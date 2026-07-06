@@ -1,0 +1,12 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: csm-portal-api
+    displayName: CSM Portal API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: openapi.yaml

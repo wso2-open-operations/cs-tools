@@ -32,7 +32,6 @@ import {
   ITEM_DETAIL_PATHS,
   OUTSTANDING_CASE_STATUS_IDS,
   OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS,
-  OUTSTANDING_CONVERSATIONS_STATUS_IDS,
   TAB_CONFIG,
 } from "../config/constants";
 import { securityReportAnalysis } from "../services/sra";
@@ -155,11 +154,8 @@ function CaseItemListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(
     cases.all(projectId!, {
-      filters: {
-        statusIds: OUTSTANDING_CASE_STATUS_IDS,
-      },
       pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
+      sortBy: { field: "updatedOn", order: "desc" },
     }),
   );
 
@@ -178,11 +174,8 @@ function ChatItemListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(
     chats.all(projectId!, {
-      filters: {
-        stateKeys: OUTSTANDING_CONVERSATIONS_STATUS_IDS,
-      },
       pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
+      sortBy: { field: "updatedOn", order: "desc" },
     }),
   );
 

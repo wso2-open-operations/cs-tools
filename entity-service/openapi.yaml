@@ -1,0 +1,4583 @@
+openapi: 3.0.1
+info:
+  title: Entity Service API
+  version: 1.0.0
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+
+  /users/me:
+    get:
+      summary: Get the profile of the currently authenticated user.
+      description: >
+        Returns profile fields for the user identified by the x-user-id-token header.
+        Supported by the ServiceNow data source only.
+      operationId: getUserMe
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUserMeResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update the profile of the currently authenticated user.
+      description: >
+        Updates mutable profile fields for the user identified by the x-user-id-token header.
+        Supported by the ServiceNow data source only.
+      operationId: patchUserMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchUserMeRequest'
+      responses:
+        "200":
+          description: User profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchUserMeResponse'
+        "400":
+          description: Bad request — missing or invalid field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/search:
+    post:
+      summary: Search users with optional filters, sort, and pagination.
+      description: >
+        Returns a paginated list of users. When the data source is ServiceNow
+        the response uses `SNUser` (name, timeZone, active, roles); when the
+        data source is postgres it uses `User` (firstName, lastName, userType).
+      operationId: searchUsers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchUsersRequest'
+      responses:
+        "200":
+          description: Users matching the supplied filters.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SearchUsersResponse'
+                  - $ref: '#/components/schemas/SearchSNUsersResponse'
+        "400":
+          description: Bad request — invalid filter value, sort field, or pagination limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/{id}:
+    get:
+      summary: Get an account by ID.
+      operationId: getAccount
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The account with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Account not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/search:
+    post:
+      summary: Search accounts by name or Salesforce ID.
+      operationId: searchAccounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAccountsRequest'
+      responses:
+        "200":
+          description: Accounts matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAccountsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/{id}:
+    get:
+      summary: Get a project by ID.
+      operationId: getProject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The project with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetailsView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/search:
+    post:
+      summary: Search projects by name, key, or subscription type.
+      operationId: searchProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProjectsRequest'
+      responses:
+        "200":
+          description: Projects matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProjectsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/search:
+    post:
+      summary: Search products by name.
+      description: >
+        Returns a paginated list of products matching the search query.
+        When the ServiceNow data source is active the response uses
+        SearchSNProductsResponse (no timestamp fields; class is a ServiceNow label).
+        Otherwise the response uses SearchProductsResponse.
+      operationId: searchProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProductsRequest'
+      responses:
+        "200":
+          description: Products matching the search query.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SearchProductsResponse'
+                  - $ref: '#/components/schemas/SearchSNProductsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{id}/versions/search:
+    post:
+      summary: Search versions of a specific product.
+      operationId: searchProductVersions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProductVersionsRequest'
+      responses:
+        "200":
+          description: Product versions matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductVersionsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployments:
+    post:
+      summary: Create a new deployment.
+      operationId: createDeployment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeploymentRequest'
+      responses:
+        "201":
+          description: Deployment created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateDeploymentResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployments/{id}:
+    patch:
+      summary: Update a deployment's name, type, description, or deactivate it.
+      operationId: patchDeployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeploymentRequest'
+      responses:
+        "200":
+          description: Deployment updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDeploymentResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (missing x-user-id-token header).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Deployment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployments/search:
+    post:
+      summary: Search deployments by name, project IDs, or deployment type.
+      operationId: searchDeployments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchDeploymentsRequest'
+      responses:
+        "200":
+          description: Deployments matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchDeploymentsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}:
+    get:
+      summary: Get a support case by ID.
+      operationId: getCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The case with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a support case.
+      description: |
+        Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
+        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
+        only when the ServiceNow data source is active.
+      operationId: patchCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCaseRequest'
+      responses:
+        "200":
+          description: Case updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateCaseResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases:
+    post:
+      summary: Create a new support case.
+      operationId: createCase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseRequest'
+      responses:
+        "201":
+          description: Case created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCaseResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/search:
+    post:
+      summary: Search support cases.
+      operationId: searchCases
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCasesRequest'
+      responses:
+        "200":
+          description: Cases matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCasesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}/comments:
+    post:
+      summary: Create a comment on a support case.
+      operationId: createCaseComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseCommentRequest'
+      responses:
+        "201":
+          description: Comment created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseComment'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}/github-issues:
+    post:
+      summary: File a GitHub issue against a product's internal repo from a support case (ServiceNow data source only).
+      operationId: createCaseGithubIssue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseGithubIssueRequest'
+      responses:
+        "201":
+          description: GitHub issue created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCaseGithubIssueResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments:
+    post:
+      summary: Upload a file attachment to a support case.
+      operationId: createCaseAttachment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAttachmentRequest'
+      responses:
+        "201":
+          description: Attachment uploaded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAttachmentResponse'
+        "400":
+          description: Bad request (missing fields, invalid data URI, or file exceeds 10 MB).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/search:
+    post:
+      summary: Search attachments linked to a support case.
+      operationId: searchCaseAttachments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAttachmentsRequest'
+      responses:
+        "200":
+          description: Paginated list of attachments for the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAttachmentsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/{id}/content:
+    get:
+      summary: Download the binary content of a case attachment.
+      operationId: getCaseAttachmentContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Attachment UUID.
+      responses:
+        "200":
+          description: Raw file content. Content-Type reflects the actual file type (e.g. image/png, application/pdf).
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/{id}:
+    delete:
+      summary: Delete a case attachment (ServiceNow data source only).
+      operationId: deleteCaseAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Attachment UUID.
+      responses:
+        "200":
+          description: Attachment deleted successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteAttachmentResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployed-products:
+    post:
+      summary: Create a new deployed product (ServiceNow data source only).
+      operationId: createDeployedProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeployedProductRequest'
+      responses:
+        "201":
+          description: Deployed product created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateDeployedProductResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployed-products/{id}:
+    patch:
+      summary: Update a deployed product's cores, tps, description, or deactivate it (ServiceNow data source only).
+      operationId: patchDeployedProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeployedProductRequest'
+      responses:
+        "200":
+          description: Deployed product updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDeployedProductResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Deployed product not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployed-products/search:
+    post:
+      summary: Search deployed products by deployment IDs.
+      operationId: searchDeployedProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchDeployedProductsRequest'
+      responses:
+        "200":
+          description: Deployed products matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchDeployedProductsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests:
+    post:
+      summary: Create a call request (ServiceNow data source only).
+      operationId: createCallRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCallRequestRequest'
+      responses:
+        "201":
+          description: Call request created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCallRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests/search:
+    post:
+      summary: Search call requests (ServiceNow data source only).
+      operationId: searchCallRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCallRequestsRequest'
+      responses:
+        "200":
+          description: Call requests matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCallRequestsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests/{id}:
+    patch:
+      summary: Update a call request (ServiceNow data source only).
+      operationId: updateCallRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCallRequestRequest'
+      responses:
+        "200":
+          description: Call request updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateCallRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /change-requests:
+    post:
+      summary: Create a change request (ServiceNow data source only).
+      operationId: createChangeRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeRequestRequest'
+      responses:
+        "201":
+          description: Change request created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateChangeRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /change-requests/{id}:
+    patch:
+      summary: Update a change request (ServiceNow data source only).
+      operationId: patchChangeRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchChangeRequestRequest'
+      responses:
+        "200":
+          description: Updated change request identifiers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchChangeRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Change request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: Get a single change request by ID (ServiceNow data source only).
+      operationId: getChangeRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The change request detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Change request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /catalogs/search:
+    post:
+      summary: Search service catalogs by deployed product (ServiceNow data source only).
+      operationId: searchCatalogs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCatalogsRequest'
+      responses:
+        "200":
+          description: Catalogs available for the given deployed product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCatalogsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /catalogs/{catalogId}/items/{catalogItemId}/variables:
+    get:
+      summary: Get variables (form fields) for a catalog item (ServiceNow data source only).
+      operationId: getCatalogItemVariables
+      parameters:
+        - name: catalogId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Catalog UUID.
+        - name: catalogItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Catalog item UUID.
+      responses:
+        "200":
+          description: Variables for the catalog item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCatalogItemVariablesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Catalog or catalog item not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /configuration-items/search:
+    post:
+      summary: Search CMDB configuration items (ServiceNow data source only).
+      operationId: searchConfigurationItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchConfigurationItemsRequest'
+      responses:
+        "200":
+          description: Configuration items matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchConfigurationItemsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /groups/search:
+    post:
+      summary: Search groups (ServiceNow data source only).
+      operationId: searchGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchGroupsRequest'
+      responses:
+        "200":
+          description: Groups matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchGroupsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /service-offerings/search:
+    post:
+      summary: Search service offerings (ServiceNow data source only).
+      operationId: searchServiceOfferings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchServiceOfferingsRequest'
+      responses:
+        "200":
+          description: Service offerings matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchServiceOfferingsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /services/search:
+    post:
+      summary: Search CMDB IT services (ServiceNow data source only).
+      operationId: searchITServices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchITServicesRequest'
+      responses:
+        "200":
+          description: IT services matching the request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchITServicesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /products/vulnerabilities/search:
+    post:
+      summary: Search product vulnerabilities (ServiceNow data source only).
+      operationId: searchProductVulnerabilities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProductVulnerabilitiesRequest'
+      responses:
+        "200":
+          description: Product vulnerabilities matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductVulnerabilitiesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /products/vulnerabilities/{id}:
+    get:
+      summary: Get a product vulnerability by ID (ServiceNow data source only).
+      operationId: getProductVulnerability
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Vulnerability UUID.
+      responses:
+        "200":
+          description: The product vulnerability with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVulnerabilityView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Vulnerability not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /change-requests/search:
+    post:
+      summary: Search change requests (ServiceNow data source only).
+      operationId: searchChangeRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchChangeRequestsRequest'
+      responses:
+        "200":
+          description: Change requests matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchChangeRequestsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /time-cards/search:
+    post:
+      summary: Search time cards (ServiceNow data source only).
+      operationId: searchTimeCards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchTimeCardsRequest'
+      responses:
+        "200":
+          description: Time cards matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchTimeCardsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /time-cards:
+    post:
+      summary: Create a time card in the submitted state (ServiceNow data source only).
+      operationId: createTimeCard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTimeCardRequest'
+      responses:
+        "201":
+          description: The created time card.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeCardMutationResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /time-cards/{id}:
+    patch:
+      summary: Update an editable (submitted) time card (ServiceNow data source only).
+      operationId: updateTimeCard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTimeCardRequest'
+      responses:
+        "200":
+          description: The updated time card.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeCardMutationResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Time card not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /comments/search:
+    post:
+      summary: Search comments by reference entity (ServiceNow data source only).
+      operationId: searchComments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCommentsRequest'
+      responses:
+        "200":
+          description: Paginated list of comments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCommentsResponse'
+        "400":
+          description: Bad request (missing or invalid referenceId/referenceType).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: Number of results per page. Defaults to 20, capped at 100.
+        offset:
+          type: integer
+          description: Zero-based offset into the result set.
+
+    GetUserMeResponse:
+      type: object
+      required: [id, email, lastName, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        timeZone:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+
+    PatchUserMeRequest:
+      type: object
+      required: [timeZone]
+      properties:
+        timeZone:
+          type: string
+          description: User's preferred time zone (e.g. "America/New_York")
+
+    PatchUserMeUpdated:
+      type: object
+      required: [id, updatedBy, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+
+    PatchUserMeResponse:
+      type: object
+      required: [message, user]
+      properties:
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/PatchUserMeUpdated'
+
+    SearchUsersRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/UserPagination'
+        filters:
+          $ref: '#/components/schemas/SearchUsersFilters'
+        sortBy:
+          $ref: '#/components/schemas/UserSortBy'
+
+    UserPagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Number of results per page. Defaults to 10, capped at 50.
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Zero-based offset into the result set.
+
+    SearchUsersFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          maxLength: 200
+          description: Case-insensitive match against username and email.
+        roles:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            enum: [internal, agent, admin, commenter, external, customer, customer_admin, partner, partner_admin]
+          description: Filter by one or more ServiceNow roles. ServiceNow data source only.
+        userNames:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+          description: Filter to specific usernames (exact match).
+        emails:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+          description: Filter to specific email addresses (exact match).
+        active:
+          type: boolean
+          nullable: true
+          description: When set, restricts results to active or inactive users.
+
+    UserSortBy:
+      type: object
+      properties:
+        field:
+          type: string
+          enum: [name, createdOn, updatedOn]
+          description: Column to sort by.
+        order:
+          type: string
+          enum: [asc, desc]
+          description: Sort direction.
+
+    User:
+      type: object
+      description: User as stored in the postgres data source.
+      properties:
+        id:
+          type: string
+        userName:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        userType:
+          type: string
+          enum: [internal, customer, system]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SNUser:
+      type: object
+      description: User as returned by the ServiceNow data source.
+      properties:
+        id:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        timeZone:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+
+    SearchUsersResponse:
+      type: object
+      description: Paginated user list from the postgres data source.
+      required: [users, total, limit, offset, hasMore]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchSNUsersResponse:
+      type: object
+      description: Paginated user list from the ServiceNow data source.
+      required: [users, total, limit, offset]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/SNUser'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    SearchAccountsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against name and sf_id.
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+        tier:
+          type: string
+          enum: [basic, enterprise]
+        region:
+          type: string
+          nullable: true
+        activationDate:
+          type: string
+          format: date-time
+        deactivationDate:
+          type: string
+          format: date-time
+          nullable: true
+        ownerId:
+          type: string
+        technicalOwnerId:
+          type: string
+          nullable: true
+        agentEnabled:
+          type: boolean
+        kbReferencesEnabled:
+          type: boolean
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchAccountsResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProjectsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against name, key, and subscription_type.
+
+    ProjectAccountRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        activationDate:
+          type: string
+          format: date-time
+          nullable: true
+        tier:
+          type: string
+        region:
+          type: string
+          nullable: true
+        agentEnabled:
+          type: boolean
+        kbReferencesEnabled:
+          type: boolean
+
+    ProjectDetailsView:
+      type: object
+      properties:
+        id:
+          type: string
+        account:
+          $ref: '#/components/schemas/ProjectAccountRef'
+        sfId:
+          type: string
+        name:
+          type: string
+        key:
+          type: string
+        subscriptionType:
+          type: string
+          enum:
+            - development_support
+            - managed_cloud_subscription
+            - evaluation_subscription
+            - subscription
+            - cloud_evaluation_support
+            - internal
+            - platformer_subscription
+            - cloud_support
+            - professional_services
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    ProjectView:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        key:
+          type: string
+        subscriptionType:
+          type: string
+          enum:
+            - development_support
+            - managed_cloud_subscription
+            - evaluation_subscription
+            - subscription
+            - cloud_evaluation_support
+            - internal
+            - platformer_subscription
+            - cloud_support
+            - professional_services
+        createdOn:
+          type: string
+          format: date-time
+
+    SearchProjectsResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProductsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against product name.
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        class:
+          type: string
+          enum: [software, service]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchProductsResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SNProduct:
+      description: Product returned by the ServiceNow data source. Timestamp fields are absent; class is a ServiceNow label (e.g. "Software Model").
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        class:
+          type: string
+
+    SearchSNProductsResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/SNProduct'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProductVersionsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against version string.
+
+    ProductVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        productId:
+          type: string
+        version:
+          type: string
+        currentSupportStatus:
+          type: string
+          enum: [available, extended, deprecated, discontinued]
+        releaseDate:
+          type: string
+          format: date-time
+        supportEolDate:
+          type: string
+          format: date-time
+          nullable: true
+        earliestPossibleSupportEolDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchProductVersionsResponse:
+      type: object
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVersion'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchDeploymentsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against deployment name.
+        projectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by project UUIDs.
+        deploymentTypes:
+          type: array
+          items:
+            type: string
+            enum:
+              - primary_production
+              - staging
+              - qa
+              - stress
+              - uat
+              - development
+          description: Filter by deployment types.
+
+    DeploymentView:
+      type: object
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum:
+            - primary_production
+            - staging
+            - qa
+            - stress
+            - uat
+            - development
+        description:
+          type: string
+          nullable: true
+        createdBy:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    CreateDeploymentRequest:
+      type: object
+      required: [projectId, name, type, description]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: UUID of the project this deployment belongs to.
+        name:
+          type: string
+          description: Display name of the deployment.
+        type:
+          type: string
+          enum: [primary_production, staging, qa, stress, uat, development]
+          description: Deployment environment type.
+        description:
+          type: string
+          description: Description of the deployment.
+
+    CreateDeploymentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        deployment:
+          $ref: '#/components/schemas/CreatedDeployment'
+
+    CreatedDeployment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    UpdateDeploymentRequest:
+      oneOf:
+        - description: Update deployment detail fields. At least one of name, type, or description must be provided.
+          type: object
+          minProperties: 1
+          properties:
+            name:
+              type: string
+            type:
+              type: string
+              enum: [primary_production, staging, qa, stress, uat, development]
+              description: Deployment environment type.
+            description:
+              type: string
+              nullable: true
+        - description: Deactivate the deployment. active must be false; no other fields may be present.
+          type: object
+          required: [active]
+          properties:
+            active:
+              type: boolean
+              enum: [false]
+
+    UpdateDeploymentResponse:
+      type: object
+      required: [message, deployment]
+      properties:
+        message:
+          type: string
+        deployment:
+          $ref: '#/components/schemas/UpdatedDeployment'
+
+    UpdatedDeployment:
+      type: object
+      required: [id, updatedOn, updatedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+
+    SearchDeploymentsResponse:
+      type: object
+      properties:
+        deployments:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeploymentView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchDeployedProductsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        deploymentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by deployment UUIDs.
+
+    DeployedProductVersionRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        releasedDate:
+          type: string
+          format: date-time
+          nullable: true
+        supportEoLDate:
+          type: string
+          format: date-time
+          nullable: true
+
+    DeployedProductView:
+      type: object
+      properties:
+        id:
+          type: string
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        version:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/DeployedProductVersionRef'
+        cores:
+          type: string
+          nullable: true
+        tps:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchDeployedProductsResponse:
+      type: object
+      properties:
+        deployedProducts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeployedProductView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    CreateDeployedProductRequest:
+      type: object
+      required: [projectId, deploymentId, productId, versionId]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: UUID of the project this deployed product belongs to.
+        deploymentId:
+          type: string
+          format: uuid
+          description: UUID of the deployment this product is associated with.
+        productId:
+          type: string
+          format: uuid
+          description: UUID of the product being deployed.
+        versionId:
+          type: string
+          format: uuid
+          description: UUID of the product version being deployed.
+        cores:
+          type: integer
+          description: Number of cores allocated for the product.
+        tps:
+          type: number
+          description: Transactions per second allocated for the product.
+        description:
+          type: string
+          description: Description of the deployed product.
+
+    CreateDeployedProductResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        deployedProduct:
+          $ref: '#/components/schemas/CreatedDeployedProduct'
+
+    CreatedDeployedProduct:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    UpdateDeployedProductRequest:
+      oneOf:
+        - description: Update deployed product detail fields. At least one of cores, tps, or description must be provided.
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          properties:
+            deploymentId:
+              type: string
+              format: uuid
+              description: Optional. Scopes the update to a specific deployment for IDOR prevention.
+            cores:
+              type: integer
+              nullable: true
+              description: Number of cores allocated for the product.
+            tps:
+              type: number
+              nullable: true
+              description: Transactions per second allocated for the product.
+            description:
+              type: string
+              nullable: true
+              description: Description of the deployed product.
+        - description: Deactivate the deployed product. active must be false; no other fields may be present.
+          type: object
+          required: [active]
+          additionalProperties: false
+          properties:
+            deploymentId:
+              type: string
+              format: uuid
+              description: Optional. Scopes the update to a specific deployment for IDOR prevention.
+            active:
+              type: boolean
+              enum: [false]
+
+    UpdateDeployedProductResponse:
+      type: object
+      required: [message, deployedProduct]
+      properties:
+        message:
+          type: string
+        deployedProduct:
+          $ref: '#/components/schemas/UpdatedDeployedProduct'
+
+    UpdatedDeployedProduct:
+      type: object
+      required: [id, updatedOn, updatedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+
+    UpdateCaseRequest:
+      type: object
+      description: |
+        Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
+        `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+      oneOf:
+        - required: [state]
+        - required: [severity]
+        - required: [workState]
+        - required: [watchList]
+        - required: [assigneeEmail]
+      properties:
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: The new state to transition the case to.
+        severity:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+          description: The new severity of the case.
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          description: The new work sub-state of the case. Only applicable when the case state is work_in_progress.
+        watchList:
+          type: array
+          items:
+            type: string
+            format: email
+          description: List of email addresses to set as the case watch list (ServiceNow only).
+        assigneeEmail:
+          type: string
+          format: email
+          description: Email of the engineer to assign to this case (ServiceNow only).
+
+    UpdateCaseResponse:
+      type: object
+      required: [message, case]
+      properties:
+        message:
+          type: string
+        case:
+          $ref: '#/components/schemas/UpdatedCase'
+
+    UpdatedCase:
+      type: object
+      required: [id, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          description: Email or display name of the user who performed the update.
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+        severity:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          nullable: true
+          description: Work sub-state after the update. null when state is not work_in_progress.
+        watchList:
+          type: array
+          items:
+            $ref: '#/components/schemas/WatchListUser'
+        assignedTo:
+          nullable: true
+          $ref: '#/components/schemas/AssignedEngineerRef'
+
+    WatchListUser:
+      type: object
+      required: [id, userName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+
+    CreateCaseRequest:
+      type: object
+      required: [type, projectId, deploymentId, deployedProductId]
+      properties:
+        type:
+          type: string
+          enum: [case, service_request, security_report_analysis]
+          description: |
+            Case type.
+            - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
+            - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
+            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
+        projectId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        deployedProductId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          description: Required for `case` and `security_report_analysis` types.
+        description:
+          type: string
+          description: Required for `case` and `security_report_analysis` types.
+        severity:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+          description: Required for `case` type.
+        issueType:
+          type: string
+          enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
+          description: Required for `case` type.
+        catalogId:
+          type: string
+          format: uuid
+          description: Required for `service_request` type. UUID of the catalog.
+        catalogItemId:
+          type: string
+          format: uuid
+          description: Required for `service_request` type. UUID of the catalog item.
+        variables:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Variable'
+          description: Required for `service_request` type.
+        attachments:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CaseAttachment'
+          description: Required for `security_report_analysis` type (at least one entry).
+        relatedCaseId:
+          type: string
+          format: uuid
+          description: Optional UUID of a related case.
+        conversationId:
+          type: string
+          format: uuid
+          description: Optional UUID of a related conversation.
+        watchList:
+          type: array
+          items:
+            type: string
+          description: Optional list of user IDs to notify.
+
+    CreateCaseResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        case:
+          type: object
+          properties:
+            id:
+              type: string
+            internalId:
+              type: string
+            number:
+              type: string
+            createdBy:
+              type: string
+            createdOn:
+              type: string
+              format: date-time
+            state:
+              type: string
+
+    SearchCasesFilters:
+      type: object
+      properties:
+        types:
+          type: array
+          items:
+            type: string
+            enum: [case, service_request, security_report_analysis, announcement, engagement]
+          description: |
+            Filter by case type. For the ServiceNow data source each value is
+            translated to its SN caseTypes equivalent (case → default_case).
+        searchQuery:
+          type: string
+          description: Case-insensitive match against subject, number, and internal_id.
+        projectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by project UUIDs.
+        deploymentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by deployment UUIDs.
+        states:
+          type: array
+          items:
+            type: string
+            enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: Filter by case states.
+        severities:
+          type: array
+          items:
+            type: string
+            enum: [catastrophic, critical, high, medium, low]
+          description: Filter by severity. Only applicable when types includes case.
+        issueTypes:
+          type: array
+          items:
+            type: string
+            enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
+          description: Filter by issue type.
+        engagementTypes:
+          type: array
+          items:
+            type: string
+            enum: [migration, consultancy, new_feature_improvement, follow_up, onboarding]
+          description: Filter by engagement type. Only applicable when types includes engagement.
+        closedStartDate:
+          type: string
+          format: date-time
+          description: "Return cases closed on or after this UTC timestamp (YYYY-MM-DDTHH:MM:SSZ)."
+        closedEndDate:
+          type: string
+          format: date-time
+        startCreatedDate:
+          type: string
+          format: date-time
+        endCreatedDate:
+          type: string
+          format: date-time
+        startUpdatedDate:
+          type: string
+          format: date-time
+        endUpdatedDate:
+          type: string
+          format: date-time
+        createdBy:
+          type: array
+          items:
+            type: string
+            format: email
+          description: Filter by creator email addresses.
+        createdByMe:
+          type: boolean
+          description: When true, restrict results to cases created by the authenticated user.
+        workStates:
+          type: array
+          items:
+            type: string
+            enum: [ongoing, paused]
+          description: |
+            Filter by work sub-state. Only applicable when state is work_in_progress.
+            For the ServiceNow data source, ongoing maps to key 1 and paused maps to key 2.
+        assignedUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by assigned engineer user UUIDs.
+        productNames:
+          type: array
+          items:
+            type: string
+          description: |
+            Filter by product family name (e.g. "API Manager", "Identity Server",
+            "Asgardeo"). Matches every version of each named product. Only applied
+            by the ServiceNow data source.
+
+    SearchCasesRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchCasesFilters'
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn, severity, state]
+              description: Column to sort by. Defaults to createdOn.
+            order:
+              type: string
+              enum: [asc, desc]
+              description: Sort direction. Defaults to desc.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    UserRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          description: firstName + lastName (null for ServiceNow data source)
+          nullable: true
+        userId:
+          type: string
+          description: Username / login identifier (null for ServiceNow data source)
+          nullable: true
+        email:
+          type: string
+          format: email
+
+    AssignedEngineerRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+
+    CaseNumberRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+
+    AccountRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+
+    UserIDEmailRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
+    EntityRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    DeployedProductRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          description: Product name combined with version (e.g. "API Manager 4.3.0").
+
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        internalId:
+          type: string
+        createdBy:
+          type: string
+        projectId:
+          type: string
+        deploymentId:
+          type: string
+        deployedProductId:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+        issueType:
+          type: string
+          enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+
+    CaseView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        internalId:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+        issueType:
+          type: string
+          enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          nullable: true
+          description: Work sub-state, present only when state is work_in_progress.
+        type:
+          type: string
+          nullable: true
+          description: Case type label. Populated for ServiceNow cases; null for Postgres cases.
+        engagementType:
+          type: string
+          nullable: true
+          description: Engagement type label. Populated for ServiceNow cases; null for Postgres cases.
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was closed. null if not yet closed.
+        createdBy:
+          $ref: '#/components/schemas/UserRef'
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Deployment associated with the case. null for ServiceNow cases with no deployment.
+        deployedProduct:
+          $ref: '#/components/schemas/DeployedProductRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        catalog:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Service catalog entry. Populated for ServiceNow cases; null for Postgres cases.
+        catalogItem:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Service catalog item. Populated for ServiceNow cases; null for Postgres cases.
+        assignedTeam:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Team assigned to the case. Populated for ServiceNow cases; null for Postgres cases.
+        conversation:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Linked conversation. Populated for ServiceNow cases; null for Postgres cases.
+        assignedEngineer:
+          nullable: true
+          $ref: '#/components/schemas/AssignedEngineerRef'
+        parentCase:
+          nullable: true
+          $ref: '#/components/schemas/CaseNumberRef'
+        relatedCase:
+          nullable: true
+          $ref: '#/components/schemas/CaseNumberRef'
+        account:
+          nullable: true
+          $ref: '#/components/schemas/AccountRef'
+
+    CaseSearchView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        internalId:
+          type: string
+        number:
+          type: string
+        createdOn:
+          type: string
+          description: Creation timestamp. RFC3339 for Postgres; raw SN timestamp string for ServiceNow.
+        createdBy:
+          type: string
+          format: email
+        subject:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        issueType:
+          type: string
+          nullable: true
+          description: Issue type enum value (Postgres) or raw SN label (ServiceNow).
+        state:
+          type: string
+          description: State enum value (Postgres) or raw SN label (ServiceNow).
+        severity:
+          type: string
+          nullable: true
+          description: Severity enum value (Postgres) or raw SN label (ServiceNow). Null for non-case types.
+        catalog:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Populated for ServiceNow data source only.
+        catalogItem:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Populated for ServiceNow data source only.
+        assignedTeam:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+        product:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+        engagementType:
+          type: string
+          nullable: true
+          description: Engagement type label. Non-null only when type is engagement.
+        workState:
+          type: string
+          nullable: true
+          description: Work sub-state label. Non-null only when state is work_in_progress.
+        type:
+          type: string
+          description: Case type value (Postgres) or SN caseType label (ServiceNow).
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        deployedProduct:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          nullable: true
+          $ref: '#/components/schemas/AssignedEngineerRef'
+        parentCase:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+        relatedCase:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+        conversation:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Populated for ServiceNow data source only.
+
+    SearchCasesResponse:
+      type: object
+      properties:
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseSearchView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    CreateCaseCommentRequest:
+      type: object
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          enum: [work_note, comment, activity]
+          description: work_note is restricted to internal users; activity to internal and system users.
+        content:
+          type: string
+
+    CommentUserRef:
+      type: object
+      properties:
+        id:
+          type: string
+          description: User identifier (email).
+        firstName:
+          type: string
+        lastName:
+          type: string
+        fullName:
+          type: string
+
+    CaseComment:
+      type: object
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        type:
+          type: string
+          enum: [work_note, comment, activity]
+        content:
+          type: string
+        createdBy:
+          $ref: '#/components/schemas/CommentUserRef'
+        createdOn:
+          type: string
+          format: date-time
+
+    SearchCaseCommentsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [work_note, comment, activity]
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchCaseCommentsResponse:
+      type: object
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseComment'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    CreateAttachmentRequest:
+      type: object
+      required: [referenceId, referenceType, name, type, file]
+      properties:
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the reference entity (case, change request, etc.)
+        referenceType:
+          $ref: '#/components/schemas/ReferenceType'
+        name:
+          type: string
+          description: File name including extension.
+        type:
+          type: string
+          description: MIME type of the file (e.g. image/png, application/pdf).
+        file:
+          type: string
+          description: Base64 data URI of the file content (e.g. data:image/png;base64,...). Maximum decoded size is 10 MB.
+        description:
+          type: string
+          nullable: true
+
+    AttachmentDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sizeBytes:
+          type: integer
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        downloadUrl:
+          type: string
+
+    CreateAttachmentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        attachment:
+          $ref: '#/components/schemas/AttachmentDetail'
+
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        referenceId:
+          type: string
+          format: uuid
+        referenceType:
+          $ref: '#/components/schemas/ReferenceType'
+        name:
+          type: string
+        type:
+          type: string
+        sizeBytes:
+          type: integer
+        description:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        downloadUrl:
+          type: string
+          nullable: true
+        previewUrl:
+          type: string
+          nullable: true
+
+    ReferenceType:
+      type: string
+      enum:
+        - case
+        - conversation
+        - change_request
+        - deployment
+
+    SearchAttachmentsRequest:
+      type: object
+      required: [referenceId, referenceType]
+      properties:
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the reference entity (case, change request, etc.)
+        referenceType:
+          $ref: '#/components/schemas/ReferenceType'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchAttachmentsResponse:
+      type: object
+      properties:
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    DeleteAttachmentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    SearchChangeRequestsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            projectIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            searchQuery:
+              type: string
+            states:
+              type: array
+              items:
+                type: string
+                enum: [customer_approval, scheduled, implement, review, customer_review, rollback, closed, canceled]
+            impacts:
+              type: array
+              items:
+                type: string
+                enum: [high, medium, low]
+            closedStartDate:
+              type: string
+              format: date-time
+              description: "ISO-8601 UTC datetime (YYYY-MM-DDTHH:MM:SSZ)"
+            closedEndDate:
+              type: string
+              format: date-time
+              description: "ISO-8601 UTC datetime (YYYY-MM-DDTHH:MM:SSZ)"
+        sortBy:
+          type: object
+          required: [field, order]
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
+
+    SearchChangeRequestView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        subject:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        case:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        deployedProduct:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        product:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedEngineer:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTeam:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        plannedStartOn:
+          type: string
+          nullable: true
+        plannedEndOn:
+          type: string
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        impact:
+          type: string
+          nullable: true
+          description: Impact label (e.g. "high", "medium", "low").
+        state:
+          type: string
+          nullable: true
+          description: State label (e.g. "review", "closed").
+        type:
+          type: string
+          nullable: true
+          description: Type label (e.g. "standard", "normal").
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
+
+    SearchChangeRequestsResponse:
+      type: object
+      properties:
+        changeRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchChangeRequestView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    ChangeRequest:
+      allOf:
+        - $ref: '#/components/schemas/SearchChangeRequestView'
+        - type: object
+          properties:
+            createdBy:
+              type: string
+            justification:
+              type: string
+              nullable: true
+            impactDescription:
+              type: string
+              nullable: true
+            serviceOutage:
+              type: string
+              nullable: true
+            communicationPlan:
+              type: string
+              nullable: true
+            rollbackPlan:
+              type: string
+              nullable: true
+            testPlan:
+              type: string
+              nullable: true
+            hasCustomerApproved:
+              type: boolean
+            hasCustomerReviewed:
+              type: boolean
+            approvedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            approvedOn:
+              type: string
+              nullable: true
+
+    Variable:
+      type: object
+      required: [id, value]
+      properties:
+        id:
+          type: string
+          description: Variable (question) ID.
+        value:
+          type: string
+          description: Answer/value for the variable.
+
+    CaseAttachment:
+      type: object
+      required: [name, file]
+      properties:
+        name:
+          type: string
+          description: File name including extension.
+        file:
+          type: string
+          description: Base64-encoded file content.
+
+    CatalogItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    Catalog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        catalogItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItem'
+
+    SearchCatalogsRequest:
+      type: object
+      required: [deployedProductId]
+      properties:
+        deployedProductId:
+          type: string
+          format: uuid
+          description: UUID of the deployed product to filter catalogs by.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchCatalogsResponse:
+      type: object
+      properties:
+        catalogs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Catalog'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CatalogItemVariable:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Variable (question) ID.
+        questionText:
+          type: string
+          description: Display text for the variable/question.
+        order:
+          type: integer
+          description: Display order.
+        type:
+          type: string
+          description: Variable type (e.g. text, select).
+
+    GetCatalogItemVariablesResponse:
+      type: object
+      properties:
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItemVariable'
+
+    CreateChangeRequestRequest:
+      type: object
+      required:
+        - subject
+      properties:
+        subject:
+          type: string
+        category:
+          type: string
+          enum:
+            - hardware
+            - software
+            - service
+            - system_software
+            - applications_software
+            - network
+            - telecom
+            - documentation
+            - other
+            - regular_release_cloud
+            - hotfix_release_cloud
+            - devops
+            - cloud_computing
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+        configurationItemId:
+          type: string
+          format: uuid
+        priority:
+          type: string
+          enum:
+            - critical
+            - high
+            - moderate
+            - low
+        impact:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+        type:
+          type: string
+          enum:
+            - standard
+            - normal
+            - emergency
+            - model
+            - site_reliability_ops
+            - azure
+        state:
+          type: string
+          enum:
+            - new
+            - assess
+            - authorize
+            - customer_approval
+            - scheduled
+            - implement
+            - review
+            - customer_review
+            - rollback
+            - closed
+            - canceled
+        groupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        risk:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+        requestedById:
+          type: string
+          format: uuid
+        description:
+          type: string
+        justification:
+          type: string
+        implementationPlan:
+          type: string
+        riskImpactAnalysis:
+          type: string
+        backoutPlan:
+          type: string
+        testPlan:
+          type: string
+        plannedStartDate:
+          type: string
+          format: date-time
+        plannedEndDate:
+          type: string
+          format: date-time
+        comment:
+          type: string
+        workNote:
+          type: string
+
+    CreateChangeRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        changeRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            createdOn:
+              type: string
+            createdBy:
+              type: string
+
+    PatchChangeRequestRequest:
+      type: object
+      minProperties: 1
+      properties:
+        plannedStartOn:
+          type: string
+          description: Planned start date and time (format YYYY-MM-DD HH:MM:SS).
+        isCustomerApproved:
+          type: boolean
+        isCustomerReviewed:
+          type: boolean
+
+    PatchChangeRequestResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+        updatedBy:
+          type: string
+
+    TimeCardState:
+      type: string
+      enum:
+        - pending
+        - submitted
+        - approved
+        - rejected
+        - processed
+        - recalled
+
+    SearchTimeCardsFilters:
+      type: object
+      properties:
+        projectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        caseId:
+          type: string
+          format: uuid
+          description: Return only time cards logged against this case.
+        userId:
+          type: string
+          format: uuid
+          description: Return only time cards submitted by this user.
+        approverId:
+          type: string
+          format: uuid
+          description: Return only time cards this user is eligible to approve (SN approver_list).
+        approvedById:
+          type: string
+          format: uuid
+          description: Return only time cards actually approved by this user (SN approved_by).
+        startDate:
+          type: string
+          description: ISO 8601 date (YYYY-MM-DD).
+        endDate:
+          type: string
+          description: ISO 8601 date (YYYY-MM-DD).
+        states:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeCardState'
+
+    SearchTimeCardsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchTimeCardsFilters'
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
+
+    TimeCardRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    TimeCardCaseRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        number:
+          type: string
+
+    TimeCardView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        totalTime:
+          type: number
+          format: double
+        createdOn:
+          type: string
+        hasBillable:
+          type: boolean
+        state:
+          type: string
+        user:
+          $ref: '#/components/schemas/TimeCardRef'
+        approvedBy:
+          $ref: '#/components/schemas/TimeCardRef'
+        project:
+          $ref: '#/components/schemas/TimeCardRef'
+        case:
+          $ref: '#/components/schemas/TimeCardCaseRef'
+
+    SearchTimeCardsResponse:
+      type: object
+      properties:
+        timeCards:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeCardView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CreateTimeCardRequest:
+      type: object
+      required: [caseId, projectId, date, approverIds]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          description: ISO 8601 date (YYYY-MM-DD).
+        approverIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Eligible approvers (approver_list). Must be non-empty.
+        isBillable:
+          type: boolean
+        issueComplexity:
+          type: string
+        workLogComment:
+          type: string
+        timeAnalyzing:
+          type: integer
+        timeSettingUp:
+          type: integer
+        timeReproducingDebugging:
+          type: integer
+        timeProvidingSolution:
+          type: integer
+        timePatching:
+          type: integer
+
+    UpdateTimeCardRequest:
+      type: object
+      minProperties: 1
+      description: >
+        Carries either editable fields (submitter, while the card is submitted),
+        or a state transition: state=approved, or state=rejected with leadComment.
+        The two are mutually exclusive and an empty body is rejected (400); the
+        entity service enforces this and authorization.
+      properties:
+        state:
+          type: string
+          enum: [approved, rejected]
+        leadComment:
+          type: string
+          description: Required when state is rejected.
+        date:
+          type: string
+          description: ISO 8601 date (YYYY-MM-DD).
+        approverIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        isBillable:
+          type: boolean
+        issueComplexity:
+          type: string
+        workLogComment:
+          type: string
+        timeAnalyzing:
+          type: integer
+        timeSettingUp:
+          type: integer
+        timeReproducingDebugging:
+          type: integer
+        timeProvidingSolution:
+          type: integer
+        timePatching:
+          type: integer
+
+    TimeCardMutationResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        timeCard:
+          $ref: '#/components/schemas/TimeCardView'
+
+    VulnerabilityPriority:
+      type: string
+      enum:
+        - info
+        - low
+        - medium
+        - high
+        - critical
+        - unknown
+
+    SearchProductVulnerabilitiesFilters:
+      type: object
+      additionalProperties: false
+      properties:
+        searchQuery:
+          type: string
+        priority:
+          $ref: '#/components/schemas/VulnerabilityPriority'
+        productName:
+          type: string
+        productVersion:
+          type: string
+
+    SearchProductVulnerabilitiesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchProductVulnerabilitiesFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ProductVulnerabilityView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        cveId:
+          type: string
+        vulnerabilityId:
+          type: string
+        priority:
+          type: string
+          description: Priority label (e.g. High, Critical).
+        productName:
+          type: string
+          nullable: true
+        productVersion:
+          type: string
+          nullable: true
+        componentName:
+          type: string
+        version:
+          type: string
+        type:
+          type: string
+        componentType:
+          type: string
+          nullable: true
+        updateLevel:
+          type: string
+          nullable: true
+        useCase:
+          type: string
+          nullable: true
+        justification:
+          type: string
+          nullable: true
+        resolution:
+          type: string
+          nullable: true
+
+    SearchProductVulnerabilitiesResponse:
+      type: object
+      properties:
+        productVulnerabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVulnerabilityView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CallRequestState:
+      type: object
+      description: Choice-list state item. id may be an integer or a string depending on the ServiceNow configuration.
+      properties:
+        id:
+          description: State key (int or string).
+        label:
+          type: string
+          description: Human-readable state label.
+
+    CallRequestCaseRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        number:
+          type: string
+
+    CreateCallRequestRequest:
+      type: object
+      required: [caseId, reason, utcTimes, durationInMinutes]
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+          format: uuid
+          description: UUID of the case this call request belongs to.
+        reason:
+          type: string
+          description: Reason for the call request.
+        utcTimes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: Preferred UTC times for the call.
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Duration of the call in minutes.
+
+    CreateCallRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            createdOn:
+              type: string
+            createdBy:
+              type: string
+            state:
+              $ref: '#/components/schemas/CallRequestState'
+
+    CaseGithubIssueRepoOverride:
+      type: object
+      required: [owner, repo]
+      additionalProperties: false
+      properties:
+        owner:
+          type: string
+          description: GitHub org/owner, overriding the product-based routing lookup.
+        repo:
+          type: string
+          description: GitHub repo, overriding the product-based routing lookup.
+
+    CreateCaseGithubIssueRequest:
+      type: object
+      required: [reason, title, description]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [default, migration, rd_ticket]
+          description: Why the issue is being filed; selects labels applied on the GitHub issue.
+        title:
+          type: string
+          description: GitHub issue title.
+        description:
+          type: string
+          description: GitHub issue body. Case number, product, and reporter are appended server-side.
+        repoOverride:
+          $ref: '#/components/schemas/CaseGithubIssueRepoOverride'
+        updateLevel:
+          type: string
+          description: Product update level, appended to the issue body.
+        publicIssueUrl:
+          type: string
+          description: Link to a related public-facing GitHub issue, appended to the issue body.
+        regression:
+          type: boolean
+          default: false
+          description: Whether this is a regression; adds a "regression" label and tags the case.
+        hotFixRequired:
+          type: boolean
+          default: false
+          description: Whether a hotfix is required; appended to the issue body.
+        issueTypeLabel:
+          type: string
+          description: Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident").
+        priorityLevel:
+          type: string
+          description: Priority label to apply when issueTypeLabel is "Type/Incident".
+
+    CaseGithubIssueDetail:
+      type: object
+      properties:
+        url:
+          type: string
+        number:
+          type: integer
+        repo:
+          type: string
+
+    CreateCaseGithubIssueResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        issue:
+          $ref: '#/components/schemas/CaseGithubIssueDetail'
+
+    SearchCallRequestsRequest:
+      type: object
+      required: [caseId]
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+          format: uuid
+          description: UUID of the case to search call requests for.
+        filters:
+          type: object
+          additionalProperties: false
+          properties:
+            states:
+              type: array
+              items:
+                type: string
+                enum:
+                  - pending_on_customer
+                  - pending_on_wso2
+                  - scheduled
+                  - customer_rejected
+                  - wso2_rejected
+                  - canceled
+                  - notes_pending
+                  - concluded
+              description: Filter by one or more states.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    CallRequestView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        case:
+          $ref: '#/components/schemas/CallRequestCaseRef'
+        reason:
+          type: string
+        preferredTimes:
+          type: array
+          items:
+            type: string
+        durationMin:
+          type: integer
+        scheduleTime:
+          type: string
+        meetingLink:
+          type: string
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
+        state:
+          $ref: '#/components/schemas/CallRequestState'
+        cancellationReason:
+          type: string
+
+    SearchCallRequestsResponse:
+      type: object
+      properties:
+        callRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallRequestView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    UpdateCallRequestRequest:
+      type: object
+      required: [state]
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum:
+            - pending_on_customer
+            - pending_on_wso2
+            - scheduled
+            - customer_rejected
+            - wso2_rejected
+            - canceled
+            - notes_pending
+            - concluded
+          description: New state for the call request.
+        cancellationReason:
+          type: string
+          description: Reason for cancellation (required when cancelling).
+        utcTimes:
+          type: array
+          items:
+            type: string
+          description: Updated preferred UTC times.
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Updated duration in minutes.
+
+    UpdateCallRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+            updatedBy:
+              type: string
+
+    SearchConfigurationItemsFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchConfigurationItemsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchConfigurationItemsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ConfigurationItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        class:
+          type: string
+          nullable: true
+
+    SearchConfigurationItemsResponse:
+      type: object
+      properties:
+        configurationItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigurationItem'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchGroupsFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchGroupsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchGroupsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    GroupParentRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        active:
+          type: boolean
+        parent:
+          $ref: '#/components/schemas/GroupParentRef'
+          nullable: true
+
+    SearchGroupsResponse:
+      type: object
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/Group'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchServiceOfferingsFilters:
+      type: object
+      properties:
+        serviceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchServiceOfferingsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchServiceOfferingsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ServiceOfferingServiceRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    ServiceOffering:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        service:
+          $ref: '#/components/schemas/ServiceOfferingServiceRef'
+          nullable: true
+
+    SearchServiceOfferingsResponse:
+      type: object
+      properties:
+        serviceOfferings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceOffering'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchITServicesFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchITServicesRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchITServicesFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ITService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        class:
+          type: string
+          nullable: true
+        businessCriticality:
+          type: string
+          nullable: true
+          enum:
+            - most_critical
+            - somewhat_critical
+            - less_critical
+            - not_critical
+        serviceClassification:
+          type: string
+          nullable: true
+          enum:
+            - business_service
+            - technology_management_service
+            - application_service
+
+    SearchITServicesResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ITService'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Comment UUID.
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the referenced entity (case, conversation, etc.).
+        content:
+          type: string
+          description: Comment content.
+        type:
+          type: string
+          description: Comment type (e.g. comment, work_notes).
+        createdOn:
+          type: string
+          format: date-time
+          description: Timestamp when the comment was created.
+        createdBy:
+          $ref: '#/components/schemas/CommentUserRef'
+
+    SearchCommentsRequest:
+      type: object
+      required:
+        - referenceId
+        - referenceType
+      properties:
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the entity to fetch comments for.
+        referenceType:
+          type: string
+          enum: [case, conversation, change_request, deployment]
+          description: Type of the referenced entity.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchCommentsResponse:
+      type: object
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+          description: List of comments.
+        total:
+          type: integer
+          description: Total number of comments matching the query.
+        limit:
+          type: integer
+          description: Maximum number of comments returned in this page.
+        offset:
+          type: integer
+          description: Number of comments skipped before this page.
+        hasMore:
+          type: boolean
+          description: Whether additional pages are available.
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string

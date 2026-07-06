@@ -1,0 +1,49 @@
+window.config = {
+  // OIDC IdP base URL for the configured identity provider.
+  CSM_PORTAL_AUTH_BASE_URL: "<your-idp-base-url>",
+  CSM_PORTAL_AUTH_CLIENT_ID: "<your-client-id>",
+  CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3001",
+  CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3001",
+
+  // csm-portal-backend (BFF) base URL. The FE never calls entity-service
+  // directly; all entity queries go through the BFF, which proxies to
+  // entity-service server-side.
+  //
+  // Azure stg example:
+  // CSM_PORTAL_BACKEND_BASE_URL: "https://<choreo-org-id>-az-stg.prod.wdt.choreoapis.dev/<key>/csm-portal-backend/v1.0",
+  CSM_PORTAL_BACKEND_BASE_URL: "<your-backend-base-url>",
+
+  // Default Oxygen UI theme. One of: "acrylicOrange", "acrylicPurple",
+  // "choreo", "classic", "highContrast". Users can override this at runtime via
+  // the header theme dropdown (the choice is persisted per browser).
+  CSM_PORTAL_THEME: "acrylicOrange",
+  CSM_PORTAL_LOG_LEVEL: "ERROR",
+
+  // Disable work-in-progress sections. When true, every nav item flagged `wip`
+  // in src/config/csmNavItems.ts (currently Operations, Engagements, Security
+  // Center, Customers, Settings) stays visible in the sidebar but is disabled
+  // (greyed out, with a "work in progress" tooltip), dropped from the quick-nav
+  // palette, and its routes render a "coming soon" page instead of the
+  // unfinished feature. Leave false to enable everything.
+  CSM_PORTAL_DISABLE_WIP_FEATURES: false,
+
+  // Mock data: when true, data hooks short-circuit to seeded fixtures instead
+  // of calling the backend. Leave false (or unset) to use the live backend.
+  CSM_PORTAL_USE_MOCKS: false,
+  // Show the in-header mock-data toggle so the value above can be flipped at
+  // runtime (persisted per-browser). Keep false in production — engineers must
+  // not be able to switch to fake data against live cases.
+  CSM_PORTAL_ALLOW_MOCK_TOGGLE: false,
+
+  CSM_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
+  // Optional maintenance banner overrides:
+  // CSM_PORTAL_MAINTENANCE_BANNER_SEVERITY: "info",
+  // CSM_PORTAL_MAINTENANCE_BANNER_TITLE: "Scheduled maintenance",
+  // CSM_PORTAL_MAINTENANCE_BANNER_MESSAGE: "Some services may be unavailable.",
+  // CSM_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL: "Learn more",
+  // CSM_PORTAL_MAINTENANCE_BANNER_ACTION_URL: "https://example.com",
+
+  CSM_PORTAL_TOP_BANNER_ENABLED: false,
+  // Optional top banner rendered above the header (raw HTML string):
+  // CSM_PORTAL_TOP_BANNER_HTML: '<div style="background-color:#000;height:6.8rem"><a href="https://wso2.com/wso2con/" target="_blank"><img style="object-fit:cover;height:100%;width:100%" src="banner.png" role="presentation"></a></div>',
+};

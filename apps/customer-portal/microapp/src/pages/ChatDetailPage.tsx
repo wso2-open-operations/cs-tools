@@ -17,7 +17,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { StatusChip } from "@components/features/support";
-import { InfoField, OverlineSlot } from "@components/features/detail";
+import { InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
 import {
   ConversationFeedback,
   MessageBubble,
@@ -25,20 +25,52 @@ import {
   type ChatMessage,
 } from "@components/features/chat";
 import { useLayout } from "@context/layout";
+import { useProject } from "@context/project";
+import { useNotify } from "@context/snackbar";
 import { SectionCard } from "@components/shared";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { chats } from "@src/services/chats";
+import { READ_ONLY_CONVERSATION_STATUS_IDS } from "@src/config/constants";
 import { useDateTime } from "../utils/useDateTime";
 
 export default function ChatDetailPage() {
   const layout = useLayout();
+  const notify = useNotify();
+  const queryClient = useQueryClient();
+  const { projectId } = useProject();
   const [messages, setMessages] = useState<(ChatMessage & { id: string })[]>([]);
+  const [comment, setComment] = useState("");
 
-  const { fromNow, format } = useDateTime();
+  const { format } = useDateTime();
   const { id } = useParams();
   const { data } = useQuery(chats.get(id!));
   const { data: comments, isLoading: isCommentsLoading } = useQuery(chats.comments(id!));
+
+  const isReadOnly = data?.statusId !== undefined && READ_ONLY_CONVERSATION_STATUS_IDS.includes(Number(data.statusId));
+
+  const mutation = useMutation({
+    mutationFn: (body: { message: string; envProducts: Record<string, string[]> }) => {
+      if (!projectId) {
+        return Promise.reject(new Error("Project ID is not available"));
+      }
+      if (!id) {
+        return Promise.reject(new Error("Conversation ID is not available"));
+      }
+      return chats.send(projectId, id).mutationFn!(body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: chats.comments(id!).queryKey });
+      setComment("");
+    },
+    onError: () => notify.error("Failed to send message. Please try again."),
+  });
+
+  const handleSend = () => {
+    const trimmed = comment.trim();
+    if (!trimmed || !projectId || !id || isReadOnly) return;
+    mutation.mutate({ message: trimmed, envProducts: {} });
+  };
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -48,7 +80,7 @@ export default function ChatDetailPage() {
         id: comment.id,
         author: comment.createdBy === "Novera" ? "assistant" : "you",
         blocks: [{ type: "text", value: comment.content || "" }],
-        timestamp: fromNow(comment.createdOn),
+        timestamp: format(comment.createdOn),
       })) || [],
     );
 
@@ -91,7 +123,7 @@ export default function ChatDetailPage() {
 
   return (
     <>
-      <Stack gap={2} mb={10}>
+      <Stack gap={2} mb={isReadOnly ? 2 : 10}>
         <Typography ref={ref} variant="h5" fontWeight="medium">
           {data?.description}
         </Typography>
@@ -130,13 +162,7 @@ export default function ChatDetailPage() {
                 .slice()
                 .reverse()
                 .map(({ id, ...message }) => (
-                  <MessageBubble
-                    key={id}
-                    {...message}
-                    sx={{ bgcolor: "background.default" }}
-                    thinking={false}
-                    animated={false}
-                  />
+                  <MessageBubble key={id} {...message} thinking={false} animated={false} />
                 ))}
             </Stack>
           )}
@@ -144,6 +170,19 @@ export default function ChatDetailPage() {
         <ConversationFeedback />
       </Stack>
       <div ref={bottomRef} />
+
+      {!isReadOnly && (
+        <StickyCommentBar
+          value={comment}
+          placeholder="Type your message"
+          submitOnEnter={false}
+          multiline
+          loading={mutation.isPending}
+          disabled={!projectId}
+          onChange={setComment}
+          onSend={handleSend}
+        />
+      )}
     </>
   );
 }

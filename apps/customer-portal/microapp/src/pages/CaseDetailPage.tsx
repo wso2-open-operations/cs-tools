@@ -144,7 +144,7 @@ export default function CaseDetailPage() {
       <OverlineSlot
         variant={overlineSlotVariant}
         type="case"
-        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        ids={data?.number ? [data.internalId, data.number] : undefined}
         title={data?.title}
       />,
     );

@@ -23,21 +23,19 @@ import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import { Pin } from "@wso2/oxygen-ui-icons-react";
 import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "../config/endpoints";
 import { useMe } from "../context/me";
 import type { FinalNoveraResponse, NoveraResponse } from "../types/novera.dto";
 import { getAccessToken, getIdToken } from "../services/auth";
 import type { Product } from "../types";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "../utils/useDateTime";
 
 export default function ChatPage() {
   const navigate = useNavigate();
   const { projectId, projectTypeId } = useProject();
   const { id: userId } = useMe();
+  const { format } = useDateTime();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [comment, setComment] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -188,7 +186,7 @@ export default function ChatPage() {
           thinking: false,
           author: "assistant",
           blocks: [{ type: "text", value: (pendingFinalData as FinalNoveraResponse).payload.message }],
-          timestamp: dayjs().fromNow(),
+          timestamp: format(new Date()),
         },
       ]);
       setActiveStreamingMessage(null);
@@ -221,7 +219,7 @@ export default function ChatPage() {
         thinking: false,
         author: "you",
         blocks: [{ type: "text", value: comment }],
-        timestamp: dayjs().fromNow(),
+        timestamp: format(new Date()),
       },
     ]);
 
@@ -287,6 +285,8 @@ export default function ChatPage() {
         loading={!!activeStreamingMessage}
         value={comment}
         placeholder="Type your message"
+        submitOnEnter={false}
+        multiline
         onChange={setComment}
         onSend={handleSend}
         topSlot={

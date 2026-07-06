@@ -26,6 +26,8 @@ interface StickyCommentBarProps {
   bottomSlot?: ReactNode;
   loading?: boolean;
   disabled?: boolean;
+  submitOnEnter?: boolean;
+  multiline?: boolean;
 
   onChange: (value: string) => void;
   onSend: () => void;
@@ -38,6 +40,8 @@ export function StickyCommentBar({
   bottomSlot,
   loading = false,
   disabled = false,
+  submitOnEnter = true,
+  multiline = false,
   onChange,
   onSend,
 }: StickyCommentBarProps) {
@@ -49,8 +53,8 @@ export function StickyCommentBar({
     onSend();
   };
 
-  const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Enter" && hasContent) {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (submitOnEnter && event.key === "Enter" && hasContent) {
       event.preventDefault();
       send();
     }
@@ -74,8 +78,10 @@ export function StickyCommentBar({
           size="small"
           value={value}
           placeholder={placeholder}
-          sx={{ alignSelf: "center" }}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
+          multiline={multiline}
+          maxRows={multiline ? 5 : undefined}
+          sx={{ alignSelf: multiline ? "stretch" : "center" }}
+          onChange={(event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
           disabled={loading || disabled}
           fullWidth
