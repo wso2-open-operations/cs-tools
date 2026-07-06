@@ -37,6 +37,7 @@ import {
   resolveUsagePresetDateRange,
 } from "@features/usage-metrics/utils/usageMetricsTab";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
+import usePostProjectInstancesUsagesStats from "@features/project-details/api/usePostProjectInstancesUsagesStats";
 
 /**
  * Usage & Metrics area: time range, inner environment tabs, overview and product drill-downs.
@@ -58,12 +59,52 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [appliedCustomStart, setAppliedCustomStart] = useState<string>("");
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
-  const [dataSource] = useState<DataSource>(DataSource.API_CALL);
 
   const dateRange = useMemo(
     () => resolveUsagePresetDateRange(timeRange),
     [timeRange],
   );
+
+  // Detect which data sources actually have data in the selected range so the
+  // toggle only offers the sources that are present (and hides entirely when
+  // neither has data).
+  const liveAvailabilityPayload = useMemo(
+    () => ({
+      filters: {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        dataSource: DataSource.API_CALL,
+      },
+    }),
+    [dateRange],
+  );
+  const uploadAvailabilityPayload = useMemo(
+    () => ({
+      filters: {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        dataSource: DataSource.FILE_UPLOAD,
+      },
+    }),
+    [dateRange],
+  );
+
+  const { data: liveAvailability } = usePostProjectInstancesUsagesStats(
+    projectId,
+    liveAvailabilityPayload,
+  );
+  const { data: uploadAvailability } = usePostProjectInstancesUsagesStats(
+    projectId,
+    uploadAvailabilityPayload,
+  );
+
+  const hasLiveData = (liveAvailability?.totalRecords ?? 0) > 0;
+  const hasUploadData = (uploadAvailability?.totalRecords ?? 0) > 0;
+  const showDataSourceToggle = hasLiveData || hasUploadData;
+  // When only one source has data, mark that one as selected; default to Live.
+  const selectedDataSource = hasLiveData
+    ? DataSource.API_CALL
+    : DataSource.FILE_UPLOAD;
 
   const { data: deploymentsData } = usePostProjectDeploymentsSearchAll(
     projectId ?? "",
@@ -121,7 +162,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     setTimeRange(UsageTimeRange.ONE_MONTH);
   };
 
-  const dataSourceToggle: ReactNode = (
+  const dataSourceToggle: ReactNode = showDataSourceToggle ? (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
       <Box
         component="span"
@@ -132,19 +173,23 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
       <ToggleButtonGroup
         size="small"
         exclusive
-        value={dataSource}
+        value={selectedDataSource}
         aria-label="data source filter"
         sx={{ pointerEvents: "none" }}
       >
-        <ToggleButton value={DataSource.API_CALL} aria-label={USAGE_METRICS_DATA_SOURCE_API_CALL}>
-          {USAGE_METRICS_DATA_SOURCE_API_CALL}
-        </ToggleButton>
-        <ToggleButton value={DataSource.FILE_UPLOAD} aria-label={USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}>
-          {USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}
-        </ToggleButton>
+        {hasLiveData && (
+          <ToggleButton value={DataSource.API_CALL} aria-label={USAGE_METRICS_DATA_SOURCE_API_CALL}>
+            {USAGE_METRICS_DATA_SOURCE_API_CALL}
+          </ToggleButton>
+        )}
+        {hasUploadData && (
+          <ToggleButton value={DataSource.FILE_UPLOAD} aria-label={USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}>
+            {USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}
+          </ToggleButton>
+        )}
       </ToggleButtonGroup>
     </Box>
-  );
+  ) : null;
 
   const uploadButton: ReactNode = (
     <Button
