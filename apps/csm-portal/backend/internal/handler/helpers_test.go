@@ -516,3 +516,24 @@ func (m *mockEntityConversationClient) SearchComments(ctx context.Context, body 
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }
+
+// ----- mock entity task SLA client -----
+
+type mockEntityTaskSlaClient struct {
+	searchTaskSlasFn func(ctx context.Context, body []byte) ([]byte, error)
+	getTaskSlaFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityTaskSlaClient) SearchTaskSlas(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchTaskSlasFn != nil {
+		return m.searchTaskSlasFn(ctx, body)
+	}
+	return []byte(`{"slas":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
+	if m.getTaskSlaFn != nil {
+		return m.getTaskSlaFn(ctx, id)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
+}
