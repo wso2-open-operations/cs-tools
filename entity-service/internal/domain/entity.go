@@ -846,28 +846,6 @@ type CaseView struct {
 	AccountDetails         *AccountRef          `json:"account"`
 }
 
-// CaseSla is the normalized read representation of a single SLA on a case.
-type CaseSla struct {
-	ID                     string  `json:"id"`
-	Definition             string  `json:"definition"`
-	Target                 *string `json:"target"`
-	Stage                  string  `json:"stage"` // normalized enum: in_progress|paused|completed|cancelled|breached
-	StageLabel             string  `json:"stageLabel"`
-	HasBreached            bool    `json:"hasBreached"`
-	BusinessTimeLeftLabel  string  `json:"businessTimeLeftLabel"`
-	BusinessElapsedLabel   string  `json:"businessElapsedLabel"`
-	BusinessElapsedPercent float64 `json:"businessElapsedPercent"`
-	StartTime              *string `json:"startTime"`
-	StopTime               *string `json:"stopTime"`
-}
-
-// CaseSlaListView is the list of SLAs attached to a case.
-type CaseSlaListView struct {
-	CaseID string    `json:"caseId"`
-	Count  int       `json:"count"`
-	Slas   []CaseSla `json:"slas"`
-}
-
 // SearchCasesFilters holds all optional filter criteria for a case search.
 type SearchCasesFilters struct {
 	Types            []string         `json:"types"`

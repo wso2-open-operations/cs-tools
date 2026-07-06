@@ -529,46 +529,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/{id}/slas:
-    get:
-      summary: List the SLAs attached to a support case.
-      description: |
-        Returns the SLAs tracked against the case when the backing data source
-        provides SLA tracking; otherwise an empty list.
-      operationId: getCaseSlas
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: The SLAs for the given case.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CaseSlaList'
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Case not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /cases:
     post:
       summary: Create a new support case.
@@ -3111,53 +3071,6 @@ components:
         account:
           nullable: true
           $ref: '#/components/schemas/AccountRef'
-
-    CaseSla:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        definition:
-          type: string
-        target:
-          type: string
-          nullable: true
-        stage:
-          type: string
-          description: Normalized stage enum.
-          enum: [in_progress, paused, completed, cancelled, breached]
-        stageLabel:
-          type: string
-          description: Stage label as provided by the data source.
-        hasBreached:
-          type: boolean
-        businessTimeLeftLabel:
-          type: string
-        businessElapsedLabel:
-          type: string
-        businessElapsedPercent:
-          type: number
-          format: double
-        startTime:
-          type: string
-          nullable: true
-        stopTime:
-          type: string
-          nullable: true
-
-    CaseSlaList:
-      type: object
-      properties:
-        caseId:
-          type: string
-          format: uuid
-        count:
-          type: integer
-        slas:
-          type: array
-          items:
-            $ref: '#/components/schemas/CaseSla'
 
     CaseSearchView:
       type: object

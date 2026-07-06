@@ -437,20 +437,6 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	}, nil
 }
 
-// GetCaseSlas returns an empty SLA list for the Postgres data source, which
-// does not track SLAs. It still validates the id and surfaces the repository's
-// not-found error for a missing case, so a nonexistent case returns 404 (as
-// GetCaseByID does) rather than an empty 200.
-func (s *caseService) GetCaseSlas(ctx context.Context, id string) (domain.CaseSlaListView, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.CaseSlaListView{}, err
-	}
-	if _, err := s.repo.GetCaseByID(ctx, id); err != nil {
-		return domain.CaseSlaListView{}, err
-	}
-	return domain.CaseSlaListView{CaseID: id, Count: 0, Slas: []domain.CaseSla{}}, nil
-}
-
 func (s *caseService) CreateCaseAttachment(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
 	return domain.CreateAttachmentResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
 }

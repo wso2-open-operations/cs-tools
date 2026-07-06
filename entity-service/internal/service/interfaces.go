@@ -148,9 +148,6 @@ type CaseService interface {
 	// GetCaseByID returns the enriched case view for the given UUID. A
 	// ValidationError is returned for a malformed UUID; a NotFoundError if no case matches.
 	GetCaseByID(ctx context.Context, id string) (domain.CaseView, error)
-	// GetCaseSlas returns the SLAs attached to the case identified by the given UUID.
-	// Populated when the backing data source tracks SLAs; the Postgres path returns an empty list.
-	GetCaseSlas(ctx context.Context, id string) (domain.CaseSlaListView, error)
 	// SearchCases returns a paginated list of cases filtered by optional project IDs,
 	// deployment IDs, deployed product IDs, state keys, severity keys, and search query.
 	// A ValidationError is returned for invalid input; any other error indicates an
