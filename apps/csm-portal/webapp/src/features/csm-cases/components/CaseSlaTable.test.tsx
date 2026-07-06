@@ -60,21 +60,21 @@ describe("CaseSlaTable", () => {
 
   it("renders a loading skeleton while the query is in flight", () => {
     mockResult({ isLoading: true });
-    render(<CaseSlaTable caseId="case-1" active />);
+    render(<CaseSlaTable caseId="case-1" />);
     expect(screen.getByText("SLAs")).toBeInTheDocument();
   });
 
   it("renders an empty state when there are no SLAs", () => {
     const empty: CaseSlaList = { caseId: "case-1", count: 0, slas: [] };
     mockResult({ data: empty });
-    render(<CaseSlaTable caseId="case-1" active />);
+    render(<CaseSlaTable caseId="case-1" />);
     expect(screen.getByText("No SLAs on this case.")).toBeInTheDocument();
   });
 
   it("renders SLA rows with definition, stage, and time labels", () => {
     const list: CaseSlaList = { caseId: "case-1", count: 1, slas: [SLA_ROW] };
     mockResult({ data: list });
-    render(<CaseSlaTable caseId="case-1" active />);
+    render(<CaseSlaTable caseId="case-1" />);
     expect(screen.getByText("S1 - Response")).toBeInTheDocument();
     expect(screen.getByText("In progress")).toBeInTheDocument();
     expect(screen.getAllByText("30 minutes").length).toBeGreaterThan(0);
@@ -86,18 +86,9 @@ describe("CaseSlaTable", () => {
   it("renders an error state with a retry action that refetches", () => {
     const refetch = vi.fn();
     mockResult({ isError: true, refetch });
-    render(<CaseSlaTable caseId="case-1" active />);
+    render(<CaseSlaTable caseId="case-1" />);
     expect(screen.getByText("Could not load SLAs for this case.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(refetch).toHaveBeenCalled();
-  });
-
-  it("does not fetch when the tab is inactive", () => {
-    mockResult({});
-    render(<CaseSlaTable caseId="case-1" active={false} />);
-    expect(mockedUseGetCsmCaseSlas).toHaveBeenCalledWith(
-      "case-1",
-      { enabled: false },
-    );
   });
 });

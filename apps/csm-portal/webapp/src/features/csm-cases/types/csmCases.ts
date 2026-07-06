@@ -129,14 +129,18 @@ export interface CaseAttachment {
 export type CustomerTier = string;
 
 /**
- * Stage of a case SLA record, as returned by the case SLA list endpoint.
+ * Stage of a case SLA record, as returned by the case SLA list endpoint. An
+ * open enum: the known values below still drive autocomplete, but a stage
+ * outside this set (e.g. one added later on the backend) is kept as-is
+ * rather than forced into the closed set.
  */
 export type SlaStage =
   | "in_progress"
   | "paused"
   | "completed"
   | "cancelled"
-  | "breached";
+  | "breached"
+  | (string & {});
 
 /**
  * A single SLA record attached to a case. All time fields

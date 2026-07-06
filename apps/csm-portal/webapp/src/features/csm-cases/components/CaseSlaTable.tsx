@@ -34,10 +34,13 @@ import type { JSX } from "react";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
 import { useGetCsmCaseSlas } from "@features/csm-cases/api/useGetCsmCaseSlas";
-import type { CaseSla, SlaStage } from "@features/csm-cases/types/csmCases";
+import type { CaseSla } from "@features/csm-cases/types/csmCases";
+
+/** The known, closed set of SLA stages that map to a curated chip color. */
+type KnownSlaStage = "in_progress" | "paused" | "completed" | "cancelled" | "breached";
 
 const SLA_STAGE_COLOR: Record<
-  SlaStage,
+  KnownSlaStage,
   "info" | "warning" | "success" | "default" | "error"
 > = {
   in_progress: "info",
@@ -66,24 +69,24 @@ function formatSlaDateTime(iso: string | null): string {
 
 /** Chip color for a row: a breached SLA is always shown in error styling. */
 function stageColor(sla: CaseSla): "info" | "warning" | "success" | "default" | "error" {
-  return sla.hasBreached ? "error" : (SLA_STAGE_COLOR[sla.stage] ?? "default");
+  return sla.hasBreached
+    ? "error"
+    : (SLA_STAGE_COLOR[sla.stage as KnownSlaStage] ?? "default");
 }
 
 interface CaseSlaTableProps {
   caseId: string;
-  /** Whether the SLA tab is the active tab — gates the (lazy) fetch. */
-  active: boolean;
 }
 
 /**
  * Table of the case's SLA records, shown on the SLA
- * tab of the case detail page. Fetches the case's SLA records lazily: the
- * query only runs once `active` is true so switching between tabs doesn't
- * fire the request until the SLA tab is actually opened.
+ * tab of the case detail page. Only ever mounted while the SLA tab is
+ * active (see the case detail page), so the fetch runs as soon as this
+ * component renders.
  */
-export function CaseSlaTable({ caseId, active }: CaseSlaTableProps): JSX.Element {
+export function CaseSlaTable({ caseId }: CaseSlaTableProps): JSX.Element {
   const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
-    useGetCsmCaseSlas(caseId, { enabled: active });
+    useGetCsmCaseSlas(caseId);
 
   const slas = data?.slas ?? [];
   const count = data?.count ?? slas.length;

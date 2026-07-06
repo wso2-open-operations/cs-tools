@@ -1208,7 +1208,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
       )}
 
       {activeTab === "sla" &&
-        caseId && <CaseSlaTable caseId={caseId} active={activeTab === "sla"} />}
+        caseId && <CaseSlaTable caseId={caseId} />}
 
       {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>

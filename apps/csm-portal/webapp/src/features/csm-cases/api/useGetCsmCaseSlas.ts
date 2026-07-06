@@ -31,16 +31,15 @@ const TASK_SLA_PAGE_LIMIT = 100;
  *
  * Calls the task-SLA search endpoint scoped to this case's id (a case is a
  * task) and maps each result onto the {@link CaseSla} row model the SLA table
- * renders (see {@link toCaseSla}). Lazy: pass `enabled: false` until the SLA
- * tab is actually selected so the request doesn't fire for every case-detail
- * load.
+ * renders (see {@link toCaseSla}). The query only runs while `caseId` is set,
+ * so callers that mount this hook conditionally (e.g. only while the SLA tab
+ * is active) get lazy fetching for free.
  */
 export function useGetCsmCaseSlas(
   caseId: string | undefined,
-  options?: { enabled?: boolean },
 ): UseQueryResult<CaseSlaList | null, Error> {
   const api = useBackendApi();
-  const enabled = (options?.enabled ?? true) && !!caseId;
+  const enabled = !!caseId;
 
   return useQuery<CaseSlaList | null, Error>({
     queryKey: [ApiQueryKeys.CSM_CASE_SLAS, caseId ?? ""],
@@ -54,7 +53,9 @@ export function useGetCsmCaseSlas(
         },
       );
       const slas = (res.taskSlas ?? []).map(toCaseSla);
-      return { caseId, count: res.total ?? slas.length, slas };
+      // Count reflects the rows actually rendered (this table always shows a
+      // case's full SLA list), not the backend's total-across-pages figure.
+      return { caseId, count: slas.length, slas };
     },
     enabled,
     staleTime: 30_000,

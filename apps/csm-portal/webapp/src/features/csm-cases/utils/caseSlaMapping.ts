@@ -27,7 +27,10 @@ import type {
   TaskSlaView,
 } from "@features/csm-cases/types/csmCases";
 
-const KNOWN_SLA_STAGES: readonly SlaStage[] = [
+/** The known, closed set of SLA stages the backend documents today. */
+type KnownSlaStage = "in_progress" | "paused" | "completed" | "cancelled" | "breached";
+
+const KNOWN_SLA_STAGES: readonly KnownSlaStage[] = [
   "in_progress",
   "paused",
   "completed",
@@ -35,7 +38,7 @@ const KNOWN_SLA_STAGES: readonly SlaStage[] = [
   "breached",
 ];
 
-const SLA_STAGE_LABEL: Record<SlaStage, string> = {
+const SLA_STAGE_LABEL: Record<KnownSlaStage, string> = {
   in_progress: "In progress",
   paused: "Paused",
   completed: "Completed",
@@ -53,13 +56,13 @@ export function normalizeStage(raw: string | null): { stage: SlaStage; label: st
   if (normalized === "achieved") normalized = "completed";
 
   if ((KNOWN_SLA_STAGES as readonly string[]).includes(normalized)) {
-    const stage = normalized as SlaStage;
+    const stage = normalized as KnownSlaStage;
     return { stage, label: SLA_STAGE_LABEL[stage] };
   }
 
   // Unknown stage from the backend: keep it visible rather than silently
   // recoding it, but still give the table a stable SlaStage to key off of.
-  return { stage: normalized as SlaStage, label: trimmed };
+  return { stage: normalized, label: trimmed };
 }
 
 /** Maps one wire-shape SLA record onto the row model {@link CaseSlaTable} renders. */
