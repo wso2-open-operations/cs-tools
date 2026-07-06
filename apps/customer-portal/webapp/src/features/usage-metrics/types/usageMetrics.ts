@@ -19,8 +19,6 @@ import type { UsageAggregatedMetricDefinition } from "@features/project-details/
 import type {
   DataSource,
   UsageEnvironmentProduct,
-  UsageInstanceChartBlock,
-  UsageProductInstanceRow,
   UsageTimeRange,
   MetricTypeSummary,
 } from "@features/project-details/types/usage";
