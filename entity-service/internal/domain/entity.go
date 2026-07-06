@@ -1929,6 +1929,13 @@ type CallRequestView struct {
 	UpdatedOn          string             `json:"updatedOn"`
 	State              CallRequestState   `json:"state"`
 	CancellationReason *string            `json:"cancellationReason,omitempty"`
+	// Agent-side fields, populated once an engineer schedules or concludes the call.
+	Assignee          *string `json:"assignee,omitempty"`
+	Notes             *string `json:"notes,omitempty"`
+	Plan              *string `json:"plan,omitempty"`
+	Attendees         *string `json:"attendees,omitempty"`
+	ActionItems       *string `json:"actionItems,omitempty"`
+	ActualDurationMin *int    `json:"actualDurationMin,omitempty"`
 }
 
 // SearchCallRequestsResponse is the paginated result of a call request search.
@@ -1959,6 +1966,47 @@ type UpdateCallRequestResponse struct {
 		ID        string `json:"id"`
 		UpdatedOn string `json:"updatedOn"`
 		UpdatedBy string `json:"updatedBy"`
+	} `json:"callRequest"`
+}
+
+// ScheduleCallRequestRequest is the input for POST /call-requests/{id}/schedule.
+// ID is injected from the URL path parameter and excluded from JSON decoding.
+type ScheduleCallRequestRequest struct {
+	ID              string `json:"-"`
+	MeetingDate     string `json:"meetingDate"`
+	DurationMinutes int    `json:"durationInMinutes"`
+	Assignee        string `json:"assignee,omitempty"`
+}
+
+// RejectCallRequestRequest is the input for POST /call-requests/{id}/reject.
+// ID is injected from the URL path parameter and excluded from JSON decoding.
+type RejectCallRequestRequest struct {
+	ID     string `json:"-"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// SendCallRequestNotesRequest is the input for POST /call-requests/{id}/notes.
+// ID is injected from the URL path parameter and excluded from JSON decoding.
+type SendCallRequestNotesRequest struct {
+	ID                string `json:"-"`
+	Notes             string `json:"notes"`
+	Plan              string `json:"plan,omitempty"`
+	Attendees         string `json:"attendees,omitempty"`
+	ActionItems       string `json:"actionItems,omitempty"`
+	ActualDurationMin *int   `json:"actualDurationMin,omitempty"`
+}
+
+// CallRequestActionResponse is the output for the agent-side call request actions
+// (schedule, reject, notes). MeetingLink and ScheduleTime are populated by the
+// schedule action and omitted otherwise.
+type CallRequestActionResponse struct {
+	Message     string `json:"message"`
+	CallRequest struct {
+		ID           string           `json:"id"`
+		UpdatedOn    string           `json:"updatedOn"`
+		State        CallRequestState `json:"state"`
+		MeetingLink  *string          `json:"meetingLink,omitempty"`
+		ScheduleTime *string          `json:"scheduleTime,omitempty"`
 	} `json:"callRequest"`
 }
 

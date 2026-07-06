@@ -89,3 +89,72 @@ func (h *CallRequestHandler) PatchCallRequest(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// ScheduleCallRequest handles POST /call-requests/{id}/schedule.
+func (h *CallRequestHandler) ScheduleCallRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apierror.WriteJSON(w, http.StatusBadRequest, "call request ID is required")
+		return
+	}
+
+	var req domain.ScheduleCallRequestRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = id
+
+	resp, err := h.svc.ScheduleCallRequest(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// RejectCallRequest handles POST /call-requests/{id}/reject.
+func (h *CallRequestHandler) RejectCallRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apierror.WriteJSON(w, http.StatusBadRequest, "call request ID is required")
+		return
+	}
+
+	var req domain.RejectCallRequestRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = id
+
+	resp, err := h.svc.RejectCallRequest(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SendCallRequestNotes handles POST /call-requests/{id}/notes.
+func (h *CallRequestHandler) SendCallRequestNotes(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apierror.WriteJSON(w, http.StatusBadRequest, "call request ID is required")
+		return
+	}
+
+	var req domain.SendCallRequestNotesRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = id
+
+	resp, err := h.svc.SendCallRequestNotes(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

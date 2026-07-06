@@ -1109,6 +1109,156 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /call-requests/{id}/schedule:
+    post:
+      summary: Schedule or reschedule a call request (supported by the backing data source only).
+      description: Moves the call request to the scheduled state, recording the meeting time, duration, and optional assignee. The backing data source generates the meeting link.
+      operationId: scheduleCallRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleCallRequestRequest'
+      responses:
+        "200":
+          description: Call request scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRequestActionResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests/{id}/reject:
+    post:
+      summary: Reject a call request (supported by the backing data source only).
+      description: Rejects the call request from the WSO2 side, moving it to the rejected state.
+      operationId: rejectCallRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectCallRequestRequest'
+      responses:
+        "200":
+          description: Call request rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRequestActionResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests/{id}/notes:
+    post:
+      summary: Record post-call notes and conclude a call request (supported by the backing data source only).
+      description: Records the notes captured from the concluded call and moves the call request to the concluded state.
+      operationId: sendCallRequestNotes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCallRequestNotesRequest'
+      responses:
+        "200":
+          description: Call notes recorded and call request concluded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRequestActionResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /change-requests:
     post:
       summary: Create a change request (ServiceNow data source only).
@@ -4380,6 +4530,21 @@ components:
           $ref: '#/components/schemas/CallRequestState'
         cancellationReason:
           type: string
+        assignee:
+          type: string
+          description: Identifier of the engineer the call is assigned to.
+        notes:
+          type: string
+          description: Notes captured from the concluded call.
+        plan:
+          type: string
+        attendees:
+          type: string
+        actionItems:
+          type: string
+        actualDurationMin:
+          type: integer
+          description: Actual call duration in minutes.
 
     SearchCallRequestsResponse:
       type: object
@@ -4440,6 +4605,76 @@ components:
               type: string
             updatedBy:
               type: string
+
+    ScheduleCallRequestRequest:
+      type: object
+      required: [meetingDate, durationInMinutes]
+      additionalProperties: false
+      properties:
+        meetingDate:
+          type: string
+          format: date-time
+          description: Scheduled meeting start time as an RFC3339 UTC timestamp.
+        durationInMinutes:
+          type: integer
+          minimum: 15
+          maximum: 240
+          description: Meeting duration in minutes.
+        assignee:
+          type: string
+          description: Optional identifier of the engineer the call is assigned to.
+
+    RejectCallRequestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          description: Optional reason for rejecting the call request.
+
+    SendCallRequestNotesRequest:
+      type: object
+      required: [notes]
+      additionalProperties: false
+      properties:
+        notes:
+          type: string
+          description: Notes captured from the concluded call.
+        plan:
+          type: string
+          description: Optional plan discussed during the call.
+        attendees:
+          type: string
+          description: Optional list of call attendees.
+        actionItems:
+          type: string
+          description: Optional action items agreed during the call.
+        actualDurationMin:
+          type: integer
+          minimum: 1
+          description: Optional actual call duration in minutes.
+
+    CallRequestActionResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+            state:
+              $ref: '#/components/schemas/CallRequestState'
+            meetingLink:
+              type: string
+              description: Generated meeting link (schedule action only).
+            scheduleTime:
+              type: string
+              description: Scheduled meeting time (schedule action only).
 
     SearchConfigurationItemsFilters:
       type: object

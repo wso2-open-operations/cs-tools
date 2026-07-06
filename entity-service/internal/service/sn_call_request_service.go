@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -39,18 +40,18 @@ type snCallRequestCreatePayload struct {
 type snCallRequestCreateResponse struct {
 	Message     string `json:"message"`
 	CallRequest struct {
-		ID        string              `json:"id"`
-		CreatedOn string              `json:"createdOn"`
-		CreatedBy string              `json:"createdBy"`
+		ID        string                  `json:"id"`
+		CreatedOn string                  `json:"createdOn"`
+		CreatedBy string                  `json:"createdBy"`
 		State     domain.CallRequestState `json:"state"`
 	} `json:"callRequest"`
 }
 
 // snCallRequestSearchPayload mirrors POST /call-requests/search in the SN integration service.
 type snCallRequestSearchPayload struct {
-	CaseID     string                          `json:"caseId"`
-	Filters    *snCallRequestSearchFilters     `json:"filters,omitempty"`
-	Pagination snProjectPagination             `json:"pagination"`
+	CaseID     string                      `json:"caseId"`
+	Filters    *snCallRequestSearchFilters `json:"filters,omitempty"`
+	Pagination snProjectPagination         `json:"pagination"`
 }
 
 type snCallRequestSearchFilters struct {
@@ -66,18 +67,24 @@ type snCallRequestsResponse struct {
 }
 
 type snCallRequest struct {
-	ID                 string                 `json:"id"`
-	Number             string                 `json:"number"`
-	Case               snCallRequestCaseRef   `json:"case"`
-	Reason             *string                `json:"reason"`
-	PreferredTimes     []string               `json:"preferredTimes"`
-	DurationMin        int                    `json:"durationMin"`
-	ScheduleTime       *string                `json:"scheduleTime"`
-	MeetingLink        *string                `json:"meetingLink"`
-	CreatedOn          string                 `json:"createdOn"`
-	UpdatedOn          string                 `json:"updatedOn"`
+	ID                 string                  `json:"id"`
+	Number             string                  `json:"number"`
+	Case               snCallRequestCaseRef    `json:"case"`
+	Reason             *string                 `json:"reason"`
+	PreferredTimes     []string                `json:"preferredTimes"`
+	DurationMin        int                     `json:"durationMin"`
+	ScheduleTime       *string                 `json:"scheduleTime"`
+	MeetingLink        *string                 `json:"meetingLink"`
+	CreatedOn          string                  `json:"createdOn"`
+	UpdatedOn          string                  `json:"updatedOn"`
 	State              domain.CallRequestState `json:"state"`
-	CancellationReason *string                `json:"cancellationReason,omitempty"`
+	CancellationReason *string                 `json:"cancellationReason,omitempty"`
+	Assignee           *string                 `json:"assignee,omitempty"`
+	Notes              *string                 `json:"notes,omitempty"`
+	Plan               *string                 `json:"plan,omitempty"`
+	Attendees          *string                 `json:"attendees,omitempty"`
+	ActionItems        *string                 `json:"actionItems,omitempty"`
+	ActualDurationMin  *int                    `json:"actualDurationMin,omitempty"`
 }
 
 type snCallRequestCaseRef struct {
@@ -125,6 +132,41 @@ type snCallRequestUpdateResponse struct {
 		ID        string `json:"id"`
 		UpdatedOn string `json:"updatedOn"`
 		UpdatedBy string `json:"updatedBy"`
+	} `json:"callRequest"`
+}
+
+// snCallRequestSchedulePayload mirrors POST /call-requests/{id}/schedule in the SN integration service.
+type snCallRequestSchedulePayload struct {
+	MeetingDate     string `json:"meetingDate"`
+	DurationMinutes int    `json:"durationInMinutes"`
+	Assignee        string `json:"assignee,omitempty"`
+}
+
+// snCallRequestRejectPayload mirrors POST /call-requests/{id}/reject in the SN integration service.
+type snCallRequestRejectPayload struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// snCallRequestNotesPayload mirrors POST /call-requests/{id}/notes in the SN integration service.
+type snCallRequestNotesPayload struct {
+	Notes             string `json:"notes"`
+	Plan              string `json:"plan,omitempty"`
+	Attendees         string `json:"attendees,omitempty"`
+	ActionItems       string `json:"actionItems,omitempty"`
+	ActualDurationMin *int   `json:"actualDurationMin,omitempty"`
+}
+
+// snCallRequestActionResponse mirrors the SN integration service response for the
+// schedule/reject/notes agent actions. MeetingLink and ScheduleTime are only set
+// by the schedule action.
+type snCallRequestActionResponse struct {
+	Message     string `json:"message"`
+	CallRequest struct {
+		ID           string                  `json:"id"`
+		UpdatedOn    string                  `json:"updatedOn"`
+		State        domain.CallRequestState `json:"state"`
+		MeetingLink  *string                 `json:"meetingLink,omitempty"`
+		ScheduleTime *string                 `json:"scheduleTime,omitempty"`
 	} `json:"callRequest"`
 }
 
@@ -247,6 +289,12 @@ func (s *snCallRequestService) SearchCallRequests(ctx context.Context, req domai
 			UpdatedOn:          cr.UpdatedOn,
 			State:              cr.State,
 			CancellationReason: cr.CancellationReason,
+			Assignee:           cr.Assignee,
+			Notes:              cr.Notes,
+			Plan:               cr.Plan,
+			Attendees:          cr.Attendees,
+			ActionItems:        cr.ActionItems,
+			ActualDurationMin:  cr.ActualDurationMin,
 		})
 	}
 
@@ -344,4 +392,104 @@ func (s *snCallRequestService) verifyCallRequestBelongsToCase(ctx context.Contex
 		offset += pageSize
 	}
 	return &apierror.NotFoundError{Msg: "call request not found for this case"}
+}
+
+// ScheduleCallRequest implements CallRequestService.
+func (s *snCallRequestService) ScheduleCallRequest(ctx context.Context, req domain.ScheduleCallRequestRequest) (domain.CallRequestActionResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CallRequestActionResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.CallRequestActionResponse{}, err
+	}
+	if req.MeetingDate == "" {
+		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "meetingDate is required"}
+	}
+	if _, err := time.Parse(time.RFC3339, req.MeetingDate); err != nil {
+		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "meetingDate must be a valid RFC3339 timestamp"}
+	}
+	if req.DurationMinutes < 15 || req.DurationMinutes > 240 {
+		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "durationInMinutes must be between 15 and 240"}
+	}
+
+	sysid := uuidToSysid(req.ID)
+	payload := snCallRequestSchedulePayload{
+		MeetingDate:     req.MeetingDate,
+		DurationMinutes: req.DurationMinutes,
+		Assignee:        req.Assignee,
+	}
+	raw, err := s.client.Post(ctx, fmt.Sprintf("/call-requests/%s/schedule", sysid), token, payload)
+	if err != nil {
+		return domain.CallRequestActionResponse{}, err
+	}
+	return parseCallRequestActionResponse(raw, "schedule")
+}
+
+// RejectCallRequest implements CallRequestService.
+func (s *snCallRequestService) RejectCallRequest(ctx context.Context, req domain.RejectCallRequestRequest) (domain.CallRequestActionResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CallRequestActionResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.CallRequestActionResponse{}, err
+	}
+
+	sysid := uuidToSysid(req.ID)
+	payload := snCallRequestRejectPayload{Reason: req.Reason}
+	raw, err := s.client.Post(ctx, fmt.Sprintf("/call-requests/%s/reject", sysid), token, payload)
+	if err != nil {
+		return domain.CallRequestActionResponse{}, err
+	}
+	return parseCallRequestActionResponse(raw, "reject")
+}
+
+// SendCallRequestNotes implements CallRequestService.
+func (s *snCallRequestService) SendCallRequestNotes(ctx context.Context, req domain.SendCallRequestNotesRequest) (domain.CallRequestActionResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CallRequestActionResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.CallRequestActionResponse{}, err
+	}
+	if req.Notes == "" {
+		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "notes is required"}
+	}
+	if req.ActualDurationMin != nil && *req.ActualDurationMin <= 0 {
+		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "actualDurationMin must be positive"}
+	}
+
+	sysid := uuidToSysid(req.ID)
+	payload := snCallRequestNotesPayload{
+		Notes:             req.Notes,
+		Plan:              req.Plan,
+		Attendees:         req.Attendees,
+		ActionItems:       req.ActionItems,
+		ActualDurationMin: req.ActualDurationMin,
+	}
+	raw, err := s.client.Post(ctx, fmt.Sprintf("/call-requests/%s/notes", sysid), token, payload)
+	if err != nil {
+		return domain.CallRequestActionResponse{}, err
+	}
+	return parseCallRequestActionResponse(raw, "notes")
+}
+
+// parseCallRequestActionResponse unmarshals an agent-action response from the SN
+// integration service and maps the sysid back to a UUID for the caller.
+func parseCallRequestActionResponse(raw json.RawMessage, action string) (domain.CallRequestActionResponse, error) {
+	var snResp snCallRequestActionResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.CallRequestActionResponse{}, fmt.Errorf("sn call requests: parse %s response: %w", action, err)
+	}
+
+	var resp domain.CallRequestActionResponse
+	resp.Message = snResp.Message
+	resp.CallRequest.ID = sysidToUUID(snResp.CallRequest.ID)
+	resp.CallRequest.UpdatedOn = snResp.CallRequest.UpdatedOn
+	resp.CallRequest.State = snResp.CallRequest.State
+	resp.CallRequest.MeetingLink = snResp.CallRequest.MeetingLink
+	resp.CallRequest.ScheduleTime = snResp.CallRequest.ScheduleTime
+	return resp, nil
 }
