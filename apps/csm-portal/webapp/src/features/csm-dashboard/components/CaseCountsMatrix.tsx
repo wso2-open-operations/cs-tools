@@ -39,6 +39,7 @@ import type {
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
+import RefreshButton from "@features/csm-dashboard/components/RefreshButton";
 
 /** Build a `/cases?...` href for the given severity and/or state filter. */
 function casesHref(severity?: Severity, state?: CaseState): string {
@@ -81,10 +82,21 @@ function CountCell({
 }
 
 export default function CaseCountsMatrix(): JSX.Element {
-  const { data, isLoading, isError } = useCaseCountsMatrix();
+  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
+    useCaseCountsMatrix();
 
   return (
-    <SectionCard title="Cases by severity and state">
+    <SectionCard
+      title="Cases by severity and state"
+      action={
+        <RefreshButton
+          onRefresh={() => void refetch()}
+          isFetching={isFetching}
+          updatedAt={dataUpdatedAt}
+          label="Refresh case counts"
+        />
+      }
+    >
       {isLoading ? (
         <Skeleton variant="rounded" height={220} />
       ) : isError || !data ? (
