@@ -504,6 +504,27 @@ func (m *mockEntityDeploymentClient) PatchDeployedProduct(ctx context.Context, d
 	return []byte(`{}`), nil
 }
 
+// ----- mock entity task-SLA client -----
+
+type mockEntityTaskSlaClient struct {
+	searchTaskSlasFn func(ctx context.Context, body []byte) ([]byte, error)
+	getTaskSlaFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityTaskSlaClient) SearchTaskSlas(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchTaskSlasFn != nil {
+		return m.searchTaskSlasFn(ctx, body)
+	}
+	return []byte(`{"taskSlas":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
+	if m.getTaskSlaFn != nil {
+		return m.getTaskSlaFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity conversation client -----
 
 type mockEntityConversationClient struct {
