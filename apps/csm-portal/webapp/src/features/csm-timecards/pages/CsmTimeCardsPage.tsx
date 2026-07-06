@@ -41,6 +41,7 @@ import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
 import { BackendApiError } from "@api/backend/client";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import type { BeProject } from "@api/backend/types";
 import { TIME_CARD_STATE_META } from "@features/csm-timecards/constants/timeCardConstants";
 import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
@@ -94,6 +95,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const role = useTimecardRole();
   const me = useCurrentEngineer();
   const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
   const [tab, setTab] = useState<TabId>("mine");
   const activeTab: TabId = tab === "approvals" && !role.isApprover ? "mine" : tab;
 
@@ -106,6 +108,11 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const [filterWorkItem, setFilterWorkItem] = useState("");
   const [filterState, setFilterState] = useState<TimeCardState | "">("");
   const [filterEngineer, setFilterEngineer] = useState("");
+  // Date range (YYYY-MM-DD, inclusive) — `from`/`to` are already real
+  // server-side filters (see TimeCardSearchFilters), just never had a UI
+  // control wired to them until now.
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
 
   const projects = useProjectOptions();
   // The backend requires a non-empty `projectIds` to return anything at all
@@ -121,6 +128,8 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const baseFilters: TimeCardSearchFilters = {
     ...(scopeProjectIds.length && { projectIds: scopeProjectIds }),
     ...(filterState && { states: [filterState] }),
+    ...(filterFrom && { from: filterFrom }),
+    ...(filterTo && { to: filterTo }),
   };
 
   // Each tab pages independently — was previously fetching its *entire*
@@ -144,7 +153,12 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const decideCard = useDecideCard();
 
   const anyFilterActive =
-    !!filterProject || !!filterWorkItem.trim() || !!filterState || !!filterEngineer.trim();
+    !!filterProject ||
+    !!filterWorkItem.trim() ||
+    !!filterState ||
+    !!filterEngineer.trim() ||
+    !!filterFrom ||
+    !!filterTo;
 
   // A filter change re-scopes the search for every tab, so every tab's page
   // position needs to reset too — otherwise "page 3" of a narrower result
@@ -162,11 +176,21 @@ export default function CsmTimeCardsPage(): JSX.Element {
     setFilterState(v);
     resetAllPages();
   };
+  const handleFilterFromChange = (v: string): void => {
+    setFilterFrom(v);
+    resetAllPages();
+  };
+  const handleFilterToChange = (v: string): void => {
+    setFilterTo(v);
+    resetAllPages();
+  };
   const clearFilters = (): void => {
     setFilterProject("");
     setFilterWorkItem("");
     setFilterState("");
     setFilterEngineer("");
+    setFilterFrom("");
+    setFilterTo("");
     resetAllPages();
   };
 
@@ -219,6 +243,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterWorkItem={setFilterWorkItem}
             filterState={filterState}
             setFilterState={handleFilterStateChange}
+            filterFrom={filterFrom}
+            setFilterFrom={handleFilterFromChange}
+            filterTo={filterTo}
+            setFilterTo={handleFilterToChange}
             onClear={clearFilters}
           />
 
@@ -293,6 +321,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterWorkItem={setFilterWorkItem}
             filterState={filterState}
             setFilterState={handleFilterStateChange}
+            filterFrom={filterFrom}
+            setFilterFrom={handleFilterFromChange}
+            filterTo={filterTo}
+            setFilterTo={handleFilterToChange}
             onClear={clearFilters}
             engineerSlot={
               <TextField
@@ -380,6 +412,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterWorkItem={setFilterWorkItem}
             filterState={filterState}
             setFilterState={handleFilterStateChange}
+            filterFrom={filterFrom}
+            setFilterFrom={handleFilterFromChange}
+            filterTo={filterTo}
+            setFilterTo={handleFilterToChange}
             onClear={clearFilters}
             hideStateFilter
             engineerSlot={
@@ -467,7 +503,14 @@ export default function CsmTimeCardsPage(): JSX.Element {
           onClose={() => setReviewCard(null)}
           onDecide={(decision) =>
             decideCard.mutate(decision, {
-              onSuccess: () => setReviewCard(null),
+              onSuccess: () => {
+                setReviewCard(null);
+                showSuccess(
+                  decision.state === "approved"
+                    ? "Time card approved."
+                    : "Time card rejected.",
+                );
+              },
               onError: (err) => {
                 // The backend 403s when the signed-in user isn't authorized
                 // to decide this specific card (confirmed live: approving
@@ -501,6 +544,10 @@ function FilterBar({
   setFilterWorkItem,
   filterState,
   setFilterState,
+  filterFrom,
+  setFilterFrom,
+  filterTo,
+  setFilterTo,
   onClear,
   engineerSlot,
   engineerChip,
@@ -513,6 +560,11 @@ function FilterBar({
   setFilterWorkItem: (v: string) => void;
   filterState: TimeCardState | "";
   setFilterState: (v: TimeCardState | "") => void;
+  /** Inclusive date range (YYYY-MM-DD), matched against a card's work date. */
+  filterFrom: string;
+  setFilterFrom: (v: string) => void;
+  filterTo: string;
+  setFilterTo: (v: string) => void;
   onClear: () => void;
   engineerSlot?: JSX.Element;
   /** Active-chip for the Engineer filter — only the Approvals tab has one. */
@@ -544,6 +596,16 @@ function FilterBar({
       key: "state",
       label: `State: ${TIME_CARD_STATE_META[filterState].label}`,
       onDelete: () => setFilterState(""),
+    });
+  }
+  if (filterFrom || filterTo) {
+    activeChips.push({
+      key: "dateRange",
+      label: `Date: ${filterFrom || "…"} to ${filterTo || "…"}`,
+      onDelete: () => {
+        setFilterFrom("");
+        setFilterTo("");
+      },
     });
   }
 
@@ -628,6 +690,32 @@ function FilterBar({
             ))}
           </TextField>
         )}
+
+        <TextField
+          size="small"
+          type="date"
+          label="From"
+          value={filterFrom}
+          onChange={(e) => setFilterFrom(e.target.value)}
+          sx={{ width: 160 }}
+          slotProps={{
+            inputLabel: { shrink: true },
+            htmlInput: { max: filterTo || undefined },
+          }}
+        />
+
+        <TextField
+          size="small"
+          type="date"
+          label="To"
+          value={filterTo}
+          onChange={(e) => setFilterTo(e.target.value)}
+          sx={{ width: 160 }}
+          slotProps={{
+            inputLabel: { shrink: true },
+            htmlInput: { min: filterFrom || undefined },
+          }}
+        />
 
         <Box sx={{ flexGrow: 1 }} />
       </Box>
