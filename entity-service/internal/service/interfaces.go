@@ -213,17 +213,10 @@ type CallRequestService interface {
 	// A ValidationError is returned for invalid input.
 	SearchCallRequests(ctx context.Context, req domain.SearchCallRequestsRequest) (domain.SearchCallRequestsResponse, error)
 	// UpdateCallRequest updates the state or other fields of a call request.
-	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
+	// The target state selects the behaviour (customer/agent transitions, scheduling,
+	// rejection, conclusion with notes). A ValidationError is returned for invalid
+	// input; a NotFoundError if no call request matches.
 	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error)
-	// ScheduleCallRequest schedules (or reschedules) a call request, moving it to the scheduled state.
-	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
-	ScheduleCallRequest(ctx context.Context, req domain.ScheduleCallRequestRequest) (domain.CallRequestActionResponse, error)
-	// RejectCallRequest rejects a call request from the WSO2 side.
-	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
-	RejectCallRequest(ctx context.Context, req domain.RejectCallRequestRequest) (domain.CallRequestActionResponse, error)
-	// SendCallRequestNotes records the post-call notes and concludes the call request.
-	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
-	SendCallRequestNotes(ctx context.Context, req domain.SendCallRequestNotesRequest) (domain.CallRequestActionResponse, error)
 }
 
 // ChangeRequestService defines the operations available on the change_requests entity.

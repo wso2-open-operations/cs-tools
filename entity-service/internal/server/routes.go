@@ -227,9 +227,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("POST /call-requests", callRequestHandler.CreateCallRequest)
 		mux.HandleFunc("POST /call-requests/search", callRequestHandler.SearchCallRequests)
 		mux.HandleFunc("PATCH /call-requests/{id}", callRequestHandler.PatchCallRequest)
-		mux.HandleFunc("POST /call-requests/{id}/schedule", callRequestHandler.ScheduleCallRequest)
-		mux.HandleFunc("POST /call-requests/{id}/reject", callRequestHandler.RejectCallRequest)
-		mux.HandleFunc("POST /call-requests/{id}/notes", callRequestHandler.SendCallRequestNotes)
 	}
 
 	if caseGithubIssueHandler != nil {

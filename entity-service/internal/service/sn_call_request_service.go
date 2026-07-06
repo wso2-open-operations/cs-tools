@@ -36,14 +36,22 @@ type snCallRequestCreatePayload struct {
 	DurationMinutes int      `json:"durationInMinutes"`
 }
 
+// snCallRequestState is the raw choice-list state object from the SN integration
+// service. Its id arrives as either an integer choice-list key or a string;
+// toDomainCallRequestState normalizes it to the domain string enum.
+type snCallRequestState struct {
+	ID    json.RawMessage `json:"id"`
+	Label string          `json:"label"`
+}
+
 // snCallRequestCreateResponse mirrors the SN integration service POST /call-requests response.
 type snCallRequestCreateResponse struct {
 	Message     string `json:"message"`
 	CallRequest struct {
-		ID        string                  `json:"id"`
-		CreatedOn string                  `json:"createdOn"`
-		CreatedBy string                  `json:"createdBy"`
-		State     domain.CallRequestState `json:"state"`
+		ID        string             `json:"id"`
+		CreatedOn string             `json:"createdOn"`
+		CreatedBy string             `json:"createdBy"`
+		State     snCallRequestState `json:"state"`
 	} `json:"callRequest"`
 }
 
@@ -67,24 +75,24 @@ type snCallRequestsResponse struct {
 }
 
 type snCallRequest struct {
-	ID                 string                  `json:"id"`
-	Number             string                  `json:"number"`
-	Case               snCallRequestCaseRef    `json:"case"`
-	Reason             *string                 `json:"reason"`
-	PreferredTimes     []string                `json:"preferredTimes"`
-	DurationMin        int                     `json:"durationMin"`
-	ScheduleTime       *string                 `json:"scheduleTime"`
-	MeetingLink        *string                 `json:"meetingLink"`
-	CreatedOn          string                  `json:"createdOn"`
-	UpdatedOn          string                  `json:"updatedOn"`
-	State              domain.CallRequestState `json:"state"`
-	CancellationReason *string                 `json:"cancellationReason,omitempty"`
-	Assignee           *string                 `json:"assignee,omitempty"`
-	Notes              *string                 `json:"notes,omitempty"`
-	Plan               *string                 `json:"plan,omitempty"`
-	Attendees          *string                 `json:"attendees,omitempty"`
-	ActionItems        *string                 `json:"actionItems,omitempty"`
-	ActualDurationMin  *int                    `json:"actualDurationMin,omitempty"`
+	ID                 string               `json:"id"`
+	Number             string               `json:"number"`
+	Case               snCallRequestCaseRef `json:"case"`
+	Reason             *string              `json:"reason"`
+	PreferredTimes     []string             `json:"preferredTimes"`
+	DurationMin        int                  `json:"durationMin"`
+	ScheduleTime       *string              `json:"scheduleTime"`
+	MeetingLink        *string              `json:"meetingLink"`
+	CreatedOn          string               `json:"createdOn"`
+	UpdatedOn          string               `json:"updatedOn"`
+	State              snCallRequestState   `json:"state"`
+	CancellationReason *string              `json:"cancellationReason,omitempty"`
+	Assignee           *string              `json:"assignee,omitempty"`
+	Notes              *string              `json:"notes,omitempty"`
+	Plan               *string              `json:"plan,omitempty"`
+	Attendees          *string              `json:"attendees,omitempty"`
+	ActionItems        *string              `json:"actionItems,omitempty"`
+	ActualDurationMin  *int                 `json:"actualDurationMin,omitempty"`
 }
 
 type snCallRequestCaseRef struct {
@@ -99,6 +107,13 @@ type snCallRequestUpdatePayload struct {
 	CancellationReason *string  `json:"cancellationReason,omitempty"`
 	UTCTimes           []string `json:"utcTimes,omitempty"`
 	DurationMinutes    *int     `json:"durationInMinutes,omitempty"`
+	MeetingDate        *string  `json:"meetingDate,omitempty"`
+	Assignee           *string  `json:"assignee,omitempty"`
+	Notes              *string  `json:"notes,omitempty"`
+	Plan               *string  `json:"plan,omitempty"`
+	Attendees          *string  `json:"attendees,omitempty"`
+	ActionItems        *string  `json:"actionItems,omitempty"`
+	ActualDurationMin  *int     `json:"actualDurationMin,omitempty"`
 }
 
 // callRequestStateToKey maps domain CallRequestStateType strings to the ServiceNow integer choice-list key.
@@ -111,6 +126,44 @@ var callRequestStateToKey = map[domain.CallRequestStateType]int{
 	domain.CallRequestStateCanceled:          6,
 	domain.CallRequestStateNotesPending:      7,
 	domain.CallRequestStateConcluded:         8,
+}
+
+// callRequestKeyToState is the inverse of callRequestStateToKey: it maps the
+// ServiceNow integer choice-list key back to the domain string enum. This keeps
+// the numeric stateKey confined to this adapter so callers only ever see the
+// string enum.
+var callRequestKeyToState = map[int]domain.CallRequestStateType{
+	1: domain.CallRequestStatePendingOnCustomer,
+	2: domain.CallRequestStatePendingOnWSO2,
+	3: domain.CallRequestStateScheduled,
+	4: domain.CallRequestStateCustomerRejected,
+	5: domain.CallRequestStateWSO2Rejected,
+	6: domain.CallRequestStateCanceled,
+	7: domain.CallRequestStateNotesPending,
+	8: domain.CallRequestStateConcluded,
+}
+
+// toDomainCallRequestState normalizes a raw SN state into the domain state, whose
+// id is always the string enum key. If the raw id is an integer choice-list key
+// it is mapped via callRequestKeyToState; if it is already a string it is passed
+// through unchanged. This is the only place the numeric key crosses into a view.
+func toDomainCallRequestState(s snCallRequestState) domain.CallRequestState {
+	out := domain.CallRequestState{Label: s.Label}
+	if len(s.ID) == 0 {
+		return out
+	}
+	var key int
+	if err := json.Unmarshal(s.ID, &key); err == nil {
+		if state, ok := callRequestKeyToState[key]; ok {
+			out.ID = string(state)
+		}
+		return out
+	}
+	var str string
+	if err := json.Unmarshal(s.ID, &str); err == nil {
+		out.ID = str
+	}
+	return out
 }
 
 // validCallRequestStates is the set of accepted CallRequestStateType values.
@@ -132,41 +185,6 @@ type snCallRequestUpdateResponse struct {
 		ID        string `json:"id"`
 		UpdatedOn string `json:"updatedOn"`
 		UpdatedBy string `json:"updatedBy"`
-	} `json:"callRequest"`
-}
-
-// snCallRequestSchedulePayload mirrors POST /call-requests/{id}/schedule in the SN integration service.
-type snCallRequestSchedulePayload struct {
-	MeetingDate     string  `json:"meetingDate"`
-	DurationMinutes int     `json:"durationInMinutes"`
-	Assignee        *string `json:"assignee,omitempty"`
-}
-
-// snCallRequestRejectPayload mirrors POST /call-requests/{id}/reject in the SN integration service.
-type snCallRequestRejectPayload struct {
-	Reason *string `json:"reason,omitempty"`
-}
-
-// snCallRequestNotesPayload mirrors POST /call-requests/{id}/notes in the SN integration service.
-type snCallRequestNotesPayload struct {
-	Notes             string  `json:"notes"`
-	Plan              *string `json:"plan,omitempty"`
-	Attendees         *string `json:"attendees,omitempty"`
-	ActionItems       *string `json:"actionItems,omitempty"`
-	ActualDurationMin *int    `json:"actualDurationMin,omitempty"`
-}
-
-// snCallRequestActionResponse mirrors the SN integration service response for the
-// schedule/reject/notes agent actions. MeetingLink and ScheduleTime are only set
-// by the schedule action.
-type snCallRequestActionResponse struct {
-	Message     string `json:"message"`
-	CallRequest struct {
-		ID           string                  `json:"id"`
-		UpdatedOn    string                  `json:"updatedOn"`
-		State        domain.CallRequestState `json:"state"`
-		MeetingLink  *string                 `json:"meetingLink,omitempty"`
-		ScheduleTime *string                 `json:"scheduleTime,omitempty"`
 	} `json:"callRequest"`
 }
 
@@ -223,7 +241,7 @@ func (s *snCallRequestService) CreateCallRequest(ctx context.Context, req domain
 	resp.CallRequest.ID = sysidToUUID(snResp.CallRequest.ID)
 	resp.CallRequest.CreatedOn = snResp.CallRequest.CreatedOn
 	resp.CallRequest.CreatedBy = snResp.CallRequest.CreatedBy
-	resp.CallRequest.State = snResp.CallRequest.State
+	resp.CallRequest.State = toDomainCallRequestState(snResp.CallRequest.State)
 	return resp, nil
 }
 
@@ -287,7 +305,7 @@ func (s *snCallRequestService) SearchCallRequests(ctx context.Context, req domai
 			MeetingLink:        cr.MeetingLink,
 			CreatedOn:          cr.CreatedOn,
 			UpdatedOn:          cr.UpdatedOn,
-			State:              cr.State,
+			State:              toDomainCallRequestState(cr.State),
 			CancellationReason: cr.CancellationReason,
 			Assignee:           cr.Assignee,
 			Notes:              cr.Notes,
@@ -327,6 +345,14 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 	if req.UTCTimes != nil && len(req.UTCTimes) == 0 {
 		return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "utcTimes must not be empty when provided"}
 	}
+	if req.MeetingDate != nil {
+		if _, err := time.Parse(time.RFC3339, *req.MeetingDate); err != nil {
+			return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "meetingDate must be a valid RFC3339 timestamp"}
+		}
+	}
+	if req.ActualDurationMin != nil && *req.ActualDurationMin <= 0 {
+		return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "actualDurationMin must be positive"}
+	}
 
 	sysid := uuidToSysid(req.ID)
 
@@ -344,6 +370,13 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 		CancellationReason: req.CancellationReason,
 		UTCTimes:           req.UTCTimes,
 		DurationMinutes:    req.DurationMinutes,
+		MeetingDate:        req.MeetingDate,
+		Assignee:           req.Assignee,
+		Notes:              req.Notes,
+		Plan:               req.Plan,
+		Attendees:          req.Attendees,
+		ActionItems:        req.ActionItems,
+		ActualDurationMin:  req.ActualDurationMin,
 	}
 	raw, err := s.client.Patch(ctx, fmt.Sprintf("/call-requests/%s", sysid), token, payload)
 	if err != nil {
@@ -392,104 +425,4 @@ func (s *snCallRequestService) verifyCallRequestBelongsToCase(ctx context.Contex
 		offset += pageSize
 	}
 	return &apierror.NotFoundError{Msg: "call request not found for this case"}
-}
-
-// ScheduleCallRequest implements CallRequestService.
-func (s *snCallRequestService) ScheduleCallRequest(ctx context.Context, req domain.ScheduleCallRequestRequest) (domain.CallRequestActionResponse, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CallRequestActionResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	if err := validateUUIDs("id", []string{req.ID}); err != nil {
-		return domain.CallRequestActionResponse{}, err
-	}
-	if req.MeetingDate == "" {
-		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "meetingDate is required"}
-	}
-	if _, err := time.Parse(time.RFC3339, req.MeetingDate); err != nil {
-		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "meetingDate must be a valid RFC3339 timestamp"}
-	}
-	if req.DurationMinutes < 15 || req.DurationMinutes > 240 {
-		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "durationInMinutes must be between 15 and 240"}
-	}
-
-	sysid := uuidToSysid(req.ID)
-	payload := snCallRequestSchedulePayload{
-		MeetingDate:     req.MeetingDate,
-		DurationMinutes: req.DurationMinutes,
-		Assignee:        req.Assignee,
-	}
-	raw, err := s.client.Post(ctx, fmt.Sprintf("/call-requests/%s/schedule", sysid), token, payload)
-	if err != nil {
-		return domain.CallRequestActionResponse{}, err
-	}
-	return parseCallRequestActionResponse(raw, "schedule")
-}
-
-// RejectCallRequest implements CallRequestService.
-func (s *snCallRequestService) RejectCallRequest(ctx context.Context, req domain.RejectCallRequestRequest) (domain.CallRequestActionResponse, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CallRequestActionResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	if err := validateUUIDs("id", []string{req.ID}); err != nil {
-		return domain.CallRequestActionResponse{}, err
-	}
-
-	sysid := uuidToSysid(req.ID)
-	payload := snCallRequestRejectPayload{Reason: req.Reason}
-	raw, err := s.client.Post(ctx, fmt.Sprintf("/call-requests/%s/reject", sysid), token, payload)
-	if err != nil {
-		return domain.CallRequestActionResponse{}, err
-	}
-	return parseCallRequestActionResponse(raw, "reject")
-}
-
-// SendCallRequestNotes implements CallRequestService.
-func (s *snCallRequestService) SendCallRequestNotes(ctx context.Context, req domain.SendCallRequestNotesRequest) (domain.CallRequestActionResponse, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CallRequestActionResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	if err := validateUUIDs("id", []string{req.ID}); err != nil {
-		return domain.CallRequestActionResponse{}, err
-	}
-	if req.Notes == "" {
-		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "notes is required"}
-	}
-	if req.ActualDurationMin != nil && *req.ActualDurationMin <= 0 {
-		return domain.CallRequestActionResponse{}, &apierror.ValidationError{Msg: "actualDurationMin must be positive"}
-	}
-
-	sysid := uuidToSysid(req.ID)
-	payload := snCallRequestNotesPayload{
-		Notes:             req.Notes,
-		Plan:              req.Plan,
-		Attendees:         req.Attendees,
-		ActionItems:       req.ActionItems,
-		ActualDurationMin: req.ActualDurationMin,
-	}
-	raw, err := s.client.Post(ctx, fmt.Sprintf("/call-requests/%s/notes", sysid), token, payload)
-	if err != nil {
-		return domain.CallRequestActionResponse{}, err
-	}
-	return parseCallRequestActionResponse(raw, "notes")
-}
-
-// parseCallRequestActionResponse unmarshals an agent-action response from the SN
-// integration service and maps the sysid back to a UUID for the caller.
-func parseCallRequestActionResponse(raw json.RawMessage, action string) (domain.CallRequestActionResponse, error) {
-	var snResp snCallRequestActionResponse
-	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.CallRequestActionResponse{}, fmt.Errorf("sn call requests: parse %s response: %w", action, err)
-	}
-
-	var resp domain.CallRequestActionResponse
-	resp.Message = snResp.Message
-	resp.CallRequest.ID = sysidToUUID(snResp.CallRequest.ID)
-	resp.CallRequest.UpdatedOn = snResp.CallRequest.UpdatedOn
-	resp.CallRequest.State = snResp.CallRequest.State
-	resp.CallRequest.MeetingLink = snResp.CallRequest.MeetingLink
-	resp.CallRequest.ScheduleTime = snResp.CallRequest.ScheduleTime
-	return resp, nil
 }

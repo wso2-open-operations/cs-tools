@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -42,50 +43,46 @@ func assertErrType(t *testing.T, want, err error) {
 	}
 }
 
-func TestSNCallRequestService_ScheduleCallRequest_Validation(t *testing.T) {
+func TestSNCallRequestService_UpdateCallRequest_Validation(t *testing.T) {
 	validID := "11111111-1111-1111-1111-111111111111"
-	validDate := "2026-08-01T10:00:00Z"
+	negDuration := -5
+	badDate := "not-a-date"
+	strPtr := func(s string) *string { return &s }
 
 	tests := []struct {
 		name    string
 		ctx     context.Context
-		req     domain.ScheduleCallRequestRequest
+		req     domain.UpdateCallRequestRequest
 		wantErr error
 	}{
 		{
 			name:    "missing token",
 			ctx:     context.Background(),
-			req:     domain.ScheduleCallRequestRequest{ID: validID, MeetingDate: validDate, DurationMinutes: 30},
+			req:     domain.UpdateCallRequestRequest{ID: validID, State: domain.CallRequestStateScheduled},
 			wantErr: &apierror.UnauthorizedError{},
 		},
 		{
 			name:    "invalid id format",
 			ctx:     contextWithUserIDToken("token"),
-			req:     domain.ScheduleCallRequestRequest{ID: "not-a-uuid", MeetingDate: validDate, DurationMinutes: 30},
+			req:     domain.UpdateCallRequestRequest{ID: "not-a-uuid", State: domain.CallRequestStateScheduled},
 			wantErr: &apierror.ValidationError{},
 		},
 		{
-			name:    "missing meetingDate",
+			name:    "invalid state",
 			ctx:     contextWithUserIDToken("token"),
-			req:     domain.ScheduleCallRequestRequest{ID: validID, MeetingDate: "", DurationMinutes: 30},
+			req:     domain.UpdateCallRequestRequest{ID: validID, State: domain.CallRequestStateType("bogus")},
 			wantErr: &apierror.ValidationError{},
 		},
 		{
-			name:    "unparseable meetingDate",
+			name:    "scheduled with unparseable meetingDate",
 			ctx:     contextWithUserIDToken("token"),
-			req:     domain.ScheduleCallRequestRequest{ID: validID, MeetingDate: "not-a-date", DurationMinutes: 30},
+			req:     domain.UpdateCallRequestRequest{ID: validID, State: domain.CallRequestStateScheduled, MeetingDate: &badDate},
 			wantErr: &apierror.ValidationError{},
 		},
 		{
-			name:    "duration below minimum",
+			name:    "concluded with non-positive actualDurationMin",
 			ctx:     contextWithUserIDToken("token"),
-			req:     domain.ScheduleCallRequestRequest{ID: validID, MeetingDate: validDate, DurationMinutes: 10},
-			wantErr: &apierror.ValidationError{},
-		},
-		{
-			name:    "duration above maximum",
-			ctx:     contextWithUserIDToken("token"),
-			req:     domain.ScheduleCallRequestRequest{ID: validID, MeetingDate: validDate, DurationMinutes: 300},
+			req:     domain.UpdateCallRequestRequest{ID: validID, State: domain.CallRequestStateConcluded, Notes: strPtr("n"), ActualDurationMin: &negDuration},
 			wantErr: &apierror.ValidationError{},
 		},
 	}
@@ -95,87 +92,52 @@ func TestSNCallRequestService_ScheduleCallRequest_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.ScheduleCallRequest(tt.ctx, tt.req)
+			_, err := svc.UpdateCallRequest(tt.ctx, tt.req)
 			assertErrType(t, tt.wantErr, err)
 		})
 	}
 }
 
-func TestSNCallRequestService_RejectCallRequest_Validation(t *testing.T) {
-	validID := "11111111-1111-1111-1111-111111111111"
-
+// TestToDomainCallRequestState verifies the READ normalization keeps the numeric
+// SN choice-list key out of the domain view: an integer id is mapped to the string
+// enum, a string id passes through, and the label is preserved.
+func TestToDomainCallRequestState(t *testing.T) {
 	tests := []struct {
-		name    string
-		ctx     context.Context
-		req     domain.RejectCallRequestRequest
-		wantErr error
+		name   string
+		in     snCallRequestState
+		wantID string
 	}{
 		{
-			name:    "missing token",
-			ctx:     context.Background(),
-			req:     domain.RejectCallRequestRequest{ID: validID},
-			wantErr: &apierror.UnauthorizedError{},
+			name:   "integer key maps to string enum",
+			in:     snCallRequestState{ID: json.RawMessage(`3`), Label: "Scheduled"},
+			wantID: string(domain.CallRequestStateScheduled),
 		},
 		{
-			name:    "invalid id format",
-			ctx:     contextWithUserIDToken("token"),
-			req:     domain.RejectCallRequestRequest{ID: "not-a-uuid"},
-			wantErr: &apierror.ValidationError{},
+			name:   "string id passes through",
+			in:     snCallRequestState{ID: json.RawMessage(`"concluded"`), Label: "Concluded"},
+			wantID: string(domain.CallRequestStateConcluded),
+		},
+		{
+			name:   "unknown integer yields empty id",
+			in:     snCallRequestState{ID: json.RawMessage(`99`), Label: "Mystery"},
+			wantID: "",
+		},
+		{
+			name:   "empty id yields empty id",
+			in:     snCallRequestState{},
+			wantID: "",
 		},
 	}
-
-	svc := NewServiceNowCallRequestService(nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.RejectCallRequest(tt.ctx, tt.req)
-			assertErrType(t, tt.wantErr, err)
-		})
-	}
-}
-
-func TestSNCallRequestService_SendCallRequestNotes_Validation(t *testing.T) {
-	validID := "11111111-1111-1111-1111-111111111111"
-	negDuration := -5
-
-	tests := []struct {
-		name    string
-		ctx     context.Context
-		req     domain.SendCallRequestNotesRequest
-		wantErr error
-	}{
-		{
-			name:    "missing token",
-			ctx:     context.Background(),
-			req:     domain.SendCallRequestNotesRequest{ID: validID, Notes: "n"},
-			wantErr: &apierror.UnauthorizedError{},
-		},
-		{
-			name:    "invalid id format",
-			ctx:     contextWithUserIDToken("token"),
-			req:     domain.SendCallRequestNotesRequest{ID: "not-a-uuid", Notes: "n"},
-			wantErr: &apierror.ValidationError{},
-		},
-		{
-			name:    "missing notes",
-			ctx:     contextWithUserIDToken("token"),
-			req:     domain.SendCallRequestNotesRequest{ID: validID, Notes: ""},
-			wantErr: &apierror.ValidationError{},
-		},
-		{
-			name:    "non-positive actualDurationMin",
-			ctx:     contextWithUserIDToken("token"),
-			req:     domain.SendCallRequestNotesRequest{ID: validID, Notes: "n", ActualDurationMin: &negDuration},
-			wantErr: &apierror.ValidationError{},
-		},
-	}
-
-	svc := NewServiceNowCallRequestService(nil)
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.SendCallRequestNotes(tt.ctx, tt.req)
-			assertErrType(t, tt.wantErr, err)
+			got := toDomainCallRequestState(tt.in)
+			if got.ID != tt.wantID {
+				t.Fatalf("id: got %q, want %q", got.ID, tt.wantID)
+			}
+			if got.Label != tt.in.Label {
+				t.Fatalf("label: got %q, want %q", got.Label, tt.in.Label)
+			}
 		})
 	}
 }
