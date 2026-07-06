@@ -99,6 +99,9 @@ type mockEntityCaseClient struct {
 	createCallRequestFn        func(ctx context.Context, body []byte) ([]byte, error)
 	searchCallRequestsFn       func(ctx context.Context, body []byte) ([]byte, error)
 	patchCallRequestFn         func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
+	scheduleCallRequestFn      func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
+	rejectCallRequestFn        func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
+	sendCallRequestNotesFn     func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 	createCaseGithubIssueFn    func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 }
 
@@ -196,6 +199,27 @@ func (m *mockEntityCaseClient) SearchCallRequests(ctx context.Context, body []by
 func (m *mockEntityCaseClient) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
 	if m.patchCallRequestFn != nil {
 		return m.patchCallRequestFn(ctx, callRequestID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) ScheduleCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
+	if m.scheduleCallRequestFn != nil {
+		return m.scheduleCallRequestFn(ctx, callRequestID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) RejectCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
+	if m.rejectCallRequestFn != nil {
+		return m.rejectCallRequestFn(ctx, callRequestID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) SendCallRequestNotes(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
+	if m.sendCallRequestNotesFn != nil {
+		return m.sendCallRequestNotesFn(ctx, callRequestID, body)
 	}
 	return []byte(`{}`), nil
 }

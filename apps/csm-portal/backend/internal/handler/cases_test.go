@@ -1409,3 +1409,103 @@ func TestCreateCaseGithubIssue(t *testing.T) {
 		}
 	})
 }
+
+func TestCallRequestActions(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
+	const callRequestID = "22222222-2222-2222-2222-222222222222"
+
+	t.Run("schedule forwards body unchanged and returns 200", func(t *testing.T) {
+		var gotID string
+		var gotBody []byte
+		client := &mockEntityCaseClient{
+			scheduleCallRequestFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				gotID, gotBody = id, body
+				return []byte(`{"message":"scheduled","callRequest":{"id":"22222222-2222-2222-2222-222222222222","state":"scheduled"}}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		payload := `{"meetingDate":"2026-08-01T10:00:00Z","durationInMinutes":30}`
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/call-requests/"+callRequestID+"/schedule", strings.NewReader(payload)))
+		r.SetPathValue("caseId", caseID)
+		r.SetPathValue("callRequestId", callRequestID)
+		w := httptest.NewRecorder()
+		h.ScheduleCallRequest(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if gotID != callRequestID {
+			t.Errorf("entity called with id %q, want %q", gotID, callRequestID)
+		}
+		if string(gotBody) != payload {
+			t.Errorf("entity received body %q, want %q (unchanged)", gotBody, payload)
+		}
+	})
+
+	t.Run("reject and notes reach their entity actions", func(t *testing.T) {
+		rejectHit, notesHit := false, false
+		cases := []struct {
+			name    string
+			payload string
+			call    func(*CaseHandler, http.ResponseWriter, *http.Request)
+			client  *mockEntityCaseClient
+			hit     *bool
+		}{
+			{
+				name:    "reject",
+				payload: `{"reason":"no longer needed"}`,
+				call:    (*CaseHandler).RejectCallRequest,
+				client: &mockEntityCaseClient{rejectCallRequestFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					rejectHit = true
+					return []byte(`{"message":"rejected"}`), nil
+				}},
+				hit: &rejectHit,
+			},
+			{
+				name:    "notes",
+				payload: `{"notes":"call summary"}`,
+				call:    (*CaseHandler).SendCallRequestNotes,
+				client: &mockEntityCaseClient{sendCallRequestNotesFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					notesHit = true
+					return []byte(`{"message":"concluded"}`), nil
+				}},
+				hit: &notesHit,
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := NewCaseHandler(tc.client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/call-requests/"+callRequestID+"/"+tc.name, strings.NewReader(tc.payload)))
+				r.SetPathValue("caseId", caseID)
+				r.SetPathValue("callRequestId", callRequestID)
+				w := httptest.NewRecorder()
+				tc.call(h, w, r)
+				assertStatus(t, w, http.StatusOK)
+				if !*tc.hit {
+					t.Errorf("%s: entity action was not invoked", tc.name)
+				}
+			})
+		}
+	})
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/call-requests/"+callRequestID+"/schedule", strings.NewReader(`{}`))
+		r.SetPathValue("caseId", caseID)
+		r.SetPathValue("callRequestId", callRequestID)
+		w := httptest.NewRecorder()
+		h.ScheduleCallRequest(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("rejects invalid callRequestId", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/call-requests/not-a-uuid/reject", strings.NewReader(`{}`)))
+		r.SetPathValue("caseId", caseID)
+		r.SetPathValue("callRequestId", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.RejectCallRequest(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+	})
+}

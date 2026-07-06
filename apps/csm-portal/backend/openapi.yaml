@@ -1603,6 +1603,190 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{caseId}/call-requests/{callRequestId}/schedule:
+    post:
+      summary: Schedule (or reschedule) a call request. Agent-only action.
+      description: >
+        Confirms a proposed call: sets the meeting time and duration and moves the
+        request to the scheduled state. Rescheduling an already-scheduled request
+        uses the same endpoint. Engineer-only role gating is a follow-up; the
+        backend has no role-based access control layer yet.
+      operationId: scheduleCallRequest
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+        - name: callRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Call request UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleCallRequestPayload'
+      responses:
+        "200":
+          description: Call request scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRequestActionResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{caseId}/call-requests/{callRequestId}/reject:
+    post:
+      summary: Reject a call request. Agent-only action.
+      description: >
+        Declines a customer's call request and records an optional reason.
+        Engineer-only role gating is a follow-up; the backend has no role-based
+        access control layer yet.
+      operationId: rejectCallRequest
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+        - name: callRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Call request UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectCallRequestPayload'
+      responses:
+        "200":
+          description: Call request rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRequestActionResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{caseId}/call-requests/{callRequestId}/notes:
+    post:
+      summary: Submit call notes for a call request. Agent-only action.
+      description: >
+        Records the outcome of a completed call (notes, action items, attendees,
+        etc.) and concludes the request. Engineer-only role gating is a follow-up;
+        the backend has no role-based access control layer yet.
+      operationId: sendCallRequestNotes
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+        - name: callRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Call request UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCallRequestNotesPayload'
+      responses:
+        "200":
+          description: Call notes recorded; call request concluded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRequestActionResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases/{id}/github-issues:
     post:
       summary: Create a GitHub issue from a case (ServiceNow data source only).
@@ -5199,6 +5383,77 @@ components:
             updatedOn:
               type: string
             updatedBy:
+              type: string
+
+    ScheduleCallRequestPayload:
+      type: object
+      required: [meetingDate, durationInMinutes]
+      additionalProperties: false
+      properties:
+        meetingDate:
+          type: string
+          format: date-time
+          description: Confirmed meeting start time, in UTC (RFC 3339).
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Duration of the call in minutes.
+        assignee:
+          type: string
+          description: Optional identifier of the engineer assigned to the call.
+
+    RejectCallRequestPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          description: Optional reason for rejecting the call request.
+
+    SendCallRequestNotesPayload:
+      type: object
+      required: [notes]
+      additionalProperties: false
+      properties:
+        notes:
+          type: string
+          description: Free-form notes describing the outcome of the call.
+        plan:
+          type: string
+          description: Optional plan or next steps agreed during the call.
+        attendees:
+          type: array
+          items:
+            type: string
+          description: Optional list of call attendees.
+        actionItems:
+          type: array
+          items:
+            type: string
+          description: Optional list of action items from the call.
+        actualDurationMin:
+          type: integer
+          minimum: 0
+          description: Optional actual call duration in minutes.
+
+    CallRequestActionResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+            state:
+              $ref: '#/components/schemas/CallRequestState'
+            meetingLink:
+              type: string
+            scheduleTime:
               type: string
 
     CreateCaseGithubIssuePayload:
