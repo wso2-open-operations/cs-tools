@@ -53,9 +53,11 @@ export function useGetCsmCaseSlas(
         },
       );
       const slas = (res.slas ?? []).map(toCaseSla);
-      // Count reflects the rows actually rendered (this table always shows a
-      // case's full SLA list), not the backend's total-across-pages figure.
-      return { caseId, count: slas.length, slas };
+      // Count reflects the backend's true total for the case, which may
+      // exceed the page of rows actually fetched/rendered (page is capped at
+      // TASK_SLA_PAGE_LIMIT). Fall back to the fetched length if the backend
+      // omits `total`.
+      return { caseId, count: res.total ?? slas.length, slas };
     },
     enabled,
     staleTime: 30_000,

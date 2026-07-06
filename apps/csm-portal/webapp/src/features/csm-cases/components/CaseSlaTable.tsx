@@ -98,6 +98,7 @@ export function CaseSlaTable({ caseId }: CaseSlaTableProps): JSX.Element {
 
   const slas = data?.slas ?? [];
   const count = data?.count ?? slas.length;
+  const isTruncated = !isLoading && !isError && slas.length < count;
 
   return (
     <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -134,6 +135,12 @@ export function CaseSlaTable({ caseId }: CaseSlaTableProps): JSX.Element {
           </IconButton>
         </Box>
       </Box>
+
+      {isTruncated ? (
+        <Typography variant="caption" color="text.secondary">
+          {`Showing first ${slas.length} of ${count}`}
+        </Typography>
+      ) : null}
 
       {/* Content */}
       {isError ? (

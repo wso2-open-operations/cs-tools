@@ -91,4 +91,20 @@ describe("CaseSlaTable", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(refetch).toHaveBeenCalled();
   });
+
+  it("calls refetch when the header refresh button is clicked", () => {
+    const refetch = vi.fn();
+    const list: CaseSlaList = { caseId: "case-1", count: 1, slas: [SLA_ROW] };
+    mockResult({ data: list, refetch });
+    render(<CaseSlaTable caseId="case-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /refresh slas/i }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it("shows a truncation notice when fewer rows are rendered than the total count", () => {
+    const list: CaseSlaList = { caseId: "case-1", count: 51, slas: [SLA_ROW] };
+    mockResult({ data: list });
+    render(<CaseSlaTable caseId="case-1" />);
+    expect(screen.getByText("Showing first 1 of 51")).toBeInTheDocument();
+  });
 });
