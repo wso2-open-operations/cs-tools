@@ -43,6 +43,7 @@ import {
   ALL_CALL_REQUEST_STATES,
   CALL_REQUEST_STATE_LABEL,
   type CallRequestAgentAction,
+  resolveCallRequestStateKey,
 } from "@features/csm-cases/utils/callRequestState";
 import { CreateCallRequestDialog } from "./CreateCallRequestDialog";
 import { ScheduleCallDialog } from "./ScheduleCallDialog";
@@ -96,7 +97,7 @@ export function CallRequestsWidget({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const isReschedule =
-    scheduleTarget?.state && String(scheduleTarget.state.id) === "scheduled";
+    resolveCallRequestStateKey(scheduleTarget?.state) === "scheduled";
 
   const requests = data ?? [];
 

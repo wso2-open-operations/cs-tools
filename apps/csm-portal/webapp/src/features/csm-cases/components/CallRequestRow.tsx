@@ -21,12 +21,13 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { BeCallRequestView, BeCallRequestStateKey } from "@api/backend/types";
+import type { BeCallRequestView } from "@api/backend/types";
 import {
   CALL_REQUEST_AGENT_ACTIONS,
   type CallRequestAgentAction,
   callRequestStateColor,
   callRequestStateLabel,
+  resolveCallRequestStateKey,
 } from "@features/csm-cases/utils/callRequestState";
 import RelativeTime from "@components/RelativeTime";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -76,10 +77,8 @@ export interface CallRequestRowProps {
 // ---------------------------------------------------------------------------
 
 export function CallRequestRow({ cr, onAction }: CallRequestRowProps): JSX.Element {
-  const stateKey = cr.state
-    ? (String(cr.state.id) as BeCallRequestStateKey)
-    : null;
-  const actions = stateKey ? CALL_REQUEST_AGENT_ACTIONS[stateKey] : [];
+  const stateKey = resolveCallRequestStateKey(cr.state);
+  const actions = (stateKey && CALL_REQUEST_AGENT_ACTIONS[stateKey]) ?? [];
 
   return (
     <Box

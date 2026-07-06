@@ -48,10 +48,41 @@ export const CALL_REQUEST_STATE_COLOR: Record<
 };
 
 /**
+ * Integer choice keys the backing data source may return for `state.id`,
+ * mapped to our enum keys. The data source passes its native state through
+ * untranslated, so `state.id` can be an integer (e.g. 3) rather than a string
+ * key (e.g. "scheduled").
+ */
+const NUMERIC_STATE_KEY: Record<string, BeCallRequestStateKey> = {
+  "1": "pending_on_customer",
+  "2": "pending_on_wso2",
+  "3": "scheduled",
+  "4": "customer_rejected",
+  "5": "wso2_rejected",
+  "6": "canceled",
+  "7": "notes_pending",
+  "8": "concluded",
+};
+
+/**
+ * Resolve a backend call-request state to one of our enum keys. `state.id` may
+ * arrive as our string key, as an integer choice key, or the state may only
+ * carry a display `label`. Returns null when it maps to none of them, so
+ * callers must handle the null case (never index a lookup with the raw id).
+ */
+export function resolveCallRequestStateKey(
+  state: { id: number | string; label?: string } | undefined,
+): BeCallRequestStateKey | null {
+  if (!state) return null;
+  const raw = String(state.id);
+  if (raw in CALL_REQUEST_STATE_LABEL) return raw as BeCallRequestStateKey;
+  if (raw in NUMERIC_STATE_KEY) return NUMERIC_STATE_KEY[raw];
+  return null;
+}
+
+/**
  * Resolve the display label for a call request state returned by the backend.
- * The backend may return `state.label` directly; fall back to our own label map
- * using the id cast to a string key when `label` is absent or when the id is a
- * known enum key.
+ * Prefers the backend-supplied `label`, else maps the id (string or integer).
  */
 export function callRequestStateLabel(state: {
   id: number | string;
@@ -59,9 +90,8 @@ export function callRequestStateLabel(state: {
 } | undefined): string {
   if (!state) return "Unknown";
   if (state.label) return state.label;
-  // id may be the string key or an opaque integer — map what we can.
-  const key = String(state.id) as BeCallRequestStateKey;
-  return CALL_REQUEST_STATE_LABEL[key] ?? String(state.id);
+  const key = resolveCallRequestStateKey(state);
+  return key ? CALL_REQUEST_STATE_LABEL[key] : String(state.id);
 }
 
 /**
@@ -71,9 +101,8 @@ export function callRequestStateLabel(state: {
 export function callRequestStateColor(
   state: { id: number | string; label?: string } | undefined,
 ): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
-  if (!state) return "default";
-  const key = String(state.id) as BeCallRequestStateKey;
-  return CALL_REQUEST_STATE_COLOR[key] ?? "default";
+  const key = resolveCallRequestStateKey(state);
+  return key ? CALL_REQUEST_STATE_COLOR[key] : "default";
 }
 
 /** All 8 state keys, used to drive filter dropdowns. */
