@@ -40,15 +40,24 @@ export function OverlineSlot({
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
 
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
   const handleCopy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard access denied or unavailable — nothing actionable to do here.
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
 
   return (
     <Stack height={40}>
