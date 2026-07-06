@@ -15,6 +15,7 @@
 // under the License.
 
 import { Autocomplete, Checkbox, Chip, ListItemText, TextField } from "@wso2/oxygen-ui";
+import type * as React from "react";
 import type { JSX } from "react";
 
 export interface SearchableMultiSelectProps {
