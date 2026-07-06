@@ -102,21 +102,23 @@ export function withRole(t: typeof base, role: TimecardRole): void {
 }
 
 /**
- * A search string virtually guaranteed to match the signed-in user's own
- * account (their email's local part) — used as the approver-search query in
- * specs. A generic single-letter query can match only empty-email service
- * accounts in a small staging tenant (confirmed); querying by "myself" always
- * finds a real, email-having candidate regardless of who captured the
- * session or what else exists in the directory. Nothing in the approver
- * picker excludes the current user from the results.
+ * A search string for the approver picker that's virtually guaranteed to
+ * surface a real, email-having, *other* account — the signed-in user's own
+ * email domain. A generic single-letter query can match only empty-email
+ * service accounts in a small staging tenant (confirmed), so the query still
+ * needs to be domain-shaped, not just any string. Deliberately not the
+ * signed-in user's own address: `LogTimeCardDialog` excludes the signed-in
+ * user from approver candidates (self-approval prevention), so a query that
+ * only the current user's own account could match would always come back
+ * empty.
  */
-export async function currentUserSearchQuery(page: Page): Promise<string> {
+export async function approverSearchQuery(page: Page): Promise<string> {
   const [meResp] = await Promise.all([
     page.waitForResponse((r) => r.url().includes("/users/me")),
     page.goto("/dashboard"),
   ]);
   const me = (await meResp.json()) as { email?: string };
-  return me.email?.split("@")[0] ?? "a";
+  return me.email?.split("@")[1] ?? "a";
 }
 
 export const test = base;

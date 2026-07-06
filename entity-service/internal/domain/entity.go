@@ -1896,3 +1896,99 @@ type UpdateCallRequestResponse struct {
 		UpdatedBy string `json:"updatedBy"`
 	} `json:"callRequest"`
 }
+
+// SearchTaskSlasFilters holds optional filter criteria for POST /task-slas/search.
+type SearchTaskSlasFilters struct {
+	TaskIDs []string `json:"taskIds,omitempty"`
+}
+
+// SearchTaskSlasRequest is the request body for POST /task-slas/search.
+type SearchTaskSlasRequest struct {
+	Filters    *SearchTaskSlasFilters `json:"filters,omitempty"`
+	Pagination Pagination             `json:"pagination"`
+}
+
+// TaskSlaDefinition is the SLA definition referenced by a task SLA record.
+type TaskSlaDefinition struct {
+	ID     *string `json:"id"`
+	Name   *string `json:"name"`
+	Type   *string `json:"type"`
+	Target *string `json:"target"`
+}
+
+// TaskSlaTaskRef is a reference to the task associated with a task SLA record.
+type TaskSlaTaskRef struct {
+	ID   *string `json:"id"`
+	Name *string `json:"name"`
+	Type *string `json:"type"`
+}
+
+// TaskSlaView is a single task SLA record in search results.
+type TaskSlaView struct {
+	ID                        string             `json:"id"`
+	SlaDefinition             *TaskSlaDefinition `json:"slaDefinition"`
+	Stage                     *string      `json:"stage"`
+	Task                      *TaskSlaTaskRef    `json:"task"`
+	BusinessTimeLeft          *string            `json:"businessTimeLeft"`
+	BusinessElapsedTime       *string            `json:"businessElapsedTime"`
+	BusinessElapsedPercentage *float64 `json:"businessElapsedPercentage"`
+	StartTime                 *string            `json:"startTime"`
+	EndTime                   *string            `json:"endTime"`
+}
+
+// SearchTaskSlasResponse is the response for POST /task-slas/search.
+type SearchTaskSlasResponse struct {
+	TaskSlas []TaskSlaView `json:"slas"`
+	Total    int           `json:"total"`
+	Limit    int           `json:"limit"`
+	Offset   int           `json:"offset"`
+}
+
+// TaskSlaDefinitionDetail is the extended SLA definition returned by GET /task-slas/{id}.
+type TaskSlaDefinitionDetail struct {
+	ID               *string `json:"id"`
+	Name             *string `json:"name"`
+	Type             *string `json:"type"`
+	Target           *string `json:"target"`
+	Flow             *string `json:"flow"`
+	Workflow         *string `json:"workflow"`
+	IsEnableLogging  *bool   `json:"isEnableLogging"`
+	DurationType     *string `json:"durationType"`
+	Duration         *string `json:"duration"`
+	ScheduleSource   *string `json:"scheduleSource"`
+	Schedule         *string `json:"schedule"`
+	TimezoneSource   *string `json:"timezoneSource"`
+	Timezone         *string `json:"timezone"`
+	StartCondition   *string `json:"startCondition"`
+	IsRetroactiveStart *bool   `json:"isRetroactiveStart"`
+	IsRetroactivePause *bool   `json:"isRetroactivePause"`
+	WhenToCancel     *string `json:"whenToCancel"`
+	CancelCondition  *string `json:"cancelCondition"`
+	PauseCondition   *string `json:"pauseCondition"`
+	WhenToResume     *string `json:"whenToResume"`
+	StopCondition    *string `json:"stopCondition"`
+	ResetCondition   *string `json:"resetCondition"`
+	ResetAction      *string `json:"resetAction"`
+}
+
+// TaskSlaScheduleRef is the schedule reference returned by GET /task-slas/{id}.
+type TaskSlaScheduleRef struct {
+	ID       *string `json:"id"`
+	Name     *string `json:"name"`
+	Timezone *string `json:"timezone"`
+}
+
+// TaskSlaDetail is the full task SLA record returned by GET /task-slas/{id}.
+type TaskSlaDetail struct {
+	ID                        string                   `json:"id"`
+	Task                      *TaskSlaTaskRef          `json:"task"`
+	SlaDefinition             *TaskSlaDefinitionDetail `json:"slaDefinition"`
+	Stage                     *string            `json:"stage"`
+	BusinessTimeLeft          *string                  `json:"businessTimeLeft"`
+	BusinessElapsedTime       *string                  `json:"businessElapsedTime"`
+	BusinessElapsedPercentage *float64                 `json:"businessElapsedPercentage"`
+	StartTime                 *string                  `json:"startTime"`
+	EndTime                   *string                  `json:"endTime"`
+	Active                    *bool                    `json:"active"`
+	Schedule                  *TaskSlaScheduleRef      `json:"schedule"`
+}

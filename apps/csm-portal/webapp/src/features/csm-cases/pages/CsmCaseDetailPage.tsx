@@ -39,7 +39,6 @@ import {
   MessageSquarePlus,
   Paperclip,
   Phone,
-  TriangleAlert,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
@@ -76,14 +75,13 @@ import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFee
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
   AttachmentsWidget,
-  AuditTimelineWidget,
   CustomerContextWidget,
   LinkedItemsWidget,
   ProductContextWidget,
-  SlaTimelineWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
+import { CaseSlaTable } from "@features/csm-cases/components/CaseSlaTable";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
@@ -95,10 +93,6 @@ import {
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import {
-  SLA_CLOCK_LABEL,
-  formatTimeToBreach,
-} from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
@@ -239,8 +233,7 @@ const TAB_DEFS: Array<{
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
-  // SLA tab is parked until its backend clock data is wired; disabled for now.
-  { id: "sla", label: "SLA", icon: <Clock size={16} />, disabled: true },
+  { id: "sla", label: "SLA", icon: <Clock size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
@@ -829,38 +822,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // notes. Mirrors the BFF comment guard so the engineer sees a clear reason
   // instead of a generic error.
   const publicReplyGateReason = publicCommentGateReason(c.state, c.workState);
-  const breached = c.minutesToBreach < 0;
-  // The backend carries no SLA timing yet (LIVE detail leaves slaClocks empty
-  // and minutesToBreach at 0). Without this guard the header SLA chip reads
-  // `0 <= 60` and paints every open case orange ("Ack · 0m left"), which is
-  // both wrong and the main source of orange on the screen. Only show SLA
-  // affordances when we actually have clock data (mock, and LIVE once wired).
-  const hasSlaData = c.slaClocks.length > 0;
   // The case description is already returned by `comments/search` as the
   // opening comment, so the stream renders it directly — no synthetic entry is
   // injected (that duplicated the first comment). The linked chat transcript
   // (if any) is appended; the feed sorts chronologically, so the chat — being
   // oldest — sinks below the case comments in the default newest-first view.
   const safeComments = mergedComments;
-
-  // SLA breach is a live condition, not a dismissible notice: surface it in a
-  // persistent banner under the header so it stays visible on every tab, not
-  // just the SLA tab.
-  const breachedClocks = c.slaClocks.filter((k) => k.state === "breached");
-  const showBreachBanner = breached || breachedClocks.length > 0;
-  const breachMessage =
-    breachedClocks.length > 0
-      ? `SLA breached — ${breachedClocks
-          .map(
-            (k) =>
-              `${SLA_CLOCK_LABEL[k.clockType]} ${formatTimeToBreach(
-                k.minutesToBreach,
-              )}`,
-          )
-          .join(", ")}`
-      : `SLA breached — ${SLA_CLOCK_LABEL[c.slaClockType]} ${formatTimeToBreach(
-          c.minutesToBreach,
-        )}`;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
@@ -948,14 +915,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {!isClosed && hasSlaData && (
-              <Chip
-                size="small"
-                variant="outlined"
-                color={breached ? "error" : c.minutesToBreach <= 60 ? "warning" : "default"}
-                label={`${SLA_CLOCK_LABEL[c.slaClockType]} · ${formatTimeToBreach(c.minutesToBreach)}`}
-              />
-            )}
             {c.tags.length > 0 && (
               <Divider orientation="vertical" flexItem sx={{ mx: 0.5, my: 0.25 }} />
             )}
@@ -981,27 +940,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
         collapsed={metaCollapsed}
         onToggleCollapsed={() => setMetaCollapsed((v) => !v)}
       />
-
-      {showBreachBanner && (
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            p: 1.25,
-            borderRadius: 1,
-            backgroundColor: "error.50",
-            border: 1,
-            borderColor: "error.main",
-            color: "error.main",
-          }}
-        >
-          <TriangleAlert size={18} />
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {breachMessage}
-          </Typography>
-        </Box>
-      )}
 
       {feedback && (
         <Box
@@ -1269,21 +1207,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
         </Box>
       )}
 
-      {activeTab === "sla" && (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: {
-              xs: "1fr",
-              md: "repeat(2, minmax(0, 1fr))",
-            },
-          }}
-        >
-          <SlaTimelineWidget clocks={c.slaClocks} />
-          <AuditTimelineWidget entries={c.audit} />
-        </Box>
-      )}
+      {activeTab === "sla" &&
+        caseId && <CaseSlaTable caseId={caseId} />}
 
       {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>

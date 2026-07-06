@@ -15,11 +15,8 @@
 // under the License.
 
 import {
-  Autocomplete,
   Box,
   Button,
-  Checkbox,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -49,7 +46,6 @@ import {
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import type * as React from "react";
 import type {
   CaseState,
   Severity,
@@ -76,6 +72,7 @@ import {
   CASE_TYPE_LABEL,
 } from "@features/csm-cases/utils/caseType";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
+import MultiSelectField from "@components/MultiSelectField";
 import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
 import ProductNameMultiSelect from "@features/csm-cases/components/ProductNameMultiSelect";
 
@@ -124,6 +121,12 @@ interface CasesFilterBarProps {
   availableAssigneeUsers: AssigneeUser[];
   /** Projects for the (id-based) project filter — value is the id, label the name. */
   availableProjects: { id: string; name: string }[];
+  /**
+   * Show the severity control. Severity (S1-S4) is a support-case concept, so
+   * this is only meaningful when the list is scoped to support cases; other
+   * record types (service requests, engagements, etc.) hide it.
+   */
+  showSeverityFilter?: boolean;
   /** Hide the case-type control when the surrounding view locks the type. */
   hideTypeFilter?: boolean;
   /** Hide the project control when the surrounding view is project-scoped. */
@@ -164,71 +167,6 @@ const PRIMARY_STATES: CaseState[] = [
   "closed",
 ];
 
-interface MultiSelectFieldProps<T extends string> {
-  id: string;
-  label: string;
-  values: T[];
-  options: { value: T; label: string }[];
-  onChange: (next: T[]) => void;
-  disabled?: boolean;
-}
-
-function MultiSelectField<T extends string>({
-  id,
-  label,
-  values,
-  options,
-  onChange,
-  disabled,
-}: MultiSelectFieldProps<T>): JSX.Element {
-  // Autocomplete-based multi-select: selected values render as chips and the
-  // options are type-to-search + checkboxes — matching the product filter.
-  const selected = options.filter((o) => values.includes(o.value));
-  return (
-    <Autocomplete<{ value: T; label: string }, true>
-      multiple
-      size="small"
-      id={id}
-      disabled={disabled}
-      options={options}
-      value={selected}
-      disableCloseOnSelect
-      getOptionLabel={(o) => o.label}
-      isOptionEqualToValue={(o, v) => o.value === v.value}
-      onChange={(_event, next) => onChange(next.map((o) => o.value))}
-      renderTags={(value, getTagProps) =>
-        value.map((option, index) => {
-          const { key, ...tagProps } = getTagProps({ index });
-          return (
-            <Chip key={key} size="small" label={option.label} {...tagProps} />
-          );
-        })
-      }
-      renderOption={(props, option, { selected: isSelected }) => {
-        const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & {
-          key: string;
-        };
-        return (
-          <li key={key} {...liProps} style={{ paddingTop: 2, paddingBottom: 2 }}>
-            <Checkbox size="small" checked={isSelected} sx={{ mr: 1, p: 0.25 }} />
-            <ListItemText
-              primary={option.label}
-              slotProps={{ primary: { style: { fontSize: 13 } } }}
-            />
-          </li>
-        );
-      }}
-      renderInput={(params) => (
-        <TextField
-          {...params}
-          label={label}
-          placeholder={values.length ? undefined : "Select…"}
-        />
-      )}
-    />
-  );
-}
-
 export default function CasesFilterBar({
   filters,
   onChange,
@@ -237,6 +175,7 @@ export default function CasesFilterBar({
   onFiltersToggle,
   availableAssigneeUsers,
   availableProjects,
+  showSeverityFilter = true,
   hideTypeFilter = false,
   hideProjectFilter = false,
   showEngagementTypeFilter = false,
@@ -499,15 +438,17 @@ export default function CasesFilterBar({
         <>
           <Divider />
           <Grid container spacing={2} sx={{ mt: 0 }}>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <MultiSelectField
-                id="cases-filter-severity"
-                label="Severity"
-                values={filters.severities}
-                options={severityOptions}
-                onChange={(next) => onChange({ ...filters, severities: next })}
-              />
-            </Grid>
+            {showSeverityFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-severity"
+                  label="Severity"
+                  values={filters.severities}
+                  options={severityOptions}
+                  onChange={(next) => onChange({ ...filters, severities: next })}
+                />
+              </Grid>
+            )}
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               <MultiSelectField
                 id="cases-filter-state"

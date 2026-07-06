@@ -58,8 +58,8 @@ function Field({ label, value }: { label: string; value: string }): JSX.Element 
 /**
  * Team-lead review of a submitted time card, then accept or reject with an
  * optional comment. Only shows what the backend actually returns on read —
- * category, issue complexity, work-log comment and the hour breakdown are
- * accepted on create but never echoed back, so they aren't shown here.
+ * issue complexity, work-log comment and the per-activity minute breakdown
+ * are accepted on create but never echoed back, so they aren't shown here.
  */
 export default function TimeCardReviewDialog({
   card,
@@ -75,7 +75,7 @@ export default function TimeCardReviewDialog({
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
-        Review time card · {card.caseNumber} · {card.totalHours.toFixed(2)}h
+        Review time card · {card.caseNumber} · {card.totalMinutes} min
       </DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>

@@ -14,28 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  useQuery,
-  useQueryClient,
-  type UseQueryResult,
-} from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useLogger } from "@hooks/useLogger";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
-import { useBackendApi, type BackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import {
   beStateFromUi,
   priorityFromSeverity,
   severityFromPriority,
   uiStateFromBe,
 } from "@api/backend/mappers";
-import { projectOptionsQueryOptions } from "@features/csm-cases/api/useProjectOptions";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import type {
-  BeAccount,
-  BeAccountSearchPayload,
-  BeAccountSearchResponse,
   BeCaseSearchPayload,
   BeCaseSearchResponse,
   BeUserSearchResponse,
@@ -46,56 +38,17 @@ import type {
   CsmCasesListResponse,
 } from "@features/csm-cases/types/csmCases";
 
-/** Page size for the account name lookup (customer column). */
-const LOOKUP_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
-// Cap the account scan the same way useProjectOptions caps the project scan.
-// Doubled from 20 when the page limit halved to BE_MAX_PAGE_LIMIT, so the total
-// scan ceiling (pages * limit) is unchanged.
-const LOOKUP_MAX_PAGES = 40;
-
-/**
- * Query options for the account-name lookup (`POST /accounts/search`). Kept as
- * its own stably-keyed query (resolved via `queryClient.fetchQuery`) so filter
- * changes on the cases list — which change the cases query key — reuse the
- * cached directory instead of re-fetching every account each time.
- */
-function accountOptionsQueryOptions(api: BackendApi) {
-  return {
-    queryKey: [ApiQueryKeys.CSM_ACCOUNTS, "options"],
-    queryFn: async (): Promise<BeAccount[]> => {
-      const all: BeAccount[] = [];
-      let offset = 0;
-      for (let page = 0; page < LOOKUP_MAX_PAGES; page += 1) {
-        const res = await api.post<
-          BeAccountSearchPayload,
-          BeAccountSearchResponse
-        >("/accounts/search", {
-          pagination: { offset, limit: LOOKUP_PAGE_LIMIT },
-        });
-        const accounts = res.accounts ?? [];
-        all.push(...accounts);
-        if (accounts.length < LOOKUP_PAGE_LIMIT) break;
-        offset += LOOKUP_PAGE_LIMIT;
-      }
-      return all;
-    },
-    staleTime: 60_000,
-  } as const;
-}
-
 /**
  * Cross-project CSM cases list.
  *
  * Does a single `POST /cases/search` (the flat, cross-project search)
  * and maps each rich `CaseSearchView` — which embeds project / deployment /
- * deployed-product — to the UI `CsmCaseRow`. The account (customer) name is the
- * only field not embedded, so it's resolved via `projects/search`
- * (projectId → accountId) + `accounts/search` (accountId → name). Both lookups
- * live under their own stable query keys (resolved with
- * `queryClient.fetchQuery`), so changing list filters only re-runs
- * `/cases/search`; the project/account directories come from cache until they
- * go stale. The project lookup shares `useProjectOptions`' key, which the
- * cases page already mounts for its filter options.
+ * deployed-product — to the UI `CsmCaseRow`. The list has no Customer column,
+ * so the customer (account) name is deliberately not resolved: doing so used to
+ * page the entire account directory (`/accounts/search` has no ID filter, and
+ * the case search view doesn't embed the account) to fill a field nothing
+ * renders. If a Customer column is added, resolve the name from the search view
+ * once it carries the account, not by scanning the directory.
  *
  * Search and the severity / state / case-type / project filters are pushed
  * into the search payload (searchQuery / severities / states / types /
@@ -115,7 +68,6 @@ export function useGetCsmCases(
 ): UseQueryResult<CsmCasesListResponse, Error> {
   const logger = useLogger();
   const api = useBackendApi();
-  const queryClient = useQueryClient();
   // Signed-in email, to resolve `assigneeIsMe` per row against the assigned
   // engineer's email. In the key so a late-arriving claim recomputes.
   const currentUserEmail = useIdTokenClaims()?.email;
@@ -199,13 +151,13 @@ export function useGetCsmCases(
         return { cases: [], total: 0, limit: pageSize, offset, hasMore: false };
       }
 
-      // One cross-project case search, plus project/account lookups for the
-      // customer column (cases embed the project, but not its account). The
-      // lookups go through `fetchQuery` with their own stable keys, so they
-      // hit the network only when their cache is stale — not on every filter
-      // change. Lookup failures degrade to blank names, not a failed list.
-      const [casesResponse, projects, accounts] = await Promise.all([
-        api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
+      // One cross-project case search. No account/project directory scan: the
+      // list has no Customer column, and the old scan paged the entire account
+      // directory to resolve a name nothing renders.
+      const casesResponse = await api.post<
+        BeCaseSearchPayload,
+        BeCaseSearchResponse
+      >("/cases/search", {
           pagination: { offset, limit: pageSize },
           sortBy: { field: "updatedOn", order: "desc" },
           // Filter fields are nested under `filters` (BE payload restructure).
@@ -242,36 +194,11 @@ export function useGetCsmCases(
               productNames: filters.productNames,
             }),
           },
-        }),
-        queryClient.fetchQuery(projectOptionsQueryOptions(api)).catch((err) => {
-          logger.warn(
-            `[useGetCsmCases] project lookup failed: ${(err as Error).message}`,
-          );
-          return [];
-        }),
-        queryClient.fetchQuery(accountOptionsQueryOptions(api)).catch((err) => {
-          logger.warn(
-            `[useGetCsmCases] account lookup failed: ${(err as Error).message}`,
-          );
-          return [];
-        }),
-      ]);
-
-      const projectAccount = new Map<string, string>(
-        projects
-          .filter((p) => p.accountId)
-          .map((p) => [p.id, p.accountId as string]),
-      );
-      const accountName = new Map<string, string>(
-        accounts
-          .filter((a) => a.name)
-          .map((a) => [a.id, a.name as string]),
-      );
+      });
 
       const myEmail = currentUserEmail?.toLowerCase();
       const cases: CsmCaseRow[] = (casesResponse.cases ?? []).map((c) => {
         const projectId = c.project?.id ?? "";
-        const accountId = projectAccount.get(projectId) ?? "";
         const assigneeEmail = c.assignedEngineer?.email;
         const assignee =
           c.assignedEngineer?.name?.trim() || assigneeEmail || "Unassigned";
@@ -282,8 +209,10 @@ export function useGetCsmCases(
           caseNumber: c.number,
           wso2CaseId: c.internalId,
           subject: c.subject ?? "(no subject)",
-          customer: accountName.get(accountId) ?? "-",
-          accountId,
+          // Not shown in the list; kept on the row shape but no longer resolved
+          // (see the account-scan removal note above).
+          customer: "",
+          accountId: "",
           projectId,
           projectName: c.project?.name ?? "-",
           // Search embeds deployedProduct as { id, name } (name includes the

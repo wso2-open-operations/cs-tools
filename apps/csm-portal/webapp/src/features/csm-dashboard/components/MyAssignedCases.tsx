@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Link, TablePagination, Typography } from "@wso2/oxygen-ui";
+import { Box, Link, TablePagination, Typography } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
@@ -26,6 +26,7 @@ import {
 } from "@features/csm-dashboard/api/useGetMyAssignedOpenCases";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
+import RefreshButton from "@features/csm-dashboard/components/RefreshButton";
 
 // Deep-link to the full cases list, pre-filtered to the caller's non-closed
 // cases. `assignees=@me` resolves against the current user server-side; the
@@ -45,10 +46,8 @@ const VIEW_ALL_HREF = `/cases?assignees=${encodeURIComponent(
 export default function MyAssignedCases(): JSX.Element {
   const currentUser = useCurrentUser();
   const [page, setPage] = useState(0);
-  const { data, isLoading, isError } = useGetMyAssignedOpenCases(
-    page,
-    MY_OPEN_CASES_PAGE_SIZE,
-  );
+  const { data, isLoading, isError, isFetching, refetch } =
+    useGetMyAssignedOpenCases(page, MY_OPEN_CASES_PAGE_SIZE);
 
   // `/users/me` returned but carried no id (entity service down): we can't tell
   // which cases are the caller's, so say so rather than showing nothing.
@@ -79,16 +78,23 @@ export default function MyAssignedCases(): JSX.Element {
       title="Assigned to me"
       subtitle={subtitle}
       action={
-        total > 0 ? (
-          <Link
-            component={RouterLink}
-            to={VIEW_ALL_HREF}
-            underline="hover"
-            variant="body2"
-          >
-            View all
-          </Link>
-        ) : undefined
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          {total > 0 ? (
+            <Link
+              component={RouterLink}
+              to={VIEW_ALL_HREF}
+              underline="hover"
+              variant="body2"
+            >
+              View all
+            </Link>
+          ) : null}
+          <RefreshButton
+            onRefresh={() => void refetch()}
+            isFetching={isFetching}
+            label="Refresh assigned cases"
+          />
+        </Box>
       }
     >
       {isError ? (

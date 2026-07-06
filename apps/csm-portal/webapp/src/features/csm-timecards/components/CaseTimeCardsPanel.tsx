@@ -26,12 +26,14 @@ import {
 import { Clock, Plus } from "@wso2/oxygen-ui-icons-react";
 import RelativeTime from "@components/RelativeTime";
 import { useCaseTimeCards, useDecideTimeCard } from "@features/csm-timecards/api/useTimeCards";
+import { useCurrentEngineer } from "@features/csm-timecards/api/useTimeSheets";
 import { useIsTeamLead } from "@features/csm-timecards/hooks/useIsTeamLead";
 import { billableLabel } from "@features/csm-timecards/constants/timeCardConstants";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import TimeCardStatusChip from "@features/csm-timecards/components/TimeCardStatusChip";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
+import TimeCardTruncatedNotice from "@features/csm-timecards/components/TimeCardTruncatedNotice";
 import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
 interface CaseTimeCardsPanelProps {
@@ -61,13 +63,14 @@ export default function CaseTimeCardsPanel({
 }: CaseTimeCardsPanelProps): JSX.Element {
   const { data, isLoading, isError } = useCaseTimeCards(caseId, projectId);
   const isTeamLead = useIsTeamLead();
+  const me = useCurrentEngineer();
   const decide = useDecideTimeCard();
   const { showError } = useErrorBanner();
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
 
-  const cards = useMemo(() => data ?? [], [data]);
+  const cards = useMemo(() => data?.cards ?? [], [data]);
   const total = useMemo(
-    () => Math.round(cards.reduce((s, c) => s + c.totalHours, 0) * 100) / 100,
+    () => cards.reduce((s, c) => s + c.totalMinutes, 0),
     [cards],
   );
 
@@ -113,7 +116,7 @@ export default function CaseTimeCardsPanel({
         }}
       >
         <Typography variant="h6" sx={{ lineHeight: 1 }}>
-          {total.toFixed(2)}h
+          {total} min
         </Typography>
         <Typography variant="caption" color="text.secondary">
           Across {cards.length} {cards.length === 1 ? "entry" : "entries"}
@@ -121,6 +124,10 @@ export default function CaseTimeCardsPanel({
       </Box>
 
       <Divider sx={{ mb: 1 }} />
+
+      {!isError && data?.truncated && (
+        <TimeCardTruncatedNotice hint="Some entries on this case may not be shown." />
+      )}
 
       {isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
@@ -159,17 +166,24 @@ export default function CaseTimeCardsPanel({
               >
                 <Typography variant="body2">{c.userName}</Typography>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography variant="body2">{c.totalHours.toFixed(2)}h</Typography>
+                  <Typography variant="body2">{c.totalMinutes} min</Typography>
                   <TimeCardStatusChip state={c.state} />
-                  {isTeamLead && !readOnly && c.state === "submitted" && (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => setReviewCard(c)}
-                    >
-                      Review
-                    </Button>
-                  )}
+                  {/* Never shown on your own card: the backend 403s a
+                   self-decide regardless of approver status, so a card you
+                   submitted yourself can never actually be reviewed by you. */}
+                  {isTeamLead &&
+                    !readOnly &&
+                    c.state === "submitted" &&
+                    !!me.id &&
+                    c.userId !== me.id && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setReviewCard(c)}
+                      >
+                        Review
+                      </Button>
+                    )}
                 </Box>
               </Box>
               <Typography variant="caption" color="text.secondary">
