@@ -58,9 +58,6 @@ type entityCaseClient interface {
 	CreateCallRequest(ctx context.Context, body []byte) ([]byte, error)
 	SearchCallRequests(ctx context.Context, body []byte) ([]byte, error)
 	PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
-	ScheduleCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
-	RejectCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
-	SendCallRequestNotes(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 	CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error)
 }
 
@@ -704,6 +701,12 @@ func (h *CaseHandler) SearchCallRequests(w http.ResponseWriter, r *http.Request)
 
 // PatchCallRequest handles PATCH /cases/{id}/call-requests/{callRequestId}.
 // Forwards the body unchanged to the entity service's PATCH /call-requests/{callRequestId}.
+//
+// This is the single mutation surface for call requests, including the agent-only
+// (WSO2 engineer) state transitions (schedule/reschedule, reject, conclude+notes)
+// selected by the target `state` in the body. The backend has no role-based access
+// control layer yet, so any authenticated user may invoke them today; engineer-only
+// gating is a follow-up and MUST NOT be invented here.
 func (h *CaseHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -754,84 +757,6 @@ func (h *CaseHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
-}
-
-// callRequestActionFunc is the entity-client signature shared by the
-// call-request action endpoints (schedule/reject/notes).
-type callRequestActionFunc func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
-
-// forwardCallRequestAction validates both path UUIDs, caps the request body,
-// forwards it unchanged to the given entity call-request action, and translates
-// upstream errors.
-//
-// The call-request action endpoints (schedule/reject/send-notes) are agent-only
-// (WSO2 engineer) operations. The backend has no role-based access control layer
-// yet, so any authenticated user may invoke them today; engineer-only gating is a
-// follow-up and MUST NOT be invented here.
-func (h *CaseHandler) forwardCallRequestAction(w http.ResponseWriter, r *http.Request, action string, fn callRequestActionFunc, failMsg string) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	caseID := r.PathValue("caseId")
-	if caseID == "" || !uuidRe.MatchString(caseID) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-
-	callRequestID := r.PathValue("callRequestId")
-	if callRequestID == "" || !uuidRe.MatchString(callRequestID) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	// The call-request id lives in the URL path, so no body injection is needed;
-	// forward the body unchanged and let the entity service validate its shape.
-	result, err := fn(r.Context(), callRequestID, body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity "+action+" failed", "userID", user.UserID, "caseID", caseID, "callRequestID", callRequestID, "err", err)
-		mapUpstreamError(w, err, failMsg)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
-// ScheduleCallRequest handles POST /cases/{caseId}/call-requests/{callRequestId}/schedule.
-// Agent-only action; see forwardCallRequestAction for the role-gating follow-up note.
-func (h *CaseHandler) ScheduleCallRequest(w http.ResponseWriter, r *http.Request) {
-	h.forwardCallRequestAction(w, r, "ScheduleCallRequest", h.entity.ScheduleCallRequest, "Failed to schedule call request.")
-}
-
-// RejectCallRequest handles POST /cases/{caseId}/call-requests/{callRequestId}/reject.
-// Agent-only action; see forwardCallRequestAction for the role-gating follow-up note.
-func (h *CaseHandler) RejectCallRequest(w http.ResponseWriter, r *http.Request) {
-	h.forwardCallRequestAction(w, r, "RejectCallRequest", h.entity.RejectCallRequest, "Failed to reject call request.")
-}
-
-// SendCallRequestNotes handles POST /cases/{caseId}/call-requests/{callRequestId}/notes.
-// Agent-only action; see forwardCallRequestAction for the role-gating follow-up note.
-func (h *CaseHandler) SendCallRequestNotes(w http.ResponseWriter, r *http.Request) {
-	h.forwardCallRequestAction(w, r, "SendCallRequestNotes", h.entity.SendCallRequestNotes, "Failed to send call request notes.")
 }
 
 // CreateCaseGithubIssue handles POST /cases/{id}/github-issues.

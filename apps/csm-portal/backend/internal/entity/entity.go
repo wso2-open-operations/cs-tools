@@ -259,24 +259,6 @@ func (c *Client) PatchCallRequest(ctx context.Context, callRequestID string, bod
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/call-requests/%s", url.PathEscape(callRequestID)), body)
 }
 
-// ScheduleCallRequest calls POST /call-requests/{id}/schedule on the entity service.
-// Response is returned as raw JSON.
-func (c *Client) ScheduleCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/call-requests/%s/schedule", url.PathEscape(callRequestID)), body)
-}
-
-// RejectCallRequest calls POST /call-requests/{id}/reject on the entity service.
-// Response is returned as raw JSON.
-func (c *Client) RejectCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/call-requests/%s/reject", url.PathEscape(callRequestID)), body)
-}
-
-// SendCallRequestNotes calls POST /call-requests/{id}/notes on the entity service.
-// Response is returned as raw JSON.
-func (c *Client) SendCallRequestNotes(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/call-requests/%s/notes", url.PathEscape(callRequestID)), body)
-}
-
 // CreateChangeRequest calls POST /change-requests on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
