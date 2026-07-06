@@ -4038,7 +4038,8 @@ components:
           type: string
           nullable: true
         businessElapsedPercentage:
-          type: string
+          type: number
+          format: double
           nullable: true
         startTime:
           type: string
@@ -4172,7 +4173,8 @@ components:
           type: string
           nullable: true
         businessElapsedPercentage:
-          type: string
+          type: number
+          format: double
           nullable: true
         startTime:
           type: string

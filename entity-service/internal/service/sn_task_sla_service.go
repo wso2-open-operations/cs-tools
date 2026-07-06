@@ -50,7 +50,7 @@ type snTaskSla struct {
 	Task                      *snTaskSlaTaskRef    `json:"task"`
 	BusinessTimeLeft          *string              `json:"businessTimeLeft"`
 	BusinessElapsedTime       *string              `json:"businessElapsedTime"`
-	BusinessElapsedPercentage *string              `json:"businessElapsedPercentage"`
+	BusinessElapsedPercentage *float64             `json:"businessElapsedPercentage"`
 	StartTime                 *string              `json:"startTime"`
 	EndTime                   *string              `json:"endTime"`
 }
@@ -80,7 +80,7 @@ type snTaskSlaDetail struct {
 	Stage                     *snTaskSlaStage           `json:"stage"`
 	BusinessTimeLeft          *string                   `json:"businessTimeLeft"`
 	BusinessElapsedTime       *string                   `json:"businessElapsedTime"`
-	BusinessElapsedPercentage *string                   `json:"businessElapsedPercentage"`
+	BusinessElapsedPercentage *float64                  `json:"businessElapsedPercentage"`
 	StartTime                 *string                   `json:"startTime"`
 	EndTime                   *string                   `json:"endTime"`
 	Active                    *bool                     `json:"active"`

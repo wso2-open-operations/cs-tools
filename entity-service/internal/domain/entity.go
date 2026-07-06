@@ -1931,7 +1931,7 @@ type TaskSlaView struct {
 	Task                      *TaskSlaTaskRef    `json:"task"`
 	BusinessTimeLeft          *string            `json:"businessTimeLeft"`
 	BusinessElapsedTime       *string            `json:"businessElapsedTime"`
-	BusinessElapsedPercentage *string            `json:"businessElapsedPercentage"`
+	BusinessElapsedPercentage *float64 `json:"businessElapsedPercentage"`
 	StartTime                 *string            `json:"startTime"`
 	EndTime                   *string            `json:"endTime"`
 }
@@ -1986,7 +1986,7 @@ type TaskSlaDetail struct {
 	Stage                     *string            `json:"stage"`
 	BusinessTimeLeft          *string                  `json:"businessTimeLeft"`
 	BusinessElapsedTime       *string                  `json:"businessElapsedTime"`
-	BusinessElapsedPercentage *string                  `json:"businessElapsedPercentage"`
+	BusinessElapsedPercentage *float64                 `json:"businessElapsedPercentage"`
 	StartTime                 *string                  `json:"startTime"`
 	EndTime                   *string                  `json:"endTime"`
 	Active                    *bool                    `json:"active"`
