@@ -108,20 +108,6 @@ export const ApiQueryKeys = {
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
 } as const;
 
-/**
- * Endpoint builders for the agent-side call-request actions under
- * `/cases/{caseId}/call-requests/{callRequestId}/...`. Centralised here so the
- * path shape has one source of truth across the hooks that call it.
- */
-export const CallRequestEndpoints = {
-  schedule: (caseId: string, callRequestId: string): string =>
-    `/cases/${encodeURIComponent(caseId)}/call-requests/${encodeURIComponent(callRequestId)}/schedule`,
-  reject: (caseId: string, callRequestId: string): string =>
-    `/cases/${encodeURIComponent(caseId)}/call-requests/${encodeURIComponent(callRequestId)}/reject`,
-  notes: (caseId: string, callRequestId: string): string =>
-    `/cases/${encodeURIComponent(caseId)}/call-requests/${encodeURIComponent(callRequestId)}/notes`,
-} as const;
-
 // Constants for API-related mutation keys.
 export const ApiMutationKeys = {
   POST_COMMENT: ["postComment"],

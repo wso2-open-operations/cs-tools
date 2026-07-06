@@ -1163,15 +1163,41 @@ export interface BeSearchCallRequestsResponse {
   limit: number;
 }
 
-/** `PATCH /cases/{caseId}/call-requests/{callRequestId}` request body. */
+/**
+ * `PATCH /cases/{caseId}/call-requests/{callRequestId}` request body.
+ * `state` selects the transition; the optional fields below are interpreted
+ * according to the target `state`:
+ * - `scheduled` (agent schedule/reschedule): `meetingDate` + `durationInMinutes`
+ *   required, `assignee` optional.
+ * - `wso2_rejected` (agent reject) / `canceled`: `cancellationReason` optional
+ *   (used as the reject/cancel reason).
+ * - `concluded` (agent send notes): `notes` required, `plan`/`attendees`/
+ *   `actionItems`/`actualDurationMin` optional.
+ * - `pending_on_wso2` (reschedule request back to the customer): `utcTimes` +
+ *   `durationInMinutes`.
+ */
 export interface BeUpdateCallRequestPayload {
   state: BeCallRequestStateKey;
-  /** Required when `state` is `"canceled"`. */
+  /** Used as the reject/cancellation reason for `wso2_rejected`/`canceled`. */
   cancellationReason?: string;
-  /** Updated preferred UTC datetimes. */
+  /** Updated preferred UTC datetimes (used when `state` is `pending_on_wso2`). */
   utcTimes?: string[];
-  /** Updated duration in minutes (min 1). */
+  /** Updated duration in minutes (min 1); used for `pending_on_wso2`/`scheduled`. */
   durationInMinutes?: number;
+  /** UTC datetime (ISO string) the call is scheduled for; required for `scheduled`. */
+  meetingDate?: string;
+  /** Agent (or team) assigned to run the call; used for `scheduled`. */
+  assignee?: string;
+  /** Call notes; required for `concluded`. */
+  notes?: string;
+  /** Follow-up plan recorded alongside the call notes; used for `concluded`. */
+  plan?: string;
+  /** Attendee list recorded alongside the call notes; used for `concluded`. */
+  attendees?: string;
+  /** Action items recorded alongside the call notes; used for `concluded`. */
+  actionItems?: string;
+  /** Actual call duration in minutes; used for `concluded`. */
+  actualDurationMin?: number;
 }
 
 /** `PATCH /cases/{caseId}/call-requests/{callRequestId}` response. */
@@ -1181,67 +1207,6 @@ export interface BeUpdateCallRequestResponse {
     id: string;
     updatedOn?: string;
     updatedBy?: string;
-  };
-}
-
-/**
- * `POST /cases/{caseId}/call-requests/{callRequestId}/schedule` request body.
- * Used for the initial schedule (from `pending_on_wso2`) and for reschedule
- * (when already `scheduled`) -- same endpoint, same shape.
- */
-export interface BeScheduleCallRequestPayload {
-  /** UTC datetime (ISO string) the call is scheduled for. */
-  meetingDate: string;
-  /** Duration of the call in minutes (15-240). */
-  durationInMinutes: number;
-  /** Agent (or team) assigned to run the call. */
-  assignee?: string;
-}
-
-/** `POST /cases/{caseId}/call-requests/{callRequestId}/schedule` response. */
-export interface BeScheduleCallRequestResponse {
-  message?: string;
-  callRequest?: {
-    id: string;
-    updatedOn?: string;
-    state?: BeCallRequestState;
-    meetingLink?: string;
-    scheduleTime?: string;
-  };
-}
-
-/** `POST /cases/{caseId}/call-requests/{callRequestId}/reject` request body. */
-export interface BeRejectCallRequestPayload {
-  reason?: string;
-}
-
-/** `POST /cases/{caseId}/call-requests/{callRequestId}/reject` response. */
-export interface BeRejectCallRequestResponse {
-  message?: string;
-  callRequest?: {
-    id: string;
-    updatedOn?: string;
-    state?: BeCallRequestState;
-  };
-}
-
-/** `POST /cases/{caseId}/call-requests/{callRequestId}/notes` request body. */
-export interface BeSendCallRequestNotesPayload {
-  notes: string;
-  plan?: string;
-  attendees?: string;
-  actionItems?: string;
-  /** Actual call duration in minutes. */
-  actualDuration?: number;
-}
-
-/** `POST /cases/{caseId}/call-requests/{callRequestId}/notes` response. */
-export interface BeSendCallRequestNotesResponse {
-  message?: string;
-  callRequest?: {
-    id: string;
-    updatedOn?: string;
-    state?: BeCallRequestState;
   };
 }
 

@@ -35,9 +35,6 @@ import {
   useGetCsmCaseCallRequests,
   usePostCsmCaseCallRequest,
   usePatchCsmCaseCallRequest,
-  useScheduleCsmCaseCallRequest,
-  useRejectCsmCaseCallRequest,
-  useSendCsmCaseCallRequestNotes,
 } from "@features/csm-cases/api/useCsmCaseCallRequests";
 import {
   ALL_CALL_REQUEST_STATES,
@@ -81,9 +78,6 @@ export function CallRequestsWidget({
   );
   const postCallRequest = usePostCsmCaseCallRequest();
   const patchCallRequest = usePatchCsmCaseCallRequest();
-  const scheduleCallRequest = useScheduleCsmCaseCallRequest();
-  const rejectCallRequest = useRejectCsmCaseCallRequest();
-  const sendCallNotes = useSendCsmCaseCallRequestNotes();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -144,10 +138,10 @@ export function CallRequestsWidget({
     if (!scheduleTarget) return;
     setActionError(null);
     try {
-      await scheduleCallRequest.mutateAsync({
+      await patchCallRequest.mutateAsync({
         caseId,
         callRequestId: scheduleTarget.id,
-        ...input,
+        patch: { state: "scheduled", ...input },
       });
       setScheduleTarget(null);
     } catch (err) {
@@ -161,10 +155,13 @@ export function CallRequestsWidget({
     if (!rejectTarget) return;
     setActionError(null);
     try {
-      await rejectCallRequest.mutateAsync({
+      await patchCallRequest.mutateAsync({
         caseId,
         callRequestId: rejectTarget.id,
-        reason,
+        patch: {
+          state: "wso2_rejected",
+          ...(reason ? { cancellationReason: reason } : {}),
+        },
       });
       setRejectTarget(null);
     } catch (err) {
@@ -184,10 +181,17 @@ export function CallRequestsWidget({
     if (!notesTarget) return;
     setActionError(null);
     try {
-      await sendCallNotes.mutateAsync({
+      const { actualDuration, ...rest } = input;
+      await patchCallRequest.mutateAsync({
         caseId,
         callRequestId: notesTarget.id,
-        ...input,
+        patch: {
+          state: "concluded",
+          ...rest,
+          ...(actualDuration !== undefined
+            ? { actualDurationMin: actualDuration }
+            : {}),
+        },
       });
       setNotesTarget(null);
     } catch (err) {
@@ -341,7 +345,7 @@ export function CallRequestsWidget({
       <ScheduleCallDialog
         callRequest={scheduleTarget}
         isReschedule={!!isReschedule}
-        submitting={scheduleCallRequest.isPending}
+        submitting={patchCallRequest.isPending}
         error={actionError}
         onClose={() => {
           setScheduleTarget(null);
@@ -352,7 +356,7 @@ export function CallRequestsWidget({
 
       <RejectCallDialog
         callRequest={rejectTarget}
-        submitting={rejectCallRequest.isPending}
+        submitting={patchCallRequest.isPending}
         error={actionError}
         onClose={() => {
           setRejectTarget(null);
@@ -363,7 +367,7 @@ export function CallRequestsWidget({
 
       <SendCallNotesDialog
         callRequest={notesTarget}
-        submitting={sendCallNotes.isPending}
+        submitting={patchCallRequest.isPending}
         error={actionError}
         onClose={() => {
           setNotesTarget(null);
