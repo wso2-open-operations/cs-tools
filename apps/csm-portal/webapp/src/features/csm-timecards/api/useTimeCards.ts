@@ -47,25 +47,47 @@ import {
   useDecideCard,
 } from "@features/csm-timecards/api/useTimeSheets";
 
+/** A case's time cards from the first `BE_MAX_PAGE_LIMIT` cards in its
+ * project, plus whether that one page fell short of the project's full
+ * `total` — some of the case's cards may not have been fetched if so. No
+ * pagination UI here (unlike the three tabs on `/time-cards`) — a single
+ * case logging more than a page's worth of time is not expected. */
+export interface CaseTimeCardsResult {
+  cards: CsmTimeCard[];
+  truncated: boolean;
+}
+
 /**
- * Time cards logged on a single case, newest first. There is no `caseId`
- * search filter on the backend — `POST /time-cards/search` also requires a
- * non-empty `filters.projectIds` to return anything at all (confirmed live;
- * an unscoped search always returns `total: 0` despite the OpenAPI spec
- * documenting `projectIds` as optional) — so this scopes the search to the
- * case's own project and filters the case's cards out client-side.
+ * Time cards logged on a single case, newest first. `filters.caseId` is
+ * documented in `openapi.yaml` and genuinely implemented end-to-end in
+ * `entity-service` (`sn_time_card_service.go` forwards it straight through
+ * to ServiceNow) — but confirmed live to be non-functional in practice: a
+ * search scoped by nothing but a case's own id returns `total: 0`
+ * unconditionally, even seconds/minutes/an hour after creating a card
+ * against that exact case, and even though the very same project-scoped
+ * search independently proves cards with that exact `case.id` exist (7 of
+ * 10 cards in the project used to verify this). `userId` and `approverId`
+ * were separately confirmed to work correctly (see {@link useMyTimeSheets}
+ * and {@link useApprovalQueue} in `useTimeSheets.ts`) — this is specific to
+ * `caseId`. Do not switch this back to `filters.caseId` without re-confirming
+ * live first. Scopes to the case's own project instead (also requires
+ * `filters.projectIds` to be non-empty — see {@link searchTimeCards}) and
+ * filters the case's cards out client-side.
  */
 export function useCaseTimeCards(
   caseId: string | undefined,
   projectId: string | undefined,
-): UseQueryResult<CsmTimeCard[], Error> {
+): UseQueryResult<CaseTimeCardsResult, Error> {
   const api = useBackendApi();
-  return useQuery<CsmTimeCard[], Error>({
+  return useQuery<CaseTimeCardsResult, Error>({
     queryKey: [ApiQueryKeys.CASE_TIME_CARDS_SEARCH, caseId ?? "", projectId ?? ""],
-    queryFn: async (): Promise<CsmTimeCard[]> => {
-      if (!caseId || !projectId) return [];
-      const all = await searchTimeCards(api, { projectIds: [projectId] });
-      return all.filter((c) => c.caseId === caseId);
+    queryFn: async (): Promise<CaseTimeCardsResult> => {
+      if (!caseId || !projectId) return { cards: [], truncated: false };
+      const { cards, total } = await searchTimeCards(api, { projectIds: [projectId] });
+      return {
+        cards: cards.filter((c) => c.caseId === caseId),
+        truncated: cards.length < total,
+      };
     },
     enabled: !!caseId && !!projectId,
     staleTime: 5_000,

@@ -48,6 +48,19 @@ export function hasLoggedHours(breakdown: ActivityBreakdown): boolean {
   return ACTIVITY_KEYS.some((key) => (breakdown[key] || 0) > 0);
 }
 
+/**
+ * What the submitted card's total will actually be: each bucket rounded to
+ * a whole hour independently, then summed — mirrors `usePostTimeCard`'s
+ * per-field `Math.round()` exactly, since the backend's hour fields are
+ * integers. A form can show a valid nonzero total (e.g. two 0.25h buckets,
+ * summing to a "logged" 0.5h) where every individual bucket still rounds to
+ * 0 — this catches that case so the form can block submit instead of
+ * silently sending an all-zero card.
+ */
+export function roundedTotalHours(breakdown: ActivityBreakdown): number {
+  return ACTIVITY_KEYS.reduce((sum, key) => sum + Math.round(breakdown[key] || 0), 0);
+}
+
 /** Field-level validation errors for the log dialog, keyed by field name. */
 export interface TimeCardDraftErrors {
   date?: string;
@@ -73,6 +86,12 @@ export function timeCardDraftErrors(draft: TimeCardDraft): TimeCardDraftErrors {
   if (!draft.date) errors.date = "Pick a date.";
   if (!hasLoggedHours(draft.breakdown)) {
     errors.hours = "Log time against at least one activity.";
+  } else if (roundedTotalHours(draft.breakdown) === 0) {
+    // Each bucket is sent to the backend rounded to a whole hour — a form
+    // that looks valid (some bucket > 0) can still round down to an
+    // all-zero card if every bucket is under 0.5h.
+    errors.hours =
+      "Logged time rounds down to 0h — the backend only accepts whole hours per activity. Increase an activity's hours to at least 0.5.";
   }
   if (!draft.workLogComment.trim()) {
     errors.workLogComment = "Add a work log comment.";

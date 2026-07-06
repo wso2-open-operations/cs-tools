@@ -85,8 +85,12 @@ export interface CsmTimeCard {
   projectId: string;
   projectName: string;
   /**
-   * When the record was created (ISO). The backend doesn't separately track
-   * the engineer-chosen work date on read, only creation time.
+   * The work date (ISO, YYYY-MM-DD), despite the name — confirmed live by
+   * backdating a test card and reading it back: the backend returns
+   * whatever date was submitted on create under this field, not a separate
+   * system-generated creation timestamp. Occasionally unparseable on real
+   * records (confirmed live); see `groupIntoSheets` in `useTimeSheets.ts`
+   * for how that's handled.
    */
   createdOn: string;
   userId: string;
@@ -152,14 +156,24 @@ export interface CsmTimeSheet {
 
 /**
  * Filters for the time-card search. Sent in the POST body (never as query
- * params). The backend only supports `projectIds` / `states` / date range
- * server-side; case and engineer scoping happen client-side over the
- * returned page (see `useTimeSheets.ts`) since the backend has no `caseId`
- * or `engineerId` search filter.
+ * params). `projectIds`, `userId`, `approverId`, and `from`/`to` are all
+ * real, confirmed-working server-side filters. `states` is filtered
+ * client-side instead — see the note on `searchTimeCards` in
+ * `useTimeSheets.ts` for why. `from`/`to` currently has no UI control wired
+ * to it; kept so a future date-range filter has somewhere to plug in.
+ *
+ * There is deliberately no `caseId` here even though `entity-service`
+ * documents and implements one — confirmed live to be non-functional
+ * (always `total: 0`); case scoping goes through `projectIds` plus a
+ * client-side filter instead (see `useCaseTimeCards` in `useTimeCards.ts`).
  */
 export interface TimeCardSearchFilters {
   /** Projects to include (company customer may own several). */
   projectIds?: string[];
+  /** Only cards submitted by this user. */
+  userId?: string;
+  /** Only cards this user is eligible to approve (backend: SN `approver_list`). */
+  approverId?: string;
   /** Lifecycle states to include. */
   states?: TimeCardState[];
   /** Inclusive date range (YYYY-MM-DD), matched against `createdOn`. */

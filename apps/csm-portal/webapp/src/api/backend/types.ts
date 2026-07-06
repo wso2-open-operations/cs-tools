@@ -1312,8 +1312,22 @@ export interface BeTimeCardView {
   case?: BeTimeCardCaseRef;
 }
 
+/**
+ * `entity-service`'s `openapi.yaml` also documents a `caseId` filter here
+ * (and it's genuinely implemented end-to-end, forwarded through to
+ * ServiceNow) — deliberately omitted: confirmed live to be non-functional,
+ * always returning `total: 0` even for a case with cards provably matching
+ * that exact id. See the note on `useCaseTimeCards` in `useTimeCards.ts`
+ * before re-adding it.
+ */
 export interface BeSearchTimeCardsFilters {
   projectIds?: string[];
+  /** Only time cards submitted by this user. */
+  userId?: string;
+  /** Only time cards this user is eligible to approve (SN `approver_list`). */
+  approverId?: string;
+  /** Only time cards actually approved by this user (SN `approved_by`). */
+  approvedById?: string;
   /** ISO 8601 date (YYYY-MM-DD). */
   startDate?: string;
   /** ISO 8601 date (YYYY-MM-DD). */

@@ -32,6 +32,7 @@ import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import TimeCardStatusChip from "@features/csm-timecards/components/TimeCardStatusChip";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
+import TimeCardTruncatedNotice from "@features/csm-timecards/components/TimeCardTruncatedNotice";
 import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
 interface CaseTimeCardsPanelProps {
@@ -65,7 +66,7 @@ export default function CaseTimeCardsPanel({
   const { showError } = useErrorBanner();
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
 
-  const cards = useMemo(() => data ?? [], [data]);
+  const cards = useMemo(() => data?.cards ?? [], [data]);
   const total = useMemo(
     () => Math.round(cards.reduce((s, c) => s + c.totalHours, 0) * 100) / 100,
     [cards],
@@ -121,6 +122,10 @@ export default function CaseTimeCardsPanel({
       </Box>
 
       <Divider sx={{ mb: 1 }} />
+
+      {!isError && data?.truncated && (
+        <TimeCardTruncatedNotice hint="Some entries on this case may not be shown." />
+      )}
 
       {isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>

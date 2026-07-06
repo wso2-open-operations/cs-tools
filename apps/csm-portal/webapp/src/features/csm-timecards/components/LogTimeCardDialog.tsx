@@ -199,17 +199,21 @@ export default function LogTimeCardDialog({
   // email; `userType` is postgres-only (absent on the ServiceNow source, the
   // live data here), so only gate on it when present — the `roles`/`active`
   // filters above already restrict server-side. Mirrors AssignEngineerDialog.
+  // Excludes the signed-in user: nothing server-side stops picking yourself
+  // as approver, which would let a submitter approve their own time.
   const candidates: ApproverOption[] = useMemo(() => {
     if (!hasApproverInput) return [];
+    const myEmail = me.email.toLowerCase();
     return (data?.users ?? [])
       .filter(
         (u) =>
           !!u.email &&
+          u.email.toLowerCase() !== myEmail &&
           u.active !== false &&
           (u.userType ? u.userType === "internal" : true),
       )
       .map((u) => ({ id: u.id, name: fullName(u), email: u.email }));
-  }, [data, hasApproverInput]);
+  }, [data, hasApproverInput, me.email]);
 
   const setActivity = (key: ActivityKey, next: number): void =>
     setBreakdown((prev) => ({ ...prev, [key]: next }));

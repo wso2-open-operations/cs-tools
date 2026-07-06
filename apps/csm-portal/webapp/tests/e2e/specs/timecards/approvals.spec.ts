@@ -30,7 +30,7 @@
 // approver, or this test would 403 for the same reason.
 //
 
-import { test, expect, withRole, hasSession, openContextAs, currentUserSearchQuery } from "../../fixtures/test";
+import { test, expect, withRole, hasSession, openContextAs, approverSearchQuery } from "../../fixtures/test";
 import { TimeCardsPage } from "../../pages/TimeCardsPage";
 import { LogTimeDialog } from "../../pages/LogTimeDialog";
 import { e2eWorkLogComment } from "../../utils/selectors";
@@ -65,7 +65,7 @@ test.describe("time cards — approvals queue", () => {
     // The card's assigned approver must be the *approver* session, since
     // only the assigned approver can decide it (see note above) — derive the
     // search query from the primary `page` (approver), not the engineer.
-    const approverQuery = await currentUserSearchQuery(page);
+    const approverQuery = await approverSearchQuery(page);
 
     // Create the card as "engineer" in a second, independent context.
     const engineerContext = await openContextAs(browser, "engineer");

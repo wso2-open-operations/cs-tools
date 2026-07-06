@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   emptyBreakdown,
   hasLoggedHours,
+  roundedTotalHours,
   timeCardDraftErrors,
   totalHours,
 } from "@features/csm-timecards/utils/timeCardTotals";
@@ -43,6 +44,24 @@ describe("timeCardTotals", () => {
 
   it("detects logged hours", () => {
     expect(hasLoggedHours({ ...emptyBreakdown(), answering: 0.25 })).toBe(true);
+  });
+
+  describe("roundedTotalHours", () => {
+    it("matches totalHours when every bucket already rounds cleanly", () => {
+      expect(
+        roundedTotalHours({ ...emptyBreakdown(), analysisDebugging: 1, reproduce: 2 }),
+      ).toBe(3);
+    });
+
+    it("rounds down to 0 when every bucket is under 0.5h, even with a nonzero raw total", () => {
+      expect(
+        roundedTotalHours({
+          ...emptyBreakdown(),
+          analysisDebugging: 0.25,
+          reproduce: 0.25,
+        }),
+      ).toBe(0);
+    });
   });
 
   describe("timeCardDraftErrors", () => {
@@ -76,6 +95,14 @@ describe("timeCardTotals", () => {
         workLogComment: "a".repeat(WORK_LOG_MAX + 1),
       });
       expect(errors.workLogComment).toBeDefined();
+    });
+
+    it("flags an hours total that rounds down to 0h even though the raw total is nonzero", () => {
+      const errors = timeCardDraftErrors({
+        ...valid,
+        breakdown: { ...emptyBreakdown(), analysisDebugging: 0.25, reproduce: 0.25 },
+      });
+      expect(errors.hours).toBeDefined();
     });
   });
 });
