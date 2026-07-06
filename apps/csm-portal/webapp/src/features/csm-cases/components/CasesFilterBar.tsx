@@ -121,6 +121,12 @@ interface CasesFilterBarProps {
   availableAssigneeUsers: AssigneeUser[];
   /** Projects for the (id-based) project filter — value is the id, label the name. */
   availableProjects: { id: string; name: string }[];
+  /**
+   * Show the severity control. Severity (S1-S4) is a support-case concept, so
+   * this is only meaningful when the list is scoped to support cases; other
+   * record types (service requests, engagements, etc.) hide it.
+   */
+  showSeverityFilter?: boolean;
   /** Hide the case-type control when the surrounding view locks the type. */
   hideTypeFilter?: boolean;
   /** Hide the project control when the surrounding view is project-scoped. */
@@ -169,6 +175,7 @@ export default function CasesFilterBar({
   onFiltersToggle,
   availableAssigneeUsers,
   availableProjects,
+  showSeverityFilter = true,
   hideTypeFilter = false,
   hideProjectFilter = false,
   showEngagementTypeFilter = false,
@@ -431,15 +438,17 @@ export default function CasesFilterBar({
         <>
           <Divider />
           <Grid container spacing={2} sx={{ mt: 0 }}>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <MultiSelectField
-                id="cases-filter-severity"
-                label="Severity"
-                values={filters.severities}
-                options={severityOptions}
-                onChange={(next) => onChange({ ...filters, severities: next })}
-              />
-            </Grid>
+            {showSeverityFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-severity"
+                  label="Severity"
+                  values={filters.severities}
+                  options={severityOptions}
+                  onChange={(next) => onChange({ ...filters, severities: next })}
+                />
+              </Grid>
+            )}
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               <MultiSelectField
                 id="cases-filter-state"
