@@ -21,7 +21,7 @@ import {
 } from "@features/csm-timecards/constants/timeCardConstants";
 
 export interface TimecardRole {
-  /** May approve/reject/recall time cards (approver group, or admin). */
+  /** May approve/reject/recall time cards — the dedicated approver group only. */
   isApprover: boolean;
   /** Time-card admin: edit any user's editable cards, approve by exception. */
   isAdmin: boolean;
@@ -29,13 +29,16 @@ export interface TimecardRole {
 
 /**
  * The signed-in user's time-card role, resolved from `GET /users/me` roles
- * (platform-owned data from the entity service). Admins are a superset of
- * approvers. Client-side affordance only — the backend must enforce the same gates.
+ * (platform-owned data from the entity service). `isApprover` and `isAdmin`
+ * are deliberately independent — being a general portal admin no longer
+ * implies time-card approval rights, and doesn't put the Approvals tab in
+ * front of someone who isn't actually a time-card approver. Client-side
+ * affordance only — the backend must enforce the same gates.
  */
 export function useTimecardRole(): TimecardRole {
   const { data: me } = useGetUsersMe();
   const roles = (me?.roles ?? []).map((r) => r.toLowerCase());
   const isAdmin = roles.includes(TIMECARD_ADMIN_GROUP.toLowerCase());
-  const isApprover = isAdmin || roles.includes(TIMECARD_APPROVER_GROUP.toLowerCase());
+  const isApprover = roles.includes(TIMECARD_APPROVER_GROUP.toLowerCase());
   return { isApprover, isAdmin };
 }

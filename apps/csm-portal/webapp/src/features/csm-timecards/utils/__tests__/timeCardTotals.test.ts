@@ -17,57 +17,38 @@
 import { describe, expect, it } from "vitest";
 import {
   emptyBreakdown,
-  hasLoggedHours,
-  roundedTotalHours,
+  hasLoggedTime,
   timeCardDraftErrors,
-  totalHours,
+  totalMinutes,
 } from "@features/csm-timecards/utils/timeCardTotals";
 import { WORK_LOG_MAX } from "@features/csm-timecards/constants/timeCardConstants";
 
 describe("timeCardTotals", () => {
   it("emptyBreakdown is all zeros and sums to 0", () => {
-    expect(totalHours(emptyBreakdown())).toBe(0);
-    expect(hasLoggedHours(emptyBreakdown())).toBe(false);
+    expect(totalMinutes(emptyBreakdown())).toBe(0);
+    expect(hasLoggedTime(emptyBreakdown())).toBe(false);
   });
 
-  it("sums activity buckets without float drift", () => {
+  it("sums activity buckets", () => {
     expect(
-      totalHours({
-        analysisDebugging: 0.1,
-        reproduce: 1.5,
-        settingUp: 0.2,
-        providingSolution: 0.5,
+      totalMinutes({
+        analysisDebugging: 15,
+        reproduce: 90,
+        settingUp: 20,
+        providingSolution: 30,
         answering: 0,
       }),
-    ).toBe(2.3);
+    ).toBe(155);
   });
 
-  it("detects logged hours", () => {
-    expect(hasLoggedHours({ ...emptyBreakdown(), answering: 0.25 })).toBe(true);
-  });
-
-  describe("roundedTotalHours", () => {
-    it("matches totalHours when every bucket already rounds cleanly", () => {
-      expect(
-        roundedTotalHours({ ...emptyBreakdown(), analysisDebugging: 1, reproduce: 2 }),
-      ).toBe(3);
-    });
-
-    it("rounds down to 0 when every bucket is under 0.5h, even with a nonzero raw total", () => {
-      expect(
-        roundedTotalHours({
-          ...emptyBreakdown(),
-          analysisDebugging: 0.25,
-          reproduce: 0.25,
-        }),
-      ).toBe(0);
-    });
+  it("detects logged time", () => {
+    expect(hasLoggedTime({ ...emptyBreakdown(), answering: 15 })).toBe(true);
   });
 
   describe("timeCardDraftErrors", () => {
     const valid = {
       date: "2026-06-27",
-      breakdown: { ...emptyBreakdown(), analysisDebugging: 1 },
+      breakdown: { ...emptyBreakdown(), analysisDebugging: 60 },
       workLogComment: "Investigated root cause.",
       approverId: "lead-1",
     };
@@ -84,7 +65,7 @@ describe("timeCardTotals", () => {
         approverId: undefined,
       });
       expect(errors.date).toBeDefined();
-      expect(errors.hours).toBeDefined();
+      expect(errors.minutes).toBeDefined();
       expect(errors.workLogComment).toBeDefined();
       expect(errors.approver).toBeDefined();
     });
@@ -95,14 +76,6 @@ describe("timeCardTotals", () => {
         workLogComment: "a".repeat(WORK_LOG_MAX + 1),
       });
       expect(errors.workLogComment).toBeDefined();
-    });
-
-    it("flags an hours total that rounds down to 0h even though the raw total is nonzero", () => {
-      const errors = timeCardDraftErrors({
-        ...valid,
-        breakdown: { ...emptyBreakdown(), analysisDebugging: 0.25, reproduce: 0.25 },
-      });
-      expect(errors.hours).toBeDefined();
     });
   });
 });

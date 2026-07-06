@@ -14,12 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, type ChangeEvent, type JSX } from "react";
+import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
   Box,
   Chip,
   CircularProgress,
-  InputAdornment,
   MenuItem,
   Tab,
   Tabs,
@@ -28,7 +27,7 @@ import {
   Typography,
   Button,
 } from "@wso2/oxygen-ui";
-import { ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
+import { ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useAllTimeCards,
   useApprovalQueue,
@@ -46,6 +45,7 @@ import { TIME_CARD_STATE_META } from "@features/csm-timecards/constants/timeCard
 import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 import TimeSheetCard from "@features/csm-timecards/components/TimeSheetCard";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
+import SearchableMultiSelect from "@components/SearchableMultiSelect";
 import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
 import type {
   CsmTimeCard,
@@ -53,6 +53,29 @@ import type {
   TimeCardSearchFilters,
   TimeCardState,
 } from "@features/csm-timecards/types/timeCards";
+
+/** Builds a `userId -> userName` lookup plus the option list a
+ * `SearchableMultiSelect` engineer filter needs, scoped to whatever sheets
+ * are currently loaded for one tab (there's no engineer-search endpoint for
+ * time cards, so — like the work-item filter — this only ever offers
+ * engineers actually present on the current page, not the full directory). */
+function engineerOptionsFrom(sheets: CsmTimeSheet[] | undefined): {
+  ids: string[];
+  nameById: Map<string, string>;
+} {
+  const nameById = new Map<string, string>();
+  (sheets ?? []).forEach((s) => nameById.set(s.userId, s.userName));
+  return { ids: [...nameById.keys()], nameById };
+}
+
+/** Distinct case numbers present in whatever sheets are currently loaded for
+ * one tab — the option list for the work-item filter. Same "current page
+ * only" caveat as {@link engineerOptionsFrom}. */
+function workItemOptionsFrom(sheets: CsmTimeSheet[] | undefined): string[] {
+  return Array.from(
+    new Set((sheets ?? []).flatMap((s) => s.cards.map((c) => c.caseNumber))),
+  );
+}
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
@@ -102,10 +125,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
   // Search filters (sent as a POST body, never query params). Project and
   // state are server-side; work item and engineer are client-side over the
   // returned page — the backend has no filter for either.
-  const [filterProject, setFilterProject] = useState("");
-  const [filterWorkItem, setFilterWorkItem] = useState("");
+  const [filterProject, setFilterProject] = useState<string[]>([]);
+  const [filterWorkItem, setFilterWorkItem] = useState<string[]>([]);
   const [filterState, setFilterState] = useState<TimeCardState | "">("");
-  const [filterEngineer, setFilterEngineer] = useState("");
+  const [filterEngineer, setFilterEngineer] = useState<string[]>([]);
 
   const projects = useProjectOptions();
   // The backend requires a non-empty `projectIds` to return anything at all
@@ -113,9 +136,9 @@ export default function CsmTimeCardsPage(): JSX.Element {
   // the OpenAPI spec documenting it as optional). Default to every project
   // the user can see (already fetched for the filter dropdown below) so
   // "My time sheets" / "Approvals" work with no filter picked; the explicit
-  // project filter narrows that down when set.
-  const scopeProjectIds = filterProject
-    ? [filterProject]
+  // project filter narrows that down when set (to one or several).
+  const scopeProjectIds = filterProject.length
+    ? filterProject
     : (projects.data ?? []).map((p) => p.id);
 
   const baseFilters: TimeCardSearchFilters = {
@@ -144,7 +167,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const decideCard = useDecideCard();
 
   const anyFilterActive =
-    !!filterProject || !!filterWorkItem.trim() || !!filterState || !!filterEngineer.trim();
+    filterProject.length > 0 ||
+    filterWorkItem.length > 0 ||
+    !!filterState ||
+    filterEngineer.length > 0;
 
   // A filter change re-scopes the search for every tab, so every tab's page
   // position needs to reset too — otherwise "page 3" of a narrower result
@@ -154,7 +180,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
     allPagination.setPage(0);
     approvalsPagination.setPage(0);
   };
-  const handleFilterProjectChange = (v: string): void => {
+  const handleFilterProjectChange = (v: string[]): void => {
     setFilterProject(v);
     resetAllPages();
   };
@@ -163,10 +189,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
     resetAllPages();
   };
   const clearFilters = (): void => {
-    setFilterProject("");
-    setFilterWorkItem("");
+    setFilterProject([]);
+    setFilterWorkItem([]);
     setFilterState("");
-    setFilterEngineer("");
+    setFilterEngineer([]);
     resetAllPages();
   };
 
@@ -174,17 +200,41 @@ export default function CsmTimeCardsPage(): JSX.Element {
     if (action === "approve" || action === "reject") setReviewCard(card);
   };
 
-  /** Client-side work-item substring filter, applied over already-fetched sheets. */
+  /** Client-side work-item filter (case number is in the selected set),
+   * applied over already-fetched sheets. */
   const byWorkItem = (sheets: CsmTimeSheet[] | undefined): CsmTimeSheet[] | undefined => {
-    const q = filterWorkItem.trim().toLowerCase();
-    if (!q || !sheets) return sheets;
+    if (filterWorkItem.length === 0 || !sheets) return sheets;
     return sheets
       .map((s) => ({
         ...s,
-        cards: s.cards.filter((c) => c.caseNumber.toLowerCase().includes(q)),
+        cards: s.cards.filter((c) => filterWorkItem.includes(c.caseNumber)),
       }))
       .filter((s) => s.cards.length > 0);
   };
+
+  // Work-item / engineer option lists are scoped per tab — each tab has its
+  // own loaded page of sheets, and there's no search endpoint for either, so
+  // the picker can only ever offer what's actually on the current page.
+  const mineWorkItemOptions = useMemo(
+    () => workItemOptionsFrom(mySheets.data?.sheets),
+    [mySheets.data],
+  );
+  const allWorkItemOptions = useMemo(
+    () => workItemOptionsFrom(allCards.data?.sheets),
+    [allCards.data],
+  );
+  const approvalsWorkItemOptions = useMemo(
+    () => workItemOptionsFrom(queue.data?.sheets),
+    [queue.data],
+  );
+  const allEngineerOptions = useMemo(
+    () => engineerOptionsFrom(allCards.data?.sheets),
+    [allCards.data],
+  );
+  const approvalsEngineerOptions = useMemo(
+    () => engineerOptionsFrom(queue.data?.sheets),
+    [queue.data],
+  );
 
   return (
     <Box
@@ -217,6 +267,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
+            workItemOptions={mineWorkItemOptions}
             filterState={filterState}
             setFilterState={handleFilterStateChange}
             onClear={clearFilters}
@@ -291,24 +342,30 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
+            workItemOptions={allWorkItemOptions}
             filterState={filterState}
             setFilterState={handleFilterStateChange}
             onClear={clearFilters}
             engineerSlot={
-              <TextField
-                size="small"
-                label="Engineer"
-                placeholder="Name…"
-                value={filterEngineer}
-                onChange={(e) => setFilterEngineer(e.target.value)}
-                sx={{ width: 180 }}
-              />
+              <Box sx={{ width: 200 }}>
+                <SearchableMultiSelect
+                  id="timecards-filter-engineer-all"
+                  label="Engineer"
+                  placeholder="Search engineers…"
+                  values={filterEngineer}
+                  options={allEngineerOptions.ids}
+                  formatOption={(id) => allEngineerOptions.nameById.get(id) ?? id}
+                  onChange={setFilterEngineer}
+                />
+              </Box>
             }
             engineerChip={
-              filterEngineer.trim()
+              filterEngineer.length > 0
                 ? {
-                    label: `Engineer: ${filterEngineer.trim()}`,
-                    onDelete: () => setFilterEngineer(""),
+                    label: `Engineer: ${filterEngineer
+                      .map((id) => allEngineerOptions.nameById.get(id) ?? id)
+                      .join(", ")}`,
+                    onDelete: () => setFilterEngineer([]),
                   }
                 : undefined
             }
@@ -323,17 +380,16 @@ export default function CsmTimeCardsPage(): JSX.Element {
           ) : (
             <>
               {(() => {
-                const q = filterEngineer.trim().toLowerCase();
                 const byEngineer = (allCards.data?.sheets ?? []).filter(
-                  (s) => !q || s.userName.toLowerCase().includes(q),
+                  (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
                 );
                 const filtered = byWorkItem(byEngineer) ?? [];
                 if (filtered.length === 0) {
                   return (
                     <Empty
                       text={
-                        q && byEngineer.length === 0
-                          ? `No engineers match "${filterEngineer}".`
+                        filterEngineer.length > 0 && byEngineer.length === 0
+                          ? "No time cards match the selected engineers."
                           : anyFilterActive
                             ? "No time cards match the current filters."
                             : "No time logged yet."
@@ -378,25 +434,31 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
+            workItemOptions={approvalsWorkItemOptions}
             filterState={filterState}
             setFilterState={handleFilterStateChange}
             onClear={clearFilters}
             hideStateFilter
             engineerSlot={
-              <TextField
-                size="small"
-                label="Engineer"
-                placeholder="Name…"
-                value={filterEngineer}
-                onChange={(e) => setFilterEngineer(e.target.value)}
-                sx={{ width: 180 }}
-              />
+              <Box sx={{ width: 200 }}>
+                <SearchableMultiSelect
+                  id="timecards-filter-engineer-approvals"
+                  label="Engineer"
+                  placeholder="Search engineers…"
+                  values={filterEngineer}
+                  options={approvalsEngineerOptions.ids}
+                  formatOption={(id) => approvalsEngineerOptions.nameById.get(id) ?? id}
+                  onChange={setFilterEngineer}
+                />
+              </Box>
             }
             engineerChip={
-              filterEngineer.trim()
+              filterEngineer.length > 0
                 ? {
-                    label: `Engineer: ${filterEngineer.trim()}`,
-                    onDelete: () => setFilterEngineer(""),
+                    label: `Engineer: ${filterEngineer
+                      .map((id) => approvalsEngineerOptions.nameById.get(id) ?? id)
+                      .join(", ")}`,
+                    onDelete: () => setFilterEngineer([]),
                   }
                 : undefined
             }
@@ -414,9 +476,8 @@ export default function CsmTimeCardsPage(): JSX.Element {
                 <Empty text="Nothing awaiting approval." />
               ) : (
                 (() => {
-                  const q = filterEngineer.trim().toLowerCase();
                   const byEngineer = (queue.data?.sheets ?? []).filter(
-                    (s) => !q || s.userName.toLowerCase().includes(q),
+                    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
                   );
                   const filtered = byWorkItem(byEngineer) ?? [];
                   if (filtered.length === 0) {
@@ -426,8 +487,8 @@ export default function CsmTimeCardsPage(): JSX.Element {
                           // Only blame the engineer filter when it's the one that
                           // excluded everything — if it matched fine and the
                           // work-item filter emptied the result, say that instead.
-                          q && byEngineer.length === 0
-                            ? `No engineers match "${filterEngineer}".`
+                          filterEngineer.length > 0 && byEngineer.length === 0
+                            ? "No time cards match the selected engineers."
                             : "No time cards match the current filters."
                         }
                       />
@@ -499,6 +560,7 @@ function FilterBar({
   setFilterProject,
   filterWorkItem,
   setFilterWorkItem,
+  workItemOptions,
   filterState,
   setFilterState,
   onClear,
@@ -507,15 +569,18 @@ function FilterBar({
   hideStateFilter,
 }: {
   projects: BeProject[];
-  filterProject: string;
-  setFilterProject: (v: string) => void;
-  filterWorkItem: string;
-  setFilterWorkItem: (v: string) => void;
+  filterProject: string[];
+  setFilterProject: (v: string[]) => void;
+  filterWorkItem: string[];
+  setFilterWorkItem: (v: string[]) => void;
+  /** Case numbers to offer in the work-item picker — scoped to whatever the
+   * calling tab currently has loaded (see `workItemOptionsFrom`). */
+  workItemOptions: string[];
   filterState: TimeCardState | "";
   setFilterState: (v: TimeCardState | "") => void;
   onClear: () => void;
   engineerSlot?: JSX.Element;
-  /** Active-chip for the Engineer filter — only the Approvals tab has one. */
+  /** Active-chip for the Engineer filter — only the All/Approvals tabs have one. */
   engineerChip?: { label: string; onDelete: () => void };
   /** Approvals always forces `states: ["submitted"]` server-side (see
    * `useApprovalQueue`), so the State control can't actually narrow anything
@@ -524,19 +589,19 @@ function FilterBar({
 }): JSX.Element {
   const activeChips: { key: string; label: string; onDelete: () => void }[] = [];
   if (engineerChip) activeChips.push({ key: "engineer", ...engineerChip });
-  if (filterProject) {
-    const name = projects.find((p) => p.id === filterProject)?.name ?? filterProject;
+  if (filterProject.length > 0) {
+    const names = filterProject.map((id) => projects.find((p) => p.id === id)?.name ?? id);
     activeChips.push({
       key: "project",
-      label: `Project: ${name}`,
-      onDelete: () => setFilterProject(""),
+      label: `Project: ${names.join(", ")}`,
+      onDelete: () => setFilterProject([]),
     });
   }
-  if (filterWorkItem.trim()) {
+  if (filterWorkItem.length > 0) {
     activeChips.push({
       key: "workItem",
-      label: `Work item: ${filterWorkItem.trim()}`,
-      onDelete: () => setFilterWorkItem(""),
+      label: `Work item: ${filterWorkItem.join(", ")}`,
+      onDelete: () => setFilterWorkItem([]),
     });
   }
   if (!hideStateFilter && filterState) {
@@ -575,39 +640,28 @@ function FilterBar({
           </Typography>
         </Box>
 
-        <TextField
-          select
-          size="small"
-          label="Project"
-          value={filterProject}
-          onChange={(e) => setFilterProject(e.target.value)}
-          sx={{ width: 200 }}
-        >
-          <MenuItem value="">All projects</MenuItem>
-          {projects.map((p) => (
-            <MenuItem key={p.id} value={p.id}>
-              {p.name ?? p.id}
-            </MenuItem>
-          ))}
-        </TextField>
+        <Box sx={{ width: 220 }}>
+          <SearchableMultiSelect
+            id="timecards-filter-project"
+            label="Project"
+            placeholder="Search projects…"
+            values={filterProject}
+            options={projects.map((p) => p.id)}
+            formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
+            onChange={setFilterProject}
+          />
+        </Box>
 
-        <TextField
-          size="small"
-          label="Work item"
-          placeholder="e.g. CS0352584"
-          value={filterWorkItem}
-          onChange={(e) => setFilterWorkItem(e.target.value)}
-          sx={{ width: 190 }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={14} />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
+        <Box sx={{ width: 220 }}>
+          <SearchableMultiSelect
+            id="timecards-filter-work-item"
+            label="Work item"
+            placeholder="Search work items…"
+            values={filterWorkItem}
+            options={workItemOptions}
+            onChange={setFilterWorkItem}
+          />
+        </Box>
 
         {engineerSlot}
 

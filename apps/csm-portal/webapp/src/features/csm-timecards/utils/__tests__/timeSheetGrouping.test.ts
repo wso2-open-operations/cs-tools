@@ -30,7 +30,7 @@ function card(overrides: Partial<CsmTimeCard>): CsmTimeCard {
     userName: "Test User",
     state: "submitted",
     billable: false,
-    totalHours: 1,
+    totalMinutes: 60,
     ...overrides,
   };
 }

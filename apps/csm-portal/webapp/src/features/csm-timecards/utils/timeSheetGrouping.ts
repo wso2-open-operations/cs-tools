@@ -20,7 +20,6 @@ import type {
   TimeSheetState,
 } from "@features/csm-timecards/types/timeCards";
 import { weekEndOf, weekStartOf } from "@features/csm-timecards/utils/timeSheetWeek";
-import { roundHours } from "@features/csm-timecards/utils/timeCardTotals";
 
 /** Roll a week's cards up into a single display status. */
 export function sheetStatus(cards: CsmTimeCard[]): TimeSheetState {
@@ -69,7 +68,7 @@ export function groupIntoSheets(
       weekEnd: weekEndOf(weekStart),
       state: sheetStatus(weekCards),
       cards: weekCards,
-      totalHours: roundHours(weekCards.reduce((sum, c) => sum + c.totalHours, 0)),
+      totalMinutes: weekCards.reduce((sum, c) => sum + c.totalMinutes, 0),
     });
   }
   return sheets.sort((a, b) => b.weekStart.localeCompare(a.weekStart));

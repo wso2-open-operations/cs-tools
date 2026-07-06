@@ -90,7 +90,12 @@ export function invalidateTimecards(queryClient: QueryClient): void {
   }
 }
 
-/** Map the backend's `TimeCardView` to the portal's `CsmTimeCard`. */
+/**
+ * Map the backend's `TimeCardView` to the portal's `CsmTimeCard`. `totalTime`
+ * is already whole minutes on the wire (see `usePostTimeCard`'s note on why),
+ * which is also the unit the portal displays throughout — a direct
+ * passthrough, no conversion needed.
+ */
 export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
   return {
     id: v.id,
@@ -103,7 +108,7 @@ export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
     userName: v.user?.name ?? "—",
     state: v.state,
     billable: v.hasBillable,
-    totalHours: v.totalTime,
+    totalMinutes: v.totalTime,
     approvedById: v.approvedBy?.id,
     approvedByName: v.approvedBy?.name,
   };

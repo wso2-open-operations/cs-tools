@@ -115,10 +115,12 @@ export function usePostTimeCard(): UseMutationResult<
         isBillable: input.billable,
         issueComplexity: input.issueComplexity,
         workLogComment: input.workLogComment,
-        // The backend's hour fields are integers (confirmed live: a 0.5
-        // value is rejected with 400) even though the form logs quarter-hour
-        // increments — round each bucket to the nearest whole hour here, at
-        // the API boundary, so the FE keeps its finer-grained display.
+        // The backend's time fields are whole minutes (confirmed:
+        // entity-service's own validation helper is named
+        // `nonNegativeMinutes`, and a real pre-existing card's `totalTime` of
+        // 150 only makes sense as ~2.5h of work in one entry, not 150 hours)
+        // — the form collects minutes directly now, so this is a defensive
+        // round only, not a unit conversion.
         timeAnalyzing: Math.round(input.breakdown.analysisDebugging),
         timeSettingUp: Math.round(input.breakdown.settingUp),
         timeReproducingDebugging: Math.round(input.breakdown.reproduce),
