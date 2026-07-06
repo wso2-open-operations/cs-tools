@@ -60,6 +60,7 @@ import {
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
 import { useGetCsmConversationMessages } from "@features/csm-cases/api/useCsmConversationMessages";
+import { useGetCsmCaseActivities } from "@features/csm-cases/api/useCsmCaseActivities";
 import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
@@ -266,6 +267,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isLoading: isCommentsLoading,
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
+  // Audited field/state changes (the "State changes" lifecycle lane), loaded
+  // from the dedicated activities endpoint — kept separate from the comments
+  // hook above, which is the sole source for comments/work notes.
+  const { data: activityAudit } = useGetCsmCaseActivities(caseId);
   // The chat transcript the case was spawned from, when linked. Loaded lazily
   // off the case's conversation id and merged into the comment stream below so
   // it renders as the earliest activity entries — mirrors the customer portal.
@@ -1103,7 +1108,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 <Chip
                   size="small"
                   variant="outlined"
-                  label={`${safeComments.length + c.audit.length + attachmentList.length} entries`}
+                  label={`${safeComments.length + (activityAudit?.length ?? 0) + attachmentList.length} entries`}
                 />
               )}
             </Box>
@@ -1136,7 +1141,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 )}
                 <CaseActivitiesFeed
                   comments={safeComments}
-                  audit={c.audit}
+                  audit={activityAudit ?? []}
                   attachments={attachmentList}
                   onDownloadAttachment={onDownloadAttachment}
                 />

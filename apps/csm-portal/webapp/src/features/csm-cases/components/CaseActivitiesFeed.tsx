@@ -74,7 +74,39 @@ const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
   attachment_added: <Paperclip size={14} />,
   sla_breached: <TriangleAlert size={14} />,
   created: <Plus size={14} />,
+  field_change: <Activity size={14} />,
 };
+
+/** One "<label>: <new> was <old>" line for a field-change entry's audit strip. */
+function FieldChangeLine({
+  field,
+}: {
+  field: { fieldLabel: string; previousValue?: string; newValue?: string };
+}): JSX.Element {
+  const hadPrevious = !!field.previousValue?.trim();
+  const hasNew = !!field.newValue?.trim();
+  return (
+    <Typography variant="body2" component="div">
+      <strong>{field.fieldLabel}:</strong>{" "}
+      {hasNew ? field.newValue : <em>cleared</em>}
+      {hadPrevious && (
+        <>
+          {" "}
+          was{" "}
+          <Box
+            component="span"
+            sx={{
+              textDecoration: "line-through",
+              color: "text.secondary",
+            }}
+          >
+            {field.previousValue}
+          </Box>
+        </>
+      )}
+    </Typography>
+  );
+}
 
 export default function CaseActivitiesFeed({
   comments,
@@ -246,9 +278,23 @@ export default function CaseActivitiesFeed({
                     {AUDIT_ICON[e.entry.kind]}
                   </Box>
                   <Box sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
-                    <Typography variant="body2">
-                      {e.entry.description}
-                    </Typography>
+                    {e.entry.changes && e.entry.changes.length > 0 ? (
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 0.25,
+                        }}
+                      >
+                        {e.entry.changes.map((change, i) => (
+                          <FieldChangeLine key={`${change.field}-${i}`} field={change} />
+                        ))}
+                      </Box>
+                    ) : (
+                      <Typography variant="body2">
+                        {e.entry.description}
+                      </Typography>
+                    )}
                     <Typography variant="caption" color="text.secondary">
                       {e.entry.actor} ·{" "}
                       <RelativeTime

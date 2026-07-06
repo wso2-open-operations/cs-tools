@@ -257,14 +257,29 @@ export type CaseAuditKind =
   | "comment_added"
   | "attachment_added"
   | "sla_breached"
-  | "created";
+  | "created"
+  | "field_change";
+
+/** One field changed within a single audited save-transaction. */
+export interface CaseAuditFieldChange {
+  field: string;
+  fieldLabel: string;
+  /** Absent/empty when the field was previously unset (a "set" change). */
+  previousValue?: string;
+  /** Absent/empty when the field was cleared. */
+  newValue?: string;
+}
 
 export interface CaseAuditEntry {
   id: string;
   kind: CaseAuditKind;
   actor: string;
-  description: string;
+  /** Free-text summary; used when `changes` is absent (older/synthetic entries). */
+  description?: string;
   createdAt: string;
+  /** Populated for `kind === "field_change"`: one save-transaction may touch
+   * several fields at once (e.g. state + assignee in the same update). */
+  changes?: CaseAuditFieldChange[];
 }
 
 export interface CaseCustomerContext {

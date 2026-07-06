@@ -557,6 +557,54 @@ export interface BeCommentSearchResponse extends BeSearchResponseBase {
 }
 
 // ---------------------------------------------------------------------------
+// Case activities (unified comment / attachment / field-change stream)
+// ---------------------------------------------------------------------------
+
+/** One field changed within a single audited save-transaction. */
+export interface BeFieldChange {
+  /** Wire field name (e.g. `state`, `priority`, `assignedEngineer`). */
+  field: string;
+  /** Human-readable label for the field (e.g. "State", "Severity"). */
+  fieldLabel: string;
+  /** Absent/empty when the field was previously unset. */
+  previousValue?: string;
+  /** Absent/empty when the field was cleared. */
+  newValue?: string;
+}
+
+export type BeCaseActivityType = "comment" | "attachment" | "field_change";
+
+/**
+ * One entry from `POST /cases/{id}/activities/search`. Shared fields are
+ * present on every entry regardless of `type`; `changes` is populated only
+ * for `type === "field_change"`. This endpoint intentionally excludes work
+ * notes — the comments/work-notes feed continues to read from
+ * `/cases/{id}/comments/search` (see {@link BeComment}).
+ */
+export interface BeCaseActivityEntry {
+  id: string;
+  type: BeCaseActivityType;
+  content?: string;
+  createdOn: string;
+  createdBy?: string;
+  createdByFirstName?: string;
+  createdByLastName?: string;
+  createdByFullName?: string;
+  /** Only present on `type === "field_change"` entries. */
+  changes?: BeFieldChange[];
+}
+
+export interface BeCaseActivitiesSearchPayload {
+  pagination?: BePagination;
+  /** Whether the response should include `field_change` entries. */
+  includeFieldChanges?: boolean;
+}
+
+export interface BeCaseActivitiesSearchResponse extends BeSearchResponseBase {
+  activity?: BeCaseActivityEntry[];
+}
+
+// ---------------------------------------------------------------------------
 // Attachments
 // ---------------------------------------------------------------------------
 

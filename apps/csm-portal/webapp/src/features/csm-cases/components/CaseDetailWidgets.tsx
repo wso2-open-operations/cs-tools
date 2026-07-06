@@ -778,6 +778,7 @@ const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
   attachment_added: <Activity size={14} />,
   sla_breached: <TriangleAlert size={14} />,
   created: <Plus size={14} />,
+  field_change: <Activity size={14} />,
 };
 
 export function AuditTimelineWidget({
