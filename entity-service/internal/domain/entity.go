@@ -1916,12 +1916,6 @@ type TaskSlaDefinition struct {
 	Target *string `json:"target"`
 }
 
-// TaskSlaStage is the current stage of the SLA.
-type TaskSlaStage struct {
-	ID    *string `json:"id"`
-	Label *string `json:"label"`
-}
-
 // TaskSlaTaskRef is a reference to the task associated with a task SLA record.
 type TaskSlaTaskRef struct {
 	ID   *string `json:"id"`
@@ -1933,7 +1927,7 @@ type TaskSlaTaskRef struct {
 type TaskSlaView struct {
 	ID                        string             `json:"id"`
 	SlaDefinition             *TaskSlaDefinition `json:"slaDefinition"`
-	Stage                     *TaskSlaStage      `json:"stage"`
+	Stage                     *string      `json:"stage"`
 	Task                      *TaskSlaTaskRef    `json:"task"`
 	BusinessTimeLeft          *string            `json:"businessTimeLeft"`
 	BusinessElapsedTime       *string            `json:"businessElapsedTime"`
@@ -1989,7 +1983,7 @@ type TaskSlaDetail struct {
 	ID                        string                   `json:"id"`
 	Task                      *TaskSlaTaskRef          `json:"task"`
 	SlaDefinition             *TaskSlaDefinitionDetail `json:"slaDefinition"`
-	Stage                     *TaskSlaStage            `json:"stage"`
+	Stage                     *string            `json:"stage"`
 	BusinessTimeLeft          *string                  `json:"businessTimeLeft"`
 	BusinessElapsedTime       *string                  `json:"businessElapsedTime"`
 	BusinessElapsedPercentage *string                  `json:"businessElapsedPercentage"`

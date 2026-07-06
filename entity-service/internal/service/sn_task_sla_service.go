@@ -143,10 +143,7 @@ func snTaskSlaToView(t snTaskSla) domain.TaskSlaView {
 	}
 
 	if t.Stage != nil {
-		view.Stage = &domain.TaskSlaStage{
-			ID:    t.Stage.ID,
-			Label: t.Stage.Label,
-		}
+		view.Stage = t.Stage.Label
 	}
 
 	if t.Task != nil {
@@ -229,10 +226,7 @@ func snTaskSlaToDetailView(t snTaskSlaDetail) domain.TaskSlaDetail {
 	}
 
 	if t.Stage != nil {
-		view.Stage = &domain.TaskSlaStage{
-			ID:    t.Stage.ID,
-			Label: t.Stage.Label,
-		}
+		view.Stage = t.Stage.Label
 	}
 
 	if t.Schedule != nil {

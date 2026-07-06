@@ -4001,16 +4001,6 @@ components:
           type: string
           nullable: true
 
-    TaskSlaStage:
-      type: object
-      properties:
-        id:
-          type: string
-          nullable: true
-        label:
-          type: string
-          nullable: true
-
     TaskSlaTaskRef:
       type: object
       properties:
@@ -4036,7 +4026,7 @@ components:
           $ref: '#/components/schemas/TaskSlaDefinition'
           nullable: true
         stage:
-          $ref: '#/components/schemas/TaskSlaStage'
+          type: string
           nullable: true
         task:
           $ref: '#/components/schemas/TaskSlaTaskRef'
@@ -4173,7 +4163,7 @@ components:
           $ref: '#/components/schemas/TaskSlaDefinitionDetail'
           nullable: true
         stage:
-          $ref: '#/components/schemas/TaskSlaStage'
+          type: string
           nullable: true
         businessTimeLeft:
           type: string
