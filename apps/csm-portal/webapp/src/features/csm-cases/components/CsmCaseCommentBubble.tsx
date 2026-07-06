@@ -14,12 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { alpha, Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
-import type { JSX } from "react";
+import { Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Bot } from "@wso2/oxygen-ui-icons-react";
+import { useMemo, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
 import { pickAccessibleText } from "@utils/contrastText";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import type {
   CsmCaseComment,
@@ -34,6 +36,7 @@ const ROLE_LABEL: Record<CsmCommentAuthorRole, string> = {
   customer: "Customer",
   wso2_engineer: "WSO2",
   system: "System",
+  chatbot: "Chatbot",
 };
 
 const ROLE_COLOR: Record<
@@ -43,13 +46,24 @@ const ROLE_COLOR: Record<
   customer: "default",
   wso2_engineer: "primary",
   system: "warning",
+  chatbot: "default",
 };
 
 export default function CsmCaseCommentBubble({
   comment,
 }: CsmCaseCommentBubbleProps): JSX.Element {
   const theme = useTheme();
-  const safeHtml = sanitizeRichTextHtml(comment.bodyHtml);
+  const isBot = comment.authorRole === "chatbot";
+  // A chatbot (Novera) message body is Markdown; render it to HTML first. Every
+  // other comment body is already rich-text HTML. Both go through the same
+  // sanitiser before injection.
+  const safeHtml = useMemo(
+    () =>
+      sanitizeRichTextHtml(
+        isBot ? markdownToHtml(comment.bodyHtml) : comment.bodyHtml,
+      ),
+    [comment.bodyHtml, isBot],
+  );
   const isSystem = comment.authorRole === "system";
 
   if (isSystem) {
@@ -112,7 +126,7 @@ export default function CsmCaseCommentBubble({
           fontSize: "0.85rem",
         }}
       >
-        {initialsOf(comment.authorName)}
+        {isBot ? <Bot size={16} /> : initialsOf(comment.authorName)}
       </Avatar>
       <Paper
         variant="outlined"
@@ -123,23 +137,27 @@ export default function CsmCaseCommentBubble({
           display: "flex",
           flexDirection: "column",
           gap: 0.75,
-          backgroundColor: isInternal
-            ? alpha(theme.palette.warning.main, 0.15)
-            : undefined,
-          borderColor: isInternal ? "warning.main" : undefined,
+          ...(isInternal && {
+            bgcolor: "action.hover",
+            borderColor: "divider",
+            borderLeftWidth: "3px",
+            borderLeftColor: "primary.main",
+          }),
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
           <Typography variant="subtitle2">{comment.authorName}</Typography>
-          <Chip
-            size="small"
-            label={ROLE_LABEL[comment.authorRole]}
-            color={ROLE_COLOR[comment.authorRole]}
-            variant="outlined"
-          />
+          {comment.authorRole !== "wso2_engineer" && (
+            <Chip
+              size="small"
+              label={ROLE_LABEL[comment.authorRole]}
+              color={ROLE_COLOR[comment.authorRole]}
+              variant="outlined"
+            />
+          )}
           {/* A filled chip "bubble" marks the work note; paired with the tinted
               background it reads as internal without a heavy banner. */}
-          {isInternal && <SemanticChip role="warning" label="Internal note" />}
+          {isInternal && <SemanticChip role="default" variant="outlined" label="Internal note" />}
           <Typography variant="caption" color="text.secondary">
             <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
           </Typography>
@@ -180,6 +198,23 @@ export default function CsmCaseCommentBubble({
               fontStyle: "italic",
             },
             "& h1, & h2, & h3": { mt: 1, mb: 0.5 },
+            // Novera answers arrive as Markdown tables; the markdown-it renderer
+            // wraps each in `.md-table-wrap`, which scrolls horizontally while
+            // the table keeps its native display (preserving a11y table roles).
+            "& .md-table-wrap": { overflowX: "auto", maxWidth: "100%", my: 0.75 },
+            "& table": {
+              width: "max-content",
+              minWidth: "100%",
+              borderCollapse: "collapse",
+            },
+            "& th, & td": {
+              border: 1,
+              borderColor: "divider",
+              px: 1,
+              py: 0.5,
+              textAlign: "left",
+            },
+            "& th": { bgcolor: "action.hover", fontWeight: 600 },
           }}
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />

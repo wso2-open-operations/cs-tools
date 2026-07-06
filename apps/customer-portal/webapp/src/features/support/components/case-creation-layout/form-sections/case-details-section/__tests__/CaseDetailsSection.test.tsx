@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { CaseDetailsSection } from "@features/support/components/case-creation-layout/form-sections/case-details-section/CaseDetailsSection";
@@ -33,9 +33,15 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
   )),
 }));
 
-vi.mock("@features/support/utils/support", () => ({
-  getSeverityColor: () => "error.main",
-}));
+vi.mock("@features/support/utils/support", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@features/support/utils/support")
+  >();
+  return {
+    ...actual,
+    getSeverityColor: () => "error.main",
+  };
+});
 
 const defaultFilters = {
   issueTypes: [{ id: "bug", label: "Bug" }],
@@ -77,13 +83,13 @@ describe("CaseDetailsSection", () => {
   });
 
   it("should render Title label and Generated from chat chip", () => {
-    renderSection();
+    renderSection({ isTitleFromChat: true });
     expect(screen.getByText("Title")).toBeInTheDocument();
     expect(screen.getByText("Generated from chat")).toBeInTheDocument();
   });
 
   it("should render Description label and From conversation chip", () => {
-    renderSection();
+    renderSection({ isDescriptionFromConversation: true });
     expect(screen.getByText("Description")).toBeInTheDocument();
     expect(screen.getByText("From conversation")).toBeInTheDocument();
   });
@@ -95,37 +101,11 @@ describe("CaseDetailsSection", () => {
   });
 
   it("should render Novera reference text", () => {
-    renderSection();
+    renderSection({ isDescriptionFromConversation: true });
     expect(
       screen.getByText(
         /This includes all the information you shared with Novera/i,
       ),
-    ).toBeInTheDocument();
-  });
-
-  it("should render edit button with accessible label", () => {
-    renderSection();
-    expect(
-      screen.getByRole("button", { name: /edit case details/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("should toggle editing mode and update accessible label", () => {
-    renderSection();
-    const editButton = screen.getByRole("button", {
-      name: /edit case details/i,
-    });
-
-    // Toggle ON
-    fireEvent.click(editButton);
-    expect(
-      screen.getByRole("button", { name: /stop editing case details/i }),
-    ).toBeInTheDocument();
-
-    // Toggle OFF
-    fireEvent.click(editButton);
-    expect(
-      screen.getByRole("button", { name: /edit case details/i }),
     ).toBeInTheDocument();
   });
 
@@ -144,7 +124,10 @@ describe("CaseDetailsSection", () => {
   });
 
   it("should render issue type and severity section with AI chips", () => {
-    renderSection();
+    renderSection({
+      isIssueTypeAutoDetected: true,
+      isSeverityAutoDetected: true,
+    });
     expect(screen.getByText("AI classified")).toBeInTheDocument();
     expect(screen.getByText("AI assessed")).toBeInTheDocument();
     expect(screen.getByText("Select Issue Type...")).toBeInTheDocument();

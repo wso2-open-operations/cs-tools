@@ -14,10 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Link, Sidebar, Typography } from "@wso2/oxygen-ui";
+import { Box, Link, Sidebar, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { Link as NavigateLink, useLocation } from "react-router";
-import { CSM_NAV_ITEMS, navItemForPath } from "@config/csmNavItems";
+import {
+  CSM_NAV_ITEMS,
+  isWipDisabled,
+  navItemForPath,
+} from "@config/csmNavItems";
+
+/** Tooltip for a disabled WIP item. Includes the label so the collapsed rail
+ *  (which hides the label) still says which feature it is. */
+const wipTooltip = (label: string): string =>
+  `${label} — this section is still under construction`;
 
 const COMPANY_NAME = "WSO2 LLC";
 const TERMS_OF_SERVICE_URL = "https://wso2.com/terms-of-use/";
@@ -54,14 +63,8 @@ export default function CsmSideBar({
     >
       <Sidebar.Nav>
         <Sidebar.Category>
-          {CSM_NAV_ITEMS.map((item) => (
-            <Link
-              key={item.id}
-              component={NavigateLink}
-              to={item.path}
-              color="inherit"
-              underline="none"
-            >
+          {CSM_NAV_ITEMS.map((item) => {
+            const itemContent = (
               <Sidebar.Item id={item.id}>
                 <Sidebar.ItemIcon>
                   <item.icon size={20} />
@@ -71,8 +74,47 @@ export default function CsmSideBar({
                     as "[object Object]". */}
                 <Sidebar.ItemLabel>{item.label}</Sidebar.ItemLabel>
               </Sidebar.Item>
-            </Link>
-          ))}
+            );
+
+            // WIP sections stay visible but disabled: no navigating Link, dimmed
+            // and non-clickable (pointer events blocked on the inner box so no
+            // click reaches Oxygen's select handler). The outer element is a
+            // focusable div (tabIndex 0, aria-disabled) so keyboard users can
+            // reach it and reveal the "work in progress" tooltip, which fires on
+            // both hover and focus. Their routes render the coming-soon page
+            // (see App.tsx's WipRouteGuard).
+            if (isWipDisabled(item)) {
+              return (
+                <Tooltip
+                  key={item.id}
+                  title={wipTooltip(item.label)}
+                  placement="right"
+                >
+                  <Box
+                    aria-disabled
+                    tabIndex={0}
+                    sx={{ display: "block", cursor: "not-allowed" }}
+                  >
+                    <Box sx={{ opacity: 0.45, pointerEvents: "none" }}>
+                      {itemContent}
+                    </Box>
+                  </Box>
+                </Tooltip>
+              );
+            }
+
+            return (
+              <Link
+                key={item.id}
+                component={NavigateLink}
+                to={item.path}
+                color="inherit"
+                underline="none"
+              >
+                {itemContent}
+              </Link>
+            );
+          })}
         </Sidebar.Category>
       </Sidebar.Nav>
 

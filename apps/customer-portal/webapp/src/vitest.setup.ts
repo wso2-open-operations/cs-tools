@@ -17,6 +17,18 @@
 import { vi } from "vitest";
 import "@testing-library/jest-dom";
 
+vi.mock("dompurify", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("dompurify")>();
+  return {
+    default: {
+      ...actual.default,
+      sanitize: actual.default.sanitize.bind(actual.default),
+      addHook: vi.fn(),
+      removeHook: vi.fn(),
+    },
+  };
+});
+
 // Mock Asgardeo to avoid buffer resolution issues in tests
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
@@ -39,4 +51,23 @@ export const mockAuthFetch = vi.fn().mockResolvedValue({
 
 vi.mock("@api/useAuthApiClient", () => ({
   useAuthApiClient: () => mockAuthFetch,
+}));
+
+vi.mock("@features/support/hooks/useResolvedInlineImageHtml", () => ({
+  useResolvedInlineImageHtml: (html: string) => ({
+    resolvedHtml: html,
+    isLoading: false,
+  }),
+}));
+
+vi.mock("@api/useGetAttachmentContent", () => ({
+  useGetAttachmentContent: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
+vi.mock("@utils/useDarkMode", () => ({
+  useDarkMode: () => false,
 }));

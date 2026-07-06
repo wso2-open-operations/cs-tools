@@ -21,6 +21,7 @@ import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import TabBar from "@components/tab-bar/TabBar";
 import SettingsAiAssistant from "@features/settings/components/SettingsAiAssistant";
+import SettingsDisplay from "@features/settings/components/SettingsDisplay";
 import SettingsUserManagement from "@features/settings/components/SettingsUserManagement";
 import SettingsRegistryTokens from "@features/settings/components/SettingsRegistryTokens";
 import {
@@ -69,9 +70,7 @@ export default function SettingsPage(): JSX.Element {
     () =>
       hideRestrictedTabs
         ? SETTINGS_PAGE_TABS.filter(
-            (tab) =>
-              tab.id !== SettingsPageTabId.USERS &&
-              tab.id !== SettingsPageTabId.REGISTRY_TOKENS,
+            (tab) => tab.id !== SettingsPageTabId.REGISTRY_TOKENS,
           )
         : [...SETTINGS_PAGE_TABS],
     [hideRestrictedTabs],
@@ -80,8 +79,7 @@ export default function SettingsPage(): JSX.Element {
   const safeActiveTab = useMemo(() => {
     if (
       hideRestrictedTabs &&
-      (resolveSettingsPageTabId(activeTab) === SettingsPageTabId.USERS ||
-        resolveSettingsPageTabId(activeTab) === SettingsPageTabId.REGISTRY_TOKENS)
+      resolveSettingsPageTabId(activeTab) === SettingsPageTabId.REGISTRY_TOKENS
     ) {
       return SettingsPageTabId.AI;
     }
@@ -132,6 +130,7 @@ export default function SettingsPage(): JSX.Element {
           isRestricted={isRestricted}
         />
       )}
+      {displayTab === SettingsPageTabId.DISPLAY && <SettingsDisplay />}
     </Box>
   );
 }

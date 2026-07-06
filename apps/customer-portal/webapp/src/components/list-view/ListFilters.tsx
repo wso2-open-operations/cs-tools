@@ -15,11 +15,14 @@
 // under the License.
 
 import {
+  Box,
+  Checkbox,
   FormControl,
   Grid,
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX, UIEvent } from "react";
@@ -29,6 +32,7 @@ import type {
   AllCasesFilterValues,
 } from "@features/support/types/cases";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type { ProjectContact } from "@features/settings/types/users";
 import {
   SelectMenuLoadMoreRow,
   SELECT_MENU_LOAD_MORE_ROW_VALUE,
@@ -41,18 +45,23 @@ import {
   deriveFilterLabels,
   mapSeverityToDisplay,
 } from "@features/support/utils/support";
+import DateRangeFilter from "@components/list-view/DateRangeFilter";
 
 export interface ListFiltersProps {
   filters: AllCasesFilterValues;
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
-  onFilterChange: (field: string, value: string) => void;
+  contacts?: ProjectContact[];
+  isContactsLoading?: boolean;
+  onFilterChange: (field: string, value: string | string[]) => void;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
   hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   hideCategoryFilter?: boolean;
+  hideCreatedByFilter?: boolean;
+  hideDateFilters?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
@@ -60,6 +69,7 @@ export interface ListFiltersProps {
 
 /**
  * ListFilters component to display filter dropdowns for case lists.
+ * Multi-select filters (status, severity, category, deployment) use checkboxes.
  *
  * @param {ListFiltersProps} props - Filter values, metadata, and change handler.
  * @returns {JSX.Element} The rendered filter dropdowns.
@@ -68,6 +78,8 @@ export default function ListFilters({
   filters,
   filterMetadata,
   deployments,
+  contacts,
+  isContactsLoading = false,
   onFilterChange,
   excludeS0 = false,
   restrictSeverityToLow = false,
@@ -75,11 +87,13 @@ export default function ListFilters({
   hideStatusFilter = false,
   hideDeploymentFilter = false,
   hideCategoryFilter = false,
+  hideCreatedByFilter = false,
+  hideDateFilters = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
 }: ListFiltersProps): JSX.Element {
-  const handleSelectChange =
+  const handleSingleChange =
     (field: string) => (event: SelectChangeEvent<string | string[]>) => {
       const val = event.target.value;
       const resolved = Array.isArray(val) ? (val[0] ?? "") : val;
@@ -87,8 +101,15 @@ export default function ListFilters({
       onFilterChange(field, resolved);
     };
 
+  const handleMultiChange =
+    (field: string) => (event: SelectChangeEvent<string[]>) => {
+      const val = event.target.value as string[];
+      onFilterChange(field, val);
+    };
+
   return (
-    <Grid container spacing={2} sx={{ mt: 1 }}>
+    <>
+    <Grid container spacing={2} sx={{ mt: 1, flexWrap: { xs: "wrap", md: "nowrap" }, overflowX: { md: "auto" } }}>
       {ALL_CASES_FILTER_DEFINITIONS.map((def) => {
         if (hideSeverityFilter && def.id === "severity") {
           return null;
@@ -102,21 +123,35 @@ export default function ListFilters({
         if (hideCategoryFilter && def.id === "category") {
           return null;
         }
+        if (hideCreatedByFilter && def.id === "createdBy") {
+          return null;
+        }
         if (def.metadataKey === "severities" && restrictSeverityToLow) {
           return null;
         }
         const { label, allLabel } = deriveFilterLabels(def.id);
 
         const isDeploymentFilter = def.id === "deployment";
-        const options = (() => {
+        const isCreatedByFilter = def.id === "createdBy";
+        const options = ((): { label: string | undefined; sublabel?: string; value: string }[] => {
           if (isDeploymentFilter) {
             return (
               deployments?.map((deployment) => ({
-                label: deployment.type?.label || deployment.name,
+                label: deployment.name || deployment.type?.label,
+                sublabel: deployment.name && deployment.type?.label ? deployment.type.label : undefined,
                 value: deployment.id,
               })) ?? []
             );
           }
+          if (isCreatedByFilter) {
+            return (
+              contacts?.map((contact) => ({
+                label: `${contact.firstName} ${contact.lastName}`.trim() || contact.email,
+                value: contact.email,
+              })) ?? []
+            );
+          }
+          if (!def.metadataKey) return [];
           const metadataOptions = filterMetadata?.[def.metadataKey];
           if (!Array.isArray(metadataOptions)) return [];
           const filtered =
@@ -144,16 +179,78 @@ export default function ListFilters({
 
         const hasNoOptions = (options?.length ?? 0) === 0;
 
+        if (def.multiSelect) {
+          const selectedValues = (filters[def.filterKey] as string[] | undefined) ?? [];
+          return (
+            <Grid key={def.id} size={{ xs: 12, sm: 6 }} sx={{ flex: { md: "1 1 0" }, minWidth: { md: 160 } }}>
+              <FormControl fullWidth size="small" sx={{ marginTop: { md: 1 } }}>
+                <InputLabel id={`${def.id}-label`}>{label}</InputLabel>
+                <Select
+                  multiple
+                  labelId={`${def.id}-label`}
+                  id={def.id}
+                  value={selectedValues}
+                  label={label}
+                  onChange={handleMultiChange(def.filterKey)}
+                  renderValue={(selected) => {
+                    if (!Array.isArray(selected) || selected.length === 0) return "";
+                    const labels = selected.map((v) => options.find((o) => o.value === v)?.label ?? v);
+                    const displayText = labels.join(", ");
+                    if (labels.length === 1) return displayText;
+                    return (
+                      <Tooltip title={displayText} placement="top">
+                        <Box
+                          component="span"
+                          sx={{
+                            display: "block",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {displayText}
+                        </Box>
+                      </Tooltip>
+                    );
+                  }}
+                >
+                  {isCreatedByFilter && isContactsLoading ? (
+                    <MenuItem disabled>
+                      <Typography variant="body2">Loading...</Typography>
+                    </MenuItem>
+                  ) : hasNoOptions ? (
+                    <MenuItem disabled>
+                      <Typography variant="body2">{EMPTY_DROPDOWN_PLACEHOLDER}</Typography>
+                    </MenuItem>
+                  ) : (
+                    options.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        <Checkbox checked={selectedValues.includes(option.value)} size="small" />
+                        <Box sx={{ ml: 1, display: "flex", alignItems: "baseline", gap: 0.5 }}>
+                          <Typography variant="body2">{option.label}</Typography>
+                          {option.sublabel && (
+                            <Typography variant="caption" color="text.secondary">- {option.sublabel}</Typography>
+                          )}
+                        </Box>
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+            </Grid>
+          );
+        }
+
         return (
-          <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>
+          <Grid key={def.id} size={{ xs: 12, sm: 6 }} sx={{ flex: { md: "1 1 0" }, minWidth: { md: 160 } }}>
             <FormControl fullWidth size="small">
               <InputLabel id={`${def.id}-label`}>{label}</InputLabel>
               <Select
                 labelId={`${def.id}-label`}
                 id={def.id}
-                value={filters[def.filterKey] || ""}
+                value={(filters[def.filterKey] as string | undefined) || ""}
                 label={label}
-                onChange={handleSelectChange(def.filterKey)}
+                onChange={handleSingleChange(def.filterKey)}
                 MenuProps={
                   isDeploymentFilter
                     ? {
@@ -207,5 +304,28 @@ export default function ListFilters({
         );
       })}
     </Grid>
+    {!hideDateFilters && (
+      <Grid container spacing={2} sx={{ mt: 1 }}>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <DateRangeFilter
+            label="Created Date"
+            startDate={filters.startCreatedDate}
+            endDate={filters.endCreatedDate}
+            onStartChange={(val) => onFilterChange("startCreatedDate", val ?? "")}
+            onEndChange={(val) => onFilterChange("endCreatedDate", val ?? "")}
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <DateRangeFilter
+            label="Updated Date"
+            startDate={filters.startUpdatedDate}
+            endDate={filters.endUpdatedDate}
+            onStartChange={(val) => onFilterChange("startUpdatedDate", val ?? "")}
+            onEndChange={(val) => onFilterChange("endUpdatedDate", val ?? "")}
+          />
+        </Grid>
+      </Grid>
+    )}
+    </>
   );
 }

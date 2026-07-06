@@ -24,7 +24,10 @@ import {
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { ChangeRequestFilterValues } from "@features/operations/types/changeRequests";
 import type { SupportStatConfig } from "@features/support/constants/supportConstants";
-import { ChangeRequestsViewMode } from "@features/operations/types/changeRequests";
+import {
+  ChangeRequestSortField,
+  ChangeRequestsViewMode,
+} from "@features/operations/types/changeRequests";
 import { ServiceRequestCaseSortField } from "@features/operations/types/serviceRequests";
 
 /**
@@ -180,16 +183,19 @@ export const CHANGE_REQUEST_FILTER_DEFINITIONS: Array<{
   filterKey: keyof ChangeRequestFilterValues;
   id: string;
   metadataKey: keyof CaseMetadataResponse;
+  multiSelect?: boolean;
 }> = [
   {
-    filterKey: "stateId",
+    filterKey: "stateIds",
     id: "state",
     metadataKey: "changeRequestStates",
+    multiSelect: true,
   },
   {
-    filterKey: "impactId",
+    filterKey: "impactIds",
     id: "impact",
     metadataKey: "changeRequestImpacts",
+    multiSelect: true,
   },
 ];
 
@@ -203,11 +209,16 @@ export const DAYS_OF_WEEK = [
   "Sat",
 ] as const;
 
+// Weekday labels for the calendar view.
 export const CHANGE_REQUEST_CALENDAR_WEEKDAY_LABELS = DAYS_OF_WEEK;
 
+// Max rows per search page when exporting change requests. 
 export const OPERATIONS_LIST_PAGE_SIZE = 10;
 
-/** Shared list header back control. */
+// Max rows per search page when exporting change requests. 
+export const CHANGE_REQUEST_SEARCH_RESULTS_PAGE_SIZE = 50;
+
+// Shared list header back control. 
 export const OPERATIONS_LIST_BACK_LABEL = "Back";
 
 // --- Change requests page ----------------------------------------------------
@@ -230,6 +241,27 @@ export const CHANGE_REQUESTS_SEARCH_PLACEHOLDER =
   "Search change requests by number, title, or description...";
 
 export const CHANGE_REQUESTS_ENTITY_LABEL = "change requests";
+
+export type ChangeRequestSortFieldOption = {
+  value: ChangeRequestSortField;
+  label: string;
+  kind?: "chronological" | "ordinal";
+};
+
+/** Sort options for change requests list (updated / created only). */
+export const CHANGE_REQUESTS_SORT_FIELD_OPTIONS: ChangeRequestSortFieldOption[] =
+  [
+    {
+      value: ChangeRequestSortField.UpdatedOn,
+      label: "Updated on",
+      kind: "chronological",
+    },
+    {
+      value: ChangeRequestSortField.CreatedOn,
+      label: "Created on",
+      kind: "chronological",
+    },
+  ];
 
 export const CHANGE_REQUESTS_VIEW_TAB_LIST_LABEL = "List View";
 
@@ -268,7 +300,7 @@ export const CHANGE_REQUESTS_LIST_PLACEHOLDER = "Not Available";
 
 export const CHANGE_REQUESTS_LIST_SR_PREFIX = "SR:";
 
-export const CHANGE_REQUESTS_LIST_CREATED_PREFIX = "Created:";
+export const CHANGE_REQUESTS_LIST_UPDATED_PREFIX = "Updated:";
 
 export const CHANGE_REQUESTS_LIST_SERVICE_OUTAGE_LABEL = "Service Outage";
 
@@ -328,13 +360,13 @@ export type ServiceRequestSortFieldOption = {
 export const SERVICE_REQUESTS_SORT_FIELD_OPTIONS: ServiceRequestSortFieldOption[] =
   [
     {
-      value: ServiceRequestCaseSortField.CreatedOn,
-      label: "Created on",
+      value: ServiceRequestCaseSortField.UpdatedOn,
+      label: "Updated on",
       kind: "chronological",
     },
     {
-      value: ServiceRequestCaseSortField.UpdatedOn,
-      label: "Updated on",
+      value: ServiceRequestCaseSortField.CreatedOn,
+      label: "Created on",
       kind: "chronological",
     },
     {

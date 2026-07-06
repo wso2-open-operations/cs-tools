@@ -28,25 +28,28 @@ import {
   callRequestStateLabel,
 } from "@features/csm-cases/utils/callRequestState";
 import RelativeTime from "@components/RelativeTime";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
 
+// Backend returns these times as UTC wall-clock (unzoned SN format). Convert to
+// the user's timezone for display; the timezone name makes the value explicit.
 function formatPreferredTimes(times: string[] | undefined): string {
   if (!times || times.length === 0) return "—";
   return times
-    .map((t) => {
-      try {
-        return new Intl.DateTimeFormat(undefined, {
-          dateStyle: "medium",
-          timeStyle: "short",
-          timeZone: "UTC",
-        }).format(new Date(t)) + " UTC";
-      } catch {
-        return t;
-      }
-    })
+    .map(
+      (t) =>
+        formatBackendTimestampForDisplay(t, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZoneName: "short",
+        }) ?? t,
+    )
     .join(", ");
 }
 

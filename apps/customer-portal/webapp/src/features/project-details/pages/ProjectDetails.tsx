@@ -169,7 +169,7 @@ export default function ProjectDetails(): JSX.Element {
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 3, height: "100%" }}>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
                   <ContactInfoCard
                     project={project}
                     isLoading={(isDetailsLoading || !project) && !projectError}

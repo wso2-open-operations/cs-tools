@@ -32,18 +32,17 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
   const { setProjectId } = useProject();
   const lastVisitedProjectId = getLastVisitedProjectId();
   const { data: meData, isLoading: meLoading, error: meError } = useQuery(users.me());
-  // const { data: projectsData, isLoading: projectsLoading, error: projectsError } = useQuery({ ...projects.all() });
   const { isLoading: projectsLoading, error: projectsError } = useInfiniteQuery(projects.paginated());
-
-  const { isLoading: isFeaturesLoading, isError: isFeaturesError } = useQuery({
-    ...projects.features(lastVisitedProjectId!),
-    enabled: !!lastVisitedProjectId,
-  });
 
   const [initialized, setInitialized] = useState(false);
 
-  const { data: lastVisitedProject } = useQuery({
+  const { data: lastVisitedProject, isLoading: isLastVisitedProjectLoading } = useQuery({
     ...projects.get(lastVisitedProjectId!),
+    enabled: !!lastVisitedProjectId,
+  });
+
+  const { isLoading: isFeaturesLoading, isError: isFeaturesError } = useQuery({
+    ...projects.features(lastVisitedProjectId!),
     enabled: !!lastVisitedProjectId,
   });
 
@@ -58,7 +57,14 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
     }
   }, [initialized, lastVisitedProject, setProjectId, navigate]);
 
-  if (meLoading || projectsLoading || isFeaturesLoading || isFeaturesError) return <LoadingFallback />;
+  if (
+    meLoading ||
+    projectsLoading ||
+    isLastVisitedProjectLoading ||
+    isFeaturesLoading ||
+    (lastVisitedProject && isFeaturesError)
+  )
+    return <LoadingFallback />;
 
   if (axios.isAxiosError(meError) || axios.isAxiosError(projectsError)) return <AuthorizationFallback />;
 

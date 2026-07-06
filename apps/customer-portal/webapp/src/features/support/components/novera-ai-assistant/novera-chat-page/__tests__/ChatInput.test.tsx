@@ -15,87 +15,45 @@
 // under the License.
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
-
-vi.mock("@wso2/oxygen-ui", async () => {
-  const actual: Record<string, unknown> = await vi.importActual("@wso2/oxygen-ui");
-  return {
-    ...actual,
-    Tooltip: ({ children }: { children: ReactNode }) => (
-      <div data-testid="tooltip">{children}</div>
-    ),
-  };
-});
-
-vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@wso2/oxygen-ui-icons-react")
-  >();
-  return {
-    ...actual,
-    Send: () => <svg data-testid="icon-send" />,
-    PanelTopClose: () => <svg data-testid="icon-panel-close" />,
-    FileText: () => <svg data-testid="icon-file" />,
-  };
-});
-
-// Mock Editor as a simple input for testing
-vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange, placeholder, onSubmitKeyDown }: any) => (
-    <div data-testid="chat-editor">
-      <span data-testid="editor-placeholder">{placeholder}</span>
-      <input
-        data-testid="editor-input"
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            onSubmitKeyDown?.();
-          }
-        }}
-      />
-    </div>
-  ),
-}));
 
 vi.mock("@features/support/utils/richTextEditor", () => ({
   htmlToPlainText: (html: string) => html || "",
 }));
 
+function renderInput(
+  props: Partial<Parameters<typeof ChatInput>[0]> = {},
+) {
+  const onSend = props.onSend ?? vi.fn();
+  const setInputValue = props.setInputValue ?? vi.fn();
+  return render(
+    <ThemeProvider theme={createTheme()}>
+      <ChatInput
+        inputValue={props.inputValue ?? ""}
+        setInputValue={setInputValue}
+        onSend={onSend}
+        {...props}
+      />
+    </ThemeProvider>,
+  );
+}
+
 describe("ChatInput", () => {
   it("should render editor and send button", () => {
-    const onSendMock = vi.fn();
-    const setInputMock = vi.fn();
-    render(
-      <ChatInput
-        inputValue=""
-        setInputValue={setInputMock}
-        onSend={onSendMock}
-      />,
-    );
-
-    expect(screen.getByTestId("editor-placeholder")).toHaveTextContent(
-      /Type your message/,
-    );
-    expect(screen.getByTestId("icon-send")).toBeInTheDocument();
+    renderInput();
+    expect(
+      screen.getByPlaceholderText("Type your message..."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
   });
 
   it("should call onSend when clicking send button with content", () => {
     const onSendMock = vi.fn();
-    const setInputMock = vi.fn();
-    render(
-      <ChatInput
-        inputValue="<p>Hi</p>"
-        setInputValue={setInputMock}
-        onSend={onSendMock}
-      />,
-    );
+    renderInput({ inputValue: "Hi", onSend: onSendMock });
 
-    const sendButton = screen.getByRole("button", { name: /send message/i });
-    fireEvent.click(sendButton);
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
 
     expect(onSendMock).toHaveBeenCalled();
   });

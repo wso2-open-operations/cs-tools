@@ -35,6 +35,7 @@ import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import {
   hasListSearchOrFilters,
   getLast30DaysUtcRange,
@@ -56,6 +57,7 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListSearchPanel from "@components/list-view/ListSearchPanel";
 import ListItems from "@components/list-view/ListItems";
+import AllCasesCsvExportButton from "@features/support/components/all-cases/AllCasesCsvExportButton";
 
 /**
  * AllCasesPage component to display all cases with stats, filters, and search.
@@ -81,14 +83,14 @@ export default function AllCasesPage(): JSX.Element {
   const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [filters, setFilters] = useSessionState<AllCasesFilterValues>(
     `${sessionPrefix}-filters`,
-    initialSeverityId ? { severityId: initialSeverityId } : {},
+    initialSeverityId ? { severityIds: [initialSeverityId] } : {},
     undefined,
     { popOnly: true },
   );
   const [isFiltersOpen, setIsFiltersOpen] = useState(
     () => hasListSearchOrFilters(searchTerm, filters),
   );
-  const [sortField, setSortField] = useSessionState<"createdOn" | "updatedOn" | "severity" | "state">(`${sessionPrefix}-sortField`, "createdOn", undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<"createdOn" | "updatedOn" | "severity" | "state">(`${sessionPrefix}-sortField`, "updatedOn", undefined, { popOnly: true });
   const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
   const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
   const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, 10, undefined, { popOnly: true });
@@ -119,15 +121,15 @@ export default function AllCasesPage(): JSX.Element {
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
   // When navigating from Dashboard with ?statusFilter=resolved, force the Closed status into the filter
-  // so the list only shows resolved cases. We guard on "already equals closed id" rather than "any truthy
-  // statusId" to avoid skipping the update when a prior session filter is a different status.
+  // so the list only shows resolved cases. We guard on "already contains closed id" rather than "any truthy
+  // statusIds" to avoid skipping the update when a prior session filter is a different status.
   useEffect(() => {
     if (statusFilter !== "resolved" || !filterMetadata?.caseStates) return;
     const closedState = filterMetadata.caseStates.find((s) => s.label === CaseStatus.CLOSED);
-    if (closedState && filters.statusId !== String(closedState.id)) {
-      setFilters((prev) => ({ ...prev, statusId: String(closedState.id) }));
+    if (closedState && !filters.statusIds?.includes(String(closedState.id))) {
+      setFilters((prev) => ({ ...prev, statusIds: [String(closedState.id)] }));
     }
-  }, [statusFilter, filterMetadata, filters.statusId, setFilters]);
+  }, [statusFilter, filterMetadata, filters.statusIds, setFilters]);
 
   // Fetch deployments for the deployment filter (10 at a time)
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
@@ -140,26 +142,36 @@ export default function AllCasesPage(): JSX.Element {
   const deploymentsList =
     deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [];
 
+  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId || "");
+  const contactsList = contactsData ?? [];
+
+  const hideSearchPanel = statusFilter != null || isDashboardSeverityNavigation;
+
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
         caseTypes: [CaseType.DEFAULT_CASE],
         ...buildDashboardCaseSearchFilters({
-          statusId: filters.statusId,
-          severityId: filters.severityId,
+          statusIds: filters.statusIds as string[] | undefined,
+          severityIds: filters.severityIds as string[] | undefined,
           issueTypes: filters.issueTypes,
-          deploymentId: permissions.hasDeployments
-            ? filters.deploymentId || undefined
+          deploymentIds: permissions.hasDeployments
+            ? (filters.deploymentIds as string[] | undefined)
             : undefined,
           searchQuery: searchTerm,
           createdByMe: createdByMe || undefined,
+          createdBy: filters.createdBy as string[] | undefined,
           caseStates: filterMetadata?.caseStates,
           isDashboardSeverityNavigation:
             (isDashboardSeverityNavigation &&
-              filters.severityId === initialSeverityId) ||
+              filters.severityIds?.includes(initialSeverityId ?? "")) ||
             statusFilter === "active",
         }),
         ...(statusFilter === "resolved" ? getLast30DaysUtcRange() : {}),
+        ...(!hideSearchPanel && filters.startCreatedDate ? { startCreatedDate: filters.startCreatedDate } : {}),
+        ...(!hideSearchPanel && filters.endCreatedDate ? { endCreatedDate: filters.endCreatedDate } : {}),
+        ...(!hideSearchPanel && filters.startUpdatedDate ? { startUpdatedDate: filters.startUpdatedDate } : {}),
+        ...(!hideSearchPanel && filters.endUpdatedDate ? { endUpdatedDate: filters.endUpdatedDate } : {}),
       },
       sortBy: {
         field: sortField,
@@ -167,6 +179,7 @@ export default function AllCasesPage(): JSX.Element {
       },
     }),
     [
+      hideSearchPanel,
       statusFilter,
       filters,
       searchTerm,
@@ -177,6 +190,7 @@ export default function AllCasesPage(): JSX.Element {
       filterMetadata?.caseStates,
       isDashboardSeverityNavigation,
       initialSeverityId,
+      contactsList,
     ],
   );
 
@@ -203,7 +217,7 @@ export default function AllCasesPage(): JSX.Element {
     (!!projectId && !hasCasesResponse) ||
     isFetchingNextPage;
 
-  const isInitialPageLoading = isCasesAreaLoading;
+  const isInitialPageLoading = isCasesAreaLoading || isContactsLoading;
 
   useEffect(() => {
     if (isInitialPageLoading) {
@@ -236,6 +250,11 @@ export default function AllCasesPage(): JSX.Element {
 
   const paginatedCases = currentPageCases;
 
+  const loadedCasesForExport = useMemo(
+    () => data?.pages.flatMap((page) => page.cases ?? []) ?? [],
+    [data],
+  );
+
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
   };
@@ -245,10 +264,12 @@ export default function AllCasesPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
+  const handleFilterChange = (field: string, value: string | string[]) => {
     setFilters((prev) => ({
       ...prev,
-      [field]: value || undefined,
+      [field]: Array.isArray(value)
+        ? (value.length === 0 ? undefined : value)
+        : (value || undefined),
     }));
     setPage(1);
   };
@@ -283,9 +304,20 @@ export default function AllCasesPage(): JSX.Element {
     setPage(1);
   };
 
-  // Note: deploymentId is ignored in API request when user lacks permissions.
+  // Note: deploymentIds are ignored in API request when user lacks permissions.
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
+
+  const downloadResultsButton = projectId ? (
+    <AllCasesCsvExportButton
+      projectId={projectId}
+      projectName={project?.name}
+      caseSearchRequest={caseSearchRequest}
+      prefetchedCases={loadedCasesForExport}
+      totalRecords={totalItems}
+      disabled={!hasCasesResponse || isCasesError || totalItems === 0}
+    />
+  ) : null;
 
   return (
     <Stack spacing={3} sx={{ minWidth: 0 }}>
@@ -325,7 +357,7 @@ export default function AllCasesPage(): JSX.Element {
         }}
       />
 
-      {statusFilter || isDashboardSeverityNavigation ? (
+      {hideSearchPanel ? (
         <Divider />
       ) : (
         <ListSearchPanel
@@ -335,6 +367,8 @@ export default function AllCasesPage(): JSX.Element {
           onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
           filters={filters}
           filterMetadata={filterMetadata}
+          contacts={contactsList}
+          isContactsLoading={isContactsLoading}
           deployments={
             projectDetailsReady && permissions.hasDeployments
               ? deploymentsList
@@ -357,8 +391,8 @@ export default function AllCasesPage(): JSX.Element {
           hideDeploymentFilter={!permissions.hasDeployments}
           isProjectContextLoading={isProjectContextLoading}
           excludeFromCount={
-            initialSeverityId && filters.severityId === initialSeverityId
-              ? ["severityId"]
+            initialSeverityId && filters.severityIds?.includes(initialSeverityId)
+              ? ["severityIds"]
               : []
           }
         />
@@ -369,8 +403,8 @@ export default function AllCasesPage(): JSX.Element {
         totalCount={totalItems}
         entityLabel="cases"
         sortFieldOptions={[
-          { value: "createdOn", label: "Created on" },
           { value: "updatedOn", label: "Updated on" },
+          { value: "createdOn", label: "Created on" },
           { value: "severity", label: "Severity", kind: "ordinal" as const },
           { value: "state", label: "Status", kind: "ordinal" as const },
         ]}
@@ -382,6 +416,7 @@ export default function AllCasesPage(): JSX.Element {
         }
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
+        rightContent={downloadResultsButton}
       />
 
       <ListItems

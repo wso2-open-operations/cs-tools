@@ -44,7 +44,6 @@ import {
   ShieldAlert,
   TriangleAlert,
   User,
-  Users,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type {
@@ -179,12 +178,14 @@ interface SecondaryItem {
   divider?: boolean;
   /** If true, the item is greyed out and not clickable. */
   disabled?: boolean;
+  /** Optional hover hint — used to explain why a `disabled` item is greyed out. */
+  tooltip?: string;
 }
 
 /**
  * The "More" overflow lists state-independent actions on a case. Items here
  * map to documented use cases — see `UseCases.md`:
- *   - Reassign / group               → ISSU-002 (self-assign generalised)
+ *   - Reassign engineer              → ISSU-002 (self-assign generalised)
  *   - Escalate / Severity change     → ISSU-006, ISSU-007
  *   - Hold auto-closure              → ISSU-027
  *   - Create incident / link incident → ISSU-021
@@ -217,18 +218,34 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
     });
   }
 
+  // Assignee changes are rejected while a case is Work in progress + Ongoing:
+  // the backend silently reverts the change and still reports success, so the
+  // reassign would appear to work while the assignee stays put. Gate the action
+  // here so we never fire that no-op. The work must be paused first (by the
+  // current assignee) or the reassignment handled by a lead.
+  const reassignBlocked =
+    caseDetail.state === "work_in_progress" && caseDetail.workState === "ongoing";
+
   // Only "Copy case link" is wired up for now. The rest are disabled until
   // their backend flows land, so the menu advertises the roadmap without
   // exposing dead actions that would no-op or toast a mock message.
   items.push(
-    { key: "reassign_engineer", label: "Assign / reassign engineer…", icon: <User size={16} /> },
-    { key: "reassign_group", label: "Reassign to group…", icon: <Users size={16} />, divider: true, disabled: true },
+    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
+    {
+      key: "reassign_engineer",
+      label: "Assign / reassign engineer…",
+      icon: <User size={16} />,
+      divider: true,
+      disabled: reassignBlocked,
+      tooltip: reassignBlocked
+        ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
+        : undefined,
+    },
     { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
     { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },
     { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true },
     { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true },
-    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, disabled: true },
-    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, disabled: true },
+    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true },
     { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
     { key: "request_call", label: "Request a call…", icon: <Phone size={16} />, disabled: true },
     { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
@@ -258,6 +275,7 @@ export default function CaseActionBar({
   onAction,
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [stateMenuAnchor, setStateMenuAnchor] = useState<HTMLElement | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PrimaryButton | null>(
     null,
   );
@@ -291,35 +309,39 @@ export default function CaseActionBar({
         justifyContent: { xs: "flex-start", md: "flex-end" },
       }}
     >
-      {primary.map((p, idx) => {
-        const button = (
+      {primary.length > 0 && (
+        <>
           <Button
             size="small"
-            variant={idx === 0 ? "contained" : "outlined"}
-            color={p.color}
-            startIcon={p.icon}
-            onClick={() => runPrimary(p)}
+            variant="outlined"
+            endIcon={<ChevronDown size={16} />}
+            onClick={(e) => setStateMenuAnchor(e.currentTarget)}
           >
-            {p.label}
+            Change state
           </Button>
-        );
-        // `targetState` is unique per button (each moves to a distinct state),
-        // so it is the correct React key — the lifecycle action is not (e.g.
-        // `resume_work` can map from more than one source state).
-        return p.tooltip ? (
-          <Tooltip key={p.targetState} title={p.tooltip}>
-            {button}
-          </Tooltip>
-        ) : (
-          <Box
-            key={p.targetState}
-            component="span"
-            sx={{ display: "inline-flex" }}
+          <Menu
+            anchorEl={stateMenuAnchor}
+            open={!!stateMenuAnchor}
+            onClose={() => setStateMenuAnchor(null)}
           >
-            {button}
-          </Box>
-        );
-      })}
+            {primary.map((p) => (
+              <MenuItem
+                key={p.targetState}
+                onClick={() => {
+                  setStateMenuAnchor(null);
+                  runPrimary(p);
+                }}
+                sx={{ gap: 1.25, minHeight: 36 }}
+              >
+                <Box sx={{ color: `${p.color}.main`, display: "flex" }}>
+                  {p.icon}
+                </Box>
+                {p.label}
+              </MenuItem>
+            ))}
+          </Menu>
+        </>
+      )}
 
       <Button
         size="small"
@@ -335,26 +357,44 @@ export default function CaseActionBar({
         open={!!menuAnchor}
         onClose={() => setMenuAnchor(null)}
       >
-        {secondary.map((item) => [
-          <MenuItem
-            key={item.key}
-            disabled={item.disabled}
-            onClick={() => {
-              setMenuAnchor(null);
-              void onAction({ secondary: item.key });
-            }}
-            sx={{ gap: 1.25, minHeight: 36 }}
-          >
-            {item.icon}
-            {item.label}
-          </MenuItem>,
-          item.divider ? (
-            <Box
-              key={`${item.key}-divider`}
-              sx={{ borderTop: 1, borderColor: "divider", my: 0.25 }}
-            />
-          ) : null,
-        ])}
+        {secondary.map((item) => {
+          const menuItem = (
+            <MenuItem
+              key={item.key}
+              disabled={item.disabled}
+              onClick={() => {
+                if (item.disabled) return;
+                setMenuAnchor(null);
+                void onAction({ secondary: item.key });
+              }}
+              sx={{ gap: 1.25, minHeight: 36 }}
+            >
+              {item.icon}
+              {item.label}
+            </MenuItem>
+          );
+          return [
+            // A disabled MenuItem has `pointer-events: none`, so a Tooltip only
+            // fires when it wraps a non-disabled span. Wrap only the tooltip item
+            // (which is disabled, so not keyboard-focusable anyway); leave the
+            // other items as bare MenuItems so the menu's arrow-key nav works.
+            item.tooltip ? (
+              <Tooltip key={item.key} title={item.tooltip}>
+                <Box component="span" sx={{ display: "block" }}>
+                  {menuItem}
+                </Box>
+              </Tooltip>
+            ) : (
+              menuItem
+            ),
+            item.divider ? (
+              <Box
+                key={`${item.key}-divider`}
+                sx={{ borderTop: 1, borderColor: "divider", my: 0.25 }}
+              />
+            ) : null,
+          ];
+        })}
       </Menu>
 
       <Dialog

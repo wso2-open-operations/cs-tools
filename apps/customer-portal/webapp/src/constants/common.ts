@@ -32,6 +32,9 @@ export const FOOTER_HEIGHT_PX = 64;
 // Header height in pixels.
 export const HEADER_HEIGHT_PX = 64;
 
+/** Overlay sidebar drawer width; matches Oxygen Sidebar default expanded width. */
+export const SIDEBAR_DRAWER_WIDTH_PX = 250;
+
 // Vertical gap in pixels.
 export const BANNER_FOOTER_GAP_PX = 24;
 
@@ -40,3 +43,7 @@ export const BANNER_HEADER_GAP_PX = 24;
 
 // Horizontal gap in pixels.
 export const BANNER_RIGHT_GAP_PX = 24;
+
+export const ERROR_UNSUPPORTED_TYPE =
+  "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment.";
+export const ERROR_SIZE_EXCEEDED = "Image exceeds the maximum allowed size of 10 MB.";

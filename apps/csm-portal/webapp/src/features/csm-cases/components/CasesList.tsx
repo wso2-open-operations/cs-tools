@@ -14,12 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
+import { WORK_STATE_LABEL } from "@features/csm-cases/utils/caseWorkState";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 
 interface CasesListProps {
@@ -41,6 +42,8 @@ const HEADER_CELLS: string[] = [
 
 // Subject gets the lion's share of the row; the ids sit in their own narrow
 // column so a long subject no longer has to share one cell with them.
+// The work-state chip (only present for WIP cases) stacks under the State chip
+// in the State column, so it doesn't need a column of its own.
 const GRID =
   "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto";
 
@@ -159,6 +162,7 @@ export default function CasesList({
                   <Typography
                     variant="body2"
                     noWrap
+                    title={c.wso2CaseId}
                     sx={{ fontFamily: "monospace", fontWeight: 600 }}
                   >
                     {c.wso2CaseId}
@@ -169,39 +173,55 @@ export default function CasesList({
                     variant="caption"
                     color="text.secondary"
                     noWrap
+                    title={c.caseNumber}
                     sx={{ fontFamily: "monospace", display: "block" }}
                   >
                     {c.caseNumber}
                   </Typography>
                 )}
-                {!c.wso2CaseId && !c.caseNumber && (
-                  <Typography variant="body2" color="text.secondary">
-                    —
-                  </Typography>
-                )}
               </Box>
               {/* Subject (the widest column) + project for context. */}
               <Box sx={{ minWidth: 0 }}>
-                <Typography variant="body2" noWrap>
+                <Typography variant="body2" noWrap title={c.subject}>
                   {c.subject}
                 </Typography>
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   noWrap
+                  title={c.projectName || undefined}
                   sx={{ display: "block" }}
                 >
                   {c.projectName}
                 </Typography>
               </Box>
-              <Typography variant="body2" noWrap>
+              <Typography variant="body2" noWrap title={c.product || undefined}>
                 {c.product}
               </Typography>
               <Box sx={{ justifySelf: "start" }}>
                 <SeverityChip severity={c.severity} clickable />
               </Box>
-              <Box sx={{ justifySelf: "start" }}>
-                <StateChip state={c.state} clickable />
+              {/* State chip, with the work-state chip stacked beneath it (the
+                  latter only for WIP cases). */}
+              <Box
+                sx={{
+                  justifySelf: "start",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 0.5,
+                }}
+              >
+                <StateChip state={c.state} variant="outlined" clickable />
+                {c.state === "work_in_progress" && c.workState && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={c.workState === "paused" ? "warning" : "default"}
+                    label={WORK_STATE_LABEL[c.workState]}
+                    sx={{ fontWeight: 600 }}
+                  />
+                )}
               </Box>
               <Typography variant="caption" color="text.secondary" noWrap>
                 <RelativeTime iso={c.updatedAt} />

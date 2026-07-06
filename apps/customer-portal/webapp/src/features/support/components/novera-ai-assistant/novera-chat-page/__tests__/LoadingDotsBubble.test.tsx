@@ -2,7 +2,8 @@
 //
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
+// in compliance with the License.
+// You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,23 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import LoadingDotsBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/LoadingDotsBubble";
-
-vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children }: any) => <div data-testid="loading-dots-box">{children}</div>,
-  Paper: ({ children }: any) => <div data-testid="loading-dots-paper">{children}</div>,
-}));
-
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Bot: () => <svg data-testid="loading-dots-bot" />,
-}));
 
 describe("LoadingDotsBubble", () => {
   it("should render loading dots container with bot icon", () => {
-    render(<LoadingDotsBubble />);
-    expect(screen.getByTestId("loading-dots-bot")).toBeInTheDocument();
-    expect(screen.getAllByTestId("loading-dots-paper").length).toBeGreaterThan(0);
+    const { container } = render(
+      <ThemeProvider theme={createTheme()}>
+        <LoadingDotsBubble />
+      </ThemeProvider>,
+    );
+    expect(container.querySelector(".MuiPaper-root")).toBeTruthy();
+    expect(container.querySelector("svg")).toBeTruthy();
   });
 });

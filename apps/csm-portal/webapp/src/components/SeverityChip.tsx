@@ -47,7 +47,7 @@ export default function SeverityChip({
     <SemanticChip
       role={SEVERITY_COLOR[severity]}
       label={
-        withLabel ? `${severity} — ${SEVERITY_LABEL[severity]}` : severity
+        withLabel ? `${severity} (${SEVERITY_LABEL[severity]})` : severity
       }
       size={size}
       bold

@@ -25,6 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { ArrowLeft, Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
+import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
 import type { JSX } from "react";
 import CaseDetailsActionRow from "@features/support/components/case-details/header/CaseDetailsActionRow";
 import {
@@ -112,7 +113,9 @@ export default function AnnouncementDetailsPanel({
   const statusLabel = data.status?.label;
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
-  const createdOnLabel = formatAnnouncementDateDisplay(data.createdOn);
+  const updatedOnLabel = formatAnnouncementDateDisplay(
+    data.updatedOn ?? data.createdOn,
+  );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -221,7 +224,7 @@ export default function AnnouncementDetailsPanel({
               aria-hidden
             />
             <Typography variant="body2" color="text.secondary">
-              {createdOnLabel}
+              {updatedOnLabel}
             </Typography>
           </Stack>
           {data.issueType?.label && (
@@ -287,7 +290,7 @@ export default function AnnouncementDetailsPanel({
                 }}
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
                 dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(normalizedHtml),
+                  __html: DOMPurify.sanitize(normalizedHtml, DESCRIPTION_PURIFY_CONFIG),
                 }}
               />
             );

@@ -208,11 +208,11 @@ export default function AllConversationsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
+  const handleFilterChange = (field: string, value: string | string[]) => {
     const key = field as keyof AllConversationsFilterValues;
     setFilters((prev) => ({
       ...prev,
-      [key]: value || undefined,
+      [key]: Array.isArray(value) ? (value.length === 0 ? undefined : value[0]) : (value || undefined),
     }));
     setPage(1);
   };

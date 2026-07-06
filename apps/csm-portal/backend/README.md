@@ -189,6 +189,7 @@ backend/
 - `POST /cases/{id}/call-requests` — Create a call request for a case (ServiceNow only)
 - `POST /cases/{id}/call-requests/search` — Search call requests for a case (ServiceNow only)
 - `PATCH /cases/{id}/call-requests/{callRequestId}` — Update a call request (ServiceNow only)
+- `POST /cases/{id}/github-issues` — Create a GitHub issue from a case; `reason` selects target repo (`default`/`migration`/`rd_ticket`; ServiceNow only)
 
 ### Users
 
@@ -222,9 +223,17 @@ backend/
 
 ### Change Requests
 
+- `POST /change-requests` — Create a change request (ServiceNow data source only)
 - `GET /change-requests/{id}` — Get change request by ID (ServiceNow data source only)
 - `PATCH /change-requests/{id}` — Update a change request (`plannedStartOn`, `isCustomerApproved`, `isCustomerReviewed`; ServiceNow data source only)
 - `POST /change-requests/search` — Search change requests (ServiceNow data source only)
+
+### CMDB
+
+- `POST /services/search` — Search IT services (ServiceNow data source only)
+- `POST /service-offerings/search` — Search service offerings (ServiceNow data source only)
+- `POST /groups/search` — Search assignment groups (ServiceNow data source only)
+- `POST /configuration-items/search` — Search configuration items (ServiceNow data source only)
 
 ### Time Cards
 
@@ -239,6 +248,10 @@ backend/
 
 - `POST /products/vulnerabilities/search` — Search product vulnerabilities; requires `pagination`, optional `filters` (`priority`, `searchQuery`, `productName`, `productVersion`) (ServiceNow data source only)
 - `GET /products/vulnerabilities/{id}` — Get product vulnerability by ID (ServiceNow data source only)
+
+### Conversations
+
+- `GET /conversations/{id}/messages` — Get paginated messages for a conversation; optional query params `limit` (1–100, default 20) and `offset` (default 0) (ServiceNow data source only)
 
 ### Updates
 

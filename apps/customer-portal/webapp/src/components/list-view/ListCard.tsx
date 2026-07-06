@@ -41,6 +41,7 @@ export interface ListCardProps {
   caseItem: CaseListItem;
   onClick?: (caseItem: CaseListItem) => void;
   hideSeverity?: boolean;
+  showEngagementType?: boolean;
 }
 
 /**
@@ -54,6 +55,7 @@ export default function ListCard({
   caseItem,
   onClick,
   hideSeverity = false,
+  showEngagementType = false,
 }: ListCardProps): JSX.Element {
   const theme = useTheme();
   const colorPath = getStatusColor(caseItem.status?.label);
@@ -142,14 +144,23 @@ export default function ListCard({
                 {caseItem.status?.label || "--"}
               </Typography>
             </Stack>
-            {caseItem.issueType?.label && (
-              <Chip
-                size="small"
-                label={caseItem.issueType.label}
-                variant="outlined"
-                sx={{ height: 20, fontSize: "0.75rem" }}
-              />
-            )}
+            {showEngagementType
+              ? caseItem.engagementType?.label && (
+                  <Chip
+                    size="small"
+                    label={caseItem.engagementType.label}
+                    variant="outlined"
+                    sx={{ height: 20, fontSize: "0.75rem" }}
+                  />
+                )
+              : caseItem.issueType?.label && (
+                  <Chip
+                    size="small"
+                    label={caseItem.issueType.label}
+                    variant="outlined"
+                    sx={{ height: 20, fontSize: "0.75rem" }}
+                  />
+                )}
           </Stack>
         }
       />
@@ -202,7 +213,7 @@ export default function ListCard({
               color="text.secondary"
               sx={{ lineHeight: 1, overflowWrap: "anywhere" }}
             >
-              Created {formatDateTime(caseItem.createdOn) || "--"}
+              Updated {formatDateTime(caseItem.updatedOn ?? caseItem.createdOn) || "--"}
             </Typography>
           </Box>
           {caseItem.createdBy && (

@@ -32,6 +32,30 @@ paths:
           description: Unauthorized
         "500":
           description: InternalServerError
+  /search:
+    post:
+      summary: Global search across projects and cases.
+      operationId: postSearch
+      requestBody:
+        description: Global search request payload with optional filters and pagination
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlobalSearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalSearchResponse'
+        "400":
+          description: BadRequest
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
   /users/me:
     get:
       summary: Fetch user information of the logged in user.
@@ -189,6 +213,10 @@ paths:
       responses:
         "200":
           description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentsResponse'
         "400":
           description: BadRequest
           content:
@@ -1488,6 +1516,96 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /deployments/{deploymentId}/products/{productId}/metrics/search:
+    post:
+      summary: Search metrics for a deployed product within a specific deployment.
+      operationId: postDeploymentsDeploymentidProductsProductidMetricsSearch
+      parameters:
+      - name: deploymentId
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: productId
+        in: path
+        description: ID of the deployed product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Metrics search payload containing startDate and endDate (within a 1-year range)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductMetricsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployedProductMetricsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+  /deployments/{deploymentId}/products/{productId}/metrics/usage-counts/search:
+    post:
+      summary: Search metrics usage counts for a deployed product within a specific deployment.
+      operationId: postDeploymentsDeploymentidProductsProductidMetricsUsageCountsSearch
+      parameters:
+      - name: deploymentId
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: productId
+        in: path
+        description: ID of the deployed product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: "Metrics usage counts search payload containing startDate and endDate (within a 1-year range)"
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductMetricsUsageCountsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployedProductMetricsUsageCountsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
   /deployments/products/{id}/catalogs/search:
     post:
       summary: Search catalogs for a specific deployed product with filters and pagination.
@@ -1922,6 +2040,80 @@ paths:
           description: Forbidden
         "409":
           description: Conflict
+  /cases/{caseId}/escalations:
+    post:
+      summary: Create an escalation for a specific case.
+      operationId: postCasesCaseidEscalations
+      parameters:
+      - name: caseId
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Escalation creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalationCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationCreateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "500":
+          description: InternalServerError
+  /cases/{caseId}/escalations/search:
+    post:
+      summary: Search escalations for a specific case.
+      operationId: postCasesCaseidEscalationsSearch
+      parameters:
+      - name: caseId
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Escalation search payload containing sort and pagination info
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalationSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "500":
+          description: InternalServerError
   /cases/{id}/call-requests/search:
     post:
       summary: Search call requests for a specific case with filters and pagination.
@@ -2552,6 +2744,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /deployment-usages:
+    post:
+      summary: Import product consumption usage from a zip file.
+      operationId: postDeploymentUsages
+      requestBody:
+        content:
+          '*/*':
+            schema:
+              description: Any type of entity body
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentUsageImportResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
   /projects/{id}/stats/usage:
     get:
       summary: Get usage stats for a specific project.
@@ -3023,6 +3239,36 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /users/groups:
+    post:
+      summary: Add users to a group via the SCIM operations service.
+      operationId: postUsersGroups
+      requestBody:
+        description: Request payload containing group name and user emails
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUsersToGroupRequest'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddUsersToGroupResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
 components:
   schemas:
     Account:
@@ -3049,6 +3295,39 @@ components:
           description: Whether the account is a partner or not
           nullable: true
       description: Account details record
+    AddUsersToGroupRequest:
+      required:
+      - emails
+      - group
+      type: object
+      properties:
+        group:
+          type: string
+          description: Display name of the group
+        emails:
+          type: array
+          description: Array of user email addresses to add to the group
+          items:
+            type: string
+      additionalProperties: false
+      description: Request payload for adding users to a group.
+    AddUsersToGroupResponse:
+      type: object
+      properties:
+        addedUsers:
+          type: array
+          description: Users successfully added to the group
+          items:
+            type: string
+          default: []
+        failedUsers:
+          type: array
+          description: Users that failed to be added
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+      description: Response payload for add-users-to-group operation.
     Attachment:
       required:
       - createdBy
@@ -3427,6 +3706,11 @@ components:
           description: List of attachments
           items:
             $ref: '#/components/schemas/CaseCreateAttachment'
+        watchList:
+          type: array
+          description: Watch list user emails to add to the case
+          items:
+            $ref: '#/components/schemas/Email'
       additionalProperties: false
       description: Payload for creating a case.
     CaseResponse:
@@ -3447,6 +3731,7 @@ components:
         - slaResponseTime
         - type
         - updatedOn
+        - watchList
         type: object
         properties:
           updatedOn:
@@ -3583,6 +3868,12 @@ components:
             nullable: true
             items:
               $ref: '#/components/schemas/ServiceRequestVariable'
+          watchList:
+            type: array
+            description: Watch list users
+            nullable: true
+            items:
+              $ref: '#/components/schemas/WatchList'
         additionalProperties: false
     CaseSearchFilters:
       type: object
@@ -3594,12 +3885,23 @@ components:
           type: integer
           description: Issue ID
           format: int64
+        issueIds:
+          type: array
+          description: Issue IDs
+          items:
+            type: integer
+            format: int64
         statusIds:
           type: array
           description: Status IDs
           items:
             type: integer
             format: int64
+        createdBy:
+          type: array
+          description: Emails of users involved in the case
+          items:
+            type: string
         caseTypes:
           type: array
           description: List of case types
@@ -3609,6 +3911,12 @@ components:
           type: integer
           description: Severity ID
           format: int64
+        severityIds:
+          type: array
+          description: List of case severity keys
+          items:
+            type: integer
+            format: int64
         engagementTypeKeys:
           type: array
           description: Engagement type keys (required for engagement type cases)
@@ -3619,9 +3927,22 @@ components:
           $ref: '#/components/schemas/UtcDateTimeString'
         closedEndDate:
           $ref: '#/components/schemas/UtcDateTimeString'
+        startCreatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        endCreatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        startUpdatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        endUpdatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
         deploymentId:
           type: string
           description: Deployment ID
+        deploymentIds:
+          type: array
+          description: Deployment ID list
+          items:
+            $ref: '#/components/schemas/IdString'
         createdByMe:
           type: boolean
           description: Case created by the logged in user
@@ -3656,14 +3977,17 @@ components:
       - service_request
       - default_case
     CaseUpdatePayload:
-      required:
-      - stateKey
       type: object
       properties:
         stateKey:
           type: integer
           description: State key to update
           format: int64
+        watchList:
+          type: array
+          description: Watch list user emails to update on the case
+          items:
+            $ref: '#/components/schemas/Email'
       additionalProperties: false
       description: Request payload for updating a case.
     CasesTrend:
@@ -3879,16 +4203,30 @@ components:
               type: integer
               description: Change request impact key
               format: int64
+            impactKeys:
+              type: array
+              description: Change request impact keys
+              items:
+                type: integer
+                format: int64
             closedStartDate:
               $ref: '#/components/schemas/UtcDateTimeString'
             closedEndDate:
               $ref: '#/components/schemas/UtcDateTimeString'
           additionalProperties: false
           description: Filter criteria
+        sortBy:
+          $ref: '#/components/schemas/SortBy'
         pagination:
           $ref: '#/components/schemas/Pagination'
       additionalProperties: false
       description: Request payload for searching change requests.
+    ChangeRequestSortField:
+      type: string
+      description: Valid change request sort field values.
+      enum:
+      - updatedOn
+      - createdOn
     ChangeRequestUpdatePayload:
       type: object
       properties:
@@ -4079,6 +4417,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
+          nullable: true
         isCsIntegrationUser:
           type: boolean
           description: Whether the contact is an Integration user or not
@@ -4139,6 +4481,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+          default: false
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
           default: false
         isPortalUser:
           type: boolean
@@ -4529,6 +4875,182 @@ components:
           $ref: '#/components/schemas/Pagination'
       additionalProperties: false
       description: Deployed product search payload
+    DeployedProductMetricsPayload:
+      required:
+      - startDate
+      - endDate
+      type: object
+      properties:
+        startDate:
+          $ref: '#/components/schemas/Date'
+        endDate:
+          $ref: '#/components/schemas/Date'
+    DeployedProductMetricsInstance:
+      required:
+      - id
+      - name
+      - cores
+      type: object
+      properties:
+        id:
+          type: string
+          description: Instance ID
+        name:
+          type: string
+          description: Instance name
+        cores:
+          type: integer
+          description: CPU cores allocated
+    DeployedProductMetricsChartDataPoint:
+      required:
+      - date
+      - instanceCount
+      - totalCores
+      - minCores
+      - maxCores
+      - avgCores
+      - instances
+      type: object
+      properties:
+        date:
+          type: string
+          description: "Date of the data point (format: YYYY-MM-DD)"
+        instanceCount:
+          type: integer
+          description: Number of instances on this date
+        totalCores:
+          type: integer
+          description: Total CPU cores on this date
+        minCores:
+          type: integer
+          description: Minimum CPU cores on this date
+        maxCores:
+          type: integer
+          description: Maximum CPU cores on this date
+        avgCores:
+          type: number
+          description: Average CPU cores on this date
+        instances:
+          type: array
+          description: Individual instances on this date
+          items:
+            $ref: '#/components/schemas/DeployedProductMetricsInstance'
+    DeployedProductMetricsSummary:
+      required:
+      - dateRange
+      - totalInstances
+      type: object
+      properties:
+        dateRange:
+          required:
+          - start
+          - end
+          type: object
+          properties:
+            start:
+              $ref: '#/components/schemas/Date'
+            end:
+              $ref: '#/components/schemas/Date'
+        totalInstances:
+          type: integer
+          description: Total number of distinct instances in the range
+        minCores:
+          type: integer
+          nullable: true
+          description: "Minimum core count in the range; null when there are no instances"
+        maxCores:
+          type: integer
+          nullable: true
+          description: "Maximum core count in the range; null when there are no instances"
+        avgCores:
+          type: number
+          nullable: true
+          description: "Average core count in the range; null when there are no instances"
+    DeployedProductMetricsResponse:
+      required:
+      - product
+      - summary
+      - chartData
+      type: object
+      properties:
+        product:
+          required:
+          - id
+          - name
+          type: object
+          properties:
+            id:
+              type: string
+              description: Deployed product ID
+            name:
+              type: string
+              description: Deployed product name
+        summary:
+          $ref: '#/components/schemas/DeployedProductMetricsSummary'
+        chartData:
+          type: array
+          description: Chart data points ordered by date
+          items:
+            $ref: '#/components/schemas/DeployedProductMetricsChartDataPoint'
+    DeployedProductMetricsUsageCountsPayload:
+      required:
+      - startDate
+      - endDate
+      type: object
+      properties:
+        startDate:
+          $ref: '#/components/schemas/Date'
+        endDate:
+          $ref: '#/components/schemas/Date'
+    DeployedProductMetricsUsageCountsSummary:
+      required:
+      - dateRange
+      - countTypes
+      type: object
+      properties:
+        dateRange:
+          required:
+          - start
+          - end
+          type: object
+          properties:
+            start:
+              type: string
+              description: Start date
+            end:
+              type: string
+              description: End date
+        countTypes:
+          type: object
+          description: Count types aggregated over the range
+          additionalProperties:
+            type: integer
+    DeployedProductMetricsUsageCountsResponse:
+      required:
+      - product
+      - summary
+      - chartData
+      type: object
+      properties:
+        product:
+          required:
+          - id
+          - name
+          type: object
+          properties:
+            id:
+              type: string
+              description: Deployed product ID
+            name:
+              type: string
+              description: Deployed product name
+        summary:
+          $ref: '#/components/schemas/DeployedProductMetricsUsageCountsSummary'
+        chartData:
+          type: array
+          description: Chart data points ordered by date
+          items:
+            type: object
     DeployedProductUpdatePayload:
       type: object
       properties:
@@ -4576,6 +5098,73 @@ components:
           type: string
           description: Description
       description: Payload for creating a deployment.
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        number:
+          type: string
+          description: Number of the deployment
+          nullable: true
+        name:
+          type: string
+          description: Name
+        createdOn:
+          type: string
+          description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
+        description:
+          type: string
+          description: Description
+          nullable: true
+        url:
+          type: string
+          description: URL
+          nullable: true
+        project:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Associated project
+        type:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Type
+        productCount:
+          type: integer
+          description: Number of deployed products associated with this deployment
+          format: int64
+      description: Deployment information.
+    DeploymentsResponse:
+      required:
+      - deployments
+      - totalRecords
+      type: object
+      properties:
+        deployments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deployment'
+          description: List of deployments
+        totalRecords:
+          type: integer
+          description: Total records count
+          format: int64
+        offset:
+          minimum: 0
+          type: integer
+          description: Offset for pagination
+          format: int64
+        limit:
+          type: integer
+          description: Limit for pagination
+          format: int64
+      description: Deployments search response.
     DeploymentSearchPayload:
       type: object
       properties:
@@ -4602,6 +5191,20 @@ components:
           description: Active status (can only be set to false to deactivate deployment)
       additionalProperties: false
       description: Request payload for updating a deployment.
+    DeploymentUsageImportResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Response message
+        result:
+          type: object
+          description: Response result
+      description: Deployment usage import response.
+    Email:
+      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+      type: string
+      description: Email validation regex pattern.
     ErrorPayload:
       required:
       - message
@@ -4684,6 +5287,10 @@ components:
               $ref: '#/components/schemas/Date'
             endDate:
               $ref: '#/components/schemas/Date'
+            dataSource:
+              type: integer
+              description: "Data source filter: 1 = API Call, 2 = File Upload"
+              format: int64
           additionalProperties: false
           description: Filter criteria
       additionalProperties: false
@@ -4753,6 +5360,7 @@ components:
       required:
       - id
       - isCsAdmin
+      - isLead
       - isPortalUser
       - isSecurityContact
       - state
@@ -4767,6 +5375,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+          nullable: true
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
           nullable: true
         isPortalUser:
           type: boolean
@@ -4785,6 +5397,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+          default: false
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
           default: false
         isPortalUser:
           type: boolean
@@ -5871,7 +6487,10 @@ components:
       type: object
       properties:
         field:
-          $ref: '#/components/schemas/CaseSortField'
+          description: Field to sort by
+          oneOf:
+          - $ref: '#/components/schemas/CaseSortField'
+          - $ref: '#/components/schemas/ChangeRequestSortField'
         order:
           $ref: '#/components/schemas/SortOrder'
       description: Sort configuration.
@@ -6057,6 +6676,12 @@ components:
           nullable: true
           allOf:
           - $ref: '#/components/schemas/ReferenceItem'
+        watchList:
+          type: array
+          description: Watch list users
+          nullable: true
+          items:
+            $ref: '#/components/schemas/WatchList'
       additionalProperties: false
       description: Updated case details.
     UpdatedChangeRequest:
@@ -6240,3 +6865,393 @@ components:
           description: Variable value
       additionalProperties: false
       description: Variable data for service request.
+    WatchList:
+      required:
+      - email
+      - id
+      - name
+      - userName
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        userName:
+          type: string
+          description: User name
+        name:
+          type: string
+          description: Full name of the user
+          nullable: true
+        email:
+          type: string
+          description: Email address of the user
+          nullable: true
+      additionalProperties: false
+      description: Watch list information.
+    EscalationCreatePayload:
+      required:
+      - reason
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Reason for the escalation
+      additionalProperties: false
+      description: Request payload for creating an escalation.
+    EscalationSortField:
+      type: string
+      description: Valid escalation sort field values.
+      enum:
+      - createdOn
+      - updatedOn
+    EscalationSearchPayload:
+      type: object
+      properties:
+        sortBy:
+          type: object
+          required:
+          - field
+          - order
+          properties:
+            field:
+              $ref: '#/components/schemas/EscalationSortField'
+            order:
+              $ref: '#/components/schemas/SortOrder'
+          description: Sort configuration
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for searching escalations.
+    CreatedEscalation:
+      required:
+      - case
+      - createdBy
+      - createdOn
+      - currentLevel
+      - id
+      - previousLevel
+      - reason
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        case:
+          $ref: '#/components/schemas/ReferenceItem'
+        currentLevel:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Current escalation level
+        previousLevel:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Previous escalation level
+        createdBy:
+          type: string
+          description: User who created the escalation
+        createdOn:
+          type: string
+          description: Created date and time
+        reason:
+          type: string
+          description: Reason for the escalation
+        notificationSentTo:
+          type: array
+          nullable: true
+          description: Users notified about the escalation
+          items:
+            type: object
+            required:
+            - id
+            - userName
+            properties:
+              id:
+                $ref: '#/components/schemas/IdString'
+              userName:
+                type: string
+              name:
+                type: string
+                nullable: true
+              email:
+                type: string
+                nullable: true
+      description: Created escalation details.
+    EscalationCreateResponse:
+      required:
+      - escalation
+      - message
+      type: object
+      properties:
+        message:
+          type: string
+          description: Success message
+        escalation:
+          $ref: '#/components/schemas/CreatedEscalation'
+      description: Response from creating an escalation.
+    Escalation:
+      required:
+      - case
+      - createdBy
+      - createdOn
+      - currentLevel
+      - id
+      - previousLevel
+      - reason
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        case:
+          $ref: '#/components/schemas/ReferenceItem'
+        currentLevel:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Current escalation level
+        previousLevel:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Previous escalation level
+        createdBy:
+          type: string
+          description: User who created the escalation
+        createdOn:
+          type: string
+          description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
+        reason:
+          type: string
+          description: Reason for the escalation
+        notificationSentTo:
+          type: array
+          nullable: true
+          description: Users notified about the escalation
+          items:
+            type: object
+            required:
+            - id
+            - userName
+            properties:
+              id:
+                $ref: '#/components/schemas/IdString'
+              userName:
+                type: string
+              name:
+                type: string
+                nullable: true
+              email:
+                type: string
+                nullable: true
+      description: Escalation data.
+    EscalationsResponse:
+      required:
+      - escalations
+      - limit
+      - offset
+      - totalRecords
+      type: object
+      properties:
+        escalations:
+          type: array
+          description: List of escalations
+          items:
+            $ref: '#/components/schemas/Escalation'
+        totalRecords:
+          type: integer
+          description: Total records count
+          format: int64
+        offset:
+          minimum: 0
+          type: integer
+          description: Offset for pagination
+          format: int64
+        limit:
+          minimum: 1
+          type: integer
+          description: Limit for pagination
+          format: int64
+      description: Escalations search response.
+    GlobalSearchType:
+      type: string
+      enum:
+        - projects
+        - cases
+      description: Valid global search type values.
+    GlobalSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Search query string
+            types:
+              type: array
+              items:
+                $ref: '#/components/schemas/GlobalSearchType'
+              description: Types to search in (projects, cases). Defaults to both if not specified.
+          additionalProperties: false
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              description: Field to sort by
+            order:
+              type: string
+              enum:
+                - asc
+                - desc
+              description: Sort order
+          additionalProperties: false
+        projectsPagination:
+          $ref: '#/components/schemas/Pagination'
+        casesPagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for global search across projects and cases.
+    GlobalSearchProject:
+      type: object
+      required:
+        - id
+        - name
+        - key
+        - type
+        - createdOn
+        - hasPdpSubscription
+        - account
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        name:
+          type: string
+          description: Name of the project
+        description:
+          type: string
+          description: Description of the project
+          nullable: true
+        key:
+          type: string
+          description: Project key
+        type:
+          $ref: '#/components/schemas/ReferenceItem'
+        createdOn:
+          type: string
+          description: Created date and time
+        startDate:
+          type: string
+          description: Project start date
+          nullable: true
+        endDate:
+          type: string
+          description: Project end date
+          nullable: true
+        hasPdpSubscription:
+          type: boolean
+          description: Indicates whether the project has a PDP subscription
+        closureState:
+          type: string
+          description: Closure state
+          nullable: true
+        account:
+          $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Project item in a global search response.
+    GlobalSearchCase:
+      type: object
+      required:
+        - id
+        - internalId
+        - number
+        - createdOn
+        - createdBy
+        - updatedOn
+        - account
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        internalId:
+          type: string
+          description: WSO2 internal ID of the case
+        number:
+          type: string
+          description: Case number
+        title:
+          type: string
+          description: Case title
+          nullable: true
+        description:
+          type: string
+          description: Case description
+          nullable: true
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: Created by (user email)
+        updatedOn:
+          type: string
+          description: Last updated date and time
+        project:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        caseType:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        state:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        severity:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        assignedEngineer:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        account:
+          $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Case item in a global search response.
+    GlobalSearchResponse:
+      type: object
+      required:
+        - query
+        - projectsTotal
+        - casesTotal
+        - projects
+        - cases
+      properties:
+        query:
+          type: string
+          description: The search query string that was used
+        projectsTotal:
+          type: integer
+          description: Total number of matching projects
+          format: int64
+        casesTotal:
+          type: integer
+          description: Total number of matching cases
+          format: int64
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/GlobalSearchProject'
+          description: List of matching projects
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/GlobalSearchCase'
+          description: List of matching cases
+      additionalProperties: false
+      description: Global search response.

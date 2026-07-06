@@ -31,7 +31,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { SelectField, TextField, ConversationSummary } from "@components/features/create";
 import { useFormik } from "formik";
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useProject } from "@context/project";
 import { projects } from "@src/services/projects";
 import { cases } from "@src/services/cases";
@@ -65,7 +65,7 @@ export default function CreateCasePage() {
   const classifications: CaseClassificationResponseDto = location.state?.classifications;
   const relatedCase: Case | undefined = location.state?.case;
   const queryClient = useQueryClient();
-  const { projectId, type } = useProject();
+  const { projectId, projectName, type } = useProject();
   const notify = useNotify();
 
   const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
@@ -137,11 +137,6 @@ export default function CreateCasePage() {
     }),
     enabled: !!formik.values.deployment,
   });
-
-  const projectsOptions = useSuspenseQuery(projects.all()).data.map((project) => ({
-    value: project.id,
-    label: project.name,
-  }));
 
   const deploymentsFieldDisabled = type ? DEPLOYMENT_DISABLED_PROJECT_TYPES.includes(type) : false;
 
@@ -262,19 +257,7 @@ export default function CreateCasePage() {
               disabled
               name="project"
               label="Project"
-              options={projectsOptions}
-              value={formik.values.project}
-              onChange={(e) => {
-                formik.handleChange(e);
-                formik.setFieldValue("deployment", "");
-                formik.setFieldValue("product", "");
-                setClassified((prev) => {
-                  const next = new Set(prev);
-                  next.delete("deployment");
-                  next.delete("product");
-                  return next;
-                });
-              }}
+              value={projectName}
               startAdornment={
                 <InputAdornment position="start">
                   <Folder size={pxToRem(20)} />
@@ -519,14 +502,23 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_MB = 10;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
 
 function AttachmentField({ onChange }: { onChange?: (attachments: AttachmentFile[]) => void }) {
+  const notify = useNotify();
   const ref = useRef<HTMLInputElement | null>(null);
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
 
   const addFiles = (incoming: File[]) => {
     const valid = incoming.filter((f) => f.size <= MAX_BYTES);
+    const rejected = incoming.filter((f) => f.size > MAX_BYTES);
+
+    if (rejected.length > 0)
+      notify.warn(
+        `${rejected.length} file${rejected.length > 1 ? "s" : ""} exceeded the ${MAX_MB}MB limit and were not attached.`,
+      );
+
     const mapped = valid.map(toAttachmentFile);
 
     setAttachments((prev) => {
@@ -592,7 +584,7 @@ function AttachmentField({ onChange }: { onChange?: (attachments: AttachmentFile
           <Stack>
             <Typography variant="body2">Drag and drop files here, or click to browse</Typography>
             <Typography variant="caption" sx={{ opacity: 0.8 }}>
-              Max 10 MB
+              Max {MAX_MB} MB
             </Typography>
           </Stack>
         </Stack>

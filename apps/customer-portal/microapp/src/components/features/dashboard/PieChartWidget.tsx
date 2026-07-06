@@ -49,6 +49,7 @@ export function PieChartWidget({ title, data, ...props }: PieChartWidgetProps) {
         ) : isEmpty ? (
           <Box
             sx={{
+<<<<<<< v2
               height: 150,
               width: "100%",
               display: "flex",
@@ -73,6 +74,23 @@ export function PieChartWidget({ title, data, ...props }: PieChartWidgetProps) {
             </Box>
             <Typography variant="body2" color="text.disabled" textAlign="center">
               No {title} found
+=======
+              width: 125,
+              height: 125,
+              borderRadius: "50%",
+              border: "3px dashed",
+              borderColor: "divider",
+              my: 2,
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            <Typography
+              variant="subtitle1"
+              sx={{ fontWeight: "medium", color: "text.disabled", textAlign: "center", px: 2, opacity: 0.8 }}
+            >
+              N/A
+>>>>>>> main
             </Typography>
           </Box>
         ) : (

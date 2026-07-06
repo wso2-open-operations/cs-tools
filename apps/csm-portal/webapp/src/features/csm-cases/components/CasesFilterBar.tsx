@@ -73,10 +73,9 @@ import {
 } from "@features/csm-cases/utils/caseType";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
 import MultiSelectField from "@components/MultiSelectField";
-import SearchableMultiSelect from "@components/SearchableMultiSelect";
+import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
+import ProductNameMultiSelect from "@features/csm-cases/components/ProductNameMultiSelect";
 
-/** Sentinel used inside `assignees` to mean "the current user". */
-export const ASSIGNEE_ME_TOKEN = "@me";
 
 /**
  * Filter state for the CSM cases list. `severities` / `states` / `caseTypes`
@@ -99,6 +98,8 @@ export interface CasesFilters {
   projects: string[];
   /** Engagement sub-type filter; only meaningful when `caseTypes` is locked to `engagement`. */
   engagementTypes: BeEngagementType[];
+  /** Product family names (e.g. "API Manager"); matches all versions of each. */
+  productNames: string[];
 }
 
 /**
@@ -238,40 +239,18 @@ export default function CasesFilterBar({
     [availableProjects],
   );
 
-  // Assignee options are engineer EMAILS (the value the backend filters on),
-  // pinned after the "@me" sentinel and ordered by display name. Pulling from
-  // the user directory rather than only the owners present in loaded cases
-  // means typing a name finds anyone, not just people who happen to own one
-  // of the currently-listed cases.
-  const nameByEmail = useMemo(() => {
+  // The assignee filter searches the user directory from the backend as you
+  // type (see AsyncAssigneeMultiSelect), so anyone is findable — not just the
+  // first page of users. `availableAssigneeUsers` (the directory prefetch /
+  // owners on loaded cases) only seeds chip labels for already-selected emails
+  // before any search has run.
+  const assigneeNameSeed = useMemo(() => {
     const m = new Map<string, string>();
     availableAssigneeUsers.forEach((u) => {
       if (u.email) m.set(u.email, u.name);
     });
     return m;
   }, [availableAssigneeUsers]);
-
-  const assigneeOptions = useMemo(() => {
-    const emails = Array.from(
-      new Set(availableAssigneeUsers.map((u) => u.email).filter(Boolean)),
-    ).sort((a, b) =>
-      (nameByEmail.get(a) ?? a).localeCompare(nameByEmail.get(b) ?? b),
-    );
-    return [ASSIGNEE_ME_TOKEN, ...emails];
-  }, [availableAssigneeUsers, nameByEmail]);
-
-  // Label an assignee value: the @me sentinel reads "Me"; an email resolves to
-  // the engineer's display name (falling back to the raw email).
-  const formatAssignee = (value: string): string =>
-    value === ASSIGNEE_ME_TOKEN ? "Me" : (nameByEmail.get(value) ?? value);
-
-  const assigneeSecondary = (value: string): string | undefined =>
-    value === ASSIGNEE_ME_TOKEN ? undefined : value;
-
-  const assigneeSearchText = (value: string): string =>
-    value === ASSIGNEE_ME_TOKEN
-      ? "Me"
-      : `${nameByEmail.get(value) ?? ""} ${value}`.trim();
 
   return (
     <Paper sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -521,17 +500,11 @@ export default function CasesFilterBar({
               {/* Email/`@me`-based picker; `useGetCsmCases` resolves the
                   selection to the UUIDs `/cases/search` expects (`@me` via the
                   app-wide current-user context, named engineers via
-                  `/users/search`). */}
-              <SearchableMultiSelect
-                id="cases-filter-assignee"
-                label="Assignee"
-                placeholder="Search engineers…"
+                  `/users/search`). Searches the directory as you type. */}
+              <AsyncAssigneeMultiSelect
                 values={filters.assignees}
-                options={assigneeOptions}
-                formatOption={formatAssignee}
-                getOptionSecondary={assigneeSecondary}
-                getOptionSearchText={assigneeSearchText}
                 onChange={(next) => onChange({ ...filters, assignees: next })}
+                nameSeed={assigneeNameSeed}
               />
             </Grid>
             {!hideProjectFilter && (
@@ -543,6 +516,14 @@ export default function CasesFilterBar({
                 />
               </Grid>
             )}
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              {/* Product family filter; the selected names map straight to
+                  `productNames` (SN matches product.name, all versions). */}
+              <ProductNameMultiSelect
+                values={filters.productNames}
+                onChange={(next) => onChange({ ...filters, productNames: next })}
+              />
+            </Grid>
           </Grid>
           {activeCount > 0 && (
             <Box sx={{ display: "flex", justifyContent: "flex-end" }}>

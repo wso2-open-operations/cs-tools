@@ -26,7 +26,9 @@ import {
   getBaseProductOptions,
   isUnknownPlaceholderProductLabel,
   getBaseDeploymentOptions,
+  formatChatHistoryForClassification,
 } from "@features/support/utils/caseCreation";
+import { ChatSender } from "@features/support/types/conversations";
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
 
 describe("caseCreation utils", () => {
@@ -411,6 +413,31 @@ describe("caseCreation utils", () => {
       expect(getBaseProductOptions(products)).toEqual([
         { id: "2", label: "WSO2 API Manager 4.2.0" },
       ]);
+    });
+  });
+
+  describe("formatChatHistoryForClassification", () => {
+    it("truncates message text to last 150 chars", () => {
+      const longText = "a".repeat(200);
+      const result = formatChatHistoryForClassification([
+        { text: longText, sender: ChatSender.USER },
+      ]);
+      expect(result).toBe(`User: ${"a".repeat(150)}`);
+    });
+
+    it("does not truncate messages under 150 chars", () => {
+      const result = formatChatHistoryForClassification([
+        { text: "short message", sender: ChatSender.USER },
+      ]);
+      expect(result).toBe("User: short message");
+    });
+
+    it("keeps the last 150 chars of a long message", () => {
+      const text = "start" + "b".repeat(200);
+      const result = formatChatHistoryForClassification([
+        { text, sender: ChatSender.BOT },
+      ]);
+      expect(result).toBe(`Assistant: ${"b".repeat(150)}`);
     });
   });
 

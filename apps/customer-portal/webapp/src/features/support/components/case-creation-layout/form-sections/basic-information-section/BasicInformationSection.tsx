@@ -64,6 +64,7 @@ export function BasicInformationSection({
   hasMoreProducts = false,
   isFetchingMoreProducts = false,
   projectTypeLabel,
+  children,
 }: BasicInformationSectionProps & { projectTypeLabel?: string | null }): JSX.Element {
   const handleDeploymentsMenuScroll = (e: UIEvent<HTMLElement>) => {
     if (
@@ -322,6 +323,14 @@ export function BasicInformationSection({
             </FormControl>
           )}
         </Grid>
+        {children && (
+          <Grid size={{ xs: 12 }}>
+            <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="caption">Watch List</Typography>
+            </Box>
+            {children}
+          </Grid>
+        )}
       </Grid>
     </Paper>
   );

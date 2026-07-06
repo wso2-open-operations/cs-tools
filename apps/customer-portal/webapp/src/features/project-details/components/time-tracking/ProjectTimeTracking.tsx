@@ -28,6 +28,7 @@ import TimeTrackingCard from "@time-tracking/TimeTrackingCard";
 import TimeTrackingCardSkeleton from "@time-tracking/TimeTrackingCardSkeleton";
 import TimeTrackingErrorState from "@time-tracking/TimeTrackingErrorState";
 import EmptyState from "@components/empty-state/EmptyState";
+import TimeCardsCsvExportButton from "@time-tracking/TimeCardsCsvExportButton";
 
 import type { ProjectTimeTrackingProps } from "@features/project-details/types/projectDetailsComponents";
 import { paginateList } from "@features/project-details/utils/timeTrackingPage";
@@ -119,10 +120,22 @@ export default function ProjectTimeTracking({
         />
       </Box>
 
-      <Box sx={{ mb: 2 }}>
+      <Box sx={{ mb: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Typography variant="body2" color="text.secondary">
           Showing {paginatedTimeCards.length} of {totalItems} time cards
         </Typography>
+        <TimeCardsCsvExportButton
+          projectId={projectId}
+          projectName={project?.name}
+          filters={{
+            ...(startDate && { startDate }),
+            ...(endDate && { endDate }),
+            states: ["Approved"],
+          }}
+          prefetchedCards={allTimeCards}
+          totalRecords={totalItems}
+          disabled={isTimeCardsLoading || isTimeCardsError || totalItems === 0}
+        />
       </Box>
 
       {isTimeCardsError ? (

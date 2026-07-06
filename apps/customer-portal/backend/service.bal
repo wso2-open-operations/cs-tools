@@ -18,6 +18,7 @@ import customer_portal.ai_chat_agent;
 import customer_portal.authorization;
 import customer_portal.entity;
 import customer_portal.product_consumption_subscription;
+import customer_portal.product_consumption_tracking;
 import customer_portal.registry;
 import customer_portal.scim;
 import customer_portal.types;
@@ -124,6 +125,52 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
         return mapMetadataResponse(metadataResponse);
+    }
+
+    # Global search across projects and cases.
+    #
+    # + payload - Global search request payload with optional filters and pagination (optional)
+    # + return - Global search results or error response
+    resource function post search(http:RequestContext ctx, types:GlobalSearchPayload? payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        types:GlobalSearchPayload searchPayload = payload ?: {};
+        types:GlobalSearchResponse|error result = globalSearch(userInfo.idToken, searchPayload);
+        if result is error {
+            if getStatusCode(result) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for global search."
+                    }
+                };
+            }
+            if getStatusCode(result) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            string customError = "Failed to perform global search.";
+            log:printError(customError, result);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{body: result};
     }
 
     # Fetch user information of the logged in user.
@@ -1367,7 +1414,9 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        if isInvalidDateRange(payload.filters?.closedStartDate, payload.filters?.closedEndDate) {
+        if isInvalidDateRange(payload.filters?.closedStartDate, payload.filters?.closedEndDate) ||
+        isInvalidDateRange(payload.filters?.startCreatedDate, payload.filters?.endCreatedDate) ||
+        isInvalidDateRange(payload.filters?.startUpdatedDate, payload.filters?.endUpdatedDate) {
             return <http:BadRequest>{
                 body: {
                     message: "Start date must not be after End date"
@@ -2751,6 +2800,204 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         return response.deployedProduct;
     }
 
+    # Search metrics for a deployed product within a specific deployment.
+    #
+    # + deploymentId - ID of the deployment
+    # + productId - ID of the deployed product
+    # + payload - Metrics search payload containing startDate and endDate (within a 1-year range)
+    # + return - Deployed product metrics response or error response
+    resource function post deployments/[entity:IdString deploymentId]/products/[entity:IdString productId]
+            /metrics/search(http:RequestContext ctx, types:DeployedProductMetricsPayload payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isInvalidDateRange(payload.startDate, payload.endDate) {
+            return <http:BadRequest>{
+                body: {
+                    message: "Invalid date range: startDate must not be after endDate."
+                }
+            };
+        }
+
+        boolean|error withinOneYear = isWithinOneYear(payload.startDate, payload.endDate);
+        if withinOneYear is error {
+            log:printError("Failed to parse date range for deployed product metrics search.", withinOneYear);
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to process the requested date range."
+                }
+            };
+        }
+        if !withinOneYear {
+            return <http:BadRequest>{
+                body: {
+                    message: "Invalid date range: the range between startDate and endDate must not exceed 1 year."
+                }
+            };
+        }
+
+        entity:DeployedProductMetricsResponse|error response = entity:searchDeployedProductMetrics(
+                userInfo.idToken,
+                productId,
+                {
+                    deploymentId,
+                    startDate: payload.startDate,
+                    endDate: payload.endDate
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for searching metrics for the deployed product."
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access metrics for deployed product` +
+                        string ` with ID: ${productId} in deployment with ID: ${deploymentId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to the requested deployed product metrics is forbidden!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "Deployed product or deployment not found."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve metrics for the deployed product.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return <http:Ok>{body: mapDeployedProductMetrics(response)};
+    }
+
+    # Search metrics usage counts for a deployed product within a specific deployment.
+    #
+    # + deploymentId - ID of the deployment
+    # + productId - ID of the deployed product
+    # + payload - Metrics usage counts search payload containing startDate and endDate (within a 1-year range)
+    # + return - Deployed product metrics usage counts response or error response
+    resource function post deployments/[entity:IdString deploymentId]/products/[entity:IdString productId]
+            /metrics/usage\-counts/search(http:RequestContext ctx,
+            types:DeployedProductMetricsUsageCountsPayload payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isInvalidDateRange(payload.startDate, payload.endDate) {
+            return <http:BadRequest>{
+                body: {
+                    message: "Invalid date range: startDate must not be after endDate."
+                }
+            };
+        }
+
+        boolean|error withinOneYear = isWithinOneYear(payload.startDate, payload.endDate);
+        if withinOneYear is error {
+            log:printError("Failed to parse date range for deployed product metrics usage counts search.",
+                    withinOneYear);
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to process the requested date range."
+                }
+            };
+        }
+        if !withinOneYear {
+            return <http:BadRequest>{
+                body: {
+                    message: "Invalid date range: the range between startDate and endDate must not exceed 1 year."
+                }
+            };
+        }
+
+        entity:DeployedProductMetricsUsageCountsResponse|error response =
+            entity:searchDeployedProductMetricsUsageCounts(
+                userInfo.idToken,
+                productId,
+                {
+                    deploymentId,
+                    startDate: payload.startDate,
+                    endDate: payload.endDate
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for searching metrics usage counts" +
+                            " for the deployed product."
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access metrics usage counts` +
+                        string ` for deployed product with ID: ${productId} in deployment with ID: ${deploymentId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to the requested deployed product metrics usage counts is forbidden!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "Deployed product or deployment not found."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve metrics usage counts for the deployed product.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return <http:Ok>{body: mapDeployedProductMetricsUsageCounts(response)};
+    }
+
     # Search catalogs for a specific deployed product with filters and pagination.
     #
     # + id - ID of the deployed product
@@ -3432,9 +3679,9 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     contactLastName: payload.contactLastName,
                     isCsIntegrationUser: payload.isCsIntegrationUser,
                     isCsAdmin: payload.isCsAdmin,
+                    isLead: payload.isLead,
                     isPortalUser: payload.isPortalUser,
                     isSecurityContact: payload.isSecurityContact
-
                 });
         if response is error {
             if getStatusCode(response) == http:STATUS_FORBIDDEN {
@@ -3583,6 +3830,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 {
                     adminEmail: userInfo.email,
                     isCsAdmin: payload.isCsAdmin,
+                    isLead: payload.isLead,
                     isPortalUser: payload.isPortalUser,
                     isSecurityContact: payload.isSecurityContact
                 });
@@ -4058,7 +4306,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     resource function post projects/[entity:IdString id]/cases/time\-cards/search(http:RequestContext ctx,
             types:TimeCardSearchPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
-        
+
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -4193,9 +4441,11 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                         searchQuery: payload.filters?.searchQuery,
                         stateKeys: payload.filters?.stateKeys,
                         impactKey: payload.filters?.impactKey,
+                        impactKeys: payload.filters?.impactKeys,
                         closedStartDate: payload.filters?.closedStartDate,
                         closedEndDate: payload.filters?.closedEndDate
                     },
+                    sortBy: payload.sortBy,
                     pagination: payload.pagination
                 });
         if response is error {
@@ -4610,6 +4860,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         );
         if response is error {
             if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                log:printWarn(string `Invalid request parameters for creating registry token by user: ${
+                        userInfo.userId}`, response);
                 return <http:BadRequest>{
                     body: {
                         message: "Invalid request parameters for creating registry token."
@@ -5165,6 +5417,65 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         return licenseResponse;
     }
 
+    # Import product consumption usage from a zip file.
+    #
+    # + req - Request containing zip file binary body
+    # + return - Deployment usage import response or error
+    isolated resource function post deployment\-usages(http:RequestContext ctx, http:Request req)
+        returns product_consumption_tracking:DeploymentUsageImportResponse|http:BadRequest|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        string? validationError = validateDeploymentUsageImportRequest(req);
+        if validationError is string {
+            log:printWarn(validationError);
+            return <http:BadRequest>{
+                body: {
+                    message: validationError
+                }
+            };
+        }
+
+        byte[]|http:ClientError zipFile = req.getBinaryPayload();
+        if zipFile is http:ClientError {
+            string customError = "Failed to read deployment usage import zip file.";
+            log:printError(customError, zipFile);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        product_consumption_tracking:DeploymentUsageImportResponse|error response =
+            product_consumption_tracking:importDeploymentUsage(userInfo.email, zipFile);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid deployment usage import request."
+                    }
+                };
+            }
+
+            string customError = "Failed to import deployment usage data.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response;
+    }
+
     # Get usage stats for a specific project.
     #
     # + id - ID of the project
@@ -5620,7 +5931,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         projectIds: [id],
                         startDate: payload.filters.startDate,
-                        endDate: payload.filters.endDate
+                        endDate: payload.filters.endDate,
+                        dataSource: payload.filters.dataSource
                     }
                 });
         if response is error {
@@ -5683,7 +5995,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         deploymentIds: [id],
                         startDate: payload.filters.startDate,
-                        endDate: payload.filters.endDate
+                        endDate: payload.filters.endDate,
+                        dataSource: payload.filters.dataSource
                     }
                 });
         if response is error {
@@ -5746,7 +6059,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         deployedProductIds: [id],
                         startDate: payload.filters.startDate,
-                        endDate: payload.filters.endDate
+                        endDate: payload.filters.endDate,
+                        dataSource: payload.filters.dataSource
                     }
                 });
         if response is error {
@@ -6030,7 +6344,211 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         return <http:Ok>{body: mapCaseActivitySummaryResponse(response)};
     }
 
-    // TODO: Add POST /users/groups — expose scim:addUsersToExternalGroup behind auth once team finalizes Asgardeo group.
+    # Add users to a group via the SCIM operations service.
+    #
+    # + ctx - Request context with authenticated user
+    # + payload - Request payload containing group name and user emails
+    # + return - Response with added/failed users or error response
+    resource function post users/groups(http:RequestContext ctx, types:AddUsersToGroupRequest payload)
+        returns scim:AddUsersToGroupResponse|http:BadRequest|http:NotFound|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        string[] userGroups = userInfo.groups ?: [];
+        if !authorization:checkRoles([authorization:authorizedRoles.securityAdvisoryPatchesAdminRole], userGroups) {
+            log:printWarn(string `User: ${userInfo.userId} is not authorized to manage group users.`);
+            return <http:Forbidden>{
+                body: {
+                    message: "You do not have permission to manage group users."
+                }
+            };
+        }
+
+        if payload.group.trim().length() == 0 {
+            return <http:BadRequest>{
+                body: {
+                    message: "Group name must be provided."
+                }
+            };
+        }
+
+        if payload.emails.length() == 0 {
+            return <http:BadRequest>{
+                body: {
+                    message: "At least one user email must be provided."
+                }
+            };
+        }
+
+        boolean hasInvalidEmail = payload.emails.some(email => email.trim().length() == 0);
+        if hasInvalidEmail {
+            return <http:BadRequest>{
+                body: {
+                    message: "Email list contains empty or whitespace-only values."
+                }
+            };
+        }
+
+        scim:AddUsersToGroupResponse|error response = scim:addUsersToExternalGroup(payload.group,
+                {emails: payload.emails});
+        if response is error {
+            int statusCode = getStatusCode(response);
+            if statusCode == http:STATUS_NOT_FOUND {
+                string customError = string `Group '${payload.group}' is not found.`;
+                log:printWarn(customError);
+                return <http:NotFound>{
+                    body: {
+                        message: customError
+                    }
+                };
+            }
+            if statusCode == http:STATUS_BAD_REQUEST {
+                string customError = string `Invalid request while adding users to the provided group. ${
+                        extractErrorMessage(response)}`;
+                log:printWarn(customError);
+                return <http:BadRequest>{
+                    body: {
+                        message: customError
+                    }
+                };
+            }
+
+            string customError = "Failed to add users to group.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response;
+    }
+
+    # Create an escalation for a specific case.
+    #
+    # + caseId - ID of the case
+    # + payload - Escalation creation payload
+    # + return - Created escalation details or error response
+    resource function post cases/[entity:IdString caseId]/escalations(
+            http:RequestContext ctx, types:EscalationCreatePayload payload)
+        returns http:Created|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:EscalationCreateResponse|error response = entity:createEscalation(userInfo.idToken,
+                {
+                    caseId: caseId,
+                    reason: payload.reason
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to create an escalation for case: ${caseId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_CASE_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for creating an escalation."
+                    }
+                };
+            }
+
+            string customError = "Failed to create escalation.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Created>{body: mapCreatedEscalation(response)};
+    }
+
+    # Search escalations for a specific case.
+    #
+    # + caseId - ID of the case
+    # + payload - Escalation search payload
+    # + return - List of escalations or error response
+    resource function post cases/[entity:IdString caseId]/escalations/search(
+            http:RequestContext ctx, types:EscalationSearchPayload payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:EscalationsResponse|error response = entity:searchEscalations(userInfo.idToken,
+                {
+                    filters: {caseIds: [caseId]},
+                    sortBy: payload.sortBy,
+                    pagination: payload.pagination
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to search escalations for case: ${caseId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_CASE_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for searching escalations."
+                    }
+                };
+            }
+
+            string customError = "Failed to search escalations.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{body: mapEscalationsResponse(response)};
+    }
 }
 
 # WebSocket service to proxy messages between the browser and the upstream Python AI chat agent for real-time communication in chat sessions.

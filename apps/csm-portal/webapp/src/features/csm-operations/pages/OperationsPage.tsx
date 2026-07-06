@@ -76,6 +76,7 @@ export default function OperationsPage(): JSX.Element {
           entityNoun="service requests"
           lockedFilters={{ caseTypes: ["service_request"] }}
           hideTypeFilter
+          detailBasePath="/operations/service-requests"
           actions={
             <Button
               variant="contained"

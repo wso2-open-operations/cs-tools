@@ -20,7 +20,7 @@ import { type JSX } from "react";
 /**
  * Fallback rendered while a lazily-loaded route chunk is being fetched. Sits
  * inside the persistent app shell so only the content region shows progress,
- * mirroring the warning-coloured LinearProgress used elsewhere in the layout.
+ * mirroring the primary-coloured LinearProgress used elsewhere in the layout.
  */
 export default function RouteSuspenseFallback(): JSX.Element {
   return (
@@ -36,7 +36,7 @@ export default function RouteSuspenseFallback(): JSX.Element {
       }}
     >
       <LinearProgress
-        color="warning"
+        color="primary"
         sx={{ width: "80%", maxWidth: 400, height: 4 }}
       />
     </Box>

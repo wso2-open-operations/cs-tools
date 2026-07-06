@@ -39,10 +39,14 @@ vi.mock("@wso2/oxygen-ui", () => ({
 }));
 
 // Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Sparkles: () => <svg data-testid="icon-sparkles" />,
-  FileText: () => <svg data-testid="icon-file-text" />,
-}));
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wso2/oxygen-ui-icons-react")>();
+  return {
+    ...actual,
+    Sparkles: () => <svg data-testid="icon-sparkles" />,
+    FileText: () => <svg data-testid="icon-file-text" />,
+  };
+});
 
 describe("EscalationBanner", () => {
   it("should render correctly when visible", () => {

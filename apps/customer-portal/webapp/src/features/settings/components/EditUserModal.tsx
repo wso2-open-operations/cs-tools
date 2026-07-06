@@ -32,7 +32,7 @@ import {
   colors,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Crown, Monitor, Settings, Shield, X } from "@wso2/oxygen-ui-icons-react";
+import { Crown, Monitor, Settings, Shield, Star, X } from "@wso2/oxygen-ui-icons-react";
 import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@features/settings/utils/settings";
 import type { EditUserModalProps } from "@features/settings/types/settings";
@@ -46,11 +46,18 @@ const EDITABLE_ROLES = [
     color: "secondary" as const,
   },
   {
+    id: "lead" as const,
+    label: "Lead",
+    description: "A portal user who can escalate an issue beyond level 3",
+    Icon: Star,
+    color: "warning" as const,
+  },
+  {
     id: "portal" as const,
     label: "Portal User",
     description: "Can log in to and access the Support Portal",
     Icon: Monitor,
-    color: "primary" as const,
+    color: "info" as const,
   },
   {
     id: "security" as const,
@@ -84,6 +91,7 @@ export default function EditUserModal({
     if (!contact) return new Set<EditableRoleId>();
     const initial = new Set<EditableRoleId>();
     if (contact.isCsAdmin) initial.add("admin");
+    if (contact.isLead) initial.add("lead");
     // isPortalUser is the explicit flag; fall back to !isCsIntegrationUser if absent
     const portalUser = contact.isPortalUser ?? !contact.isCsIntegrationUser;
     if (portalUser) initial.add("portal");
@@ -115,9 +123,11 @@ export default function EditUserModal({
   };
 
   const handleSave = useCallback(() => {
+    const isLead = selectedRoles.has("lead");
     onSubmit({
       isCsAdmin: selectedRoles.has("admin"),
-      isPortalUser: selectedRoles.has("portal"),
+      isLead,
+      isPortalUser: selectedRoles.has("portal") || isLead,
       isSecurityContact: selectedRoles.has("security"),
     });
   }, [selectedRoles, onSubmit]);
@@ -125,6 +135,7 @@ export default function EditUserModal({
   const initialRoles = getInitialRoles();
   const isDirty =
     selectedRoles.has("admin") !== initialRoles.has("admin") ||
+    selectedRoles.has("lead") !== initialRoles.has("lead") ||
     selectedRoles.has("portal") !== initialRoles.has("portal") ||
     selectedRoles.has("security") !== initialRoles.has("security");
 

@@ -52,6 +52,7 @@ export type ProjectContact = {
   firstName: string;
   lastName: string;
   isCsAdmin: boolean;
+  isLead?: boolean;
   isCsIntegrationUser: boolean;
   isPortalUser?: boolean;
   isSecurityContact: boolean;
@@ -88,6 +89,7 @@ export type CreateProjectContactRequest = {
   contactLastName: string;
   isCsAdmin?: boolean;
   isCsIntegrationUser: boolean;
+  isLead?: boolean;
   isPortalUser?: boolean;
   isSecurityContact: boolean;
 };

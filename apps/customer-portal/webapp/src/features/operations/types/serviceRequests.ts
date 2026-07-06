@@ -90,4 +90,5 @@ export type CreateServiceRequestPayload = {
   catalogItemId: string;
   variables: ServiceRequestVariable[];
   attachments?: ServiceRequestAttachment[];
+  watchList?: string[];
 };

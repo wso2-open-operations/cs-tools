@@ -49,7 +49,6 @@ import {
   CHAT_TYPING_INTERVAL_MS,
   NOVERA_ANALYZING_PLACEHOLDER_TEXT,
   NOVERA_INITIAL_WELCOME_TEXT,
-  TOKEN_WARNING_SESSION_LIMIT_REACHED,
 } from "@features/support/constants/chatConstants";
 import {
   formatChatHistoryForClassification,
@@ -347,7 +346,6 @@ export default function NoveraChatPage(): JSX.Element {
   }, [isWaitingForClassification, isAllProductsLoading, performClassification]);
   const [showRichText, setShowRichText] = useState(false);
   const [isInputDisabled, setIsInputDisabled] = useState(false);
-  const [isTypingDisabled, setIsTypingDisabled] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const inputValueRef = useRef("");
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -432,9 +430,6 @@ export default function NoveraChatPage(): JSX.Element {
       }
       if (actions.some((a) => a.type === NoveraActionType.SolutionWorked)) {
         setIsInputDisabled(true);
-      }
-      if (pending?.payload?.token_warning === TOKEN_WARNING_SESSION_LIMIT_REACHED) {
-        setIsTypingDisabled(true);
       }
     }
   }, [setShowRichText]);
@@ -751,10 +746,10 @@ export default function NoveraChatPage(): JSX.Element {
             resetTrigger={resetTrigger}
             forceRichText={showRichText}
             disabled={isInputDisabled}
-            typingDisabled={isTypingDisabled}
           />
         </Paper>
       </Box>
+
     </Box>
   );
 }

@@ -24,33 +24,32 @@ import {
   type ChangeEvent,
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
-import { Button, CircularProgress, Divider, Stack } from "@wso2/oxygen-ui";
-import { Download } from "@wso2/oxygen-ui-icons-react";
+import { Box, Divider, Stack } from "@wso2/oxygen-ui";
 import type { ChangeRequestFilterValues, ChangeRequestItem } from "@features/operations/types/changeRequests";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetChangeRequests, {
   useGetChangeRequestsInfinite,
 } from "@features/operations/api/useGetChangeRequests";
-import { useGetProjectChangeRequestStats } from "@features/operations/api/useGetProjectChangeRequestStats";
 import { CHANGE_REQUEST_FILTER_DEFINITIONS } from "@features/operations/constants/operationsConstants";
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
+import ChangeRequestsCsvExportButton from "@features/operations/components/change-requests/ChangeRequestsCsvExportButton";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ChangeRequestsList from "@features/operations/components/change-requests/ChangeRequestsList";
 import ChangeRequestsCalendarView from "@features/operations/components/change-requests/ChangeRequestsCalendarView";
 import TabBar from "@components/tab-bar/TabBar";
-import { generateChangeRequestsSchedulePdf } from "@features/operations/utils/changeRequestsSchedulePdf";
+import { SortOrder } from "@/types/common";
 import { hasListSearchOrFilters, countListSearchAndFilters } from "@features/support/utils/support";
 import {
   ChangeRequestFilterDefinitionId,
+  ChangeRequestSortField,
   ChangeRequestsViewMode,
 } from "@features/operations/types/changeRequests";
 import {
   CHANGE_REQUESTS_ENTITY_LABEL,
-  CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL,
-  CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL,
   CHANGE_REQUESTS_PAGE_DESCRIPTION,
   CHANGE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED,
   CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING,
@@ -60,6 +59,7 @@ import {
   CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING,
   CHANGE_REQUESTS_PAGE_TITLE_SCHEDULED,
   CHANGE_REQUESTS_SEARCH_PLACEHOLDER,
+  CHANGE_REQUESTS_SORT_FIELD_OPTIONS,
   CHANGE_REQUESTS_VIEW_TABS_CONFIG,
   OPERATIONS_LIST_BACK_LABEL,
   OPERATIONS_LIST_PAGE_SIZE,
@@ -91,6 +91,7 @@ export default function ChangeRequestsPage(): JSX.Element {
   const scheduledOnly = locationState?.scheduledOnly ?? false;
   const { projectId } = useParams<{ projectId: string }>();
   const navSegment = getOperationsNavSegment(location.pathname);
+  const { data: projectDetails } = useGetProjectDetails(projectId ?? "");
 
   const [viewMode, setViewMode] = useState<ChangeRequestsViewMode>(
     ChangeRequestsViewMode.List,
@@ -103,23 +104,45 @@ export default function ChangeRequestsPage(): JSX.Element {
   );
   const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
   const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, OPERATIONS_LIST_PAGE_SIZE, undefined, { popOnly: true });
-  const [isExporting, setIsExporting] = useState(false);
+  const [sortField, setSortField] = useSessionState<ChangeRequestSortField>(
+    `${sessionPrefix}-sortField`,
+    ChangeRequestSortField.UpdatedOn,
+    undefined,
+    { popOnly: true },
+  );
+  const [sortOrder, setSortOrder] = useSessionState<SortOrder>(
+    `${sessionPrefix}-sortOrder`,
+    SortOrder.DESC,
+    undefined,
+    { popOnly: true },
+  );
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
-
-  const {
-    data: stats,
-    isLoading: isStatsLoading,
-  } = useGetProjectChangeRequestStats(projectId || "", {
-    enabled: !!projectId,
-  });
 
   const changeRequestSearchRequest = useMemo(() => {
     const isPresetMode = outstandingOnly || actionRequired || scheduledOnly;
     const effectiveFilters = isPresetMode ? {} : filters;
     const effectiveSearchTerm = isPresetMode ? "" : searchTerm;
-    return buildChangeRequestSearchRequest(effectiveFilters, effectiveSearchTerm, outstandingOnly, actionRequired, scheduledOnly, filterMetadata?.changeRequestStates);
-  }, [searchTerm, filters, outstandingOnly, actionRequired, scheduledOnly, filterMetadata?.changeRequestStates]);
+    return buildChangeRequestSearchRequest(
+      effectiveFilters,
+      effectiveSearchTerm,
+      outstandingOnly,
+      actionRequired,
+      scheduledOnly,
+      filterMetadata?.changeRequestStates,
+      sortField,
+      sortOrder,
+    );
+  }, [
+    searchTerm,
+    filters,
+    outstandingOnly,
+    actionRequired,
+    scheduledOnly,
+    filterMetadata?.changeRequestStates,
+    sortField,
+    sortOrder,
+  ]);
 
   const offset = (page - 1) * rowsPerPage;
 
@@ -154,19 +177,19 @@ export default function ChangeRequestsPage(): JSX.Element {
       enabled:
         !!projectId &&
         !!filterMetadata &&
-        (viewMode === ChangeRequestsViewMode.Calendar || isExporting),
+        viewMode === ChangeRequestsViewMode.Calendar,
     },
   );
 
   useEffect(() => {
     if (
-      (viewMode === ChangeRequestsViewMode.Calendar || isExporting) &&
+      viewMode === ChangeRequestsViewMode.Calendar &&
       hasNextPage &&
       !isFetchingNextPage
     ) {
       void fetchNextPage();
     }
-  }, [viewMode, isExporting, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [viewMode, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const changeRequests = useMemo(() => {
     if (viewMode === ChangeRequestsViewMode.List) {
@@ -186,40 +209,6 @@ export default function ChangeRequestsPage(): JSX.Element {
       ? listData?.totalRecords || 0
       : infiniteData?.pages[0]?.totalRecords || 0;
 
-  useEffect(() => {
-    if (!isExporting) return;
-    if (isInfiniteError) {
-      queueMicrotask(() => {
-        setIsExporting(false);
-      });
-      return;
-    }
-    if (
-      !isInfiniteLoading &&
-      !isStatsLoading &&
-      !hasNextPage &&
-      !isFetchingNextPage &&
-      infiniteData &&
-      stats
-    ) {
-      const allChangeRequests =
-        flattenChangeRequestInfinitePages(infiniteData.pages) || [];
-      generateChangeRequestsSchedulePdf(allChangeRequests, stats);
-      queueMicrotask(() => {
-        setIsExporting(false);
-      });
-    }
-  }, [
-    isExporting,
-    isInfiniteLoading,
-    isInfiniteError,
-    isStatsLoading,
-    hasNextPage,
-    isFetchingNextPage,
-    infiniteData,
-    stats,
-  ]);
-
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
   };
@@ -229,10 +218,10 @@ export default function ChangeRequestsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
+  const handleFilterChange = (field: string, value: string | string[]) => {
     setFilters((prev) => ({
       ...prev,
-      [field]: value || undefined,
+      [field]: Array.isArray(value) ? (value.length === 0 ? undefined : value) : (value || undefined),
     }));
     setPage(1);
   };
@@ -248,17 +237,46 @@ export default function ChangeRequestsPage(): JSX.Element {
     setPage(1);
   };
 
+  const handleSortChange = (value: SortOrder) => {
+    setSortOrder(value);
+    setPage(1);
+  };
+
+  const handleSortFieldChange = (value: string) => {
+    setSortField(value as ChangeRequestSortField);
+    setPage(1);
+  };
+
   const handleChangeRequestClick = (item: ChangeRequestItem): void => {
     navigate(
       `/projects/${projectId}/${navSegment}/change-requests/${item.id}`,
     );
   };
 
-  const handleExportSchedule = () => {
-    setIsExporting(true);
-  };
-
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
+  const hideSearchPanel =
+    outstandingOnly || actionRequired || scheduledOnly;
+
+  const downloadResultsButton = projectId ? (
+    <ChangeRequestsCsvExportButton
+      projectId={projectId}
+      projectName={projectDetails?.name}
+      searchRequest={changeRequestSearchRequest}
+      prefetchedItems={
+        viewMode === ChangeRequestsViewMode.List
+          ? changeRequests
+          : flattenChangeRequestInfinitePages(infiniteData?.pages)
+      }
+      totalRecords={totalRecords}
+      disabled={
+        isLoading ||
+        isError ||
+        totalRecords === 0 ||
+        (viewMode === ChangeRequestsViewMode.Calendar &&
+          (hasNextPage || isFetchingNextPage))
+      }
+    />
+  ) : null;
   const visibleFilterDefinitions = useMemo(
     () =>
       outstandingOnly || actionRequired || scheduledOnly
@@ -268,28 +286,6 @@ export default function ChangeRequestsPage(): JSX.Element {
         : CHANGE_REQUEST_FILTER_DEFINITIONS,
     [outstandingOnly, actionRequired, scheduledOnly],
   );
-  const exportButton = (
-    <Button
-      variant="contained"
-      color="warning"
-      size="small"
-      onClick={handleExportSchedule}
-      startIcon={
-        isExporting ? (
-          <CircularProgress size={16} sx={{ color: "white" }} />
-        ) : (
-          <Download />
-        )
-      }
-      disabled={isExporting}
-      sx={{ mt: { xs: 0, sm: 4 } }}
-    >
-      {isExporting
-        ? CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL
-        : CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL}
-    </Button>
-  );
-
   return (
     <Stack spacing={3}>
       <ListPageHeader
@@ -313,10 +309,9 @@ export default function ChangeRequestsPage(): JSX.Element {
         }
         backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
-        actions={exportButton}
       />
 
-      {outstandingOnly || actionRequired || scheduledOnly ? (
+      {hideSearchPanel ? (
         <Divider />
       ) : (
         <ListSearchBar
@@ -345,16 +340,24 @@ export default function ChangeRequestsPage(): JSX.Element {
         shownCount={changeRequests.length}
         totalCount={totalRecords}
         entityLabel={CHANGE_REQUESTS_ENTITY_LABEL}
+        sortFieldOptions={CHANGE_REQUESTS_SORT_FIELD_OPTIONS}
+        sortField={sortField}
+        onSortFieldChange={handleSortFieldChange}
+        sortOrder={sortOrder}
+        onSortOrderChange={handleSortChange}
         rightContent={
-          <TabBar
-            tabs={CHANGE_REQUESTS_VIEW_TABS_CONFIG}
-            activeTab={viewMode}
-            onTabChange={(tabId) => {
-              setViewMode(tabId as ChangeRequestsViewMode);
-              setPage(1);
-            }}
-            sx={{ mb: 0, height: 32 }}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {downloadResultsButton}
+            <TabBar
+              tabs={CHANGE_REQUESTS_VIEW_TABS_CONFIG}
+              activeTab={viewMode}
+              onTabChange={(tabId) => {
+                setViewMode(tabId as ChangeRequestsViewMode);
+                setPage(1);
+              }}
+              sx={{ mb: 0, height: 32 }}
+            />
+          </Box>
         }
       />
 

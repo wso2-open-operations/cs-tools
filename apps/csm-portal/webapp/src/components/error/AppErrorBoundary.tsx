@@ -66,8 +66,8 @@ export default class AppErrorBoundary extends Component<
         <Stack spacing={2} alignItems="center" sx={{ maxWidth: 480 }}>
           <Typography variant="h5">Something went wrong</Typography>
           <Typography variant="body1" color="text.secondary" textAlign="center">
-            An unexpected error occurred while rendering this page. Reloading
-            usually fixes it; your sign-in session is preserved.
+            Something went wrong loading this page. Try reloading — your session
+            will be kept.
           </Typography>
           <Button variant="contained" onClick={() => window.location.reload()}>
             Reload page

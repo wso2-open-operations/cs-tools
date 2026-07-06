@@ -74,9 +74,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		snProductHandler = handler.NewSNProductHandler(service.NewServiceNowProductService(serviceNowIntegrationServiceClient))
 	}
 
-	productVersionRepo := repository.NewProductVersionRepository(db)
-	productVersionSvc := service.NewProductVersionService(productVersionRepo)
-	productVersionHandler := handler.NewProductVersionHandler(productVersionSvc)
+	var productVersionHandler *handler.ProductVersionHandler
+	var snProductVersionHandler *handler.SNProductVersionHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		snProductVersionHandler = handler.NewSNProductVersionHandler(service.NewServiceNowProductVersionService(serviceNowIntegrationServiceClient))
+	} else if db != nil {
+		productVersionRepo := repository.NewProductVersionRepository(db)
+		productVersionSvc := service.NewProductVersionService(productVersionRepo)
+		productVersionHandler = handler.NewProductVersionHandler(productVersionSvc)
+	}
 
 	deploymentRepo := repository.NewDeploymentRepository(db)
 	var activeDeploymentSvc service.DeploymentService
@@ -136,6 +142,36 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		productVulnerabilityHandler = handler.NewProductVulnerabilityHandler(service.NewServiceNowProductVulnerabilityService(serviceNowIntegrationServiceClient))
 	}
 
+	var itServiceHandler *handler.ITServiceHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		itServiceHandler = handler.NewITServiceHandler(service.NewServiceNowITServiceService(serviceNowIntegrationServiceClient))
+	}
+
+	var serviceOfferingHandler *handler.ServiceOfferingHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		serviceOfferingHandler = handler.NewServiceOfferingHandler(service.NewServiceNowServiceOfferingService(serviceNowIntegrationServiceClient))
+	}
+
+	var groupHandler *handler.GroupHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		groupHandler = handler.NewGroupHandler(service.NewServiceNowGroupService(serviceNowIntegrationServiceClient))
+	}
+
+	var configurationItemHandler *handler.ConfigurationItemHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		configurationItemHandler = handler.NewConfigurationItemHandler(service.NewServiceNowConfigurationItemService(serviceNowIntegrationServiceClient))
+	}
+
+	var commentHandler *handler.CommentHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		commentHandler = handler.NewCommentHandler(service.NewServiceNowCommentService(serviceNowIntegrationServiceClient))
+	}
+
+	var taskSlaHandler *handler.TaskSlaHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		taskSlaHandler = handler.NewTaskSlaHandler(service.NewServiceNowTaskSlaService(serviceNowIntegrationServiceClient))
+	}
+
 	var snUserHandler *handler.SNUserHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		snUserHandler = handler.NewSNUserHandler(service.NewServiceNowUserService(serviceNowIntegrationServiceClient))
@@ -165,7 +201,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	} else {
 		mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
 	}
-	mux.HandleFunc("POST /products/{id}/versions/search", productVersionHandler.SearchProductVersions)
+	if snProductVersionHandler != nil {
+		mux.HandleFunc("POST /products/{id}/versions/search", snProductVersionHandler.SearchProductVersions)
+	} else if productVersionHandler != nil {
+		mux.HandleFunc("POST /products/{id}/versions/search", productVersionHandler.SearchProductVersions)
+	}
 	mux.HandleFunc("POST /deployments", deploymentHandler.CreateDeployment)
 	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
 	mux.HandleFunc("PATCH /deployments/{id}", deploymentHandler.PatchDeployment)
@@ -177,7 +217,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
-	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
 	mux.HandleFunc("POST /attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)
@@ -194,6 +233,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 
 	if changeRequestHandler != nil {
+		mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 		mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
@@ -213,6 +253,31 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	if productVulnerabilityHandler != nil {
 		mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 		mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)
+	}
+
+	if itServiceHandler != nil {
+		mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
+	}
+
+	if serviceOfferingHandler != nil {
+		mux.HandleFunc("POST /service-offerings/search", serviceOfferingHandler.SearchServiceOfferings)
+	}
+
+	if groupHandler != nil {
+		mux.HandleFunc("POST /groups/search", groupHandler.SearchGroups)
+	}
+
+	if configurationItemHandler != nil {
+		mux.HandleFunc("POST /configuration-items/search", configurationItemHandler.SearchConfigurationItems)
+	}
+
+	if commentHandler != nil {
+		mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
+	}
+
+	if taskSlaHandler != nil {
+		mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
+		mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	}
 
 	return middleware.CorrelationID(

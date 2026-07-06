@@ -202,6 +202,39 @@ export type UsageAggregatedMetricDefinition = {
   secondaryName?: string;
 };
 
+// Curr/Avg/Min/Max summary for a metric over a time range.
+export type CurrMinMaxAvg = {
+  curr: number;
+  avg: number;
+  min: number;
+  max: number;
+};
+
+// Data source values for filtering usage stats.
+export enum DataSource {
+  API_CALL = 1,
+  FILE_UPLOAD = 2,
+}
+
+// Response type for POST .../instances/stats/usages/search.
+export type InstanceUsageStatsResponse = {
+  stats: Record<string, Record<string, number>>;
+  totalRecords: number;
+  startDate: string;
+  endDate: string;
+};
+
+// Summary statistics derived from a date-keyed stats map for a single metric type.
+export type MetricTypeSummary = {
+  id: string;
+  label: string;
+  curr: number;
+  min: number;
+  max: number;
+  avg: number;
+  trend: { date: string; value: number }[];
+};
+
 // Item type for a mini line chart shown when an instance row is expanded.
 export type UsageInstanceChartBlock = {
   title: string;
@@ -213,21 +246,24 @@ export type UsageInstanceChartBlock = {
   data: UsageTrendRow[];
 };
 
-// Item type for chart blocks for a product instance row.
-export type UsageInstanceCharts = {
-  transactions: UsageInstanceChartBlock;
-  cores: UsageInstanceChartBlock;
+// A single trend chart to render inside the product expanded view.
+export type ProductChartTrend = {
+  title: string;
+  caption: string;
+  stroke: string;
+  data: UsageTrendRow[];
 };
 
 // Item type for per-instance row when a product is expanded.
 export type UsageProductInstanceRow = {
   id: string;
   hostName: string;
+  os: string;
   javaVersion: string;
   u2Level: string;
-  transactionsLabel: string;
-  coreCount: number;
-  charts: UsageInstanceCharts;
+  summaryStats: { label: string; value: string }[];
+  coreSummary: CurrMinMaxAvg;
+  charts: UsageInstanceChartBlock[];
 };
 
 // Item type for core metric pill labels on the environment product row.
@@ -242,11 +278,11 @@ export type UsageEnvironmentProduct = {
   name: string;
   version: string;
   runningInstances: number;
-  transactionsLabel: string;
-  thirdMetricLabel: string;
-  thirdMetricValue: string;
+  metricKeys: string[];
+  summaryStats: { label: string; value: string }[];
   coreMetrics: UsageCoreMetricStat[];
-  transactionTrend: UsageTrendRow[];
-  coreUsageTrend: UsageTrendRow[];
+  chartTrends: ProductChartTrend[];
   instances: UsageProductInstanceRow[];
+  instanceSummary: CurrMinMaxAvg;
+  coreSummary: CurrMinMaxAvg;
 };

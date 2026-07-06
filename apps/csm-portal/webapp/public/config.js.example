@@ -19,6 +19,14 @@ window.config = {
   CSM_PORTAL_THEME: "acrylicOrange",
   CSM_PORTAL_LOG_LEVEL: "ERROR",
 
+  // Disable work-in-progress sections. When true, every nav item flagged `wip`
+  // in src/config/csmNavItems.ts (currently Operations, Engagements, Security
+  // Center, Customers, Settings) stays visible in the sidebar but is disabled
+  // (greyed out, with a "work in progress" tooltip), dropped from the quick-nav
+  // palette, and its routes render a "coming soon" page instead of the
+  // unfinished feature. Leave false to enable everything.
+  CSM_PORTAL_DISABLE_WIP_FEATURES: false,
+
   // Mock data: when true, data hooks short-circuit to seeded fixtures instead
   // of calling the backend. Leave false (or unset) to use the live backend.
   CSM_PORTAL_USE_MOCKS: false,

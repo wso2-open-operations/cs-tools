@@ -569,11 +569,11 @@ public isolated function getProjectChangeRequestStats(string idToken, string pro
 }
 
 # Search instances by criteria.
-# 
+#
 # + idToken - ID token for authorization
 # + payload - Instance search payload containing search criteria for instances
 # + return - Instances response containing matching instances or error
-public isolated function searchInstances(string idToken, InstanceSearchPayload payload) 
+public isolated function searchInstances(string idToken, InstanceSearchPayload payload)
     returns InstancesResponse|error {
 
     return csEntityClient->/instances/search.post(payload, generateHeaders(idToken));
@@ -602,7 +602,7 @@ public isolated function searchInstanceUsage(string idToken, InstanceUsagePayloa
 }
 
 # Search case activities by criteria.
-# 
+#
 # + idToken - ID token for authorization
 # + caseId - Unique ID of the case for which activities are to be searched
 # + payload - Case activities search payload containing search criteria for case activities
@@ -635,6 +635,15 @@ public isolated function searchInstanceMetricsStats(string idToken, InstanceMetr
     return csEntityClient->/instances/metrics/stats/search.post(payload, generateHeaders(idToken));
 }
 
+# Perform a global search across projects and cases.
+#
+# + idToken - ID token for authorization
+# + payload - Global search request payload containing optional filters, sort, and pagination
+# + return - Global search response or error
+public isolated function globalSearch(string idToken, GlobalSearchPayload payload) returns GlobalSearchResponse|error {
+    return csEntityClient->/search.post(payload, generateHeaders(idToken));
+}
+
 # Download attachment content by attachment ID.
 #
 # + idToken - ID token for authorization
@@ -642,4 +651,54 @@ public isolated function searchInstanceMetricsStats(string idToken, InstanceMetr
 # + return - Attachment content as a byte stream or error
 public isolated function downloadAttachment(string idToken, IdString attachmentId) returns http:Response|error {
     return csEntityClient->/attachments/[attachmentId]/content.get(generateHeaders(idToken));
+}
+
+# Create an escalation for a case.
+#
+# + idToken - ID token for authorization
+# + payload - Escalation creation payload containing the case ID and reason
+# + return - Escalation creation response or error
+public isolated function createEscalation(string idToken, EscalationCreatePayload payload)
+    returns EscalationCreateResponse|error {
+
+    return csEntityClient->/escalations.post(payload, generateHeaders(idToken));
+}
+
+# Search escalations by criteria.
+#
+# + idToken - ID token for authorization
+# + payload - Escalation search payload containing filters, sort, and pagination
+# + return - Escalations response containing matching escalations or error
+public isolated function searchEscalations(string idToken, EscalationSearchPayload payload)
+    returns EscalationsResponse|error {
+
+    return csEntityClient->/escalations/search.post(payload, generateHeaders(idToken));
+}
+
+# Search metrics for a specific deployed product.
+#
+# + idToken - ID token for authorization
+# + deployedProductId - ID of the deployed product
+# + payload - Metrics search payload containing deploymentId, startDate, and endDate
+# + return - Deployed product metrics response or error
+public isolated function searchDeployedProductMetrics(string idToken, IdString deployedProductId,
+        DeployedProductMetricsPayload payload) returns DeployedProductMetricsResponse|error {
+
+    return csEntityClient->/deployed\-products/[deployedProductId]/metrics/search.post(payload,
+        generateHeaders(idToken)
+    );
+}
+
+# Search metrics usage counts for a specific deployed product.
+#
+# + idToken - ID token for authorization
+# + deployedProductId - ID of the deployed product
+# + payload - Metrics usage counts search payload
+# + return - Deployed product metrics usage counts response or error
+public isolated function searchDeployedProductMetricsUsageCounts(string idToken, IdString deployedProductId,
+        DeployedProductMetricsUsageCountsPayload payload) returns DeployedProductMetricsUsageCountsResponse|error {
+
+    return csEntityClient->/deployed\-products/[deployedProductId]/metrics/usage\-counts/search.post(payload,
+        generateHeaders(idToken)
+    );
 }

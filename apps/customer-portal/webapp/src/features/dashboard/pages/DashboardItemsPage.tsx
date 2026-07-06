@@ -46,6 +46,7 @@ import {
   CaseStatus,
 } from "@features/support/constants/supportConstants";
 import { getLast30DaysUtcRange } from "@features/support/utils/support";
+import { SortOrder } from "@/types/common";
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListItems from "@components/list-view/ListItems";
 import ChangeRequestsList from "@features/operations/components/change-requests/ChangeRequestsList";
@@ -159,6 +160,11 @@ export default function DashboardItemsPage({
     [mode],
   );
 
+  const listSortBy = useMemo(
+    () => ({ field: "updatedOn" as const, order: SortOrder.DESC }),
+    [],
+  );
+
   // --- Data fetching (10 items each — single-page query, never loads more) ---
   const {
     data: casesQueryData,
@@ -172,6 +178,7 @@ export default function DashboardItemsPage({
         statusIds: apiStatusIds,
         ...closedLast30dRange,
       },
+      sortBy: listSortBy,
     },
     0,
     10,
@@ -190,6 +197,7 @@ export default function DashboardItemsPage({
         statusIds: apiStatusIds,
         ...closedLast30dRange,
       },
+      sortBy: listSortBy,
     },
     0,
     10,
@@ -208,6 +216,7 @@ export default function DashboardItemsPage({
         statusIds: apiStatusIds,
         ...closedLast30dRange,
       },
+      sortBy: listSortBy,
     },
     0,
     10,
@@ -226,6 +235,7 @@ export default function DashboardItemsPage({
         statusIds: apiStatusIds,
         ...closedLast30dRange,
       },
+      sortBy: listSortBy,
     },
     0,
     10,
@@ -243,6 +253,7 @@ export default function DashboardItemsPage({
         stateKeys: crStateKeys ?? [],
         ...closedLast30dRange,
       },
+      sortBy: listSortBy,
     },
     0,
     10,

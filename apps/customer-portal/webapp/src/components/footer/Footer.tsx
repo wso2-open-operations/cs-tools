@@ -29,7 +29,15 @@ import type { JSX } from "react";
  */
 export default function Footer(): JSX.Element {
   return (
-    <FooterUI>
+    <FooterUI
+      sx={{
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
+        px: { xs: 1.5, sm: 2, md: 3 },
+      }}
+    >
       <FooterUI.Copyright>
         © {new Date().getFullYear()} {COMPANY_NAME}. All rights reserved.
       </FooterUI.Copyright>

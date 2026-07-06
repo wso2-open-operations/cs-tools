@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { mockAuthFetch } from "../../../../vitest.setup";
 
 // Mock logger
 const mockLogger = {
@@ -46,6 +47,15 @@ describe("useGetProjectCasesStats", () => {
     });
     mockLogger.debug.mockClear();
     mockLogger.error.mockClear();
+    mockAuthFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        totalCases: 50,
+        stateCount: [],
+        outstandingSeverityCount: [],
+        resolvedCases: { total: 0, currentMonth: 0, pastThirtyDays: 0 },
+      }),
+    } as Response);
     (
       window as unknown as {
         config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };

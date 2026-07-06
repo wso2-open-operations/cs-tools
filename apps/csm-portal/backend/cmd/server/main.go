@@ -55,9 +55,15 @@ func main() {
 	productHandler := handler.NewProductHandler(entityClient)
 	deploymentHandler := handler.NewDeploymentHandler(entityClient)
 	changeRequestHandler := handler.NewChangeRequestHandler(entityClient)
+	itServiceHandler := handler.NewITServiceHandler(entityClient)
+	serviceOfferingHandler := handler.NewServiceOfferingHandler(entityClient)
+	groupHandler := handler.NewGroupHandler(entityClient)
+	configurationItemHandler := handler.NewConfigurationItemHandler(entityClient)
 	catalogHandler := handler.NewCatalogHandler(entityClient)
 	timeCardHandler := handler.NewTimeCardHandler(entityClient)
 	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
+	conversationHandler := handler.NewConversationHandler(entityClient)
+	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -103,6 +109,7 @@ func main() {
 	mux.HandleFunc("POST /cases/{id}/call-requests", caseHandler.CreateCallRequest)
 	mux.HandleFunc("POST /cases/{id}/call-requests/search", caseHandler.SearchCallRequests)
 	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{callRequestId}", caseHandler.PatchCallRequest)
+	mux.HandleFunc("POST /cases/{id}/github-issues", caseHandler.CreateCaseGithubIssue)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
@@ -121,9 +128,14 @@ func main() {
 	mux.HandleFunc("POST /deployments/{id}/products", deploymentHandler.PostDeployedProduct)
 	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
 	mux.HandleFunc("PATCH /deployments/{deploymentId}/products/{productId}", deploymentHandler.PatchDeployedProduct)
+	mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
 	mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 	mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
+	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
+	mux.HandleFunc("POST /service-offerings/search", serviceOfferingHandler.SearchServiceOfferings)
+	mux.HandleFunc("POST /groups/search", groupHandler.SearchGroups)
+	mux.HandleFunc("POST /configuration-items/search", configurationItemHandler.SearchConfigurationItems)
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
 	mux.HandleFunc("POST /time-cards", timeCardHandler.CreateTimeCard)
 	mux.HandleFunc("PATCH /time-cards/{id}", timeCardHandler.UpdateTimeCard)
@@ -131,6 +143,9 @@ func main() {
 	mux.HandleFunc("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", catalogHandler.GetCatalogItemVariables)
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)
+	mux.HandleFunc("GET /conversations/{id}/messages", conversationHandler.GetConversationMessages)
+	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
+	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 
 	addr := envOrDefault("PORT", ":8080")
 

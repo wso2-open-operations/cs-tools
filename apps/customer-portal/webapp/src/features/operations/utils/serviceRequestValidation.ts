@@ -131,6 +131,18 @@ export function isDateTimeField(variable: CatalogItemVariable): boolean {
   return DATE_TIME_FIELD_PATTERNS.some((p) => p.test(q));
 }
 
+function normalizeQuestionText(questionText: string): string {
+  return (questionText ?? "").trim().replace(/^[\s*•]+\s*(?:required\s*:?\s*)?/i, "").trim();
+}
+
+export function isStartDateTimeField(variable: CatalogItemVariable): boolean {
+  return /^start\s*(date|time)$/i.test(normalizeQuestionText(variable.questionText ?? ""));
+}
+
+export function isEndDateTimeField(variable: CatalogItemVariable): boolean {
+  return /^end\s*(date|time)$/i.test(normalizeQuestionText(variable.questionText ?? ""));
+}
+
 /**
  * Returns user-editable variables (excludes context and hidden).
  * Hot fix: all typable fields are mandatory.

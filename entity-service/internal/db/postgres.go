@@ -60,10 +60,13 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// NewPoolIfNeeded creates a Postgres connection pool. A pool is always required
-// because only ProjectService is SN-backed; all other entities (users, accounts,
-// products, deployments, cases) continue to use Postgres regardless of DATA_SOURCE.
+// NewPoolIfNeeded creates a Postgres connection pool when one is needed.
+// When DATA_SOURCE=servicenow all entity reads/writes go through the SN
+// integration service, so no pool is opened and (nil, nil) is returned.
 func NewPoolIfNeeded(cfg *config.Config) (*pgxpool.Pool, error) {
+	if cfg.DataSource == config.DataSourceServiceNow {
+		return nil, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return NewPool(ctx, cfg.DSN())

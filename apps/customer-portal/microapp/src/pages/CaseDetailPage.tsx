@@ -16,7 +16,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUpRight, CheckIcon, CircleX, Image, Paperclip, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Box, Card, Grid, IconButton, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { Box, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
   InfoField,
@@ -144,7 +144,7 @@ export default function CaseDetailPage() {
       <OverlineSlot
         variant={overlineSlotVariant}
         type="case"
-        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        ids={data?.number ? [data.internalId, data.number] : undefined}
         title={data?.title}
       />,
     );
@@ -300,6 +300,7 @@ export default function CaseDetailPage() {
       />
 
       <AttachmentPreviewDialog
+        key={previewAttachment?.id}
         open={Boolean(previewAttachment)}
         attachment={previewAttachment}
         onClose={handlePreviewClose}
@@ -320,39 +321,37 @@ function AttachmentCard({
   const { fromNow } = useDateTime();
 
   return (
-    <>
-      <Card sx={{ p: 1.5 }}>
-        <Stack direction="row" alignItems="flex-start" gap={1}>
-          <Box
-            sx={{
-              flexShrink: 0,
-              width: 40,
-              height: 40,
-              borderRadius: 0.5,
-              overflow: "hidden",
-              bgcolor: "action.hover",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "text.secondary",
-            }}
-          >
-            {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
-          </Box>
-          <Stack gap={0.25} minWidth={0} flex={1}>
-            <Typography variant="subtitle2" fontWeight="medium" noWrap>
-              {attachment.fileName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {attachment.createdBy} · {fromNow(attachment.createdOn)}
-            </Typography>
-          </Stack>
-          <IconButton onClick={() => onPreview(attachment)}>
-            <ArrowUpRight size={pxToRem(18)} />
-          </IconButton>
-        </Stack>
-      </Card>
-    </>
+    <Card
+      role="button"
+      sx={{ display: "flex", direction: "row", alignItems: "center", gap: 1.2, p: 1.5 }}
+      onClick={() => onPreview(attachment)}
+    >
+      <Box
+        sx={{
+          flexShrink: 0,
+          width: 40,
+          height: 40,
+          borderRadius: 0.5,
+          overflow: "hidden",
+          bgcolor: "action.hover",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "text.secondary",
+        }}
+      >
+        {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
+      </Box>
+      <Stack gap={0.25} minWidth={0} flex={1}>
+        <Typography variant="subtitle2" fontWeight="medium" noWrap>
+          {attachment.fileName}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" noWrap>
+          {attachment.createdBy} · {fromNow(attachment.createdOn)}
+        </Typography>
+      </Stack>
+      <ArrowUpRight size={pxToRem(18)} />
+    </Card>
   );
 }
 

@@ -55,7 +55,7 @@ export default function ChatHistoryCard({
 
   return (
     <Form.CardButton
-      onClick={() => onItemAction?.(item.chatId, ChatAction.VIEW)}
+      onClick={() => onItemAction?.(item.chatId, action)}
       sx={{
         p: 2,
         width: "100%",

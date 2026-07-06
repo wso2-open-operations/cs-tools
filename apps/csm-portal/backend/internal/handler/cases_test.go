@@ -399,14 +399,12 @@ func TestSearchCaseComments(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("forwards case ID and body to upstream and returns 200", func(t *testing.T) {
-		var capturedCaseID string
+	t.Run("injects referenceId and referenceType into SearchComments payload", func(t *testing.T) {
 		var capturedBody []byte
 		client := &mockEntityCaseClient{
-			searchCaseCommentsFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
-				capturedCaseID = caseID
+			searchCommentsFn: func(_ context.Context, body []byte) ([]byte, error) {
 				capturedBody = body
-				return []byte(`{"comments":[{"id":"c-1","caseId":"case-42","type":"comment","content":"First comment","createdBy":"user-1","createdOn":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
+				return []byte(`{"comments":[{"id":"c-1","referenceId":"case-42","type":"comment","content":"First comment","createdBy":"user-1","createdOn":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -419,11 +417,15 @@ func TestSearchCaseComments(t *testing.T) {
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
 
-		if capturedCaseID != "case-42" {
-			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, "case-42")
+		var payload map[string]any
+		if err := json.Unmarshal(capturedBody, &payload); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
-		if !json.Valid(capturedBody) {
-			t.Errorf("upstream received invalid JSON body: %s", capturedBody)
+		if payload["referenceId"] != "case-42" {
+			t.Errorf("referenceId = %v, want %q", payload["referenceId"], "case-42")
+		}
+		if payload["referenceType"] != "case" {
+			t.Errorf("referenceType = %v, want %q", payload["referenceType"], "case")
 		}
 
 		resp := decodeJSON[map[string]any](t, w)
@@ -437,7 +439,7 @@ func TestSearchCaseComments(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityCaseClient{
-					searchCaseCommentsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					searchCommentsFn: func(_ context.Context, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
 				}
@@ -1193,6 +1195,112 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 				r.SetPathValue("id",testAttachmentID)
 				w := httptest.NewRecorder()
 				h.GetCaseAttachmentContent(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestCreateCaseGithubIssue(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(`{"title":"crash"}`))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//github-issues", strings.NewReader(`{"title":"crash"}`)))
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/github-issues", strings.NewReader(`{"title":"crash"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards case ID and body to upstream and returns 201", func(t *testing.T) {
+		const reqPayload = `{"reason":"default","title":"crash on startup","description":"details"}`
+		var capturedCaseID string
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			createCaseGithubIssueFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedCaseID = id
+				capturedBody = body
+				return []byte(`{"issueUrl":"https://github.com/org/repo/issues/1","issueNumber":1,"repository":"org/repo"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(reqPayload)))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+		if capturedCaseID != caseID {
+			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, caseID)
+		}
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create GitHub issue.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					createCaseGithubIssueFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(`{"title":"crash"}`)))
+				r.SetPathValue("id", caseID)
+				w := httptest.NewRecorder()
+				h.CreateCaseGithubIssue(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

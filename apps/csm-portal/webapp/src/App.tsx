@@ -15,8 +15,9 @@
 // under the License.
 
 import { type JSX, lazy } from "react";
-import { Navigate, Route, Routes, useLocation, useParams } from "react-router";
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
+import { isDisabledWipPath, navItemForPath } from "@config/csmNavItems";
 import {
   POST_LOGIN_REDIRECT_KEY,
   PostLoginRedirectConsumer,
@@ -111,6 +112,28 @@ function RootLanding(): JSX.Element | null {
 }
 
 /**
+ * Layout guard for WIP sections. When `CSM_PORTAL_DISABLE_WIP_FEATURES` is on, a
+ * direct or pinned link to a disabled WIP path (e.g. `/operations`,
+ * `/customers`) renders the shared "coming soon" page instead of the unfinished
+ * feature — the URL survives and the message matches the nav's "work in
+ * progress" tooltip. The same flag disables these items in the nav. Renders the
+ * matched route otherwise.
+ */
+function WipRouteGuard(): JSX.Element {
+  const { pathname } = useLocation();
+  if (isDisabledWipPath(pathname)) {
+    const label = navItemForPath(pathname)?.label ?? "This section";
+    return (
+      <CsmComingSoonPage
+        title={label}
+        description={`${label} is still a work in progress and isn't available yet.`}
+      />
+    );
+  }
+  return <Outlet />;
+}
+
+/**
  * Redirects a legacy detail path (`/accounts/:id`, `/projects/:id`) to its new
  * home under `/customers`, preserving the id. Exists only so old pinned/deep
  * links survive the Accounts+Projects → Customers menu merge.
@@ -158,110 +181,116 @@ export default function App(): JSX.Element {
               />
 
               <Route element={<AuthGuard />}>
-                <Route path="/" element={<RootLanding />} />
+                <Route element={<WipRouteGuard />}>
+                  <Route path="/" element={<RootLanding />} />
 
-                {/* Customers — Accounts + Projects under one tabbed section.
-                    BFF-backed pages (entity-service search + by-id endpoints).
-                    Detail pages render full-width (outside the tab layout). */}
-                <Route path="customers" element={<CsmCustomersLayout />}>
+                  {/* Customers — Accounts + Projects under one tabbed section.
+                      BFF-backed pages (entity-service search + by-id endpoints).
+                      Detail pages render full-width (outside the tab layout). */}
+                  <Route path="customers" element={<CsmCustomersLayout />}>
+                    <Route
+                      index
+                      element={<Navigate to="/customers/accounts" replace />}
+                    />
+                    <Route path="accounts" element={<CsmAccountsPage />} />
+                    <Route path="projects" element={<CsmProjectsPage />} />
+                  </Route>
                   <Route
-                    index
+                    path="customers/accounts/:id"
+                    element={<CsmAccountDetailPage />}
+                  />
+                  <Route
+                    path="customers/projects/:id"
+                    element={<CsmProjectDetailPage />}
+                  />
+
+                  {/* Legacy paths kept alive so pinned/deep links don't 404. */}
+                  <Route
+                    path="accounts"
                     element={<Navigate to="/customers/accounts" replace />}
                   />
-                  <Route path="accounts" element={<CsmAccountsPage />} />
-                  <Route path="projects" element={<CsmProjectsPage />} />
+                  <Route
+                    path="accounts/:id"
+                    element={<LegacyDetailRedirect to="/customers/accounts" />}
+                  />
+                  <Route
+                    path="projects"
+                    element={<Navigate to="/customers/projects" replace />}
+                  />
+                  <Route
+                    path="projects/:id"
+                    element={<LegacyDetailRedirect to="/customers/projects" />}
+                  />
+
+                  {/* Administration — Users tab is real, others are WIP */}
+                  <Route path="admin" element={<CsmAdminLayout />}>
+                    <Route index element={<Navigate to="/admin/users" replace />} />
+                    <Route path="users" element={<CsmUsersPage />} />
+                    <Route
+                      path="roles"
+                      element={
+                        <CsmComingSoonPage
+                          title="Roles"
+                          description="Role-based access control: define roles and their permission sets."
+                          blockedOn="csm-portal/backend roles endpoints"
+                        />
+                      }
+                    />
+                    <Route
+                      path="groups"
+                      element={
+                        <CsmComingSoonPage
+                          title="Groups"
+                          description="User groups for bulk role assignment and access control."
+                          blockedOn="csm-portal/backend groups endpoints"
+                        />
+                      }
+                    />
+                    <Route
+                      path="permissions"
+                      element={
+                        <CsmComingSoonPage
+                          title="Permissions"
+                          description="Fine-grained permission catalog and assignment view."
+                          blockedOn="csm-portal/backend permissions endpoints"
+                        />
+                      }
+                    />
+                  </Route>
+
+                  <Route path="dashboard" element={<CsmDashboardPage />} />
+                  <Route path="cases" element={<CsmCasesPage />} />
+                  <Route path="cases/new" element={<CsmCaseCreatePage />} />
+                  <Route path="cases/:caseId" element={<CsmCaseDetailPage />} />
+
+                  <Route path="operations" element={<OperationsPage />} />
+                  <Route
+                    path="operations/service-requests/new"
+                    element={<CreateServiceRequestPage />}
+                  />
+                  <Route
+                    path="operations/service-requests/:caseId"
+                    element={<CsmCaseDetailPage />}
+                  />
+                  <Route
+                    path="operations/change-requests/:id"
+                    element={<CsmChangeRequestDetailPage />}
+                  />
+
+                  <Route path="engagements" element={<CsmEngagementsPage />} />
+                  <Route path="engagements/:caseId" element={<CsmCaseDetailPage />} />
+                  <Route path="updates" element={<CsmUpdatesPage />} />
+                  <Route path="security-center" element={<CsmSecurityCenterPage />} />
+                  <Route
+                    path="security-center/reports/new"
+                    element={<CreateSecurityReportPage />}
+                  />
+                  <Route
+                    path="security-center/vulnerabilities/:id"
+                    element={<ProductVulnerabilityDetailPage />}
+                  />
+                  <Route path="time-cards" element={<CsmTimeCardsPage />} />
                 </Route>
-                <Route
-                  path="customers/accounts/:id"
-                  element={<CsmAccountDetailPage />}
-                />
-                <Route
-                  path="customers/projects/:id"
-                  element={<CsmProjectDetailPage />}
-                />
-
-                {/* Legacy paths kept alive so pinned/deep links don't 404. */}
-                <Route
-                  path="accounts"
-                  element={<Navigate to="/customers/accounts" replace />}
-                />
-                <Route
-                  path="accounts/:id"
-                  element={<LegacyDetailRedirect to="/customers/accounts" />}
-                />
-                <Route
-                  path="projects"
-                  element={<Navigate to="/customers/projects" replace />}
-                />
-                <Route
-                  path="projects/:id"
-                  element={<LegacyDetailRedirect to="/customers/projects" />}
-                />
-
-                {/* Administration — Users tab is real, others are WIP */}
-                <Route path="admin" element={<CsmAdminLayout />}>
-                  <Route index element={<Navigate to="/admin/users" replace />} />
-                  <Route path="users" element={<CsmUsersPage />} />
-                  <Route
-                    path="roles"
-                    element={
-                      <CsmComingSoonPage
-                        title="Roles"
-                        description="Role-based access control: define roles and their permission sets."
-                        blockedOn="csm-portal/backend roles endpoints"
-                      />
-                    }
-                  />
-                  <Route
-                    path="groups"
-                    element={
-                      <CsmComingSoonPage
-                        title="Groups"
-                        description="User groups for bulk role assignment and access control."
-                        blockedOn="csm-portal/backend groups endpoints"
-                      />
-                    }
-                  />
-                  <Route
-                    path="permissions"
-                    element={
-                      <CsmComingSoonPage
-                        title="Permissions"
-                        description="Fine-grained permission catalog and assignment view."
-                        blockedOn="csm-portal/backend permissions endpoints"
-                      />
-                    }
-                  />
-                </Route>
-
-                <Route path="dashboard" element={<CsmDashboardPage />} />
-                <Route path="cases" element={<CsmCasesPage />} />
-                <Route path="cases/new" element={<CsmCaseCreatePage />} />
-                <Route path="cases/:caseId" element={<CsmCaseDetailPage />} />
-
-                <Route path="operations" element={<OperationsPage />} />
-                <Route
-                  path="operations/service-requests/new"
-                  element={<CreateServiceRequestPage />}
-                />
-                <Route
-                  path="operations/change-requests/:id"
-                  element={<CsmChangeRequestDetailPage />}
-                />
-
-                <Route path="engagements" element={<CsmEngagementsPage />} />
-                <Route path="engagements/:caseId" element={<CsmCaseDetailPage />} />
-                <Route path="updates" element={<CsmUpdatesPage />} />
-                <Route path="security-center" element={<CsmSecurityCenterPage />} />
-                <Route
-                  path="security-center/reports/new"
-                  element={<CreateSecurityReportPage />}
-                />
-                <Route
-                  path="security-center/vulnerabilities/:id"
-                  element={<ProductVulnerabilityDetailPage />}
-                />
-                <Route path="time-cards" element={<CsmTimeCardsPage />} />
               </Route>
 
               <Route

@@ -208,7 +208,7 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
  * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
  */
-const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): null => {
+const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: (reason: "size" | "type") => void }): null => {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -216,16 +216,22 @@ const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): 
       const items = event.clipboardData?.items;
       if (!items) return;
 
+      const ALLOWED_PASTE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
       const MAX_PASTE_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
       for (const item of Array.from(items)) {
-        if (item.type.startsWith("image/")) {
+        if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
+          event.preventDefault();
+          onPasteError?.("type");
+          break;
+        }
+        if (ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
           const file = item.getAsFile();
           if (!file) continue;
 
           event.preventDefault();
 
           if (file.size > MAX_PASTE_IMAGE_SIZE) {
-            onPasteError?.();
+            onPasteError?.("size");
             break;
           }
 
@@ -330,7 +336,7 @@ const Editor = ({
   onBlur?: () => void;
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
   overlayElement?: ReactNode;
-  onPasteError?: () => void;
+  onPasteError?: (reason: "size" | "type") => void;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();

@@ -40,9 +40,13 @@ vi.mock("@wso2/oxygen-ui", () => ({
 }));
 
 // Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Bot: () => <svg data-testid="icon-bot" />,
-}));
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wso2/oxygen-ui-icons-react")>();
+  return {
+    ...actual,
+    Bot: () => <svg data-testid="icon-bot" />,
+  };
+});
 
 describe("NoveraChatBanner", () => {
   it("should render correctly with title and description", () => {

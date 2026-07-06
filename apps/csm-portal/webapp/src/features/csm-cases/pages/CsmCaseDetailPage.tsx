@@ -60,6 +60,7 @@ import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
+import { useGetCsmConversationMessages } from "@features/csm-cases/api/useCsmConversationMessages";
 import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
@@ -69,6 +70,8 @@ import {
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
+import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
+import { usePostCaseGithubIssue } from "@features/csm-cases/api/useCsmCaseGithubIssue";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
@@ -194,7 +197,6 @@ const SECONDARY_TOAST: Record<string, string> = {
   link_case: "Link related case picker (mock).",
   link_incident: "Link to incident picker (mock).",
   manage_watchers: "Add/remove watcher dialog (mock).",
-  raise_git_issue: "Raise internal Git issue (mock).",
   create_task: "Create task dialog (mock).",
   request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
@@ -249,15 +251,38 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
-  const backPath = isEngagementRoute ? "/engagements" : "/cases";
-  const backLabel = isEngagementRoute ? "Back to engagements" : "Back to cases";
-  const detailPath = isEngagementRoute ? `/engagements/${caseId}` : `/cases/${caseId}`;
+  const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
+  const backPath = isEngagementRoute
+    ? "/engagements"
+    : isServiceRequestRoute
+      ? "/operations?tab=service_requests"
+      : "/cases";
+  const backLabel = isEngagementRoute
+    ? "Back to engagements"
+    : isServiceRequestRoute
+      ? "Back to service requests"
+      : "Back to cases";
+  const detailPath = isEngagementRoute
+    ? `/engagements/${caseId}`
+    : isServiceRequestRoute
+      ? `/operations/service-requests/${caseId}`
+      : `/cases/${caseId}`;
   const { data, isLoading, isError } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
     isLoading: isCommentsLoading,
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
+  // The chat transcript the case was spawned from, when linked. Loaded lazily
+  // off the case's conversation id and merged into the comment stream below so
+  // it renders as the earliest activity entries — mirrors the customer portal.
+  // Disabled (no fetch) when the case has no linked conversation, so
+  // isChatLoading/isChatError stay false for chat-less cases.
+  const {
+    data: chatMessages,
+    isLoading: isChatLoading,
+    isError: isChatError,
+  } = useGetCsmConversationMessages(data?.conversationId);
   const postComment = usePostCsmCaseComment();
   const {
     data: attachments,
@@ -288,6 +313,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
+  const [githubIssueOpen, setGithubIssueOpen] = useState(false);
+  // Inline error shown inside the Git-issue dialog (e.g. the SN routing 422 /
+  // state 409). Cleared when the dialog opens or a submit is retried.
+  const [githubIssueError, setGithubIssueError] = useState<string | null>(null);
+  const postGithubIssue = usePostCaseGithubIssue();
   const postTimeCard = usePostTimeCard();
   // Attachment pending delete confirmation (drives the confirm dialog).
   const [pendingDelete, setPendingDelete] = useState<CaseAttachment | null>(
@@ -591,6 +621,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // ISSU-020: file an internal GitHub issue from the case. The SN side
+      // gates on the case state (only certain states may file) and resolves
+      // the target repo from the product; we don't pre-gate here — open the
+      // dialog and surface any backend rejection inline.
+      if (action.secondary === "raise_git_issue") {
+        setGithubIssueError(null);
+        setGithubIssueOpen(true);
+        return;
+      }
+
       setFeedback({
         message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
         severity: "info",
@@ -663,6 +703,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
 
+  // Case comments + the linked chat transcript, as one list for the activity
+  // feed. Memoised so the feed's own sort doesn't rerun on every render.
+  const mergedComments = useMemo(
+    () => [...(comments ?? []), ...(chatMessages ?? [])],
+    [comments, chatMessages],
+  );
+
   const onUploadAttachment = useCallback(
     (file: File) => {
       if (!caseId) return;
@@ -729,8 +776,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <Skeleton variant="rectangular" height={32} width={240} />
-        <Skeleton variant="rectangular" height={200} />
+        <Skeleton variant="rounded" height={32} width={240} />
+        <Skeleton variant="rounded" height={200} />
       </Box>
     );
   }
@@ -791,8 +838,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const hasSlaData = c.slaClocks.length > 0;
   // The case description is already returned by `comments/search` as the
   // opening comment, so the stream renders it directly — no synthetic entry is
-  // injected (that duplicated the first comment).
-  const safeComments = comments ?? [];
+  // injected (that duplicated the first comment). The linked chat transcript
+  // (if any) is appended; the feed sorts chronologically, so the chat — being
+  // oldest — sinks below the case comments in the default newest-first view.
+  const safeComments = mergedComments;
 
   // SLA breach is a live condition, not a dismissible notice: surface it in a
   // persistent banner under the header so it stays visible on every tab, not
@@ -1121,14 +1170,17 @@ export default function CsmCaseDetailPage(): JSX.Element {
               )}
             </Box>
 
-            {isCommentsLoading ? (
+            {isCommentsLoading || isChatLoading ? (
+              // Wait for both the comments and the linked chat transcript so the
+              // transcript doesn't pop into an already-rendered timeline.
+              // isChatLoading is false for chat-less cases (query disabled).
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {[0, 1, 2].map((i) => (
-                  <Skeleton key={i} variant="rectangular" height={56} />
+                  <Skeleton key={i} variant="rounded" height={56} />
                 ))}
               </Box>
             ) : (
-              // A comments failure shouldn't blank the timeline — the
+              // A comments/chat failure shouldn't blank the timeline — the
               // description, audit, and attachments loaded fine. Show them with
               // an inline notice.
               <>
@@ -1136,6 +1188,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <Typography variant="body2" color="error">
                     Could not load comments. Showing the rest of the activity —
                     reload to try again.
+                  </Typography>
+                )}
+                {isChatError && (
+                  <Typography variant="body2" color="error">
+                    Could not load the chat conversation. Showing the rest of the
+                    activity — reload to try again.
                   </Typography>
                 )}
                 <CaseActivitiesFeed
@@ -1263,7 +1321,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {activeTab === "call-requests" && caseId && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
-          <CallRequestsWidget caseId={caseId} />
+          <CallRequestsWidget caseId={caseId} severity={c.severity} />
         </Box>
       )}
 
@@ -1308,6 +1366,56 @@ export default function CsmCaseDetailPage(): JSX.Element {
               },
             })
           }
+        />
+      )}
+
+      {githubIssueOpen && (
+        <CreateGithubIssueDialog
+          open={githubIssueOpen}
+          submitting={postGithubIssue.isPending}
+          error={githubIssueError}
+          defaultUpdateLevel={c.productContext.updateLevel}
+          defaultTitle={c.subject}
+          defaultDescription={c.description}
+          onClose={() => {
+            setGithubIssueOpen(false);
+            setGithubIssueError(null);
+          }}
+          onSubmit={(payload) => {
+            setGithubIssueError(null);
+            postGithubIssue.mutate(
+              { caseId: c.id, ...payload },
+              {
+                onSuccess: (res) => {
+                  setGithubIssueOpen(false);
+                  // The SN side writes the issue URL into work notes; show that
+                  // entry by switching to the activities feed (just refetched).
+                  setActiveTab("activities");
+                  setFeedback({
+                    message: res.issue?.url
+                      ? `Internal Git issue created: ${res.issue.url}`
+                      : "Internal Git issue created.",
+                    severity: "success",
+                    sticky: true,
+                  });
+                },
+                onError: (err) => {
+                  // Surface the backend's own message on 4xx (invalid state,
+                  // product not routable) inline in the dialog; fall back to a
+                  // generic banner for 5xx.
+                  if (
+                    err instanceof BackendApiError &&
+                    err.status < 500 &&
+                    err.message
+                  ) {
+                    setGithubIssueError(err.message);
+                  } else {
+                    showError("Could not create the Git issue.", err);
+                  }
+                },
+              },
+            );
+          }}
         />
       )}
 

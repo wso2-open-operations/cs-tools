@@ -88,7 +88,7 @@ type mockEntityCaseClient struct {
 	createCaseFn               func(ctx context.Context, body []byte) ([]byte, error)
 	patchCaseFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	createCaseCommentFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCaseCommentsFn       func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
 	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
 	createCaseAttachmentFn     func(ctx context.Context, body []byte) ([]byte, error)
@@ -98,6 +98,7 @@ type mockEntityCaseClient struct {
 	createCallRequestFn        func(ctx context.Context, body []byte) ([]byte, error)
 	searchCallRequestsFn       func(ctx context.Context, body []byte) ([]byte, error)
 	patchCallRequestFn         func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
+	createCaseGithubIssueFn    func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
@@ -121,9 +122,9 @@ func (m *mockEntityCaseClient) CreateCaseComment(ctx context.Context, caseID str
 	return []byte(`{}`), nil
 }
 
-func (m *mockEntityCaseClient) SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error) {
-	if m.searchCaseCommentsFn != nil {
-		return m.searchCaseCommentsFn(ctx, caseID, body)
+func (m *mockEntityCaseClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCommentsFn != nil {
+		return m.searchCommentsFn(ctx, body)
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }
@@ -187,6 +188,13 @@ func (m *mockEntityCaseClient) SearchCallRequests(ctx context.Context, body []by
 func (m *mockEntityCaseClient) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
 	if m.patchCallRequestFn != nil {
 		return m.patchCallRequestFn(ctx, callRequestID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.createCaseGithubIssueFn != nil {
+		return m.createCaseGithubIssueFn(ctx, caseID, body)
 	}
 	return []byte(`{}`), nil
 }
@@ -328,9 +336,17 @@ func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, pro
 // ----- mock entity change request client -----
 
 type mockEntityChangeRequestClient struct {
+	createChangeRequestFn  func(ctx context.Context, body []byte) ([]byte, error)
 	searchChangeRequestsFn func(ctx context.Context, body []byte) ([]byte, error)
 	getChangeRequestFn     func(ctx context.Context, id string) ([]byte, error)
 	patchChangeRequestFn   func(ctx context.Context, id string, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityChangeRequestClient) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createChangeRequestFn != nil {
+		return m.createChangeRequestFn(ctx, body)
+	}
+	return []byte(`{"message":"Change request created.","changeRequest":{"id":"11111111-1111-1111-1111-111111111111","number":"CHG0001","createdOn":"2026-01-01T00:00:00Z","createdBy":"user@example.com"}}`), nil
 }
 
 func (m *mockEntityChangeRequestClient) SearchChangeRequests(ctx context.Context, body []byte) ([]byte, error) {
@@ -352,6 +368,58 @@ func (m *mockEntityChangeRequestClient) PatchChangeRequest(ctx context.Context, 
 		return m.patchChangeRequestFn(ctx, id, body)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","updatedOn":"2026-01-01T00:00:00Z","updatedBy":"user@example.com"}`), nil
+}
+
+// ----- mock entity IT service client -----
+
+type mockEntityITServiceClient struct {
+	searchITServicesFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityITServiceClient) SearchITServices(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchITServicesFn != nil {
+		return m.searchITServicesFn(ctx, body)
+	}
+	return []byte(`{"services":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+// ----- mock entity service offering client -----
+
+type mockEntityServiceOfferingClient struct {
+	searchServiceOfferingsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityServiceOfferingClient) SearchServiceOfferings(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchServiceOfferingsFn != nil {
+		return m.searchServiceOfferingsFn(ctx, body)
+	}
+	return []byte(`{"serviceOfferings":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+// ----- mock entity group client -----
+
+type mockEntityGroupClient struct {
+	searchGroupsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityGroupClient) SearchGroups(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchGroupsFn != nil {
+		return m.searchGroupsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+// ----- mock entity configuration item client -----
+
+type mockEntityConfigurationItemClient struct {
+	searchConfigurationItemsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityConfigurationItemClient) SearchConfigurationItems(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchConfigurationItemsFn != nil {
+		return m.searchConfigurationItemsFn(ctx, body)
+	}
+	return []byte(`{"configurationItems":[],"total":0,"limit":20,"offset":0}`), nil
 }
 
 // ----- mock entity time-card client -----
@@ -434,4 +502,38 @@ func (m *mockEntityDeploymentClient) PatchDeployedProduct(ctx context.Context, d
 		return m.patchDeployedProductFn(ctx, deployedProductID, body)
 	}
 	return []byte(`{}`), nil
+}
+
+// ----- mock entity conversation client -----
+
+type mockEntityConversationClient struct {
+	searchCommentsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityConversationClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCommentsFn != nil {
+		return m.searchCommentsFn(ctx, body)
+	}
+	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
+}
+
+// ----- mock entity task SLA client -----
+
+type mockEntityTaskSlaClient struct {
+	searchTaskSlasFn func(ctx context.Context, body []byte) ([]byte, error)
+	getTaskSlaFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityTaskSlaClient) SearchTaskSlas(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchTaskSlasFn != nil {
+		return m.searchTaskSlasFn(ctx, body)
+	}
+	return []byte(`{"slas":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
+	if m.getTaskSlaFn != nil {
+		return m.getTaskSlaFn(ctx, id)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
 }

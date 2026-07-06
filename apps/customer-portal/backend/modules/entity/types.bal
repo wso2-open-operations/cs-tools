@@ -131,6 +131,10 @@ public type Project record {|
     int outstandingCount;
     # SLA status (e.g., "Needs Attention")
     string slaStatus;
+    # Project start date
+    Date? startDate;
+    # Project end date
+    Date? endDate;
     json...;
 |};
 
@@ -257,6 +261,10 @@ public type UpdatedProject record {|
     json...;
 |};
 
+# Email validation regex pattern.
+@constraint:String { pattern: re `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$` }
+public type Email string;
+
 # Payload for creating a case.
 public type CaseCreatePayload record {|
     # Case type
@@ -287,6 +295,8 @@ public type CaseCreatePayload record {|
     Variable[] variables?;
     # List of attachments
     CaseCreateAttachment[] attachments?;
+    # Watch list user emails to add to the case
+    Email[] watchList?;
 |};
 
 # Attachment for creating a case.
@@ -327,7 +337,9 @@ public type CreatedCase record {|
 # Request payload for updating a case.
 public type CaseUpdatePayload record {|
     # State key to update
-    int stateKey;
+    int stateKey?;
+    # Watch list user emails to update on the case
+    Email[] watchList?;
 |};
 
 # Response from updating a case.
@@ -350,6 +362,8 @@ public type UpdatedCase record {|
     ChoiceListItem state;
     # Case type information
     ReferenceTableItem? 'type;
+    # Watch list users
+    WatchList[]? watchList?;
     json...;
 |};
 
@@ -387,6 +401,10 @@ public type Case record {|
     ReferenceTableItem? product;
     # Engagement type information
     ChoiceListItem engagementType?;
+    # Current escalation level of the case
+    ChoiceListItem? escalationLevel;
+    # Indicates whether the case is escalated
+    boolean? isEscalated;
     json...;
 |};
 
@@ -434,16 +452,30 @@ public type CaseSearchFilters record {|
     int[] issueTypeKeys?;
     # State key
     int[] stateKeys?;
+    # Email of the user who is involved in the case
+    string[] createdBy?;
     # Severity key
     int severityKey?;
+    # List of case severity keys
+    int[] severityKeys?;
     # Engagement type keys (required for engagement type cases)
     int[] engagementTypeKeys?;
     # Start date for closed date
     UtcDateTimeString closedStartDate?;
     # End date for closed date
     UtcDateTimeString closedEndDate?;
+    # Start date for created date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString startCreatedDate?;
+    # End date for created date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString endCreatedDate?;
+    # Start date for updated date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString startUpdatedDate?;
+    # End date for updated date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString endUpdatedDate?;
     # Deployment ID
     string deploymentId?;
+    # Deployment ID list
+    IdString[] deploymentIds?;
     # Case created by the logged in user
     boolean createdByMe?;
 |};
@@ -550,6 +582,21 @@ public type CaseResponse record {|
     Date? engagementStartDate?;
     # Engagement end date
     Date? engagementEndDate?;
+    # Watch list users
+    WatchList[]? watchList;
+    json...;
+|};
+
+# Watch list information.
+public type WatchList record {|
+    # ID of the user
+    IdString id;
+    # User name
+    string userName;
+    # Full name of the user
+    string? name;
+    # Email address of the user
+    string? email;
     json...;
 |};
 
@@ -564,7 +611,7 @@ public type ServiceRequestVariable record {|
 # Sort configuration.
 public type SortBy record {|
     # Field to sort by
-    CaseSortField 'field;
+    CaseSortField|ChangeRequestSortField 'field;
     # Sort order
     SortOrder 'order;
     json...;
@@ -1282,6 +1329,8 @@ public type Deployment record {|
     ReferenceTableItem? project;
     # Type
     ChoiceListItem? 'type;
+    # Number of deployed products associated with this deployment
+    int deployedProductCount?;
     json...;
 |};
 
@@ -2031,11 +2080,15 @@ public type ChangeRequestSearchPayload record {|
         int[] stateKeys?;
         # Change request impact key
         int impactKey?;
+        # Change request impact keys
+        int[] impactKeys?;
         # Start date for closed date filter
         UtcDateTimeString closedStartDate?;
         # End date for closed date filter
         UtcDateTimeString closedEndDate?;
     |} filters?;
+    # Sort configuration
+    SortBy sortBy?;
     # Pagination details
     Pagination pagination?;
 |};
@@ -2295,6 +2348,8 @@ public type InstanceUsageStatsPayload record {|
         IdString[] deploymentIds?;
         # List of deployed product IDs (mutually exclusive with projectIds and deploymentIds)
         IdString[] deployedProductIds?;
+        # Data source filter: 1 = API Call, 2 = File Upload
+        int dataSource?;
     |} filters;
 |};
 
@@ -2312,6 +2367,8 @@ public type InstanceMetricStatsPayload record {|
         IdString[] deploymentIds?;
         # List of deployed product IDs (mutually exclusive with projectIds and deploymentIds)
         IdString[] deployedProductIds?;
+        # Data source filter: 1 = API Call, 2 = File Upload
+        int dataSource?;
     |} filters;
 |};
 
@@ -2353,5 +2410,331 @@ public type InstanceMetricStatsResponse record {|
     string startDate;
     # End date of the queried range
     string endDate;
+    json...;
+|};
+
+# Payload for creating an escalation.
+public type EscalationCreatePayload record {|
+    # Case ID
+    IdString caseId;
+    # Reason for the escalation
+    string reason;
+|};
+
+# Created escalation details.
+public type CreatedEscalation record {|
+    # ID
+    IdString id;
+    # Associated case information
+    ReferenceTableItem case;
+    # Current escalation level
+    ChoiceListItem currentLevel;
+    # Previous escalation level
+    ChoiceListItem previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Reason for the escalation
+    string reason;
+    # Users notified about the escalation
+    record {|
+        # System ID of the user
+        IdString id;
+        # User name
+        string userName;
+        # Full name of the user
+        string? name;
+        # Email address of the user
+        string? email;
+    |}[]? notificationSentTo;
+    json...;
+|};
+
+# Response from creating an escalation.
+public type EscalationCreateResponse record {|
+    # Success message
+    string message;
+    # Created escalation details
+    CreatedEscalation escalation;
+    json...;
+|};
+
+# Escalation data.
+public type Escalation record {|
+    # ID
+    IdString id;
+    # Associated case information
+    ReferenceTableItem case;
+    # Current escalation level
+    ChoiceListItem currentLevel;
+    # Previous escalation level
+    ChoiceListItem previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Reason for the escalation
+    string reason;
+    # Users notified about the escalation
+    record {|
+        # System ID of the user
+        IdString id;
+        # User name
+        string userName;
+        # Full name of the user
+        string? name;
+        # Email address of the user
+        string? email;
+    |}[]? notificationSentTo;
+    json...;
+|};
+
+# Payload for searching escalations.
+public type EscalationSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Case IDs to filter
+        IdString[] caseIds?;
+        # Current escalation level IDs to filter by
+        int[] currentLevels?;
+    |} filters?;
+    # Sort configuration
+    record {|
+        # Field to sort by
+        EscalationSortField 'field;
+        # Sort order
+        SortOrder 'order;
+    |} sortBy?;
+    # Pagination details
+    Pagination pagination?;
+|};
+
+# Escalations search response.
+public type EscalationsResponse record {|
+    # List of escalations
+    Escalation[] escalations;
+    # Total records count
+    int totalRecords;
+    *Pagination;
+    json...;
+|};
+
+# Request payload for global search across projects and cases.
+public type GlobalSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Search query string
+        string searchQuery?;
+        # Tables to search in (projects, cases). Defaults to both if not specified.
+        GlobalSearchType[] tables?;
+    |} filters?;
+    # Sort configuration
+    record {|
+        # Field to sort by
+        string 'field?;
+        # Sort order
+        SortOrder 'order?;
+    |} sortBy?;
+    # Pagination for projects results
+    Pagination projectsPagination?;
+    # Pagination for cases results
+    Pagination casesPagination?;
+|};
+
+# Project item in a global search response.
+public type GlobalSearchProject record {|
+    # System ID of the project
+    IdString id;
+    # Name of the project
+    string name;
+    # Description of the project
+    string? description;
+    # Project key
+    string key;
+    # Project type
+    ReferenceTableItem 'type;
+    # Created date and time
+    string createdOn;
+    # Project start date
+    Date? startDate;
+    # Project end date
+    Date? endDate;
+    # Indicates whether the project has a PDP subscription
+    boolean hasPdpSubscription;
+    # Closure state
+    string? closureState;
+    # Associated account
+    ReferenceTableItem account;
+    json...;
+|};
+
+# Case item in a global search response.
+public type GlobalSearchCase record {|
+    # System ID of the case
+    IdString id;
+    # WSO2 internal ID of the case
+    string internalId;
+    # Case number
+    string number;
+    # Case title
+    string? title;
+    # Case description
+    string? description;
+    # Created date and time
+    string createdOn;
+    # Created by (user email)
+    string createdBy;
+    # Last updated date and time
+    string updatedOn;
+    # Associated project
+    ReferenceTableItem? project;
+    # Case type information
+    ReferenceTableItem? caseType;
+    # Status information
+    ChoiceListItem? state;
+    # Severity information
+    ChoiceListItem? severity;
+    # Assigned engineer
+    ReferenceTableItem? assignedEngineer;
+    # Associated account
+    ReferenceTableItem account;
+    json...;
+|};
+
+# Global search response.
+public type GlobalSearchResponse record {|
+    # The search query string that was used
+    string query;
+    # Total number of matching projects
+    int projectsTotal;
+    # Total number of matching cases
+    int casesTotal;
+    # List of matching projects
+    GlobalSearchProject[] projects;
+    # List of matching cases
+    GlobalSearchCase[] cases;
+    json...;
+|};
+
+# Request payload for searching deployed product metrics.
+public type DeployedProductMetricsPayload record {|
+    # Deployment ID reference (e.g. "deployments/<id>")
+    IdString deploymentId;
+    # Start date of the metrics range (format: YYYY-MM-DD)
+    Date startDate;
+    # End date of the metrics range (format: YYYY-MM-DD)
+    Date endDate;
+|};
+
+# A single instance entry within a chart data point.
+public type DeployedProductMetricsInstance record {|
+    # Instance ID
+    string id;
+    # Instance name
+    string name;
+    # CPU cores allocated
+    int cores;
+    json...;
+|};
+
+# A single chart data point for deployed product metrics.
+public type DeployedProductMetricsChartDataPoint record {|
+    # Date of the data point (format: YYYY-MM-DD)
+    string date;
+    # Number of instances on this date
+    int instanceCount;
+    # Total CPU cores on this date
+    int totalCores;
+    # Minimum CPU cores on this date
+    int minCores;
+    # Maximum CPU cores on this date
+    int maxCores;
+    # Average CPU cores on this date
+    decimal avgCores;
+    # Individual instances on this date
+    DeployedProductMetricsInstance[] instances;
+    json...;
+|};
+
+# Summary for deployed product metrics.
+public type DeployedProductMetricsSummary record {|
+    # Queried date range
+    record {|
+        # Start date of the range
+        string 'start;
+        # End date of the range
+        string 'end;
+        json...;
+    |} dateRange;
+    # Total number of distinct instances in the range
+    int totalInstances;
+    # Minimum core count in the range; null when there are no instances
+    int? minCores;
+    # Maximum core count in the range; null when there are no instances
+    int? maxCores;
+    # Average core count in the range; null when there are no instances
+    decimal? avgCores;
+    json...;
+|};
+
+# Response for deployed product metrics search.
+public type DeployedProductMetricsResponse record {|
+    # The deployed product reference
+    record {|
+        # Deployed product ID
+        string id;
+        # Deployed product name
+        string name;
+        json...;
+    |} deployedProduct;
+    # Summary statistics for the queried range
+    DeployedProductMetricsSummary summary;
+    # Chart data points ordered by date
+    DeployedProductMetricsChartDataPoint[] chartData;
+    json...;
+|};
+
+# Request payload for searching deployed product metrics usage counts.
+public type DeployedProductMetricsUsageCountsPayload record {|
+    # Deployment ID
+    IdString deploymentId;
+    # Start date of the range (format: YYYY-MM-DD)
+    Date startDate;
+    # End date of the range (format: YYYY-MM-DD)
+    Date endDate;
+|};
+
+# Summary for deployed product metrics usage counts.
+public type DeployedProductMetricsUsageCountsSummary record {|
+    # Date range of the metrics query
+    record {|
+        # Start date
+        string 'start;
+        # End date
+        string 'end;
+        json...;
+    |} dateRange;
+    # Count types aggregated over the range
+    map<int> countTypes;
+    json...;
+|};
+
+# Response for deployed product metrics usage counts search.
+public type DeployedProductMetricsUsageCountsResponse record {|
+    # The deployed product reference
+    record {|
+        # Deployed product ID
+        string id;
+        # Deployed product name
+        string name;
+        json...;
+    |} deployedProduct;
+    # Summary statistics for the queried range
+    DeployedProductMetricsUsageCountsSummary summary;
+    # Chart data points ordered by date
+    json[] chartData;
     json...;
 |};

@@ -28,6 +28,7 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import CasesTableHeader from "@features/dashboard/components/cases-table/CasesTableHeader";
 import CasesFilters from "@features/dashboard/components/cases-table/CasesFilters";
 import CasesList from "@features/dashboard/components/cases-table/CasesList";
@@ -35,10 +36,17 @@ import {
   countCasesTableActiveFilters,
   filterCasesTableMetadataOptions,
   mapCasesTableFilterOptionLabel,
+  parseDashboardCasesViewMode,
   resolveCasesTableDefaultStatusIds,
   resolveCasesTableSearchStatusIds,
 } from "@features/dashboard/utils/casesTable";
-import { isS0Case, deriveFilterLabels } from "@features/support/utils/support";
+import { DASHBOARD_CASES_VIEW_TABS } from "@features/dashboard/constants/casesTable";
+import { DashboardCasesViewMode } from "@features/dashboard/types/casesTable";
+import {
+  deriveFilterLabels,
+  isS0Case,
+  normalizeCaseSearchIssueIds,
+} from "@features/support/utils/support";
 import {
   CaseType,
   ALL_CASES_FILTER_DEFINITIONS,
@@ -82,6 +90,9 @@ const CasesTable = ({
   const [showAll, setShowAll] = useState(false);
   // loading all
   const [isLoadingAll, setIsLoadingAll] = useState(false);
+  const [viewMode, setViewMode] = useState<DashboardCasesViewMode>(
+    DashboardCasesViewMode.AllCases,
+  );
 
   const { data: filtersMetadata } = useGetProjectFilters(projectId);
   // deployments query
@@ -96,6 +107,10 @@ const CasesTable = ({
       deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [],
     [deploymentsQuery.data],
   );
+
+  // contacts for created by filter
+  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId);
+  const contactsList = useMemo(() => contactsData ?? [], [contactsData]);
 
   // effective filters
   const effectiveFilters: CasesTableFilterValues = useMemo(
@@ -112,34 +127,37 @@ const CasesTable = ({
       (def) =>
         def.id !== "caseType" &&
         !(restrictSeverityToLow && def.metadataKey === "severities") &&
-        (includeDeploymentFilter || def.id !== "deployment"),
+        (includeDeploymentFilter || def.id !== "deployment") &&
+        (def.id === "deployment" || def.id === "createdBy" || !!def.metadataKey),
     ).map((def) => {
       const { label } = deriveFilterLabels(def.id);
 
       const isDeploymentFilter = def.id === "deployment";
+      const isCreatedByFilter = def.id === "createdBy";
       let options: { label: string; value: string }[];
-      switch (isDeploymentFilter) {
-        case true:
-          options =
-            deploymentsList.map((deployment) => ({
-              label: deployment.type?.label || deployment.name,
-              value: deployment.id,
-            })) ?? [];
-          break;
-        default: {
-          const metadataOptions =
-            filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
-          const filtered = filterCasesTableMetadataOptions(
-            def.metadataKey,
-            metadataOptions,
-            excludeS0,
-            restrictSeverityToLow,
-          );
-          options = filtered.map((item) => ({
-            label: mapCasesTableFilterOptionLabel(def.metadataKey, item.label),
-            value: item.id,
-          }));
-        }
+      if (isDeploymentFilter) {
+        options = deploymentsList.map((deployment) => ({
+          label: deployment.type?.label || deployment.name,
+          value: deployment.id,
+        }));
+      } else if (isCreatedByFilter) {
+        options = contactsList.map((contact) => ({
+          label: `${contact.firstName} ${contact.lastName}`.trim() || contact.email,
+          value: contact.email,
+        }));
+      } else {
+        const metadataOptions =
+          filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
+        const filtered = filterCasesTableMetadataOptions(
+          def.metadataKey!,
+          metadataOptions,
+          excludeS0,
+          restrictSeverityToLow,
+        );
+        options = filtered.map((item) => ({
+          label: mapCasesTableFilterOptionLabel(def.metadataKey!, item.label),
+          value: item.id,
+        }));
       }
 
       return {
@@ -147,6 +165,8 @@ const CasesTable = ({
         label,
         type: "select" as const,
         options,
+        ...(def.multiSelect ? { multiSelect: true } : null),
+        ...(isCreatedByFilter ? { isLoading: isContactsLoading } : null),
         ...(isDeploymentFilter
           ? {
               onLoadMore: () => {
@@ -166,6 +186,8 @@ const CasesTable = ({
   }, [
     filtersMetadata,
     deploymentsList,
+    contactsList,
+    isContactsLoading,
     excludeS0,
     restrictSeverityToLow,
     includeDeploymentFilter,
@@ -181,26 +203,34 @@ const CasesTable = ({
     return {
       filters: {
         statusIds: resolveCasesTableSearchStatusIds(
-          effectiveFilters.statusId,
+          effectiveFilters.statusIds as string[] | undefined,
           defaultStatusIds,
         ),
         caseTypes: [CaseType.DEFAULT_CASE],
-        severityId: effectiveFilters.severityId
-          ? Number(effectiveFilters.severityId)
-          : undefined,
-        issueId: effectiveFilters.issueTypes
-          ? Number(effectiveFilters.issueTypes)
-          : undefined,
-        deploymentId: effectiveFilters.deploymentId
-          ? String(effectiveFilters.deploymentId)
-          : undefined,
+        severityIds:
+          (effectiveFilters.severityIds as string[] | undefined)?.length
+            ? (effectiveFilters.severityIds as string[]).map(Number)
+            : undefined,
+        issueIds: normalizeCaseSearchIssueIds(
+          effectiveFilters.issueTypes as string | string[] | undefined,
+        ),
+        deploymentIds:
+          (effectiveFilters.deploymentIds as string[] | undefined)?.length
+            ? (effectiveFilters.deploymentIds as string[])
+            : undefined,
+        createdByMe:
+          viewMode === DashboardCasesViewMode.MyCases ? true : undefined,
+        createdBy:
+          (effectiveFilters.createdBy as string[] | undefined)?.length
+            ? (effectiveFilters.createdBy as string[])
+            : undefined,
       },
       sortBy: {
-        field: "createdOn",
+        field: "updatedOn",
         order: SortOrder.DESC,
       },
     };
-  }, [effectiveFilters, filtersMetadata]);
+  }, [effectiveFilters, filtersMetadata, viewMode]);
 
   // offset
   const offset = page * rowsPerPage;
@@ -273,10 +303,10 @@ const CasesTable = ({
   };
 
   // handle update filter
-  const handleUpdateFilter = (field: string, value: string | number) => {
+  const handleUpdateFilter = (field: string, value: string | string[] | number) => {
     setFilters((prev) => ({
       ...prev,
-      [field]: value,
+      [field]: Array.isArray(value) ? (value.length === 0 ? undefined : value) : value,
     }));
     setPage(0);
     setShowAll(false);
@@ -298,7 +328,15 @@ const CasesTable = ({
   const activeFiltersCount = countCasesTableActiveFilters(filters);
 
   return (
-    <ListingTable.Container sx={{ width: "100%", mb: 4, p: 3 }}>
+    <ListingTable.Container
+      sx={{
+        width: "100%",
+        maxWidth: "100%",
+        mb: 4,
+        boxSizing: "border-box",
+        p: { xs: 2, sm: 2.5, md: 3 },
+      }}
+    >
       <CasesTableHeader
         activeFiltersCount={activeFiltersCount}
         isFiltersOpen={isFilterOpen}
@@ -310,6 +348,14 @@ const CasesTable = ({
           }
         }}
         hasAgent={hasAgent}
+        viewTabs={DASHBOARD_CASES_VIEW_TABS}
+        activeViewMode={viewMode}
+        onViewModeChange={(tabId) => {
+          setViewMode(parseDashboardCasesViewMode(tabId));
+          setPage(0);
+          setShowAll(false);
+          setIsLoadingAll(false);
+        }}
       />
 
       {isFilterOpen && (

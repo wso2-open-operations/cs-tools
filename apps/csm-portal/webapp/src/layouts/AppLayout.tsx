@@ -166,7 +166,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
             >
               {isVisible && (
                 <LinearProgress
-                  color="warning"
+                  color="primary"
                   sx={{
                     position: "absolute",
                     top: 0,
@@ -203,7 +203,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                     }}
                   >
                     <LinearProgress
-                      color="warning"
+                      color="primary"
                       sx={{ width: "80%", maxWidth: 400, height: 4 }}
                     />
                     <Typography variant="body2" color="text.secondary">

@@ -26,6 +26,79 @@ import (
 
 const testCRID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+func TestCreateChangeRequest(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(`{"subject":"Deploy v2"}`))
+		w := httptest.NewRecorder()
+		h.CreateChangeRequest(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.CreateChangeRequest(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.CreateChangeRequest(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 201 with response", func(t *testing.T) {
+		const reqPayload = `{"subject":"Deploy v2"}`
+		var capturedBody []byte
+		client := &mockEntityChangeRequestClient{
+			createChangeRequestFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"message":"Change request created.","changeRequest":{"id":"` + testCRID + `","number":"CHG0001","createdOn":"2026-01-01T00:00:00Z","createdBy":"user@example.com"}}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.CreateChangeRequest(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create change request.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityChangeRequestClient{
+					createChangeRequestFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewChangeRequestHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(`{"subject":"Deploy v2"}`)))
+				w := httptest.NewRecorder()
+				h.CreateChangeRequest(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestGetChangeRequest(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})

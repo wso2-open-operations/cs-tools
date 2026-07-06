@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRecommendationRequestFromCase,
+  buildRecommendationRequestFromConversationMessages,
   recommendationScoreToPercent,
 } from "@features/support/utils/recommendations";
 import type { CaseDetails } from "@features/support/types/cases";
@@ -30,6 +31,36 @@ describe("recommendationScoreToPercent", () => {
 
   it("should treat values above 1 as already being percent-like", () => {
     expect(recommendationScoreToPercent(94)).toBe(94);
+  });
+});
+
+describe("buildRecommendationRequestFromConversationMessages", () => {
+  it("returns null for empty messages", () => {
+    expect(buildRecommendationRequestFromConversationMessages([])).toBeNull();
+  });
+
+  const makeMsg = (content: string) => ({
+    id: "1",
+    content,
+    type: "user",
+    createdOn: "2026-01-01T00:00:00Z",
+    isEscalated: false,
+    hasInlineAttachments: false,
+    inlineAttachments: [],
+  });
+
+  it("truncates message content to last 150 chars", () => {
+    const req = buildRecommendationRequestFromConversationMessages([
+      makeMsg("x".repeat(200)),
+    ]);
+    expect(req?.chatHistory[0].content).toBe("x".repeat(150));
+  });
+
+  it("does not truncate messages under 150 chars", () => {
+    const req = buildRecommendationRequestFromConversationMessages([
+      makeMsg("short message"),
+    ]);
+    expect(req?.chatHistory[0].content).toBe("short message");
   });
 });
 

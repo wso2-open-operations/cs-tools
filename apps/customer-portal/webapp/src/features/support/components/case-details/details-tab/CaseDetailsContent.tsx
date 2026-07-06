@@ -28,6 +28,9 @@ import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetAIChatHistory from "@features/support/api/useGetAIChatHistory";
 import { useConversationRecommendationsSearch } from "@features/support/api/useConversationRecommendationsSearch";
 import { buildRecommendationRequestFromCase } from "@features/support/utils/recommendations";
+import { usePostCaseEscalationsSearch } from "@features/support/api/usePostCaseEscalationsSearch";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import {
   getStatusColor,
   resolveColorFromTheme,
@@ -155,6 +158,7 @@ export default function CaseDetailsContent({
     isSecurityReportAnalysis || isEngagementRoute || isServiceRequest;
   const hideRelatedChangeRequestsTab =
     !isServiceRequest || !data?.changeRequests?.length;
+  const hideEscalationTab = isEngagementRoute || isServiceRequest || isSecurityReportAnalysis;
 
   // Eagerly fetch KB recommendations so the tab count is available on page load.
   // React Query deduplicates the network call when the KB tab component mounts later.
@@ -182,6 +186,29 @@ export default function CaseDetailsContent({
     !hideKnowledgeBaseTab &&
     (isKbCommentsLoading || (!!kbPayload && isKbRecLoading && !kbRecData));
 
+  // Eagerly fetch escalation history so count is available on page load.
+  const { data: escalationData, refetch: refetchEscalations } =
+    usePostCaseEscalationsSearch(caseId, !hideEscalationTab);
+  const escalationCount = hideEscalationTab
+    ? undefined
+    : (escalationData?.totalRecords ?? escalationData?.escalations?.length);
+  const isEscalated = data?.isEscalated ?? false;
+  const escalationLevelId = String(data?.escalationLevel?.id ?? "0");
+
+  // Determine if the logged-in user is a Lead (required for EL3+ escalations).
+  // Keep undefined while userDetails is still loading to avoid a false-negative
+  // that would cause the Escalate button to flicker into view for Lead users.
+  const { data: userDetails, isLoading: isUserDetailsLoading } = useGetUserDetails();
+  const { data: projectContacts } = useGetProjectContacts(
+    hideEscalationTab ? "" : resolvedProjectId,
+  );
+  const isCurrentUserLead: boolean | undefined =
+    !isUserDetailsLoading && !!userDetails?.email
+      ? !!projectContacts?.find(
+          (c) => c.email.toLowerCase() === userDetails.email!.toLowerCase(),
+        )?.isLead
+      : undefined;
+
   const visibleTabs = useMemo(
     () => [
       0,
@@ -190,8 +217,9 @@ export default function CaseDetailsContent({
       ...(hideCallsTab ? [] : [3]),
       ...(hideKnowledgeBaseTab ? [] : [4]),
       ...(hideRelatedChangeRequestsTab ? [] : [5]),
+      ...(hideEscalationTab ? [] : [6]),
     ],
-    [hideCallsTab, hideKnowledgeBaseTab, hideRelatedChangeRequestsTab],
+    [hideCallsTab, hideKnowledgeBaseTab, hideRelatedChangeRequestsTab, hideEscalationTab],
   );
   const clampedActiveTab = Math.min(
     activeTab,
@@ -312,6 +340,11 @@ export default function CaseDetailsContent({
                     assignedEngineerLabel={
                       hideAssignedEngineer ? null : assignedEngineerLabel
                     }
+                    engagementTypeLabel={
+                      isEngagementRoute
+                        ? (data?.engagementType?.label ?? null)
+                        : null
+                    }
                     statusChipIcon={statusChipIcon}
                     statusChipSx={statusChipSx}
                     isLoading={isLoading}
@@ -322,6 +355,12 @@ export default function CaseDetailsContent({
                     }
                     showStatusChip={headerVariant !== "engagement"}
                     variant={headerVariant}
+                    isEscalated={!hideEscalationTab && isEscalated}
+                    escalationLevelLabel={
+                      !hideEscalationTab && isEscalated
+                        ? (data?.escalationLevel?.label ?? null)
+                        : null
+                    }
                   />
                 </Box>
 
@@ -336,6 +375,9 @@ export default function CaseDetailsContent({
                     caseId={caseId}
                     isLoading={isLoading}
                     hideAssignedEngineer={hideAssignedEngineer}
+                    escalationLevelId={hideEscalationTab ? null : escalationLevelId}
+                    onEscalateSuccess={() => void refetchEscalations()}
+                    isCurrentUserLead={isCurrentUserLead}
                   />
                 )}
               </Box>
@@ -355,6 +397,9 @@ export default function CaseDetailsContent({
           knowledgeBaseCount={knowledgeBaseCount}
           knowledgeBaseCountLoading={knowledgeBaseCountLoading}
           hideRelatedChangeRequestsTab={hideRelatedChangeRequestsTab}
+          hideEscalationTab={hideEscalationTab}
+          escalationCount={escalationCount}
+          isEscalated={isEscalated}
         />
       </Paper>
 

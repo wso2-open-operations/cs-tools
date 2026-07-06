@@ -29,13 +29,18 @@ import {
   alpha,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import { getStatusColor, mapSeverityToDisplay } from "@features/support/utils/support";
+import {
+  getStatusColor,
+  mapSeverityToDisplay,
+} from "@features/support/utils/support";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
+import { formatCasesTableCaseIdentifier } from "@features/dashboard/utils/casesTable";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import CasesTableSkeleton from "@features/dashboard/components/cases-table/CasesTableSkeleton";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
+import { CASES_TABLE_HEADER_CREATED_BY } from "@features/dashboard/constants/casesTable";
 import type { CasesListProps } from "@/features/dashboard/types/casesTable";
 
 const CasesList = ({
@@ -52,15 +57,20 @@ const CasesList = ({
 }: CasesListProps): JSX.Element => {
   return (
     <>
-      <TableContainer component={Paper}>
-        <Table sx={{ minWidth: 650 }}>
+      <TableContainer
+        component={Paper}
+        elevation={0}
+        sx={{ maxWidth: "100%", overflowX: "auto" }}
+      >
+        <Table sx={{ minWidth: { xs: 520, sm: 780 } }}>
           <TableHead>
             <TableRow>
-              <TableCell>Created</TableCell>
+              <TableCell>Updated</TableCell>
               <TableCell sx={{ maxWidth: 320 }}>Details</TableCell>
               <TableCell>Severity</TableCell>
-              <TableCell align="center">Assigned to</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>{CASES_TABLE_HEADER_CREATED_BY}</TableCell>
+              <TableCell align="center">Assigned to</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -68,7 +78,7 @@ const CasesList = ({
               <CasesTableSkeleton rowsPerPage={rowsPerPage} />
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={6} align="center">
                   <Box
                     sx={{
                       display: "flex",
@@ -86,7 +96,7 @@ const CasesList = ({
               </TableRow>
             ) : data?.cases.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={6} align="center">
                   <Box
                     sx={{
                       display: "flex",
@@ -143,94 +153,141 @@ const CasesList = ({
                       typeof assignedEngineerValue === "string"
                         ? assignedEngineerValue.trim()
                         : assignedEngineerValue?.label?.trim() || "";
-                    const assignedEngineerDisplay = assignedEngineerName || "--";
+                    const assignedEngineerDisplay =
+                      assignedEngineerName || "--";
+                    const createdByDisplay = row.createdBy?.trim() || "--";
 
                     return (
                       <>
-                  <TableCell>
-                    <Box>
-                      <Typography variant="body2" color="text.primary">
-                        {formatBackendTimestampForDisplay(row.createdOn, { month: "short", day: "numeric", year: "numeric" }) ?? "--"}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatBackendTimestampForDisplay(row.createdOn, { hour: "numeric", minute: "2-digit", hour12: true }) ?? ""}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ maxWidth: 320 }}>
-                    <Box
-                      sx={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 0.25,
-                        minWidth: 0,
-                      }}
-                    >
-                      <Typography
-                        variant="body2"
-                        color="text.primary"
-                        sx={{
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {row.title || "--"}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        ID: {row.number}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    {(() => {
-                      const severityColor = getSeverityLegendColor(
-                        row.severity?.label,
-                      );
-                      return (
-                        <Chip
-                          label={mapSeverityToDisplay(row.severity?.label)}
-                          size="small"
-                          variant="outlined"
-                          sx={{
-                            bgcolor: alpha(severityColor, 0.1),
-                            color: severityColor,
-                            borderColor: alpha(severityColor, 0.3),
-                            fontWeight: 500,
-                            px: 0,
-                            height: 20,
-                            fontSize: "0.75rem",
-                            "& .MuiChip-label": {
-                              pl: "6px",
-                              pr: "6px",
-                            },
-                          }}
-                        />
-                      );
-                    })()}
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography variant="body2" color="text.primary">
-                      {assignedEngineerDisplay}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Box
-                        sx={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: "50%",
-                          backgroundColor: getStatusColor(
-                            row.status?.label || "",
-                          ),
-                        }}
-                      />
-                      <Typography variant="body2" color="text.primary">
-                        {row.status?.label || "--"}
-                      </Typography>
-                    </Box>
-                  </TableCell>
+                        <TableCell>
+                          <Box>
+                            <Typography variant="body2" color="text.primary">
+                              {formatBackendTimestampForDisplay(
+                                row.updatedOn ?? row.createdOn,
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                },
+                              ) ?? "--"}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {formatBackendTimestampForDisplay(
+                                row.updatedOn ?? row.createdOn,
+                                {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                  hour12: true,
+                                },
+                              ) ?? ""}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 320 }}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 0.25,
+                              minWidth: 0,
+                            }}
+                          >
+                            <Typography
+                              variant="body2"
+                              color="text.primary"
+                              sx={{
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {row.title || "--"}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {formatCasesTableCaseIdentifier(
+                                row.number,
+                                row.internalId,
+                              )}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          {(() => {
+                            const severityColor = getSeverityLegendColor(
+                              row.severity?.label,
+                            );
+                            return (
+                              <Chip
+                                label={mapSeverityToDisplay(
+                                  row.severity?.label,
+                                )}
+                                size="small"
+                                variant="outlined"
+                                sx={{
+                                  bgcolor: alpha(severityColor, 0.1),
+                                  color: severityColor,
+                                  borderColor: alpha(severityColor, 0.3),
+                                  fontWeight: 500,
+                                  px: 0,
+                                  height: 20,
+                                  fontSize: "0.75rem",
+                                  "& .MuiChip-label": {
+                                    pl: "6px",
+                                    pr: "6px",
+                                  },
+                                }}
+                              />
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1,
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                backgroundColor: getStatusColor(
+                                  row.status?.label || "",
+                                ),
+                              }}
+                            />
+                            <Typography variant="body2" color="text.primary">
+                              {row.status?.label || "--"}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography
+                            variant="body2"
+                            color="text.primary"
+                            sx={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              maxWidth: 160,
+                            }}
+                          >
+                            {createdByDisplay}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2" color="text.primary">
+                            {assignedEngineerDisplay}
+                          </Typography>
+                        </TableCell>
                       </>
                     );
                   })()}

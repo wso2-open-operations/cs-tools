@@ -62,7 +62,8 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
           ),
         }}
       >
-        {animated ? fullText.slice(0, cursor) : fullText}
+        {/* force single newlines into markdown hard breaks so typed line breaks render as typed */}
+        {(animated ? fullText.slice(0, cursor) : fullText).replace(/\n/g, "  \n")}
       </Markdown>
       <Box
         sx={{

@@ -103,6 +103,13 @@ type ProductVersionService interface {
 	SearchProductVersions(ctx context.Context, req domain.SearchProductVersionsRequest) (domain.SearchProductVersionsResponse, error)
 }
 
+// SNProductVersionService is the ServiceNow-backed variant of ProductVersionService.
+// It returns SNProductVersion items with string date fields to avoid time.Parse errors
+// on empty SN date strings.
+type SNProductVersionService interface {
+	SearchProductVersions(ctx context.Context, req domain.SearchProductVersionsRequest) (domain.SearchSNProductVersionsResponse, error)
+}
+
 // DeploymentService defines the operations available on the deployment entity.
 type DeploymentService interface {
 	// SearchDeployments returns a paginated list of deployments filtered by optional
@@ -207,6 +214,10 @@ type CallRequestService interface {
 
 // ChangeRequestService defines the operations available on the change_requests entity.
 type ChangeRequestService interface {
+	// CreateChangeRequest creates a new change request in ServiceNow. Subject is required.
+	// Supported by the ServiceNow data source only.
+	CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error)
+
 	// SearchChangeRequests returns a paginated list of change requests filtered by optional
 	// project IDs, state keys, impact keys, date ranges, and search query.
 	SearchChangeRequests(ctx context.Context, req domain.SearchChangeRequestsRequest) (domain.SearchChangeRequestsResponse, error)
@@ -228,6 +239,58 @@ type TimeCardService interface {
 	// UpdateTimeCard edits an editable (submitted) time card, or transitions its
 	// state (approve/reject) when req.State is set. SN enforces authorization.
 	UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error)
+}
+
+// ConfigurationItemService defines the operations available on the configuration items entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ConfigurationItemService interface {
+	// SearchConfigurationItems returns a paginated list of CMDB configuration items filtered by
+	// optional search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchConfigurationItems(ctx context.Context, req domain.SearchConfigurationItemsRequest) (domain.SearchConfigurationItemsResponse, error)
+}
+
+// GroupService defines the operations available on the groups entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type GroupService interface {
+	// SearchGroups returns a paginated list of groups filtered by optional search query.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchGroups(ctx context.Context, req domain.SearchGroupsRequest) (domain.SearchGroupsResponse, error)
+}
+
+// ServiceOfferingService defines the operations available on the service offerings entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ServiceOfferingService interface {
+	// SearchServiceOfferings returns a paginated list of service offerings filtered by
+	// optional service IDs. An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchServiceOfferings(ctx context.Context, req domain.SearchServiceOfferingsRequest) (domain.SearchServiceOfferingsResponse, error)
+}
+
+// ITServiceService defines the operations available on the CMDB IT services entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ITServiceService interface {
+	// SearchITServices returns a paginated list of CMDB services from ServiceNow.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchITServices(ctx context.Context, req domain.SearchITServicesRequest) (domain.SearchITServicesResponse, error)
+}
+
+// CommentService defines generic comment search operations across all reference types
+// (case, conversation, change_request, etc.).
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type CommentService interface {
+	// SearchComments returns a paginated list of comments for the given reference entity.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
+}
+
+// TaskSlaService defines the operations available on the task-slas entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type TaskSlaService interface {
+	// SearchTaskSlas returns a paginated list of task SLA records filtered by optional task IDs.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchTaskSlas(ctx context.Context, req domain.SearchTaskSlasRequest) (domain.SearchTaskSlasResponse, error)
+	// GetTaskSla returns the full detail of a single task SLA record by its UUID.
+	// A NotFoundError is returned if the record does not exist.
+	GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error)
 }
 
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.

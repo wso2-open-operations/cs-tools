@@ -54,6 +54,7 @@ const FILTER_PARAM_KEYS = [
   "assignees",
   "projects",
   "engagementTypes",
+  "products",
 ] as const;
 
 interface CsmIssuesViewProps {
@@ -185,11 +186,12 @@ export default function CsmIssuesView({
   const rangeStart = total === 0 ? 0 : page * rowsPerPage + 1;
   const rangeEnd = page * rowsPerPage + cases.length;
 
-  const subtitle = isLoading
-    ? "Loading…"
-    : total === 0
-      ? `No ${entityNoun}`
-      : `Showing ${rangeStart}–${rangeEnd} of ${total}`;
+  const subtitle =
+    isLoading
+      ? null
+      : total === 0
+        ? `No ${entityNoun}`
+        : `Showing ${rangeStart}–${rangeEnd} of ${total}`;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -204,9 +206,11 @@ export default function CsmIssuesView({
       >
         <Box>
           {title && <Typography variant="h5">{title}</Typography>}
-          <Typography variant="body2" color="text.secondary">
-            {subtitle}
-          </Typography>
+          {subtitle != null && (
+            <Typography variant="body2" color="text.secondary">
+              {subtitle}
+            </Typography>
+          )}
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           {breachedCount > 0 && (

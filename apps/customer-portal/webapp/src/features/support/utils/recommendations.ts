@@ -166,7 +166,7 @@ export function buildRecommendationRequestFromConversationMessages(
 
   const chatHistory: RecommendationApiMessage[] = [];
   for (const m of sorted) {
-    const content = m.content?.trim() ?? "";
+    const content = (m.content?.trim() ?? "").slice(-150);
     if (!content) continue;
     const isBot =
       m.type?.toLowerCase() === "bot" ||

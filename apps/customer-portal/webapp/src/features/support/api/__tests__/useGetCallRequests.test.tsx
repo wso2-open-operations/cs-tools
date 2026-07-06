@@ -33,7 +33,7 @@ vi.mock("@hooks/useLogger", () => ({
 
 // Mock useAuthApiClient so tests don't need to stub global fetch
 const mockAuthFetch = vi.fn();
-vi.mock("@api/useAuthApiClient", () => ({
+vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => mockAuthFetch,
 }));
 
@@ -150,9 +150,7 @@ describe("useGetCallRequests", () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toContain(
-      "Error fetching call requests: 500 Internal Server Error - Error message",
-    );
+    expect(result.current.error?.message).toBe("Internal Server Error");
   });
 
   it("should error when CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured", async () => {

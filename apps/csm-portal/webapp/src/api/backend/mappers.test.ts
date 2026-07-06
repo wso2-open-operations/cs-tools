@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import type { BeCaseComment } from "./types";
+import type { BeCaseComment, BeComment } from "./types";
 import {
   beStateFromUi,
   commentTypeFromInternal,
@@ -83,6 +83,15 @@ describe("uiStateFromBe / beStateFromUi", () => {
     // known state — that is what lets the backend add a state with no FE change.
     expect(uiStateFromBe("pending_review")).toBe("pending_review");
   });
+
+  it("normalizes the raw ServiceNow label form to the enum", () => {
+    // The SN case-search view sends the human label instead of the enum; the
+    // mapper lowercases + collapses whitespace so SN cases render with the
+    // curated label/colour and `state === "work_in_progress"` checks match.
+    expect(uiStateFromBe("Work In Progress")).toBe("work_in_progress");
+    expect(uiStateFromBe("Waiting On WSO2")).toBe("waiting_on_wso2");
+    expect(uiStateFromBe("Solution Proposed")).toBe("solution_proposed");
+  });
 });
 
 describe("commentTypeFromInternal", () => {
@@ -146,5 +155,67 @@ describe("uiCommentFromBe", () => {
     expect(
       uiCommentFromBe({ ...base, createdBy: { id: "x@wso2.com" } }).authorName,
     ).toBe("x@wso2.com");
+  });
+});
+
+describe("uiCommentFromBe — /comments/search shape and chat", () => {
+  // The confirmed shape backing both case comments and chat messages: a nested
+  // `createdBy` object, `referenceId` (not `caseId`), and a normalized singular
+  // `type`. (createdOn tie-break etc. is covered in caseActivityFeed.test.ts.)
+  const msg: BeComment = {
+    id: "m1",
+    referenceId: "conv1",
+    content: "the EOL for AWS RDS MySQL 8.0.42 is July 31st, 2026",
+    type: "comment",
+    createdOn: "2026-07-01T00:51:54Z",
+    createdBy: {
+      id: "sree@abc.com",
+      firstName: "Sree",
+      lastName: "Kumar",
+      fullName: "Sree Kumar",
+    },
+  };
+
+  it("maps a customer chat message to a customer bubble", () => {
+    const ui = uiCommentFromBe(msg, { context: "conversation" });
+    expect(ui.authorRole).toBe("customer");
+    expect(ui.internal).toBe(false);
+    expect(ui.authorName).toBe("Sree Kumar");
+    expect(ui.caseId).toBe("conv1"); // referenceId, not caseId
+  });
+
+  it("detects Novera as a chatbot via the nested createdBy.id", () => {
+    const ui = uiCommentFromBe(
+      { ...msg, createdBy: { id: "Novera", fullName: "Novera" } },
+      { context: "conversation" },
+    );
+    expect(ui.authorRole).toBe("chatbot");
+  });
+
+  it("detects Novera via nested createdBy.fullName when the id is opaque", () => {
+    // The field the settled BE payload actually carries the bot name in.
+    const ui = uiCommentFromBe(
+      { ...msg, createdBy: { id: "svc-account-9f2c", fullName: "Novera" } },
+      { context: "conversation" },
+    );
+    expect(ui.authorRole).toBe("chatbot");
+  });
+
+  it("marks a work_note as internal", () => {
+    const ui = uiCommentFromBe({ ...msg, type: "work_note" });
+    expect(ui.internal).toBe(true);
+  });
+
+  it("defaults a non-bot case comment to wso2_engineer", () => {
+    const ui = uiCommentFromBe(msg, { context: "case" });
+    expect(ui.authorRole).toBe("wso2_engineer");
+  });
+
+  it("uses the bare createdBy string from the comment-create ack", () => {
+    const ui = uiCommentFromBe(
+      { ...msg, createdBy: "someone@wso2.com" },
+      { context: "case" },
+    );
+    expect(ui.authorName).toBe("someone@wso2.com");
   });
 });

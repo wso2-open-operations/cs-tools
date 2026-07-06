@@ -401,6 +401,28 @@ const (
 	SupportStatusDiscontinued SupportStatus = "discontinued"
 )
 
+// SNProductVersion is the ServiceNow-backed product version type.
+// Date fields are strings (e.g. "2024-01-15") rather than time.Time to avoid
+// parse errors when SN returns empty strings for optional date fields.
+type SNProductVersion struct {
+	ID                             string  `json:"id"`
+	ProductID                      string  `json:"productId"`
+	Version                        string  `json:"version"`
+	CurrentSupportStatus           string  `json:"currentSupportStatus"`
+	ReleaseDate                    string  `json:"releaseDate"`
+	SupportEOLDate                 *string `json:"supportEolDate"`
+	EarliestPossibleSupportEOLDate *string `json:"earliestPossibleSupportEolDate"`
+}
+
+// SearchSNProductVersionsResponse is the paginated SN product version search result.
+type SearchSNProductVersionsResponse struct {
+	ProductVersions []SNProductVersion `json:"productVersions"`
+	Total           int                `json:"total"`
+	Limit           int                `json:"limit"`
+	Offset          int                `json:"offset"`
+	HasMore         bool               `json:"hasMore"`
+}
+
 // ProductVersion represents a versioned release of a software product.
 // SupportEOLDate and EarliestPossibleSupportEOLDate are optional.
 type ProductVersion struct {
@@ -844,6 +866,7 @@ type SearchCasesFilters struct {
 	CreatedByMe      bool             `json:"createdByMe"`
 	WorkStates       []CaseWorkState  `json:"workStates"`
 	AssignedUserIDs  []string         `json:"assignedUserIds"`
+	ProductNames     []string         `json:"productNames"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
@@ -1057,6 +1080,34 @@ type SearchCaseCommentsResponse struct {
 	HasMore  bool          `json:"hasMore"`
 }
 
+// Comment is a generic comment associated with any reference entity type
+// (case, conversation, change_request, etc.).
+type Comment struct {
+	ID          string         `json:"id"`
+	ReferenceID string         `json:"referenceId"`
+	Content     string         `json:"content"`
+	Type        CommentType    `json:"type"`
+	CreatedOn   time.Time      `json:"createdOn"`
+	CreatedBy   CommentUserRef `json:"createdBy"`
+}
+
+// SearchCommentsRequest is the input for POST /comments/search.
+type SearchCommentsRequest struct {
+	ReferenceID   string          `json:"referenceId"`
+	ReferenceType ReferenceType   `json:"referenceType"`
+	Pagination    Pagination      `json:"pagination"`
+	Filters       *CommentFilters `json:"filters,omitempty"`
+}
+
+// SearchCommentsResponse is the paginated result of a generic comment search.
+type SearchCommentsResponse struct {
+	Comments []Comment `json:"comments"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+	HasMore  bool      `json:"hasMore"`
+}
+
 // CaseGithubIssueReason classifies why a GitHub issue is being filed from a case.
 type CaseGithubIssueReason string
 
@@ -1196,6 +1247,9 @@ const (
 type ChangeRequestState string
 
 const (
+	ChangeRequestStateNew              ChangeRequestState = "new"
+	ChangeRequestStateAssess           ChangeRequestState = "assess"
+	ChangeRequestStateAuthorize        ChangeRequestState = "authorize"
 	ChangeRequestStateCustomerApproval ChangeRequestState = "customer_approval"
 	ChangeRequestStateScheduled        ChangeRequestState = "scheduled"
 	ChangeRequestStateImplement        ChangeRequestState = "implement"
@@ -1214,6 +1268,83 @@ const (
 	ChangeRequestImpactMedium ChangeRequestImpact = "medium"
 	ChangeRequestImpactLow    ChangeRequestImpact = "low"
 )
+
+// ChangeRequestRisk represents the risk level of a change request.
+type ChangeRequestRisk string
+
+const (
+	ChangeRequestRiskHigh     ChangeRequestRisk = "high"
+	ChangeRequestRiskModerate ChangeRequestRisk = "moderate"
+	ChangeRequestRiskLow      ChangeRequestRisk = "low"
+)
+
+// ChangeRequestPriority represents the priority of a change request.
+type ChangeRequestPriority string
+
+const (
+	ChangeRequestPriorityCritical ChangeRequestPriority = "critical"
+	ChangeRequestPriorityHigh     ChangeRequestPriority = "high"
+	ChangeRequestPriorityModerate ChangeRequestPriority = "moderate"
+	ChangeRequestPriorityLow      ChangeRequestPriority = "low"
+)
+
+// ChangeRequestCategory represents the category of a change request.
+type ChangeRequestCategory string
+
+const (
+	ChangeRequestCategoryHardware             ChangeRequestCategory = "hardware"
+	ChangeRequestCategorySoftware             ChangeRequestCategory = "software"
+	ChangeRequestCategoryService              ChangeRequestCategory = "service"
+	ChangeRequestCategorySystemSoftware       ChangeRequestCategory = "system_software"
+	ChangeRequestCategoryApplicationsSoftware ChangeRequestCategory = "applications_software"
+	ChangeRequestCategoryNetwork              ChangeRequestCategory = "network"
+	ChangeRequestCategoryTelecom              ChangeRequestCategory = "telecom"
+	ChangeRequestCategoryDocumentation        ChangeRequestCategory = "documentation"
+	ChangeRequestCategoryOther                ChangeRequestCategory = "other"
+	ChangeRequestCategoryRegularReleaseCloud  ChangeRequestCategory = "regular_release_cloud"
+	ChangeRequestCategoryHotfixReleaseCloud   ChangeRequestCategory = "hotfix_release_cloud"
+	ChangeRequestCategoryDevOps               ChangeRequestCategory = "devops"
+	ChangeRequestCategoryCloudComputing       ChangeRequestCategory = "cloud_computing"
+)
+
+// CreateChangeRequestRequest is the input for POST /change-requests.
+// Subject is the only required field; all others are optional.
+type CreateChangeRequestRequest struct {
+	Subject             string                 `json:"subject"`
+	Category            *ChangeRequestCategory `json:"category,omitempty"`
+	ServiceID           *string                `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string                `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string                `json:"configurationItemId,omitempty"`
+	Priority            *ChangeRequestPriority `json:"priority,omitempty"`
+	Impact              *ChangeRequestImpact   `json:"impact,omitempty"`
+	Type                *ChangeRequestType     `json:"type,omitempty"`
+	State               *ChangeRequestState    `json:"state,omitempty"`
+	GroupID             *string                `json:"groupId,omitempty"`
+	AssignedEngineerID  *string                `json:"assignedEngineerId,omitempty"`
+	Risk                *ChangeRequestRisk     `json:"risk,omitempty"`
+	RequestedByID       *string                `json:"requestedById,omitempty"`
+	Description         *string                `json:"description,omitempty"`
+	Justification       *string                `json:"justification,omitempty"`
+	ImplementationPlan  *string                `json:"implementationPlan,omitempty"`
+	RiskImpactAnalysis  *string                `json:"riskImpactAnalysis,omitempty"`
+	BackoutPlan         *string                `json:"backoutPlan,omitempty"`
+	TestPlan            *string                `json:"testPlan,omitempty"`
+	PlannedStartDate    *string                `json:"plannedStartDate,omitempty"`
+	PlannedEndDate      *string                `json:"plannedEndDate,omitempty"`
+	Comment             *string                `json:"comment,omitempty"`
+	WorkNote            *string                `json:"workNote,omitempty"`
+}
+
+// CreateChangeRequestResponse is the output for POST /change-requests.
+type CreateChangeRequestResponse struct {
+	Message       string `json:"message"`
+	ChangeRequest struct {
+		ID        string `json:"id"`
+		Number    string `json:"number"`
+		CreatedOn string `json:"createdOn"`
+		CreatedBy string `json:"createdBy"`
+	} `json:"changeRequest"`
+}
 
 // ChangeRequestSortField enumerates the columns available for sorting change request search results.
 type ChangeRequestSortField string
@@ -1548,6 +1679,146 @@ type CallRequestCaseRef struct {
 	Number *string `json:"number,omitempty"`
 }
 
+// BusinessCriticality represents the criticality level of an IT service.
+type BusinessCriticality string
+
+const (
+	BusinessCriticalityMostCritical     BusinessCriticality = "most_critical"
+	BusinessCriticalitySomewhatCritical BusinessCriticality = "somewhat_critical"
+	BusinessCriticalityLessCritical     BusinessCriticality = "less_critical"
+	BusinessCriticalityNotCritical      BusinessCriticality = "not_critical"
+)
+
+// ServiceClassification represents the classification of an IT service.
+type ServiceClassification string
+
+const (
+	ServiceClassificationBusinessService             ServiceClassification = "business_service"
+	ServiceClassificationTechnologyManagementService ServiceClassification = "technology_management_service"
+	ServiceClassificationApplicationService          ServiceClassification = "application_service"
+)
+
+// ITService is a single CMDB service entry returned in a search response.
+type ITService struct {
+	ID                    string                 `json:"id"`
+	Name                  *string                `json:"name"`
+	Class                 *string                `json:"class"`
+	BusinessCriticality   *BusinessCriticality   `json:"businessCriticality"`
+	ServiceClassification *ServiceClassification `json:"serviceClassification"`
+}
+
+// ConfigurationItem is a single CMDB configuration item returned in a search response.
+type ConfigurationItem struct {
+	ID          string  `json:"id"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Class       *string `json:"class"`
+}
+
+// SearchConfigurationItemsFilters holds optional filter criteria for configuration item searches.
+type SearchConfigurationItemsFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchConfigurationItemsRequest is the input for POST /configuration-items/search.
+type SearchConfigurationItemsRequest struct {
+	Filters    *SearchConfigurationItemsFilters `json:"filters,omitempty"`
+	Pagination Pagination                       `json:"pagination"`
+}
+
+// SearchConfigurationItemsResponse is the paginated result of a configuration items search.
+type SearchConfigurationItemsResponse struct {
+	ConfigurationItems []ConfigurationItem `json:"configurationItems"`
+	Total              int                 `json:"total"`
+	Offset             int                 `json:"offset"`
+	Limit              int                 `json:"limit"`
+}
+
+// GroupParentRef is the parent group reference within a group.
+type GroupParentRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Group is a single group entry returned in a search response.
+type Group struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Active bool            `json:"active"`
+	Parent *GroupParentRef `json:"parent"`
+}
+
+// SearchGroupsFilters holds optional filter criteria for group searches.
+type SearchGroupsFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchGroupsRequest is the input for POST /groups/search.
+type SearchGroupsRequest struct {
+	Filters    *SearchGroupsFilters `json:"filters,omitempty"`
+	Pagination Pagination           `json:"pagination"`
+}
+
+// SearchGroupsResponse is the paginated result of a groups search.
+type SearchGroupsResponse struct {
+	Groups []Group `json:"groups"`
+	Total  int     `json:"total"`
+	Offset int     `json:"offset"`
+	Limit  int     `json:"limit"`
+}
+
+// ServiceOfferingServiceRef is the parent service reference within a service offering.
+type ServiceOfferingServiceRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ServiceOffering is a single service offering entry returned in a search response.
+type ServiceOffering struct {
+	ID      string                     `json:"id"`
+	Name    string                     `json:"name"`
+	Service *ServiceOfferingServiceRef `json:"service"`
+}
+
+// SearchServiceOfferingsFilters holds optional filter criteria for service offering searches.
+type SearchServiceOfferingsFilters struct {
+	ServiceIDs  []string `json:"serviceIds,omitempty"`
+	SearchQuery string   `json:"searchQuery,omitempty"`
+}
+
+// SearchServiceOfferingsRequest is the input for POST /service-offerings/search.
+type SearchServiceOfferingsRequest struct {
+	Filters    *SearchServiceOfferingsFilters `json:"filters,omitempty"`
+	Pagination Pagination                     `json:"pagination"`
+}
+
+// SearchServiceOfferingsResponse is the paginated result of a service offerings search.
+type SearchServiceOfferingsResponse struct {
+	ServiceOfferings []ServiceOffering `json:"serviceOfferings"`
+	Total            int               `json:"total"`
+	Offset           int               `json:"offset"`
+	Limit            int               `json:"limit"`
+}
+
+// SearchITServicesFilters holds optional filter criteria for IT service searches.
+type SearchITServicesFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchITServicesRequest is the input for POST /services/search.
+type SearchITServicesRequest struct {
+	Filters    *SearchITServicesFilters `json:"filters,omitempty"`
+	Pagination Pagination               `json:"pagination"`
+}
+
+// SearchITServicesResponse is the paginated result of a services search.
+type SearchITServicesResponse struct {
+	Services []ITService `json:"services"`
+	Total    int         `json:"total"`
+	Offset   int         `json:"offset"`
+	Limit    int         `json:"limit"`
+}
+
 // CreateCallRequestRequest is the input for POST /call-requests.
 type CreateCallRequestRequest struct {
 	CaseID          string   `json:"caseId"`
@@ -1624,4 +1895,100 @@ type UpdateCallRequestResponse struct {
 		UpdatedOn string `json:"updatedOn"`
 		UpdatedBy string `json:"updatedBy"`
 	} `json:"callRequest"`
+}
+
+// SearchTaskSlasFilters holds optional filter criteria for POST /task-slas/search.
+type SearchTaskSlasFilters struct {
+	TaskIDs []string `json:"taskIds,omitempty"`
+}
+
+// SearchTaskSlasRequest is the request body for POST /task-slas/search.
+type SearchTaskSlasRequest struct {
+	Filters    *SearchTaskSlasFilters `json:"filters,omitempty"`
+	Pagination Pagination             `json:"pagination"`
+}
+
+// TaskSlaDefinition is the SLA definition referenced by a task SLA record.
+type TaskSlaDefinition struct {
+	ID     *string `json:"id"`
+	Name   *string `json:"name"`
+	Type   *string `json:"type"`
+	Target *string `json:"target"`
+}
+
+// TaskSlaTaskRef is a reference to the task associated with a task SLA record.
+type TaskSlaTaskRef struct {
+	ID   *string `json:"id"`
+	Name *string `json:"name"`
+	Type *string `json:"type"`
+}
+
+// TaskSlaView is a single task SLA record in search results.
+type TaskSlaView struct {
+	ID                        string             `json:"id"`
+	SlaDefinition             *TaskSlaDefinition `json:"slaDefinition"`
+	Stage                     *string      `json:"stage"`
+	Task                      *TaskSlaTaskRef    `json:"task"`
+	BusinessTimeLeft          *string            `json:"businessTimeLeft"`
+	BusinessElapsedTime       *string            `json:"businessElapsedTime"`
+	BusinessElapsedPercentage *float64 `json:"businessElapsedPercentage"`
+	StartTime                 *string            `json:"startTime"`
+	EndTime                   *string            `json:"endTime"`
+}
+
+// SearchTaskSlasResponse is the response for POST /task-slas/search.
+type SearchTaskSlasResponse struct {
+	TaskSlas []TaskSlaView `json:"slas"`
+	Total    int           `json:"total"`
+	Limit    int           `json:"limit"`
+	Offset   int           `json:"offset"`
+}
+
+// TaskSlaDefinitionDetail is the extended SLA definition returned by GET /task-slas/{id}.
+type TaskSlaDefinitionDetail struct {
+	ID               *string `json:"id"`
+	Name             *string `json:"name"`
+	Type             *string `json:"type"`
+	Target           *string `json:"target"`
+	Flow             *string `json:"flow"`
+	Workflow         *string `json:"workflow"`
+	IsEnableLogging  *bool   `json:"isEnableLogging"`
+	DurationType     *string `json:"durationType"`
+	Duration         *string `json:"duration"`
+	ScheduleSource   *string `json:"scheduleSource"`
+	Schedule         *string `json:"schedule"`
+	TimezoneSource   *string `json:"timezoneSource"`
+	Timezone         *string `json:"timezone"`
+	StartCondition   *string `json:"startCondition"`
+	IsRetroactiveStart *bool   `json:"isRetroactiveStart"`
+	IsRetroactivePause *bool   `json:"isRetroactivePause"`
+	WhenToCancel     *string `json:"whenToCancel"`
+	CancelCondition  *string `json:"cancelCondition"`
+	PauseCondition   *string `json:"pauseCondition"`
+	WhenToResume     *string `json:"whenToResume"`
+	StopCondition    *string `json:"stopCondition"`
+	ResetCondition   *string `json:"resetCondition"`
+	ResetAction      *string `json:"resetAction"`
+}
+
+// TaskSlaScheduleRef is the schedule reference returned by GET /task-slas/{id}.
+type TaskSlaScheduleRef struct {
+	ID       *string `json:"id"`
+	Name     *string `json:"name"`
+	Timezone *string `json:"timezone"`
+}
+
+// TaskSlaDetail is the full task SLA record returned by GET /task-slas/{id}.
+type TaskSlaDetail struct {
+	ID                        string                   `json:"id"`
+	Task                      *TaskSlaTaskRef          `json:"task"`
+	SlaDefinition             *TaskSlaDefinitionDetail `json:"slaDefinition"`
+	Stage                     *string            `json:"stage"`
+	BusinessTimeLeft          *string                  `json:"businessTimeLeft"`
+	BusinessElapsedTime       *string                  `json:"businessElapsedTime"`
+	BusinessElapsedPercentage *float64                 `json:"businessElapsedPercentage"`
+	StartTime                 *string                  `json:"startTime"`
+	EndTime                   *string                  `json:"endTime"`
+	Active                    *bool                    `json:"active"`
+	Schedule                  *TaskSlaScheduleRef      `json:"schedule"`
 }

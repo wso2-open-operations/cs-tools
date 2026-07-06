@@ -41,6 +41,7 @@ import {
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
+import { isCloudSupportSubscription } from "@features/csm-projects/utils/subscriptionType";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
@@ -100,21 +101,42 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
 
   const deployments = useSearchDeployments(projectId || undefined);
-  const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
+
+  // Details for the selected project (locked or picked). Gives the display name
+  // for the locked read-only field, and the subscription type that drives the
+  // cloud-project deployment behaviour below.
+  const selectedProject = useGetProject(projectId || undefined);
+  const lockedProjectLabel = selectedProject.data?.name
+    ? selectedProject.data.name
+    : selectedProject.isLoading
+      ? "Loading project…"
+      : lockedProjectId;
+
+  // Cloud-support projects file against the single primary-production
+  // deployment, so the form hides the deployment picker and derives it
+  // automatically (mirrors the customer portal). Other subscriptions keep the
+  // normal deployment → product cascade.
+  const isCloudProject = isCloudSupportSubscription(
+    selectedProject.data?.subscriptionType,
+  );
+  const primaryProductionDeployments = useMemo(
+    () => (deployments.data ?? []).filter((d) => d.type === "primary_production"),
+    [deployments.data],
+  );
+  // For a cloud project the deployment is derived (the lone primary-production
+  // one), not user-picked; everything downstream keys off this effective id.
+  const effectiveDeploymentId = isCloudProject
+    ? (primaryProductionDeployments[0]?.id ?? "")
+    : deploymentId;
+
+  const deployedProducts = useDeployedProductOptions(
+    effectiveDeploymentId || undefined,
+  );
   const postCase = usePostCsmCase();
   const postAttachment = usePostCsmCaseAttachment();
   const uploadedBy = useEngineerDisplayName();
   // Spans the whole submit (create + post-create attachment uploads).
   const [submitting, setSubmitting] = useState(false);
-
-  // Resolve the locked project's display name so the read-only field shows the
-  // name (not the raw id). Only fetched when the form is project-scoped.
-  const lockedProject = useGetProject(isProjectLocked ? lockedProjectId : undefined);
-  const lockedProjectLabel = lockedProject.data?.name
-    ? lockedProject.data.name
-    : lockedProject.isLoading
-      ? "Loading project…"
-      : lockedProjectId;
 
   // When a selector query fails the form becomes non-completable, so surface it
   // with an explicit retry rather than leaving an empty dropdown. (Projects are
@@ -146,7 +168,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const canSubmit = useMemo(
     () =>
       !!projectId &&
-      !!deploymentId &&
+      !!effectiveDeploymentId &&
       !!deployedProductId &&
       !!severity &&
       !!issueType &&
@@ -156,7 +178,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       !submitting,
     [
       projectId,
-      deploymentId,
+      effectiveDeploymentId,
       deployedProductId,
       severity,
       issueType,
@@ -185,7 +207,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       const created = await postCase.mutateAsync({
         type: "case",
         projectId,
-        deploymentId,
+        deploymentId: effectiveDeploymentId,
         deployedProductId,
         subject: subject.trim(),
         description,
@@ -274,29 +296,33 @@ export default function CsmCaseCreatePage(): JSX.Element {
             )}
           </Grid>
 
-          <Grid size={{ xs: 12, md: 4 }}>
-            <FormControl fullWidth size="small" required>
-              <InputLabel id="case-deployment-label">Deployment</InputLabel>
-              <Select
-                labelId="case-deployment-label"
-                label="Deployment"
-                value={deploymentId}
-                onChange={(e) => onDeploymentChange(String(e.target.value))}
-                disabled={!projectId || deployments.isLoading}
-              >
-                {(deployments.data ?? []).map((d) => (
-                  <MenuItem key={d.id} value={d.id}>
-                    {d.name ?? d.id}
-                  </MenuItem>
-                ))}
-              </Select>
-              {!projectId ? (
-                <FormHelperText>Select a project first</FormHelperText>
-              ) : deployments.isLoading ? (
-                <FormHelperText>Loading deployments…</FormHelperText>
-              ) : null}
-            </FormControl>
-          </Grid>
+          {/* Cloud-support projects file against the single primary-production
+              deployment, auto-selected above — so the picker is hidden. */}
+          {!isCloudProject && (
+            <Grid size={{ xs: 12, md: 4 }}>
+              <FormControl fullWidth size="small" required>
+                <InputLabel id="case-deployment-label">Deployment</InputLabel>
+                <Select
+                  labelId="case-deployment-label"
+                  label="Deployment"
+                  value={deploymentId}
+                  onChange={(e) => onDeploymentChange(String(e.target.value))}
+                  disabled={!projectId || deployments.isLoading}
+                >
+                  {(deployments.data ?? []).map((d) => (
+                    <MenuItem key={d.id} value={d.id}>
+                      {d.name ?? d.id}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {!projectId ? (
+                  <FormHelperText>Select a project first</FormHelperText>
+                ) : deployments.isLoading ? (
+                  <FormHelperText>Loading deployments…</FormHelperText>
+                ) : null}
+              </FormControl>
+            </Grid>
+          )}
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
@@ -306,7 +332,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 label="Deployed product"
                 value={deployedProductId}
                 onChange={(e) => setDeployedProductId(String(e.target.value))}
-                disabled={!deploymentId || deployedProducts.isLoading}
+                disabled={!effectiveDeploymentId || deployedProducts.isLoading}
               >
                 {(deployedProducts.data ?? []).map((dp) => (
                   <MenuItem key={dp.id} value={dp.id}>
@@ -314,8 +340,15 @@ export default function CsmCaseCreatePage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
-              {!deploymentId ? (
-                <FormHelperText>Select a deployment first</FormHelperText>
+              {!effectiveDeploymentId ? (
+                <FormHelperText>
+                  {isCloudProject
+                    ? !deployments.isLoading &&
+                      primaryProductionDeployments.length === 0
+                      ? "No primary production deployment for this project."
+                      : "Loading products…"
+                    : "Select a deployment first"}
+                </FormHelperText>
               ) : deployedProducts.isLoading ? (
                 <FormHelperText>Loading products…</FormHelperText>
               ) : null}

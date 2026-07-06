@@ -89,7 +89,6 @@ export default function AttachmentListItem({
 
   useEffect(() => {
     if (imageExpanded) {
-      setPreviewMinTimeElapsed(false);
       previewTimerRef.current = setTimeout(
         () => setPreviewMinTimeElapsed(true),
         PREVIEW_SKELETON_MIN_DISPLAY_MS,
@@ -99,7 +98,6 @@ export default function AttachmentListItem({
         clearTimeout(previewTimerRef.current);
         previewTimerRef.current = null;
       }
-      setPreviewMinTimeElapsed(false);
     }
     return () => {
       if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
@@ -109,7 +107,9 @@ export default function AttachmentListItem({
     attachment.name ?? "",
     attachment.type ?? "",
   );
-  const isImageAttachment = attachmentCategory === "image";
+  const isImageAttachment =
+    attachmentCategory === "image" &&
+    /\.(png|jpe?g|webp)$/i.test(attachment.name ?? "");
   const hasPreviewImage = isImageAttachment;
 
   // Fetch authenticated image data URL only when the preview is expanded.
@@ -195,7 +195,10 @@ export default function AttachmentListItem({
                 size="small"
                 aria-label={imageExpanded ? "Collapse image" : "Expand image"}
                 sx={{ color: "text.secondary" }}
-                onClick={() => setImageExpanded((prev) => !prev)}
+                onClick={() => {
+                  setPreviewMinTimeElapsed(false);
+                  setImageExpanded((prev) => !prev);
+                }}
               >
                 {imageExpanded ? (
                   <ChevronUp size={16} aria-hidden />

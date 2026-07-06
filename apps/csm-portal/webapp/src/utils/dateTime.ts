@@ -204,6 +204,102 @@ export function formatBackendTimestampForDisplay(
 }
 
 /**
+ * Offset in milliseconds to ADD to a UTC instant to obtain the wall-clock time
+ * shown in `timeZone` at that instant. Positive for zones east of UTC.
+ *
+ * @param utcMs - UTC instant in epoch milliseconds.
+ * @param timeZone - IANA timezone.
+ * @returns {number} Offset in milliseconds.
+ */
+function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23", // 00-23; avoids the h24 midnight "24" edge case
+  }).formatToParts(new Date(utcMs));
+  const get = (t: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((p) => p.type === t)?.value ?? "0");
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour"),
+    get("minute"),
+    get("second"),
+  );
+  return asUtc - utcMs;
+}
+
+/**
+ * Interprets a `<input type="datetime-local">` wall-clock value ("YYYY-MM-DDTHH:mm")
+ * as being in the resolved user timezone and returns the corresponding UTC ISO
+ * instant. This keeps entry and display symmetric: the user types in their own
+ * timezone, and we store/submit UTC.
+ *
+ * @param localValue - datetime-local input value.
+ * @param explicitTimeZone - Optional timezone override.
+ * @returns {string | null} UTC ISO string, or null when unparseable.
+ */
+export function zonedInputToUtcIso(
+  localValue: string,
+  explicitTimeZone?: string,
+): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
+    localValue.trim(),
+  );
+  if (!m) {
+    const d = new Date(localValue);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const timeZone = resolveDisplayTimeZone(explicitTimeZone);
+  const guessUtc = Date.UTC(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+    Number(m[6] ?? "0"),
+  );
+  // Two passes so the offset is correct across a DST boundary.
+  let offset = timeZoneOffsetMs(guessUtc, timeZone);
+  offset = timeZoneOffsetMs(guessUtc - offset, timeZone);
+  return new Date(guessUtc - offset).toISOString();
+}
+
+/**
+ * Formats a UTC instant as a `<input type="datetime-local">` wall-clock value
+ * ("YYYY-MM-DDTHH:mm") in the resolved user timezone. Inverse of
+ * {@link zonedInputToUtcIso}; used for the input's `min` attribute.
+ *
+ * @param utcMs - UTC instant in epoch milliseconds.
+ * @param explicitTimeZone - Optional timezone override.
+ * @returns {string} datetime-local value in the resolved timezone.
+ */
+export function utcMsToZonedInputValue(
+  utcMs: number,
+  explicitTimeZone?: string,
+): string {
+  const timeZone = resolveDisplayTimeZone(explicitTimeZone);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23", // 00-23; avoids the h24 midnight "24" edge case
+    timeZone,
+  }).formatToParts(new Date(utcMs));
+  const get = (t: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === t)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
+/**
  * Formats a backend (UTC) timestamp as an absolute date-time string in the
  * user's resolved timezone, suitable for tooltip text. Format:
  *   "2026-05-31 20:28:33 GMT+5:30"
@@ -225,17 +321,14 @@ export function formatAbsoluteForUser(
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-      hour12: false,
+      hourCycle: "h23", // 00-23; avoids the h24 midnight "24" edge case
       timeZone,
       timeZoneName: "shortOffset",
     }).formatToParts(date);
     const find = (type: Intl.DateTimeFormatPartTypes): string =>
       parts.find((p) => p.type === type)?.value ?? "";
     const datePart = `${find("year")}-${find("month")}-${find("day")}`;
-    // hour with hour12=false in en-CA returns "00"-"24"; "24" can appear for
-    // midnight — normalize to "00".
-    const hh = find("hour") === "24" ? "00" : find("hour");
-    const timePart = `${hh}:${find("minute")}:${find("second")}`;
+    const timePart = `${find("hour")}:${find("minute")}:${find("second")}`;
     const tzPart = find("timeZoneName") || "UTC";
     return `${datePart} ${timePart} ${tzPart}`;
   } catch {

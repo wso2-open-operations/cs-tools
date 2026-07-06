@@ -251,3 +251,57 @@ func (c *Client) SearchCallRequests(ctx context.Context, body []byte) ([]byte, e
 func (c *Client) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/call-requests/%s", url.PathEscape(callRequestID)), body)
 }
+
+// CreateChangeRequest calls POST /change-requests on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/change-requests", body)
+}
+
+// SearchITServices calls POST /services/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchITServices(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/services/search", body)
+}
+
+// SearchServiceOfferings calls POST /service-offerings/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchServiceOfferings(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/service-offerings/search", body)
+}
+
+// SearchGroups calls POST /groups/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchGroups(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/groups/search", body)
+}
+
+// SearchConfigurationItems calls POST /configuration-items/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchConfigurationItems(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/configuration-items/search", body)
+}
+
+// CreateCaseGithubIssue calls POST /cases/{id}/github-issues on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/github-issues", url.PathEscape(caseID)), body)
+}
+
+// SearchComments calls POST /comments/search on the entity service.
+// The body must be a JSON-encoded SearchCommentsRequest (referenceId, referenceType, pagination).
+func (c *Client) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/comments/search", body)
+}
+
+// SearchTaskSlas calls POST /slas/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchTaskSlas(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/slas/search", body)
+}
+
+// GetTaskSla calls GET /slas/{id} on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/slas/%s", url.PathEscape(id)), nil)
+}

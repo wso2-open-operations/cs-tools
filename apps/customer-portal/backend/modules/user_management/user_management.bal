@@ -21,6 +21,7 @@ public type CONFLICT_ERROR distinct error;
 const ADMIN_ROLE = "Admin";
 const PORTAL_USER_ROLE = "Portal user";
 const SECURITY_CONTACT_ROLE = "Security Contact";
+const LEAD = "Lead";
 
 # Get project contacts for the given project ID.
 #
@@ -48,7 +49,7 @@ public isolated function createProjectContact(string projectId, OnBoardContactPa
         contactFirstName: payload.contactFirstName,
         contactLastName: payload.contactLastName,
         isCsIntegrationUser: payload.isCsIntegrationUser,
-        role: getRoles(payload.isCsAdmin, payload.isPortalUser, payload.isSecurityContact)
+        role: getRoles(payload.isCsAdmin, payload.isLead, payload.isPortalUser, payload.isSecurityContact)
     };
 
     http:Response userCreateResponse = check userManagementClient->/projects/[projectId]/contact.post(userManagementPayload);
@@ -102,7 +103,7 @@ public isolated function updateMembershipRole(string projectId, string contactEm
 
     UserManagementMembershipRolePayload userManagementPayload = {
         adminEmail: payload.adminEmail,
-        role: getRoles(payload.isCsAdmin, payload.isPortalUser, payload.isSecurityContact)
+        role: getRoles(payload.isCsAdmin, payload.isLead, payload.isPortalUser, payload.isSecurityContact)
     };
 
     http:Response userUpdateResponse =
@@ -155,10 +156,22 @@ public isolated function validateProjectContact(ValidationPayload payload) retur
     return error(check errBody.message);
 }
 
-isolated function getRoles(boolean isCsAdmin, boolean isPortalUser, boolean isSecurityContact) returns string[] {
+# Get the roles for a contact based on the provided boolean flags.
+# 
+# + isCsAdmin - Whether the contact is a customer admin or not
+# + isLead - Whether the contact is a lead or not
+# + isPortalUser - Whether the contact is a portal user or not
+# + isSecurityContact - Whether the contact is a security contact or not
+# + return - Array of roles for the contact
+isolated function getRoles(boolean isCsAdmin, boolean isLead, boolean isPortalUser, boolean isSecurityContact)
+    returns string[] {
+
     string[] roles = [];
     if isCsAdmin {
         roles.push(ADMIN_ROLE);
+    }
+    if isLead {
+        roles.push(LEAD);
     }
     if isPortalUser {
         roles.push(PORTAL_USER_ROLE);
@@ -176,6 +189,7 @@ isolated function toContact(UserManagementContact contact) returns Contact {
         firstName: contact.firstName,
         lastName: contact.lastName,
         isCsAdmin: hasRole(contact["role"], ADMIN_ROLE),
+        isLead: hasRole(contact["role"], LEAD),
         isCsIntegrationUser: contact.isCsIntegrationUser,
         isPortalUser: hasRole(contact["role"], PORTAL_USER_ROLE),
         isSecurityContact: hasRole(contact["role"], SECURITY_CONTACT_ROLE),
@@ -189,6 +203,7 @@ isolated function toMembership(UserManagementMembership membership) returns Memb
         id: membership.id,
         state: membership.state,
         isCsAdmin: hasRole(membership["role"], ADMIN_ROLE),
+        isLead: hasRole(membership["role"], LEAD),
         isPortalUser: hasRole(membership["role"], PORTAL_USER_ROLE),
         isSecurityContact: hasRole(membership["role"], SECURITY_CONTACT_ROLE),
         contact: membership["contact"]

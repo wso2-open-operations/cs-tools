@@ -18,6 +18,7 @@ import { colors } from "@wso2/oxygen-ui";
 import type {
   InstanceMetricEntry,
   InstanceUsageEntry,
+  ProductChartTrend,
   UsageEnvironmentProduct,
   UsageInstanceChartBlock,
   UsageProductInstanceRow,
@@ -25,19 +26,24 @@ import type {
 import {
   buildCoreAverageTrendFromMetrics,
   buildUsageTrendFromUsages,
+  computeInstanceAndCoreSummary,
+  computeSeriesSummary,
   computeUsageHeadlineDeltaSigned,
   formatUsageMetricCount,
 } from "@features/project-details/utils/usageMetrics";
 import {
   USAGE_METRICS_INSTANCE_CHART_CORE_CAPTION,
   USAGE_METRICS_INSTANCE_CHART_CORE_TITLE,
-  USAGE_METRICS_INSTANCE_CHART_TX_CAPTION,
-  USAGE_METRICS_INSTANCE_CHART_TX_TITLE,
   USAGE_METRICS_PRODUCT_CORE_METRIC_INSTANCES,
   USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES,
-  USAGE_METRICS_PRODUCT_THIRD_METRIC_LABEL,
   USAGE_METRICS_VALUE_EM_DASH,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
+import {
+  CORE_CHART_CONFIG,
+  METRIC_CHART_CONFIG,
+  METRIC_CHART_CONFIG_FALLBACK,
+  getProductMetricKeys,
+} from "@features/usage-metrics/utils/usageMetricsProductClassifier";
 
 /**
  * Short period label (MM-DD) for environment product charts.
@@ -66,6 +72,7 @@ export function buildUsageProductInstanceAccordionKey(
 /**
  * Derives product rows from deployment-scoped usages + metrics.
  * Groups entries by deployedProduct.id (falling back to product.id then instanceId).
+ * Metric keys and chart trends are determined per-product by the WSO2 product classifier.
  *
  * @param usages - Usage rows for the deployment.
  * @param metrics - Metric rows for the deployment.
@@ -101,21 +108,53 @@ export function deriveUsageEnvironmentProducts(
 
   return Array.from(productMap.entries()).map(
     ([pid, { label, usages: pUsages, metrics: pMetrics }]) => {
-      const txTrend = buildUsageTrendFromUsages(
-        pUsages,
-        "TRANSACTION_COUNT",
-        formatUsageEnvironmentPeriodLabel,
-      );
+      const metricKeys = getProductMetricKeys(label);
+
+      // Compute total for each metric key across all usage entries
+      const metricTotals = new Map<string, number>();
+      for (const key of metricKeys) {
+        const total = pUsages.reduce(
+          (sum, u) =>
+            sum + u.periodSummaries.reduce((s, ps) => s + (ps.counts[key] ?? 0), 0),
+          0,
+        );
+        metricTotals.set(key, total);
+      }
+
+      // Product-level summary stats (shown in accordion header)
+      const summaryStats = metricKeys.map((key) => {
+        const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
+        const total = metricTotals.get(key) ?? 0;
+        return {
+          label: cfg.title,
+          value: formatUsageMetricCount(total),
+        };
+      });
+
+      // Product-level chart trends (shown in expanded view)
       const coreTrend = buildCoreAverageTrendFromMetrics(pMetrics);
-      const totalTx = pUsages.reduce(
-        (sum, u) =>
-          sum +
-          u.periodSummaries.reduce(
-            (s, ps) => s + (ps.counts["TRANSACTION_COUNT"] ?? 0),
-            0,
-          ),
-        0,
-      );
+      const chartTrends: ProductChartTrend[] = [
+        ...metricKeys.map((key) => {
+          const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
+          return {
+            title: cfg.title,
+            caption: cfg.caption,
+            stroke: cfg.stroke,
+            data: buildUsageTrendFromUsages(
+              pUsages,
+              key,
+              formatUsageEnvironmentPeriodLabel,
+            ),
+          };
+        }),
+        {
+          title: CORE_CHART_CONFIG.title,
+          caption: CORE_CHART_CONFIG.caption,
+          stroke: CORE_CHART_CONFIG.stroke,
+          data: coreTrend.map((r) => ({ name: r.name, value: r.current })),
+        },
+      ];
+
       const totalCores = pMetrics.reduce(
         (sum, m) =>
           sum +
@@ -130,87 +169,111 @@ export function deriveUsageEnvironmentProducts(
           }, 0),
         0,
       );
-      const totalApis = pUsages.reduce(
-        (sum, u) =>
-          sum +
-          u.periodSummaries.reduce(
-            (s, ps) => s + (ps.counts["API_COUNT"] ?? 0),
-            0,
-          ),
-        0,
-      );
 
       const instanceRows: UsageProductInstanceRow[] = pUsages.map((u) => {
-        const instUsageTrend = buildUsageTrendFromUsages(
-          [u],
-          "TRANSACTION_COUNT",
-          formatUsageEnvironmentPeriodLabel,
-        );
-        const instTxHD = computeUsageHeadlineDeltaSigned(instUsageTrend);
         const instMetric = pMetrics.find((m) => m.instanceId === u.instanceId);
+
+        // Instance-level stats: one formatted value per metric key
+        const instSummaryStats = metricKeys.map((key) => {
+          const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
+          const total = u.periodSummaries.reduce(
+            (s, ps) => s + (ps.counts[key] ?? 0),
+            0,
+          );
+          return { label: cfg.title, value: formatUsageMetricCount(total) };
+        });
+
+        // Instance-level charts: one per metric key + cores
         const instCoreTrend = instMetric
           ? buildCoreAverageTrendFromMetrics([instMetric])
           : [];
-        const lastCore =
-          instMetric?.dataPoints.at(-1)?.coreCount ??
-          (instMetric?.dataPoints.at(-1)?.deploymentMetadata?.numberOfCores !=
-          null
-            ? Number(
-                instMetric.dataPoints.at(-1)!.deploymentMetadata!.numberOfCores,
-              )
-            : 0) ??
-          0;
+        const instCoreValues = (instMetric?.dataPoints ?? [])
+          .slice()
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .map((dp) =>
+            dp.coreCount != null
+              ? dp.coreCount
+              : dp.deploymentMetadata?.numberOfCores != null
+                ? Number(dp.deploymentMetadata.numberOfCores)
+                : 0,
+          );
+        const instCoreSummary = computeSeriesSummary(instCoreValues);
         const coreHD = computeUsageHeadlineDeltaSigned(
           instCoreTrend.map((r) => ({ name: r.name, value: r.current })),
         );
 
-        const javaVer =
-          instMetric?.dataPoints.at(-1)?.jdkVersion ??
-          instMetric?.dataPoints.at(-1)?.deploymentMetadata?.jdkVersion ??
-          USAGE_METRICS_VALUE_EM_DASH;
-        const u2Level =
-          instMetric?.dataPoints.at(-1)?.deploymentMetadata?.updateLevel ??
-          USAGE_METRICS_VALUE_EM_DASH;
-        const instanceStroke = colors.blue?.[500] ?? "#3B82F6";
+        const instCharts: UsageInstanceChartBlock[] = [
+          ...metricKeys.map((key) => {
+            const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
+            const instTrend = buildUsageTrendFromUsages(
+              [u],
+              key,
+              formatUsageEnvironmentPeriodLabel,
+            );
+            const instHD = computeUsageHeadlineDeltaSigned(instTrend);
+            return {
+              title: cfg.title,
+              caption: cfg.caption,
+              headlineValue: instHD.headline,
+              deltaLabel: instHD.delta,
+              deltaPositive: instHD.deltaPositive,
+              stroke: cfg.stroke,
+              data: instTrend,
+            };
+          }),
+          {
+            title: USAGE_METRICS_INSTANCE_CHART_CORE_TITLE,
+            caption: USAGE_METRICS_INSTANCE_CHART_CORE_CAPTION,
+            headlineValue: String(instCoreSummary.curr),
+            deltaLabel: coreHD.delta,
+            deltaPositive: coreHD.deltaPositive,
+            stroke: colors.orange?.[500] ?? "#F97316",
+            data: instCoreTrend.map((r) => ({ name: r.name, value: r.current })),
+          },
+        ];
 
-        const txBlock: UsageInstanceChartBlock = {
-          title: USAGE_METRICS_INSTANCE_CHART_TX_TITLE,
-          caption: USAGE_METRICS_INSTANCE_CHART_TX_CAPTION,
-          headlineValue: instTxHD.headline,
-          deltaLabel: instTxHD.delta,
-          deltaPositive: instTxHD.deltaPositive,
-          stroke: instanceStroke,
-          data: instUsageTrend,
-        };
-        const coresBlock: UsageInstanceChartBlock = {
-          title: USAGE_METRICS_INSTANCE_CHART_CORE_TITLE,
-          caption: USAGE_METRICS_INSTANCE_CHART_CORE_CAPTION,
-          headlineValue: String(lastCore),
-          deltaLabel: coreHD.delta,
-          deltaPositive: coreHD.deltaPositive,
-          stroke: colors.orange?.[500] ?? "#F97316",
-          data: instCoreTrend.map((r) => ({ name: r.name, value: r.current })),
-        };
+        // Sort ascending so .at(-1) is always the most recent data point,
+        // regardless of whether SN returns newest-first or oldest-first.
+        const sortedDps = [...(instMetric?.dataPoints ?? [])].sort((a, b) =>
+          (a.date ?? "").localeCompare(b.date ?? ""),
+        );
+        const lastDp = sortedDps.at(-1);
+        const javaVer = (
+          lastDp?.jdkVersion ??
+          lastDp?.deploymentMetadata?.jdkVersion ??
+          USAGE_METRICS_VALUE_EM_DASH
+        ).replace(/^"|"$/g, "");
+        const u2Level =
+          lastDp?.deploymentMetadata?.updateLevel ?? USAGE_METRICS_VALUE_EM_DASH;
+        const dm = lastDp?.deploymentMetadata;
+        const os = dm?.os
+          ? dm.osVersion
+            ? `${dm.os} ${dm.osVersion}`
+            : dm.os
+          : USAGE_METRICS_VALUE_EM_DASH;
 
         return {
           id: u.instanceId,
-          hostName: u.instanceId,
+          hostName: u.instanceKey,
+          os,
           javaVersion: javaVer,
           u2Level,
-          transactionsLabel: instTxHD.headline,
-          coreCount: lastCore,
-          charts: { transactions: txBlock, cores: coresBlock },
+          summaryStats: instSummaryStats,
+          coreSummary: instCoreSummary,
+          charts: instCharts,
         };
       });
+
+      const { instanceSummary, coreSummary } =
+        computeInstanceAndCoreSummary(pMetrics);
 
       return {
         id: pid,
         name: label,
         version: "",
         runningInstances: pUsages.length,
-        transactionsLabel: formatUsageMetricCount(totalTx),
-        thirdMetricLabel: USAGE_METRICS_PRODUCT_THIRD_METRIC_LABEL,
-        thirdMetricValue: String(totalApis),
+        metricKeys,
+        summaryStats,
         coreMetrics: [
           {
             label: USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES,
@@ -221,9 +284,10 @@ export function deriveUsageEnvironmentProducts(
             value: String(pUsages.length),
           },
         ],
-        transactionTrend: txTrend,
-        coreUsageTrend: coreTrend,
+        chartTrends,
         instances: instanceRows,
+        instanceSummary,
+        coreSummary,
       };
     },
   );

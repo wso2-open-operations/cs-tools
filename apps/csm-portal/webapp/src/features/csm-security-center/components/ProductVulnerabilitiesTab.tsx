@@ -18,10 +18,10 @@ import {
   Alert,
   Box,
   Chip,
-  CircularProgress,
   InputAdornment,
   MenuItem,
   Paper,
+  Skeleton,
   Table,
   TableBody,
   TableCell,
@@ -154,11 +154,15 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
             </TableHead>
             <TableBody>
               {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
-                </TableRow>
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 6 }).map((__, j) => (
+                      <TableCell key={j}>
+                        <Skeleton variant="text" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
               ) : isError ? (
                 // The error Alert above carries the detail; don't fall through
                 // to the empty state (which would read as "0 results").
@@ -198,12 +202,12 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
                   >
                     <TableCell>
                       <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                        {vuln.cveId || vuln.vulnerabilityId || "—"}
+                        {vuln.cveId || vuln.vulnerabilityId || "-"}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" noWrap title={vuln.componentName}>
-                        {vuln.componentName || "—"}
+                        {vuln.componentName || "-"}
                         {vuln.version ? (
                           <Typography
                             component="span"
@@ -218,7 +222,7 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" noWrap>
-                        {vuln.productName || "—"}
+                        {vuln.productName || "-"}
                         {vuln.productVersion ? (
                           <Typography
                             component="span"
@@ -240,11 +244,11 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
                           label={vuln.priority}
                         />
                       ) : (
-                        "—"
+                        "-"
                       )}
                     </TableCell>
-                    <TableCell>{vuln.type || "—"}</TableCell>
-                    <TableCell>{vuln.updateLevel || "—"}</TableCell>
+                    <TableCell>{vuln.type || "-"}</TableCell>
+                    <TableCell>{vuln.updateLevel || "-"}</TableCell>
                   </TableRow>
                   );
                 })

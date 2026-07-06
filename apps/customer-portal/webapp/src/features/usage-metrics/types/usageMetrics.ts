@@ -17,10 +17,10 @@
 import type { ReactNode } from "react";
 import type { UsageAggregatedMetricDefinition } from "@features/project-details/types/usage";
 import type {
+  DataSource,
   UsageEnvironmentProduct,
-  UsageInstanceChartBlock,
-  UsageProductInstanceRow,
   UsageTimeRange,
+  MetricTypeSummary,
 } from "@features/project-details/types/usage";
 
 /** ISO date strings (YYYY-MM-DD) for usage API filters. */
@@ -73,6 +73,7 @@ export type UsageMetricsTimeRangeSelectorProps = {
   onCancelCustom: () => void;
   appliedCustomStart: string;
   appliedCustomEnd: string;
+  rightAction?: ReactNode;
 };
 
 export type UsageOverviewPanelProps = {
@@ -81,6 +82,17 @@ export type UsageOverviewPanelProps = {
   expandedEnvironmentIds: Set<string>;
   onToggleEnvironment: (id: string) => void;
   timeRangeSelector?: ReactNode;
+  dataSource?: DataSource | null;
+};
+
+export type DataSourceStatCardProps = {
+  summary: MetricTypeSummary;
+  isLoading?: boolean;
+};
+
+export type DataSourceToggleProps = {
+  value: DataSource | null;
+  onChange: (value: DataSource | null) => void;
 };
 
 export type UsageEnvironmentProductsPanelProps = {
@@ -119,6 +131,7 @@ export type DeploymentExpandedViewProps = {
   deploymentId: string;
   typeId: string;
   dateRange: UsageDateRangeIso;
+  expanded: boolean;
 };
 
 export type EnvironmentBreakdownRow = {
@@ -141,18 +154,6 @@ export type EnvironmentBreakdownAccordionProps = {
 
 export type ProductExpandedViewProps = {
   product: UsageEnvironmentProduct;
-  expandedInstanceKeys: Set<string>;
-  onToggleInstance: (key: string) => void;
-};
-
-export type InstanceMiniTrendCardProps = {
-  block: UsageInstanceChartBlock;
-};
-
-export type InstanceAccordionRowProps = {
-  instance: UsageProductInstanceRow;
-  expanded: boolean;
-  onToggle: () => void;
 };
 
 export type ProductAccordionRowProps = {
@@ -160,8 +161,6 @@ export type ProductAccordionRowProps = {
   deploymentId: string;
   expanded: boolean;
   onToggle: () => void;
-  expandedInstanceKeys: Set<string>;
-  onToggleInstance: (key: string) => void;
 };
 
 export type MetricPillProps = {

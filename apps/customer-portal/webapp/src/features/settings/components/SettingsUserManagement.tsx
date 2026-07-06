@@ -158,12 +158,13 @@ export default function SettingsUserManagement({
   }, [removeTarget, deleteContact, showSuccess, showError]);
 
   const handleEditUser = useCallback(
-    (next: { isCsAdmin: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => {
+    (next: { isCsAdmin: boolean; isLead: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => {
       if (!editTarget?.email) return;
       patchContact.mutate(
         {
           email: editTarget.email,
           isCsAdmin: next.isCsAdmin,
+          isLead: next.isLead,
           isPortalUser: next.isPortalUser,
           isSecurityContact: next.isSecurityContact,
         },
@@ -376,17 +377,19 @@ export default function SettingsUserManagement({
                           justifyContent: "flex-end",
                         }}
                       >
-                        <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              aria-label="Edit user"
-                              onClick={() => setEditTarget(contact)}
-                            >
-                              <PencilLine size={16} />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
+                        {!contact.isCsIntegrationUser && (
+                          <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
+                            <span>
+                              <IconButton
+                                size="small"
+                                aria-label="Edit user"
+                                onClick={() => setEditTarget(contact)}
+                              >
+                                <PencilLine size={16} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        )}
                         <Tooltip title={SETTINGS_USER_REMOVE_TOOLTIP}>
                           <span>
                             <IconButton

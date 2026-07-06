@@ -30,7 +30,7 @@ import {
   uiStateFromBe,
 } from "@api/backend/mappers";
 import { projectOptionsQueryOptions } from "@features/csm-cases/api/useProjectOptions";
-import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import type {
   BeAccount,
@@ -143,6 +143,7 @@ export function useGetCsmCases(
       [...filters.assignees].sort(),
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
+      [...filters.productNames].sort(),
       currentUserEmail ?? "",
       currentUserId ?? "",
       page,
@@ -202,7 +203,7 @@ export function useGetCsmCases(
       // customer column (cases embed the project, but not its account). The
       // lookups go through `fetchQuery` with their own stable keys, so they
       // hit the network only when their cache is stale — not on every filter
-      // change. Lookup failures degrade to "—" names, not a failed list.
+      // change. Lookup failures degrade to blank names, not a failed list.
       const [casesResponse, projects, accounts] = await Promise.all([
         api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
           pagination: { offset, limit: pageSize },
@@ -235,6 +236,10 @@ export function useGetCsmCases(
             // Assignee filter, resolved to engineer UUIDs above.
             ...(assignedUserIds && assignedUserIds.length > 0 && {
               assignedUserIds,
+            }),
+            // Product family names; SN matches `product.name` (all versions).
+            ...(filters.productNames.length > 0 && {
+              productNames: filters.productNames,
             }),
           },
         }),
@@ -277,13 +282,13 @@ export function useGetCsmCases(
           caseNumber: c.number,
           wso2CaseId: c.internalId,
           subject: c.subject ?? "(no subject)",
-          customer: accountName.get(accountId) ?? "—",
+          customer: accountName.get(accountId) ?? "-",
           accountId,
           projectId,
-          projectName: c.project?.name ?? "—",
+          projectName: c.project?.name ?? "-",
           // Search embeds deployedProduct as { id, name } (name includes the
           // version); the GET view uses a displayName-shaped ref instead.
-          product: c.deployedProduct?.name ?? "—",
+          product: c.deployedProduct?.name ?? c.product?.name ?? "-",
           severity: severityFromPriority(c.severity),
           state: uiStateFromBe(c.state),
           caseType: c.type,

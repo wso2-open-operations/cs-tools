@@ -14,8 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Divider, pxToRem, Skeleton, Stack, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
-import { Sparkle } from "@wso2/oxygen-ui-icons-react";
+import {
+  alpha,
+  Avatar,
+  Box,
+  Divider,
+  Paper,
+  Skeleton,
+  Stack,
+  Typography,
+  type SxProps,
+  type Theme,
+} from "@wso2/oxygen-ui";
+import { Bot, User } from "@wso2/oxygen-ui-icons-react";
 import { KBCard } from "./KBCard";
 import { ChecklistItem } from "./ChecklistItem";
 import { TypewriterText } from "../../shared";
@@ -34,6 +45,42 @@ export interface ChatMessage {
   onAnimationComplete?: () => void;
 }
 
+const AVATAR_SIZE = 32;
+
+function NoveraAvatar() {
+  return (
+    <Box
+      sx={{
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
+        borderRadius: "50%",
+        background: "linear-gradient(135deg, #EA580C 0%, #F97316 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+      }}
+    >
+      <Bot size={16} color="white" />
+    </Box>
+  );
+}
+
+function UserAvatar() {
+  return (
+    <Avatar
+      sx={{
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
+        bgcolor: (theme) => alpha(theme.palette.primary.light, 0.1),
+        color: (theme) => theme.palette.primary.main,
+      }}
+    >
+      <User size={16} />
+    </Avatar>
+  );
+}
+
 export function MessageBubble({
   author,
   blocks,
@@ -46,102 +93,95 @@ export function MessageBubble({
   const you = author === "you";
 
   return (
-    <Stack direction="row" justifyContent={you ? "end" : "start"}>
-      <Card
-        component={Stack}
-        p={1.5}
-        ml={you ? 10 : undefined}
-        width={you ? "fit-content" : "100%"}
-        sx={{ ...sx, bgcolor: "background.paper" }}
-      >
-        {!you && (
-          <Stack direction="row" justifyContent="space-between" gap={1} mb={0.5}>
-            <Box color="primary.main">
-              <Sparkle size={pxToRem(18)} />
-            </Box>
-            {thinking ? (
-              <Typography
-                noWrap
-                variant="subtitle2"
-                sx={{
-                  fontWeight: "medium",
-                  background: "linear-gradient(90deg, #aaa 25%, #fff 50%, #aaa 75%)",
-                  backgroundSize: "200% 100%",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                  animation: "shimmer 1.5s infinite linear",
-                  "@keyframes shimmer": {
-                    from: { backgroundPosition: "200% center" },
-                    to: { backgroundPosition: "-200% center" },
-                  },
-                  opacity: "80%",
-                  ml: 8,
-                }}
-              >
-                {typeof thinking === "string" ? thinking : "Thinking"}
-              </Typography>
-            ) : (
-              <Typography variant="subtitle2" color="text.disabled">
-                {timestamp}
-              </Typography>
-            )}
-          </Stack>
-        )}
+    <Stack direction="row" gap={1.5} sx={{ flexDirection: you ? "row-reverse" : "row", ...sx }}>
+      {you ? <UserAvatar /> : <NoveraAvatar />}
 
-        <Stack gap={2}>
-          {blocks.map((block, index) => {
-            switch (block.type) {
-              case "text":
-                return (
-                  <Typography
-                    key={index}
-                    variant="body2"
-                    component="span"
-                    sx={{ "& > *": { margin: 0, lineHeight: 1.7 } }}
-                  >
-                    <TypewriterText
-                      tokens={block.value.split("")}
-                      animated={animated}
-                      pending={!!thinking}
-                      onAnimationComplete={onAnimationComplete}
-                    />
-                  </Typography>
-                );
-
-              case "checklist":
-                return (
-                  <Stack key={index} gap={1}>
-                    {block.items.map((item, i) => (
-                      <ChecklistItem key={i}>{item}</ChecklistItem>
-                    ))}
-                  </Stack>
-                );
-
-              case "kb":
-                return (
-                  <Stack key={index} gap={1.5}>
-                    <Divider sx={{ my: 1 }} />
-                    {block.items.map((item, i) => (
-                      <KBCard key={i} id={item.id} title={item.title} />
-                    ))}
-                  </Stack>
-                );
-
-              default:
-                return null;
-            }
-          })}
-        </Stack>
-
-        {you && (
-          <Stack direction="row" justifyContent="end">
-            <Typography variant="subtitle2" color="text.disabled" mt={1}>
+      <Stack gap={0.5} sx={{ flex: you ? "0 1 auto" : 1, maxWidth: you ? "80%" : undefined, minWidth: 0 }}>
+        <Stack direction="row" gap={1} alignItems="center" justifyContent={you ? "flex-end" : "flex-start"}>
+          <Typography variant="body2" fontWeight="medium">
+            {you ? "You" : "Novera"}
+          </Typography>
+          {!you && thinking ? (
+            <Typography
+              noWrap
+              variant="caption"
+              sx={{
+                fontWeight: "medium",
+                background: "linear-gradient(90deg, #aaa 25%, #fff 50%, #aaa 75%)",
+                backgroundSize: "200% 100%",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+                animation: "shimmer 1.5s infinite linear",
+                "@keyframes shimmer": {
+                  from: { backgroundPosition: "200% center" },
+                  to: { backgroundPosition: "-200% center" },
+                },
+                opacity: "80%",
+              }}
+            >
+              {typeof thinking === "string" ? thinking : "Thinking"}
+            </Typography>
+          ) : (
+            <Typography variant="caption" color="text.secondary">
               {timestamp}
             </Typography>
+          )}
+        </Stack>
+
+        <Box
+          component={you ? Paper : "div"}
+          elevation={0}
+          sx={
+            you ? { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.1), boxShadow: "none", p: 1.25 } : undefined
+          }
+        >
+          <Stack gap={2}>
+            {blocks.map((block, index) => {
+              switch (block.type) {
+                case "text":
+                  return (
+                    <Typography
+                      key={index}
+                      variant="body2"
+                      component="span"
+                      sx={{ "& > *": { margin: 0, lineHeight: 1.7 } }}
+                    >
+                      <TypewriterText
+                        tokens={block.value.split("")}
+                        animated={animated}
+                        pending={!!thinking}
+                        onAnimationComplete={onAnimationComplete}
+                      />
+                    </Typography>
+                  );
+
+                case "checklist":
+                  return (
+                    <Stack key={index} gap={1}>
+                      {block.items.map((item, i) => (
+                        <ChecklistItem key={i}>{item}</ChecklistItem>
+                      ))}
+                    </Stack>
+                  );
+
+                case "kb":
+                  return (
+                    <Stack key={index} gap={1.5}>
+                      <Divider sx={{ my: 1 }} />
+                      {block.items.map((item, i) => (
+                        <KBCard key={i} id={item.id} title={item.title} />
+                      ))}
+                    </Stack>
+                  );
+
+                default:
+                  return null;
+              }
+            })}
           </Stack>
-        )}
-      </Card>
+        </Box>
+      </Stack>
     </Stack>
   );
 }
@@ -155,38 +195,20 @@ export function MessageBubbleSkeleton({ author = "assistant", sx }: MessageBubbl
   const isYou = author === "you";
 
   return (
-    <Stack direction="row" justifyContent={isYou ? "end" : "start"} width="100%">
-      <Card
-        component={Stack}
-        p={1.5}
-        ml={isYou ? 10 : undefined}
-        width={isYou ? "fit-content" : "100%"}
-        sx={{
-          ...sx,
-          bgcolor: "background.paper",
-          borderStyle: "dashed",
-          borderWidth: 1,
-          borderColor: "divider",
-        }}
-      >
-        {!isYou && (
-          <Stack direction="row" justifyContent="start" gap={1} mb={1.5}>
-            <Skeleton variant="circular" width={pxToRem(18)} height={pxToRem(18)} />
-            <Skeleton variant="text" width={60} height={20} />
-          </Stack>
-        )}
+    <Stack direction="row" gap={1.5} width="100%" sx={{ flexDirection: isYou ? "row-reverse" : "row", ...sx }}>
+      <Skeleton variant="circular" width={AVATAR_SIZE} height={AVATAR_SIZE} />
+
+      <Stack gap={0.5} sx={{ flex: isYou ? "0 1 auto" : 1, minWidth: 0 }}>
+        <Stack direction="row" gap={1} justifyContent={isYou ? "flex-end" : "flex-start"}>
+          <Skeleton variant="text" width={50} height={20} />
+          <Skeleton variant="text" width={60} height={20} />
+        </Stack>
 
         <Stack gap={1}>
           <Skeleton variant="text" width={isYou ? 150 : "90%"} height={20} />
           <Skeleton variant="text" width={isYou ? 100 : "75%"} height={20} />
         </Stack>
-
-        {isYou && (
-          <Stack direction="row" justifyContent="end" mt={1}>
-            <Skeleton variant="text" width={50} height={20} />
-          </Stack>
-        )}
-      </Card>
+      </Stack>
     </Stack>
   );
 }

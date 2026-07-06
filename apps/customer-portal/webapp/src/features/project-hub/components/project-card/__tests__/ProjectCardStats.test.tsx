@@ -15,102 +15,52 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import ProjectCardStats from "@features/project-hub/components/project-card/ProjectCardStats";
 
-// Mock @wso2/oxygen-ui
-vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children }: any) => <div>{children}</div>,
-  Divider: () => <hr />,
-  Form: {
-    CardContent: ({ children }: any) => <div>{children}</div>,
-  },
-  Typography: ({ children }: any) => <span>{children}</span>,
-  colors: {
-    blue: { 500: "#2196F3" },
-  },
-  Skeleton: () => <div data-testid="skeleton" />,
-}));
-
-// Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Calendar: () => <svg data-testid="calendar-icon" />,
-  CircleAlert: () => <svg data-testid="alert-icon" />,
-  MessageSquare: () => <svg data-testid="message-icon" />,
-}));
-
-// Mock utils
-vi.mock("@features/project-hub/utils/projectCard", () => ({
-  formatProjectDate: vi.fn((date) => `Formatted ${date}`),
-}));
-
-// Mock ErrorIndicator
-vi.mock("@components/error-indicator/ErrorIndicator", () => ({
-  default: ({ entityName }: any) => (
-    <div data-testid="error-indicator">Error: {entityName}</div>
-  ),
-}));
-
 describe("ProjectCardStats", () => {
-  it("should render counts and formatted date", () => {
-    const props = {
-      outstandingCount: 10,
-      activeChatsCount: 5,
-      actionRequiredCount: 0,
-      date: "2025-07-17",
-    };
-
-    render(<ProjectCardStats {...props} />);
+  it("renders outstanding and active chat counts", () => {
+    render(
+      <ProjectCardStats
+        date="2026-01-01"
+        outstandingCount={10}
+        activeChatsCount={5}
+        actionRequiredCount={2}
+      />,
+    );
 
     expect(screen.getByText("10")).toBeInTheDocument();
     expect(screen.getByText("5")).toBeInTheDocument();
-    expect(screen.getByText(`Formatted ${props.date}`)).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("Action Required")).toBeInTheDocument();
+    expect(screen.getByText("Active Chats")).toBeInTheDocument();
   });
 
-  it("should render icons", () => {
-    const props = {
-      outstandingCount: 0,
-      activeChatsCount: 0,
-      actionRequiredCount: 0,
-      date: "2025-07-17",
-    };
+  it("renders error indicators when isError is true", () => {
+    render(
+      <ProjectCardStats
+        date="2026-01-01"
+        outstandingCount={0}
+        activeChatsCount={0}
+        actionRequiredCount={0}
+        isError
+      />,
+    );
 
-    render(<ProjectCardStats {...props} />);
-
-    expect(screen.getByTestId("calendar-icon")).toBeInTheDocument();
-    expect(screen.getByTestId("alert-icon")).toBeInTheDocument();
-    expect(screen.getByTestId("message-icon")).toBeInTheDocument();
+    expect(screen.getAllByTestId("error-indicator").length).toBeGreaterThan(0);
   });
 
-  it("should render error indicators when isError is true", () => {
-    const props = {
-      outstandingCount: 0,
-      activeChatsCount: 0,
-      actionRequiredCount: 0,
-      date: "2025-07-17",
-      isError: true,
-    };
+  it("renders skeletons when isLoading is true", () => {
+    const { container } = render(
+      <ProjectCardStats
+        date="2026-01-01"
+        outstandingCount={0}
+        activeChatsCount={0}
+        actionRequiredCount={0}
+        isLoading
+      />,
+    );
 
-    render(<ProjectCardStats {...props} />);
-
-    expect(
-      screen.getByText("Error: Outstanding support cases"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Error: Active Chats")).toBeInTheDocument();
-    expect(screen.queryByText("0")).not.toBeInTheDocument();
-  });
-
-  it("should render skeletons when isLoading is true", () => {
-    const props = {
-      outstandingCount: 0,
-      activeChatsCount: 0,
-      actionRequiredCount: 0,
-      date: "2025-07-17",
-      isLoading: true,
-    };
-
-    render(<ProjectCardStats {...props} />);
-
-    expect(screen.getAllByTestId("skeleton")).toHaveLength(2);
+    expect(container.querySelectorAll(".MuiSkeleton-root").length).toBeGreaterThan(0);
   });
 });

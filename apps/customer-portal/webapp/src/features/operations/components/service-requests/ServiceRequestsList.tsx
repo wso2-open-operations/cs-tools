@@ -232,7 +232,7 @@ export default function ServiceRequestsList({
                     color="text.secondary"
                     sx={{ lineHeight: 1 }}
                   >
-                    {formatDateTime(sr.createdOn) || NULL_PLACEHOLDER}
+                    {formatDateTime(sr.updatedOn ?? sr.createdOn) || NULL_PLACEHOLDER}
                   </Typography>
                 </Box>
                 {environmentLabel && (

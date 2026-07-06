@@ -36,7 +36,6 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import { AnnouncementSortField } from "@features/announcements/types/announcements";
 import {
-  ANNOUNCEMENTS_BACK_LABEL,
   ANNOUNCEMENTS_PAGE_DESCRIPTION,
   ANNOUNCEMENTS_PAGE_SIZE,
   ANNOUNCEMENTS_PAGE_TITLE,
@@ -67,7 +66,7 @@ export default function AnnouncementsPage(): JSX.Element {
   const [filters, setFilters] = useSessionState<AnnouncementFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
   const [sortField, setSortField] = useSessionState<AnnouncementSortField>(
     `${sessionPrefix}-sortField`,
-    AnnouncementSortField.CreatedOn,
+    AnnouncementSortField.UpdatedOn,
     isValidAnnouncementSortField,
     { popOnly: true },
   );
@@ -122,8 +121,13 @@ export default function AnnouncementsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({ ...prev, [field]: value || undefined }));
+  const handleFilterChange = (field: string, value: string | string[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      [field]: Array.isArray(value)
+        ? (value.length === 0 ? undefined : value)
+        : (value || undefined),
+    }));
     setPage(1);
   };
 
@@ -140,8 +144,6 @@ export default function AnnouncementsPage(): JSX.Element {
       <ListPageHeader
         title={ANNOUNCEMENTS_PAGE_TITLE}
         description={ANNOUNCEMENTS_PAGE_DESCRIPTION}
-        backLabel={ANNOUNCEMENTS_BACK_LABEL}
-        onBack={() => navigate("..")}
       />
 
       <ListSearchBar

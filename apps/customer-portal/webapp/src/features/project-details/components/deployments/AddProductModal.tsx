@@ -90,10 +90,18 @@ export default function AddProductModal({
   const accumulatedProductsLengthRef = useRef(0);
   const accumulatedVersionsLengthRef = useRef(0);
 
+  const productsRef = useRef<ProductItem[]>([]);
+  const versionsRef = useRef<ProductVersionItem[]>([]);
+
   useLayoutEffect(() => {
+    productsRef.current = products;
     accumulatedProductsLengthRef.current = products.length;
+  }, [products]);
+
+  useLayoutEffect(() => {
+    versionsRef.current = versions;
     accumulatedVersionsLengthRef.current = versions.length;
-  }, [products, versions]);
+  }, [versions]);
 
   const resetModalState = useCallback(() => {
     setForm({ ...ADD_PRODUCT_MODAL_INITIAL_FORM });
@@ -173,7 +181,7 @@ export default function AddProductModal({
       return;
     }
 
-    const prevProducts = products;
+    const prevProducts = productsRef.current;
     const prevProductIds = new Set(
       prevProducts.map((p) => p.id).filter((id): id is string => Boolean(id)),
     );
@@ -196,7 +204,7 @@ export default function AddProductModal({
       applyServerProductsTotal();
     }
     setProducts([...prevProducts, ...newProductItems]);
-  }, [productsPage, products]);
+  }, [productsPage]);
 
   const productsTotalRecords = Number.isFinite(cachedProductsTotalRecords)
     ? (cachedProductsTotalRecords as number)
@@ -283,7 +291,7 @@ export default function AddProductModal({
       return;
     }
 
-    const prevVersions = versions;
+    const prevVersions = versionsRef.current;
     const prevVersionIds = new Set(
       prevVersions.map((v) => v.id).filter((id): id is string => Boolean(id)),
     );
@@ -306,7 +314,7 @@ export default function AddProductModal({
       applyServerVersionsTotal();
     }
     setVersions([...prevVersions, ...newVersionItems]);
-  }, [form.productId, versionsPage, versions]);
+  }, [form.productId, versionsPage]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const versionsTotalRecords = Number.isFinite(cachedVersionsTotalRecords)

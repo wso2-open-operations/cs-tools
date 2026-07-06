@@ -47,7 +47,7 @@ type entityCaseClient interface {
 	CreateCase(ctx context.Context, body []byte) ([]byte, error)
 	PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
 	CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error)
@@ -57,6 +57,7 @@ type entityCaseClient interface {
 	CreateCallRequest(ctx context.Context, body []byte) ([]byte, error)
 	SearchCallRequests(ctx context.Context, body []byte) ([]byte, error)
 	PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
+	CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -223,6 +224,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 }
 
 // SearchCaseComments handles POST /cases/{id}/comments/search.
+// Injects referenceId and referenceType into the payload and forwards to POST /comments/search.
 func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -247,14 +249,23 @@ func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !json.Valid(body) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+	payload["referenceId"] = caseID
+	payload["referenceType"] = "case"
 
-	result, err := h.entity.SearchCaseComments(r.Context(), caseID, body)
+	newBody, err := json.Marshal(payload)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCaseComments failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.SearchComments(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to search case comments.")
 		return
 	}
@@ -697,4 +708,45 @@ func (h *CaseHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateCaseGithubIssue handles POST /cases/{id}/github-issues.
+func (h *CaseHandler) CreateCaseGithubIssue(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.CreateCaseGithubIssue(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateCaseGithubIssue failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to create GitHub issue.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }

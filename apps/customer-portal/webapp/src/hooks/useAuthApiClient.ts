@@ -15,10 +15,26 @@
 // under the License.
 
 import { useAsgardeo } from "@asgardeo/react";
+import { ASGARDEO_UNAUTHENTICATED_CODE } from "@constants/apiConstants";
+
+// Shared across every caller's hook instance. Each useAuthApiClient() call
+// creates its own authFetch closure, so this lives at module scope to ensure
+// only ONE full sign-in redirect is triggered even when many concurrent calls
+// fail authentication at once.
+let signInInFlight = false;
+
+// Only the Asgardeo "unauthenticated" code means the token was expired/missing
+// when the call ran. Everything else (network failures, real backend 5xx) must
+// propagate untouched so existing error handling and error pages still work.
+const isTokenExpiredError = (error: unknown): boolean =>
+  error != null &&
+  typeof error === "object" &&
+  "code" in error &&
+  (error as { code: string }).code === ASGARDEO_UNAUTHENTICATED_CODE;
 
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken } = useAsgardeo();
+  const { getIdToken, signIn } = useAsgardeo();
 
   /**
    * Builds request headers with auth and payload defaults.
@@ -59,7 +75,7 @@ export function useAuthApiClient() {
     return headers;
   };
 
-  const authFetch = async (
+  const attemptFetch = async (
     input: RequestInfo | URL,
     options?: RequestInit,
   ): Promise<Response> => {
@@ -67,11 +83,60 @@ export function useAuthApiClient() {
     if (!token) {
       throw new Error("Unable to retrieve ID token");
     }
-
     return fetch(input, {
       ...options,
       headers: buildRequestHeaders(options, token),
     });
+  };
+
+  // Redirect to a full sign-in, single-flighted so concurrent auth failures
+  // don't fire multiple redirects. Returns a never-resolving promise so callers
+  // don't fall through to an error page while the browser navigates away.
+  const redirectToSignIn = (): Promise<Response> => {
+    if (!signInInFlight) {
+      signInInFlight = true;
+      // Best-effort: navigation takes over from here. Reset on the rare chance
+      // the redirect itself rejects so a later attempt can retry.
+      void Promise.resolve(signIn()).finally(() => {
+        signInInFlight = false;
+      });
+    }
+    return new Promise<Response>(() => {});
+  };
+
+  const authFetch = async (
+    input: RequestInfo | URL,
+    options?: RequestInit,
+  ): Promise<Response> => {
+    try {
+      return await attemptFetch(input, options);
+    } catch (error) {
+      // Only an expired/missing token is recoverable here; anything else
+      // (network, real backend 5xx) must surface to existing error handling.
+      if (!isTokenExpiredError(error)) {
+        throw error;
+      }
+
+      // A concurrent caller, or the provider's periodic background refresh
+      // (periodicTokenRefresh on AsgardeoProvider), may have re-minted the
+      // token in the meantime, so retry once to pick it up. getIdToken() itself
+      // only reads the stored token; if nothing refreshed it the retry fails
+      // again and we fall through to the sign-in redirect below.
+      try {
+        return await attemptFetch(input, options);
+      } catch (retryError) {
+        // Retry failed for a non-auth reason (e.g. a transient network blip on
+        // the second attempt): surface it to existing error handling instead of
+        // bouncing the user to sign-in.
+        if (!isTokenExpiredError(retryError)) {
+          throw retryError;
+        }
+
+        // Still unauthenticated after the retry — the session is gone. Redirect
+        // for a full sign-in.
+        return redirectToSignIn();
+      }
+    }
   };
 
   return authFetch;

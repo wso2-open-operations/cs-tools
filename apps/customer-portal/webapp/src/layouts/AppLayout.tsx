@@ -16,12 +16,14 @@
 
 import { notificationBannerConfig } from "@config/notificationBannerConfig";
 import {
-  AppShell,
   Box,
   useAppShell,
+  useMediaQuery,
+  useTheme,
   LinearProgress,
   Typography,
 } from "@wso2/oxygen-ui";
+import AppShellLayout from "@layouts/AppShellLayout";
 import { type JSX, type ReactNode, useRef, useEffect, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
@@ -30,7 +32,7 @@ import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
 import HtmlAnnouncementBanner from "@components/announcement-banner/HtmlAnnouncementBanner";
-import TopBanner from "@components/top-banner/TopBanner";
+import TopBanners from "@components/top-banner/TopBanners";
 import Footer from "@components/footer/Footer";
 import Header from "@components/header/Header";
 import SideBar from "@components/side-nav-bar/SideBar";
@@ -41,6 +43,7 @@ import {
   getSidebarCollapsed,
   setSidebarCollapsed,
 } from "@features/settings/utils/settingsStorage";
+import { useIsMidSizeTouchViewport } from "@hooks/useResponsiveLayout";
 
 /**
  * AppLayout component.
@@ -56,7 +59,6 @@ interface AppLayoutProps {
  */
 export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
-  const mainContentRef = useRef<HTMLDivElement>(null);
   const { isLoading: isAuthLoading } = useAsgardeo();
   const { error: userDetailsError, isLoading: isUserDetailsLoading } =
     useGetUserDetails();
@@ -64,13 +66,15 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
 
   // Scroll to top on route change
   useEffect(() => {
-    if (mainContentRef.current) {
-      mainContentRef.current.scrollTop = 0;
-    }
+    document.getElementById("main-scroll-container")?.scrollTo({ top: 0 });
   }, [location.pathname]);
 
+  const theme = useTheme();
+  const isCompactViewport = useMediaQuery(theme.breakpoints.down("md"));
+  const isMidSizeTouchViewport = useIsMidSizeTouchViewport();
   const { state: shellState, actions: shellActions } = useAppShell({
-    initialCollapsed: getSidebarCollapsed(),
+    initialCollapsed:
+      getSidebarCollapsed() || isCompactViewport || isMidSizeTouchViewport,
   });
 
   const { isVisible } = useLoader();
@@ -98,7 +102,10 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
     setLoadingMessage("Authenticating…");
     const t1 = setTimeout(() => setLoadingMessage("Fetching user info…"), 1500);
     const t2 = setTimeout(() => setLoadingMessage("Please wait…"), 3000);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [isAuthLoading, isLoginCallback]);
 
   // Persist sidebar state
@@ -106,8 +113,62 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
     setSidebarCollapsed(shellState.sidebarCollapsed);
   }, [shellState.sidebarCollapsed]);
 
+  // Collapse sidebar when the viewport shrinks below md (not on manual expand).
+  const wasCompactViewport = useRef(isCompactViewport);
+  useEffect(() => {
+    if (
+      isCompactViewport &&
+      !wasCompactViewport.current &&
+      !shellState.sidebarCollapsed
+    ) {
+      shellActions.toggleSidebar();
+    }
+    wasCompactViewport.current = isCompactViewport;
+  }, [isCompactViewport, shellState.sidebarCollapsed, shellActions]);
+
+  const isSidebarOverlay = isMidSizeTouchViewport;
+  const isSidebarOpen = isSidebarOverlay && !shellState.sidebarCollapsed;
+
+  // Collapse sidebar when entering overlay mode so the drawer does not open unexpectedly.
+  const previousIsSidebarOverlay = useRef(isSidebarOverlay);
+  useEffect(() => {
+    if (
+      !previousIsSidebarOverlay.current &&
+      isSidebarOverlay &&
+      !shellState.sidebarCollapsed
+    ) {
+      shellActions.toggleSidebar();
+    }
+    previousIsSidebarOverlay.current = isSidebarOverlay;
+  }, [isSidebarOverlay, shellState.sidebarCollapsed, shellActions]);
+
+  // Close overlay drawer after navigation only (not when the user opens it).
+  const previousPathname = useRef(location.pathname);
+  useEffect(() => {
+    if (
+      isSidebarOverlay &&
+      previousPathname.current !== location.pathname &&
+      !shellState.sidebarCollapsed
+    ) {
+      shellActions.toggleSidebar();
+    }
+    previousPathname.current = location.pathname;
+  }, [
+    location.pathname,
+    isSidebarOverlay,
+    shellState.sidebarCollapsed,
+    shellActions,
+  ]);
+
+  const handleSidebarClose = (): void => {
+    if (!shellState.sidebarCollapsed) {
+      shellActions.toggleSidebar();
+    }
+  };
+
   // Path Logic Constants
   const isProjectHub = location.pathname === "/" || location.pathname === "";
+  const isPartnerPage = location.pathname.startsWith("/partner/");
 
   const isCaseDetailsPage =
     /\/(?:projects\/[^/]+|[^/]+)\/support\/cases\/[^/]+$/.test(
@@ -165,112 +226,127 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
           overflow: "hidden",
         }}
       >
-        <TopBanner />
+        <TopBanners />
         <GlobalNotificationBanner visible={notificationBannerConfig.visible} />
         <HtmlAnnouncementBanner />
-        <AppShell sx={{ flex: 1, minHeight: 0, height: "auto" }}>
-          <AppShell.Navbar>
+        <AppShellLayout
+          header={
             <Header
               onToggleSidebar={shellActions.toggleSidebar}
               collapsed={shellState.sidebarCollapsed}
               hideProjectControls={hasPortalAccessError}
             />
-          </AppShell.Navbar>
-
-          {!isProjectHub && !hasPortalAccessError && !isErrorPageDisplayed && (
-            <AppShell.Sidebar>
+          }
+          sidebar={
+            !isProjectHub && !isPartnerPage && !hasPortalAccessError && !isErrorPageDisplayed ? (
               <SideBar
-                collapsed={shellState.sidebarCollapsed}
+                collapsed={
+                  isSidebarOverlay ? false : shellState.sidebarCollapsed
+                }
                 expandedMenus={shellState.expandedMenus}
                 onSelect={shellActions.setActiveMenuItem}
                 onToggleExpand={shellActions.toggleMenu}
               />
-            </AppShell.Sidebar>
-          )}
-
-          <AppShell.Main>
+            ) : undefined
+          }
+          sidebarOverlay={isSidebarOverlay}
+          sidebarOpen={isSidebarOpen}
+          onSidebarClose={handleSidebarClose}
+          footer={<Footer />}
+        >
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              width: "100%",
+              maxWidth: "100%",
+              position: "relative",
+              boxSizing: "border-box",
+            }}
+          >
+            {isVisible && (
+              <LinearProgress
+                color="warning"
+                sx={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  zIndex: 1300,
+                  height: 3,
+                }}
+              />
+            )}
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-                width: "100%",
                 flex: 1,
                 minHeight: 0,
-                overflow: "hidden",
-                position: "relative",
+                minWidth: 0,
+                width: "100%",
+                maxWidth: "100%",
+                display: "flex",
+                flexDirection: "column",
+                boxSizing: "border-box",
+                ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
+                ...(isAuthLoading
+                  ? { p: 0 }
+                  : isDetailsStylePage
+                    ? { px: 0, pb: 0, pt: 0 }
+                    : {
+                        px: { xs: 1.5, sm: 2, md: 3 },
+                        py: { xs: 2, sm: 2.5, md: 3 },
+                      }),
               }}
             >
-              {isVisible && (
-                <LinearProgress
-                  color="warning"
+              {!hasInitialized ? (
+                <Box
                   sx={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    zIndex: 1300,
-                    height: 3,
+                    flex: 1,
+                    minHeight: 0,
+                    minWidth: 0,
+                    width: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 2,
                   }}
-                />
-              )}
-              <Box
-                ref={mainContentRef}
-                sx={{
-                  flex: 1,
-                  minHeight: 0,
-                  minWidth: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  overflowY: "auto",
-                  overflowX: "hidden",
-                  ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
-                  ...(isAuthLoading
-                    ? { p: 0 }
-                    : isDetailsStylePage
-                      ? { px: 0, pb: 0, pt: 0 }
-                      : { p: 3 }),
-                }}
-              >
-                {!hasInitialized ? (
-                  <Box
-                    sx={{
-                      flex: 1,
-                      minHeight: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 2,
-                    }}
-                  >
-                    <LinearProgress
-                      color="warning"
-                      sx={{ width: "80%", maxWidth: 400, height: 4 }}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                      {loadingMessage}
-                    </Typography>
-                  </Box>
-                ) : hasPortalAccessError ? (
-                  <PortalAccessRequiredPage />
-                ) : (
-                  children || (
+                >
+                  <LinearProgress
+                    color="warning"
+                    sx={{ width: "80%", maxWidth: 400, height: 4 }}
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    {loadingMessage}
+                  </Typography>
+                </Box>
+              ) : hasPortalAccessError ? (
+                <PortalAccessRequiredPage />
+              ) : (
+                <Box
+                  sx={{
+                    width: "100%",
+                    maxWidth: "100%",
+                    minWidth: 0,
+                    flex: 1,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  {children || (
                     <Outlet
                       context={{
                         sidebarCollapsed: shellState.sidebarCollapsed,
                       }}
                     />
-                  )
-                )}
-              </Box>
+                  )}
+                </Box>
+              )}
             </Box>
-          </AppShell.Main>
-
-          <AppShell.Footer>
-            <Footer />
-          </AppShell.Footer>
-        </AppShell>
+          </Box>
+        </AppShellLayout>
       </Box>
     </IdleTimeoutProvider>
   );

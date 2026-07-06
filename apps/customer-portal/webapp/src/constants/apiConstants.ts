@@ -40,7 +40,6 @@ export const ApiQueryKeys = {
   PRODUCT_VERSIONS_SEARCH: "product-versions-search",
   DEPLOYMENT_PRODUCTS: "deployment-products",
   TIME_TRACKING_STATS: "time-tracking-stats",
-  RECOMMENDED_UPDATE_LEVELS: "recommended-update-levels",
   PRODUCT_UPDATE_LEVELS: "product-update-levels",
   PRODUCT_VULNERABILITY: "product-vulnerability",
   PRODUCT_VULNERABILITIES_SEARCH: "product-vulnerabilities-search",
@@ -71,6 +70,9 @@ export const ApiQueryKeys = {
   PROJECT_INSTANCE_METRICS: "project-instance-metrics",
   DEPLOYMENT_INSTANCE_METRICS: "deployment-instance-metrics",
   DEPLOYED_PRODUCT_INSTANCE_METRICS: "deployed-product-instance-metrics",
+  PROJECT_INSTANCE_USAGE_STATS: "project-instance-usage-stats",
+  CASE_ESCALATIONS_SEARCH: "case-escalations-search",
+  GLOBAL_SEARCH: "global-search",
 } as const;
 
 // Constants for API-related mutation keys.

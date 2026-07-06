@@ -120,10 +120,14 @@ export default function ListResultsBar({
                   }
                 >
                   <MenuItem value={SortOrder.DESC}>
-                    <Typography variant="body2">{isOrdinalSort ? "Descending" : "Newest first"}</Typography>
+                    <Typography variant="body2">
+                      {isOrdinalSort ? "Descending" : "Newest first"}
+                    </Typography>
                   </MenuItem>
                   <MenuItem value={SortOrder.ASC}>
-                    <Typography variant="body2">{isOrdinalSort ? "Ascending" : "Oldest first"}</Typography>
+                    <Typography variant="body2">
+                      {isOrdinalSort ? "Ascending" : "Oldest first"}
+                    </Typography>
                   </MenuItem>
                 </Select>
               </FormControl>

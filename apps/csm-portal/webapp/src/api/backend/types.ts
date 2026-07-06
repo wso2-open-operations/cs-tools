@@ -422,6 +422,12 @@ export interface BeCaseSearchFilters {
    * `@me`-only selection resolves to nothing and the filter is omitted.
    */
   assignedUserIds?: string[];
+  /**
+   * Filter by product family name (e.g. `"API Manager"`, `"Asgardeo"`). Matches
+   * every version of each named product (ServiceNow matches `product.name`).
+   * SN data source only.
+   */
+  productNames?: string[];
 }
 
 export interface BeCaseSearchPayload {
@@ -472,6 +478,9 @@ export interface BeCaseSearchView {
   /** Embedded as `{ id, name }` (name already includes the version), not the
    * `displayName`-shaped ref the GET view uses. */
   deployedProduct?: BeEntityRef | null;
+  /** The product itself (distinct from `deployedProduct`); used to populate the
+   * list Product column when no deployed product is set (e.g. cloud cases). */
+  product?: BeEntityRef | null;
 }
 
 export interface BeCaseSearchResponse extends BeSearchResponseBase {
@@ -517,6 +526,34 @@ export interface BeCaseCommentSearchPayload {
 
 export interface BeCaseCommentSearchResponse extends BeSearchResponseBase {
   comments: BeCaseComment[];
+}
+
+/**
+ * Comment shape returned by the generic `POST /comments/search`, which — since
+ * the entity-service refactor — backs BOTH `/cases/{id}/comments/search` and
+ * `/conversations/{id}/messages`. It reuses `referenceId` (the case or
+ * conversation id) rather than `caseId`; the backend normalizes `type` to the
+ * `BeCaseCommentType` enum (unknown SN types default to `comment`).
+ *
+ * `createdBy` is typed `BeCaseCommentAuthor | string`: search/messages embed the
+ * nested author object, while the comment-create ack echoes only a bare string.
+ * The mapper handles both.
+ */
+export interface BeComment {
+  id: string;
+  /** Parent reference id — the case id or conversation id per the endpoint. */
+  referenceId?: string;
+  /** Rich-text HTML (case comment) or Markdown (Novera chat) body. */
+  content: string;
+  /** Normalized comment type; `string` (not the enum) to tolerate new values. */
+  type: string;
+  createdOn: string;
+  createdBy: BeCaseCommentAuthor | string | null;
+}
+
+export interface BeCommentSearchResponse extends BeSearchResponseBase {
+  /** Optional: the backend may omit the array on an empty result. */
+  comments?: BeComment[];
 }
 
 // ---------------------------------------------------------------------------
@@ -989,6 +1026,60 @@ export interface BeCreateCallRequestResponse {
     createdOn?: string;
     createdBy?: string;
     state?: BeCallRequestState;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// GitHub issue creation from a case — `POST /cases/{id}/github-issues`
+// (ServiceNow data source only; the BFF forwards the body opaquely to the
+// entity service, which validates and routes it to the SN scoped app).
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the issue is being filed. Selects the label set applied on the GitHub
+ * issue and collapses the three legacy "open git issue" flows into one:
+ * `default` (Open Git Issue), `migration` (Open Migration Git Issue),
+ * `rd_ticket` (Open R&D ticket).
+ */
+export type BeCaseGithubIssueReason = "default" | "migration" | "rd_ticket";
+
+/** Explicit owner/repo, overriding the product-based routing lookup on the SN side. */
+export interface BeCaseGithubIssueRepoOverride {
+  owner: string;
+  repo: string;
+}
+
+/** `POST /cases/{id}/github-issues` request body. */
+export interface BeCreateCaseGithubIssuePayload {
+  reason: BeCaseGithubIssueReason;
+  title: string;
+  description: string;
+  /** Explicit target repo; when omitted, the SN side routes by the case's product unit. */
+  repoOverride?: BeCaseGithubIssueRepoOverride;
+  /** Product update level, appended to the issue body. */
+  updateLevel?: string;
+  /** Link to a related public-facing GitHub issue, appended to the issue body. */
+  publicIssueUrl?: string;
+  /** When true: adds a `regression` label and tags the case as a regression. */
+  regression?: boolean;
+  /** When true: appends "Hotfix Required : Yes" to the issue body. */
+  hotFixRequired?: boolean;
+  /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
+  issueTypeLabel?: string;
+  /** Priority label, applied only when `issueTypeLabel` is "Type/Incident". */
+  priorityLevel?: string;
+}
+
+/** `POST /cases/{id}/github-issues` response. */
+export interface BeCreateCaseGithubIssueResponse {
+  message?: string;
+  issue?: {
+    /** URL of the created GitHub issue. */
+    url: string;
+    /** GitHub issue number. */
+    number: number;
+    /** Repo the issue was created in. */
+    repo: string;
   };
 }
 

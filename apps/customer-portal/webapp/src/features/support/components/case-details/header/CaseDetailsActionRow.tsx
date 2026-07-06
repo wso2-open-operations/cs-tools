@@ -23,9 +23,14 @@ import {
   useTheme,
   type Theme,
 } from "@wso2/oxygen-ui";
+import CaseStateConfirmDialog from "@features/support/components/case-details/dialogs/CaseStateConfirmDialog";
+import EscalateCaseModal from "../escalation/EscalateCaseModal";
 import { type JSX, useState } from "react";
 import {
   CASE_STATUS_ACTIONS,
+  ESCALATION_LEAD_REQUIRED_FROM_LEVEL,
+  ESCALATION_MAX_LEVEL_ID,
+  ESCALATION_NEXT_LEVEL,
   type CaseStatusPaletteIntent,
 } from "@features/support/constants/supportConstants";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -39,6 +44,7 @@ import {
   toPresentContinuousActionLabel,
   toPresentTenseActionLabel,
 } from "@features/support/utils/support";
+import { TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 
 const ACTION_BUTTON_ICON_SIZE = 12;
 
@@ -87,6 +93,9 @@ export default function CaseDetailsActionRow({
   projectId = "",
   caseId = "",
   isLoading = false,
+  escalationLevelId,
+  onEscalateSuccess,
+  isCurrentUserLead,
 }: CaseDetailsActionRowProps): JSX.Element {
   void assignedEngineer;
   void engineerInitials;
@@ -100,6 +109,21 @@ export default function CaseDetailsActionRow({
 
   const patchCase = usePatchCase(projectId, caseId);
   const [pendingActionLabel, setPendingActionLabel] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    label: string;
+    stateKey: number;
+  } | null>(null);
+  const [escalateModalOpen, setEscalateModalOpen] = useState(false);
+
+  const resolvedEscalationLevelId = escalationLevelId != null ? String(escalationLevelId) : null;
+  const escalationLevelInfo = resolvedEscalationLevelId != null ? ESCALATION_NEXT_LEVEL[resolvedEscalationLevelId ?? "0"] : null;
+  const needsLead = resolvedEscalationLevelId != null && ESCALATION_LEAD_REQUIRED_FROM_LEVEL.has(resolvedEscalationLevelId);
+  const showEscalateButton =
+    resolvedEscalationLevelId != null &&
+    statusLabel !== "Closed" &&
+    resolvedEscalationLevelId !== ESCALATION_MAX_LEVEL_ID &&
+    !!escalationLevelInfo &&
+    (!needsLead || isCurrentUserLead === true);
 
   const availableActions = getAvailableCaseActions(statusLabel).filter(
     (label) => {
@@ -151,26 +175,7 @@ export default function CaseDetailsActionRow({
               isOpenRelatedCase
                 ? onOpenRelatedCase
                 : canPatch
-                  ? () => {
-                      setPendingActionLabel(label);
-                      patchCase.mutate(
-                        { stateKey: stateKey! },
-                        {
-                          onSuccess: () => {
-                            showSuccess("State updated successfully.");
-                          },
-                          onError: (err) => {
-                            showError(
-                              err?.message ??
-                                "Failed to update case status. Please try again.",
-                            );
-                          },
-                          onSettled: () => {
-                            setPendingActionLabel(null);
-                          },
-                        },
-                      );
-                    }
+                  ? () => setConfirmAction({ label, stateKey: stateKey! })
                   : undefined
             }
             sx={getActionButtonSx(theme, paletteIntent) as Record<string, unknown>}
@@ -181,6 +186,72 @@ export default function CaseDetailsActionRow({
           </Button>
         );
       })}
+      {showEscalateButton && (
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<TriangleAlert size={ACTION_BUTTON_ICON_SIZE} />}
+          onClick={() => setEscalateModalOpen(true)}
+          sx={{
+            borderColor: theme.palette.warning.light,
+            bgcolor: alpha(theme.palette.warning.light, 0.1),
+            color: theme.palette.warning.light,
+            fontSize: "0.7rem",
+            minHeight: 0,
+            py: 0.5,
+            px: 1,
+            "&:hover": {
+              borderColor: theme.palette.warning.main,
+              bgcolor: alpha(theme.palette.warning.light, 0.2),
+            },
+            textTransform: "none",
+          }}
+        >
+          Escalate Case
+        </Button>
+      )}
+      <CaseStateConfirmDialog
+        open={!!confirmAction}
+        actionLabel={confirmAction ? toPresentTenseActionLabel(confirmAction.label) : ""}
+        isPending={patchCase.isPending}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          const { label, stateKey } = confirmAction;
+          setPendingActionLabel(label);
+          patchCase.mutate(
+            { stateKey },
+            {
+              onSuccess: () => {
+                showSuccess("State updated successfully.");
+              },
+              onError: (err) => {
+                showError(
+                  err?.message ?? "Failed to update case status. Please try again.",
+                );
+              },
+              onSettled: () => {
+                setPendingActionLabel(null);
+                setConfirmAction(null);
+              },
+            },
+          );
+        }}
+      />
+      {showEscalateButton && (
+        <EscalateCaseModal
+          open={escalateModalOpen}
+          caseId={caseId}
+          escalationLevelId={resolvedEscalationLevelId}
+          escalationLevelLabel={`EL${resolvedEscalationLevelId}`}
+          onClose={() => setEscalateModalOpen(false)}
+          onSuccess={() => {
+            showSuccess("Case escalated successfully.");
+            onEscalateSuccess?.();
+          }}
+          onError={(msg) => showError(msg)}
+        />
+      )}
     </Stack>
   );
 }

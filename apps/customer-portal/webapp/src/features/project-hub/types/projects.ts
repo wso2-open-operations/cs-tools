@@ -37,6 +37,8 @@ export type ProjectListItem = {
   actionRequiredCount: number;
   outstandingCount?: number | null;
   slaStatus: string;
+  startDate?: string | null;
+  endDate?: string | null;
 };
 
 // Item type for account nested in project details response.

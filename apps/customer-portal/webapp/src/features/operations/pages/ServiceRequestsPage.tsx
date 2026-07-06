@@ -50,6 +50,7 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListSearchPanel from "@components/list-view/ListSearchPanel";
 import ListItems from "@components/list-view/ListItems";
+import CaseListCsvExportButton from "@features/support/components/list-export/CaseListCsvExportButton";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ServiceRequestCaseSortField } from "@features/operations/types/serviceRequests";
 import {
@@ -100,7 +101,7 @@ export default function ServiceRequestsPage(): JSX.Element {
   const [isFiltersOpen, setIsFiltersOpen] = useState(
     () => hasListSearchOrFilters(searchTerm, filters),
   );
-  const [sortField, setSortField] = useSessionState<ServiceRequestCaseSortField>(`${sessionPrefix}-sortField`, ServiceRequestCaseSortField.CreatedOn, undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<ServiceRequestCaseSortField>(`${sessionPrefix}-sortField`, ServiceRequestCaseSortField.UpdatedOn, undefined, { popOnly: true });
   const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
   const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
   const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, OPERATIONS_LIST_PAGE_SIZE, undefined, { popOnly: true });
@@ -239,10 +240,12 @@ export default function ServiceRequestsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
+  const handleFilterChange = (field: string, value: string | string[]) => {
     setFilters((prev) => ({
       ...prev,
-      [field]: value || undefined,
+      [field]: Array.isArray(value)
+        ? (value.length === 0 ? undefined : value)
+        : (value || undefined),
     }));
     setPage(1);
   };
@@ -290,6 +293,26 @@ export default function ServiceRequestsPage(): JSX.Element {
     ...filters,
     severityId: undefined,
   });
+
+  const loadedCasesForExport = useMemo(
+    () => data?.pages.flatMap((page) => page.cases ?? []) ?? [],
+    [data],
+  );
+
+  const hideSearchPanel = outstandingOnly || actionRequired;
+
+  const downloadResultsButton = projectId ? (
+    <CaseListCsvExportButton
+      projectId={projectId}
+      projectName={project?.name}
+      caseSearchRequest={caseSearchRequest}
+      filenamePrefix="service-requests"
+      prefetchedCases={loadedCasesForExport}
+      totalRecords={totalItems}
+      disabled={!hasCasesResponse || isCasesError || totalItems === 0}
+      emptyMessage="No service requests to export for the current search or filters."
+    />
+  ) : null;
 
   const handleNewServiceRequest = () => {
     navigate(`/projects/${projectId}/${navSegment}/service-requests/create`);
@@ -371,7 +394,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         actions={newRequestButton}
       />
 
-      {outstandingOnly || actionRequired ? (
+      {hideSearchPanel ? (
         <Divider />
       ) : (
         <ListSearchPanel
@@ -401,6 +424,7 @@ export default function ServiceRequestsPage(): JSX.Element {
           onClearFilters={handleClearFilters}
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter
+          hideCategoryFilter
           hideDeploymentFilter={!permissions.hasDeployments}
           isProjectContextLoading={isProjectContextLoading}
         />
@@ -415,6 +439,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
+        rightContent={downloadResultsButton}
       />
 
       <ListItems

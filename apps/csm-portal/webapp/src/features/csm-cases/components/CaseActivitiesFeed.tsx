@@ -45,16 +45,15 @@ import { useMemo, useState, type JSX } from "react";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import RelativeTime from "@components/RelativeTime";
 import { formatBytes } from "@utils/formatBytes";
+import {
+  compareFeedEntries,
+  type FeedEntry,
+} from "@features/csm-cases/utils/caseActivityFeed";
 import type {
   CaseAttachment,
   CaseAuditEntry,
   CsmCaseComment,
 } from "@features/csm-cases/types/csmCases";
-
-type FeedEntry =
-  | { kind: "comment"; at: string; comment: CsmCaseComment }
-  | { kind: "audit"; at: string; entry: CaseAuditEntry }
-  | { kind: "attachment"; at: string; attachment: CaseAttachment };
 
 interface CaseActivitiesFeedProps {
   comments: CsmCaseComment[];
@@ -106,7 +105,7 @@ export default function CaseActivitiesFeed({
       }
     }
     out.sort((a, b) =>
-      newestFirst ? b.at.localeCompare(a.at) : a.at.localeCompare(b.at),
+      newestFirst ? -compareFeedEntries(a, b) : compareFeedEntries(a, b),
     );
     return out;
   }, [

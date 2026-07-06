@@ -75,6 +75,8 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { mergeRegister } from "@lexical/utils";
 import {
+  ALLOWED_INLINE_IMAGE_EXTENSIONS,
+  ALLOWED_INLINE_IMAGE_TYPES,
   MAX_IMAGE_SIZE_BYTES,
   RICH_TEXT_BLOCK_TAGS,
 } from "@features/support/constants/supportConstants";
@@ -167,7 +169,7 @@ const Toolbar = ({
 
       const formatType =
         "getFormatType" in element &&
-        typeof element.getFormatType === "function"
+          typeof element.getFormatType === "function"
           ? (element.getFormatType() as ElementFormatType)
           : "";
       setElementAlign(formatType);
@@ -239,6 +241,19 @@ const Toolbar = ({
       const resetInput = () => {
         if (imageInputRef.current) imageInputRef.current.value = "";
       };
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      if (
+        !ALLOWED_INLINE_IMAGE_TYPES.includes(
+          file.type as (typeof ALLOWED_INLINE_IMAGE_TYPES)[number],
+        ) ||
+        !(ALLOWED_INLINE_IMAGE_EXTENSIONS as readonly string[]).includes(ext)
+      ) {
+        showError(
+          `Image "${file.name}" has an unsupported format. Allowed formats: ${ALLOWED_INLINE_IMAGE_EXTENSIONS.join(", ")}.`,
+        );
+        resetInput();
+        return;
+      }
       if (file.size > MAX_IMAGE_SIZE_BYTES) {
         showError(
           `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
@@ -776,7 +791,7 @@ const Toolbar = ({
                     ref={imageInputRef}
                     type="file"
                     hidden
-                    accept="image/*"
+                    accept={ALLOWED_INLINE_IMAGE_TYPES.join(",")}
                     onChange={onImageUpload}
                   />
                 </ToggleButton>

@@ -38,7 +38,11 @@ import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListCard from "@components/list-view/ListCard";
-import { countListSearchAndFilters } from "@features/support/utils/support";
+import CaseListCsvExportButton from "@features/support/components/list-export/CaseListCsvExportButton";
+import {
+  countListSearchAndFilters,
+  normalizeCaseSearchIssueIds,
+} from "@features/support/utils/support";
 import type {
   AllCasesFilterValues,
   CaseListItem,
@@ -107,7 +111,7 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
   const [filters, setFilters] = useSessionState<AllCasesFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
   const [sortField, setSortField] = useSessionState<SecurityReportCaseSortField>(
     `${sessionPrefix}-sortField`,
-    SecurityReportCaseSortField.createdOn,
+    SecurityReportCaseSortField.updatedOn,
     isValidSecuritySortField,
     { popOnly: true },
   );
@@ -125,9 +129,9 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
           viewMode === SecurityReportViewMode.MY ? true : undefined,
         statusIds: fixedStatusIds !== undefined
           ? (fixedStatusIds.length > 0 ? fixedStatusIds : undefined)
-          : (filters.statusId ? [Number(filters.statusId)] : undefined),
+          : (filters.statusIds?.length ? filters.statusIds.map(Number) : undefined),
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
-        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
+        issueIds: normalizeCaseSearchIssueIds(filters.issueTypes),
         deploymentId: filters.deploymentId || undefined,
         searchQuery: searchTerm.trim() || undefined,
         ...(fixedClosedDateRange ?? {}),
@@ -159,7 +163,31 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
     [data],
   );
 
-  const totalItems = displayedCases.length;
+  const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? displayedCases.length;
+  const totalItems = apiTotalRecords || displayedCases.length;
+  const listHasRefinement = countListSearchAndFilters(searchTerm, filters) > 0;
+  const showDownloadResults =
+    listHasRefinement ||
+    viewMode === SecurityReportViewMode.MY ||
+    searchTerm.trim().length > 0;
+
+  const downloadResultsButton =
+    showDownloadResults && projectId ? (
+      <CaseListCsvExportButton
+        projectId={projectId}
+        caseSearchRequest={caseSearchRequest}
+        filenamePrefix="security-reports"
+        prefetchedCases={displayedCases}
+        totalRecords={totalItems}
+        disabled={
+          isLoading ||
+          hasNextPage ||
+          totalItems === 0 ||
+          !isSecurityReportAvailable
+        }
+        emptyMessage="No security reports to export for the current search or filters."
+      />
+    ) : null;
 
   const paginatedCases = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
@@ -181,8 +209,13 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({ ...prev, [field]: value || undefined }));
+  const handleFilterChange = (field: string, value: string | string[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      [field]: Array.isArray(value)
+        ? (value.length === 0 ? undefined : value)
+        : (value || undefined),
+    }));
     setPage(1);
   };
 
@@ -303,6 +336,7 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
           onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
           activeFiltersCount={countListSearchAndFilters("", filters)}
           onClearFilters={handleClearFilters}
+          actionsBeforeClearFilters={downloadResultsButton}
           filtersContent={
             <ListFiltersPanel
               filterDefinitions={SECURITY_REPORT_FILTER_DEFINITIONS}
@@ -332,6 +366,9 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
         onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
+        rightContent={
+          fixedStatusIds !== undefined ? downloadResultsButton : undefined
+        }
       />
 
       <Box>

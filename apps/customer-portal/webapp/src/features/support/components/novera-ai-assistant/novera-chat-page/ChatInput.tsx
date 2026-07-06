@@ -44,6 +44,7 @@ export default function ChatInput({
   isCreateCaseLoading = false,
   disabled = false,
   typingDisabled = false,
+  onRequestTokens,
 }: ChatInputProps): JSX.Element | null {
   const isTooLong = inputValue.length > CHAT_MAX_CHARS;
   const isInputBlocked = isSending || typingDisabled;
@@ -55,6 +56,36 @@ export default function ChatInput({
 
   return (
     <Box sx={{ flexShrink: 0 }}>
+      {/* Session Limit Banner */}
+      {typingDisabled && (
+        <Box
+          sx={{
+            px: 6,
+            py: 1.5,
+            bgcolor: alpha(colors.red[800], 0.05),
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 2,
+          }}
+        >
+          <Typography variant="body2" color="error">
+            You have reached your session token limit.
+          </Typography>
+          {onRequestTokens && (
+            <Button
+              onClick={onRequestTokens}
+              variant="outlined"
+              size="small"
+              color="error"
+              sx={{ flexShrink: 0, textTransform: "none" }}
+            >
+              Request More Tokens
+            </Button>
+          )}
+        </Box>
+      )}
+
       {/* Create Case Banner */}
       <Box
         sx={{

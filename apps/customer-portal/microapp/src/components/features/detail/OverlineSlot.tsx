@@ -14,8 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useState } from "react";
 import { motion, type Variants } from "framer-motion";
-import { Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { IconButton, Skeleton, Stack, Tooltip, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { Check, Copy } from "@wso2/oxygen-ui-icons-react";
 import type { ItemCardProps } from "../support";
 
 import { TYPE_CONFIG } from "../support/config";
@@ -24,14 +26,38 @@ export function OverlineSlot({
   variant = "normal",
   type,
   id,
+  ids,
   title,
 }: {
   variant?: "normal" | "shrunk";
   type: ItemCardProps["type"];
   id?: string;
+  /** One or more copyable identifiers to render instead of `id` (e.g. internal + external case IDs). */
+  ids?: string[];
   title?: string;
 }) {
   const { icon: Icon, color } = TYPE_CONFIG[type];
+  const [copied, setCopied] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleCopy = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access denied or unavailable — nothing actionable to do here.
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
 
   return (
     <Stack height={40}>
@@ -49,9 +75,32 @@ export function OverlineSlot({
         animate={variant}
       >
         <Icon color={color} size={pxToRem(16)} />
-        <Typography variant="body1" fontWeight="medium" noWrap>
-          {id ?? <Skeleton variant="text" width={120} height={30} />}
-        </Typography>
+        {ids ? (
+          <Stack direction="row" alignItems="center" gap={0.5} minWidth={0}>
+            <Typography variant="body1" fontWeight="medium" noWrap>
+              {ids.join(" | ")}
+            </Typography>
+            <Tooltip
+              title={copied ? "Copied!" : "Copy"}
+              open={copied || hovered}
+              onOpen={() => setHovered(true)}
+              onClose={() => setHovered(false)}
+            >
+              <IconButton
+                size="small"
+                color={copied ? "success" : "default"}
+                onClick={() => handleCopy(ids.join(" | "))}
+                aria-label="Copy IDs"
+              >
+                {copied ? <Check size={pxToRem(16)} /> : <Copy size={pxToRem(16)} />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        ) : (
+          <Typography variant="body1" fontWeight="medium" noWrap>
+            {id ?? <Skeleton variant="text" width={120} height={30} />}
+          </Typography>
+        )}
       </Stack>
 
       {variant === "shrunk" && (

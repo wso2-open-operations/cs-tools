@@ -24,10 +24,10 @@ import {
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
-  BeCaseComment,
+  BeComment,
   BeCaseCommentCreatePayload,
   BeCaseCommentSearchPayload,
-  BeCaseCommentSearchResponse,
+  BeCommentSearchResponse,
 } from "@api/backend/types";
 import {
   commentTypeFromInternal,
@@ -59,9 +59,11 @@ export function useGetCsmCaseComments(
       };
       const response = await api.post<
         BeCaseCommentSearchPayload,
-        BeCaseCommentSearchResponse
+        BeCommentSearchResponse
       >(`/cases/${encodeURIComponent(caseId)}/comments/search`, payload);
-      return response.comments.map(uiCommentFromBe);
+      return (response.comments ?? []).map((comment) =>
+        uiCommentFromBe(comment, { context: "case" }),
+      );
     },
     enabled: !!caseId,
     staleTime: 10_000,
@@ -100,9 +102,9 @@ export function usePostCsmCaseComment(): UseMutationResult<
       };
       const created = await api.post<
         BeCaseCommentCreatePayload,
-        BeCaseComment
+        BeComment
       >(`/cases/${encodeURIComponent(input.caseId)}/comments`, payload);
-      return uiCommentFromBe(created);
+      return uiCommentFromBe(created, { context: "case" });
     },
     onSuccess: (_newComment, variables) => {
       // The BE create response is a thin ack — it echoes only {id, createdOn,

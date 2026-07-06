@@ -25,6 +25,23 @@ configurable types:FeatureFlags featureFlags = {
 };
 configurable string[] restrictedChangeRequestStateIds = ["-3", "-4", "-5"];
 
+# Validate deployment usage import request.
+#
+# + req - Request containing zip file binary body
+# + return - Error message if validation fails, nil otherwise
+isolated function validateDeploymentUsageImportRequest(http:Request req) returns string? {
+    string contentType = req.getContentType();
+    if contentType.trim().length() == 0 {
+        return "Content-Type header is required.";
+    }
+
+    string baseType = re `;`.split(contentType.trim().toLowerAscii())[0].trim();
+    if baseType != "application/zip" && baseType != "application/x-zip-compressed" {
+        return "Request body must be a zip file.";
+    }
+    return;
+}
+
 # Search cases for a given project.
 #
 # + idToken - ID token for authorization
@@ -34,20 +51,26 @@ configurable string[] restrictedChangeRequestStateIds = ["-3", "-4", "-5"];
 public isolated function searchCases(string idToken, string projectId, types:CaseSearchPayload payload)
     returns types:CaseSearchResponse|error {
 
-    int? issueId = payload.filters?.issueId;
     entity:CaseSearchPayload searchPayload = {
         filters: {
             projectIds: [projectId],
             searchQuery: payload.filters?.searchQuery,
-            issueTypeKeys: issueId != () ? [issueId] : (),
+            issueTypeKeys: payload.filters?.issueIds,
             severityKey: payload.filters?.severityId,
+            severityKeys: payload.filters?.severityIds,
+            createdBy: payload.filters?.createdBy,
             caseTypes: payload.filters?.caseTypes,
             stateKeys: payload.filters?.statusIds,
             deploymentId: payload.filters?.deploymentId,
+            deploymentIds: payload.filters?.deploymentIds,
             createdByMe: payload.filters?.createdByMe,
             engagementTypeKeys: payload.filters?.engagementTypeKeys,
             closedStartDate: payload.filters?.closedStartDate,
-            closedEndDate: payload.filters?.closedEndDate
+            closedEndDate: payload.filters?.closedEndDate,
+            startCreatedDate: payload.filters?.startCreatedDate,
+            endCreatedDate: payload.filters?.endCreatedDate,
+            startUpdatedDate: payload.filters?.startUpdatedDate,
+            endUpdatedDate: payload.filters?.endUpdatedDate
         },
         pagination: payload.pagination,
         sortBy: payload.sortBy
@@ -70,6 +93,7 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
         let entity:ReferenceTableItem? catalogItem = case?.catalogItem
         let entity:ReferenceTableItem? assignedTeam = case.assignedTeam
         let entity:ReferenceTableItem? product = case.product
+        let entity:ChoiceListItem? escalationLevel = case.escalationLevel
         select {
             id: case.id,
             internalId: case.internalId,
@@ -94,7 +118,9 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             catalog: catalog != () ? {id: catalog.id, label: catalog.name} : (),
             catalogItem: catalogItem != () ? {id: catalogItem.id, label: catalogItem.name} : (),
             assignedTeam: assignedTeam != () ? {id: assignedTeam.id, label: assignedTeam.name} : (),
-            product: product != () ? {id: product.id, label: product.name} : ()
+            product: product != () ? {id: product.id, label: product.name} : (),
+            escalationLevel: escalationLevel != () ? {id: escalationLevel.id.toString(), label: escalationLevel.label} : (),
+            isEscalated: case.isEscalated
         };
 
     return {
@@ -266,6 +292,28 @@ public isolated function isInvalidLimitOffset(int? 'limit, int? offset) returns 
 public isolated function isInvalidDateRange(string? startDate, string? endDate) returns boolean =>
     startDate != () && endDate != () && startDate > endDate;
 
+# Validate that the date range does not exceed 1 year.
+#
+# + startDate - Start date string (format: YYYY-MM-DD)
+# + endDate - End date string (format: YYYY-MM-DD)
+# + return - True if the range is within 1 year, false if it exceeds 1 year, or error if parsing fails
+public isolated function isWithinOneYear(string startDate, string endDate) returns boolean|error {
+    int startYear = check int:fromString(startDate.substring(0, 4));
+    int startMonth = check int:fromString(startDate.substring(5, 7));
+    int startDay = check int:fromString(startDate.substring(8, 10));
+    int endYear = check int:fromString(endDate.substring(0, 4));
+    int endMonth = check int:fromString(endDate.substring(5, 7));
+    int endDay = check int:fromString(endDate.substring(8, 10));
+
+    if endYear - startYear > 1 {
+        return false;
+    }
+    if endYear - startYear == 1 {
+        return endMonth < startMonth || (endMonth == startMonth && endDay <= startDay);
+    }
+    return true;
+}
+
 # Map attachments response to map to desired structure.
 #
 # + response - Attachments response from the entity service
@@ -309,7 +357,8 @@ public isolated function mapDeployments(entity:DeploymentsResponse response) ret
             description: deployment.description,
             url: deployment.url,
             project: project != () ? {id: project.id, label: project.name} : (),
-            'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : ()
+            'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : (),
+            productCount: deployment.deployedProductCount
         };
     return {deployments, totalRecords: response.totalRecords, offset: response.offset, 'limit: response.'limit};
 }
@@ -618,6 +667,8 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
     entity:ServiceRequestVariable[]? variables = response?.variables;
     entity:ReferenceTableItem? product = response.product;
     entity:ChoiceListItem? engagementType = response.engagementType;
+    entity:WatchList[]? watchList = response.watchList;
+    entity:ChoiceListItem? escalationLevel = response.escalationLevel;
 
     return {
         id: response.id,
@@ -682,7 +733,11 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
         hasAutoClosed: response?.hasAutoClosed,
         engagementStartDate: response?.engagementStartDate,
         engagementEndDate: response?.engagementEndDate,
-        variables
+        variables,
+        watchList: watchList != () ? from entity:WatchList user in watchList
+            select {id: user.id, userName: user.userName, name: user.name, email: user.email} : (),
+        escalationLevel: escalationLevel != () ? {id: escalationLevel.id.toString(), label: escalationLevel.label} : (),
+        isEscalated: response.isEscalated
     };
 }
 
@@ -919,7 +974,9 @@ public isolated function mapProjectsResponse(entity:ProjectsResponse response) r
             hasKbReferences: project.hasKbReferences,
             activeCasesCount: project.activeCasesCount,
             activeChatsCount: project.activeChatsCount,
-            slaStatus: project.slaStatus
+            slaStatus: project.slaStatus,
+            startDate: project.startDate,
+            endDate: project.endDate
         };
 
     return {projects, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};
@@ -1105,12 +1162,15 @@ public isolated function mapTimeCardSearchResponseGroupedByCases(entity:CaseTime
 public isolated function mapUpdatedCaseResponse(entity:UpdatedCase updatedCase) returns types:UpdatedCase {
     entity:ChoiceListItem state = updatedCase.state;
     entity:ReferenceTableItem? 'type = updatedCase.'type;
+    entity:WatchList[]? watchList = updatedCase?.watchList;
     return {
         id: updatedCase.id,
         updatedOn: updatedCase.updatedOn,
         state: {id: state.id.toString(), label: state.label},
         'type: 'type != () ? {id: 'type.id, label: 'type.name} : (),
-        updatedBy: updatedCase.updatedBy
+        updatedBy: updatedCase.updatedBy,
+        watchList: watchList != () ? from entity:WatchList user in watchList
+            select {id: user.id, userName: user.userName, name: user.name, email: user.email} : ()
     };
 }
 
@@ -1152,6 +1212,130 @@ public isolated function mapInstanceUsageStats(entity:InstanceUsageStatsResponse
     endDate: response.endDate
 };
 
+# Map escalation create response to the desired structure.
+#
+# + response - Escalation create response from the entity service
+# + return - Mapped escalation create response
+public isolated function mapCreatedEscalation(entity:EscalationCreateResponse response)
+    returns types:EscalationCreateResponse {
+
+    entity:CreatedEscalation escalation = response.escalation;
+    return {
+        message: response.message,
+        escalation: {
+            id: escalation.id,
+            'case: {id: escalation.case.id, label: escalation.case.name},
+            currentLevel: {id: escalation.currentLevel.id.toString(), label: escalation.currentLevel.label},
+            previousLevel: {id: escalation.previousLevel.id.toString(), label: escalation.previousLevel.label},
+            createdBy: escalation.createdBy,
+            createdOn: escalation.createdOn,
+            reason: escalation.reason,
+            notificationSentTo: escalation.notificationSentTo
+        }
+    };
+}
+
+# Map escalations search response to the desired structure.
+#
+# + response - Escalations search response from the entity service
+# + return - Mapped escalations response
+public isolated function mapEscalationsResponse(entity:EscalationsResponse response)
+    returns types:EscalationsResponse {
+
+    types:Escalation[] escalations = from entity:Escalation escalation in response.escalations
+        let entity:ReferenceTableItem escalationCase = escalation.case
+        let entity:ChoiceListItem currentLevel = escalation.currentLevel
+        let entity:ChoiceListItem previousLevel = escalation.previousLevel
+        select {
+            id: escalation.id,
+            'case: {id: escalationCase.id, label: escalationCase.name},
+            currentLevel: {id: currentLevel.id.toString(), label: currentLevel.label},
+            previousLevel: {id: previousLevel.id.toString(), label: previousLevel.label},
+            createdBy: escalation.createdBy,
+            createdOn: escalation.createdOn,
+            updatedOn: escalation.updatedOn,
+            reason: escalation.reason,
+            notificationSentTo: escalation.notificationSentTo
+        };
+
+    return {
+        escalations,
+        totalRecords: response.totalRecords,
+        'limit: response.'limit,
+        offset: response.offset
+    };
+}
+
+# Perform a global search across projects and cases.
+#
+# + idToken - ID token for authorization
+# + payload - Global search payload with optional filters, sort, and pagination
+# + return - Global search response or error
+public isolated function globalSearch(string idToken, types:GlobalSearchPayload payload)
+    returns types:GlobalSearchResponse|error {
+
+    entity:GlobalSearchPayload searchPayload = {
+        filters: {
+            searchQuery: payload.filters?.searchQuery,
+            tables: payload.filters?.types
+        },
+        sortBy: payload.sortBy,
+        projectsPagination: payload.projectsPagination,
+        casesPagination: payload.casesPagination
+    };
+
+    entity:GlobalSearchResponse response = check entity:globalSearch(idToken, searchPayload);
+
+    types:GlobalSearchProject[] projects = from entity:GlobalSearchProject project in response.projects
+        let entity:ReferenceTableItem 'type = project.'type
+        let entity:ReferenceTableItem account = project.account
+        select {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            key: project.key,
+            'type: {id: 'type.id, label: 'type.name},
+            createdOn: project.createdOn,
+            startDate: project.startDate,
+            endDate: project.endDate,
+            hasPdpSubscription: project.hasPdpSubscription,
+            closureState: project.closureState,
+            account: {id: account.id, label: account.name}
+        };
+
+    types:GlobalSearchCase[] cases = from entity:GlobalSearchCase entityCase in response.cases
+        let entity:ReferenceTableItem? project = entityCase.project
+        let entity:ReferenceTableItem? caseType = entityCase.caseType
+        let entity:ChoiceListItem? state = entityCase.state
+        let entity:ChoiceListItem? severity = entityCase.severity
+        let entity:ReferenceTableItem? assignedEngineer = entityCase.assignedEngineer
+        let entity:ReferenceTableItem account = entityCase.account
+        select {
+            id: entityCase.id,
+            internalId: entityCase.internalId,
+            number: entityCase.number,
+            title: entityCase.title,
+            description: entityCase.description,
+            createdOn: entityCase.createdOn,
+            createdBy: entityCase.createdBy,
+            updatedOn: entityCase.updatedOn,
+            project: project != () ? {id: project.id, label: project.name} : (),
+            caseType: caseType != () ? {id: caseType.id, label: caseType.name} : (),
+            state: state != () ? {id: state.id.toString(), label: state.label} : (),
+            severity: severity != () ? {id: severity.id.toString(), label: severity.label} : (),
+            assignedEngineer: assignedEngineer != () ? {id: assignedEngineer.id, label: assignedEngineer.name} : (),
+            account: {id: account.id, label: account.name}
+        };
+
+    return {
+        query: response.query,
+        projectsTotal: response.projectsTotal,
+        casesTotal: response.casesTotal,
+        projects,
+        cases
+    };
+}
+
 # Map instance metric stats response to the desired structure.
 #
 # + response - Instance metric stats response from the entity service
@@ -1169,3 +1353,70 @@ public isolated function mapInstanceMetricStats(entity:InstanceMetricStatsRespon
     startDate: response.startDate,
     endDate: response.endDate
 };
+
+# Map deployed product metrics response.
+#
+# + response - Deployed product metrics response from the entity service
+# + return - Mapped deployed product metrics response
+public isolated function mapDeployedProductMetrics(entity:DeployedProductMetricsResponse response)
+    returns types:DeployedProductMetricsResponse {
+
+    types:DeployedProductMetricsChartDataPoint[] chartData =
+        from entity:DeployedProductMetricsChartDataPoint dataPoint in response.chartData
+        select {
+            date: dataPoint.date,
+            instanceCount: dataPoint.instanceCount,
+            totalCores: dataPoint.totalCores,
+            minCores: dataPoint.minCores,
+            maxCores: dataPoint.maxCores,
+            avgCores: dataPoint.avgCores,
+            instances: from entity:DeployedProductMetricsInstance instance in dataPoint.instances
+                select {
+                    id: instance.id,
+                    name: instance.name,
+                    cores: instance.cores
+                }
+        };
+
+    return {
+        product: {
+            id: response.deployedProduct.id,
+            name: response.deployedProduct.name
+        },
+        summary: {
+            dateRange: {
+                'start: response.summary.dateRange.'start,
+                'end: response.summary.dateRange.'end
+            },
+            totalInstances: response.summary.totalInstances,
+            minCores: response.summary.minCores,
+            maxCores: response.summary.maxCores,
+            avgCores: response.summary.avgCores
+        },
+        chartData
+    };
+}
+
+# Map deployed product metrics usage counts response.
+#
+# + response - Deployed product metrics usage counts response from the entity service
+# + return - Mapped deployed product metrics usage counts response
+public isolated function mapDeployedProductMetricsUsageCounts(
+        entity:DeployedProductMetricsUsageCountsResponse response)
+        returns types:DeployedProductMetricsUsageCountsResponse {
+
+    return {
+        product: {
+            id: response.deployedProduct.id,
+            name: response.deployedProduct.name
+        },
+        summary: {
+            dateRange: {
+                'start: response.summary.dateRange.'start,
+                'end: response.summary.dateRange.'end
+            },
+            countTypes: response.summary.countTypes
+        },
+        chartData: response.chartData
+    };
+}

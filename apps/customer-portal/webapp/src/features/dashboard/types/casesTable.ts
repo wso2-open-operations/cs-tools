@@ -32,6 +32,8 @@ export type TableFilter = {
   type: "select";
   options?: string[] | SelectOption[];
   placeholder?: string;
+  multiSelect?: boolean;
+  isLoading?: boolean;
   onLoadMore?: () => void;
   hasMore?: boolean;
   isFetchingMore?: boolean;
@@ -39,9 +41,9 @@ export type TableFilter = {
 
 // Case filters props.
 export type CasesFiltersProps = {
-  filters: Record<string, string | number | undefined>;
+  filters: Record<string, string | string[] | number | undefined>;
   filterFields: TableFilter[];
-  onFilterChange: (field: string, value: string | number) => void;
+  onFilterChange: (field: string, value: string | string[] | number) => void;
 };
 
 // Case list props.
@@ -58,12 +60,21 @@ export type CasesListProps = {
   hasListRefinement?: boolean;
 };
 
+/** My vs all cases on the dashboard outstanding cases table. */
+export enum DashboardCasesViewMode {
+  MyCases = "my-cases",
+  AllCases = "all-cases",
+}
+
 // Case table header props.
 export type CasesTableHeaderProps = {
   activeFiltersCount: number;
   isFiltersOpen: boolean;
   onFilterToggle: () => void;
   hasAgent?: boolean;
+  viewTabs: ReadonlyArray<{ id: string; label: string }>;
+  activeViewMode: DashboardCasesViewMode;
+  onViewModeChange: (tabId: string) => void;
 };
 
 // Case table skeleton props.
@@ -82,11 +93,12 @@ export type CasesTableProps = {
 
 // Case table filter values.
 export type CasesTableFilterValues = {
-  [key: string]: string | number | undefined;
-  statusId?: string | number;
-  severityId?: string | number;
-  issueTypes?: string | number;
-  deploymentId?: string | number;
+  [key: string]: string | string[] | number | undefined;
+  statusIds?: string[];
+  severityIds?: string[];
+  issueTypes?: string | string[] | number;
+  createdBy?: string[];
+  deploymentIds?: string[];
 };
 
 // Route params used by cases table header when `projectId` is read from the URL.

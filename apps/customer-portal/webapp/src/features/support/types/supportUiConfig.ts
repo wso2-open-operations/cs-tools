@@ -46,9 +46,10 @@ export type CaseStatusAction = {
 /** All-cases list filter field mapping. */
 export type AllCasesFilterDefinition = {
   id: string;
-  metadataKey: keyof CaseMetadataResponse;
+  metadataKey?: keyof CaseMetadataResponse;
   filterKey: string;
   useLabelAsValue?: boolean;
+  multiSelect?: boolean;
 };
 
 /** All-conversations list filter field mapping. */
@@ -60,8 +61,8 @@ export type AllConversationsFilterDefinition = {
 
 /** Announcements page filter state shape. */
 export type AnnouncementFilterValues = {
-  [key: string]: string | undefined;
-  statusId?: string;
+  [key: string]: string | string[] | undefined;
+  statusIds?: string[];
 };
 
 export type AnnouncementFilterDefinition = {
@@ -69,6 +70,7 @@ export type AnnouncementFilterDefinition = {
   id: string;
   metadataKey: keyof CaseMetadataResponse;
   useLabelAsValue?: boolean;
+  multiSelect?: boolean;
 };
 
 /** Case type object for selects and stats. */

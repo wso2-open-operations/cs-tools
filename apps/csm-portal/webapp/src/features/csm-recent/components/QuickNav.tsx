@@ -25,7 +25,7 @@ import { Search } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useNavigate } from "react-router";
-import { CSM_NAV_ITEMS } from "@config/csmNavItems";
+import { navigableNavItems } from "@config/csmNavItems";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useRecentViews } from "@features/csm-recent/hooks/useRecentViews";
 import { kindIcon } from "@features/csm-recent/kindMeta";
@@ -137,15 +137,15 @@ export default function QuickNav(): JSX.Element | null {
         section: "Recent",
       }));
 
-    const pages: Result[] = CSM_NAV_ITEMS.filter((i) => match(i.label)).map(
-      (i) => ({
+    const pages: Result[] = navigableNavItems()
+      .filter((i) => match(i.label))
+      .map((i) => ({
         key: `page-${i.id}`,
         icon: <i.icon size={16} />,
         label: i.label,
         href: i.path,
         section: "Pages",
-      }),
-    );
+      }));
 
     return [...cases, ...pinned, ...recent, ...pages];
   }, [recents, trimmedQuery, caseHitsSettled, caseSearch.data]);
