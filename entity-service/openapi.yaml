@@ -4083,7 +4083,7 @@ components:
         workflow:
           type: string
           nullable: true
-        enableLogging:
+        isEnableLogging:
           type: boolean
           nullable: true
         durationType:
@@ -4107,10 +4107,10 @@ components:
         startCondition:
           type: string
           nullable: true
-        retroactiveStart:
+        isRetroactiveStart:
           type: boolean
           nullable: true
-        retroactivePause:
+        isRetroactivePause:
           type: boolean
           nullable: true
         whenToCancel:

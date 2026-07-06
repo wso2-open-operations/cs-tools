@@ -1952,7 +1952,7 @@ type TaskSlaDefinitionDetail struct {
 	Target           *string `json:"target"`
 	Flow             *string `json:"flow"`
 	Workflow         *string `json:"workflow"`
-	EnableLogging    *bool   `json:"enableLogging"`
+	IsEnableLogging  *bool   `json:"isEnableLogging"`
 	DurationType     *string `json:"durationType"`
 	Duration         *string `json:"duration"`
 	ScheduleSource   *string `json:"scheduleSource"`
@@ -1960,8 +1960,8 @@ type TaskSlaDefinitionDetail struct {
 	TimezoneSource   *string `json:"timezoneSource"`
 	Timezone         *string `json:"timezone"`
 	StartCondition   *string `json:"startCondition"`
-	RetroactiveStart *bool   `json:"retroactiveStart"`
-	RetroactivePause *bool   `json:"retroactivePause"`
+	IsRetroactiveStart *bool   `json:"isRetroactiveStart"`
+	IsRetroactivePause *bool   `json:"isRetroactivePause"`
 	WhenToCancel     *string `json:"whenToCancel"`
 	CancelCondition  *string `json:"cancelCondition"`
 	PauseCondition   *string `json:"pauseCondition"`

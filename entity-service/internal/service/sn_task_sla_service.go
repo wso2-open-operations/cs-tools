@@ -94,7 +94,7 @@ type snTaskSlaDefinitionDetail struct {
 	Target           *string `json:"target"`
 	Flow             *string `json:"flow"`
 	Workflow         *string `json:"workflow"`
-	EnableLogging    *bool   `json:"enableLogging"`
+	EnableLogging    *bool   `json:"isEnableLogging"`
 	DurationType     *string `json:"durationType"`
 	Duration         *string `json:"duration"`
 	ScheduleSource   *string `json:"scheduleSource"`
@@ -102,8 +102,8 @@ type snTaskSlaDefinitionDetail struct {
 	TimezoneSource   *string `json:"timezoneSource"`
 	Timezone         *string `json:"timezone"`
 	StartCondition   *string `json:"startCondition"`
-	RetroactiveStart *bool   `json:"retroactiveStart"`
-	RetroactivePause *bool   `json:"retroactivePause"`
+	RetroactiveStart *bool   `json:"isRetroactiveStart"`
+	RetroactivePause *bool   `json:"isRetroactivePause"`
 	WhenToCancel     *string `json:"whenToCancel"`
 	CancelCondition  *string `json:"cancelCondition"`
 	PauseCondition   *string `json:"pauseCondition"`
@@ -200,7 +200,7 @@ func snTaskSlaToDetailView(t snTaskSlaDetail) domain.TaskSlaDetail {
 			Target:           t.SlaDefinition.Target,
 			Flow:             t.SlaDefinition.Flow,
 			Workflow:         t.SlaDefinition.Workflow,
-			EnableLogging:    t.SlaDefinition.EnableLogging,
+			IsEnableLogging:  t.SlaDefinition.EnableLogging,
 			DurationType:     t.SlaDefinition.DurationType,
 			Duration:         t.SlaDefinition.Duration,
 			ScheduleSource:   t.SlaDefinition.ScheduleSource,
@@ -208,8 +208,8 @@ func snTaskSlaToDetailView(t snTaskSlaDetail) domain.TaskSlaDetail {
 			TimezoneSource:   t.SlaDefinition.TimezoneSource,
 			Timezone:         t.SlaDefinition.Timezone,
 			StartCondition:   t.SlaDefinition.StartCondition,
-			RetroactiveStart: t.SlaDefinition.RetroactiveStart,
-			RetroactivePause: t.SlaDefinition.RetroactivePause,
+			IsRetroactiveStart: t.SlaDefinition.RetroactiveStart,
+			IsRetroactivePause: t.SlaDefinition.RetroactivePause,
 			WhenToCancel:     t.SlaDefinition.WhenToCancel,
 			CancelCondition:  t.SlaDefinition.CancelCondition,
 			PauseCondition:   t.SlaDefinition.PauseCondition,
