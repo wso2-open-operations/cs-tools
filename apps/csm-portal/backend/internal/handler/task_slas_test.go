@@ -29,7 +29,7 @@ const testTaskSlaID = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 func TestSearchTaskSlas(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewTaskSlaHandler(&mockEntityTaskSlaClient{})
-		r := httptest.NewRequest(http.MethodPost, "/task-slas/search", strings.NewReader(`{}`))
+		r := httptest.NewRequest(http.MethodPost, "/slas/search", strings.NewReader(`{}`))
 		w := httptest.NewRecorder()
 		h.SearchTaskSlas(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
@@ -39,7 +39,7 @@ func TestSearchTaskSlas(t *testing.T) {
 
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewTaskSlaHandler(&mockEntityTaskSlaClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/task-slas/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/slas/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
 		w := httptest.NewRecorder()
 		h.SearchTaskSlas(w, r)
 		assertStatus(t, w, http.StatusRequestEntityTooLarge)
@@ -49,7 +49,7 @@ func TestSearchTaskSlas(t *testing.T) {
 
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewTaskSlaHandler(&mockEntityTaskSlaClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/task-slas/search", strings.NewReader(`not-json`)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/slas/search", strings.NewReader(`not-json`)))
 		w := httptest.NewRecorder()
 		h.SearchTaskSlas(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -68,7 +68,7 @@ func TestSearchTaskSlas(t *testing.T) {
 			},
 		}
 		h := NewTaskSlaHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/task-slas/search", strings.NewReader(payload)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/slas/search", strings.NewReader(payload)))
 		w := httptest.NewRecorder()
 		h.SearchTaskSlas(w, r)
 
@@ -92,7 +92,7 @@ func TestSearchTaskSlas(t *testing.T) {
 					},
 				}
 				h := NewTaskSlaHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/task-slas/search", strings.NewReader(`{}`)))
+				r := withUser(httptest.NewRequest(http.MethodPost, "/slas/search", strings.NewReader(`{}`)))
 				w := httptest.NewRecorder()
 				h.SearchTaskSlas(w, r)
 				assertStatus(t, w, tc.wantCode)
@@ -106,7 +106,7 @@ func TestSearchTaskSlas(t *testing.T) {
 func TestGetTaskSla(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewTaskSlaHandler(&mockEntityTaskSlaClient{})
-		r := httptest.NewRequest(http.MethodGet, "/task-slas/"+testTaskSlaID, nil)
+		r := httptest.NewRequest(http.MethodGet, "/slas/"+testTaskSlaID, nil)
 		r.SetPathValue("id", testTaskSlaID)
 		w := httptest.NewRecorder()
 		h.GetTaskSla(w, r)
@@ -117,7 +117,7 @@ func TestGetTaskSla(t *testing.T) {
 
 	t.Run("rejects empty id", func(t *testing.T) {
 		h := NewTaskSlaHandler(&mockEntityTaskSlaClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/task-slas/", nil))
+		r := withUser(httptest.NewRequest(http.MethodGet, "/slas/", nil))
 		w := httptest.NewRecorder()
 		h.GetTaskSla(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -135,7 +135,7 @@ func TestGetTaskSla(t *testing.T) {
 			},
 		}
 		h := NewTaskSlaHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/task-slas/"+testTaskSlaID, nil))
+		r := withUser(httptest.NewRequest(http.MethodGet, "/slas/"+testTaskSlaID, nil))
 		r.SetPathValue("id", testTaskSlaID)
 		w := httptest.NewRecorder()
 		h.GetTaskSla(w, r)
@@ -160,7 +160,7 @@ func TestGetTaskSla(t *testing.T) {
 					},
 				}
 				h := NewTaskSlaHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodGet, "/task-slas/"+testTaskSlaID, nil))
+				r := withUser(httptest.NewRequest(http.MethodGet, "/slas/"+testTaskSlaID, nil))
 				r.SetPathValue("id", testTaskSlaID)
 				w := httptest.NewRecorder()
 				h.GetTaskSla(w, r)

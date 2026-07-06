@@ -144,8 +144,8 @@ func main() {
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)
 	mux.HandleFunc("GET /conversations/{id}/messages", conversationHandler.GetConversationMessages)
-	mux.HandleFunc("POST /task-slas/search", taskSlaHandler.SearchTaskSlas)
-	mux.HandleFunc("GET /task-slas/{id}", taskSlaHandler.GetTaskSla)
+	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
+	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 
 	addr := envOrDefault("PORT", ":8080")
 

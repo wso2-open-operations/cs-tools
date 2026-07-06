@@ -48,7 +48,7 @@ func NewTaskSlaHandler(entity entityTaskSlaClient) *TaskSlaHandler {
 	return &TaskSlaHandler{entity: entity}
 }
 
-// SearchTaskSlas handles POST /task-slas/search.
+// SearchTaskSlas handles POST /slas/search.
 // The request body is forwarded unchanged to the entity service and the raw
 // response is returned.
 func (h *TaskSlaHandler) SearchTaskSlas(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +85,7 @@ func (h *TaskSlaHandler) SearchTaskSlas(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// GetTaskSla handles GET /task-slas/{id}.
+// GetTaskSla handles GET /slas/{id}.
 // The raw response from the entity service is returned unchanged. The id is an
 // upstream identifier, not a platform UUID, so it is forwarded as-is (escaped by
 // the entity client) rather than validated against a UUID pattern.

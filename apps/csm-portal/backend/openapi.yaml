@@ -2463,7 +2463,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /task-slas/search:
+  /slas/search:
     post:
       summary: Search task SLAs (ServiceNow data source only).
       operationId: searchTaskSlas
@@ -2519,7 +2519,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /task-slas/{id}:
+  /slas/{id}:
     get:
       summary: Get a task SLA by ID (ServiceNow data source only).
       operationId: getTaskSla
