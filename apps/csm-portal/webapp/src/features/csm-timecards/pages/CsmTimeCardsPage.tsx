@@ -220,10 +220,14 @@ export default function CsmTimeCardsPage(): JSX.Element {
   };
   const handleFilterFromChange = (v: string): void => {
     setFilterFrom(v);
+    // min/max on the date inputs only guide the picker UI — typing a date
+    // directly can still commit an inverted range, so clamp here too.
+    if (filterTo && v > filterTo) setFilterTo(v);
     resetAllPages();
   };
   const handleFilterToChange = (v: string): void => {
     setFilterTo(v);
+    if (filterFrom && v < filterFrom) setFilterFrom(v);
     resetAllPages();
   };
   const clearFilters = (): void => {
