@@ -30,7 +30,7 @@ export type TimeCardState =
   | "processed";
 
 /**
- * The fixed activity buckets a time card splits its hours across — the
+ * The fixed activity buckets a time card splits its time across — the
  * activity categories from the Time Management requirement (ISSU-009).
  * Write-only: the backend accepts these on create (`timeAnalyzing`,
  * `timeSettingUp`, …) but never returns them on read, so they shape the
@@ -46,7 +46,8 @@ export const ACTIVITY_KEYS = [
 
 export type ActivityKey = (typeof ACTIVITY_KEYS)[number];
 
-/** Hours logged against each activity bucket (log-time form state only). */
+/** Whole minutes logged against each activity bucket (log-time form state
+ * only) — matches the backend's own unit for these fields directly. */
 export type ActivityBreakdown = Record<ActivityKey, number>;
 
 /** A team lead eligible to approve a time card (ServiceNow "approver_list"). */
@@ -55,26 +56,16 @@ export interface TimeCardApprover {
   name: string;
 }
 
-/**
- * Work category options (the ServiceNow "Category" field). Write-only — see
- * {@link ActivityBreakdown}.
- */
-export type TimeCardCategory =
-  | "Task work"
-  | "Investigation"
-  | "Customer call"
-  | "Documentation";
-
 /** Issue-complexity options (the ServiceNow "Issue Complexity" field). Write-only. */
 export type IssueComplexity = "N/A" | "Low" | "Medium" | "High";
 
 /**
  * A time card as returned by `POST /time-cards/search` and the mutation
  * endpoints (the backend's `TimeCardView`). This is the complete set of
- * fields the backend ever returns for a card — `category`, `issueComplexity`,
- * `workLogComment`, the hour breakdown, and any lead comment are accepted on
- * write but never read back, so editing an existing card isn't supported
- * (it would silently blank those fields).
+ * fields the backend ever returns for a card — `issueComplexity`,
+ * `workLogComment`, the per-activity minute breakdown, and any lead comment
+ * are accepted on write but never read back, so editing an existing card
+ * isn't supported (it would silently blank those fields).
  */
 export interface CsmTimeCard {
   id: string;
@@ -98,7 +89,9 @@ export interface CsmTimeCard {
   state: TimeCardState;
   /** Whether the logged time is billable to the customer (ISSU-009). */
   billable: boolean;
-  totalHours: number;
+  /** Whole minutes — the backend's own unit for this field (see
+   * `mapTimeCard` in `useTimeSheets.ts`). */
+  totalMinutes: number;
   /** The deciding approver, once a decision has been made. */
   approvedById?: string;
   approvedByName?: string;
@@ -116,7 +109,6 @@ export interface CreateTimeCardInput {
   projectId: string;
   projectName: string;
   date: string;
-  category: TimeCardCategory;
   breakdown: ActivityBreakdown;
   /** Billable classification (ISSU-009). */
   billable: boolean;
@@ -151,7 +143,8 @@ export interface CsmTimeSheet {
   weekEnd: string;
   state: TimeSheetState;
   cards: CsmTimeCard[];
-  totalHours: number;
+  /** Whole minutes, summed from `cards`. */
+  totalMinutes: number;
 }
 
 /**

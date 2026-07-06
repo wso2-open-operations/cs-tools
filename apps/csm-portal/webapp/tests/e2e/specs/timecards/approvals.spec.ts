@@ -110,7 +110,7 @@ test.describe("time cards — approvals queue", () => {
     const tc = new TimeCardsPage(page);
     await tc.goto();
     await tc.openApprovals();
-    await page.getByLabel("Work item").fill(caseNumber!);
+    await tc.filterWorkItem(caseNumber!);
     await expect(tc.cardRow(caseNumber!)).toBeVisible({ timeout: 15_000 });
 
     await tc.cardButton(caseNumber!, "Approve").click();

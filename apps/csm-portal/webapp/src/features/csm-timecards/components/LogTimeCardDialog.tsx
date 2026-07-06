@@ -47,9 +47,7 @@ import {
   ACTIVITY_BUCKETS,
   DEFAULT_BILLABLE,
   DEFAULT_ISSUE_COMPLEXITY,
-  DEFAULT_TIME_CARD_CATEGORY,
   ISSUE_COMPLEXITY_OPTIONS,
-  TIME_CARD_CATEGORIES,
   WORK_LOG_MAX,
 } from "@features/csm-timecards/constants/timeCardConstants";
 import type {
@@ -58,12 +56,11 @@ import type {
   CreateTimeCardInput,
   IssueComplexity,
   TimeCardApprover,
-  TimeCardCategory,
 } from "@features/csm-timecards/types/timeCards";
 import {
   emptyBreakdown,
   timeCardDraftErrors,
-  totalHours,
+  totalMinutes,
 } from "@features/csm-timecards/utils/timeCardTotals";
 import { localTodayIso } from "@features/csm-timecards/utils/timeSheetWeek";
 
@@ -91,8 +88,9 @@ function fullName(u: NormalizedUser): string {
   return u.name.trim() || u.userName;
 }
 
-/** One activity row: a labelled hours input plus a proportion bar (relative to
- * the current logged total so each bar shows share-of-work, not share-of-day). */
+/** One activity row: a labelled whole-minutes input plus a proportion bar
+ * (relative to the current logged total so each bar shows share-of-work, not
+ * share-of-day). */
 function ActivityRow({
   label,
   value,
@@ -123,8 +121,8 @@ function ActivityRow({
         type="number"
         size="small"
         value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
-        slotProps={{ htmlInput: { min: 0, step: 0.25, "aria-label": label } }}
+        onChange={(e) => onChange(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+        slotProps={{ htmlInput: { min: 0, step: 1, "aria-label": label } }}
         onBlur={onBlur}
         sx={{ width: 96 }}
       />
@@ -140,9 +138,12 @@ function ActivityRow({
 }
 
 /**
- * "Log time" form. Mirrors the ServiceNow fields (date, category, the five
- * activity buckets, work-log comment, issue complexity, approver) with a live
- * running total, per-activity proportion bars, and inline validation.
+ * "Log time" form. Mirrors the ServiceNow fields (date, the five activity
+ * buckets, work-log comment, issue complexity, approver) with a live
+ * running total, per-activity proportion bars, and inline validation. There
+ * was a "Category" field here too, but it was never actually sent anywhere
+ * (`usePostTimeCard`'s payload has no such field) — removed rather than kept
+ * as a choice that silently did nothing.
  * Creating a card submits it immediately — the backend has no draft step, so
  * there is no "Pending" status and no edit-after-create (see the module-level
  * note in `types/timeCards.ts` on why edit isn't supported).
@@ -159,7 +160,6 @@ export default function LogTimeCardDialog({
   const me = resolveUserInfo(useIdTokenClaims());
 
   const [date, setDate] = useState(localTodayIso());
-  const [category, setCategory] = useState<TimeCardCategory>(DEFAULT_TIME_CARD_CATEGORY);
   const [issueComplexity, setIssueComplexity] = useState<IssueComplexity>(
     DEFAULT_ISSUE_COMPLEXITY,
   );
@@ -173,7 +173,7 @@ export default function LogTimeCardDialog({
     setTouched((prev) => new Set(prev).add(field));
   const isTouched = (field: string): boolean => touched.has(field);
 
-  const total = totalHours(breakdown);
+  const total = totalMinutes(breakdown);
   const errors = timeCardDraftErrors({
     date,
     breakdown,
@@ -218,7 +218,7 @@ export default function LogTimeCardDialog({
   const setActivity = (key: ActivityKey, next: number): void =>
     setBreakdown((prev) => ({ ...prev, [key]: next }));
 
-  const ALL_FIELDS = ["date", "hours", "workLogComment", "approver"];
+  const ALL_FIELDS = ["date", "minutes", "workLogComment", "approver"];
   const handleSubmit = (): void => {
     if (!isValid || !approver) {
       setTouched(new Set(ALL_FIELDS));
@@ -230,7 +230,6 @@ export default function LogTimeCardDialog({
       projectId,
       projectName,
       date,
-      category,
       breakdown,
       billable,
       workLogComment: workLogComment.trim(),
@@ -285,40 +284,19 @@ export default function LogTimeCardDialog({
             {projectName ? ` · ${projectName}` : ""}
           </Typography>
 
-          {/* Date + category */}
-          <Box
-            sx={{
-              display: "grid",
-              gap: 1.5,
-              gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
-            }}
-          >
-            <TextField
-              type="date"
-              label="Date"
-              size="small"
-              required
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              onBlur={() => touch("date")}
-              error={isTouched("date") && !!errors.date}
-              helperText={isTouched("date") ? errors.date : undefined}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
-            <TextField
-              select
-              label="Category"
-              size="small"
-              value={category}
-              onChange={(e) => setCategory(e.target.value as TimeCardCategory)}
-            >
-              {TIME_CARD_CATEGORIES.map((c) => (
-                <MenuItem key={c} value={c}>
-                  {c}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Box>
+          <TextField
+            type="date"
+            label="Date"
+            size="small"
+            required
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            onBlur={() => touch("date")}
+            error={isTouched("date") && !!errors.date}
+            helperText={isTouched("date") ? errors.date : undefined}
+            slotProps={{ inputLabel: { shrink: true } }}
+            sx={{ maxWidth: { sm: 220 }, minWidth: 160 }}
+          />
 
           <Divider />
 
@@ -330,25 +308,19 @@ export default function LogTimeCardDialog({
               justifyContent: "space-between",
             }}
           >
-            <Typography variant="subtitle2">Time breakdown (hours)</Typography>
+            <Typography variant="subtitle2">Time breakdown (minutes)</Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <Clock size={14} />
               <Typography variant="subtitle2" color="primary">
-                {total.toFixed(2)}h total
+                {total} min total
               </Typography>
             </Box>
           </Box>
-          {isTouched("hours") && errors.hours && (
+          {isTouched("minutes") && errors.minutes && (
             <Typography variant="caption" color="error">
-              {errors.hours}
+              {errors.minutes}
             </Typography>
           )}
-          <Typography variant="caption" color="text.secondary">
-            Each activity is logged in whole-hour increments — quarter-hours
-            help you balance the total below, but round to the nearest hour
-            on submit (a small amount split across several activities may
-            round down to 0h for those activities).
-          </Typography>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
             {ACTIVITY_BUCKETS.map((b) => (
               <ActivityRow
@@ -357,7 +329,7 @@ export default function LogTimeCardDialog({
                 value={breakdown[b.key]}
                 total={total}
                 onChange={(next) => setActivity(b.key, next)}
-                onBlur={() => touch("hours")}
+                onBlur={() => touch("minutes")}
               />
             ))}
           </Box>

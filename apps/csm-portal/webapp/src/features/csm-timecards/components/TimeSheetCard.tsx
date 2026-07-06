@@ -99,7 +99,7 @@ export default function TimeSheetCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <SemanticChip role={meta.role} label={meta.label} />
           <Typography variant="h6" sx={{ lineHeight: 1 }}>
-            {sheet.totalHours.toFixed(2)}h
+            {sheet.totalMinutes} min
           </Typography>
         </Box>
       </Box>
@@ -125,7 +125,7 @@ export default function TimeSheetCard({
               <Box sx={{ minWidth: 0 }}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
                   <Typography variant="body2" noWrap>
-                    {c.caseNumber} · {c.totalHours.toFixed(2)}h
+                    {c.caseNumber} · {c.totalMinutes} min
                   </Typography>
                   <Chip
                     label={c.billable ? "Billable" : "Non-billable"}
