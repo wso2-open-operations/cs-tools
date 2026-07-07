@@ -82,7 +82,9 @@ import {
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
+import { useGetCsmCaseCallRequests } from "@features/csm-cases/api/useCsmCaseCallRequests";
 import { CaseSlaTable } from "@features/csm-cases/components/CaseSlaTable";
+import { useGetCsmCaseSlas } from "@features/csm-cases/api/useGetCsmCaseSlas";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
@@ -185,15 +187,12 @@ const FEEDBACK_PALETTE: Record<
 const SECONDARY_TOAST: Record<string, string> = {
   reassign_engineer: "Reassign engineer dialog (mock).",
   reassign_group: "Reassign group dialog (mock).",
-  escalate: "Escalation form (mock).",
-  change_severity: "Severity change request (mock).",
   hold_auto_close: "Hold auto-closure dialog (mock).",
   create_incident: "Create incident from case (mock).",
   link_case: "Link related case picker (mock).",
   link_incident: "Link to incident picker (mock).",
   manage_watchers: "Add/remove watcher dialog (mock).",
   create_task: "Create task dialog (mock).",
-  request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
 };
@@ -234,7 +233,7 @@ const TAB_DEFS: Array<{
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
-  { id: "sla", label: "SLA", icon: <Clock size={16} /> },
+  { id: "sla", label: "SLAs", icon: <Clock size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
@@ -295,6 +294,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const postAttachment = usePostCsmCaseAttachment();
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const deleteAttachment = useDeleteCsmCaseAttachment();
+  // Fetched unconditionally (not just while their tab is active) purely for
+  // the tab-label counts below; each widget still runs its own scoped query
+  // when its tab mounts, deduped against this one by react-query's cache.
+  const { data: slaList } = useGetCsmCaseSlas(caseId);
+  const { data: callRequests } = useGetCsmCaseCallRequests(caseId);
   const patchCase = usePatchCsmCase(caseId);
   const patchCaseById = usePatchCsmCaseById();
   const findMyOngoingCases = useFindMyOngoingCases();
@@ -315,6 +319,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
+  // Bumped to pop open the Call requests tab's "Create call request" dialog
+  // from the action bar's "Request a call" item.
+  const [requestCallSignal, setRequestCallSignal] = useState(0);
   const [githubIssueOpen, setGithubIssueOpen] = useState(false);
   // Inline error shown inside the Git-issue dialog (e.g. the SN routing 422 /
   // state 409). Cleared when the dialog opens or a submit is retried.
@@ -420,6 +427,62 @@ export default function CsmCaseDetailPage(): JSX.Element {
     });
   }, [data, recordView]);
 
+  // Starting work: enforce the single-active-case rule.
+  // 1) look up the engineer's other ongoing cases (abort on failure — we
+  //    must not transition without knowing), 2) move this case to
+  // work_in_progress, 3) if none ongoing → mark this one ongoing; if some
+  // exist → ask before pausing them (handled in onConfirmStartWork). Shared
+  // by the "Start progress" transition and the "Assign to me" shortcut,
+  // which also puts the case into progress once the assignment lands.
+  const startWork = useCallback(
+    async (successMessage: string, successSeverity: FeedbackSeverity) => {
+      if (!data) return;
+      const caseId = data.id;
+      let others: MyOngoingCase[];
+      try {
+        others = await findMyOngoingCases(caseId);
+      } catch (err) {
+        // Don't proceed blind: marking this ongoing without knowing the
+        // other active cases would break the single-active-case rule.
+        showError(
+          "Couldn't check your other active cases. Please try again.",
+          err,
+        );
+        return;
+      }
+      try {
+        await patchCase.mutateAsync({ state: "work_in_progress" });
+      } catch (err) {
+        showError(
+          "Could not move the case to Work in progress. Please try again.",
+          err,
+        );
+        return;
+      }
+      if (others.length === 0) {
+        // No competing case → make this the active (ongoing) one.
+        try {
+          await patchCase.mutateAsync({ workState: "ongoing" });
+        } catch (err) {
+          showError(
+            "Moved to Work in progress, but could not mark it ongoing.",
+            err,
+          );
+          return;
+        }
+        setFeedback({
+          message: successMessage,
+          severity: successSeverity,
+          sticky: true,
+        });
+        return;
+      }
+      // Others are ongoing → confirm before pausing them.
+      setPauseConflict(others);
+    },
+    [data, findMyOngoingCases, patchCase, showError],
+  );
+
   const onAction = useCallback(
     (
       action: CaseLifecycleAction | { secondary: string },
@@ -434,56 +497,25 @@ export default function CsmCaseDetailPage(): JSX.Element {
           ? beStateFromUi(nextState)
           : LIFECYCLE_TARGET_STATE[action];
 
-        // Starting work: enforce the single-active-case rule.
-        // 1) look up the engineer's other ongoing cases (abort on failure — we
-        //    must not transition without knowing), 2) move this case to
-        // work_in_progress, 3) if none ongoing → mark this one ongoing; if some
-        // exist → ask before pausing them (handled in onConfirmStartWork).
+        // "Assign to me" on the Change-state button: the case isn't the
+        // engineer's yet, so claim it (PATCH assigneeEmail) before starting
+        // work — a plain state PATCH would move it to Work in progress
+        // without ever making it the clicking engineer's case.
+        if (action === "assign_to_me" && data && currentUserEmail) {
+          patchCase.mutate(
+            { assigneeEmail: currentUserEmail },
+            {
+              onSuccess: () =>
+                void startWork(LIFECYCLE_TOAST.assign_to_me, LIFECYCLE_SEVERITY.assign_to_me),
+              onError: (err) =>
+                showError("Could not assign the case to you.", err),
+            },
+          );
+          return;
+        }
+
         if (targetState === "work_in_progress" && data) {
-          const caseId = data.id;
-          void (async () => {
-            let others: MyOngoingCase[];
-            try {
-              others = await findMyOngoingCases(caseId);
-            } catch (err) {
-              // Don't proceed blind: marking this ongoing without knowing the
-              // other active cases would break the single-active-case rule.
-              showError(
-                "Couldn't check your other active cases. Please try again.",
-                err,
-              );
-              return;
-            }
-            try {
-              await patchCase.mutateAsync({ state: "work_in_progress" });
-            } catch (err) {
-              showError(
-                "Could not move the case to Work in progress. Please try again.",
-                err,
-              );
-              return;
-            }
-            if (others.length === 0) {
-              // No competing case → make this the active (ongoing) one.
-              try {
-                await patchCase.mutateAsync({ workState: "ongoing" });
-              } catch (err) {
-                showError(
-                  "Moved to Work in progress, but could not mark it ongoing.",
-                  err,
-                );
-                return;
-              }
-              setFeedback({
-                message: LIFECYCLE_TOAST[action],
-                severity: LIFECYCLE_SEVERITY[action],
-                sticky: true,
-              });
-              return;
-            }
-            // Others are ongoing → confirm before pausing them.
-            setPauseConflict(others);
-          })();
+          void startWork(LIFECYCLE_TOAST[action], LIFECYCLE_SEVERITY[action]);
           return;
         }
 
@@ -633,13 +665,29 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Jump to the Call requests tab and pop its own "Create call request"
+      // dialog, rather than a second/duplicate entry point for the same form.
+      if (action.secondary === "request_call") {
+        setActiveTab("call-requests");
+        setRequestCallSignal((n) => n + 1);
+        return;
+      }
+
       setFeedback({
         message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
         severity: "info",
         sticky: false,
       });
     },
-    [data, showError, patchCase, findMyOngoingCases, detailPath],
+    [
+      data,
+      showError,
+      patchCase,
+      findMyOngoingCases,
+      detailPath,
+      startWork,
+      currentUserEmail,
+    ],
   );
 
   // Confirm pausing the engineer's other ongoing case(s) and making this case
@@ -715,6 +763,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const onUploadAttachment = useCallback(
     (file: File) => {
       if (!caseId) return;
+      if (data?.state === "closed") {
+        showError("This case is closed — attachments are read-only.");
+        return;
+      }
       postAttachment.mutate(
         { caseId, file, uploadedBy: engineerName },
         {
@@ -728,7 +780,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         },
       );
     },
-    [caseId, engineerName, postAttachment],
+    [caseId, engineerName, postAttachment, data, showError],
   );
 
   const onDownloadAttachment = useCallback(
@@ -989,11 +1041,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
           {TAB_DEFS.map((t) => {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
-              t.id === "attachments"
-                ? attachmentList.length
-                : t.id === "time"
-                  ? c.timeLogs.length
-                  : undefined;
+              t.id === "sla"
+                ? slaList?.count
+                : t.id === "attachments"
+                  ? attachmentList.length
+                  : t.id === "time"
+                    ? c.timeLogs.length
+                    : t.id === "call-requests"
+                      ? callRequests?.length
+                      : undefined;
             return (
               <Tab
                 key={t.id}
@@ -1037,7 +1093,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
-                disabled={!caseId}
+                disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
@@ -1081,6 +1137,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               fullWidth
               variant="outlined"
               color="inherit"
+              disabled={isClosed}
               startIcon={<MessageSquarePlus size={18} />}
               onClick={() => setComposerOpen(true)}
               sx={{
@@ -1099,9 +1156,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 },
               }}
             >
-              {publicReplyGateReason
-                ? "Add an internal work note…"
-                : "Compose a reply to the customer…"}
+              {isClosed
+                ? "This case is closed — comments and work notes are read-only."
+                : publicReplyGateReason
+                  ? "Add an internal work note…"
+                  : "Compose a reply to the customer…"}
             </Button>
           )}
 
@@ -1239,7 +1298,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   "Could not upload the attachment.")
                 : null
             }
-            onUpload={onUploadAttachment}
+            onUpload={isClosed ? undefined : onUploadAttachment}
             onDownloadAll={onDownloadAllAttachments}
             onDownload={onDownloadAttachment}
             onDelete={setPendingDelete}
@@ -1261,7 +1320,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {activeTab === "call-requests" && caseId && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
-          <CallRequestsWidget caseId={caseId} severity={c.severity} />
+          <CallRequestsWidget
+            caseId={caseId}
+            severity={c.severity}
+            openCreateSignal={requestCallSignal}
+          />
         </Box>
       )}
 

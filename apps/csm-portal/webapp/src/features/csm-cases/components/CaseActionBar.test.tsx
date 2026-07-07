@@ -92,7 +92,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^closed$/i })).toBeInTheDocument();
   });
 
@@ -106,9 +106,9 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /solution proposed/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /awaiting info/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /propose solution/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /request information/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^closed$/i })).not.toBeInTheDocument();
   });
 
@@ -120,11 +120,11 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
     unmount();
 
-    // ...and from a paused state, the SAME target reads the same — "Waiting on
+    // ...and from a paused state, the SAME target reads the same — "Wait on
     // WSO2", not a fabricated "Resume work".
     render(
       <CaseActionBar
@@ -132,7 +132,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
   });
 
@@ -144,9 +144,9 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={onAction}
       />,
     );
-    // "Waiting on WSO2" has no confirm dialog, so it dispatches immediately, and
+    // "Wait on WSO2" has no confirm dialog, so it dispatches immediately, and
     // the target must be the real backend nextState.
-    fireEvent.click(screen.getByRole("button", { name: /waiting on wso2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /wait on wso2/i }));
     expect(onAction).toHaveBeenCalledWith("wait_on_wso2", "waiting_on_wso2");
   });
 
@@ -177,9 +177,9 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /solution proposed/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /awaiting info/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /propose solution/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /request information/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^closed$/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
   });
@@ -212,7 +212,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reopened/i })).not.toBeInTheDocument();
     // The state-independent "More" overflow is unaffected.
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
