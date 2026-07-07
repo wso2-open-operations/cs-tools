@@ -711,6 +711,52 @@ const (
 	CaseWorkStatePaused  CaseWorkState = "paused"
 )
 
+// CaseResolutionCode enumerates the resolution codes for a resolved case.
+type CaseResolutionCode string
+
+const (
+	CaseResolutionCodeSolvedFixedBySupportGuidanceProvided    CaseResolutionCode = "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
+	CaseResolutionCodeSolvedFixedByClosingRelatedIncident     CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
+	CaseResolutionCodeSolvedFixedByClosingRelatedRDTicket     CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
+	CaseResolutionCodeSolvedWorkaroundProvided                CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED"
+	CaseResolutionCodeSolvedByCustomer                        CaseResolutionCode = "SOLVED_BY_CUSTOMER"
+	CaseResolutionCodeConsideredForRoadmap                    CaseResolutionCode = "CONSIDERED_FOR_ROADMAP"
+	CaseResolutionCodeInconclusiveOutOfScope                  CaseResolutionCode = "INCONCLUSIVE_OUT_OF_SCOPE"
+	CaseResolutionCodeInconclusiveCannotReproduce             CaseResolutionCode = "INCONCLUSIVE_CANNOT_REPRODUCE"
+	CaseResolutionCodeInconclusiveNoWorkaround                CaseResolutionCode = "INCONCLUSIVE_NO_WORKAROUND"
+	CaseResolutionCodeDuplicateIssue                          CaseResolutionCode = "DUPLICATE_ISSUE"
+	CaseResolutionCodeVoidedCanceled                          CaseResolutionCode = "VOIDED_CANCELED"
+	CaseResolutionCodeOnHold                                  CaseResolutionCode = "ON_HOLD"
+	CaseResolutionCodeConsideredForRoadmapAlt                 CaseResolutionCode = "CONSIDERED_FOR_ROADMAP_ALT"
+	CaseResolutionCodeSolvedFixedTheIssue                     CaseResolutionCode = "SOLVED_FIXED_THE_ISSUE"
+	CaseResolutionCodeSolvedWorkaroundProvidedAlt             CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED_ALT"
+	CaseResolutionCodeSolvedByContributor                     CaseResolutionCode = "SOLVED_BY_CONTRIBUTOR"
+	CaseResolutionCodeSolvedByNovera                          CaseResolutionCode = "SOLVED_BY_NOVERA"
+	CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness    CaseResolutionCode = "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS"
+)
+
+// CaseCause enumerates the root-cause categories for a resolved case.
+type CaseCause string
+
+const (
+	CaseCauseUserMisunderstandingConcepts      CaseCause = "USER_MISUNDERSTANDING_CONCEPTS"
+	CaseCauseUserMisunderstandingDocumentation CaseCause = "USER_MISUNDERSTANDING_DOCUMENTATION"
+	CaseCauseUserNotFollowingDocumentation     CaseCause = "USER_NOT_FOLLOWING_DOCUMENTATION"
+	CaseCauseUserMistake                       CaseCause = "USER_MISTAKE"
+	CaseCauseSolutionProblematicArchitecture   CaseCause = "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
+	CaseCauseSolutionProblematicCode           CaseCause = "SOLUTION_PROBLEMATIC_CODE"
+	CaseCauseApplicationBug                    CaseCause = "APPLICATION_BUG"
+	CaseCauseApplicationMisleadingUXUI         CaseCause = "APPLICATION_MISLEADING_UX_UI"
+	CaseCauseApplicationLimitation             CaseCause = "APPLICATION_LIMITATION"
+	CaseCauseApplicationMissingFeature         CaseCause = "APPLICATION_MISSING_FEATURE"
+	CaseCauseApplicationDocumentationGap       CaseCause = "APPLICATION_DOCUMENTATION_GAP"
+	CaseCauseApplicationDocumentationError     CaseCause = "APPLICATION_DOCUMENTATION_ERROR"
+	CaseCauseInfrastructureCustomerSide        CaseCause = "INFRASTRUCTURE_CUSTOMERS_SIDE"
+	CaseCauseInfrastructureSaaSNotEnough       CaseCause = "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
+	CaseCauseInfrastructureSaaSother           CaseCause = "INFRASTRUCTURE_SAAS_SIDE_OTHER"
+	CaseCauseUnknown                           CaseCause = "UNKNOWN"
+)
+
 // EngagementType classifies the type of an engagement case.
 type EngagementType string
 
@@ -926,8 +972,8 @@ type UpdateCaseRequest struct {
 	WorkState      *CaseWorkState `json:"workState"`
 	WatchList      []string       `json:"watchList"`
 	AssigneeEmail  *string        `json:"assigneeEmail"`
-	ResolutionCode *int           `json:"resolutionCode"`
-	Cause          *string        `json:"cause"`
+	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
+	Cause          *CaseCause     `json:"cause"`
 	CloseNotes     *string        `json:"closeNotes"`
 }
 

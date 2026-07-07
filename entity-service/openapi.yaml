@@ -2677,11 +2677,47 @@ components:
           format: email
           description: Email of the engineer to assign to this case (ServiceNow only).
         resolutionCode:
-          type: integer
-          description: Resolution code key. Only allowed when state is closed or solution_proposed.
+          type: string
+          enum:
+            - SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED
+            - SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT
+            - SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET
+            - SOLVED_WORKAROUND_PROVIDED
+            - SOLVED_BY_CUSTOMER
+            - CONSIDERED_FOR_ROADMAP
+            - INCONCLUSIVE_OUT_OF_SCOPE
+            - INCONCLUSIVE_CANNOT_REPRODUCE
+            - INCONCLUSIVE_NO_WORKAROUND
+            - DUPLICATE_ISSUE
+            - VOIDED_CANCELED
+            - ON_HOLD
+            - CONSIDERED_FOR_ROADMAP_ALT
+            - SOLVED_FIXED_THE_ISSUE
+            - SOLVED_WORKAROUND_PROVIDED_ALT
+            - SOLVED_BY_CONTRIBUTOR
+            - SOLVED_BY_NOVERA
+            - ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS
+          description: Resolution code. Only allowed when state is closed or solution_proposed.
         cause:
           type: string
-          description: Cause description. Only allowed when state is closed or solution_proposed.
+          enum:
+            - USER_MISUNDERSTANDING_CONCEPTS
+            - USER_MISUNDERSTANDING_DOCUMENTATION
+            - USER_NOT_FOLLOWING_DOCUMENTATION
+            - USER_MISTAKE
+            - SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE
+            - SOLUTION_PROBLEMATIC_CODE
+            - APPLICATION_BUG
+            - APPLICATION_MISLEADING_UX_UI
+            - APPLICATION_LIMITATION
+            - APPLICATION_MISSING_FEATURE
+            - APPLICATION_DOCUMENTATION_GAP
+            - APPLICATION_DOCUMENTATION_ERROR
+            - INFRASTRUCTURE_CUSTOMERS_SIDE
+            - INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH
+            - INFRASTRUCTURE_SAAS_SIDE_OTHER
+            - UNKNOWN
+          description: Root-cause category. Only allowed when state is closed or solution_proposed.
         closeNotes:
           type: string
           description: Close notes. Only allowed when state is closed or solution_proposed.

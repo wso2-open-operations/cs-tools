@@ -24,6 +24,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -65,7 +66,14 @@ func decodeErrMsg(err error) string {
 	}
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
-		return fmt.Sprintf("invalid value for field %q: expected %s", typeErr.Field, typeErr.Type)
+		typeName := typeErr.Type.String()
+		// Strip package prefix from named types (e.g. "domain.CaseResolutionCode" → "string").
+		if typeErr.Type.Kind() == reflect.String {
+			typeName = "string"
+		} else if typeErr.Type.Kind() == reflect.Int || typeErr.Type.Kind() == reflect.Int64 {
+			typeName = "integer"
+		}
+		return fmt.Sprintf("invalid value for field %q: expected %s", typeErr.Field, typeName)
 	}
 	// DisallowUnknownFields produces "json: unknown field "<name>"".
 	msg := err.Error()
