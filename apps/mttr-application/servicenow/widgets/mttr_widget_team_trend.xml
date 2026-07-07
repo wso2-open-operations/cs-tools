@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: MTTR Trend for ABTs (monthly team line chart)             -->
+    <!-- UI Page Name: mttr_widget_team_trend                              -->
+    <!-- Line chart: monthly MTTR per CS team                              -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_team_trend">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getMonthlyTrendTeam();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-teamtrend {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #f0d5c8;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-teamtrend .header {
+            background: #f0d5c8;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-teamtrend .body { padding: 16px; }
+        .mttr-chart-teamtrend .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-teamtrend">
+        <div class="header">MTTR Trend for ABTs - Last 12 Months</div>
+        <div class="body">
+            <div id="chart_team_trend" style="width:100%;"></div>
+        </div>
+        <div class="footer">Group by Account Integration CS Team</div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_team_trend" style="display:none">${jvar_team_trend}</textarea>
+
+    <script type="text/javascript">
+    // IIFE scope-guard — see mttr_widget_team_casetype.xml for full
+    // rationale (sibling widgets declare _scheduleRedraw / drawChart /
+    // noData at top level; the wrap keeps them per-widget-scoped).
+    (function () {
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawChart, 100); });
+
+        var _rtimer = null;
+        function _scheduleRedraw() {
+            if (_rtimer) clearTimeout(_rtimer);
+            _rtimer = setTimeout(drawChart, 150);
+        }
+        // Idempotent listener setup — see mttr_widget_hist_inc_priority.xml
+        // for the rationale (SN re-renders re-run this script; naive
+        // addEventListener leaks a handler on every mount).
+        if (window.__mttrTeamTrendState) {
+            window.removeEventListener('resize', window.__mttrTeamTrendState.resizeHandler);
+            if (window.__mttrTeamTrendState.observer) {
+                window.__mttrTeamTrendState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedraw);
+        var _obsTeamTrend = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsTeamTrend = new ResizeObserver(_scheduleRedraw);
+            _obsTeamTrend.observe(document.getElementById('chart_team_trend'));
+        }
+        window.__mttrTeamTrendState = { resizeHandler: _scheduleRedraw, observer: _obsTeamTrend };
+
+        var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun',
+                           'Jul','Aug','Sep','Oct','Nov','Dec'];
+        var TEAM_COLORS = ['#4dc9f6','#f67019','#f53794','#00a950',
+                           '#8549ba','#ff6384','#36a2eb'];
+
+        function formatMonth(ym) {
+            var parts = ym.split('-');
+            var mi = parseInt(parts[1], 10) - 1;
+            return MONTH_NAMES[mi] + '/' + parts[0];
+        }
+
+        function drawChart() {
+            try {
+                var _el = document.getElementById('chart_team_trend');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(250, Math.round(_w * 0.55)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_team_trend').value;
+                if (!raw || raw === 'null') { noData(); return; }
+                var trendData = JSON.parse(raw);
+                if (!trendData || !trendData.months || trendData.months.length === 0) {
+                    noData(); return;
+                }
+
+                var teamNames = Object.keys(trendData.teams).sort();
+                var header = ['Month'];
+                for (var t = 0; teamNames.length > t; t++) {
+                    header.push(teamNames[t]);
+                }
+
+                var rows = [header];
+                for (var m = 0; trendData.months.length > m; m++) {
+                    var row = [formatMonth(trendData.months[m])];
+                    for (var tn = 0; teamNames.length > tn; tn++) {
+                        var hrs = trendData.teams[teamNames[tn]][m] || 0;
+                        row.push(Math.round((hrs / 24) * 10) / 10);
+                    }
+                    rows.push(row);
+                }
+
+                var data = google.visualization.arrayToDataTable(rows);
+                var td = trendData.teams_display || {};
+                for (var fm = 0; trendData.months.length > fm; fm++) {
+                    for (var ft = 0; teamNames.length > ft; ft++) {
+                        var tdd = td[teamNames[ft]] || [];
+                        data.setFormattedValue(fm, ft + 1, tdd[fm] || '');
+                    }
+                }
+                var chart = new google.visualization.LineChart(
+                    document.getElementById('chart_team_trend'));
+                chart.draw(data, {
+                    chartArea: { width: '80%', height: '68%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 10 } },
+                    colors: TEAM_COLORS,
+                    backgroundColor: 'transparent',
+                    curveType: 'function',
+                    vAxis: {
+                        title: 'Average Business Duration (Days)',
+                        format: '#.#',
+                        textStyle: { fontSize: 10 },
+                        viewWindow: { min: 0 }
+                    },
+                    hAxis: { textStyle: { fontSize: 10 }, slantedText: true },
+                    tooltip: { textStyle: { fontSize: 11 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_team_trend error:', e);
+                noData();
+            }
+        }
+
+        function noData() {
+            // Build the placeholder via DOM API instead of innerHTML.
+            // The old escaped-entity string kept the XML/Jelly parser
+            // happy but at runtime left the JS string containing literal
+            // "&amp;lt;" characters, which the HTML parser then decoded to
+            // text (not markup) — so the paragraph tag rendered as literal
+            // text on the page. Using createElement + textContent keeps
+            // the JS source XML-safe and produces a real p node in the DOM.
+            var container = document.getElementById('chart_team_trend');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No data available';
+            container.appendChild(p);
+        }
+    })();
+    </script>
+
+</j:jelly>

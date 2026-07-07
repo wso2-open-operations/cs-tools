@@ -1,0 +1,677 @@
+openapi: 3.0.3
+info:
+  title: MTTR API
+  description: |
+    Mean Time to Resolve (MTTR) API for WSO2 support cases.
+    Ingests resolved case data from ServiceNow and provides P95
+    truncated-average MTTR metrics across multiple dimensions.
+  version: v1
+  contact:
+    name: WSO2 CS Team
+
+servers:
+  - url: /
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns API health status including database connectivity and cache state. No authentication required.
+      operationId: getHealth
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  db_time:
+                    type: string
+                    format: date-time
+                  total_cases:
+                    type: integer
+                    example: 1234
+                  last_ingestion_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  last_aggregation_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  cache_entries:
+                    type: integer
+                    example: 9
+        "503":
+          description: Unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /cases/batch:
+    post:
+      summary: Push a batch of resolved cases
+      description: |
+        Ingest up to 500 resolved cases per request. Cases are upserted
+        by `case_sys_id`. Used by the ServiceNow scheduled job for
+        incremental sync.
+      operationId: postCasesBatch
+      tags: [Ingestion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRequest"
+      responses:
+        "200":
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /cases/bulk-import:
+    post:
+      summary: Bulk import cases (backfill)
+      description: |
+        One-time backfill endpoint accepting up to 5000 records.
+        Same schema as `/cases/batch` but with a higher limit.
+      operationId: postCasesBulkImport
+      tags: [Ingestion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRequest"
+      responses:
+        "200":
+          description: Bulk import processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /mttr:
+    get:
+      summary: Get MTTR metrics
+      description: |
+        Returns cached P95 truncated-average MTTR data for the
+        requested dimension type.
+      operationId: getMttr
+      tags: [MTTR]
+      parameters:
+        - name: type
+          in: query
+          required: true
+          description: The dimension type to query
+          schema:
+            $ref: "#/components/schemas/DimensionType"
+      responses:
+        "200":
+          description: MTTR data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MttrResponse"
+        "400":
+          description: Invalid dimension type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /mttr/types:
+    get:
+      summary: List available dimension types
+      description: Returns the list of valid dimension type values for the `/mttr` endpoint.
+      operationId: getMttrTypes
+      tags: [MTTR]
+      responses:
+        "200":
+          description: Dimension types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  types:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DimensionType"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/cache/reset:
+    post:
+      summary: Trigger MTTR recalculation
+      description: |
+        Re-runs the P95 truncated-average aggregation and updates
+        the cache. Optionally specify a single dimension type, or
+        omit to recalculate all.
+      operationId: postCacheReset
+      tags: [Admin]
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: Recalculate a single dimension type (omit for all)
+          schema:
+            $ref: "#/components/schemas/DimensionType"
+      responses:
+        "200":
+          description: Cache reset complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  recalculated:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - overall_by_type
+                      - team_incidents
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Forbidden — admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/ingestion-logs:
+    get:
+      summary: View ingestion history
+      description: Returns recent batch ingestion log entries.
+      operationId: getIngestionLogs
+      tags: [Admin]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Number of log entries to return (default 50, max 200)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Ingestion logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IngestionLog"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Forbidden — admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/retention/run:
+    post:
+      summary: Trigger retention job manually
+      description: |
+        Manually runs the retention service which:
+        1. Summarizes case_events older than RETENTION_CASE_EVENTS_MONTHS
+           (default 24 months) into case_events_summary table
+        2. Deletes the raw rows from case_events after summarization
+        3. Purges old ingestion_log entries
+        
+        Use this for testing or to immediately free up database space.
+      operationId: postRetentionRun
+      tags: [Admin]
+      responses:
+        "200":
+          description: Retention job completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  message:
+                    type: string
+                    example: Retention job completed
+                  ingestion_log_purged:
+                    type: integer
+                    description: Number of old ingestion_log rows deleted
+                  summarised:
+                    type: integer
+                    description: Number of summary records written
+                  deleted:
+                    type: integer
+                    description: Number of raw case_events rows deleted
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Forbidden — admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Retention job failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /summary/historical:
+    get:
+      summary: Get historical MTTR summaries
+      description: |
+        Returns half-year (H1/H2) MTTR summaries from archived case data.
+        These are pre-computed P95 truncated-mean values stored when raw
+        case_events are purged after the retention window (default 24 months).
+      operationId: getHistoricalSummary
+      tags: [Summary]
+      parameters:
+        - name: case_type
+          in: query
+          required: true
+          description: Filter by case type
+          schema:
+            type: string
+            enum: [Incident, Query]
+        - name: group_by
+          in: query
+          required: false
+          description: Grouping dimension (default team)
+          schema:
+            type: string
+            enum: [priority, team, product]
+            default: team
+      responses:
+        "200":
+          description: Historical summary data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoricalSummaryResponse"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /summary/periods:
+    get:
+      summary: List available summary periods
+      description: Returns all half-year periods for which archived summaries exist.
+      operationId: getSummaryPeriods
+      tags: [Summary]
+      responses:
+        "200":
+          description: Available periods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periods:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        period_label:
+                          type: string
+                          example: "2025-H1"
+                        period_start:
+                          type: string
+                          format: date
+                          example: "2025-01-01"
+                        period_end:
+                          type: string
+                          format: date
+                          example: "2025-06-30"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 Client Credentials token from Choreo STS
+
+  schemas:
+    DimensionType:
+      type: string
+      enum:
+        - overall_by_type
+        - team_incidents
+        - team_incidents_priority
+        - team_queries
+        - priority_incidents
+        - patched_incidents
+        - patched_queries
+        - monthly_trend_team
+        - monthly_trend_type
+        - monthly_trend_priority
+
+    CaseRecord:
+      type: object
+      required:
+        - case_sys_id
+        - product
+        - cs_team
+        - business_duration_ms
+        - created_date
+        - case_type
+        - case_state
+      properties:
+        case_sys_id:
+          type: string
+          maxLength: 32
+          description: ServiceNow case sys_id (upsert key)
+          example: abc123def456
+        product:
+          type: string
+          example: WSO2 API Manager
+        cs_team:
+          type: string
+          example: Cloud Team
+        business_duration_ms:
+          type: number
+          minimum: 1
+          description: Resolution time in milliseconds
+          example: 86400000
+        created_date:
+          type: string
+          format: date-time
+          example: "2026-01-15T08:00:00Z"
+        closed_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-01-16T08:00:00Z"
+        case_type:
+          type: string
+          example: Incident
+        priority:
+          type: string
+          nullable: true
+          description: Priority level (P1–P4). Required for Incidents, null for Queries.
+          example: P2
+        is_patched:
+          type: boolean
+          example: true
+        case_state:
+          type: string
+          example: closed
+
+    BatchRequest:
+      type: object
+      required:
+        - batch_id
+        - cases
+      properties:
+        batch_id:
+          type: string
+          description: Unique identifier for this batch
+          example: sn_batch_20260401_001
+        cases:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseRecord"
+          minItems: 1
+          maxItems: 5000
+
+    BatchResponse:
+      type: object
+      properties:
+        batch_id:
+          type: string
+          example: sn_batch_20260401_001
+        received:
+          type: integer
+          example: 100
+        inserted:
+          type: integer
+          example: 95
+        updated:
+          type: integer
+          example: 3
+        rejected:
+          type: integer
+          example: 2
+        rejected_details:
+          type: array
+          items:
+            type: object
+            properties:
+              case_sys_id:
+                type: string
+              reason:
+                type: string
+
+    MttrResponse:
+      type: object
+      properties:
+        dimension_type:
+          type: string
+          example: team_incidents
+        period:
+          type: object
+          properties:
+            start:
+              type: string
+              format: date
+              example: "2025-04-02"
+            end:
+              type: string
+              format: date
+              example: "2026-04-02"
+        calculated_at:
+          type: string
+          format: date-time
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              labels:
+                type: object
+                # Label values are strings (case_type, priority, cs_team,
+                # product, month) except for the `is_patched` dimension,
+                # which echoes the raw boolean back from case_events.
+                additionalProperties:
+                  oneOf:
+                    - type: string
+                    - type: boolean
+                example:
+                  cs_team: IAM
+              total_cases:
+                type: integer
+                example: 120
+              excluded_cases:
+                type: integer
+                example: 6
+              p95_cutoff_hours:
+                type: number
+                format: float
+                # Null when the sample size is below MIN_SAMPLE_SIZE — in
+                # that case we return the simple average without a P95 cut
+                # (min_sample_met=false) and there is no cutoff to report.
+                nullable: true
+                example: 480.2
+              mttr_hours:
+                type: number
+                format: float
+                example: 210.5
+              simple_avg_hours:
+                type: number
+                format: float
+                example: 230.1
+              min_sample_met:
+                type: boolean
+                example: true
+
+    IngestionLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        batch_id:
+          type: string
+        records_received:
+          type: integer
+        records_inserted:
+          type: integer
+        records_updated:
+          type: integer
+        records_rejected:
+          type: integer
+        rejected_details:
+          type: object
+          nullable: true
+        ingested_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Missing or invalid Authorization header
+
+    ValidationError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Validation failed
+        details:
+          type: array
+          items:
+            type: object
+
+    HistoricalSummaryResponse:
+      type: object
+      properties:
+        case_type:
+          type: string
+          example: Incident
+        group_by:
+          type: string
+          example: team
+        periods:
+          type: array
+          items:
+            type: string
+          example: ["2025-H1", "2025-H2"]
+        series:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: object
+              properties:
+                mttr_hours:
+                  type: number
+                  format: float
+                  example: 210.5
+                simple_avg_hours:
+                  type: number
+                  format: float
+                  example: 230.1
+                total_cases:
+                  type: integer
+                  example: 85
+                min_sample_met:
+                  type: boolean
+                  example: true
+          example:
+            IAM:
+              "2025-H1":
+                mttr_hours: 180.3
+                simple_avg_hours: 200.1
+                total_cases: 45
+                min_sample_met: true
+
+security:
+  - BearerAuth: []

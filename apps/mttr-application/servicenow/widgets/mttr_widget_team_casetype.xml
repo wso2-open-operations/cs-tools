@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: Case Type Based MTTR For ABTs (grouped bar chart)         -->
+    <!-- UI Page Name: mttr_widget_team_casetype                           -->
+    <!-- Bar chart: Incident vs Query MTTR per CS team                     -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_team_casetype">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getTeamCaseTypeMTTR();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-teamct {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #b8d4e3;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-teamct .header {
+            background: #b8d4e3;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-teamct .body { padding: 16px; }
+        .mttr-chart-teamct .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-teamct">
+        <div class="header">Case Type Based MTTR For ABTs - Last 12 Months</div>
+        <div class="body">
+            <div id="chart_team_casetype" style="width:100%;"></div>
+        </div>
+        <div class="footer">
+            Group by Account Integration CS Team &#160;|&#160; Stacked by Case Type
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_team_casetype" style="display:none">${jvar_team_casetype}</textarea>
+
+    <script type="text/javascript">
+    // IIFE scope-guard: `_rtimer`, `_scheduleRedraw`, `drawChart`, and
+    // `noData` are declared with `var`/`function` and would land in the
+    // browser's global scope. Four sibling widgets (patched, non_patched,
+    // priority_trend, team_trend) declare identically-named helpers, so
+    // whichever loads last would overwrite the others. Wrapping the body
+    // in an IIFE keeps every helper closure-scoped; the only intentional
+    // global is `window.__mttrTeamCasetypeState` (needed to tear down
+    // stale listeners across SN re-renders — see the block below).
+    (function () {
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawChart, 100); });
+
+        var _rtimer = null;
+        function _scheduleRedraw() {
+            if (_rtimer) clearTimeout(_rtimer);
+            _rtimer = setTimeout(drawChart, 150);
+        }
+        // Idempotent listener setup — see mttr_widget_hist_inc_priority.xml
+        // for the rationale (SN re-renders re-run this script; naive
+        // addEventListener leaks a handler on every mount).
+        if (window.__mttrTeamCasetypeState) {
+            window.removeEventListener('resize', window.__mttrTeamCasetypeState.resizeHandler);
+            if (window.__mttrTeamCasetypeState.observer) {
+                window.__mttrTeamCasetypeState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedraw);
+        var _obsTeamCasetype = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsTeamCasetype = new ResizeObserver(_scheduleRedraw);
+            _obsTeamCasetype.observe(document.getElementById('chart_team_casetype'));
+        }
+        window.__mttrTeamCasetypeState = { resizeHandler: _scheduleRedraw, observer: _obsTeamCasetype };
+
+        function drawChart() {
+            try {
+                var _el = document.getElementById('chart_team_casetype');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(250, Math.round(_w * 0.55)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_team_casetype').value;
+                if (!raw || raw === 'null' || raw === '[]') { noData(); return; }
+                var teamData = JSON.parse(raw);
+                if (!teamData || teamData.length === 0) { noData(); return; }
+
+                var rows = [['Team', 'Incident', 'Query']];
+                for (var i = 0; teamData.length > i; i++) {
+                    var t = teamData[i];
+                    rows.push([t.team, Math.round(((t.Incident || 0) / 24) * 10) / 10, Math.round(((t.Query || 0) / 24) * 10) / 10]);
+                }
+
+                var data = google.visualization.arrayToDataTable(rows);
+                for (var f = 0; teamData.length > f; f++) {
+                    data.setFormattedValue(f, 1, teamData[f].Incident_display || '');
+                    data.setFormattedValue(f, 2, teamData[f].Query_display || '');
+                }
+                var chart = new google.visualization.ColumnChart(
+                    document.getElementById('chart_team_casetype'));
+                chart.draw(data, {
+                    isStacked: false,
+                    chartArea: { width: '80%', height: '72%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+                    colors: ['#3498db', '#2ecc71'],
+                    backgroundColor: 'transparent',
+                    vAxis: {
+                        title: 'Average Business Duration (Days)',
+                        format: '#.#',
+                        textStyle: { fontSize: 10 },
+                        viewWindow: { min: 0 }
+                    },
+                    hAxis: { textStyle: { fontSize: 10 }, slantedText: true },
+                    tooltip: { textStyle: { fontSize: 11 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_team_casetype error:', e);
+                noData();
+            }
+        }
+
+        function noData() {
+            // DOM-API placeholder — see mttr_widget_team_trend.xml for
+            // the full rationale (escaped-entity innerHTML rendered as
+            // literal text; createElement produces a real p node).
+            var container = document.getElementById('chart_team_casetype');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No data available';
+            container.appendChild(p);
+        }
+    })();
+    </script>
+
+</j:jelly>
