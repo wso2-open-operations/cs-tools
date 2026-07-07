@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -352,6 +353,20 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 	}
 	if req.ActualDurationMin != nil && *req.ActualDurationMin <= 0 {
 		return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "actualDurationMin must be positive"}
+	}
+	// State-specific required fields (mirrors the backing data source's per-state rules).
+	switch req.State {
+	case domain.CallRequestStateScheduled:
+		if req.MeetingDate == nil || strings.TrimSpace(*req.MeetingDate) == "" {
+			return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "meetingDate is required when state is scheduled"}
+		}
+		if req.DurationMinutes == nil {
+			return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "durationInMinutes is required when state is scheduled"}
+		}
+	case domain.CallRequestStateConcluded:
+		if req.Notes == nil || strings.TrimSpace(*req.Notes) == "" {
+			return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "notes is required when state is concluded"}
+		}
 	}
 
 	sysid := uuidToSysid(req.ID)
