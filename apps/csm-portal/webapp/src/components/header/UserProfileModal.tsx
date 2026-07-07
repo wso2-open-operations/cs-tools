@@ -46,8 +46,8 @@ import {
 // E.164 phone validator: leading + required, then country code digit + 7-14 more digits.
 const E164 = /^\+[1-9]\d{7,14}$/;
 
-// Show at most this many group chips inline before collapsing with "+N more".
-const GROUPS_PREVIEW_LIMIT = 4;
+// Show at most this many role chips inline before collapsing with "+N more".
+const ROLES_PREVIEW_LIMIT = 4;
 
 export interface UserProfileModalProps {
   open: boolean;
@@ -149,8 +149,12 @@ export default function UserProfileModal({
     onClose,
   ]);
 
-  const visibleGroups = info.groups.slice(0, GROUPS_PREVIEW_LIMIT);
-  const hiddenGroupCount = info.groups.length - visibleGroups.length;
+  // The platform authorizes off its own data, not IdP claims (Asgardeo groups
+  // are auth-only, not a role list) — so this shows `/users/me`'s `roles`
+  // rather than `claims.groups`.
+  const roles = userMe?.roles ?? [];
+  const visibleRoles = roles.slice(0, ROLES_PREVIEW_LIMIT);
+  const hiddenRoleCount = roles.length - visibleRoles.length;
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -194,10 +198,10 @@ export default function UserProfileModal({
           </Box>
         </Box>
 
-        {info.groups.length > 0 && (
+        {(isLoading || roles.length > 0) && (
           <Box>
             <Typography variant="caption" color="text.secondary">
-              Groups
+              Roles
             </Typography>
             <Box
               sx={{
@@ -207,16 +211,22 @@ export default function UserProfileModal({
                 mt: 0.5,
               }}
             >
-              {visibleGroups.map((g) => (
-                <Chip key={g} size="small" label={g} variant="outlined" />
-              ))}
-              {hiddenGroupCount > 0 && (
-                <Chip
-                  size="small"
-                  label={`+${hiddenGroupCount} more`}
-                  variant="outlined"
-                  color="default"
-                />
+              {isLoading ? (
+                <Skeleton width={160} />
+              ) : (
+                <>
+                  {visibleRoles.map((r) => (
+                    <Chip key={r} size="small" label={r} variant="outlined" />
+                  ))}
+                  {hiddenRoleCount > 0 && (
+                    <Chip
+                      size="small"
+                      label={`+${hiddenRoleCount} more`}
+                      variant="outlined"
+                      color="default"
+                    />
+                  )}
+                </>
               )}
             </Box>
           </Box>
