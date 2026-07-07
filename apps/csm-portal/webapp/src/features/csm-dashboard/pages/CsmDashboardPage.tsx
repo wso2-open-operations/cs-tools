@@ -37,6 +37,13 @@ import {
  * tab+widget model (DashboardsAndReportsProposal.md, entity-service reports
  * DSL) lands. The placeholder dashboards below are kept for that restore.
  */
+// csm-portal-backend has no route for this yet (no `/csm/dashboard` handler
+// registered in cmd/server/main.go), so the call would always 404. Skip it
+// until that backend work lands — the header already renders a graceful
+// "Engineer overview" fallback for the no-data case, same as it would for a
+// real fetch failure, so gating here is a no-op once the endpoint exists.
+const CSM_DASHBOARD_API_IMPLEMENTED = false;
+
 export default function CsmDashboardPage(): JSX.Element {
   // ABT scoping is not implemented yet, so default to (and stay on)
   // all-customers; the My ABT / All customers toggle is disabled in the header.
@@ -47,7 +54,9 @@ export default function CsmDashboardPage(): JSX.Element {
   // Only the engineer-overview header consumes this now; the queue/SLA/customer/
   // activity widgets are hidden, leaving the standalone severity-by-state matrix
   // (CaseCountsMatrix, which loads from its own source) as the only widget.
-  const { data, isError } = useGetCsmDashboard(scope);
+  const { data, isError } = useGetCsmDashboard(scope, {
+    enabled: CSM_DASHBOARD_API_IMPLEMENTED,
+  });
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -57,7 +66,7 @@ export default function CsmDashboardPage(): JSX.Element {
         onScopeChange={setScope}
         dashboardKey={dashboardKey}
         onDashboardChange={setDashboardKey}
-        isError={isError}
+        isError={isError || !CSM_DASHBOARD_API_IMPLEMENTED}
       />
       {dashboardKey === "engineer" ? (
         <>

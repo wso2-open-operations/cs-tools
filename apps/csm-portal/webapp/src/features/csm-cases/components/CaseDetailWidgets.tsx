@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Avatar,
   Box,
   Button,
   Card,
@@ -23,6 +22,7 @@ import {
   CircularProgress,
   IconButton,
   LinearProgress,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -32,10 +32,8 @@ import {
   CheckCircle,
   Clock,
   Download,
-  ExternalLink,
   History,
   Link as LinkIcon,
-  Mail,
   MapPin,
   Paperclip,
   Plus,
@@ -48,21 +46,22 @@ import {
   Users,
 } from "@wso2/oxygen-ui-icons-react";
 import { useRef, type ChangeEvent, type JSX } from "react";
-import { Link as RouterLink } from "react-router";
-import { initialsOf } from "@utils/userClaims";
 import { formatBytes } from "@utils/formatBytes";
 import type {
   CaseAttachment,
   CaseAuditEntry,
   CaseCustomerContext,
-  CaseLinkedItem,
   CaseProductContext,
   CaseTag,
   CaseTimeLogEntry,
-  CaseWatcher,
-  DeploymentCategory,
 } from "@features/csm-cases/types/csmCases";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
+import {
+  deploymentTypeLabel,
+  formatDeploymentDate,
+} from "@features/csm-projects/utils/deployments";
+import type { ProjectDetails } from "@features/csm-projects/types/csmProjects";
+import type { BeDeployment } from "@api/backend/types";
 import RelativeTime from "@components/RelativeTime";
 
 // ---------------------------------------------------------------------------
@@ -74,11 +73,23 @@ interface WidgetCardProps {
   icon?: JSX.Element;
   action?: JSX.Element;
   children: React.ReactNode;
+  /** Greys out the whole card and explains why via a tooltip on the title —
+   * for a widget whose backing feature isn't wired up yet. */
+  disabledReason?: string;
 }
 
-function WidgetCard({ title, icon, action, children }: WidgetCardProps): JSX.Element {
+function WidgetCard({
+  title,
+  icon,
+  action,
+  children,
+  disabledReason,
+}: WidgetCardProps): JSX.Element {
   return (
-    <Card variant="outlined" sx={{ p: 2 }}>
+    <Card
+      variant="outlined"
+      sx={{ p: 2, opacity: disabledReason ? 0.6 : 1 }}
+    >
       <Box
         sx={{
           display: "flex",
@@ -88,13 +99,17 @@ function WidgetCard({ title, icon, action, children }: WidgetCardProps): JSX.Ele
           mb: 1.25,
         }}
       >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-          {icon}
-          <Typography variant="subtitle2">{title}</Typography>
-        </Box>
+        <Tooltip title={disabledReason ?? ""}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            {icon}
+            <Typography variant="subtitle2">{title}</Typography>
+          </Box>
+        </Tooltip>
         {action}
       </Box>
-      {children}
+      <Box sx={disabledReason ? { pointerEvents: "none" } : undefined}>
+        {children}
+      </Box>
     </Card>
   );
 }
@@ -133,10 +148,23 @@ function MetaRow({
 // 1. Customer / Account context
 // ---------------------------------------------------------------------------
 
+/** "cloud_support" -> "cloud support". Matches the plain formatter already
+ * used for the same enum on the project detail page. */
+function formatSubscriptionType(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
 export function CustomerContextWidget({
   ctx,
+  project,
+  isLoadingProject,
 }: {
   ctx: CaseCustomerContext;
+  /** The case's project, via `GET /projects/{id}` — carries the subscription
+   * type/dates plus a fuller account snapshot than the case-detail payload's
+   * embedded `customerContext`. */
+  project?: ProjectDetails | null;
+  isLoadingProject?: boolean;
 }): JSX.Element {
   return (
     <WidgetCard
@@ -155,19 +183,14 @@ export function CustomerContextWidget({
           <strong>{ctx.accountName}</strong>
         </Typography>
       </MetaRow>
-      <MetaRow label="Primary contact">
-        <Box sx={{ display: "flex", flexDirection: "column" }}>
-          <Typography variant="body2">{ctx.primaryContact}</Typography>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
-          >
-            <Mail size={12} />
-            {ctx.primaryContactEmail}
-          </Typography>
-        </Box>
+      <MetaRow label="Account Manager">
+        <Typography variant="body2">{ctx.accountManager}</Typography>
       </MetaRow>
+      {ctx.technicalOwner && (
+        <MetaRow label="Technical Owner">
+          <Typography variant="body2">{ctx.technicalOwner}</Typography>
+        </MetaRow>
+      )}
       <MetaRow label="Region">
         <Typography
           variant="body2"
@@ -177,17 +200,38 @@ export function CustomerContextWidget({
           {ctx.region}
         </Typography>
       </MetaRow>
-      <MetaRow label="Account Manager">
-        <Typography variant="body2">{ctx.accountManager}</Typography>
-      </MetaRow>
-      {ctx.technicalOwner && (
-        <MetaRow label="Technical Owner">
-          <Typography variant="body2">{ctx.technicalOwner}</Typography>
+      {isLoadingProject && (
+        <MetaRow label="Project">
+          <Typography variant="body2" color="text.secondary">
+            Loading…
+          </Typography>
         </MetaRow>
       )}
-      <MetaRow label="Open cases">
-        <Chip size="small" variant="outlined" label={`${ctx.openCases} open`} />
-      </MetaRow>
+      {project && (
+        <>
+          <MetaRow label="Project name">
+            <Typography variant="body2">{project.name}</Typography>
+          </MetaRow>
+          <MetaRow label="Project key">
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+              {project.key}
+            </Typography>
+          </MetaRow>
+          <MetaRow label="Subscription type">
+            <Typography variant="body2" sx={{ textTransform: "capitalize" }}>
+              {formatSubscriptionType(project.subscriptionType)}
+            </Typography>
+          </MetaRow>
+          <MetaRow label="Subscription period">
+            <Typography variant="body2">
+              {formatDeploymentDate(project.startDate)} –{" "}
+              {formatDeploymentDate(project.endDate)}
+            </Typography>
+          </MetaRow>
+          {/* No subscription-status field exists on the project record today
+              (only start/end dates) — omitted rather than inferring one. */}
+        </>
+      )}
     </WidgetCard>
   );
 }
@@ -196,59 +240,40 @@ export function CustomerContextWidget({
 // 2. Product / environment context
 // ---------------------------------------------------------------------------
 
-const ENV_COLOR: Record<
-  CaseProductContext["environment"],
-  "default" | "info" | "warning" | "error"
-> = {
-  dev: "default",
-  qa: "info",
-  staging: "warning",
-  prod: "error",
-};
-
-const DEPLOYMENT_CATEGORY_LABEL: Record<DeploymentCategory, string> = {
-  primary_production: "Primary Production",
-  staging: "Staging",
-  qa: "QA",
-  stress: "Stress",
-  uat: "UAT",
-  development: "Development",
-};
-
 export function ProductContextWidget({
   ctx,
+  liveDeployment,
+  isLoadingLiveDeployment,
 }: {
   ctx: CaseProductContext;
+  /** The case's deployment as returned by `POST /deployments/search`
+   * (looked up by `ctx.deploymentId`) — the live name/type, rather than the
+   * snapshot embedded in the case-detail payload at creation time. */
+  liveDeployment?: BeDeployment | null;
+  isLoadingLiveDeployment?: boolean;
 }): JSX.Element {
-  const categoryLabel = ctx.deploymentCategory
-    ? DEPLOYMENT_CATEGORY_LABEL[ctx.deploymentCategory]
-    : null;
+  const deploymentName = liveDeployment?.name ?? ctx.deployment;
+  const categoryLabel = liveDeployment
+    ? deploymentTypeLabel(liveDeployment.type)
+    : ctx.deploymentCategory
+      ? deploymentTypeLabel(ctx.deploymentCategory)
+      : null;
   return (
     <WidgetCard title="Deployment info" icon={<Server size={16} />}>
       <MetaRow label="Deployment">
-        <Box
-          sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
-        >
-          <Typography variant="body2">
-            <strong>{ctx.deployment}</strong>
-          </Typography>
-          {categoryLabel && (
-            <Chip
-              size="small"
-              variant="outlined"
-              label={categoryLabel}
-              color={ENV_COLOR[ctx.environment]}
-            />
-          )}
-        </Box>
+        <Typography variant="body2">
+          <strong>{isLoadingLiveDeployment ? "Loading…" : deploymentName}</strong>
+        </Typography>
       </MetaRow>
+      {!isLoadingLiveDeployment && categoryLabel && (
+        <MetaRow label="Type">
+          <Typography variant="body2">{categoryLabel}</Typography>
+        </MetaRow>
+      )}
       <MetaRow label="Product">
         <Typography variant="body2">
           <strong>{ctx.product}</strong>
         </Typography>
-      </MetaRow>
-      <MetaRow label="Version">
-        <Typography variant="body2">{ctx.version}</Typography>
       </MetaRow>
       {ctx.updateLevel && (
         <MetaRow label="Update level">
@@ -267,176 +292,7 @@ export function ProductContextWidget({
 }
 
 // ---------------------------------------------------------------------------
-// 4. Watchers
-// ---------------------------------------------------------------------------
-
-const ROLE_LABEL: Record<CaseWatcher["role"], string> = {
-  wso2_engineer: "WSO2",
-  customer_contact: "Customer",
-  manager: "Manager",
-};
-
-export function WatchersWidget({
-  watchers,
-  onAdd,
-}: {
-  watchers: CaseWatcher[];
-  onAdd?: () => void;
-}): JSX.Element {
-  return (
-    <WidgetCard
-      title="Watchers"
-      icon={<Users size={16} />}
-      action={
-        <Button
-          size="small"
-          variant="text"
-          startIcon={<Plus size={14} />}
-          onClick={onAdd}
-        >
-          Add
-        </Button>
-      }
-    >
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-        {watchers.map((w) => (
-          <Box
-            key={w.id}
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1,
-              py: 0.5,
-            }}
-          >
-            <Avatar sx={{ width: 28, height: 28, fontSize: "0.75rem" }}>
-              {initialsOf(w.name)}
-            </Avatar>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="body2" sx={{ lineHeight: 1.2 }}>
-                {w.name} {w.isMe && <em>(you)</em>}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {ROLE_LABEL[w.role]}
-              </Typography>
-            </Box>
-          </Box>
-        ))}
-      </Box>
-    </WidgetCard>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 5. Linked items
-// ---------------------------------------------------------------------------
-
-const LINKED_ICON: Record<CaseLinkedItem["kind"], JSX.Element> = {
-  case: <LinkIcon size={14} />,
-  incident: <TriangleAlert size={14} />,
-  escalation: <ArrowUpRight size={14} />,
-  kb: <Shield size={14} />,
-  cr: <CheckCircle size={14} />,
-  sr: <CheckCircle size={14} />,
-};
-
-const LINKED_LABEL: Record<CaseLinkedItem["kind"], string> = {
-  case: "Case",
-  incident: "Incident",
-  escalation: "Escalation",
-  kb: "KB",
-  cr: "CR",
-  sr: "SR",
-};
-
-export function LinkedItemsWidget({
-  items,
-  onLink,
-}: {
-  items: CaseLinkedItem[];
-  onLink?: () => void;
-}): JSX.Element {
-  return (
-    <WidgetCard
-      title="Linked items"
-      icon={<LinkIcon size={16} />}
-      action={
-        <Button
-          size="small"
-          variant="text"
-          startIcon={<Plus size={14} />}
-          onClick={onLink}
-        >
-          Link
-        </Button>
-      }
-    >
-      {items.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          Nothing linked yet.
-        </Typography>
-      ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
-          {items.map((item) => {
-            const inner = (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1,
-                  p: 0.75,
-                  borderRadius: 1,
-                  border: 1,
-                  borderColor: "divider",
-                  "&:hover": item.href
-                    ? { backgroundColor: "action.hover", cursor: "pointer" }
-                    : undefined,
-                }}
-              >
-                {LINKED_ICON[item.kind]}
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block", lineHeight: 1.1 }}
-                  >
-                    {LINKED_LABEL[item.kind]} · {item.reference} · {item.state}
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      lineHeight: 1.2,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {item.title}
-                  </Typography>
-                </Box>
-                {item.href && <ExternalLink size={14} />}
-              </Box>
-            );
-            return item.href ? (
-              <RouterLink
-                key={item.id}
-                to={item.href}
-                style={{ textDecoration: "none", color: "inherit" }}
-              >
-                {inner}
-              </RouterLink>
-            ) : (
-              <Box key={item.id}>{inner}</Box>
-            );
-          })}
-        </Box>
-      )}
-    </WidgetCard>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 6. Tags
+// 3. Tags
 // ---------------------------------------------------------------------------
 
 export function TagsWidget({
@@ -483,7 +339,7 @@ export function TagsWidget({
 }
 
 // ---------------------------------------------------------------------------
-// 7. Time logs
+// 4. Time logs
 // ---------------------------------------------------------------------------
 
 export function TimeLogsWidget({
@@ -559,7 +415,7 @@ export function TimeLogsWidget({
 }
 
 // ---------------------------------------------------------------------------
-// 7b. Attachments (all files on the case, newest first)
+// 4b. Attachments (all files on the case, newest first)
 // ---------------------------------------------------------------------------
 
 /**
@@ -764,7 +620,7 @@ export function AttachmentsWidget({
 }
 
 // ---------------------------------------------------------------------------
-// 8. Audit timeline (lifecycle events, distinct from comments)
+// 5. Audit timeline (lifecycle events, distinct from comments)
 // ---------------------------------------------------------------------------
 
 const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {

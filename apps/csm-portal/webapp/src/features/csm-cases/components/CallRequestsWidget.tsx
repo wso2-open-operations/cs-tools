@@ -28,7 +28,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Phone, Plus, RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import type { BeCallRequestView, BeCallRequestStateKey } from "@api/backend/types";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import {
@@ -57,6 +57,13 @@ interface CallRequestsWidgetProps {
   caseId: string;
   /** Case severity (S0-S4) — passed to the create dialog to enforce the lead-time rule. */
   severity?: Severity;
+  /** True to pop the "Create call request" dialog from outside the widget
+   * (e.g. the case action bar's "Request a call" item). One-shot: the
+   * widget calls `onAutoOpenCreateHandled` once it has acted on it, so the
+   * caller can drop it back to false — otherwise every remount of this
+   * widget (e.g. just clicking back onto the tab) would reopen the dialog. */
+  autoOpenCreate?: boolean;
+  onAutoOpenCreateHandled?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +73,8 @@ interface CallRequestsWidgetProps {
 export function CallRequestsWidget({
   caseId,
   severity,
+  autoOpenCreate,
+  onAutoOpenCreateHandled,
 }: CallRequestsWidgetProps): JSX.Element {
   // State filter — empty string means "all". Filtering happens server-side
   // via `filters.states` on the search request.
@@ -81,6 +90,14 @@ export function CallRequestsWidget({
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (autoOpenCreate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the dialog open to an external one-shot trigger from the case action bar
+      setCreateOpen(true);
+      onAutoOpenCreateHandled?.();
+    }
+  }, [autoOpenCreate, onAutoOpenCreateHandled]);
 
   // Dialog targets — only one dialog is ever open at a time, driven by which
   // action was clicked on a row.

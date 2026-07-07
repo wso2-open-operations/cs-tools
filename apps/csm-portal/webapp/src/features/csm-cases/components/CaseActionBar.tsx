@@ -41,8 +41,6 @@ import {
   Phone,
   Play,
   Send,
-  ShieldAlert,
-  TriangleAlert,
   User,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
@@ -141,12 +139,37 @@ const DEFAULT_TARGET_CONFIG: TargetConfig = {
   icon: <ArrowRight size={16} />,
 };
 
+// Friendlier verbs for the transition buttons than the raw state name reads
+// as. `work_in_progress` is special-cased in `buttonFor` since its wording
+// (and underlying action) depends on who the case is assigned to.
+const TRANSITION_LABEL: Partial<Record<CaseState, string>> = {
+  solution_proposed: "Propose solution",
+  awaiting_info: "Request information",
+  waiting_on_wso2: "Wait on WSO2",
+  closed: "Close",
+};
+
 /** Build the button for a transition into `target`, labelled by the BE state. */
-function buttonFor(target: CaseState): PrimaryButton {
+function buttonFor(target: CaseState, caseDetail: CsmCaseDetail): PrimaryButton {
+  const config = TARGET_CONFIG[target] ?? DEFAULT_TARGET_CONFIG;
+  if (target === "work_in_progress") {
+    // Moving into Work in progress reads differently depending on whether the
+    // case is already the current engineer's: unassigned/someone-else's case
+    // needs claiming first ("Assign to me"), while an already-own case just
+    // needs its work started ("Start progress"). `onAction` uses the `action`
+    // value (not just the target state) to decide whether to PATCH the
+    // assignee before moving the state.
+    return {
+      targetState: target,
+      ...config,
+      label: caseDetail.assigneeIsMe ? "Start progress" : "Assign to me",
+      action: caseDetail.assigneeIsMe ? "start_work" : "assign_to_me",
+    };
+  }
   return {
     targetState: target,
-    label: stateLabel(target),
-    ...(TARGET_CONFIG[target] ?? DEFAULT_TARGET_CONFIG),
+    label: TRANSITION_LABEL[target] ?? stateLabel(target),
+    ...config,
   };
 }
 
@@ -186,18 +209,18 @@ interface SecondaryItem {
  * The "More" overflow lists state-independent actions on a case. Items here
  * map to documented use cases — see `UseCases.md`:
  *   - Reassign engineer              → ISSU-002 (self-assign generalised)
- *   - Escalate / Severity change     → ISSU-006, ISSU-007
- *   - Hold auto-closure              → ISSU-027
+ *   - Hold auto-closure              → ISSU-027 (only while awaiting info / solution proposed)
  *   - Create incident / link incident → ISSU-021
  *   - Raise Git issue                → ISSU-020
  *   - Create task                    → ISSU-025
- *   - Request a call                 → ISSU-008
+ *   - Request a call                 → ISSU-008 (opens the Call requests tab's create dialog)
  *   - Log time                       → ISSU-017
  *   - Copy case link                 → ISSU-010 (per-comment + per-case permalinks)
  *
  * Intentionally NOT here:
- *   - Watch / unwatch  → managed via the Watchers widget in Details (ISSU-018)
+ *   - Watch / unwatch  → withdrawn along with the Watchers widget (ISSU-018), no backend flow planned yet
  *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
+ *   - Escalate to lead / Request severity change → withdrawn, no backend flow planned yet
  */
 function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const items: SecondaryItem[] = [];
@@ -226,9 +249,17 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const reassignBlocked =
     caseDetail.state === "work_in_progress" && caseDetail.workState === "ongoing";
 
-  // Only "Copy case link" is wired up for now. The rest are disabled until
-  // their backend flows land, so the menu advertises the roadmap without
-  // exposing dead actions that would no-op or toast a mock message.
+  // Hold auto-closure only makes sense while the case is sitting in a state
+  // that's subject to auto-closure (awaiting the customer's response) —
+  // showing it at any other time would offer to hold a closure that isn't
+  // pending.
+  const canHoldAutoClose =
+    caseDetail.state === "awaiting_info" || caseDetail.state === "solution_proposed";
+
+  // Only "Copy case link", "Request a call", and "Log time" are wired up.
+  // The rest are disabled until their backend flows land, so the menu
+  // advertises the roadmap without exposing dead actions that would no-op or
+  // toast a mock message.
   items.push(
     { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
     {
@@ -241,13 +272,13 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
         ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
         : undefined,
     },
-    { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
-    { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },
-    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true },
+    ...(canHoldAutoClose
+      ? [{ key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true }]
+      : []),
     { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true },
     { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true },
     { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
-    { key: "request_call", label: "Request a call…", icon: <Phone size={16} />, disabled: true },
+    { key: "request_call", label: "Request a call…", icon: <Phone size={16} /> },
     { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
   );
@@ -287,7 +318,7 @@ export default function CaseActionBar({
   const targets = caseDetail.nextStates ?? [];
   const lifecycle = [...new Set(targets)]
     .sort((a, b) => orderRank(a) - orderRank(b))
-    .map(buttonFor);
+    .map((target) => buttonFor(target, caseDetail));
   const primary = lifecycle;
   const secondary = buildSecondaryItems(caseDetail);
 
@@ -309,7 +340,20 @@ export default function CaseActionBar({
         justifyContent: { xs: "flex-start", md: "flex-end" },
       }}
     >
-      {primary.length > 0 && (
+      {primary.length === 1 && (
+        // A single reachable state needs no menu — show the transition
+        // itself as one click rather than "Change state" → pick the only item.
+        <Button
+          size="small"
+          variant="contained"
+          color={primary[0].color}
+          startIcon={primary[0].icon}
+          onClick={() => runPrimary(primary[0])}
+        >
+          {primary[0].label}
+        </Button>
+      )}
+      {primary.length > 1 && (
         <>
           <Button
             size="small"
