@@ -481,6 +481,11 @@ export default function CasesFilterBar({
                 options={workStateOptions}
                 onChange={(next) => onChange({ ...filters, workStates: next })}
                 disabled={!filters.states.includes("work_in_progress")}
+                disabledTooltip={
+                  filters.states.includes("work_in_progress")
+                    ? undefined
+                    : `Select the "${STATE_LABEL.work_in_progress}" state to filter by work state`
+                }
               />
             </Grid>
             {showEngagementTypeFilter && (
