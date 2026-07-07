@@ -27,7 +27,7 @@ import {
   Typography,
   Button,
 } from "@wso2/oxygen-ui";
-import { CalendarRange, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
+import { CalendarRange, Download, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useAllTimeCards,
   useApprovalQueue,
@@ -47,6 +47,7 @@ import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 import TimeSheetCard from "@features/csm-timecards/components/TimeSheetCard";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
 import SearchableMultiSelect from "@components/SearchableMultiSelect";
+import { exportTimeCardsCsv } from "@features/csm-timecards/utils/timeCardCsvExport";
 import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
 import type {
   CsmTimeCard,
@@ -140,6 +141,9 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const { showSuccess } = useSuccessBanner();
   const [tab, setTab] = useState<TabId>("mine");
   const activeTab: TabId = tab === "approvals" && !role.isApprover ? "mine" : tab;
+  // Stable per-render so re-renders while the page is open don't shift the
+  // exported filename's date mid-session.
+  const todayStamp = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
 
@@ -335,25 +339,34 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <>
               {(() => {
                 const filtered = byWorkItem(mySheets.data?.sheets) ?? [];
-                if (filtered.length === 0) {
-                  return (
-                    <Empty
-                      text={
-                        anyFilterActive
-                          ? "No time cards match the current filters."
-                          : "No time logged yet. Open a case and use its Time tracking tab to log time."
-                      }
-                    />
-                  );
-                }
-                return filtered.map((s) => (
-                  <TimeSheetCard
-                    key={s.id}
-                    sheet={s}
-                    role={{ isOwner: true, isApprover: false, isAdmin: false }}
-                    onCardAction={handleCardAction}
-                  />
-                ));
+                return (
+                  <>
+                    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                      <ExportCsvButton
+                        cards={filtered.flatMap((s) => s.cards)}
+                        filename={`time-cards-my-sheets-${todayStamp}.csv`}
+                      />
+                    </Box>
+                    {filtered.length === 0 ? (
+                      <Empty
+                        text={
+                          anyFilterActive
+                            ? "No time cards match the current filters."
+                            : "No time logged yet. Open a case and use its Time tracking tab to log time."
+                        }
+                      />
+                    ) : (
+                      filtered.map((s) => (
+                        <TimeSheetCard
+                          key={s.id}
+                          sheet={s}
+                          role={{ isOwner: true, isApprover: false, isAdmin: false }}
+                          onCardAction={handleCardAction}
+                        />
+                      ))
+                    )}
+                  </>
+                );
               })()}
               {/* Pages over raw records, not weekly sheets — a week's cards
                can legitimately span a page boundary and look incomplete
@@ -434,28 +447,37 @@ export default function CsmTimeCardsPage(): JSX.Element {
                   (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
                 );
                 const filtered = byWorkItem(byEngineer) ?? [];
-                if (filtered.length === 0) {
-                  return (
-                    <Empty
-                      text={
-                        filterEngineer.length > 0 && byEngineer.length === 0
-                          ? "No time cards match the selected engineers."
-                          : anyFilterActive
-                            ? "No time cards match the current filters."
-                            : "No time logged yet."
-                      }
-                    />
-                  );
-                }
-                return filtered.map((s) => (
-                  <TimeSheetCard
-                    key={s.id}
-                    sheet={s}
-                    role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
-                    showEngineer
-                    onCardAction={handleCardAction}
-                  />
-                ));
+                return (
+                  <>
+                    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                      <ExportCsvButton
+                        cards={filtered.flatMap((s) => s.cards)}
+                        filename={`time-cards-all-${todayStamp}.csv`}
+                      />
+                    </Box>
+                    {filtered.length === 0 ? (
+                      <Empty
+                        text={
+                          filterEngineer.length > 0 && byEngineer.length === 0
+                            ? "No time cards match the selected engineers."
+                            : anyFilterActive
+                              ? "No time cards match the current filters."
+                              : "No time logged yet."
+                        }
+                      />
+                    ) : (
+                      filtered.map((s) => (
+                        <TimeSheetCard
+                          key={s.id}
+                          sheet={s}
+                          role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
+                          showEngineer
+                          onCardAction={handleCardAction}
+                        />
+                      ))
+                    )}
+                  </>
+                );
               })()}
               <TablePagination
                 component="div"
@@ -526,16 +548,22 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <Typography color="error">Could not load the approval queue.</Typography>
           ) : (
             <>
-              {(queue.data?.sheets ?? []).length === 0 ? (
-                <Empty text="Nothing awaiting approval." />
-              ) : (
-                (() => {
-                  const byEngineer = (queue.data?.sheets ?? []).filter(
-                    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
-                  );
-                  const filtered = byWorkItem(byEngineer) ?? [];
-                  if (filtered.length === 0) {
-                    return (
+              {(() => {
+                const byEngineer = (queue.data?.sheets ?? []).filter(
+                  (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
+                );
+                const filtered = byWorkItem(byEngineer) ?? [];
+                return (
+                  <>
+                    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                      <ExportCsvButton
+                        cards={filtered.flatMap((s) => s.cards)}
+                        filename={`time-cards-approvals-${todayStamp}.csv`}
+                      />
+                    </Box>
+                    {(queue.data?.sheets ?? []).length === 0 ? (
+                      <Empty text="Nothing awaiting approval." />
+                    ) : filtered.length === 0 ? (
                       <Empty
                         text={
                           // Only blame the engineer filter when it's the one that
@@ -546,19 +574,20 @@ export default function CsmTimeCardsPage(): JSX.Element {
                             : "No time cards match the current filters."
                         }
                       />
-                    );
-                  }
-                  return filtered.map((s) => (
-                    <TimeSheetCard
-                      key={s.id}
-                      sheet={s}
-                      role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
-                      showEngineer
-                      onCardAction={handleCardAction}
-                    />
-                  ));
-                })()
-              )}
+                    ) : (
+                      filtered.map((s) => (
+                        <TimeSheetCard
+                          key={s.id}
+                          sheet={s}
+                          role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
+                          showEngineer
+                          onCardAction={handleCardAction}
+                        />
+                      ))
+                    )}
+                  </>
+                );
+              })()}
               <TablePagination
                 component="div"
                 count={queue.data?.total ?? 0}
@@ -841,6 +870,30 @@ function FilterBar({
         </Box>
       )}
     </Box>
+  );
+}
+
+/** Downloads whatever `cards` the caller currently has loaded — a "current
+ * page" export, not a full report (see the pagination notes on
+ * `searchTimeCards` in `useTimeSheets.ts` for why a full-scope export isn't
+ * reliable yet). Disabled when there's nothing to export. */
+function ExportCsvButton({
+  cards,
+  filename,
+}: {
+  cards: CsmTimeCard[];
+  filename: string;
+}): JSX.Element {
+  return (
+    <Button
+      size="small"
+      variant="text"
+      startIcon={<Download size={14} />}
+      disabled={cards.length === 0}
+      onClick={() => exportTimeCardsCsv(cards, filename)}
+    >
+      Export CSV
+    </Button>
   );
 }
 
