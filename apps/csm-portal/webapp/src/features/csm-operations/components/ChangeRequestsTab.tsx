@@ -18,7 +18,6 @@ import {
   Alert,
   Box,
   Chip,
-  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -137,11 +136,11 @@ export default function ChangeRequestsTab(): JSX.Element {
         </Alert>
       )}
 
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Number</TableCell>
                 <TableCell>Subject</TableCell>
                 <TableCell>Project</TableCell>
@@ -155,13 +154,13 @@ export default function ChangeRequestsTab(): JSX.Element {
               {isLoading ? (
                 [0, 1, 2, 3, 4, 5].map((i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={72} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : changeRequests.length === 0 ? (
@@ -230,7 +229,7 @@ export default function ChangeRequestsTab(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
+      </Box>
 
       {isFetching && !isLoading && (
         <Typography variant="caption" color="text.secondary">
