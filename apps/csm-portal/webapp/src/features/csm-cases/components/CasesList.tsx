@@ -109,7 +109,7 @@ export default function CasesList({
               "&:last-of-type": { borderBottom: 0 },
             }}
           >
-            <Skeleton variant="rectangular" height={28} />
+            <Skeleton variant="rounded" height={28} />
           </Box>
         ))}
 

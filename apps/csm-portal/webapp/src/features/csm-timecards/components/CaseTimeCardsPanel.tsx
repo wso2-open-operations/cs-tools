@@ -19,8 +19,8 @@ import {
   Box,
   Button,
   Card,
-  CircularProgress,
   Divider,
+  Skeleton,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Clock, Plus } from "@wso2/oxygen-ui-icons-react";
@@ -130,8 +130,19 @@ export default function CaseTimeCardsPanel({
       )}
 
       {isLoading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
-          <CircularProgress size={22} />
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {[0, 1, 2].map((i) => (
+            <Box
+              key={i}
+              sx={{ p: 1, borderRadius: 1, border: 1, borderColor: "divider" }}
+            >
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                <Skeleton variant="rounded" width="40%" height={20} />
+                <Skeleton variant="rounded" width="20%" height={20} />
+              </Box>
+              <Skeleton variant="rounded" width="25%" height={16} />
+            </Box>
+          ))}
         </Box>
       ) : isError ? (
         <Typography variant="body2" color="error" sx={{ py: 2 }}>

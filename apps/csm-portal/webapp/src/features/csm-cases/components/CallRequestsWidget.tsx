@@ -296,7 +296,7 @@ export function CallRequestsWidget({
         {isLoading && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             {[0, 1, 2].map((i) => (
-              <Skeleton key={i} variant="rectangular" height={64} />
+              <Skeleton key={i} variant="rounded" height={64} />
             ))}
           </Box>
         )}

@@ -225,7 +225,7 @@ export default function CsmCaseCommentBubble({
           }}
         >
           {isImagesLoading ? (
-            <Skeleton variant="rectangular" width="100%" height={120} sx={{ borderRadius: 1 }} />
+            <Skeleton variant="rounded" width="100%" height={120} />
           ) : (
             <Box dangerouslySetInnerHTML={{ __html: resolvedHtml }} />
           )}

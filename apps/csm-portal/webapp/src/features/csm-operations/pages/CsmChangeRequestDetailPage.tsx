@@ -142,8 +142,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <Skeleton variant="rectangular" height={32} width={240} />
-        <Skeleton variant="rectangular" height={260} />
+        <Skeleton variant="rounded" height={32} width={240} />
+        <Skeleton variant="rounded" height={260} />
       </Box>
     );
   }

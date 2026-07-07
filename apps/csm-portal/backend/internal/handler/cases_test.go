@@ -264,15 +264,13 @@ func TestCreateCaseComment(t *testing.T) {
 		assertErrorMessage(t, w, ErrMsgCommentNotAllowed)
 	})
 
-	t.Run("allows work_note in any case state without calling GetCase", func(t *testing.T) {
-		for _, state := range []string{"open", "work_in_progress", "waiting_on_wso2", "awaiting_info", "solution_proposed", "closed"} {
+	t.Run("allows work_note when case is not closed", func(t *testing.T) {
+		for _, state := range []string{"open", "work_in_progress", "waiting_on_wso2", "awaiting_info", "solution_proposed"} {
 			state := state
 			t.Run(state, func(t *testing.T) {
 				t.Parallel()
-				getCalled := false
 				client := &mockEntityCaseClient{
 					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
-						getCalled = true
 						return []byte(`{"state":"` + state + `"}`), nil
 					},
 					createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
@@ -285,11 +283,24 @@ func TestCreateCaseComment(t *testing.T) {
 				w := httptest.NewRecorder()
 				h.CreateCaseComment(w, r)
 				assertStatus(t, w, http.StatusCreated)
-				if getCalled {
-					t.Errorf("GetCase should not be called for work_note")
-				}
 			})
 		}
+	})
+
+	t.Run("blocks work_note on closed case", func(t *testing.T) {
+		t.Parallel()
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"closed"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(`{"type":"work_note","content":"internal note"}`)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgWorkNoteOnClosedCase)
 	})
 
 	t.Run("forwards body to entity and returns response", func(t *testing.T) {
@@ -1161,6 +1172,40 @@ func TestCreateCaseAttachment(t *testing.T) {
 				assertContentType(t, w, "application/json")
 			})
 		}
+	})
+
+	t.Run("blocks attachment upload on closed case", func(t *testing.T) {
+		t.Parallel()
+		casePayload := `{"referenceId":"` + testCaseID + `","referenceType":"case","name":"file.png","type":"image/png","file":"data:image/png;base64,aGVsbG8="}`
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"closed"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(casePayload)))
+		w := httptest.NewRecorder()
+		h.CreateCaseAttachment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgAttachmentOnClosedCase)
+	})
+
+	t.Run("allows attachment upload on open case", func(t *testing.T) {
+		t.Parallel()
+		casePayload := `{"referenceId":"` + testCaseID + `","referenceType":"case","name":"file.png","type":"image/png","file":"data:image/png;base64,aGVsbG8="}`
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"work_in_progress"}`), nil
+			},
+			createCaseAttachmentFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"att-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(casePayload)))
+		w := httptest.NewRecorder()
+		h.CreateCaseAttachment(w, r)
+		assertStatus(t, w, http.StatusCreated)
 	})
 }
 

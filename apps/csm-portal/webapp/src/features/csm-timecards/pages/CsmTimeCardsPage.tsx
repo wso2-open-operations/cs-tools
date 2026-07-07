@@ -17,9 +17,11 @@
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
   Box,
+  Card,
   Chip,
-  CircularProgress,
+  Divider,
   MenuItem,
+  Skeleton,
   Tab,
   Tabs,
   TablePagination,
@@ -343,9 +345,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
            load. The filter bar itself renders regardless, same as Approvals
            below, so it's never hidden behind this spinner. */}
           {mySheets.isLoading || projects.isLoading ? (
-            <Centered>
-              <CircularProgress />
-            </Centered>
+            <TimeSheetCardSkeletons />
           ) : mySheets.isError ? (
             <Typography color="error">Could not load your time sheets.</Typography>
           ) : (
@@ -442,9 +442,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
           />
 
           {allCards.isLoading || projects.isLoading ? (
-            <Centered>
-              <CircularProgress />
-            </Centered>
+            <TimeSheetCardSkeletons />
           ) : allCards.isError ? (
             <Typography color="error">Could not load time cards.</Typography>
           ) : (
@@ -536,9 +534,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
           />
 
           {queue.isLoading || projects.isLoading ? (
-            <Centered>
-              <CircularProgress />
-            </Centered>
+            <TimeSheetCardSkeletons />
           ) : queue.isError ? (
             <Typography color="error">Could not load the approval queue.</Typography>
           ) : (
@@ -882,9 +878,32 @@ function ExportCsvButton({
   );
 }
 
-function Centered({ children }: { children: JSX.Element }): JSX.Element {
+function TimeSheetCardSkeletons(): JSX.Element {
   return (
-    <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>{children}</Box>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {[0, 1, 2].map((i) => (
+        <Card key={i} variant="outlined" sx={{ p: 2 }}>
+          <Box
+            sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}
+          >
+            <Skeleton variant="rounded" width={140} height={20} />
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Skeleton variant="rounded" width={64} height={24} />
+              <Skeleton variant="rounded" width={56} height={24} />
+            </Box>
+          </Box>
+          <Divider sx={{ mb: 1 }} />
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+            {[0, 1].map((j) => (
+              <Box key={j} sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Skeleton variant="rounded" width="55%" height={20} />
+                <Skeleton variant="rounded" width="15%" height={20} />
+              </Box>
+            ))}
+          </Box>
+        </Card>
+      ))}
+    </Box>
   );
 }
 

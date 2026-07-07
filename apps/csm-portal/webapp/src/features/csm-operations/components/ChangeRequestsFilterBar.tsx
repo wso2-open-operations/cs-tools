@@ -223,7 +223,7 @@ export default function ChangeRequestsFilterBar({
         <Button
           variant="outlined"
           size="small"
-          color="inherit"
+          color="primary"
           onClick={onFiltersToggle}
           startIcon={<ListFilter size={16} />}
           endIcon={isFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -234,7 +234,7 @@ export default function ChangeRequestsFilterBar({
           <Button
             variant="text"
             size="small"
-            color="inherit"
+            color="primary"
             onClick={onReset}
             startIcon={<X size={16} />}
           >
