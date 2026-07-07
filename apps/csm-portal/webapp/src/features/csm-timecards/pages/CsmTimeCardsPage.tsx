@@ -282,6 +282,19 @@ export default function CsmTimeCardsPage(): JSX.Element {
     [queue.data],
   );
 
+  // Filtered sheets per tab, computed once and shared between the FilterBar's
+  // export action and the list rendering below — rather than recomputing (and
+  // risking drift) in two places.
+  const mineFilteredSheets = byWorkItem(mySheets.data?.sheets) ?? [];
+  const allByEngineer = (allCards.data?.sheets ?? []).filter(
+    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
+  );
+  const allFilteredSheets = byWorkItem(allByEngineer) ?? [];
+  const approvalsByEngineer = (queue.data?.sheets ?? []).filter(
+    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
+  );
+  const approvalsFilteredSheets = byWorkItem(approvalsByEngineer) ?? [];
+
   return (
     <Box
       sx={{ p: { xs: 2, md: 3 }, display: "flex", flexDirection: "column", gap: 2 }}
@@ -337,37 +350,30 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <Typography color="error">Could not load your time sheets.</Typography>
           ) : (
             <>
-              {(() => {
-                const filtered = byWorkItem(mySheets.data?.sheets) ?? [];
-                return (
-                  <>
-                    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-                      <ExportCsvButton
-                        cards={filtered.flatMap((s) => s.cards)}
-                        filename={`time-cards-my-sheets-${todayStamp}.csv`}
-                      />
-                    </Box>
-                    {filtered.length === 0 ? (
-                      <Empty
-                        text={
-                          anyFilterActive
-                            ? "No time cards match the current filters."
-                            : "No time logged yet. Open a case and use its Time tracking tab to log time."
-                        }
-                      />
-                    ) : (
-                      filtered.map((s) => (
-                        <TimeSheetCard
-                          key={s.id}
-                          sheet={s}
-                          role={{ isOwner: true, isApprover: false, isAdmin: false }}
-                          onCardAction={handleCardAction}
-                        />
-                      ))
-                    )}
-                  </>
-                );
-              })()}
+              <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                <ExportCsvButton
+                  cards={mineFilteredSheets.flatMap((s) => s.cards)}
+                  filename={`time-cards-my-sheets-${todayStamp}.csv`}
+                />
+              </Box>
+              {mineFilteredSheets.length === 0 ? (
+                <Empty
+                  text={
+                    anyFilterActive
+                      ? "No time cards match the current filters."
+                      : "No time logged yet. Open a case and use its Time tracking tab to log time."
+                  }
+                />
+              ) : (
+                mineFilteredSheets.map((s) => (
+                  <TimeSheetCard
+                    key={s.id}
+                    sheet={s}
+                    role={{ isOwner: true, isApprover: false, isAdmin: false }}
+                    onCardAction={handleCardAction}
+                  />
+                ))
+              )}
               {/* Pages over raw records, not weekly sheets — a week's cards
                can legitimately span a page boundary and look incomplete
                until you've paged further; same for "my cards" being a small
@@ -409,8 +415,9 @@ export default function CsmTimeCardsPage(): JSX.Element {
             filterTo={filterTo}
             setFilterTo={handleFilterToChange}
             onClear={clearFilters}
+            compact
             engineerSlot={
-              <Box sx={{ width: 200 }}>
+              <Box sx={{ width: 170 }}>
                 <SearchableMultiSelect
                   id="timecards-filter-engineer-all"
                   label="Engineer"
@@ -442,43 +449,33 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <Typography color="error">Could not load time cards.</Typography>
           ) : (
             <>
-              {(() => {
-                const byEngineer = (allCards.data?.sheets ?? []).filter(
-                  (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
-                );
-                const filtered = byWorkItem(byEngineer) ?? [];
-                return (
-                  <>
-                    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-                      <ExportCsvButton
-                        cards={filtered.flatMap((s) => s.cards)}
-                        filename={`time-cards-all-${todayStamp}.csv`}
-                      />
-                    </Box>
-                    {filtered.length === 0 ? (
-                      <Empty
-                        text={
-                          filterEngineer.length > 0 && byEngineer.length === 0
-                            ? "No time cards match the selected engineers."
-                            : anyFilterActive
-                              ? "No time cards match the current filters."
-                              : "No time logged yet."
-                        }
-                      />
-                    ) : (
-                      filtered.map((s) => (
-                        <TimeSheetCard
-                          key={s.id}
-                          sheet={s}
-                          role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
-                          showEngineer
-                          onCardAction={handleCardAction}
-                        />
-                      ))
-                    )}
-                  </>
-                );
-              })()}
+              <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                <ExportCsvButton
+                  cards={allFilteredSheets.flatMap((s) => s.cards)}
+                  filename={`time-cards-all-${todayStamp}.csv`}
+                />
+              </Box>
+              {allFilteredSheets.length === 0 ? (
+                <Empty
+                  text={
+                    filterEngineer.length > 0 && allByEngineer.length === 0
+                      ? "No time cards match the selected engineers."
+                      : anyFilterActive
+                        ? "No time cards match the current filters."
+                        : "No time logged yet."
+                  }
+                />
+              ) : (
+                allFilteredSheets.map((s) => (
+                  <TimeSheetCard
+                    key={s.id}
+                    sheet={s}
+                    role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
+                    showEngineer
+                    onCardAction={handleCardAction}
+                  />
+                ))
+              )}
               <TablePagination
                 component="div"
                 count={allCards.data?.total ?? 0}
@@ -498,8 +495,6 @@ export default function CsmTimeCardsPage(): JSX.Element {
       {/* Approvals */}
       {activeTab === "approvals" && role.isApprover && (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Typography variant="subtitle2">Submitted for your approval</Typography>
-
           <FilterBar
             projects={projects.data ?? []}
             filterProject={filterProject}
@@ -548,46 +543,36 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <Typography color="error">Could not load the approval queue.</Typography>
           ) : (
             <>
-              {(() => {
-                const byEngineer = (queue.data?.sheets ?? []).filter(
-                  (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
-                );
-                const filtered = byWorkItem(byEngineer) ?? [];
-                return (
-                  <>
-                    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-                      <ExportCsvButton
-                        cards={filtered.flatMap((s) => s.cards)}
-                        filename={`time-cards-approvals-${todayStamp}.csv`}
-                      />
-                    </Box>
-                    {(queue.data?.sheets ?? []).length === 0 ? (
-                      <Empty text="Nothing awaiting approval." />
-                    ) : filtered.length === 0 ? (
-                      <Empty
-                        text={
-                          // Only blame the engineer filter when it's the one that
-                          // excluded everything — if it matched fine and the
-                          // work-item filter emptied the result, say that instead.
-                          filterEngineer.length > 0 && byEngineer.length === 0
-                            ? "No time cards match the selected engineers."
-                            : "No time cards match the current filters."
-                        }
-                      />
-                    ) : (
-                      filtered.map((s) => (
-                        <TimeSheetCard
-                          key={s.id}
-                          sheet={s}
-                          role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
-                          showEngineer
-                          onCardAction={handleCardAction}
-                        />
-                      ))
-                    )}
-                  </>
-                );
-              })()}
+              <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                <ExportCsvButton
+                  cards={approvalsFilteredSheets.flatMap((s) => s.cards)}
+                  filename={`time-cards-approvals-${todayStamp}.csv`}
+                />
+              </Box>
+              {(queue.data?.sheets ?? []).length === 0 ? (
+                <Empty text="Nothing awaiting approval." />
+              ) : approvalsFilteredSheets.length === 0 ? (
+                <Empty
+                  text={
+                    // Only blame the engineer filter when it's the one that
+                    // excluded everything — if it matched fine and the
+                    // work-item filter emptied the result, say that instead.
+                    filterEngineer.length > 0 && approvalsByEngineer.length === 0
+                      ? "No time cards match the selected engineers."
+                      : "No time cards match the current filters."
+                  }
+                />
+              ) : (
+                approvalsFilteredSheets.map((s) => (
+                  <TimeSheetCard
+                    key={s.id}
+                    sheet={s}
+                    role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
+                    showEngineer
+                    onCardAction={handleCardAction}
+                  />
+                ))
+              )}
               <TablePagination
                 component="div"
                 count={queue.data?.total ?? 0}
@@ -661,6 +646,7 @@ function FilterBar({
   engineerSlot,
   engineerChip,
   hideStateFilter,
+  compact,
 }: {
   projects: BeProject[];
   filterProject: string[];
@@ -685,6 +671,10 @@ function FilterBar({
    * `useApprovalQueue`), so the State control can't actually narrow anything
    * there — hide it instead of showing a filter that silently does nothing. */
   hideStateFilter?: boolean;
+  /** Narrower field widths — only the All tab shows every filter (Project,
+   * Work item, Engineer, State) plus the date range at once, so it's the
+   * only one that needs the squeeze to still fit on one line. */
+  compact?: boolean;
 }): JSX.Element {
   const activeChips: { key: string; label: string; onDelete: () => void }[] = [];
   if (engineerChip) activeChips.push({ key: "engineer", ...engineerChip });
@@ -731,67 +721,61 @@ function FilterBar({
         overflow: "hidden",
       }}
     >
-      {/* Controls — a fixed two-row layout rather than one row that wraps
-       unpredictably: which controls land on row two would otherwise depend
-       on viewport width, and a single item stranding itself alone on a new
-       row (with a lot of empty space next to it) reads as broken overflow
-       rather than a deliberate section. Row one is the entity filters, row
-       two is always the date range, regardless of width. */}
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, px: 2, py: 1.5 }}>
-        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
-            <ListFilter size={16} />
-            <Typography variant="caption" fontWeight={600} color="text.secondary">
-              Filters
-            </Typography>
-          </Box>
-
-          <Box sx={{ width: 220 }}>
-            <SearchableMultiSelect
-              id="timecards-filter-project"
-              label="Project"
-              placeholder="Search projects…"
-              values={filterProject}
-              options={projects.map((p) => p.id)}
-              formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
-              onChange={setFilterProject}
-            />
-          </Box>
-
-          <Box sx={{ width: 220 }}>
-            <SearchableMultiSelect
-              id="timecards-filter-work-item"
-              label="Work item"
-              placeholder="Search work items…"
-              values={filterWorkItem}
-              options={workItemOptions}
-              onChange={setFilterWorkItem}
-            />
-          </Box>
-
-          {engineerSlot}
-
-          {!hideStateFilter && (
-            <TextField
-              select
-              size="small"
-              label="State"
-              value={filterState}
-              onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
-              sx={{ width: 150 }}
-            >
-              <MenuItem value="">All states</MenuItem>
-              {FILTER_STATES.map((s) => (
-                <MenuItem key={s} value={s}>
-                  {TIME_CARD_STATE_META[s].label}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
+      {/* Controls — a single row that wraps only if the viewport genuinely
+       can't fit everything. The date range is one grouped pill (not two
+       separate fields) so it wraps as a unit rather than splitting apart
+       mid-pair if it ever does need to drop to a second line. */}
+      <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5, px: 2, py: 1.5 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
+          <ListFilter size={16} />
+          <Typography variant="caption" fontWeight={600} color="text.secondary">
+            Filters
+          </Typography>
         </Box>
 
-        {/* One grouped pill instead of two separate outlined fields — reads
-         as a single "date range" control, always on its own row. */}
+        <Box sx={{ width: compact ? 170 : 220 }}>
+          <SearchableMultiSelect
+            id="timecards-filter-project"
+            label="Project"
+            placeholder="Search projects…"
+            values={filterProject}
+            options={projects.map((p) => p.id)}
+            formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
+            onChange={setFilterProject}
+          />
+        </Box>
+
+        <Box sx={{ width: compact ? 170 : 220 }}>
+          <SearchableMultiSelect
+            id="timecards-filter-work-item"
+            label="Work item"
+            placeholder="Search work items…"
+            values={filterWorkItem}
+            options={workItemOptions}
+            onChange={setFilterWorkItem}
+          />
+        </Box>
+
+        {engineerSlot}
+
+        {!hideStateFilter && (
+          <TextField
+            select
+            size="small"
+            label="State"
+            value={filterState}
+            onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+            sx={{ width: compact ? 120 : 150 }}
+          >
+            <MenuItem value="">All states</MenuItem>
+            {FILTER_STATES.map((s) => (
+              <MenuItem key={s} value={s}>
+                {TIME_CARD_STATE_META[s].label}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
+
         <Box
           sx={{
             display: "flex",
@@ -800,6 +784,7 @@ function FilterBar({
             width: "fit-content",
             height: 40,
             px: 1.25,
+            ml: 1,
             border: 1,
             borderColor: "divider",
             borderRadius: 1,
