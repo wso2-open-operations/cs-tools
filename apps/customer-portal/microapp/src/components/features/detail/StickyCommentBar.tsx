@@ -53,7 +53,7 @@ export function StickyCommentBar({
     onSend();
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (submitOnEnter && event.key === "Enter" && hasContent) {
       event.preventDefault();
       send();

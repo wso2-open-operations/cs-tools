@@ -61,7 +61,7 @@ export const RichTextBase = styled(Box)(({ theme }) => ({
     filter: "invert(1) hue-rotate(180deg) brightness(0.88)",
     "& *": { backgroundColor: "transparent !important" },
     "& pre": { backgroundColor: "#ececec !important", color: "#000 !important" },
-    "& img": { filter: "invert(1) hue-rotate(180deg) brightness(1.136)" }
+    "& img": { filter: "invert(1) hue-rotate(180deg) brightness(1.136)" },
   }),
 =======
   "& img": { width: "100%" },

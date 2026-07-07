@@ -57,7 +57,7 @@ export default function ChatDetailPage() {
       if (!id) {
         return Promise.reject(new Error("Conversation ID is not available"));
       }
-      return chats.send(projectId, id).mutationFn!(body);
+      return chats.send(projectId, id).mutationFn!(body, { client: queryClient, meta: undefined });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: chats.comments(id!).queryKey });
@@ -85,7 +85,7 @@ export default function ChatDetailPage() {
     );
 
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [comments]);
+  }, [comments, format]);
 
   const ref = useRef<HTMLSpanElement>(null);
   const [overlineSlotVariant, setOverlineSlotVariant] = useState<"normal" | "shrunk">("normal");
@@ -111,15 +111,17 @@ export default function ChatDetailPage() {
     return () => observer.unobserve(element);
   }, []);
 
+  const { setTitleOverride } = layout;
+
   useLayoutEffect(() => {
-    layout.setTitleOverride(
+    setTitleOverride(
       <OverlineSlot variant={overlineSlotVariant} type="chat" id={data?.number} title={data?.description} />,
     );
 
     return () => {
-      layout.setTitleOverride(undefined);
+      setTitleOverride(undefined);
     };
-  }, [data, overlineSlotVariant]);
+  }, [data, overlineSlotVariant, setTitleOverride]);
 
   return (
     <>

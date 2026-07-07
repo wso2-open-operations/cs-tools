@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, type Variants } from "framer-motion";
 import { IconButton, Skeleton, Stack, Tooltip, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { Check, Copy } from "@wso2/oxygen-ui-icons-react";
@@ -40,7 +40,7 @@ export function OverlineSlot({
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleCopy = async (value: string) => {
     try {
