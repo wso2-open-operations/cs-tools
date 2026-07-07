@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Checkbox, Chip, ListItemText, TextField } from "@wso2/oxygen-ui";
+import { Autocomplete, Box, Checkbox, Chip, ListItemText, TextField, Tooltip } from "@wso2/oxygen-ui";
 import type * as React from "react";
 import type { JSX } from "react";
 
@@ -25,6 +25,13 @@ export interface MultiSelectFieldProps<T extends string> {
   options: { value: T; label: string }[];
   onChange: (next: T[]) => void;
   disabled?: boolean;
+  /**
+   * Explains why the field is disabled. Shown as a hover tooltip; ignored
+   * when `disabled` is false. A disabled MUI control has `pointer-events:
+   * none`, so the tooltip is anchored to a wrapping `<span>` rather than the
+   * `Autocomplete` itself.
+   */
+  disabledTooltip?: string;
 }
 
 /**
@@ -41,9 +48,10 @@ export default function MultiSelectField<T extends string>({
   options,
   onChange,
   disabled,
+  disabledTooltip,
 }: MultiSelectFieldProps<T>): JSX.Element {
   const selected = options.filter((o) => values.includes(o.value));
-  return (
+  const field = (
     <Autocomplete<{ value: T; label: string }, true>
       multiple
       size="small"
@@ -85,5 +93,15 @@ export default function MultiSelectField<T extends string>({
         />
       )}
     />
+  );
+
+  if (!disabled || !disabledTooltip) return field;
+
+  return (
+    <Tooltip title={disabledTooltip}>
+      <Box component="span" sx={{ display: "block" }}>
+        {field}
+      </Box>
+    </Tooltip>
   );
 }

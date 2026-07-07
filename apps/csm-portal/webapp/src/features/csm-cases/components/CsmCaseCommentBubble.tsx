@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Avatar, Box, Chip, Paper, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
@@ -23,6 +23,7 @@ import { pickAccessibleText } from "@utils/contrastText";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
+import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
 import type {
   CsmCaseComment,
   CsmCommentAuthorRole,
@@ -64,6 +65,8 @@ export default function CsmCaseCommentBubble({
       ),
     [comment.bodyHtml, isBot],
   );
+  const { resolvedHtml, isLoading: isImagesLoading } =
+    useResolvedInlineImageHtml(safeHtml);
   const isSystem = comment.authorRole === "system";
 
   if (isSystem) {
@@ -81,18 +84,22 @@ export default function CsmCaseCommentBubble({
         }}
       >
         <SemanticChip role="warning" label="System" />
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            overflowWrap: "anywhere",
-            wordBreak: "break-word",
-            "& p": { m: 0 },
-            "& a": { color: "primary.main" },
-            ...{ "& *": { fontSize: "0.875rem" } },
-          }}
-          dangerouslySetInnerHTML={{ __html: safeHtml }}
-        />
+        {isImagesLoading ? (
+          <Skeleton variant="text" width="40%" sx={{ flex: 1 }} />
+        ) : (
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+              "& p": { m: 0 },
+              "& a": { color: "primary.main" },
+              ...{ "& *": { fontSize: "0.875rem" } },
+            }}
+            dangerouslySetInnerHTML={{ __html: resolvedHtml }}
+          />
+        )}
         <Typography variant="caption" color="text.secondary">
           <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
         </Typography>
@@ -216,8 +223,13 @@ export default function CsmCaseCommentBubble({
             },
             "& th": { bgcolor: "action.hover", fontWeight: 600 },
           }}
-          dangerouslySetInnerHTML={{ __html: safeHtml }}
-        />
+        >
+          {isImagesLoading ? (
+            <Skeleton variant="rectangular" width="100%" height={120} sx={{ borderRadius: 1 }} />
+          ) : (
+            <Box dangerouslySetInnerHTML={{ __html: resolvedHtml }} />
+          )}
+        </Box>
       </Paper>
     </Box>
   );
