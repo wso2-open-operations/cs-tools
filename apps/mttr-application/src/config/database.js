@@ -46,6 +46,15 @@ const connectionPool = new Pool({
     max: applicationConfig.db.max,
     idleTimeoutMillis: applicationConfig.db.idleTimeoutMillis,
     connectionTimeoutMillis: applicationConfig.db.connectionTimeoutMillis,
+    // Sets `statement_timeout` on every session pg-node opens against
+    // Postgres. Any query that runs past this deadline is cancelled
+    // server-side and the client returns to the pool — prevents a
+    // pathologically slow query (or a stuck one) from leaking a client
+    // for the full idle window. Applies to every path (aggregation,
+    // retention, ingestion, health), so the value must sit above any
+    // legitimate query duration. See src/config/index.js for the
+    // rationale on the default (2 min).
+    statement_timeout: applicationConfig.db.statementTimeoutMillis,
 });
 
 // `error` is fired for idle clients that disconnect unexpectedly (e.g. the

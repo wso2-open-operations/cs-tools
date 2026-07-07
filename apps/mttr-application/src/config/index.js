@@ -59,6 +59,19 @@ const applicationConfig = {
         // the checkout. Guards against requests hanging indefinitely when
         // the DB is unreachable — instead they fast-fail and surface a 5xx.
         connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECT_MS, 10) || 10000,
+        // Postgres-side per-query deadline (SET statement_timeout). Any
+        // query that runs longer than this is cancelled server-side and
+        // the client returns to the pool. Prevents a genuinely stuck
+        // query (Postgres pathology, lock wait, network stall) from
+        // leaking a pool client for the full server-side idle window.
+        // The health handler additionally races on the JS side with a
+        // 3s ceiling for a fast 503, but that alone doesn't cancel the
+        // orphaned pg promise — this server-side deadline does.
+        //
+        // 2 min is generous vs. every legitimate MTTR query (aggregation
+        // ~10s, retention ~30s per full run under the maintenance lock).
+        // Raise if the workload ever grows past that; env-driven.
+        statementTimeoutMillis: parseInt(process.env.DB_STATEMENT_TIMEOUT_MS, 10) || 120000,
     },
 
     // ── OAuth 2.0 / JWT authentication settings ─────────────────────────

@@ -34,11 +34,16 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// Whole-handler ceiling. Choreo readiness probes fire every few seconds
-// and Docker HEALTHCHECK every 30s; both need a fast answer. If the DB
-// hangs mid-query (pool client alive but server-side stuck) we want to
-// surface a 503 in a bounded time rather than exhausting probe timeout.
-// Covers all five queries collectively via Promise.race below.
+// Layered protection against a stuck DB:
+//   1. This Promise.race gives the caller a 503 in ≤ 3s regardless of
+//      whether pg-node resolves — Choreo readiness probes fire every
+//      few seconds and can't wait longer.
+//   2. Pool-wide `statement_timeout` (configured on the pg pool — see
+//      src/config/database.js) actually CANCELS the underlying query
+//      server-side after DB_STATEMENT_TIMEOUT_MS (default 2 min), so
+//      the pool client comes back instead of leaking for the full
+//      idle window. Without (2), the Promise.race would return a
+//      fast 503 but leave the orphaned query hogging a pool client.
 const HEALTH_QUERY_TIMEOUT_MS = 3000;
 
 function timeoutAfter(ms, label) {
