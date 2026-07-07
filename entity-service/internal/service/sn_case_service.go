@@ -757,11 +757,20 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 }
 
 type snUpdateCasePayload struct {
-	StateKey      *int     `json:"stateKey,omitempty"`
-	SeverityKey   *int     `json:"severityKey,omitempty"`
-	WorkStateKey  *int     `json:"workStateKey,omitempty"`
-	WatchList     []string `json:"watchList,omitempty"`
-	AssigneeEmail *string  `json:"assigneeEmail,omitempty"`
+	StateKey       *int     `json:"stateKey,omitempty"`
+	SeverityKey    *int     `json:"severityKey,omitempty"`
+	WorkStateKey   *int     `json:"workStateKey,omitempty"`
+	WatchList      []string `json:"watchList,omitempty"`
+	AssigneeEmail  *string  `json:"assigneeEmail,omitempty"`
+	ResolutionCode *int     `json:"resolutionCode,omitempty"`
+	Cause          *string  `json:"cause,omitempty"`
+	CloseNotes     *string  `json:"closeNotes,omitempty"`
+}
+
+// snResolutionStates are the state keys that allow resolution fields.
+var snResolutionStates = map[int]bool{
+	3: true, // closed
+	6: true, // solution_proposed
 }
 
 // snWorkStateIDMap maps domain CaseWorkState enums to SN numeric work state IDs.
@@ -773,13 +782,13 @@ var snWorkStateIDMap = map[domain.CaseWorkState]int{
 type snUpdateCaseResponse struct {
 	Message string `json:"message"`
 	Case    struct {
-		ID        string       `json:"id"`
-		UpdatedOn string       `json:"updatedOn"`
-		UpdatedBy string       `json:"updatedBy"`
-		State     *snCaseState `json:"state"`
-		Severity  *snCaseLabel `json:"severity"`
-		WorkState *snCaseLabel `json:"workState"`
-		WatchList []struct {
+		ID             string       `json:"id"`
+		UpdatedOn      string       `json:"updatedOn"`
+		UpdatedBy      string       `json:"updatedBy"`
+		State          *snCaseState `json:"state"`
+		Severity       *snCaseLabel `json:"severity"`
+		WorkState      *snCaseLabel `json:"workState"`
+		WatchList      []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
 			Name     string `json:"name"`
@@ -789,6 +798,16 @@ type snUpdateCaseResponse struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"assignedTo"`
+		ResolutionCode *struct {
+			ID    json.Number `json:"id"`
+			Label string      `json:"label"`
+		} `json:"resolutionCode"`
+		Cause *struct {
+			ID    string `json:"id"`
+			Label string `json:"label"`
+		} `json:"cause"`
+		CloseNotes *string `json:"closeNotes"`
+		ResolvedAt *string `json:"resolvedAt"`
 	} `json:"case"`
 }
 
@@ -796,6 +815,8 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
+
+	hasResolutionFields := req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil
 
 	fieldCount := 0
 	if req.State != nil {
@@ -819,6 +840,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if fieldCount > 1 {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, workState, watchList, or assigneeEmail may be provided per request"}
 	}
+	if hasResolutionFields && req.State == nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is also provided"}
+	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
@@ -835,6 +859,12 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state " + string(*req.State) + " is not supported by ServiceNow"}
 		}
 		payload.StateKey = &id
+		if hasResolutionFields && !snResolutionStates[id] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is closed or solution_proposed"}
+		}
+		payload.ResolutionCode = req.ResolutionCode
+		payload.Cause = req.Cause
+		payload.CloseNotes = req.CloseNotes
 	}
 	if req.Severity != nil {
 		if !validCaseSeverity[*req.Severity] {
@@ -914,6 +944,20 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			})
 		}
 		resp.Case.WatchList = wl
+	}
+	if snResp.Case.ResolutionCode != nil {
+		resp.Case.ResolutionCode = &domain.CaseLabelRef{ID: snResp.Case.ResolutionCode.ID.String(), Label: snResp.Case.ResolutionCode.Label}
+	}
+	if snResp.Case.Cause != nil {
+		resp.Case.Cause = &domain.CaseLabelRef{ID: snResp.Case.Cause.ID, Label: snResp.Case.Cause.Label}
+	}
+	resp.Case.CloseNotes = snResp.Case.CloseNotes
+	if snResp.Case.ResolvedAt != nil {
+		resolvedAt, err := time.Parse(snCreatedOnLayout, *snResp.Case.ResolvedAt)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse resolvedAt %q: %w", *snResp.Case.ResolvedAt, err)
+		}
+		resp.Case.ResolvedAt = &resolvedAt
 	}
 
 	return resp, nil

@@ -917,13 +917,18 @@ type SearchCasesResponse struct {
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
 // Exactly one of State, Severity, WorkState, WatchList, or AssigneeEmail must be provided.
 // WatchList and AssigneeEmail are only supported for the ServiceNow data source.
+// ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
+// State is closed or solution_proposed.
 type UpdateCaseRequest struct {
-	ID            string         `json:"-"`
-	State         *CaseState     `json:"state"`
-	Severity      *CaseSeverity  `json:"severity"`
-	WorkState     *CaseWorkState `json:"workState"`
-	WatchList     []string       `json:"watchList"`
-	AssigneeEmail *string        `json:"assigneeEmail"`
+	ID             string         `json:"-"`
+	State          *CaseState     `json:"state"`
+	Severity       *CaseSeverity  `json:"severity"`
+	WorkState      *CaseWorkState `json:"workState"`
+	WatchList      []string       `json:"watchList"`
+	AssigneeEmail  *string        `json:"assigneeEmail"`
+	ResolutionCode *int           `json:"resolutionCode"`
+	Cause          *string        `json:"cause"`
+	CloseNotes     *string        `json:"closeNotes"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -932,16 +937,26 @@ type UpdateCaseResponse struct {
 	Case    UpdatedCase `json:"case"`
 }
 
+// CaseLabelRef is a generic id/label pair returned by ServiceNow for choice-list fields.
+type CaseLabelRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
 // UpdatedCase carries the fields of a case that may change after an update.
 type UpdatedCase struct {
-	ID         string               `json:"id"`
-	UpdatedOn  time.Time            `json:"updatedOn"`
-	UpdatedBy  string               `json:"updatedBy,omitempty"`
-	State      CaseState            `json:"state,omitempty"`
-	Severity   CaseSeverity         `json:"severity,omitempty"`
-	WorkState  *CaseWorkState       `json:"workState"`
-	WatchList  []WatchListUser      `json:"watchList,omitempty"`
-	AssignedTo *AssignedEngineerRef `json:"assignedTo,omitempty"`
+	ID             string               `json:"id"`
+	UpdatedOn      time.Time            `json:"updatedOn"`
+	UpdatedBy      string               `json:"updatedBy,omitempty"`
+	State          CaseState            `json:"state,omitempty"`
+	Severity       CaseSeverity         `json:"severity,omitempty"`
+	WorkState      *CaseWorkState       `json:"workState"`
+	WatchList      []WatchListUser      `json:"watchList,omitempty"`
+	AssignedTo     *AssignedEngineerRef `json:"assignedTo,omitempty"`
+	ResolutionCode *CaseLabelRef        `json:"resolutionCode,omitempty"`
+	Cause          *CaseLabelRef        `json:"cause,omitempty"`
+	CloseNotes     *string              `json:"closeNotes,omitempty"`
+	ResolvedAt     *time.Time           `json:"resolvedAt,omitempty"`
 }
 
 // WatchListUser is a compact user reference within the watch list.

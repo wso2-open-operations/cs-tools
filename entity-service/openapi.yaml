@@ -2645,6 +2645,8 @@ components:
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+        `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
+        `state` when the state is `closed` or `solution_proposed`.
       oneOf:
         - required: [state]
         - required: [severity]
@@ -2674,6 +2676,15 @@ components:
           type: string
           format: email
           description: Email of the engineer to assign to this case (ServiceNow only).
+        resolutionCode:
+          type: integer
+          description: Resolution code key. Only allowed when state is closed or solution_proposed.
+        cause:
+          type: string
+          description: Cause description. Only allowed when state is closed or solution_proposed.
+        closeNotes:
+          type: string
+          description: Close notes. Only allowed when state is closed or solution_proposed.
 
     UpdateCaseResponse:
       type: object
@@ -2715,6 +2726,36 @@ components:
         assignedTo:
           nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
+        resolutionCode:
+          nullable: true
+          description: Resolution code, present when the case was closed or solution proposed.
+          allOf:
+            - $ref: '#/components/schemas/CaseLabelRef'
+        cause:
+          nullable: true
+          description: Cause, present when the case was closed or solution proposed.
+          allOf:
+            - $ref: '#/components/schemas/CaseLabelRef'
+        closeNotes:
+          type: string
+          nullable: true
+          description: Close notes, present when the case was closed or solution proposed.
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was resolved, present when state is closed or solution_proposed.
+
+    CaseLabelRef:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          description: Internal identifier for the choice-list value.
+        label:
+          type: string
+          description: Human-readable label for the choice-list value.
 
     WatchListUser:
       type: object
