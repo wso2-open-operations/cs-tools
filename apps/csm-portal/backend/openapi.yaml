@@ -5211,7 +5211,7 @@ components:
           description: Optional action items from the call (free text).
         actualDurationMin:
           type: integer
-          minimum: 0
+          minimum: 1
           description: Optional actual call duration in minutes.
 
     UpdateCallRequestResponse:
