@@ -32,6 +32,7 @@ import type {
   BeDeleteAttachmentResponse,
 } from "@api/backend/types";
 import { uiAttachmentFromBe } from "@api/backend/mappers";
+import { saveBlob } from "@utils/saveBlob";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 
 /**
@@ -60,18 +61,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
       reject(reader.error ?? new Error("Failed to read the file."));
     reader.readAsDataURL(file);
   });
-}
-
-/** Trigger a browser "save as" for a fetched blob. */
-function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 /**
