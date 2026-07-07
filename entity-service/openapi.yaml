@@ -1063,7 +1063,12 @@ paths:
   /call-requests/{id}:
     patch:
       summary: Update a call request (supported by the backing data source only).
-      description: The target state selects the behaviour: customer/agent state transitions, scheduling (with meetingDate, durationInMinutes, assignee), rejection or cancellation (with cancellationReason), or conclusion with post-call notes (notes, plan, attendees, actionItems, actualDurationMin).
+      description: >
+        The target state selects the behaviour: customer/agent state
+        transitions, scheduling (with meetingDate, durationInMinutes,
+        assignee), rejection or cancellation (with cancellationReason), or
+        conclusion with post-call notes (notes, plan, attendees, actionItems,
+        actualDurationMin).
       operationId: updateCallRequest
       parameters:
         - name: id
