@@ -83,6 +83,8 @@ import {
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
 import { useGetCsmCaseCallRequests } from "@features/csm-cases/api/useCsmCaseCallRequests";
+import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
+import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { CaseSlaTable } from "@features/csm-cases/components/CaseSlaTable";
 import { useGetCsmCaseSlas } from "@features/csm-cases/api/useGetCsmCaseSlas";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
@@ -299,6 +301,22 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // when its tab mounts, deduped against this one by react-query's cache.
   const { data: slaList } = useGetCsmCaseSlas(caseId);
   const { data: callRequests } = useGetCsmCaseCallRequests(caseId);
+  // Live deployment lookup for the Details tab's "Deployment info" widget —
+  // only runs when the case actually has a deployment link (SN-sourced cases
+  // may have none). Reuses the project's deployment list rather than a
+  // single-deployment GET, since the backend has no `/deployments/{id}` route.
+  const { data: projectDeployments, isLoading: isProjectDeploymentsLoading } =
+    useSearchDeployments(
+      data?.productContext.deploymentId ? data.projectId : undefined,
+    );
+  const liveDeployment = projectDeployments?.find(
+    (d) => d.id === data?.productContext.deploymentId,
+  );
+  // Richer account/project facts for the Customer card, beyond what's
+  // embedded in the case-detail payload's `customerContext` snapshot.
+  const { data: caseProject, isLoading: isCaseProjectLoading } = useGetProject(
+    data?.projectId,
+  );
   const patchCase = usePatchCsmCase(caseId);
   const patchCaseById = usePatchCsmCaseById();
   const findMyOngoingCases = useFindMyOngoingCases();
@@ -428,13 +446,42 @@ export default function CsmCaseDetailPage(): JSX.Element {
     });
   }, [data, recordView]);
 
+  // Resolve the single-active-case rule once the engineer's other ongoing
+  // cases are already known: mark THIS case ongoing if there are none, or
+  // prompt to pause the others first (handled in onConfirmStartWork). Shared
+  // by `startWork` (after moving to Work in progress) and the resume-work
+  // path in `onAction` (case is already Work in progress, just un-pausing).
+  const resolveOngoingConflict = useCallback(
+    async (
+      others: MyOngoingCase[],
+      successMessage: string,
+      successSeverity: FeedbackSeverity,
+    ) => {
+      if (others.length > 0) {
+        setPauseConflict(others);
+        return;
+      }
+      try {
+        await patchCase.mutateAsync({ workState: "ongoing" });
+      } catch (err) {
+        showError("Could not mark the case ongoing. Please try again.", err);
+        return;
+      }
+      setFeedback({
+        message: successMessage,
+        severity: successSeverity,
+        sticky: true,
+      });
+    },
+    [patchCase, showError],
+  );
+
   // Starting work: enforce the single-active-case rule.
   // 1) look up the engineer's other ongoing cases (abort on failure — we
   //    must not transition without knowing), 2) move this case to
-  // work_in_progress, 3) if none ongoing → mark this one ongoing; if some
-  // exist → ask before pausing them (handled in onConfirmStartWork). Shared
-  // by the "Start progress" transition and the "Assign to me" shortcut,
-  // which also puts the case into progress once the assignment lands.
+  // work_in_progress, 3) resolve via `resolveOngoingConflict`. Shared by the
+  // "Start progress" transition and the "Assign to me" shortcut, which also
+  // puts the case into progress once the assignment lands.
   const startWork = useCallback(
     async (successMessage: string, successSeverity: FeedbackSeverity) => {
       if (!data) return;
@@ -460,28 +507,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
         );
         return;
       }
-      if (others.length === 0) {
-        // No competing case → make this the active (ongoing) one.
-        try {
-          await patchCase.mutateAsync({ workState: "ongoing" });
-        } catch (err) {
-          showError(
-            "Moved to Work in progress, but could not mark it ongoing.",
-            err,
-          );
-          return;
-        }
-        setFeedback({
-          message: successMessage,
-          severity: successSeverity,
-          sticky: true,
-        });
-        return;
-      }
-      // Others are ongoing → confirm before pausing them.
-      setPauseConflict(others);
+      await resolveOngoingConflict(others, successMessage, successSeverity);
     },
-    [data, findMyOngoingCases, patchCase, showError],
+    [data, findMyOngoingCases, patchCase, showError, resolveOngoingConflict],
   );
 
   const onAction = useCallback(
@@ -501,8 +529,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
         // "Assign to me" on the Change-state button: the case isn't the
         // engineer's yet, so claim it (PATCH assigneeEmail) before starting
         // work — a plain state PATCH would move it to Work in progress
-        // without ever making it the clicking engineer's case.
-        if (action === "assign_to_me" && data && currentUserEmail) {
+        // without ever making it the clicking engineer's case. Guarded on its
+        // own (not folded into the generic work_in_progress branch below) so
+        // a missing email surfaces an error instead of silently starting work
+        // on a case that was never actually assigned.
+        if (action === "assign_to_me" && data) {
+          if (!currentUserEmail) {
+            showError("Could not assign the case to you: no signed-in email found.");
+            return;
+          }
           patchCase.mutate(
             { assigneeEmail: currentUserEmail },
             {
@@ -603,24 +638,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             );
             return;
           }
-          if (others.length === 0) {
-            try {
-              await patchCase.mutateAsync({ workState: "ongoing" });
-            } catch (err) {
-              showError(
-                "Could not resume work on this case. Please try again.",
-                err,
-              );
-              return;
-            }
-            setFeedback({
-              message: "Resumed work on this case.",
-              severity: "info",
-              sticky: true,
-            });
-            return;
-          }
-          setPauseConflict(others);
+          await resolveOngoingConflict(others, "Resumed work on this case.", "info");
         })();
         return;
       }
@@ -687,6 +705,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
       findMyOngoingCases,
       detailPath,
       startWork,
+      resolveOngoingConflict,
       currentUserEmail,
     ],
   );
@@ -1262,22 +1281,29 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <RelativeTime iso={c.updatedAt} />
                 </Typography>
               </MetaCell>
-              <MetaCell label="Assignment group (ABT)">
-                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                  {c.assignmentGroup}
-                </Typography>
-              </MetaCell>
             </Box>
           </Card>
-          <CustomerContextWidget ctx={c.customerContext} />
-          <ProductContextWidget ctx={c.productContext} />
+          <CustomerContextWidget
+            ctx={c.customerContext}
+            project={caseProject}
+            isLoadingProject={isCaseProjectLoading}
+          />
+          <ProductContextWidget
+            ctx={c.productContext}
+            liveDeployment={liveDeployment}
+            isLoadingLiveDeployment={
+              !!c.productContext.deploymentId && isProjectDeploymentsLoading
+            }
+          />
           <WatchersWidget
             watchers={c.watchers}
             onAdd={() => onAction({ secondary: "manage_watchers" })}
+            disabled
           />
           <LinkedItemsWidget
             items={c.linkedItems}
             onLink={() => onAction({ secondary: "link_case" })}
+            disabled
           />
         </Box>
       )}

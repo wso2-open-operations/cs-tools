@@ -66,9 +66,18 @@ if (typeof window !== "undefined") {
     }
     if (!alreadyReloaded) window.location.reload();
   };
-  window.addEventListener("vite:preloadError", reloadForNewBuild);
+  window.addEventListener("vite:preloadError", (event) => {
+    // Vite rethrows the preload failure unless we mark it handled here.
+    event.preventDefault();
+    reloadForNewBuild();
+  });
+  // Match every browser's wording for a failed dynamic import: Chrome/Edge
+  // ("Failed to fetch dynamically imported module"), Firefox ("error loading
+  // dynamically imported module"), and Safari ("Importing a module script
+  // failed").
+  const DYNAMIC_IMPORT_FAILURE = /fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i;
   window.addEventListener("unhandledrejection", (event) => {
-    if (/Failed to fetch dynamically imported module/.test(String(event.reason))) {
+    if (DYNAMIC_IMPORT_FAILURE.test(String(event.reason))) {
       reloadForNewBuild();
     }
   });

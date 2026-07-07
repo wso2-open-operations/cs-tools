@@ -29,6 +29,10 @@ import type {
  */
 export function useGetCsmDashboard(
   scope: DashboardScope,
+  options?: {
+    /** Pass `false` to skip the fetch entirely (no backend route yet). */
+    enabled?: boolean;
+  },
 ): UseQueryResult<CsmAbtDashboardData, Error> {
   const authFetch = useAuthApiClient();
 
@@ -49,6 +53,7 @@ export function useGetCsmDashboard(
       }
       return (await response.json()) as CsmAbtDashboardData;
     },
+    enabled: options?.enabled ?? true,
     staleTime: 30_000,
   });
 }

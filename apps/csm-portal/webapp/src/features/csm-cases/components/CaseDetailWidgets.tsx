@@ -23,6 +23,7 @@ import {
   CircularProgress,
   IconButton,
   LinearProgress,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -60,9 +61,14 @@ import type {
   CaseTag,
   CaseTimeLogEntry,
   CaseWatcher,
-  DeploymentCategory,
 } from "@features/csm-cases/types/csmCases";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
+import {
+  deploymentTypeLabel,
+  formatDeploymentDate,
+} from "@features/csm-projects/utils/deployments";
+import type { ProjectDetails } from "@features/csm-projects/types/csmProjects";
+import type { BeDeployment } from "@api/backend/types";
 import RelativeTime from "@components/RelativeTime";
 
 // ---------------------------------------------------------------------------
@@ -74,11 +80,23 @@ interface WidgetCardProps {
   icon?: JSX.Element;
   action?: JSX.Element;
   children: React.ReactNode;
+  /** Greys out the whole card and explains why via a tooltip on the title —
+   * for a widget whose backing feature isn't wired up yet. */
+  disabledReason?: string;
 }
 
-function WidgetCard({ title, icon, action, children }: WidgetCardProps): JSX.Element {
+function WidgetCard({
+  title,
+  icon,
+  action,
+  children,
+  disabledReason,
+}: WidgetCardProps): JSX.Element {
   return (
-    <Card variant="outlined" sx={{ p: 2 }}>
+    <Card
+      variant="outlined"
+      sx={{ p: 2, opacity: disabledReason ? 0.6 : 1 }}
+    >
       <Box
         sx={{
           display: "flex",
@@ -88,13 +106,17 @@ function WidgetCard({ title, icon, action, children }: WidgetCardProps): JSX.Ele
           mb: 1.25,
         }}
       >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-          {icon}
-          <Typography variant="subtitle2">{title}</Typography>
-        </Box>
+        <Tooltip title={disabledReason ?? ""}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            {icon}
+            <Typography variant="subtitle2">{title}</Typography>
+          </Box>
+        </Tooltip>
         {action}
       </Box>
-      {children}
+      <Box sx={disabledReason ? { pointerEvents: "none" } : undefined}>
+        {children}
+      </Box>
     </Card>
   );
 }
@@ -133,10 +155,23 @@ function MetaRow({
 // 1. Customer / Account context
 // ---------------------------------------------------------------------------
 
+/** "cloud_support" -> "cloud support". Matches the plain formatter already
+ * used for the same enum on the project detail page. */
+function formatSubscriptionType(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
 export function CustomerContextWidget({
   ctx,
+  project,
+  isLoadingProject,
 }: {
   ctx: CaseCustomerContext;
+  /** The case's project, via `GET /projects/{id}` — carries the subscription
+   * type/dates plus a fuller account snapshot than the case-detail payload's
+   * embedded `customerContext`. */
+  project?: ProjectDetails | null;
+  isLoadingProject?: boolean;
 }): JSX.Element {
   return (
     <WidgetCard
@@ -185,9 +220,40 @@ export function CustomerContextWidget({
           <Typography variant="body2">{ctx.technicalOwner}</Typography>
         </MetaRow>
       )}
-      <MetaRow label="Open cases">
-        <Chip size="small" variant="outlined" label={`${ctx.openCases} open`} />
-      </MetaRow>
+      {isLoadingProject && (
+        <MetaRow label="Project">
+          <Typography variant="body2" color="text.secondary">
+            Loading…
+          </Typography>
+        </MetaRow>
+      )}
+      {project && (
+        <>
+          <MetaRow label="Subscription">
+            <Typography variant="body2" sx={{ textTransform: "capitalize" }}>
+              {formatSubscriptionType(project.subscriptionType)}
+            </Typography>
+          </MetaRow>
+          <MetaRow label="Project key">
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+              {project.key}
+            </Typography>
+          </MetaRow>
+          <MetaRow label="Subscription period">
+            <Typography variant="body2">
+              {formatDeploymentDate(project.startDate)} –{" "}
+              {formatDeploymentDate(project.endDate)}
+            </Typography>
+          </MetaRow>
+          {project.account.activationDate && (
+            <MetaRow label="Account since">
+              <Typography variant="body2">
+                {formatDeploymentDate(project.account.activationDate)}
+              </Typography>
+            </MetaRow>
+          )}
+        </>
+      )}
     </WidgetCard>
   );
 }
@@ -206,23 +272,24 @@ const ENV_COLOR: Record<
   prod: "error",
 };
 
-const DEPLOYMENT_CATEGORY_LABEL: Record<DeploymentCategory, string> = {
-  primary_production: "Primary Production",
-  staging: "Staging",
-  qa: "QA",
-  stress: "Stress",
-  uat: "UAT",
-  development: "Development",
-};
-
 export function ProductContextWidget({
   ctx,
+  liveDeployment,
+  isLoadingLiveDeployment,
 }: {
   ctx: CaseProductContext;
+  /** The case's deployment as returned by `POST /deployments/search`
+   * (looked up by `ctx.deploymentId`) — the live name/type, rather than the
+   * snapshot embedded in the case-detail payload at creation time. */
+  liveDeployment?: BeDeployment | null;
+  isLoadingLiveDeployment?: boolean;
 }): JSX.Element {
-  const categoryLabel = ctx.deploymentCategory
-    ? DEPLOYMENT_CATEGORY_LABEL[ctx.deploymentCategory]
-    : null;
+  const deploymentName = liveDeployment?.name ?? ctx.deployment;
+  const categoryLabel = liveDeployment
+    ? deploymentTypeLabel(liveDeployment.type)
+    : ctx.deploymentCategory
+      ? deploymentTypeLabel(ctx.deploymentCategory)
+      : null;
   return (
     <WidgetCard title="Deployment info" icon={<Server size={16} />}>
       <MetaRow label="Deployment">
@@ -230,9 +297,11 @@ export function ProductContextWidget({
           sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
         >
           <Typography variant="body2">
-            <strong>{ctx.deployment}</strong>
+            <strong>
+              {isLoadingLiveDeployment ? "Loading…" : deploymentName}
+            </strong>
           </Typography>
-          {categoryLabel && (
+          {categoryLabel && !isLoadingLiveDeployment && (
             <Chip
               size="small"
               variant="outlined"
@@ -279,20 +348,25 @@ const ROLE_LABEL: Record<CaseWatcher["role"], string> = {
 export function WatchersWidget({
   watchers,
   onAdd,
+  disabled,
 }: {
   watchers: CaseWatcher[];
   onAdd?: () => void;
+  /** True while watcher management isn't wired up yet. */
+  disabled?: boolean;
 }): JSX.Element {
   return (
     <WidgetCard
       title="Watchers"
       icon={<Users size={16} />}
+      disabledReason={disabled ? "Watcher management isn't available yet." : undefined}
       action={
         <Button
           size="small"
           variant="text"
           startIcon={<Plus size={14} />}
           onClick={onAdd}
+          disabled={disabled}
         >
           Add
         </Button>
@@ -352,20 +426,25 @@ const LINKED_LABEL: Record<CaseLinkedItem["kind"], string> = {
 export function LinkedItemsWidget({
   items,
   onLink,
+  disabled,
 }: {
   items: CaseLinkedItem[];
   onLink?: () => void;
+  /** True while linking cases/incidents isn't wired up yet. */
+  disabled?: boolean;
 }): JSX.Element {
   return (
     <WidgetCard
       title="Linked items"
       icon={<LinkIcon size={16} />}
+      disabledReason={disabled ? "Linking items isn't available yet." : undefined}
       action={
         <Button
           size="small"
           variant="text"
           startIcon={<Plus size={14} />}
           onClick={onLink}
+          disabled={disabled}
         >
           Link
         </Button>

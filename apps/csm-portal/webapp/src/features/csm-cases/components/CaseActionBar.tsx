@@ -339,7 +339,20 @@ export default function CaseActionBar({
         justifyContent: { xs: "flex-start", md: "flex-end" },
       }}
     >
-      {primary.length > 0 && (
+      {primary.length === 1 && (
+        // A single reachable state needs no menu — show the transition
+        // itself as one click rather than "Change state" → pick the only item.
+        <Button
+          size="small"
+          variant="contained"
+          color={primary[0].color}
+          startIcon={primary[0].icon}
+          onClick={() => runPrimary(primary[0])}
+        >
+          {primary[0].label}
+        </Button>
+      )}
+      {primary.length > 1 && (
         <>
           <Button
             size="small"
