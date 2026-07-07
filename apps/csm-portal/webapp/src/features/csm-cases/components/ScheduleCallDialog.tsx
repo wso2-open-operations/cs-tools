@@ -209,6 +209,9 @@ export function ScheduleCallDialog({
               required
               size="small"
               disabled={submitting}
+              // datetime-local always shows a placeholder, so force the label to
+              // float up — otherwise it overlaps the mm/dd/yyyy placeholder.
+              InputLabelProps={{ shrink: true }}
               error={
                 (selectedTime === CUSTOM_TIME_VALUE && !!customTime && !customTimeValid) ||
                 pastError
