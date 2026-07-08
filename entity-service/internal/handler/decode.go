@@ -94,6 +94,7 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		sue *apierror.ServiceUnavailableError
 		ue  *apierror.UnauthorizedError
 		fe  *apierror.ForbiddenError
+		ce  *apierror.ConflictError
 	)
 	switch {
 	case errors.As(err, &ve):
@@ -115,6 +116,11 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		// 404 – resource not found; message is safe to return.
 		log.Printf("Not found: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(nfe.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusNotFound, nfe.Msg)
+
+	case errors.As(err, &ce):
+		// 409 – request conflicts with the current state of the resource; message is safe to return.
+		log.Printf("Conflict: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ce.Msg)) // #nosec G706 -- path and message sanitized
+		apierror.WriteJSON(w, http.StatusConflict, ce.Msg)
 
 	case errors.As(err, &sue):
 		// 503 – downstream dependency unavailable; log details, return generic message.
