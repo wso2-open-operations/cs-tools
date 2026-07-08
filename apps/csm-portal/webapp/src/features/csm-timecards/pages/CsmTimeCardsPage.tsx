@@ -18,9 +18,10 @@ import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
   Box,
   Card,
-  Chip,
   Divider,
+  Grid,
   MenuItem,
+  Paper,
   Skeleton,
   Tab,
   Tabs,
@@ -29,7 +30,7 @@ import {
   Typography,
   Button,
 } from "@wso2/oxygen-ui";
-import { CalendarRange, Download, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, ChevronUp, Download, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useAllTimeCards,
   useApprovalQueue,
@@ -84,25 +85,6 @@ function workItemOptionsFrom(sheets: CsmTimeSheet[] | undefined): string[] {
 const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
 const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
-
-/** Strips the native date input's own chrome so it blends into the grouped
- * pill it sits in, rather than looking like a bare HTML form control.
- * `colorScheme: "light dark"` lets the browser render its calendar icon
- * for whichever of light/dark actually applies, instead of always dark. */
-const dateInputSx = {
-  border: "none",
-  outline: "none",
-  background: "none",
-  font: "inherit",
-  fontSize: "0.8125rem",
-  color: "inherit",
-  colorScheme: "light dark",
-  width: 108,
-  "&::-webkit-calendar-picker-indicator": {
-    cursor: "pointer",
-    opacity: 0.7,
-  },
-};
 
 /** Page + rows-per-page state for one tab's `TablePagination`, following the
  * same shape/convention as `CsmUsersPage.tsx` and friends. Each tab gets its
@@ -415,30 +397,18 @@ export default function CsmTimeCardsPage(): JSX.Element {
             filterTo={filterTo}
             setFilterTo={handleFilterToChange}
             onClear={clearFilters}
-            compact
             engineerSlot={
-              <Box sx={{ width: 170 }}>
-                <SearchableMultiSelect
-                  id="timecards-filter-engineer-all"
-                  label="Engineer"
-                  placeholder="Search engineers…"
-                  values={filterEngineer}
-                  options={allEngineerOptions.ids}
-                  formatOption={(id) => allEngineerOptions.nameById.get(id) ?? id}
-                  onChange={setFilterEngineer}
-                />
-              </Box>
+              <SearchableMultiSelect
+                id="timecards-filter-engineer-all"
+                label="Engineer"
+                placeholder="Search engineers…"
+                values={filterEngineer}
+                options={allEngineerOptions.ids}
+                formatOption={(id) => allEngineerOptions.nameById.get(id) ?? id}
+                onChange={setFilterEngineer}
+              />
             }
-            engineerChip={
-              filterEngineer.length > 0
-                ? {
-                    label: `Engineer: ${filterEngineer
-                      .map((id) => allEngineerOptions.nameById.get(id) ?? id)
-                      .join(", ")}`,
-                    onDelete: () => setFilterEngineer([]),
-                  }
-                : undefined
-            }
+            engineerActive={filterEngineer.length > 0}
           />
 
           {allCards.isLoading || projects.isLoading ? (
@@ -509,28 +479,17 @@ export default function CsmTimeCardsPage(): JSX.Element {
             onClear={clearFilters}
             hideStateFilter
             engineerSlot={
-              <Box sx={{ width: 200 }}>
-                <SearchableMultiSelect
-                  id="timecards-filter-engineer-approvals"
-                  label="Engineer"
-                  placeholder="Search engineers…"
-                  values={filterEngineer}
-                  options={approvalsEngineerOptions.ids}
-                  formatOption={(id) => approvalsEngineerOptions.nameById.get(id) ?? id}
-                  onChange={setFilterEngineer}
-                />
-              </Box>
+              <SearchableMultiSelect
+                id="timecards-filter-engineer-approvals"
+                label="Engineer"
+                placeholder="Search engineers…"
+                values={filterEngineer}
+                options={approvalsEngineerOptions.ids}
+                formatOption={(id) => approvalsEngineerOptions.nameById.get(id) ?? id}
+                onChange={setFilterEngineer}
+              />
             }
-            engineerChip={
-              filterEngineer.length > 0
-                ? {
-                    label: `Engineer: ${filterEngineer
-                      .map((id) => approvalsEngineerOptions.nameById.get(id) ?? id)
-                      .join(", ")}`,
-                    onDelete: () => setFilterEngineer([]),
-                  }
-                : undefined
-            }
+            engineerActive={filterEngineer.length > 0}
           />
 
           {queue.isLoading || projects.isLoading ? (
@@ -624,7 +583,14 @@ export default function CsmTimeCardsPage(): JSX.Element {
  * "processed" exist in the backend's enum but nothing here can produce them. */
 const FILTER_STATES: TimeCardState[] = ["submitted", "approved", "rejected"];
 
-/** Shared filter bar for the My time sheets, All, and Approvals tabs. */
+/**
+ * Shared filter bar for the My time sheets, All, and Approvals tabs.
+ * Matches the Paper + collapsible-Grid shape used by `CasesFilterBar` and
+ * `ChangeRequestsFilterBar` (toggle button with an active count, a "Clear
+ * filters" button, a responsive Grid of fields, an "N filters active"
+ * caption) instead of a bespoke always-open single-row layout, so time cards
+ * doesn't look and behave differently from every other list page's filters.
+ */
 function FilterBar({
   projects,
   filterProject,
@@ -640,9 +606,8 @@ function FilterBar({
   setFilterTo,
   onClear,
   engineerSlot,
-  engineerChip,
+  engineerActive,
   hideStateFilter,
-  compact,
 }: {
   projects: BeProject[];
   filterProject: string[];
@@ -661,196 +626,136 @@ function FilterBar({
   setFilterTo: (v: string) => void;
   onClear: () => void;
   engineerSlot?: JSX.Element;
-  /** Active-chip for the Engineer filter — only the All/Approvals tabs have one. */
-  engineerChip?: { label: string; onDelete: () => void };
+  /** Whether the Engineer filter (only on the All/Approvals tabs) is active —
+   * counted alongside the other fields for the toggle button's badge. */
+  engineerActive?: boolean;
   /** Approvals always forces `states: ["submitted"]` server-side (see
    * `useApprovalQueue`), so the State control can't actually narrow anything
    * there — hide it instead of showing a filter that silently does nothing. */
   hideStateFilter?: boolean;
-  /** Narrower field widths — only the All tab shows every filter (Project,
-   * Work item, Engineer, State) plus the date range at once, so it's the
-   * only one that needs the squeeze to still fit on one line. */
-  compact?: boolean;
 }): JSX.Element {
-  const activeChips: { key: string; label: string; onDelete: () => void }[] = [];
-  if (engineerChip) activeChips.push({ key: "engineer", ...engineerChip });
-  if (filterProject.length > 0) {
-    const names = filterProject.map((id) => projects.find((p) => p.id === id)?.name ?? id);
-    activeChips.push({
-      key: "project",
-      label: `Project: ${names.join(", ")}`,
-      onDelete: () => setFilterProject([]),
-    });
-  }
-  if (filterWorkItem.length > 0) {
-    activeChips.push({
-      key: "workItem",
-      label: `Work item: ${filterWorkItem.join(", ")}`,
-      onDelete: () => setFilterWorkItem([]),
-    });
-  }
-  if (!hideStateFilter && filterState) {
-    activeChips.push({
-      key: "state",
-      label: `State: ${TIME_CARD_STATE_META[filterState].label}`,
-      onDelete: () => setFilterState(""),
-    });
-  }
-  if (filterFrom || filterTo) {
-    activeChips.push({
-      key: "dateRange",
-      label: `Date: ${filterFrom || "…"} to ${filterTo || "…"}`,
-      onDelete: () => {
-        setFilterFrom("");
-        setFilterTo("");
-      },
-    });
-  }
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+
+  const activeCount =
+    (filterProject.length > 0 ? 1 : 0) +
+    (filterWorkItem.length > 0 ? 1 : 0) +
+    (engineerActive ? 1 : 0) +
+    (!hideStateFilter && filterState ? 1 : 0) +
+    (filterFrom || filterTo ? 1 : 0);
+  const hasActive = activeCount > 0;
 
   return (
-    <Box
-      sx={{
-        border: 1,
-        borderColor: "divider",
-        borderRadius: 2,
-        bgcolor: "background.paper",
-        overflow: "hidden",
-      }}
-    >
-      {/* Controls — a single row that wraps only if the viewport genuinely
-       can't fit everything. The date range is one grouped pill (not two
-       separate fields) so it wraps as a unit rather than splitting apart
-       mid-pair if it ever does need to drop to a second line. */}
-      <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5, px: 2, py: 1.5 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
-          <ListFilter size={16} />
-          <Typography variant="caption" fontWeight={600} color="text.secondary">
-            Filters
-          </Typography>
-        </Box>
-
-        <Box sx={{ width: compact ? 170 : 220 }}>
-          <SearchableMultiSelect
-            id="timecards-filter-project"
-            label="Project"
-            placeholder="Search projects…"
-            values={filterProject}
-            options={projects.map((p) => p.id)}
-            formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
-            onChange={setFilterProject}
-          />
-        </Box>
-
-        <Box sx={{ width: compact ? 170 : 220 }}>
-          <SearchableMultiSelect
-            id="timecards-filter-work-item"
-            label="Work item"
-            placeholder="Search work items…"
-            values={filterWorkItem}
-            options={workItemOptions}
-            onChange={setFilterWorkItem}
-          />
-        </Box>
-
-        {engineerSlot}
-
-        {!hideStateFilter && (
-          <TextField
-            select
-            size="small"
-            label="State"
-            value={filterState}
-            onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
-            sx={{ width: compact ? 120 : 150 }}
-          >
-            <MenuItem value="">All states</MenuItem>
-            {FILTER_STATES.map((s) => (
-              <MenuItem key={s} value={s}>
-                {TIME_CARD_STATE_META[s].label}
-              </MenuItem>
-            ))}
-          </TextField>
-        )}
-
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 0.75,
-            width: "fit-content",
-            height: 40,
-            px: 1.25,
-            ml: 1,
-            border: 1,
-            borderColor: "divider",
-            borderRadius: 1,
-            color: "text.secondary",
-          }}
+    <Paper sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+        <Button
+          variant="outlined"
+          size="small"
+          color="primary"
+          onClick={() => setIsFiltersOpen((v) => !v)}
+          startIcon={<ListFilter size={16} />}
+          endIcon={isFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         >
-          <CalendarRange size={15} style={{ flexShrink: 0, opacity: 0.7 }} />
-          <Box
-            component="input"
-            type="date"
-            aria-label="From date"
-            value={filterFrom}
-            max={filterTo || undefined}
-            onChange={(e) => setFilterFrom(e.target.value)}
-            sx={dateInputSx}
-          />
-          <Typography variant="body2" color="text.disabled">
-            –
-          </Typography>
-          <Box
-            component="input"
-            type="date"
-            aria-label="To date"
-            value={filterTo}
-            min={filterFrom || undefined}
-            onChange={(e) => setFilterTo(e.target.value)}
-            sx={dateInputSx}
-          />
-        </Box>
+          {hasActive ? `Filters (${activeCount})` : "Filters"}
+        </Button>
+        {hasActive && (
+          <Button
+            variant="text"
+            size="small"
+            color="primary"
+            onClick={onClear}
+            startIcon={<X size={16} />}
+          >
+            Clear filters
+          </Button>
+        )}
       </Box>
 
-      {/* Active filter chips */}
-      {activeChips.length > 0 && (
-        <Box
-          sx={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 0.75,
-            px: 2,
-            py: 1,
-            borderTop: 1,
-            borderColor: "divider",
-            bgcolor: "action.hover",
-          }}
-        >
-          <Typography variant="caption" color="text.disabled" sx={{ mr: 0.5 }}>
-            Active:
-          </Typography>
-          {activeChips.map((c) => (
-            <Chip
-              key={c.key}
-              label={c.label}
-              size="small"
-              onDelete={c.onDelete}
-              deleteIcon={<X size={12} />}
-              sx={{ height: 22, fontSize: "0.72rem" }}
-            />
-          ))}
-          <Button
-            size="small"
-            variant="text"
-            onClick={onClear}
-            sx={{ ml: 0.5, fontSize: "0.72rem", py: 0, minHeight: 0 }}
-          >
-            Clear all
-          </Button>
-        </Box>
+      {isFiltersOpen && (
+        <>
+          <Divider />
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <SearchableMultiSelect
+                id="timecards-filter-project"
+                label="Project"
+                placeholder="Search projects…"
+                values={filterProject}
+                options={projects.map((p) => p.id)}
+                formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
+                onChange={setFilterProject}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <SearchableMultiSelect
+                id="timecards-filter-work-item"
+                label="Work item"
+                placeholder="Search work items…"
+                values={filterWorkItem}
+                options={workItemOptions}
+                onChange={setFilterWorkItem}
+              />
+            </Grid>
+            {engineerSlot && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>{engineerSlot}</Grid>
+            )}
+            {!hideStateFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <TextField
+                  select
+                  fullWidth
+                  size="small"
+                  label="State"
+                  value={filterState}
+                  onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+                >
+                  <MenuItem value="">All states</MenuItem>
+                  {FILTER_STATES.map((s) => (
+                    <MenuItem key={s} value={s}>
+                      {TIME_CARD_STATE_META[s].label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+            )}
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Work date from"
+                type="date"
+                value={filterFrom}
+                onChange={(e) => setFilterFrom(e.target.value)}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { max: filterTo || undefined },
+                }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Work date to"
+                type="date"
+                value={filterTo}
+                onChange={(e) => setFilterTo(e.target.value)}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { min: filterFrom || undefined },
+                }}
+              />
+            </Grid>
+          </Grid>
+          {activeCount > 0 && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Typography variant="caption" color="text.secondary">
+                {activeCount} {activeCount === 1 ? "filter" : "filters"} active
+              </Typography>
+            </Box>
+          )}
+        </>
       )}
-    </Box>
+    </Paper>
   );
 }
 
