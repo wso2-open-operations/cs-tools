@@ -129,8 +129,12 @@ export default function CsmCaseCreatePage(): JSX.Element {
   // can't stop an already-selected value from becoming invalid underneath).
   // Adjusted during render (React's recommended pattern for this) rather
   // than in an effect, which would call setState synchronously post-commit.
+  // Gated on the fetch having settled — while a new project's data is still
+  // loading, `selectedProject.data` (and so isManagedCloud) is transiently
+  // empty/false, which would otherwise wipe a valid S0 when moving between
+  // two Managed Cloud projects.
   const [prevManagedCloud, setPrevManagedCloud] = useState(isManagedCloud);
-  if (isManagedCloud !== prevManagedCloud) {
+  if (!selectedProject.isFetching && isManagedCloud !== prevManagedCloud) {
     setPrevManagedCloud(isManagedCloud);
     if (severity === "S0" && !isManagedCloud) setSeverity("");
   }
