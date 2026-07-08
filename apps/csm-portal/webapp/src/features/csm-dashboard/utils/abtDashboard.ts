@@ -46,6 +46,7 @@ export const STATE_LABEL: Record<CaseState, string> = {
   awaiting_info: "Awaiting info",
   waiting_on_wso2: "Waiting on WSO2",
   closed: "Closed",
+  reopened: "Reopened",
 };
 
 // Status chip colour by "whose move is it", so colour carries information when
@@ -69,6 +70,8 @@ export const STATE_COLOR: Record<
   solution_proposed: "default",
   awaiting_info: "default",
   closed: "success",
+  // Active again, on us — same bucket as open/work_in_progress.
+  reopened: "info",
 };
 
 /**

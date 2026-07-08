@@ -67,7 +67,6 @@ function detailFromBeCase(
     state: uiStateFromBe(c.state),
     workState: c.workState ?? null,
     nextStates: (c.nextStates ?? []).map(uiStateFromBe),
-    canCreateRelatedCase: c.canCreateRelatedCase ?? false,
     relatedCase: c.relatedCase
       ? { id: c.relatedCase.id, caseNumber: c.relatedCase.number }
       : undefined,

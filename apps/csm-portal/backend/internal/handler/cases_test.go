@@ -1082,23 +1082,23 @@ func TestGetCase(t *testing.T) {
 		}
 	})
 
-	t.Run("canCreateRelatedCase reflects state and closedOn window", func(t *testing.T) {
-		type getCaseRelatedResp struct {
-			CanCreateRelatedCase bool `json:"canCreateRelatedCase"`
+	t.Run("nextStates surfaces reopened as the create-related-case signal", func(t *testing.T) {
+		type getCaseNextStatesResp struct {
+			NextStates []string `json:"nextStates"`
 		}
 		recentClosed := time.Now().Add(-10 * 24 * time.Hour).Format(time.RFC3339)
 		oldClosed := time.Now().Add(-90 * 24 * time.Hour).Format(time.RFC3339)
 		cases := []struct {
 			name     string
 			body     string
-			wantTrue bool
+			wantNext []string
 		}{
-			{"closed case within the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosed + `"}`, true},
-			{"closed case outside the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `"}`, false},
-			{"closed case with no closedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed"}`, false},
-			{"open case with a closedOn value", `{"id":"` + testCaseID + `","type":"case","state":"open","closedOn":"` + recentClosed + `"}`, false},
-			{"closed service_request within the window", `{"id":"` + testCaseID + `","type":"service_request","state":"closed","closedOn":"` + recentClosed + `"}`, false},
-			{"closed case with no type set", `{"id":"` + testCaseID + `","state":"closed","closedOn":"` + recentClosed + `"}`, false},
+			{"closed case within the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
+			{"closed case outside the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `"}`, []string{}},
+			{"closed case with no closedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed"}`, []string{}},
+			{"open case with a closedOn value", `{"id":"` + testCaseID + `","type":"case","state":"open","closedOn":"` + recentClosed + `"}`, []string{caseStateWorkInProgress}},
+			{"closed service_request within the window", `{"id":"` + testCaseID + `","type":"service_request","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
+			{"closed case with no type set", `{"id":"` + testCaseID + `","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1114,9 +1114,14 @@ func TestGetCase(t *testing.T) {
 				w := httptest.NewRecorder()
 				h.GetCase(w, r)
 				assertStatus(t, w, http.StatusOK)
-				resp := decodeJSON[getCaseRelatedResp](t, w)
-				if resp.CanCreateRelatedCase != tc.wantTrue {
-					t.Errorf("canCreateRelatedCase = %v, want %v", resp.CanCreateRelatedCase, tc.wantTrue)
+				resp := decodeJSON[getCaseNextStatesResp](t, w)
+				if len(resp.NextStates) != len(tc.wantNext) {
+					t.Fatalf("nextStates = %v, want %v", resp.NextStates, tc.wantNext)
+				}
+				for i, got := range resp.NextStates {
+					if got != tc.wantNext[i] {
+						t.Errorf("nextStates[%d] = %v, want %v", i, got, tc.wantNext[i])
+					}
 				}
 			})
 		}

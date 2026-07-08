@@ -133,6 +133,10 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   resume_work: "Resumed work on this case.",
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
+  // Unused: intercepted before this map is read (see onAction) since it
+  // navigates instead of showing a toast. Present only to satisfy the
+  // exhaustive Record.
+  create_related_case: "",
   transition: "Case updated.",
 };
 
@@ -157,6 +161,8 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   resume_work: "info",
   close: "success",
   close_no_response: "success",
+  // Unused — see the matching note in LIFECYCLE_TOAST.
+  create_related_case: "info",
   transition: "info",
 };
 
@@ -547,6 +553,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
           return;
         }
 
+        // ISSU-004: the backend puts `reopened` in a closed case's
+        // `nextStates` only as a signal — there is no real reopen (the data
+        // source has no such transition). Never PATCH it; open the new-case
+        // form pre-filled with relatedCaseId instead. Must run before the
+        // generic `targetState` PATCH below, since `beStateFromUi("reopened")`
+        // is truthy and would otherwise be sent as a state transition.
+        if (action === "create_related_case" && data) {
+          const params = new URLSearchParams({ projectId: data.projectId, relatedCaseId: data.id });
+          if (data.caseNumber) params.set("relatedCaseNumber", data.caseNumber);
+          navigate(`/cases/new?${params.toString()}`);
+          return;
+        }
+
         if (targetState === "work_in_progress" && data) {
           void startWork(LIFECYCLE_TOAST[action], LIFECYCLE_SEVERITY[action]);
           return;
@@ -686,18 +705,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
       if (action.secondary === "request_call") {
         setActiveTab("call-requests");
         setAutoOpenCallCreate(true);
-        return;
-      }
-
-      // ISSU-004: replaces reopening a closed case (the data source has no
-      // outbound transition from closed). The action bar only offers this
-      // when the backend's `canCreateRelatedCase` says the case is still
-      // within its 60-day window, so no eligibility check is needed here.
-      if (action.secondary === "create_related_case") {
-        if (!data) return;
-        const params = new URLSearchParams({ projectId: data.projectId, relatedCaseId: data.id });
-        if (data.caseNumber) params.set("relatedCaseNumber", data.caseNumber);
-        navigate(`/cases/new?${params.toString()}`);
         return;
       }
 

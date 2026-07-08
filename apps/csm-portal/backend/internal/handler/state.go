@@ -26,6 +26,12 @@ import (
 // this window.
 const relatedCaseWindow = 60 * 24 * time.Hour
 
+// caseTypeCase is the standard support case type — as opposed to
+// service_request, security_report_analysis, or engagement. Related-case
+// creation is only offered for this type; the other types have their own
+// create flows that don't accept a relatedCaseId today.
+const caseTypeCase = "case"
+
 const (
 	caseStateOpen             = "open"
 	caseStateWorkInProgress   = "work_in_progress"
@@ -38,9 +44,12 @@ const (
 
 // nextStates returns the valid next states reachable from the given case state.
 // Role-gated transitions (team-lead override, auto-close) are excluded until
-// role enforcement is implemented. Closed is terminal: the upstream data
-// source rejects any outbound transition from a closed case, including
-// reopen, so no next states are advertised for it.
+// role enforcement is implemented. Closed is terminal — the upstream data
+// source rejects any outbound transition from a closed case, so no next
+// states are advertised for it here. The one exception is surfaced by the
+// caller (injectNextStates): `caseStateReopened` is reused as a signal that
+// this closed case is still within its related-case window, since the
+// frontend has no real reopen to offer, only "create a related case".
 func nextStates(state string) []string {
 	switch state {
 	case caseStateOpen:
@@ -73,12 +82,6 @@ func isValidStateTransition(from, to string) bool {
 	return false
 }
 
-// caseTypeCase is the standard support case type — as opposed to
-// service_request, security_report_analysis, or engagement. Related-case
-// creation is only offered for this type; the other types have their own
-// create flows that don't accept a relatedCaseId today.
-const caseTypeCase = "case"
-
 // canCreateRelatedCase reports whether a new case may be created as related to
 // a case of the given type/state, closed at the given timestamp (RFC 3339, as
 // returned in the "closedOn" field; empty when the case was never closed).
@@ -97,11 +100,14 @@ func canCreateRelatedCase(caseType, state, closedOn string) bool {
 	return time.Since(t) <= relatedCaseWindow
 }
 
-// injectCaseComputedFields parses raw case JSON returned by the entity
-// service and appends the portal-computed fields the frontend needs to
-// render case actions: "nextStates" (valid transitions from "state") and
-// "canCreateRelatedCase" (derived from "type" + "state" + "closedOn").
-func injectCaseComputedFields(data []byte) ([]byte, error) {
+// injectNextStates parses raw case JSON returned by the entity service,
+// derives the valid next states from "state", and returns the JSON with a
+// "nextStates" key appended. For a closed case still within its related-case
+// window (see canCreateRelatedCase), "reopened" is included as the sole
+// entry — there is no separate eligibility field; the frontend renders that
+// entry as "Create related case" rather than an actual reopen, since a real
+// reopen is never valid.
+func injectNextStates(data []byte) ([]byte, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
@@ -124,15 +130,14 @@ func injectCaseComputedFields(data []byte) ([]byte, error) {
 		// which canCreateRelatedCase treats as "not closed".
 		_ = json.Unmarshal(raw, &closedOn)
 	}
-	ns, err := json.Marshal(nextStates(state))
+	ns := nextStates(state)
+	if canCreateRelatedCase(caseType, state, closedOn) {
+		ns = []string{caseStateReopened}
+	}
+	nsJSON, err := json.Marshal(ns)
 	if err != nil {
 		return nil, err
 	}
-	m["nextStates"] = ns
-	canRelate, err := json.Marshal(canCreateRelatedCase(caseType, state, closedOn))
-	if err != nil {
-		return nil, err
-	}
-	m["canCreateRelatedCase"] = canRelate
+	m["nextStates"] = nsJSON
 	return json.Marshal(m)
 }

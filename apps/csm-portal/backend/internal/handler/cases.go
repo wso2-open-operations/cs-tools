@@ -623,9 +623,9 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err = injectCaseComputedFields(result)
+	result, err = injectNextStates(result)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to inject case computed fields", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "failed to inject nextStates", "userID", user.UserID, "caseID", caseID, "err", err)
 		writeError(w, http.StatusInternalServerError, "Failed to process case details.")
 		return
 	}

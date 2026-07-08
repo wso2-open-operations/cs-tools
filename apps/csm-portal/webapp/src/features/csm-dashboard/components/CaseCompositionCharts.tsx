@@ -54,6 +54,7 @@ const STATE_SLICE_COLOR: Record<CaseState, string> = {
   awaiting_info: paletteColor("cyan", 500, "#06b6d4"),
   solution_proposed: paletteColor("teal", 500, "#14b8a6"),
   closed: paletteColor("grey", 500, "#6b7280"),
+  reopened: paletteColor("purple", 500, "#a855f7"),
 };
 
 /**

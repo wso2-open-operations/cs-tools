@@ -281,50 +281,40 @@ describe("CaseActionBar — reassign gating for WIP-Ongoing", () => {
 });
 
 describe("CaseActionBar — create related case (closed-case reopen replacement)", () => {
-  /** Open the "More" overflow and return the create-related-case menu item. */
-  function openRelatedCaseItem(): HTMLElement {
-    fireEvent.click(screen.getByRole("button", { name: /more/i }));
-    return screen.getByRole("menuitem", { name: /create related case/i });
-  }
-
-  it("is not offered on a non-closed case", () => {
+  it("is not offered on a closed case the backend has not flagged eligible (empty nextStates)", () => {
     render(
-      <CaseActionBar
-        caseDetail={caseInState("work_in_progress", ["solution_proposed"])}
-        onAction={() => {}}
-      />,
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={() => {}} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     expect(
-      screen.queryByRole("menuitem", { name: /create related case/i }),
+      screen.queryByRole("button", { name: /create related case/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("is disabled on a closed case the backend has not flagged as eligible", () => {
+  it("renders as a single primary button when the backend flags the case eligible", () => {
     const onAction = vi.fn();
     render(
       <CaseActionBar
-        caseDetail={{ ...caseInState("closed", []), canCreateRelatedCase: false }}
+        caseDetail={caseInState("closed", ["reopened"])}
         onAction={onAction}
       />,
     );
-    const item = openRelatedCaseItem();
-    expect(item).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(item);
-    expect(onAction).not.toHaveBeenCalled();
+    const button = screen.getByRole("button", { name: /create related case/i });
+    expect(button).toBeInTheDocument();
+    // Must dispatch the create_related_case action, never a real "reopened"
+    // state PATCH — the data source has no such transition.
+    fireEvent.click(button);
+    expect(onAction).toHaveBeenCalledWith("create_related_case", "reopened");
   });
 
-  it("is enabled and dispatches when the backend flags the case eligible", () => {
-    const onAction = vi.fn();
+  it("never renders a literal 'Reopened' state-transition button", () => {
+    // Guards against regressing to the pre-fix behavior where a closed case's
+    // stray `reopened` nextState rendered as a generic (broken) reopen action.
     render(
       <CaseActionBar
-        caseDetail={{ ...caseInState("closed", []), canCreateRelatedCase: true }}
-        onAction={onAction}
+        caseDetail={caseInState("closed", ["reopened"])}
+        onAction={() => {}}
       />,
     );
-    const item = openRelatedCaseItem();
-    expect(item).not.toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(item);
-    expect(onAction).toHaveBeenCalledWith({ secondary: "create_related_case" });
+    expect(screen.queryByRole("button", { name: /^reopened$/i })).not.toBeInTheDocument();
   });
 });

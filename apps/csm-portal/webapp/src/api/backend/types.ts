@@ -179,9 +179,13 @@ export interface BeCaseView {
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
   workState?: BeCaseWorkState | null;
+  /**
+   * States this case may transition into next. For a closed case, `reopened`
+   * appearing here is not a real reopen (the data source has no such
+   * transition) — it signals that a new case may still be created as related
+   * to this one, within its 60-day window.
+   */
   nextStates?: BeCaseState[];
-  /** Whether a new case may be created as related to this one (closed + within its 60-day window). */
-  canCreateRelatedCase?: boolean;
   /** The case this one was created as related to, when any. */
   relatedCase?: BeCaseNumberRef | null;
   createdBy?: BeUserRef;
