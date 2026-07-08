@@ -14,28 +14,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { startTransition } from "react";
+import { startTransition, useCallback } from "react";
 import { useNavigate, type NavigateOptions, type To } from "react-router";
 
 /**
  * Wraps useNavigate so every navigation is scheduled as a React transition.
  * This prevents the Suspense fallback from flashing during lazy-route navigation
  * — React keeps the current page visible until the new chunk is ready.
+ * The returned function is stable (memoized via useCallback) so it is safe
+ * to use as a useCallback/useEffect dependency.
  */
 export function useNavTransition() {
   const navigate = useNavigate();
 
-  function wrappedNavigate(to: To, options?: NavigateOptions): void;
-  function wrappedNavigate(delta: number): void;
-  function wrappedNavigate(to: To | number, options?: NavigateOptions): void {
-    startTransition(() => {
-      if (typeof to === "number") {
-        navigate(to);
-      } else {
-        navigate(to, options);
-      }
-    });
-  }
-
-  return wrappedNavigate;
+  return useCallback(
+    (to: To | number, options?: NavigateOptions): void => {
+      startTransition(() => {
+        if (typeof to === "number") {
+          navigate(to);
+        } else {
+          navigate(to, options);
+        }
+      });
+    },
+    [navigate],
+  );
 }
