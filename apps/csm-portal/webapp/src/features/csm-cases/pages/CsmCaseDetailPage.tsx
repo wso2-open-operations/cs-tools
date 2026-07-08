@@ -184,14 +184,10 @@ const FEEDBACK_PALETTE: Record<
   error: { bg: "error.50", border: "error.main", fg: "error.main" },
 };
 
+// Only covers secondary actions that are handled inline below with a fixed,
+// literal toast — every action with real branching feedback (success/error,
+// dynamic text) sets its own message directly instead of reading this map.
 const SECONDARY_TOAST: Record<string, string> = {
-  reassign_engineer: "Reassign engineer dialog (mock).",
-  reassign_group: "Reassign group dialog (mock).",
-  hold_auto_close: "Hold auto-closure dialog (mock).",
-  create_incident: "Create incident from case (mock).",
-  link_incident: "Link to incident picker (mock).",
-  create_task: "Create task dialog (mock).",
-  log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
 };
 
@@ -688,8 +684,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Reachable only for a secondary action with no handler above — every
+      // menu item that isn't wired up yet is disabled in CaseActionBar, so
+      // this is a defensive fallback, not a normal path.
       setFeedback({
-        message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
+        message: SECONDARY_TOAST[action.secondary] ?? "This action isn't available yet.",
         severity: "info",
         sticky: false,
       });
