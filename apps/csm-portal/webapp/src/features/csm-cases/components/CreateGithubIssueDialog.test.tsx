@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
@@ -114,5 +114,55 @@ describe("CreateGithubIssueDialog — confirm step before filing a real issue", 
     );
     // The form itself is still open/usable, not reset or closed.
     expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
+  });
+
+  it("surfaces the error inside the confirm step, not just the form behind it", () => {
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error="Something went wrong filing the issue."
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+    const confirmDialog = screen.getByRole("dialog", {
+      name: /file this github issue/i,
+    });
+    expect(
+      within(confirmDialog).getByText("Something went wrong filing the issue."),
+    ).toBeInTheDocument();
+  });
+
+  it("disables Back and File issue while a submit is in flight", () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+
+    rerender(
+      <CreateGithubIssueDialog
+        open
+        submitting
+        error={null}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    const confirmDialog = screen.getByRole("dialog", {
+      name: /file this github issue/i,
+    });
+    expect(within(confirmDialog).getByRole("button", { name: /^back$/i })).toBeDisabled();
+    expect(within(confirmDialog).getByRole("button", { name: /file issue/i })).toBeDisabled();
   });
 });
