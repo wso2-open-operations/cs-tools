@@ -1097,10 +1097,15 @@ func TestGetCase(t *testing.T) {
 			{"closed case within the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
 			{"closed case outside the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `"}`, []string{}},
 			{"closed case with a zoneless space-separated closedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosedNoZone + `"}`, []string{caseStateReopened}},
-			{"closed case with no closedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed"}`, []string{}},
+			{"closed case with no closedOn or updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed"}`, []string{}},
 			{"open case with a closedOn value", `{"id":"` + testCaseID + `","type":"case","state":"open","closedOn":"` + recentClosed + `"}`, []string{caseStateWorkInProgress}},
 			{"closed service_request within the window", `{"id":"` + testCaseID + `","type":"service_request","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
 			{"closed case with no type set", `{"id":"` + testCaseID + `","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
+			// ServiceNow-backed cases never populate closedOn today, so
+			// updatedOn stands in for it.
+			{"closed case with no closedOn, falls back to a recent updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
+			{"closed case with no closedOn, falls back to an old updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + oldClosed + `"}`, []string{}},
+			{"closed case prefers closedOn over updatedOn when both present", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `","updatedOn":"` + recentClosed + `"}`, []string{}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

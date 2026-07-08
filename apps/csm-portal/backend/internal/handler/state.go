@@ -108,18 +108,29 @@ func parseClosedOn(closedOn string) (time.Time, bool) {
 }
 
 // canCreateRelatedCase reports whether a new case may be created as related to
-// a case of the given type/state, closed at the given timestamp (as returned
-// in the "closedOn" field — see parseClosedOn for accepted shapes; empty when
-// the case was never closed). The upstream data source rejects the link once
-// a closed case falls outside relatedCaseWindow, so this mirrors that rule to
-// avoid advertising an action that would fail server-side. Scoped to
-// caseType == "case" — the other case types' create flows have no
-// related-case field yet.
-func canCreateRelatedCase(caseType, state, closedOn string) bool {
-	if caseType != caseTypeCase || state != caseStateClosed || closedOn == "" {
+// a case of the given type/state, closed at closedOn (as returned in the
+// "closedOn" field — see parseClosedOn for accepted shapes). The ServiceNow
+// data source does not populate "closedOn" at all today, so this falls back
+// to updatedOn (also raw case JSON, always present) when closedOn is absent —
+// a closed case is normally terminal, so its last update time is a reasonable
+// stand-in for its close time. This is a best-effort UI signal only: the
+// upstream data source's own eligibility check (closed + within
+// relatedCaseWindow) still runs server-side when the related case is
+// actually created, so a stale fallback here just fails cleanly there rather
+// than corrupting anything. Scoped to caseType == "case" — the other case
+// types' create flows have no related-case field yet.
+func canCreateRelatedCase(caseType, state, closedOn, updatedOn string) bool {
+	if caseType != caseTypeCase || state != caseStateClosed {
 		return false
 	}
-	t, ok := parseClosedOn(closedOn)
+	ts := closedOn
+	if ts == "" {
+		ts = updatedOn
+	}
+	if ts == "" {
+		return false
+	}
+	t, ok := parseClosedOn(ts)
 	if !ok {
 		return false
 	}
@@ -153,11 +164,15 @@ func injectNextStates(data []byte) ([]byte, error) {
 	var closedOn string
 	if raw, ok := m["closedOn"]; ok {
 		// Best-effort: a null or malformed value just leaves closedOn empty,
-		// which canCreateRelatedCase treats as "not closed".
+		// so canCreateRelatedCase falls back to updatedOn.
 		_ = json.Unmarshal(raw, &closedOn)
 	}
+	var updatedOn string
+	if raw, ok := m["updatedOn"]; ok {
+		_ = json.Unmarshal(raw, &updatedOn)
+	}
 	ns := nextStates(state)
-	if canCreateRelatedCase(caseType, state, closedOn) {
+	if canCreateRelatedCase(caseType, state, closedOn, updatedOn) {
 		ns = []string{caseStateReopened}
 	}
 	nsJSON, err := json.Marshal(ns)
