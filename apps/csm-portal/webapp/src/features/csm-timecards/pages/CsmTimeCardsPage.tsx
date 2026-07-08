@@ -16,10 +16,11 @@
 
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
+  AdapterDateFns,
   Box,
   Card,
+  DatePickers,
   Divider,
-  Grid,
   MenuItem,
   Paper,
   Skeleton,
@@ -31,6 +32,26 @@ import {
   Button,
 } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp, Download, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
+
+const { DatePicker, LocalizationProvider } = DatePickers;
+
+/** "YYYY-MM-DD" to a local-midnight Date (avoids the UTC-parse day-shift
+ * `new Date(dateString)` can cause depending on the viewer's timezone). */
+function parseDateOnly(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Local-midnight Date back to "YYYY-MM-DD", matching TimeCardSearchFilters'
+ * `from`/`to` wire format. */
+function formatDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 import {
   useAllTimeCards,
   useApprovalQueue,
@@ -673,8 +694,11 @@ function FilterBar({
       {isFiltersOpen && (
         <>
           <Divider />
-          <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+          {/* Row 1: Project / Work item / Engineer / State — each flexes
+              equally so the row always fills the container's full width,
+              regardless of how many of these fields this tab shows. */}
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            <Box sx={{ flex: "1 1 0", minWidth: 160 }}>
               <SearchableMultiSelect
                 id="timecards-filter-project"
                 label="Project"
@@ -684,8 +708,8 @@ function FilterBar({
                 formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
                 onChange={setFilterProject}
               />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+            </Box>
+            <Box sx={{ flex: "1 1 0", minWidth: 160 }}>
               <SearchableMultiSelect
                 id="timecards-filter-work-item"
                 label="Work item"
@@ -694,12 +718,10 @@ function FilterBar({
                 options={workItemOptions}
                 onChange={setFilterWorkItem}
               />
-            </Grid>
-            {engineerSlot && (
-              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>{engineerSlot}</Grid>
-            )}
+            </Box>
+            {engineerSlot && <Box sx={{ flex: "1 1 0", minWidth: 160 }}>{engineerSlot}</Box>}
             {!hideStateFilter && (
-              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <Box sx={{ flex: "1 1 0", minWidth: 160 }}>
                 <TextField
                   select
                   fullWidth
@@ -715,37 +737,62 @@ function FilterBar({
                     </MenuItem>
                   ))}
                 </TextField>
-              </Grid>
+              </Box>
             )}
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Work date from"
-                type="date"
-                value={filterFrom}
-                onChange={(e) => setFilterFrom(e.target.value)}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { max: filterTo || undefined },
-                }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Work date to"
-                type="date"
-                value={filterTo}
-                onChange={(e) => setFilterTo(e.target.value)}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { min: filterFrom || undefined },
-                }}
-              />
-            </Grid>
-          </Grid>
+          </Box>
+
+          {/* Row 2: the work-date range, its own full-width row — each
+              picker flexes to half the container instead of sitting
+              compact-width with empty space trailing after it. */}
+          <Box>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ mb: 0.75, display: "block" }}
+            >
+              Work date
+            </Typography>
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                <Box sx={{ flex: "1 1 0", minWidth: 160 }}>
+                  <DatePicker
+                    label="From"
+                    value={parseDateOnly(filterFrom)}
+                    maxDate={parseDateOnly(filterTo) ?? undefined}
+                    onChange={(date) =>
+                      setFilterFrom(
+                        date instanceof Date && !Number.isNaN(date.getTime())
+                          ? formatDateOnly(date)
+                          : "",
+                      )
+                    }
+                    slotProps={{
+                      textField: { size: "small", fullWidth: true },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Box>
+                <Box sx={{ flex: "1 1 0", minWidth: 160 }}>
+                  <DatePicker
+                    label="To"
+                    value={parseDateOnly(filterTo)}
+                    minDate={parseDateOnly(filterFrom) ?? undefined}
+                    onChange={(date) =>
+                      setFilterTo(
+                        date instanceof Date && !Number.isNaN(date.getTime())
+                          ? formatDateOnly(date)
+                          : "",
+                      )
+                    }
+                    slotProps={{
+                      textField: { size: "small", fullWidth: true },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Box>
+              </Box>
+            </LocalizationProvider>
+          </Box>
           {activeCount > 0 && (
             <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
               <Typography variant="caption" color="text.secondary">
