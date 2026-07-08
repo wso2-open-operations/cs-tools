@@ -131,7 +131,7 @@ const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
   reopened: {
     action: "create_related_case",
     color: "primary",
-    icon: <GitBranch size={16} />,
+    icon: <LinkIcon size={16} />,
   },
 };
 

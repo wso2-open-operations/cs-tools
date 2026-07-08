@@ -918,6 +918,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   }
 
   const c = data;
+  // Narrowed once here so the JSX below can use it without a non-null
+  // assertion — `c.relatedCase` on its own doesn't stay narrowed across the
+  // `onClick` closure.
+  const relatedCase = c.relatedCase;
   const isClosed = c.state === "closed";
   // The backend rejects a customer-visible comment unless the case is
   // work_in_progress + ongoing. Internal work notes are allowed in any state,
@@ -1009,14 +1013,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
             )}
             <SeverityChip severity={c.severity} withLabel />
             <StateChip state={c.state} />
-            {c.relatedCase && (
+            {relatedCase && (
               <Chip
                 size="small"
                 variant="outlined"
                 clickable
                 icon={<LinkIcon size={14} />}
-                label={`Related: ${c.relatedCase.caseNumber ?? c.relatedCase.id}`}
-                onClick={() => navigate(`/cases/${c.relatedCase!.id}`)}
+                label={`Related: ${relatedCase.caseNumber ?? relatedCase.id}`}
+                onClick={() => navigate(`/cases/${relatedCase.id}`)}
                 sx={{ fontWeight: 600 }}
               />
             )}
