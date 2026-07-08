@@ -88,7 +88,7 @@ func main() {
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
 		Issuer:                mustEnv("AUTH_ISSUER"),
-		Audience:              mustEnv("AUTH_AUDIENCE"),
+		Audiences:             splitComma(mustEnv("AUTH_AUDIENCE")),
 		ClockSkew:             5 * time.Second,
 		TokenValidatorEnabled: os.Getenv("AUTH_TOKEN_VALIDATOR_ENABLED") != "false",
 	}

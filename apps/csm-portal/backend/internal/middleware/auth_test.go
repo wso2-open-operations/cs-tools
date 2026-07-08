@@ -36,7 +36,7 @@ func testConfig() middleware.Config {
 	return middleware.Config{
 		JWKSEndpoint:          "http://unused.example.com",
 		Issuer:                "test-issuer",
-		Audience:              "test-audience",
+		Audiences:             []string{"test-audience"},
 		TokenValidatorEnabled: false,
 	}
 }
