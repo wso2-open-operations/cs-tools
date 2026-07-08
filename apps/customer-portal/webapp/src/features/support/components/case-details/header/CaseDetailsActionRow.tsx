@@ -25,6 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import CaseStateConfirmDialog from "@features/support/components/case-details/dialogs/CaseStateConfirmDialog";
 import EscalateCaseModal from "../escalation/EscalateCaseModal";
+import CaseFeedbackModal from "../feedback/CaseFeedbackModal";
 import { type JSX, useState } from "react";
 import {
   CASE_STATUS_ACTIONS,
@@ -114,6 +115,7 @@ export default function CaseDetailsActionRow({
     stateKey: number;
   } | null>(null);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
 
   const resolvedEscalationLevelId = escalationLevelId != null ? String(escalationLevelId) : null;
   const escalationLevelInfo = resolvedEscalationLevelId != null ? ESCALATION_NEXT_LEVEL[resolvedEscalationLevelId ?? "0"] : null;
@@ -224,6 +226,10 @@ export default function CaseDetailsActionRow({
             {
               onSuccess: () => {
                 showSuccess("State updated successfully.");
+                // Prompt for feedback after the case is closed (non-blocking).
+                if (ACTION_TO_CASE_STATE_LABEL[label] === "Closed" && caseId) {
+                  setFeedbackModalOpen(true);
+                }
               },
               onError: (err) => {
                 showError(
@@ -249,6 +255,15 @@ export default function CaseDetailsActionRow({
             showSuccess("Case escalated successfully.");
             onEscalateSuccess?.();
           }}
+          onError={(msg) => showError(msg)}
+        />
+      )}
+      {feedbackModalOpen && (
+        <CaseFeedbackModal
+          open
+          caseId={caseId}
+          onClose={() => setFeedbackModalOpen(false)}
+          onSubmitted={() => showSuccess("Thanks for your feedback.")}
           onError={(msg) => showError(msg)}
         />
       )}
