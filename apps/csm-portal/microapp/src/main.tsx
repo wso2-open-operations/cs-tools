@@ -14,14 +14,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import React from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
+import axios from "axios";
+import App from "@src/App";
+import theme from "./theme";
+import "@src/index.css";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+          if (status && status >= 400 && status < 500) return false;
+        }
+        return failureCount < 3;
+      },
+    },
+  },
+});
 
 const container = document.getElementById("root");
-if (!container) throw new Error("'Root container missing'");
-const root = createRoot(container);
-root.render(
-  <React.StrictMode>
-    <div>CSM Microapp</div>
-  </React.StrictMode>,
+if (!container) throw new Error("Root container missing");
+
+createRoot(container).render(
+  <StrictMode>
+    <OxygenUIThemeProvider theme={theme}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </OxygenUIThemeProvider>
+  </StrictMode>,
 );

@@ -19,9 +19,9 @@
     "@mui/lab": "7.0.1-beta.20",
     "@mui/material": "7.3.6",
     "@tanstack/react-query": "5.90.12",
-    "@wso2/oxygen-ui": "0.2.1",
-    "@wso2/oxygen-ui-charts-react": "0.4.0",
-    "@wso2/oxygen-ui-icons-react": "0.2.1",
+    "@wso2/oxygen-ui": "0.6.1",
+    "@wso2/oxygen-ui-charts-react": "0.6.1",
+    "@wso2/oxygen-ui-icons-react": "0.6.1",
     "axios": "1.13.2",
     "dayjs": "1.11.19",
     "dompurify": "3.4.0",
@@ -57,8 +57,5 @@
     "typescript-eslint": "8.46.4",
     "vite": "7.1.7",
     "vite-tsconfig-paths": "5.1.4"
-  },
-  "allowScripts": {
-    "esbuild@0.25.12": true
   }
 }
