@@ -233,6 +233,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
                 <FormHelperText>Select a project first</FormHelperText>
               ) : deployments.isLoading ? (
                 <FormHelperText>Loading deployments…</FormHelperText>
+              ) : (deployments.data ?? []).length === 0 ? (
+                <FormHelperText>No deployments found for this project.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -257,6 +259,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
                 <FormHelperText>Select a deployment first</FormHelperText>
               ) : deployedProducts.isLoading ? (
                 <FormHelperText>Loading products…</FormHelperText>
+              ) : (deployedProducts.data ?? []).length === 0 ? (
+                <FormHelperText>No deployed products found for this deployment.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>

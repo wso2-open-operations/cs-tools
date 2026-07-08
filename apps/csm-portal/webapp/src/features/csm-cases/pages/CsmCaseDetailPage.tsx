@@ -52,7 +52,7 @@ import {
   useFindMyOngoingCases,
   type MyOngoingCase,
 } from "@features/csm-cases/api/useFindMyOngoingCases";
-import type { BeCaseState } from "@api/backend/types";
+import type { BeCaseState, BeCreateCaseGithubIssueResponse } from "@api/backend/types";
 import { beStateFromUi } from "@api/backend/mappers";
 import { BackendApiError } from "@api/backend/client";
 import {
@@ -184,14 +184,10 @@ const FEEDBACK_PALETTE: Record<
   error: { bg: "error.50", border: "error.main", fg: "error.main" },
 };
 
+// Only covers secondary actions that are handled inline below with a fixed,
+// literal toast — every action with real branching feedback (success/error,
+// dynamic text) sets its own message directly instead of reading this map.
 const SECONDARY_TOAST: Record<string, string> = {
-  reassign_engineer: "Reassign engineer dialog (mock).",
-  reassign_group: "Reassign group dialog (mock).",
-  hold_auto_close: "Hold auto-closure dialog (mock).",
-  create_incident: "Create incident from case (mock).",
-  link_incident: "Link to incident picker (mock).",
-  create_task: "Create task dialog (mock).",
-  log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
 };
 
@@ -341,6 +337,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // Inline error shown inside the Git-issue dialog (e.g. the SN routing 422 /
   // state 409). Cleared when the dialog opens or a submit is retried.
   const [githubIssueError, setGithubIssueError] = useState<string | null>(null);
+  // Set on a successful submit so the dialog can show its own "created" view
+  // with a clickable link instead of closing itself immediately.
+  const [githubIssueResult, setGithubIssueResult] =
+    useState<BeCreateCaseGithubIssueResponse | null>(null);
   const postGithubIssue = usePostCaseGithubIssue();
   const postTimeCard = usePostTimeCard();
   // Attachment pending delete confirmation (drives the confirm dialog).
@@ -670,10 +670,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
-      // ISSU-020: file an internal GitHub issue from the case. The SN side
-      // gates on the case state (only certain states may file) and resolves
-      // the target repo from the product; we don't pre-gate here — open the
-      // dialog and surface any backend rejection inline.
+      // ISSU-020: file an internal GitHub issue from the case. Closed cases
+      // are blocked at the menu level (CaseActionBar's raise_git_issue item
+      // is disabled — see caseClosed there); this handler only runs for a
+      // non-closed case. The SN side still resolves the target repo from the
+      // product and may reject other states we don't otherwise pre-gate, so
+      // any backend rejection still surfaces inline in the dialog.
       if (action.secondary === "raise_git_issue") {
         setGithubIssueError(null);
         setGithubIssueOpen(true);
@@ -688,8 +690,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Reachable only for a secondary action with no handler above — every
+      // menu item that isn't wired up yet is disabled in CaseActionBar, so
+      // this is a defensive fallback, not a normal path.
       setFeedback({
-        message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
+        message: SECONDARY_TOAST[action.secondary] ?? "This action isn't available yet.",
         severity: "info",
         sticky: false,
       });
@@ -1391,12 +1396,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
           open={githubIssueOpen}
           submitting={postGithubIssue.isPending}
           error={githubIssueError}
+          createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
           defaultTitle={c.subject}
           defaultDescription={c.description}
           onClose={() => {
             setGithubIssueOpen(false);
             setGithubIssueError(null);
+            setGithubIssueResult(null);
           }}
           onSubmit={(payload) => {
             setGithubIssueError(null);
@@ -1404,17 +1411,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
               { caseId: c.id, ...payload },
               {
                 onSuccess: (res) => {
-                  setGithubIssueOpen(false);
-                  // The SN side writes the issue URL into work notes; show that
-                  // entry by switching to the activities feed (just refetched).
+                  // Dialog shows its own "created" view with a clickable
+                  // link (see createdIssue) instead of closing immediately —
+                  // still switch to the activities feed in the background so
+                  // the SN-written work-note entry is visible once they're
+                  // done reading the confirmation.
                   setActiveTab("activities");
-                  setFeedback({
-                    message: res.issue?.url
-                      ? `Internal Git issue created: ${res.issue.url}`
-                      : "Internal Git issue created.",
-                    severity: "success",
-                    sticky: true,
-                  });
+                  setGithubIssueResult(res);
                 },
                 onError: (err) => {
                   // Surface the backend's own message on 4xx (invalid state,

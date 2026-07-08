@@ -249,19 +249,30 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const reassignBlocked =
     caseDetail.state === "work_in_progress" && caseDetail.workState === "ongoing";
 
-  // Hold auto-closure only makes sense while the case is sitting in a state
-  // that's subject to auto-closure (awaiting the customer's response) —
-  // showing it at any other time would offer to hold a closure that isn't
-  // pending.
-  const canHoldAutoClose =
-    caseDetail.state === "awaiting_info" || caseDetail.state === "solution_proposed";
+  // A closed case is done — filing a new Git issue against it doesn't fit
+  // the same "closed is read-only" rule already applied to comments,
+  // attachments, and time tracking (see CsmCaseDetailPage.tsx's isClosed).
+  const caseClosed = caseDetail.state === "closed";
 
-  // Only "Copy case link", "Request a call", and "Log time" are wired up.
-  // The rest are disabled until their backend flows land, so the menu
-  // advertises the roadmap without exposing dead actions that would no-op or
-  // toast a mock message.
+  // Roadmap items with no backend flow yet: kept visible (so the menu still
+  // advertises what's coming) but disabled with a tooltip explaining why,
+  // rather than clickable and silently no-op'ing or toasting a mock message.
+  // "Hold auto-closure…" belongs here too — it isn't state-gated, it's simply
+  // not built yet, regardless of the case's current state.
+  const NOT_BUILT_YET = "Not available yet — this action is planned but not built.";
+
+  // Only "Copy case link", "Request a call", "Log time", "Assign / reassign
+  // engineer…", and "Raise internal Git issue…" are wired up. The rest are
+  // disabled until their backend flows land.
   items.push(
-    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
+    {
+      key: "raise_git_issue",
+      label: "Raise internal Git issue…",
+      icon: <GitBranch size={16} />,
+      divider: true,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
     {
       key: "reassign_engineer",
       label: "Assign / reassign engineer…",
@@ -272,12 +283,10 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
         ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
         : undefined,
     },
-    ...(canHoldAutoClose
-      ? [{ key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true }]
-      : []),
-    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true },
-    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true },
-    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
+    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true, tooltip: NOT_BUILT_YET },
+    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
     { key: "request_call", label: "Request a call…", icon: <Phone size={16} /> },
     { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },

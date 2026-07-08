@@ -279,3 +279,61 @@ describe("CaseActionBar — reassign gating for WIP-Ongoing", () => {
     expect(onAction).toHaveBeenCalledWith({ secondary: "reassign_engineer" });
   });
 });
+
+describe("CaseActionBar — unbuilt roadmap items stay disabled, not silently mock", () => {
+  // Create incident / Link to incident / Create task / Hold auto-closure have
+  // no backend flow yet. They must never be clickable — a click that reaches
+  // onAction would surface a mock toast to a real user — and they must never
+  // depend on case state, since it isn't state that's missing, it's the
+  // feature itself.
+  const ROADMAP_ITEMS = [
+    /create incident from case/i,
+    /link to incident/i,
+    /create task/i,
+    /hold auto-closure/i,
+  ];
+
+  it.each(ROADMAP_ITEMS)("keeps %s disabled and inert", (name) => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("CaseActionBar — Raise internal Git issue is blocked on a closed case", () => {
+  it("disables the menu item once the case is closed", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /raise internal git issue/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps it enabled for a non-closed case", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /raise internal git issue/i });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: "raise_git_issue" });
+  });
+});
