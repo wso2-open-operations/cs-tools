@@ -36,12 +36,36 @@ export const setAccessToken = (token: string): void => localStorage.setItem(Loca
 export const getIdToken = (): string | null => localStorage.getItem(LocalStorageKeys.idToken);
 export const setIdToken = (token: string): void => localStorage.setItem(LocalStorageKeys.idToken, token);
 
+// Refresh early rather than right at expiry, to cover in-flight request latency.
+const TOKEN_EXPIRY_BUFFER_MS = 60_000;
+
+// apiClient calls refreshToken() on every request; without this check that means a native-bridge
+// round trip (plus a full user-store re-init) per request even when the current token is still
+// valid for a while. Treat undecodable/expired-soon tokens as needing refresh, same as a missing
+// token, so this fails toward refreshing rather than toward silently reusing a stale token.
+function isTokenExpiringSoon(token: string | null): boolean {
+  if (!token) return true;
+  try {
+    const { exp } = jwtDecode<{ exp?: number }>(token);
+    if (!exp) return true;
+    return exp * 1000 - Date.now() < TOKEN_EXPIRY_BUFFER_MS;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * A function to refresh the token.
  * This is a simplified version of the logic in the original `handleRequestWithNewToken`.
- * It fetches a new token and updates it in storage.
+ * Skips the native-bridge round trip when the current ID token is still valid for a while,
+ * and only fetches a new token and updates storage when it's missing or near-expiry.
  */
 export const refreshToken = (): Promise<string> => {
+  const currentIdToken = getIdToken();
+  if (!isTokenExpiringSoon(currentIdToken)) {
+    return Promise.resolve(currentIdToken as string);
+  }
+
   const idTokenPromise = new Promise<string>((resolve, reject) => {
     getToken((token) => (token ? resolve(token) : reject("ID Token failed")));
   });
@@ -84,11 +108,16 @@ export const checkUserGroups = (groupNames: string | string[]): boolean => {
     return false;
   }
 
-  const decoded = jwtDecode<TokenPayload>(token);
-  const userGroups = decoded.groups ?? [];
-  const requiredGroups = Array.isArray(groupNames) ? groupNames : [groupNames];
+  try {
+    const decoded = jwtDecode<TokenPayload>(token);
+    const userGroups = decoded.groups ?? [];
+    const requiredGroups = Array.isArray(groupNames) ? groupNames : [groupNames];
 
-  return requiredGroups.some((group) => userGroups.includes(group));
+    return requiredGroups.some((group) => userGroups.includes(group));
+  } catch (error) {
+    Logger.error("Failed to decode ID token for group check.", error);
+    return false;
+  }
 };
 
 /**
@@ -114,6 +143,7 @@ export const decodeTokenAndStoreUser = (): User | null => {
       name: `${decoded.given_name || ""} ${decoded.family_name || ""}`,
     };
 
+    useUserStore.getState().setUser(user);
     return user;
   } catch (error) {
     Logger.error("Failed to decode token and store user information", error);

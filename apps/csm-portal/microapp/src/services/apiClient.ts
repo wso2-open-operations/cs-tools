@@ -14,10 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import axios, { type InternalAxiosRequestConfig } from "axios";
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { Logger } from "@utils/logger";
 import { getAccessToken, refreshToken } from "./auth";
 import { BACKEND_URL } from "@config/endpoints";
+
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
 
 // Variables/constants
 let isRefreshing = false;
@@ -39,13 +43,14 @@ const apiClient = axios.create({
  */
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
-    // Log the outgoing request
+    // Log the outgoing request. Deliberately omits config.headers — on a retried request
+    // (see the 401 handler below) it already carries the prior Authorization/x-user-id-token
+    // values at this point, and this log forwards to the native bridge via sendNativeLog.
     Logger.info(`Making ${config.method?.toUpperCase()} request to: ${config.baseURL || ""}${config.url || ""}`, {
       url: config.url,
       method: config.method,
       baseURL: config.baseURL,
       fullURL: `${config.baseURL || ""}${config.url || ""}`,
-      headers: config.headers,
     });
 
     // Use a singleton promise for token refresh
@@ -97,19 +102,18 @@ const processQueue = (error: unknown, token: string | null = null) => {
 
 apiClient.interceptors.response.use(
   (response) => {
-    // Any status code within the range of 2xx causes this function to trigger
+    // Any status code within the range of 2xx causes this function to trigger. Logs only the
+    // response's size, not its content — response bodies here can carry user PII (email, phone)
+    // and case content, and this log forwards to the native bridge via sendNativeLog.
     Logger.info(`Successful response from ${response.config.method?.toUpperCase()} ${response.config.url}`, {
       status: response.status,
       statusText: response.statusText,
       url: response.config.url,
-      data: {
-        ...response.data,
-        dataSize: response.data ? JSON.stringify(response.data).length : 0,
-      },
+      dataSize: response.data ? JSON.stringify(response.data).length : 0,
     });
     return response;
   },
-  async (error) => {
+  async (error: AxiosError) => {
     if (axios.isCancel(error)) {
       return Promise.reject(error);
     }
@@ -121,7 +125,12 @@ apiClient.interceptors.response.use(
       message: error.message,
     });
 
-    const originalRequest = error.config;
+    // error.config can be undefined for some Axios errors (e.g. ones raised before a request
+    // config is fully attached), and the 401-retry logic below needs a config to retry against.
+    const originalRequest = error.config as RetryableRequestConfig | undefined;
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       Logger.warn("Received 401 unauthorized, attempting token refresh");

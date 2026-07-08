@@ -155,6 +155,7 @@ export const saveLocalData = (
     window.nativebridge.rejectSaveLocalData = (error: string) => failedToRespondCallback(error);
   } else {
     Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+    failedToRespondCallback(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
@@ -180,6 +181,7 @@ export const getLocalData = <T>(
     window.nativebridge.rejectGetLocalData = (error: string) => failedToRespondCallback(error);
   } else {
     Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+    failedToRespondCallback(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
@@ -265,5 +267,6 @@ export const getVersion = (callback: Callback<string>): void => {
     };
   } else {
     Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+    callback();
   }
 };

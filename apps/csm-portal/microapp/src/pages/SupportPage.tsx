@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
@@ -28,11 +28,11 @@ import { TABS, TAB_CONFIG } from "@components/support/config";
 
 export default function SupportPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromParams = TABS.find((t) => t === searchParams.get("tab")) ?? "case";
-  const [tab, setTab] = useState<CaseType>(tabFromParams);
+  // Derived directly from the URL (not local state) so browser back/forward navigation that
+  // changes ?tab= is reflected immediately, instead of showing a stale tab.
+  const tab = TABS.find((t) => t === searchParams.get("tab")) ?? "case";
 
   const handleTabChange = (value: CaseType) => {
-    setTab(value);
     setSearchParams(
       (prev) => {
         prev.set("tab", value);
