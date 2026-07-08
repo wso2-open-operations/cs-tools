@@ -125,6 +125,25 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const isCloudProject = isCloudSupportSubscription(
     selectedProject.data?.subscriptionType,
   );
+  // S0 is reserved for Managed Cloud — the highest severity is meant to page
+  // WSO2's own on-call for a subscription WSO2 directly operates, not one a
+  // customer only gets support for.
+  const isManagedCloud =
+    selectedProject.data?.subscriptionType === "managed_cloud_subscription";
+  // Clears a stale S0 pick if the project changes to a non-Managed-Cloud one
+  // after it was selected (the dropdown itself blocks picking it fresh, but
+  // can't stop an already-selected value from becoming invalid underneath).
+  // Adjusted during render (React's recommended pattern for this) rather
+  // than in an effect, which would call setState synchronously post-commit.
+  // Gated on the fetch having settled — while a new project's data is still
+  // loading, `selectedProject.data` (and so isManagedCloud) is transiently
+  // empty/false, which would otherwise wipe a valid S0 when moving between
+  // two Managed Cloud projects.
+  const [prevManagedCloud, setPrevManagedCloud] = useState(isManagedCloud);
+  if (!selectedProject.isFetching && isManagedCloud !== prevManagedCloud) {
+    setPrevManagedCloud(isManagedCloud);
+    if (severity === "S0" && !isManagedCloud) setSeverity("");
+  }
   const primaryProductionDeployments = useMemo(
     () => (deployments.data ?? []).filter((d) => d.type === "primary_production"),
     [deployments.data],
@@ -381,8 +400,9 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 onChange={(e) => setSeverity(e.target.value as Severity)}
               >
                 {SEVERITIES.map((s) => (
-                  <MenuItem key={s} value={s}>
+                  <MenuItem key={s} value={s} disabled={s === "S0" && !isManagedCloud}>
                     {s} · {SEVERITY_LABEL[s]}
+                    {s === "S0" && !isManagedCloud ? " (Managed Cloud only)" : ""}
                   </MenuItem>
                 ))}
               </Select>

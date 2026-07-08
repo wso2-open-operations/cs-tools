@@ -374,3 +374,32 @@ describe("CaseActionBar — Raise internal Git issue is blocked on a closed case
     expect(onAction).toHaveBeenCalledWith({ secondary: "raise_git_issue" });
   });
 });
+
+describe("CaseActionBar — Change severity is blocked on a closed case", () => {
+  it("disables the menu item once the case is closed", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /change severity/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps it enabled for a non-closed case", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /change severity/i });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: "change_severity" });
+  });
+});

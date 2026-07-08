@@ -28,6 +28,7 @@ import {
   ChevronDown,
   Clock,
   Copy,
+  Gauge,
   GitBranch,
   Inbox,
   Link as LinkIcon,
@@ -203,12 +204,14 @@ interface SecondaryItem {
  *   - Create task                    → ISSU-025
  *   - Request a call                 → ISSU-008 (opens the Call requests tab's create dialog)
  *   - Log time                       → ISSU-017
+ *   - Change severity                → PATCH /cases/{id} { severity }, already fully
+ *                                       backend-supported (see ChangeSeverityDialog.tsx)
  *   - Copy case link                 → ISSU-010 (per-comment + per-case permalinks)
  *
  * Intentionally NOT here:
  *   - Watch / unwatch  → withdrawn along with the Watchers widget (ISSU-018), no backend flow planned yet
  *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
- *   - Escalate to lead / Request severity change → withdrawn, no backend flow planned yet
+ *   - Escalate to lead → withdrawn, no backend flow planned yet
  */
 function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const items: SecondaryItem[] = [];
@@ -250,8 +253,8 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const NOT_BUILT_YET = "Not available yet — this action is planned but not built.";
 
   // Only "Copy case link", "Request a call", "Log time", "Assign / reassign
-  // engineer…", and "Raise internal Git issue…" are wired up. The rest are
-  // disabled until their backend flows land.
+  // engineer…", "Raise internal Git issue…", and "Change severity…" are wired
+  // up. The rest are disabled until their backend flows land.
   items.push(
     {
       key: "raise_git_issue",
@@ -270,6 +273,14 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       tooltip: reassignBlocked
         ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
         : undefined,
+    },
+    {
+      key: "change_severity",
+      label: "Change severity…",
+      icon: <Gauge size={16} />,
+      divider: true,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
     },
     { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
     { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true, tooltip: NOT_BUILT_YET },

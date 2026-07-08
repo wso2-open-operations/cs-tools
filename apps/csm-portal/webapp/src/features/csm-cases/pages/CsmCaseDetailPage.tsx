@@ -59,7 +59,8 @@ import type {
   BeCaseState,
   BeCreateCaseGithubIssueResponse,
 } from "@api/backend/types";
-import { beStateFromUi } from "@api/backend/mappers";
+import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
+import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import { BackendApiError } from "@api/backend/client";
 import {
   useGetCsmCaseComments,
@@ -77,6 +78,7 @@ import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentIn
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
 import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
+import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
 import { usePostCaseGithubIssue } from "@features/csm-cases/api/useCsmCaseGithubIssue";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
@@ -348,6 +350,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     kind: "close" | "propose_solution";
     targetState: BeCaseState;
   } | null>(null);
+  const [severityOpen, setSeverityOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
   // One-shot: true to pop open the Call requests tab's "Create call request"
   // dialog from the action bar's "Request a call" item. The widget flips it
@@ -630,6 +633,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Change severity opens the severity picker; the PATCH happens in
+      // onChangeSeverity once a new value is confirmed.
+      if (action.secondary === "change_severity") {
+        setSeverityOpen(true);
+        return;
+      }
+
       // Pause / resume the work sub-state via PATCH { workState }. Only for an
       // in-progress case assigned to the current user. Pausing is a direct
       // single-field patch. Resuming sets this case `ongoing`, so it runs the
@@ -842,6 +852,26 @@ export default function CsmCaseDetailPage(): JSX.Element {
       );
     },
     [patchCase, resolutionDialog, showError],
+  );
+
+  const onChangeSeverity = useCallback(
+    (next: Severity) => {
+      patchCase.mutate(
+        { severity: priorityFromSeverity(next) },
+        {
+          onSuccess: () => {
+            setSeverityOpen(false);
+            setFeedback({
+              message: `Severity changed to ${next}.`,
+              severity: "success",
+              sticky: true,
+            });
+          },
+          onError: (err) => showError("Could not change the severity.", err),
+        },
+      );
+    },
+    [patchCase, showError],
   );
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
@@ -1450,6 +1480,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isSubmitting={patchCase.isPending}
           onClose={() => setResolutionDialog(null)}
           onSubmit={onResolutionSubmit}
+        />
+      )}
+
+      {severityOpen && (
+        <ChangeSeverityDialog
+          currentSeverity={c.severity}
+          // S0 is reserved for Managed Cloud, same rule as case creation (see
+          // CsmCaseCreatePage.tsx) — caseProject is the same project fetch
+          // already used for the Customer card above.
+          isManagedCloud={caseProject?.subscriptionType === "managed_cloud_subscription"}
+          isChanging={patchCase.isPending}
+          onClose={() => setSeverityOpen(false)}
+          onChange={onChangeSeverity}
         />
       )}
 
