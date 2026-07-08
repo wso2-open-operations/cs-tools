@@ -1226,6 +1226,33 @@ export type BeChangeRequestState =
 
 export type BeChangeRequestImpact = "high" | "medium" | "low";
 
+export type BeChangeRequestType =
+  | "standard"
+  | "normal"
+  | "emergency"
+  | "model"
+  | "site_reliability_ops"
+  | "azure";
+
+export type BeChangeRequestPriority = "critical" | "high" | "moderate" | "low";
+
+export type BeChangeRequestRisk = "high" | "moderate" | "low";
+
+export type BeChangeRequestCategory =
+  | "hardware"
+  | "software"
+  | "service"
+  | "system_software"
+  | "applications_software"
+  | "network"
+  | "telecom"
+  | "documentation"
+  | "other"
+  | "regular_release_cloud"
+  | "hotfix_release_cloud"
+  | "devops"
+  | "cloud_computing";
+
 /** List-item / shared shape for a change request (`POST /change-requests/search`). */
 export interface BeChangeRequestSearchView {
   id: string;
@@ -1262,6 +1289,52 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   hasCustomerReviewed?: boolean;
   approvedBy?: BeEntityRef | null;
   approvedOn?: string | null;
+}
+
+/**
+ * `POST /change-requests` body (ServiceNow data source only). `subject` is
+ * the only required field; every ID field (`serviceId`, `serviceOfferingId`,
+ * `configurationItemId`, `groupId`, `assignedEngineerId`, `requestedById`)
+ * is a portal UUID, converted to a ServiceNow sysid server-side — the BE has
+ * no lookup/search endpoint for any of them, so the form collects them as
+ * plain text. `state` is deliberately not exposed: the BE defaults it and a
+ * create form has no business picking an arbitrary starting workflow state.
+ * `plannedStartDate`/`plannedEndDate` are `YYYY-MM-DD HH:MM:SS` strings.
+ */
+export interface BeCreateChangeRequestPayload {
+  subject: string;
+  category?: BeChangeRequestCategory;
+  serviceId?: string;
+  serviceOfferingId?: string;
+  configurationItemId?: string;
+  priority?: BeChangeRequestPriority;
+  impact?: BeChangeRequestImpact;
+  type?: BeChangeRequestType;
+  groupId?: string;
+  assignedEngineerId?: string;
+  risk?: BeChangeRequestRisk;
+  requestedById?: string;
+  description?: string;
+  justification?: string;
+  implementationPlan?: string;
+  riskImpactAnalysis?: string;
+  backoutPlan?: string;
+  testPlan?: string;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
+  comment?: string;
+  workNote?: string;
+}
+
+/** `POST /change-requests` response — the created identifiers. */
+export interface BeCreateChangeRequestResponse {
+  message: string;
+  changeRequest: {
+    id: string;
+    number: string;
+    createdOn: string;
+    createdBy: string;
+  };
 }
 
 /**

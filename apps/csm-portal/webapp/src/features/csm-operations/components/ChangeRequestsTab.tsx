@@ -17,6 +17,7 @@
 import {
   Alert,
   Box,
+  Button,
   Chip,
   Skeleton,
   Table,
@@ -28,6 +29,7 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
+import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
@@ -121,6 +123,18 @@ export default function ChangeRequestsTab(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="contained"
+          color="primary"
+          size="small"
+          startIcon={<Plus size={16} />}
+          onClick={() => navigate("/operations/change-requests/new")}
+        >
+          Create change request
+        </Button>
+      </Box>
+
       <ChangeRequestsFilterBar
         filters={filters}
         onChange={handleFiltersChange}
