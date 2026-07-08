@@ -1,0 +1,43 @@
+name: Build customer-portal-microapp
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: "Version bump type (patch / minor / major). Defaults to patch."
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      version:
+        description: "Optional: current version hint from Release Dashboard (e.g. 1.0.3). Used as baseline only if no git tag exists."
+        required: false
+        type: string
+        default: ""
+      build:
+        description: "Optional: current build hint from Release Dashboard (e.g. 16). Used as baseline only if no git tag exists."
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/reusable-frontend-build.yml
+    with:
+      app_name: customer-portal-microapp
+      app_path: apps/customer-portal/microapp
+      initial_version: "1.0.3-build.16"
+      bump_type: ${{ inputs.bump_type }}
+      node_version: "20"
+      build_command: npm run build
+      output_dir: dist # Vite-built frontend
+      override_version: ${{ inputs.version }}
+      override_build: ${{ inputs.build }}
+      service_url_env_name: CUSTOMER_PORTAL_BACKEND_URL
+    secrets:
+      REACT_APP_API_BASE: ${{ secrets.REACT_APP_API_BASE }}
