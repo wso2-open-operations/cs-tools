@@ -327,6 +327,8 @@ func (c *Client) do(req *http.Request, path string) (json.RawMessage, error) {
 		return nil, &apierror.ForbiddenError{Msg: extractDownstreamMessage(raw, "not authorized to access this resource")}
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, &apierror.NotFoundError{Msg: extractDownstreamMessage(raw, "resource not found in downstream service")}
+	case resp.StatusCode == http.StatusConflict:
+		return nil, &apierror.ValidationError{Msg: extractDownstreamMessage(raw, "request conflicts with current state of the resource")}
 	case resp.StatusCode == http.StatusServiceUnavailable:
 		return nil, &apierror.ServiceUnavailableError{Msg: "downstream service unavailable"}
 	default:
