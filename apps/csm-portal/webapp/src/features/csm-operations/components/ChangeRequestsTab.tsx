@@ -29,7 +29,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useNavigate } from "react-router";
+
+import { useNavTransition } from "@hooks/useNavTransition";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useSearchChangeRequests } from "@features/csm-operations/api/useSearchChangeRequests";
@@ -73,7 +74,7 @@ function toISOEnd(date: string): string {
  * (state, impact, closed date range, free-text search).
  */
 export default function ChangeRequestsTab(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const [filters, setFilters] = useState<ChangeRequestFilters>(DEFAULT_CR_FILTERS);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);

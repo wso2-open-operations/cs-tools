@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import {  useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
@@ -51,6 +51,7 @@ import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import type { BeCaseIssueType } from "@api/backend/types";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 const SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
 
@@ -79,7 +80,7 @@ const MAX_DESCRIPTION_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_DESCRIPTION_CONTENT_BYTES = MAX_DESCRIPTION_BODY_BYTES - 4 * 1024;
 
 export default function CsmCaseCreatePage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const { showError } = useErrorBanner();
 
   // When the form is opened from a project's page (`/cases/new?projectId=…`),

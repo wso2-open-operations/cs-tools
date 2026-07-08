@@ -17,12 +17,13 @@
 import { Button } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import { useNavigate } from "react-router";
+
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 /** All-cases list — the shared issues view across every case type. */
 export default function CsmCasesPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
 
   return (
     <CsmIssuesView

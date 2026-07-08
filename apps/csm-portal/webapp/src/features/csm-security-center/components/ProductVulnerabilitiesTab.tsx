@@ -33,7 +33,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Search } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useNavigate } from "react-router";
+
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProductVulnerabilities } from "@features/csm-security-center/api/useSearchProductVulnerabilities";
 import {
@@ -42,6 +42,7 @@ import {
   vulnerabilityPriorityLabel,
 } from "@features/csm-security-center/utils/vulnerabilities";
 import type { BeVulnerabilityPriority } from "@api/backend/types";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -52,7 +53,7 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
  * a row opens the vulnerability detail page.
  */
 export default function ProductVulnerabilitiesTab(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const [searchInput, setSearchInput] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<BeVulnerabilityPriority | "">("");
   const [page, setPage] = useState(0);

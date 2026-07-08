@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+
 import { BackendApiError } from "@api/backend/client";
 import Editor from "@components/rich-text-editor/Editor";
 import AttachmentsField from "@components/attachments/AttachmentsField";
@@ -42,6 +42,7 @@ import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelec
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 // POST /cases caps the whole body at 10 MiB (BE maxCaseBodyBytes). Attachments
 // dominate that, but the subject + (rich-text, unbounded) description share the
@@ -62,7 +63,7 @@ function todayStamp(): string {
 }
 
 export default function CreateSecurityReportPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const { showError } = useErrorBanner();
 
   const [projectId, setProjectId] = useState("");

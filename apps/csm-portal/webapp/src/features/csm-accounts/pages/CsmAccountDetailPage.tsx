@@ -24,8 +24,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router";
+import {  useParams } from "react-router";
 import { useGetAccount } from "@features/csm-accounts/api/useGetAccount";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
@@ -78,7 +79,7 @@ function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
 
 export default function CsmAccountDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const { data, isLoading, isError } = useGetAccount(id);
 
   if (isLoading) {

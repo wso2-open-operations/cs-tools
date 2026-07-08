@@ -30,7 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+
 import { BackendApiError } from "@api/backend/client";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import {
@@ -48,6 +48,7 @@ import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useSearchCatalogs } from "@features/csm-operations/api/useSearchCatalogs";
 import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalogItemVariables";
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
+import { useNavTransition } from "@hooks/useNavTransition";
 import {
   encodeVariableValue,
   getFirstEmptyRequiredField,
@@ -56,7 +57,7 @@ import {
 } from "@features/csm-operations/utils/catalogVariables";
 
 export default function CreateServiceRequestPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const { showError } = useErrorBanner();
 
   const [projectId, setProjectId] = useState("");
