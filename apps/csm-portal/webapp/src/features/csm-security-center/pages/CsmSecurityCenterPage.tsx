@@ -17,9 +17,10 @@
 import { Box, Button, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import {  useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ProductVulnerabilitiesTab from "@features/csm-security-center/components/ProductVulnerabilitiesTab";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 type SecurityCenterTabId = "security_reports" | "vulnerabilities";
 
@@ -32,7 +33,7 @@ const TAB_IDS: SecurityCenterTabId[] = ["security_reports", "vulnerabilities"];
  * tab, and the selection survives a refresh or share.
  */
 export default function CsmSecurityCenterPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab") as SecurityCenterTabId | null;
   const activeTab: SecurityCenterTabId =

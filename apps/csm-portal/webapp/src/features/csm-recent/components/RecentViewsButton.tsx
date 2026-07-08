@@ -34,7 +34,7 @@ import {
   type JSX,
 } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router";
+
 import {
   clearRecentViews,
   toggleRecentViewPin,
@@ -44,6 +44,7 @@ import {
 } from "@features/csm-recent/hooks/useRecentViews";
 import { KIND_LABEL, KIND_ORDER, kindIcon } from "@features/csm-recent/kindMeta";
 import RelativeTime from "@components/RelativeTime";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 const PANEL_WIDTH = 360;
 
@@ -62,7 +63,7 @@ function groupByKind(
 }
 
 export default function RecentViewsButton(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const theme = useTheme();
   const recents = useRecentViews();
   const [open, setOpen] = useState(false);

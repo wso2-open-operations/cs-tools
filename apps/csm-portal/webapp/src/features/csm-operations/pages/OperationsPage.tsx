@@ -17,10 +17,11 @@
 import { Box, Button, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import {  useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import IssuesListUnavailable from "@features/csm-operations/components/IssuesListUnavailable";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 type OperationsTabId = "service_requests" | "change_requests" | "incidents";
 
@@ -38,7 +39,7 @@ const TAB_IDS: readonly OperationsTabId[] = [
  * yet and renders an unavailable placeholder.
  */
 export default function OperationsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   // Active tab lives in the URL (`?tab=`) so the change-request detail page can
   // link back to the right tab, and the tab survives a refresh / share.
   const [searchParams, setSearchParams] = useSearchParams();

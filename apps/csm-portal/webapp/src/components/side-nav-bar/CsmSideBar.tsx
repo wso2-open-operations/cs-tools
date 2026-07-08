@@ -22,6 +22,7 @@ import {
   isWipDisabled,
   navItemForPath,
 } from "@config/csmNavItems";
+import { preloadRoute } from "@utils/routePreloaders";
 
 /** Tooltip for a disabled WIP item. Includes the label so the collapsed rail
  *  (which hides the label) still says which feature it is. */
@@ -110,6 +111,7 @@ export default function CsmSideBar({
                 to={item.path}
                 color="inherit"
                 underline="none"
+                onMouseEnter={() => preloadRoute(item.path)}
               >
                 {itemContent}
               </Link>

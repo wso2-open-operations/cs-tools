@@ -17,6 +17,7 @@
 import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
+import { preloadRoute } from "@utils/routePreloaders";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
@@ -135,6 +136,7 @@ export default function CasesList({
               key={c.id}
               component={RouterLink}
               to={`${detailBasePath}/${c.id}`}
+              onMouseEnter={() => preloadRoute(detailBasePath)}
               sx={{
                 gridColumn: "1 / -1",
                 display: "grid",

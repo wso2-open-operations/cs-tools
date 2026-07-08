@@ -24,7 +24,7 @@ import {
 import { Search } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { useNavigate } from "react-router";
+
 import { navigableNavItems } from "@config/csmNavItems";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useRecentViews } from "@features/csm-recent/hooks/useRecentViews";
@@ -34,6 +34,7 @@ import {
   useQuickCaseSearch,
 } from "@features/csm-cases/api/useQuickCaseSearch";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 type Section = "Cases" | "Pinned" | "Recent" | "Pages";
 
@@ -53,7 +54,7 @@ const isMac =
 
 export default function QuickNav(): JSX.Element | null {
   const { isSignedIn } = useAsgardeo();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const recents = useRecentViews();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
