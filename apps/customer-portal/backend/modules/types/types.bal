@@ -885,6 +885,34 @@ public type CommentCreatePayload record {|
     entity:CommentType 'type;
 |};
 
+# Feedback emoji summary.
+public type FeedbackEmojiSummary record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Selected image URL
+    string selectedImage;
+|};
+
+# Case feedback details.
+public type CaseFeedback record {|
+    # ID
+    entity:IdString id;
+    # Emoji summary
+    FeedbackEmojiSummary emoji;
+    # Chips
+    string[]? chips;
+    # Assessment ID
+    entity:IdString assessmentId;
+    # User who created the feedback
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Additional comment
+    string? additionalComment;
+|};
+
 # Payload for submitting case feedback.
 public type CaseFeedbackPayload record {|
     # Emoji ID

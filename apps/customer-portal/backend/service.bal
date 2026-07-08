@@ -2298,6 +2298,65 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         return createdCommentResponse.comment;
     }
 
+    # Get feedback for a specific case.
+    #
+    # + id - ID of the case
+    # + return - Case feedback or error response
+    resource function get cases/[entity:IdString id]/feedback(http:RequestContext ctx)
+        returns types:CaseFeedback|http:Unauthorized|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CaseFeedback|error feedbackResponse = entity:getCaseFeedback(userInfo.idToken, id);
+        if feedbackResponse is error {
+            if getStatusCode(feedbackResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            if getStatusCode(feedbackResponse) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: string `Feedback not found for case with ID: ${id}.`
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve feedback for the case.";
+            log:printError(customError, feedbackResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return {
+            id: feedbackResponse.id,
+            emoji: {
+                id: feedbackResponse.emoji.id,
+                name: feedbackResponse.emoji.name,
+                selectedImage: feedbackResponse.emoji.selectedImage
+            },
+            chips: feedbackResponse.chips,
+            assessmentId: feedbackResponse.assessmentId,
+            createdBy: feedbackResponse.createdBy,
+            createdOn: feedbackResponse.createdOn,
+            additionalComment: feedbackResponse.additionalComment
+        };
+    }
+
     # Submit feedback for a specific case.
     #
     # + id - ID of the case

@@ -321,6 +321,15 @@ public isolated function createComment(string idToken, CommentCreatePayload payl
     return csEntityClient->/comments.post(payload, generateHeaders(idToken));
 }
 
+# Get feedback for a case.
+#
+# + idToken - ID token for authorization
+# + id - ID of the case
+# + return - Case feedback or error
+public isolated function getCaseFeedback(string idToken, IdString id) returns CaseFeedback|error {
+    return csEntityClient->/cases/[id]/feedback.get(generateHeaders(idToken));
+}
+
 # Submit feedback for a case.
 #
 # + idToken - ID token for authorization
