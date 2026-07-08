@@ -150,7 +150,10 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
     expect(onAction).toHaveBeenCalledWith("wait_on_wso2", "waiting_on_wso2");
   });
 
-  it("gates a customer-notifying transition behind a confirm dialog before dispatch", () => {
+  it("dispatches Close immediately — confirmation happens via the Post Resolution Activity dialog upstream", () => {
+    // CaseActionBar itself no longer gates close/propose-solution behind a
+    // confirm dialog; CsmCaseDetailPage's onAction opens the resolution
+    // dialog for these two, which doubles as the confirmation step.
     const onAction = vi.fn();
     render(
       <CaseActionBar
@@ -158,12 +161,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={onAction}
       />,
     );
-    // Clicking "Close" must NOT dispatch yet — it opens a confirm dialog.
     fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
-    expect(onAction).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    // Confirming dispatches with the close action + closed target.
-    fireEvent.click(screen.getByRole("button", { name: /close case/i }));
     expect(onAction).toHaveBeenCalledWith("close", "closed");
   });
 

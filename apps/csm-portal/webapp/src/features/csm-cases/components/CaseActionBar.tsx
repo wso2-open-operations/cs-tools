@@ -17,14 +17,9 @@
 import {
   Box,
   Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Menu,
   MenuItem,
   Tooltip,
-  Typography,
 } from "@wso2/oxygen-ui";
 import {
   AlertTriangle,
@@ -52,25 +47,19 @@ import type {
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 
-type ActionConfirm = {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  confirmColor: "primary" | "error" | "warning";
-};
-
 /**
  * Presentation for a transition *into* a given state. The button LABEL is never
  * stored here — it always comes from `stateLabel(targetState)`, so the bar
  * honours the backend transition graph verbatim and never invents UI-specific
- * verbs. This only carries the icon/colour, the lifecycle action used for the
- * post-transition toast, and an optional confirm gate.
+ * verbs. This only carries the icon/colour and the lifecycle action used for
+ * the post-transition toast. `closed`/`solution_proposed` don't need a
+ * confirm gate here — `onAction` opens the Post Resolution Activity dialog
+ * for those, which doubles as the confirmation step.
  */
 type TargetConfig = {
   action: CaseLifecycleAction;
   color: "primary" | "success" | "warning" | "error";
   icon: JSX.Element;
-  confirm?: ActionConfirm;
 };
 
 /** A concrete button: a target state plus its presentation. */
@@ -80,17 +69,13 @@ type PrimaryButton = TargetConfig & {
   tooltip?: string;
 };
 
-const CLOSE_CONFIRM: ActionConfirm = {
-  title: "Close this case?",
-  body: "The customer receives a closure notification and the case moves to “Closed”.",
-  confirmLabel: "Close case",
-  confirmColor: "warning",
-};
-
 /**
  * Per-target-state presentation. One entry per state a case can move INTO.
- * Customer-notifying / hard-to-undo transitions carry a confirm gate so a stray
- * click in a busy queue can't silently close a case or email the customer.
+ * `closed` and `solution_proposed` dispatch immediately like every other
+ * target, but `onAction` (in CsmCaseDetailPage) opens the Post Resolution
+ * Activity dialog for those two (resolution code, cause, close notes —
+ * ISSU-026) instead of PATCHing right away — that dialog is the confirm
+ * gate for a customer-notifying transition, so no separate one is needed here.
  */
 const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
   work_in_progress: {
@@ -112,18 +97,11 @@ const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
     action: "propose_solution",
     color: "success",
     icon: <Send size={16} />,
-    confirm: {
-      title: "Propose solution to the customer?",
-      body: "The customer is notified that a solution has been proposed and the case moves to “Solution proposed”.",
-      confirmLabel: "Propose solution",
-      confirmColor: "primary",
-    },
   },
   closed: {
     action: "close",
     color: "warning",
     icon: <CheckCircle size={16} />,
-    confirm: CLOSE_CONFIRM,
   },
   // Not a real reopen — the data source has no transition out of closed. The
   // backend only puts `reopened` in a closed case's `nextStates` as a signal
@@ -337,9 +315,6 @@ export default function CaseActionBar({
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [stateMenuAnchor, setStateMenuAnchor] = useState<HTMLElement | null>(null);
-  const [pendingConfirm, setPendingConfirm] = useState<PrimaryButton | null>(
-    null,
-  );
 
   // Render a button for every state the backend says the case can move to. The
   // backend `nextStates` is the single source of truth: an empty/terminal list
@@ -353,10 +328,6 @@ export default function CaseActionBar({
   const secondary = buildSecondaryItems(caseDetail);
 
   const runPrimary = (p: PrimaryButton): void => {
-    if (p.confirm) {
-      setPendingConfirm(p);
-      return;
-    }
     void onAction(p.action, p.targetState);
   };
 
@@ -471,35 +442,6 @@ export default function CaseActionBar({
           ];
         })}
       </Menu>
-
-      <Dialog
-        open={!!pendingConfirm}
-        onClose={() => setPendingConfirm(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>{pendingConfirm?.confirm?.title}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            {pendingConfirm?.confirm?.body}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPendingConfirm(null)}>Cancel</Button>
-          <Button
-            variant="contained"
-            color={pendingConfirm?.confirm?.confirmColor ?? "primary"}
-            startIcon={pendingConfirm?.icon}
-            onClick={() => {
-              const p = pendingConfirm;
-              setPendingConfirm(null);
-              if (p) void onAction(p.action, p.targetState);
-            }}
-          >
-            {pendingConfirm?.confirm?.confirmLabel ?? "Confirm"}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

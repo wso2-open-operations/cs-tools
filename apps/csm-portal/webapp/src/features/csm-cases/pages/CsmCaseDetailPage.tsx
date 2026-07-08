@@ -53,7 +53,12 @@ import {
   useFindMyOngoingCases,
   type MyOngoingCase,
 } from "@features/csm-cases/api/useFindMyOngoingCases";
-import type { BeCaseState, BeCreateCaseGithubIssueResponse } from "@api/backend/types";
+import type {
+  BeCaseCause,
+  BeCaseResolutionCode,
+  BeCaseState,
+  BeCreateCaseGithubIssueResponse,
+} from "@api/backend/types";
 import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import { BackendApiError } from "@api/backend/client";
@@ -72,6 +77,7 @@ import {
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
+import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
 import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
 import { usePostCaseGithubIssue } from "@features/csm-cases/api/useCsmCaseGithubIssue";
@@ -337,6 +343,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [metaCollapsed, setMetaCollapsed] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  // ISSU-026: closing or proposing a solution opens this instead of PATCHing
+  // immediately — it collects the Post Resolution Activity and doubles as
+  // the confirmation step for these two customer-notifying transitions.
+  const [resolutionDialog, setResolutionDialog] = useState<{
+    kind: "close" | "propose_solution";
+    targetState: BeCaseState;
+  } | null>(null);
   const [severityOpen, setSeverityOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
   // One-shot: true to pop open the Call requests tab's "Create call request"
@@ -566,6 +579,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
           const params = new URLSearchParams({ projectId: data.projectId, relatedCaseId: data.id });
           if (data.caseNumber) params.set("relatedCaseNumber", data.caseNumber);
           navigate(`/cases/new?${params.toString()}`);
+          return;
+        }
+
+        // ISSU-026: closing or proposing a solution records the Post
+        // Resolution Activity first — open that dialog instead of PATCHing
+        // immediately. Must run before the generic `targetState` PATCH below.
+        if ((action === "close" || action === "propose_solution") && targetState) {
+          setResolutionDialog({ kind: action, targetState });
           return;
         }
 
@@ -801,6 +822,36 @@ export default function CsmCaseDetailPage(): JSX.Element {
       );
     },
     [patchCase, showError],
+  );
+
+  // Submits the Post Resolution Activity dialog: PATCHes state alongside
+  // resolutionCode/cause/closeNotes in one call (the backend accepts all
+  // four together for these two transitions — see BeCaseUpdatePayload).
+  const onResolutionSubmit = useCallback(
+    (fields: {
+      resolutionCode: BeCaseResolutionCode;
+      cause: BeCaseCause;
+      closeNotes: string;
+    }) => {
+      if (!resolutionDialog) return;
+      const { kind, targetState } = resolutionDialog;
+      patchCase.mutate(
+        { state: targetState, ...fields },
+        {
+          onSuccess: () => {
+            setResolutionDialog(null);
+            setFeedback({
+              message: LIFECYCLE_TOAST[kind],
+              severity: LIFECYCLE_SEVERITY[kind],
+              sticky: true,
+            });
+          },
+          onError: (err) =>
+            showError("Could not update the case. Please try again.", err),
+        },
+      );
+    },
+    [patchCase, resolutionDialog, showError],
   );
 
   const onChangeSeverity = useCallback(
@@ -1420,6 +1471,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isAssigning={patchCase.isPending}
           onClose={() => setAssignOpen(false)}
           onAssign={onAssign}
+        />
+      )}
+
+      {resolutionDialog && (
+        <ResolutionDialog
+          kind={resolutionDialog.kind}
+          isSubmitting={patchCase.isPending}
+          onClose={() => setResolutionDialog(null)}
+          onSubmit={onResolutionSubmit}
         />
       )}
 
