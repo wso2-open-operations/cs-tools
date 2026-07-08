@@ -137,7 +137,7 @@ var snCaseTypeSysidMap = map[string]string{
 	"5aeff1201b74c210264c997a234bcb54": "service_request",
 	"ab36479047ccf510a0a29cd3846d43ee": "security_report_analysis",
 	"3b8b43311b58f010cb6898aebd4bcb8f": "announcement",
-	"8f8fc2c41b0bd550d64e64a2604bcb38": "announcement",
+	"8f8fc2c41b0bd550d64e64a2604bcb38": "engagement",
 }
 
 // snCaseTypeToDomain converts a SN caseType entity ref to the domain type string.
