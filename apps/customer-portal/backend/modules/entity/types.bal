@@ -54,6 +54,8 @@ public type MetadataResponse record {|
     ChoiceListItem[] timeZones;
     # List of available project types
     ReferenceTableItem[] projectTypes;
+    # List of feedback emojies
+    FeedbackEmoji[] feedbackEmojies;
     json...;
 |};
 
@@ -437,6 +439,34 @@ public type ReferenceTableItem record {|
     Date? releasedOn?;
     # End of life date (for product versions)
     Date? endOfLifeOn?;
+    json...;
+|};
+
+# Feedback emoji chip information.
+public type FeedbackEmojiChip record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Value
+    string value;
+    json...;
+|};
+
+# Feedback emoji information.
+public type FeedbackEmoji record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Value
+    string value;
+    # Unselected image URL
+    string unselectedImage;
+    # Selected image URL
+    string selectedImage;
+    # Chips
+    FeedbackEmojiChip[] chips;
     json...;
 |};
 
@@ -1416,6 +1446,70 @@ public type CommentCreateResponse record {|
     string message;
     # Created comment details
     CreatedComment comment;
+    json...;
+|};
+
+# Feedback emoji summary.
+public type FeedbackEmojiSummary record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Selected image URL
+    string selectedImage;
+    json...;
+|};
+
+# Case feedback details.
+public type CaseFeedback record {|
+    # ID
+    IdString id;
+    # Emoji summary
+    FeedbackEmojiSummary emoji;
+    # Chips
+    string[]? chips;
+    # Assessment ID
+    IdString assessmentId;
+    # User who created the feedback
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Additional comment
+    string? additionalComment;
+    json...;
+|};
+
+# Payload for submitting case feedback.
+public type CaseFeedbackPayload record {|
+    # Emoji ID
+    string emojiId;
+    # Chip IDs
+    string[] chipIds?;
+    # Additional comment
+    string additionalComment?;
+|};
+
+# Submitted feedback details.
+public type SubmittedFeedback record {|
+    # ID
+    IdString id;
+    # Assessment ID
+    IdString assessmentId;
+    # Case ID
+    IdString caseId;
+    # User who created the feedback
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    json...;
+|};
+
+# Response from submitting case feedback.
+public type CaseFeedbackResponse record {|
+    # Success message
+    string message;
+    # Submitted feedback details
+    SubmittedFeedback feedback;
     json...;
 |};
 

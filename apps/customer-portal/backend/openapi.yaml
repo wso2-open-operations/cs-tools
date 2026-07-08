@@ -1153,6 +1153,72 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /cases/{id}/feedback:
+    get:
+      summary: Get feedback for a specific case.
+      operationId: getCasesIdFeedback
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseFeedback'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+    post:
+      summary: Submit feedback for a specific case.
+      operationId: postCasesIdFeedback
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Case feedback payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseFeedbackPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseFeedbackResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
   /conversations/{id}/messages:
     get:
       summary: Get messages for a specific conversation.
@@ -3875,6 +3941,73 @@ components:
             items:
               $ref: '#/components/schemas/WatchList'
         additionalProperties: false
+    CaseFeedback:
+      required:
+      - assessmentId
+      - chips
+      - createdBy
+      - createdOn
+      - emoji
+      - id
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        emoji:
+          $ref: '#/components/schemas/FeedbackEmojiSummary'
+        chips:
+          type: array
+          description: Chips
+          nullable: true
+          items:
+            type: string
+        assessmentId:
+          $ref: '#/components/schemas/IdString'
+        createdBy:
+          type: string
+          description: User who created the feedback
+        createdOn:
+          type: string
+          description: Created date and time
+        additionalComment:
+          type: string
+          description: Additional comment
+          nullable: true
+      additionalProperties: false
+      description: Case feedback details.
+    CaseFeedbackPayload:
+      required:
+      - emojiId
+      type: object
+      properties:
+        emojiId:
+          type: string
+          description: Emoji ID
+        chipIds:
+          type: array
+          description: Chip IDs
+          nullable: true
+          items:
+            type: string
+        additionalComment:
+          type: string
+          description: Additional comment
+          nullable: true
+      additionalProperties: false
+      description: Payload for submitting case feedback.
+    CaseFeedbackResponse:
+      required:
+      - feedback
+      - message
+      type: object
+      properties:
+        message:
+          type: string
+          description: Success message
+        feedback:
+          $ref: '#/components/schemas/SubmittedFeedback'
+      additionalProperties: false
+      description: Response from submitting case feedback.
     CaseSearchFilters:
       type: object
       properties:
@@ -5228,6 +5361,74 @@ components:
           type: string
         method:
           type: string
+    FeedbackEmojiChip:
+      required:
+      - id
+      - name
+      - value
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        name:
+          type: string
+          description: Name
+        value:
+          type: string
+          description: Value
+      additionalProperties: false
+      description: Feedback emoji chip information.
+    FeedbackEmoji:
+      required:
+      - chips
+      - id
+      - name
+      - selectedImage
+      - unselectedImage
+      - value
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        name:
+          type: string
+          description: Name
+        value:
+          type: string
+          description: Value
+        unselectedImage:
+          type: string
+          description: Unselected image URL
+        selectedImage:
+          type: string
+          description: Selected image URL
+        chips:
+          type: array
+          description: Chips
+          items:
+            $ref: '#/components/schemas/FeedbackEmojiChip'
+      additionalProperties: false
+      description: Feedback emoji information.
+    FeedbackEmojiSummary:
+      required:
+      - id
+      - name
+      - selectedImage
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        name:
+          type: string
+          description: Name
+        selectedImage:
+          type: string
+          description: Selected image URL
+      additionalProperties: false
+      description: Feedback emoji summary.
     FeatureFlags:
       required:
       - usageMetricsEnabled
@@ -5431,6 +5632,7 @@ components:
     MetadataResponse:
       required:
       - featureFlags
+      - feedbackEmojies
       - projectTypes
       - timeZones
       type: object
@@ -5445,6 +5647,11 @@ components:
           description: List of available project types
           items:
             $ref: '#/components/schemas/ReferenceItem'
+        feedbackEmojies:
+          type: array
+          description: List of feedback emojies
+          items:
+            $ref: '#/components/schemas/FeedbackEmoji'
         featureFlags:
           $ref: '#/components/schemas/FeatureFlags'
       additionalProperties: false
@@ -6505,6 +6712,29 @@ components:
       description: Stats filter enum
       enum:
       - me
+    SubmittedFeedback:
+      required:
+      - assessmentId
+      - caseId
+      - createdBy
+      - createdOn
+      - id
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        assessmentId:
+          $ref: '#/components/schemas/IdString'
+        caseId:
+          $ref: '#/components/schemas/IdString'
+        createdBy:
+          type: string
+          description: User who created the feedback
+        createdOn:
+          type: string
+          description: Created date and time
+      additionalProperties: false
+      description: Submitted feedback details.
     SubscriptionData:
       required:
       - clientId

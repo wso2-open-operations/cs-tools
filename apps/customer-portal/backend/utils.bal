@@ -1031,7 +1031,17 @@ public isolated function mapMetadataResponse(entity:MetadataResponse response) r
         select {id: item.id.toString(), label: item.label};
     types:ReferenceItem[] projectTypes = from entity:ReferenceTableItem item in response.projectTypes
         select {id: item.id, label: item.name};
-    return {timeZones, projectTypes, featureFlags};
+    types:FeedbackEmoji[] feedbackEmojies = from entity:FeedbackEmoji emoji in response.feedbackEmojies
+        select {
+            id: emoji.id,
+            name: emoji.name,
+            value: emoji.value,
+            unselectedImage: emoji.unselectedImage,
+            selectedImage: emoji.selectedImage,
+            chips: from entity:FeedbackEmojiChip chip in emoji.chips
+                select {id: chip.id, name: chip.name, value: chip.value}
+        };
+    return {timeZones, projectTypes, feedbackEmojies, featureFlags};
 }
 
 # Map usage stats response to the desired structure.
