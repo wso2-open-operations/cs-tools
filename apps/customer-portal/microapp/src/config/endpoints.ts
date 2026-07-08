@@ -14,10 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+export const BACKEND_URL = import.meta.env.CUSTOMER_PORTAL_BACKEND_URL;
 
 if (!BACKEND_URL) {
-  throw new Error("VITE_BACKEND_URL is not defined");
+  throw new Error("CUSTOMER_PORTAL_BACKEND_URL is not defined");
 }
 
 export const PROJECTS_ENDPOINT = "/projects/search";
@@ -53,7 +53,7 @@ export const USER_ACTIONS_ENDPOINT = (id: string, email: string) => `/projects/$
 export const METADATA_ENDPOINT = "/metadata";
 export const ATTACHMENT_DETAIL_ENDPOINT = (id: string) => `/attachments/${id}`;
 export const NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT = (sessionId: string) =>
-  import.meta.env.VITE_BACKEND_URL.replace("https://", "wss://").replace(
+  import.meta.env.CUSTOMER_PORTAL_BACKEND_URL.replace("https://", "wss://").replace(
     "/v1.0",
     `/websocket/v1.0/ws?sessionId=${sessionId}`,
   );
