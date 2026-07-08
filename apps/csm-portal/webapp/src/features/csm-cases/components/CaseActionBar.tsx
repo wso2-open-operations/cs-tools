@@ -249,6 +249,11 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const reassignBlocked =
     caseDetail.state === "work_in_progress" && caseDetail.workState === "ongoing";
 
+  // A closed case is done — filing a new Git issue against it doesn't fit
+  // the same "closed is read-only" rule already applied to comments,
+  // attachments, and time tracking (see CsmCaseDetailPage.tsx's isClosed).
+  const caseClosed = caseDetail.state === "closed";
+
   // Roadmap items with no backend flow yet: kept visible (so the menu still
   // advertises what's coming) but disabled with a tooltip explaining why,
   // rather than clickable and silently no-op'ing or toasting a mock message.
@@ -260,7 +265,14 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   // engineer…", and "Raise internal Git issue…" are wired up. The rest are
   // disabled until their backend flows land.
   items.push(
-    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
+    {
+      key: "raise_git_issue",
+      label: "Raise internal Git issue…",
+      icon: <GitBranch size={16} />,
+      divider: true,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
     {
       key: "reassign_engineer",
       label: "Assign / reassign engineer…",

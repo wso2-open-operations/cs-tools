@@ -19,8 +19,17 @@ import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
 
+function selectType(typeLabel: string): void {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type/i }));
+  fireEvent.click(screen.getByRole("option", { name: typeLabel }));
+}
+
+/** Fills every field required for the simplest type (Query — no Severity or
+ * Hotfix Required involved) so tests unrelated to the per-type rules don't
+ * need to know about them. */
 function fillRequiredFields(): void {
-  fireEvent.change(screen.getByLabelText(/summary/i), {
+  selectType("Query");
+  fireEvent.change(screen.getByLabelText(/subject/i), {
     target: { value: "Token issuance is slow" },
   });
   fireEvent.change(screen.getByLabelText(/description/i), {
@@ -29,7 +38,7 @@ function fillRequiredFields(): void {
 }
 
 describe("CreateGithubIssueDialog — required fields gate submission", () => {
-  it("disables Create issue until Summary and Description are both filled", () => {
+  it("disables Create issue until Type, Subject, and Description are all filled", () => {
     render(
       <CreateGithubIssueDialog
         open
@@ -40,14 +49,96 @@ describe("CreateGithubIssueDialog — required fields gate submission", () => {
       />,
     );
     expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-    fillRequiredFields();
+    selectType("Query");
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/subject/i), {
+      target: { value: "Token issuance is slow" },
+    });
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Latency spiked after the last deploy." },
+    });
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
+  });
+});
+
+describe("CreateGithubIssueDialog — per-type field rules", () => {
+  it("Query hides Severity and Hotfix Required", () => {
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    selectType("Query");
+    expect(screen.queryByRole("combobox", { name: /severity/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Hotfix Required")).not.toBeInTheDocument();
+  });
+
+  it("Incident requires Severity and hides Hotfix Required", () => {
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    selectType("Incident");
+    fireEvent.change(screen.getByLabelText(/subject/i), {
+      target: { value: "Token issuance is slow" },
+    });
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Latency spiked after the last deploy." },
+    });
+    expect(screen.queryByText("Hotfix Required")).not.toBeInTheDocument();
+    // Severity is required for Incident — Create issue stays disabled without it.
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
+    fireEvent.click(screen.getByRole("option", { name: /p1/i }));
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
+  });
+
+  it("Patch hides Severity and requires Update Level + Public Git Issue", () => {
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    selectType("Patch");
+    fireEvent.change(screen.getByLabelText(/subject/i), {
+      target: { value: "Token issuance is slow" },
+    });
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Latency spiked after the last deploy." },
+    });
+    expect(screen.queryByRole("combobox", { name: /severity/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Hotfix Required")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/update level/i), {
+      target: { value: "7.1.0" },
+    });
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/public git issue/i), {
+      target: { value: "https://github.com/wso2/example/issues/1" },
+    });
     expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
   });
 });
 
 describe("CreateGithubIssueDialog — confirm step before filing a real issue", () => {
-  // Filing an issue is a real, permanent write to an external repo with no
-  // delete on either side, so it must never fire on the first click.
+  // Filing an issue is a real write to an external repo with no delete on
+  // either side, so it must never fire on the first click.
   it("does not call onSubmit on the first click — opens a confirm step instead", () => {
     const onSubmit = vi.fn();
     render(
@@ -86,6 +177,7 @@ describe("CreateGithubIssueDialog — confirm step before filing a real issue", 
         reason: "default",
         title: "Token issuance is slow",
         description: "Latency spiked after the last deploy.",
+        issueTypeLabel: "Type/Query",
       }),
     );
   });
@@ -164,5 +256,52 @@ describe("CreateGithubIssueDialog — confirm step before filing a real issue", 
     });
     expect(within(confirmDialog).getByRole("button", { name: /^back$/i })).toBeDisabled();
     expect(within(confirmDialog).getByRole("button", { name: /file issue/i })).toBeDisabled();
+  });
+});
+
+describe("CreateGithubIssueDialog — success view", () => {
+  it("shows a clickable link to the created issue instead of closing", () => {
+    const onClose = vi.fn();
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        createdIssue={{
+          message: "Issue created.",
+          issue: { url: "https://github.com/wso2-enterprise/example/issues/42", number: 42, repo: "example" },
+        }}
+        onClose={onClose}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+
+    const link = screen.getByRole("link", { name: /example#42/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://github.com/wso2-enterprise/example/issues/42",
+    );
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("falls back to the response message when no issue URL is present", () => {
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        createdIssue={{ message: "Filed, awaiting SN sync." }}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+    expect(screen.getByText("Filed, awaiting SN sync.")).toBeInTheDocument();
   });
 });
