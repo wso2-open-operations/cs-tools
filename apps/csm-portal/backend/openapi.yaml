@@ -3495,6 +3495,13 @@ components:
               - reopened
               - solution_proposed
               - closed
+          description: >-
+            Valid next states from the current one. A closed case can never
+            actually be reopened (the backing data source has no such
+            transition); `reopened` appears here only as a signal that a new
+            case may still be created as related to this one — true for a
+            standard `case`-type case closed within the last 60 days, empty
+            otherwise.
 
     CaseSearchView:
       type: object

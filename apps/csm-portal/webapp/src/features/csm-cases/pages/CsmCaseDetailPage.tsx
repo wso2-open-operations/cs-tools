@@ -35,6 +35,7 @@ import {
   ArrowLeft,
   Clock,
   Layers,
+  Link as LinkIcon,
   ListChecks,
   MessageSquarePlus,
   Paperclip,
@@ -132,6 +133,10 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   resume_work: "Resumed work on this case.",
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
+  // Unused: intercepted before this map is read (see onAction) since it
+  // navigates instead of showing a toast. Present only to satisfy the
+  // exhaustive Record.
+  create_related_case: "",
   transition: "Case updated.",
 };
 
@@ -156,6 +161,8 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   resume_work: "info",
   close: "success",
   close_no_response: "success",
+  // Unused — see the matching note in LIFECYCLE_TOAST.
+  create_related_case: "info",
   transition: "info",
 };
 
@@ -546,6 +553,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
           return;
         }
 
+        // ISSU-004: the backend puts `reopened` in a closed case's
+        // `nextStates` only as a signal — there is no real reopen (the data
+        // source has no such transition). Never PATCH it; open the new-case
+        // form pre-filled with relatedCaseId instead. Must run before the
+        // generic `targetState` PATCH below, since `beStateFromUi("reopened")`
+        // is truthy and would otherwise be sent as a state transition.
+        if (action === "create_related_case" && data) {
+          const params = new URLSearchParams({ projectId: data.projectId, relatedCaseId: data.id });
+          if (data.caseNumber) params.set("relatedCaseNumber", data.caseNumber);
+          navigate(`/cases/new?${params.toString()}`);
+          return;
+        }
+
         if (targetState === "work_in_progress" && data) {
           void startWork(LIFECYCLE_TOAST[action], LIFECYCLE_SEVERITY[action]);
           return;
@@ -708,6 +728,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
       startWork,
       resolveOngoingConflict,
       currentUserEmail,
+      navigate,
     ],
   );
 
@@ -897,6 +918,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   }
 
   const c = data;
+  // Narrowed once here so the JSX below can use it without a non-null
+  // assertion — `c.relatedCase` on its own doesn't stay narrowed across the
+  // `onClick` closure.
+  const relatedCase = c.relatedCase;
   const isClosed = c.state === "closed";
   // The backend rejects a customer-visible comment unless the case is
   // work_in_progress + ongoing. Internal work notes are allowed in any state,
@@ -988,6 +1013,17 @@ export default function CsmCaseDetailPage(): JSX.Element {
             )}
             <SeverityChip severity={c.severity} withLabel />
             <StateChip state={c.state} />
+            {relatedCase && (
+              <Chip
+                size="small"
+                variant="outlined"
+                clickable
+                icon={<LinkIcon size={14} />}
+                label={`Related: ${relatedCase.caseNumber ?? relatedCase.id}`}
+                onClick={() => navigate(`/cases/${relatedCase.id}`)}
+                sx={{ fontWeight: 600 }}
+              />
+            )}
             {c.state === "work_in_progress" && c.workState && (
               <Chip
                 size="small"

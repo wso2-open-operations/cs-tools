@@ -280,6 +280,45 @@ describe("CaseActionBar — reassign gating for WIP-Ongoing", () => {
   });
 });
 
+describe("CaseActionBar — create related case (closed-case reopen replacement)", () => {
+  it("is not offered on a closed case the backend has not flagged eligible (empty nextStates)", () => {
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={() => {}} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /create related case/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders as a single primary button when the backend flags the case eligible", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("closed", ["reopened"])}
+        onAction={onAction}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /create related case/i });
+    expect(button).toBeInTheDocument();
+    // Must dispatch the create_related_case action, never a real "reopened"
+    // state PATCH — the data source has no such transition.
+    fireEvent.click(button);
+    expect(onAction).toHaveBeenCalledWith("create_related_case", "reopened");
+  });
+
+  it("never renders a literal 'Reopened' state-transition button", () => {
+    // Guards against regressing to the pre-fix behavior where a closed case's
+    // stray `reopened` nextState rendered as a generic (broken) reopen action.
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("closed", ["reopened"])}
+        onAction={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^reopened$/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("CaseActionBar — unbuilt roadmap items stay disabled, not silently mock", () => {
   // Create incident / Link to incident / Create task / Hold auto-closure have
   // no backend flow yet. They must never be clickable — a click that reaches

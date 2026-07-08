@@ -124,6 +124,15 @@ const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
     icon: <CheckCircle size={16} />,
     confirm: CLOSE_CONFIRM,
   },
+  // Not a real reopen — the data source has no transition out of closed. The
+  // backend only puts `reopened` in a closed case's `nextStates` as a signal
+  // that a related case may still be created (see that field's doc); `action`
+  // routes to the create-related-case flow in `onAction` instead of a PATCH.
+  reopened: {
+    action: "create_related_case",
+    color: "primary",
+    icon: <LinkIcon size={16} />,
+  },
 };
 
 /**
@@ -147,6 +156,7 @@ const TRANSITION_LABEL: Partial<Record<CaseState, string>> = {
   awaiting_info: "Request information",
   waiting_on_wso2: "Wait on WSO2",
   closed: "Close",
+  reopened: "Create related case",
 };
 
 /** Build the button for a transition into `target`, labelled by the BE state. */

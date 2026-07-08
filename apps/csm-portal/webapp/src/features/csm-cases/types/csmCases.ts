@@ -330,6 +330,11 @@ export type CaseLifecycleAction =
   | "resume_work"
   | "close"
   | "close_no_response"
+  // Closed-case replacement for reopening: the backend surfaces this via a
+  // `reopened` entry in `nextStates` (a real reopen is never valid — see
+  // that field's doc), but it must NOT be PATCHed like a real transition —
+  // it opens the new-case form pre-filled with relatedCaseId instead.
+  | "create_related_case"
   // Generic transition into a state the frontend has no curated action for
   // (e.g. a state added on the backend). Drives the post-transition toast only;
   // the PATCH target always comes from the backend `nextStates` value.
@@ -350,8 +355,14 @@ export interface CsmCaseDetail extends CsmCaseRow {
    * conversation (e.g. non-ServiceNow source, or a case opened without chat).
    */
   conversationId?: string;
-  /** States this case may transition into next, per the backend. */
+  /**
+   * States this case may transition into next, per the backend. For a closed
+   * case, a `reopened` entry is not a real reopen (the data source has none)
+   * — it signals "Create related case" is available within its 60-day window.
+   */
   nextStates?: CaseState[];
+  /** The case this one was created as related to, when any. */
+  relatedCase?: { id: string; caseNumber?: string };
   /** Display name of the person who opened the case. */
   createdBy?: string;
   /** Email of the creator — used to tell a WSO2 engineer from a customer. */

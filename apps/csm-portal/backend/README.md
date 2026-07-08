@@ -167,7 +167,7 @@ backend/
 │   │   └── security_headers.go # X-Content-Type-Options, CSP, HSTS on every response
 │   └── handler/
 │       ├── cases.go            # HTTP handlers for case endpoints
-│       ├── state.go            # Case state machine (nextStates, isValidStateTransition)
+│       ├── state.go            # Case state machine (nextStates, isValidStateTransition, canCreateRelatedCase)
 │       ├── catalogs.go                   # HTTP handlers for catalog endpoints (ServiceNow only)
 │       ├── change_requests.go            # HTTP handlers for change-request endpoints
 │       ├── product_vulnerabilities.go    # HTTP handlers for product vulnerability endpoints (ServiceNow only)

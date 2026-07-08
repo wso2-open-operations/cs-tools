@@ -105,7 +105,7 @@ export interface BeCase {
   state?: BeCaseState;
   createdAt?: string;
   updatedAt?: string;
-  closedAt?: string;
+  closedOn?: string;
 }
 
 /** A referenced user, as embedded in case views (not just an id string). */
@@ -120,6 +120,12 @@ export interface BeUserRef {
 export interface BeEntityRef {
   id: string;
   name: string;
+}
+
+/** A referenced case carrying only its display number, e.g. the related case. */
+export interface BeCaseNumberRef {
+  id: string;
+  number?: string;
 }
 
 /**
@@ -173,7 +179,15 @@ export interface BeCaseView {
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
   workState?: BeCaseWorkState | null;
+  /**
+   * States this case may transition into next. For a closed case, `reopened`
+   * appearing here is not a real reopen (the data source has no such
+   * transition) — it signals that a new case may still be created as related
+   * to this one, within its 60-day window.
+   */
   nextStates?: BeCaseState[];
+  /** The case this one was created as related to, when any. */
+  relatedCase?: BeCaseNumberRef | null;
   createdBy?: BeUserRef;
   /** The CS engineer the case is assigned to; null when unassigned. */
   assignedEngineer?: BeAssignedEngineerRef | null;
@@ -196,7 +210,7 @@ export interface BeCaseView {
   conversation?: BeEntityRef | null;
   createdOn?: string;
   updatedOn?: string;
-  closedAt?: string | null;
+  closedOn?: string | null;
 }
 
 export interface BeCaseCreatePayload {
@@ -209,6 +223,12 @@ export interface BeCaseCreatePayload {
   description: string;
   severity: BeCaseSeverity;
   issueType: BeCaseIssueType;
+  /**
+   * UUID of the closed case this one is related to. The data source only
+   * accepts this for a case closed within the last 60 days — otherwise it
+   * rejects the create with a "related case too old" error.
+   */
+  relatedCaseId?: string;
   /** Optional supporting files (raw base64), like the customer portal. */
   attachments?: BeCaseAttachmentPayload[];
 }

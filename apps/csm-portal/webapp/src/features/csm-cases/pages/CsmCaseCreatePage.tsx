@@ -90,6 +90,12 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const lockedProjectId = searchParams.get("projectId") ?? "";
   const isProjectLocked = !!lockedProjectId;
+  // Set when opened from a closed case's "Create related case" action
+  // (`/cases/new?relatedCaseId=…&relatedCaseNumber=…`). The backend already
+  // validated eligibility (closed + within its 60-day window) before offering
+  // that action, so this page just carries the id through on submit.
+  const relatedCaseId = searchParams.get("relatedCaseId") ?? undefined;
+  const relatedCaseNumber = searchParams.get("relatedCaseNumber") ?? undefined;
 
   const [projectId, setProjectId] = useState(lockedProjectId);
   const [deploymentId, setDeploymentId] = useState("");
@@ -213,6 +219,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
         description,
         severity: priorityFromSeverity(severity),
         issueType: issueType,
+        relatedCaseId,
       });
       // The create endpoint doesn't attach files for standard cases, so upload
       // them to the new case afterwards. A partial failure still lands the case.
@@ -244,9 +251,14 @@ export default function CsmCaseCreatePage(): JSX.Element {
       >
         Back to cases
       </Button>
-      <Typography variant="h5" sx={{ mb: 2 }}>
+      <Typography variant="h5" sx={{ mb: relatedCaseId ? 0.5 : 2 }}>
         New case
       </Typography>
+      {relatedCaseId && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Related to {relatedCaseNumber ?? "the closed case"} — its id is carried through automatically.
+        </Typography>
+      )}
 
       <Card variant="outlined" sx={{ p: 3 }}>
         {hasOptionsError && (

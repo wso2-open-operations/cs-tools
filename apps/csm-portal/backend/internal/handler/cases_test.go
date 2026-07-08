@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
@@ -1051,7 +1052,7 @@ func TestGetCase(t *testing.T) {
 			{caseStateWaitingOnWSO2, []string{caseStateWorkInProgress}},
 			{caseStateAwaitingInfo, []string{caseStateWaitingOnWSO2}},
 			{caseStateSolutionProposed, []string{caseStateClosed, caseStateWaitingOnWSO2}},
-			{caseStateClosed, []string{caseStateReopened}},
+			{caseStateClosed, []string{}},
 			{caseStateReopened, []string{caseStateWorkInProgress}},
 		}
 		for _, tc := range cases {
@@ -1069,6 +1070,58 @@ func TestGetCase(t *testing.T) {
 
 				assertStatus(t, w, http.StatusOK)
 				resp := decodeJSON[getCaseResp](t, w)
+				if len(resp.NextStates) != len(tc.wantNext) {
+					t.Fatalf("nextStates = %v, want %v", resp.NextStates, tc.wantNext)
+				}
+				for i, got := range resp.NextStates {
+					if got != tc.wantNext[i] {
+						t.Errorf("nextStates[%d] = %v, want %v", i, got, tc.wantNext[i])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("nextStates surfaces reopened as the create-related-case signal", func(t *testing.T) {
+		type getCaseNextStatesResp struct {
+			NextStates []string `json:"nextStates"`
+		}
+		recentClosed := time.Now().Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+		oldClosed := time.Now().Add(-90 * 24 * time.Hour).Format(time.RFC3339)
+		recentClosedNoZone := time.Now().Add(-10 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+		cases := []struct {
+			name     string
+			body     string
+			wantNext []string
+		}{
+			{"closed case within the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
+			{"closed case outside the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `"}`, []string{}},
+			{"closed case with a zoneless space-separated closedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosedNoZone + `"}`, []string{caseStateReopened}},
+			{"closed case with no closedOn or updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed"}`, []string{}},
+			{"open case with a closedOn value", `{"id":"` + testCaseID + `","type":"case","state":"open","closedOn":"` + recentClosed + `"}`, []string{caseStateWorkInProgress}},
+			{"closed service_request within the window", `{"id":"` + testCaseID + `","type":"service_request","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
+			{"closed case with no type set", `{"id":"` + testCaseID + `","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
+			// ServiceNow-backed cases never populate closedOn today, so
+			// updatedOn stands in for it.
+			{"closed case with no closedOn, falls back to a recent updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
+			{"closed case with no closedOn, falls back to an old updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + oldClosed + `"}`, []string{}},
+			{"closed case prefers closedOn over updatedOn when both present", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `","updatedOn":"` + recentClosed + `"}`, []string{}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+						return []byte(tc.body), nil
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+				r.SetPathValue("id", testCaseID)
+				w := httptest.NewRecorder()
+				h.GetCase(w, r)
+				assertStatus(t, w, http.StatusOK)
+				resp := decodeJSON[getCaseNextStatesResp](t, w)
 				if len(resp.NextStates) != len(tc.wantNext) {
 					t.Fatalf("nextStates = %v, want %v", resp.NextStates, tc.wantNext)
 				}
