@@ -50,7 +50,6 @@ public type FeedbackEmoji record {|
     string selectedImage;
     # Chips
     FeedbackEmojiChip[] chips;
-    json...;
 |};
 
 # Metadata.
