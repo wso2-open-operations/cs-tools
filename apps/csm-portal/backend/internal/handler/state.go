@@ -30,7 +30,9 @@ const (
 
 // nextStates returns the valid next states reachable from the given case state.
 // Role-gated transitions (team-lead override, auto-close) are excluded until
-// role enforcement is implemented.
+// role enforcement is implemented. Closed is terminal: the upstream data
+// source rejects any outbound transition from a closed case, including
+// reopen, so no next states are advertised for it.
 func nextStates(state string) []string {
 	switch state {
 	case caseStateOpen:
@@ -44,7 +46,7 @@ func nextStates(state string) []string {
 	case caseStateSolutionProposed:
 		return []string{caseStateClosed, caseStateWaitingOnWSO2}
 	case caseStateClosed:
-		return []string{caseStateReopened}
+		return []string{}
 	case caseStateReopened:
 		return []string{caseStateWorkInProgress}
 	default: // unknown values are terminal
