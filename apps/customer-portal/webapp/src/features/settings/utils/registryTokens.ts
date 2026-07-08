@@ -65,7 +65,7 @@ export function getRegistryTokenStatusChipColor(
 }
 
 /**
- * Formats unix seconds as DD/MM/YYYY.
+ * Formats unix seconds as "Jan 23, 2026".
  *
  * @param ts - Unix timestamp in seconds.
  * @returns Human-readable date or "Never".
@@ -74,15 +74,15 @@ export function formatRegistryTokenTimestamp(ts?: number): string {
   if (!ts || ts <= 0) return REGISTRY_TOKEN_TIMESTAMP_NEVER_LABEL;
   const d = new Date(ts * 1000);
   return d.toLocaleDateString(REGISTRY_TOKEN_DATE_LOCALE, {
-    day: "2-digit",
-    month: "2-digit",
+    day: "numeric",
+    month: "short",
     year: "numeric",
     timeZone: resolveDisplayTimeZone(),
   });
 }
 
 /**
- * Formats ISO date string to DD/MM/YYYY.
+ * Formats ISO date string as "Jan 23, 2026".
  *
  * @param iso - ISO date from API.
  * @returns Formatted date or null placeholder.
@@ -90,8 +90,8 @@ export function formatRegistryTokenTimestamp(ts?: number): string {
 export function formatRegistryTokenIsoDate(iso?: string | null): string {
   if (!iso) return SETTINGS_NULL_PLACEHOLDER;
   const formatted = formatBackendTimestampForDisplay(iso, {
-    day: "2-digit",
-    month: "2-digit",
+    day: "numeric",
+    month: "short",
     year: "numeric",
   }, undefined, REGISTRY_TOKEN_DATE_LOCALE);
   return formatted ?? SETTINGS_NULL_PLACEHOLDER;
