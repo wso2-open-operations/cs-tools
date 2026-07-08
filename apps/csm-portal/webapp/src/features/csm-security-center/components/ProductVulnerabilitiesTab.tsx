@@ -20,7 +20,6 @@ import {
   Chip,
   InputAdornment,
   MenuItem,
-  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -139,11 +138,11 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
         </Alert>
       )}
 
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>CVE / Vulnerability ID</TableCell>
                 <TableCell>Component</TableCell>
                 <TableCell>Product</TableCell>
@@ -153,14 +152,15 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 6 }).map((__, j) => (
-                      <TableCell key={j}>
-                        <Skeleton variant="text" />
-                      </TableCell>
-                    ))}
+                    <TableCell><Skeleton variant="rounded" width="75%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={64} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="60%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : isError ? (
@@ -267,13 +267,7 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

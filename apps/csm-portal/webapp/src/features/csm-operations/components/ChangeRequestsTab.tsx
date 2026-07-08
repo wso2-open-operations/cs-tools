@@ -151,8 +151,8 @@ export default function ChangeRequestsTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                [0, 1, 2, 3, 4, 5].map((i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
                     <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
@@ -231,11 +231,6 @@ export default function ChangeRequestsTab(): JSX.Element {
         />
       </Box>
 
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
     </Box>
   );
 }
