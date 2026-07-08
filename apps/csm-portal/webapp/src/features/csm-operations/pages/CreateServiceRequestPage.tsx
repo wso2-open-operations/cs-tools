@@ -280,6 +280,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText>Select a project first</FormHelperText>
               ) : deployments.isLoading ? (
                 <FormHelperText>Loading deployments…</FormHelperText>
+              ) : (deployments.data ?? []).length === 0 ? (
+                <FormHelperText>No deployments found for this project.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -304,6 +306,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText>Select a deployment first</FormHelperText>
               ) : deployedProducts.isLoading ? (
                 <FormHelperText>Loading products…</FormHelperText>
+              ) : (deployedProducts.data ?? []).length === 0 ? (
+                <FormHelperText>No deployed products found for this deployment.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -354,6 +358,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
               </Select>
               {!catalogId ? (
                 <FormHelperText>Select a catalog first</FormHelperText>
+              ) : catalogItems.length === 0 ? (
+                <FormHelperText>No items found in this catalog.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
