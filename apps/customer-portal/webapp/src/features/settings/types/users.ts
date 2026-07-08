@@ -49,7 +49,7 @@ export type ContactDetails = {
 export type ProjectContact = {
   id: string;
   email: string;
-  firstName: string;
+  firstName?: string | null;
   lastName: string;
   isCsAdmin: boolean;
   isLead?: boolean;
