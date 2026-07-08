@@ -26,6 +26,8 @@ import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 interface CasesListProps {
   cases: CsmCaseRow[];
   isLoading: boolean;
+  /** Number of skeleton rows to show while loading. Defaults to 6. */
+  skeletonCount?: number;
   /** Base path for detail links. Defaults to "/cases". */
   detailBasePath?: string;
 }
@@ -50,6 +52,7 @@ const GRID =
 export default function CasesList({
   cases,
   isLoading,
+  skeletonCount = 6,
   detailBasePath = "/cases",
 }: CasesListProps): JSX.Element {
   const theme = useTheme();
@@ -97,7 +100,7 @@ export default function CasesList({
 
       {/* Rows */}
       {isLoading &&
-        [0, 1, 2, 3, 4, 5].map((i) => (
+        Array.from({ length: skeletonCount }).map((_, i) => (
           <Box
             key={i}
             sx={{

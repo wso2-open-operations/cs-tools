@@ -24,7 +24,6 @@ import {
   ListItemText,
   MenuItem,
   OutlinedInput,
-  Paper,
   Select,
   Skeleton,
   Stack,
@@ -185,11 +184,11 @@ export default function CsmUsersPage(): JSX.Element {
         </Alert>
       )}
 
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small" aria-label="Users search results">
+          <Table size="small" aria-label="Users search results" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Username</TableCell>
                 <TableCell sortDirection={sortField === "name" ? sortOrder : false}>
                   <TableSortLabel
@@ -207,14 +206,15 @@ export default function CsmUsersPage(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                [0, 1, 2, 3, 4, 5].map((i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    {[0, 1, 2, 3, 4, 5].map((c) => (
-                      <TableCell key={c}>
-                        <Skeleton variant="text" />
-                      </TableCell>
-                    ))}
+                    <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="75%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={64} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : users.length === 0 ? (
@@ -283,13 +283,7 @@ export default function CsmUsersPage(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

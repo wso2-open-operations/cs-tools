@@ -18,7 +18,6 @@ import {
   Alert,
   Box,
   Chip,
-  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -99,11 +98,11 @@ export default function CsmAccountsPage(): JSX.Element {
         </Alert>
       )}
 
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Name</TableCell>
                 <TableCell>SF ID</TableCell>
                 <TableCell>Tier</TableCell>
@@ -113,15 +112,15 @@ export default function CsmAccountsPage(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                [0, 1, 2, 3, 4, 5].map((i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="65%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={70} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="60%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : accounts.length === 0 ? (
@@ -179,13 +178,7 @@ export default function CsmAccountsPage(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

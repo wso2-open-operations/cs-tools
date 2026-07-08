@@ -139,7 +139,7 @@ export default function CsmIssuesView({
     [filters, debouncedSearch, showSeverityFilter, lockedFilters],
   );
 
-  const { data, isLoading, isError, error } = useGetCsmCases(
+  const { data, isLoading, isFetching, isError, error } = useGetCsmCases(
     queryFilters,
     page,
     rowsPerPage,
@@ -257,7 +257,7 @@ export default function CsmIssuesView({
         showEngagementTypeFilter={showEngagementTypeFilter}
       />
 
-      <CasesList cases={cases} isLoading={isLoading} detailBasePath={detailBasePath} />
+      <CasesList cases={cases} isLoading={isLoading || isFetching} skeletonCount={rowsPerPage} detailBasePath={detailBasePath} />
 
       <TablePagination
         component="div"
