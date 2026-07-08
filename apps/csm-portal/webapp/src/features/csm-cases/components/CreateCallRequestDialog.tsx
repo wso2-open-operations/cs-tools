@@ -33,6 +33,18 @@ import {
   zonedInputToUtcIso,
 } from "@utils/dateTime";
 
+/** Formats a UTC epoch-ms instant as "Jan 23, 2026, 10:14 PM UTC" for the slot preview hint. */
+function formatUtcHint(ms: number): string {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(ms));
+}
+
 // ---------------------------------------------------------------------------
 // Constants — mirror the backend's call-request contract so we fail in the
 // dialog instead of round-tripping to a generic 400.
@@ -109,8 +121,7 @@ function slotStatus(
       error: `Must be at least ${formatLeadTime(leadMinutes)} from now for this case severity.`,
     };
   }
-  const utc = new Date(ms).toISOString().slice(0, 16).replace("T", " ");
-  return { hint: `= ${utc} UTC` };
+  return { hint: `= ${formatUtcHint(ms)} UTC` };
 }
 
 /** Filled slots mapped to future (>= lead time), de-duplicated UTC ISO instants. */

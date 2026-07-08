@@ -52,7 +52,7 @@ function formatDate(value?: string | null): string {
   return (
     formatBackendTimestampForDisplay(value, {
       year: "numeric",
-      month: "numeric",
+      month: "short",
       day: "numeric",
     }) ?? "—"
   );
