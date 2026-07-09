@@ -71,4 +71,35 @@ describe("ChatMessageBubble", () => {
 
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
   });
+
+  it("should show a usage-limit message for credit/token errors", () => {
+    renderBubble({
+      id: "3",
+      text: "Anthropic API error: Your credit balance is too low to access the Anthropic API.",
+      sender: ChatSender.BOT,
+      timestamp: new Date(),
+      isError: true,
+    });
+
+    expect(
+      screen.getByText(
+        "The AI assistant is temporarily unavailable due to usage limits. Please try again later.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("should not leak raw error text for non usage-limit errors", () => {
+    renderBubble({
+      id: "4",
+      text: "NullPointerException at line 42",
+      sender: ChatSender.BOT,
+      timestamp: new Date(),
+      isError: true,
+    });
+
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(
+      screen.queryByText("NullPointerException at line 42"),
+    ).not.toBeInTheDocument();
+  });
 });
