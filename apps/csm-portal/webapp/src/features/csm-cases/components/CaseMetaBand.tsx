@@ -245,25 +245,6 @@ export default function CaseMetaBand({
             borderColor: "divider",
           }}
         >
-          <Cell label="Tier">
-            <Box sx={{ minWidth: 0 }}>
-              <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
-            </Box>
-          </Cell>
-          <Cell label="Assignee">
-            <Typography variant="body2" noWrap>
-              {c.assigneeIsMe ? (
-                <strong>{c.assignee}</strong>
-              ) : (
-                c.assignee
-              )}
-            </Typography>
-          </Cell>
-          <Cell label="Created by">
-            <Typography variant="body2" noWrap>
-              {c.createdBy ?? c.customerContext.primaryContact ?? "—"}
-            </Typography>
-          </Cell>
           <Cell label="Account">
             {c.accountId ? (
               <LinkText to={`/customers/accounts/${c.accountId}`}>
@@ -274,6 +255,11 @@ export default function CaseMetaBand({
                 {c.customer}
               </Typography>
             )}
+          </Cell>
+          <Cell label="Tier">
+            <Box sx={{ minWidth: 0 }}>
+              <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
+            </Box>
           </Cell>
           <Cell label="Project">
             {c.projectId ? (
@@ -305,6 +291,20 @@ export default function CaseMetaBand({
           <Cell label="Product">
             <Typography variant="body2" noWrap>
               {product.product ?? "—"}
+            </Typography>
+          </Cell>
+          <Cell label="Created by">
+            <Typography variant="body2" noWrap>
+              {c.createdBy ?? c.customerContext.primaryContact ?? "—"}
+            </Typography>
+          </Cell>
+          <Cell label="Assignee">
+            <Typography variant="body2" noWrap>
+              {c.assigneeIsMe ? (
+                <strong>{c.assignee}</strong>
+              ) : (
+                c.assignee
+              )}
             </Typography>
           </Cell>
         </Box>

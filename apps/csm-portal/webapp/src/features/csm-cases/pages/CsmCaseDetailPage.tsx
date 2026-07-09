@@ -114,6 +114,7 @@ import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import type {
   CaseAttachment,
   CaseLifecycleAction,
+  CreateRelatedCaseNavState,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -579,9 +580,17 @@ export default function CsmCaseDetailPage(): JSX.Element {
         // generic `targetState` PATCH below, since `beStateFromUi("reopened")`
         // is truthy and would otherwise be sent as a state transition.
         if (action === "create_related_case" && data) {
-          const params = new URLSearchParams({ projectId: data.projectId, relatedCaseId: data.id });
-          if (data.caseNumber) params.set("relatedCaseNumber", data.caseNumber);
-          navigate(`/cases/new?${params.toString()}`);
+          const navState: CreateRelatedCaseNavState = {
+            projectId: data.projectId,
+            relatedCaseId: data.id,
+            relatedCaseNumber: data.caseNumber,
+            deploymentId: data.productContext.deploymentId,
+            deployedProductId: data.productContext.deployedProductId,
+            severity: data.severity,
+            issueType: data.issueType,
+            subject: `Related Case : ${data.subject}`,
+          };
+          navigate("/cases/new", { state: navState });
           return;
         }
 
@@ -715,11 +724,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
       }
 
       if (action.secondary === "log_time") {
-        // CAMG-006: closed cases are read-only — no new time entries.
-        if (data?.state === "closed") {
-          showError("This case is closed — time tracking is read-only.");
-          return;
-        }
+        // Time cards can still be logged after a case is closed — engineers
+        // often record time after the fact.
         setLogTimeOpen(true);
         return;
       }
@@ -1452,7 +1458,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
             caseId={c.id}
             projectId={c.projectId}
             onLogTime={() => setLogTimeOpen(true)}
-            readOnly={isClosed}
           />
         </Box>
       )}

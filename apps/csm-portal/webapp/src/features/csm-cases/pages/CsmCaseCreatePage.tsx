@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import {  useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
@@ -51,6 +51,7 @@ import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import type { BeCaseIssueType } from "@api/backend/types";
+import type { CreateRelatedCaseNavState } from "@features/csm-cases/types/csmCases";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 const SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -89,21 +90,35 @@ export default function CsmCaseCreatePage(): JSX.Element {
   // state once and the picker is replaced by a locked field. Opened without the
   // param (the cases-list "New case" entry), the searchable picker is shown.
   const [searchParams] = useSearchParams();
-  const lockedProjectId = searchParams.get("projectId") ?? "";
+  // Set when opened from a closed case's "Create related case" action, which
+  // navigates here with router state (not query params) so the whole case
+  // context — project, deployment, product, severity, issue type, subject —
+  // carries over as editable starting values without a query-string round
+  // trip or a full page load. See CsmCaseDetailPage.tsx's
+  // `create_related_case` handler.
+  const relatedCaseState = useLocation().state as
+    | CreateRelatedCaseNavState
+    | undefined;
+
+  const lockedProjectId =
+    searchParams.get("projectId") ?? relatedCaseState?.projectId ?? "";
   const isProjectLocked = !!lockedProjectId;
-  // Set when opened from a closed case's "Create related case" action
-  // (`/cases/new?relatedCaseId=…&relatedCaseNumber=…`). The backend already
-  // validated eligibility (closed + within its 60-day window) before offering
-  // that action, so this page just carries the id through on submit.
-  const relatedCaseId = searchParams.get("relatedCaseId") ?? undefined;
-  const relatedCaseNumber = searchParams.get("relatedCaseNumber") ?? undefined;
+  // The backend already validated eligibility (closed + within its 60-day
+  // window) before offering "Create related case", so this page just carries
+  // the id through on submit.
+  const relatedCaseId = relatedCaseState?.relatedCaseId;
+  const relatedCaseNumber = relatedCaseState?.relatedCaseNumber;
 
   const [projectId, setProjectId] = useState(lockedProjectId);
-  const [deploymentId, setDeploymentId] = useState("");
-  const [deployedProductId, setDeployedProductId] = useState("");
-  const [severity, setSeverity] = useState<Severity | "">("");
-  const [issueType, setIssueType] = useState<BeCaseIssueType | "">("");
-  const [subject, setSubject] = useState("");
+  const [deploymentId, setDeploymentId] = useState(relatedCaseState?.deploymentId ?? "");
+  const [deployedProductId, setDeployedProductId] = useState(
+    relatedCaseState?.deployedProductId ?? "",
+  );
+  const [severity, setSeverity] = useState<Severity | "">(relatedCaseState?.severity ?? "");
+  const [issueType, setIssueType] = useState<BeCaseIssueType | "">(
+    relatedCaseState?.issueType ?? "",
+  );
+  const [subject, setSubject] = useState(relatedCaseState?.subject ?? "");
   const [description, setDescription] = useState("");
   const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
 

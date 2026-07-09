@@ -42,24 +42,18 @@ interface CaseTimeCardsPanelProps {
   projectId: string;
   /** Opens the log-time dialog (owned by the page so the action bar can trigger it). */
   onLogTime: () => void;
-  /**
-   * When true the case is closed (CAMG-006): time tracking is read-only, so
-   * logging and inline review are disabled. Existing entries stay visible.
-   */
-  readOnly?: boolean;
 }
 
 /**
  * The body of a case's "Time tracking" tab: the time cards logged on this
  * case, with a running total and per-entry status. A team lead can review
- * (accept or reject) any submitted entry inline — unless the case is closed,
- * in which case the panel is read-only.
+ * (accept or reject) any submitted entry inline. Available even after the
+ * case is closed — time is often logged after the fact.
  */
 export default function CaseTimeCardsPanel({
   caseId,
   projectId,
   onLogTime,
-  readOnly = false,
 }: CaseTimeCardsPanelProps): JSX.Element {
   const { data, isLoading, isError } = useCaseTimeCards(caseId, projectId);
   const isTeamLead = useIsTeamLead();
@@ -89,23 +83,15 @@ export default function CaseTimeCardsPanel({
           <Clock size={16} />
           <Typography variant="subtitle2">Time tracked</Typography>
         </Box>
-        {!readOnly && (
-          <Button
-            size="small"
-            variant="text"
-            startIcon={<Plus size={14} />}
-            onClick={onLogTime}
-          >
-            Log time
-          </Button>
-        )}
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<Plus size={14} />}
+          onClick={onLogTime}
+        >
+          Log time
+        </Button>
       </Box>
-
-      {readOnly && (
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-          This case is closed — time tracking is read-only.
-        </Typography>
-      )}
 
       <Box
         sx={{
@@ -183,7 +169,6 @@ export default function CaseTimeCardsPanel({
                    self-decide regardless of approver status, so a card you
                    submitted yourself can never actually be reviewed by you. */}
                   {isTeamLead &&
-                    !readOnly &&
                     c.state === "submitted" &&
                     !!me.id &&
                     c.userId !== me.id && (

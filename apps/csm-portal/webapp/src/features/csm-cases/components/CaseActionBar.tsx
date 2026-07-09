@@ -269,10 +269,12 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       label: "Assign / reassign engineer…",
       icon: <User size={16} />,
       divider: true,
-      disabled: reassignBlocked,
-      tooltip: reassignBlocked
-        ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
-        : undefined,
+      disabled: caseClosed || reassignBlocked,
+      tooltip: caseClosed
+        ? "This case is closed — it's read-only."
+        : reassignBlocked
+          ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
+          : undefined,
     },
     {
       key: "change_severity",

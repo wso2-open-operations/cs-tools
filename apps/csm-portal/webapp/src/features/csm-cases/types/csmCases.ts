@@ -20,7 +20,7 @@ import type {
   Severity,
   SlaClockType,
 } from "@features/csm-dashboard/types/abtDashboard";
-import type { BeCaseType } from "@api/backend/types";
+import type { BeCaseIssueType, BeCaseType } from "@api/backend/types";
 
 export interface CsmCaseRow {
   /**
@@ -315,6 +315,8 @@ export interface CaseProductContext {
   deployment: string;
   /** Deployment UUID, when the case is linked to one — drives the detail link. */
   deploymentId?: string;
+  /** Deployed-product UUID, when the case is linked to one. */
+  deployedProductId?: string;
   /** Fixed-list classification of the deployment (e.g. Primary Production). */
   deploymentCategory?: DeploymentCategory;
   environment: "dev" | "qa" | "staging" | "prod";
@@ -341,6 +343,26 @@ export type CaseLifecycleAction =
   | "transition";
 
 /**
+ * Router (`navigate(..., { state })`) payload carried from a closed case's
+ * "Create related case" action to `/cases/new`, so the new-case form can
+ * prefill from the case it's related to without a query-string round trip
+ * or a full page load. All fields but the ids are just starting values —
+ * the form leaves every one of them editable. See CsmCaseDetailPage.tsx's
+ * `create_related_case` handler and CsmCaseCreatePage.tsx's read of
+ * `useLocation().state`.
+ */
+export interface CreateRelatedCaseNavState {
+  projectId: string;
+  relatedCaseId: string;
+  relatedCaseNumber?: string;
+  deploymentId?: string;
+  deployedProductId?: string;
+  severity?: Severity;
+  issueType?: BeCaseIssueType;
+  subject?: string;
+}
+
+/**
  * Full case detail used by the case detail page. Extends the lightweight
  * row type used in lists with all the side-widget data plus a curated set
  * of state-driven primary actions.
@@ -348,6 +370,8 @@ export type CaseLifecycleAction =
 export interface CsmCaseDetail extends CsmCaseRow {
   description: string;
   assignmentGroup: string;
+  /** Category of issue reported, when set (e.g. "total_outage", "question"). */
+  issueType?: BeCaseIssueType;
   /**
    * Id of the chat conversation this case was spawned from, when any. Drives
    * loading the Novera chat transcript as the earliest entries in the activity
