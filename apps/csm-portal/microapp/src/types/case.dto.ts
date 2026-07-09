@@ -86,6 +86,7 @@ export interface CaseSearchFiltersDto {
   issueTypes?: CaseIssueType[];
   assignedUserIds?: string[];
   createdByMe?: boolean;
+  workStates?: NonNullable<CaseWorkState>[];
 }
 
 export interface CaseSearchPayloadDto {

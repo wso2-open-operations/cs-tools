@@ -14,23 +14,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
-import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
+import { Badge, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
+import { useQuery, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
+import { currentUser } from "@src/services/currentUser";
 import type { CaseType } from "@src/types";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { CaseCard, CaseCardSkeleton } from "@components/support/CaseCard";
 import { EmptyState } from "@components/support/EmptyState";
 import { ErrorState } from "@components/support/ErrorState";
+import { SearchBar } from "@components/support/SearchBar";
+import { FiltersSheet } from "@components/support/FiltersSheet";
+import { countActiveFilters, EMPTY_FILTERS, toCaseSearchFilters, type CaseFilters } from "@components/support/filters";
 import { TABS, TAB_CONFIG } from "@components/support/config";
+import { useDebouncedValue } from "@utils/useDebouncedValue";
 
 export default function SupportPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Derived directly from the URL (not local state) so browser back/forward navigation that
   // changes ?tab= is reflected immediately, instead of showing a stale tab.
   const tab = TABS.find((t) => t === searchParams.get("tab")) ?? "case";
+
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const [filters, setFilters] = useState<CaseFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = countActiveFilters(filters);
+
+  const { data: currentUserId } = useQuery(currentUser.id());
 
   const handleTabChange = (value: CaseType) => {
     setSearchParams(
@@ -46,6 +60,15 @@ export default function SupportPage() {
     <Stack gap={2}>
       <Typography variant="h5">Support</Typography>
 
+      <Stack direction="row" gap={1} alignItems="center">
+        <SearchBar value={search} onChange={setSearch} />
+        <Badge badgeContent={activeFilterCount} color="primary" invisible={activeFilterCount === 0}>
+          <IconButton aria-label="Filters" onClick={() => setFiltersOpen(true)}>
+            <SlidersHorizontal size={18} />
+          </IconButton>
+        </Badge>
+      </Stack>
+
       <Tabs variant="scrollable" value={tab} onChange={(_, value) => handleTabChange(value)}>
         {TABS.map((t) => (
           <Tab key={t} label={TAB_CONFIG[t].title} value={t} disableRipple />
@@ -54,17 +77,34 @@ export default function SupportPage() {
 
       <CaseListErrorBoundary>
         <Suspense fallback={<CaseListSkeleton />}>
-          <CaseListContent type={tab} />
+          <CaseListContent
+            type={tab}
+            search={debouncedSearch}
+            filters={filters}
+            currentUserId={currentUserId ?? null}
+          />
         </Suspense>
       </CaseListErrorBoundary>
+
+      <FiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} filters={filters} onApply={setFilters} />
     </Stack>
   );
 }
 
-function CaseListContent({ type }: { type: CaseType }) {
+function CaseListContent({
+  type,
+  search,
+  filters,
+  currentUserId,
+}: {
+  type: CaseType;
+  search: string;
+  filters: CaseFilters;
+  currentUserId: string | null;
+}) {
   const { data } = useSuspenseQuery(
     cases.all({
-      filters: { types: [type] },
+      filters: toCaseSearchFilters(type, search, filters, currentUserId),
       sortBy: { field: "updatedOn", order: "desc" },
       pagination: { limit: 20 },
     }),

@@ -16,7 +16,7 @@
 
 import { colors, type ChipProps } from "@wso2/oxygen-ui";
 import { Briefcase, Megaphone, OctagonAlert, Settings, Shield, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { CaseSeverity, CaseState, CaseType } from "@src/types";
+import type { CaseSeverity, CaseState, CaseType, CaseWorkState } from "@src/types";
 
 export const TABS: CaseType[] = ["case", "service_request", "security_report_analysis", "engagement", "announcement"];
 
@@ -95,4 +95,25 @@ export const SEVERITY_CHIP_COLOR_CONFIG: Record<CaseSeverity, NonNullable<ChipPr
   high: "warning",
   medium: "info",
   low: "default",
+};
+
+// Filter option lists, mirroring apps/csm-portal/webapp's CasesFilterBar.tsx (ALL_SEVERITIES,
+// PRIMARY_STATES, ALL_WORK_STATES, WORK_STATE_LABEL) — same option order as the webapp.
+export const ALL_SEVERITIES: CaseSeverity[] = ["catastrophic", "critical", "high", "medium", "low"];
+
+export const FILTERABLE_STATES: CaseState[] = [
+  "open",
+  "work_in_progress",
+  "awaiting_info",
+  "solution_proposed",
+  "waiting_on_wso2",
+  "closed",
+  "reopened",
+];
+
+export const ALL_WORK_STATES: NonNullable<CaseWorkState>[] = ["ongoing", "paused"];
+
+export const WORK_STATE_LABEL: Record<NonNullable<CaseWorkState>, string> = {
+  ongoing: "Ongoing",
+  paused: "Paused",
 };
