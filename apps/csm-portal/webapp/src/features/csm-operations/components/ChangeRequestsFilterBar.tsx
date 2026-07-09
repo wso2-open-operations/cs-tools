@@ -15,9 +15,11 @@
 // under the License.
 
 import {
+  AdapterDateFns,
   Box,
   Button,
   Checkbox,
+  DatePickers,
   Divider,
   FormControl,
   Grid,
@@ -41,43 +43,33 @@ import {
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
-import type {
-  BeChangeRequestImpact,
-  BeChangeRequestState,
-} from "@api/backend/types";
 import {
   CHANGE_REQUEST_IMPACTS,
   CHANGE_REQUEST_STATES,
   changeRequestImpactLabel,
   changeRequestStateLabel,
+  countActiveCRFilters,
+  type ChangeRequestFilters,
 } from "@features/csm-operations/utils/changeRequests";
 
-export interface ChangeRequestFilters {
-  search: string;
-  states: BeChangeRequestState[];
-  impacts: BeChangeRequestImpact[];
-  /** YYYY-MM-DD local date string, or empty. */
-  closedStartDate: string;
-  /** YYYY-MM-DD local date string, or empty. */
-  closedEndDate: string;
+const { DatePicker, LocalizationProvider } = DatePickers;
+
+/** "YYYY-MM-DD" to a local-midnight Date (avoids the UTC-parse day-shift
+ * `new Date(dateString)` can cause depending on the viewer's timezone). */
+function parseDateOnly(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export const DEFAULT_CR_FILTERS: ChangeRequestFilters = {
-  search: "",
-  states: [],
-  impacts: [],
-  closedStartDate: "",
-  closedEndDate: "",
-};
-
-/** Count non-search active filters (used for the badge on the Filters button). */
-export function countActiveCRFilters(filters: ChangeRequestFilters): number {
-  return (
-    (filters.states.length > 0 ? 1 : 0) +
-    (filters.impacts.length > 0 ? 1 : 0) +
-    (filters.closedStartDate ? 1 : 0) +
-    (filters.closedEndDate ? 1 : 0)
-  );
+/** Local-midnight Date back to "YYYY-MM-DD", matching ChangeRequestFilters'
+ * closedStartDate/closedEndDate wire format. */
+function formatDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 interface ChangeRequestsFilterBarProps {
@@ -267,35 +259,48 @@ export default function ChangeRequestsFilterBar({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Closed from"
-                type="date"
-                value={filters.closedStartDate}
-                onChange={(e) =>
-                  onChange({ ...filters, closedStartDate: e.target.value })
-                }
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DatePicker
+                  label="Closed from"
+                  value={parseDateOnly(filters.closedStartDate)}
+                  maxDate={parseDateOnly(filters.closedEndDate) ?? undefined}
+                  onChange={(date) =>
+                    onChange({
+                      ...filters,
+                      closedStartDate:
+                        date instanceof Date && !Number.isNaN(date.getTime())
+                          ? formatDateOnly(date)
+                          : "",
+                    })
+                  }
+                  slotProps={{
+                    textField: { size: "small", fullWidth: true },
+                    field: { clearable: true },
+                  }}
+                />
+              </LocalizationProvider>
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Closed to"
-                type="date"
-                value={filters.closedEndDate}
-                onChange={(e) =>
-                  onChange({ ...filters, closedEndDate: e.target.value })
-                }
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: {
-                    min: filters.closedStartDate || undefined,
-                  },
-                }}
-              />
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DatePicker
+                  label="Closed to"
+                  value={parseDateOnly(filters.closedEndDate)}
+                  minDate={parseDateOnly(filters.closedStartDate) ?? undefined}
+                  onChange={(date) =>
+                    onChange({
+                      ...filters,
+                      closedEndDate:
+                        date instanceof Date && !Number.isNaN(date.getTime())
+                          ? formatDateOnly(date)
+                          : "",
+                    })
+                  }
+                  slotProps={{
+                    textField: { size: "small", fullWidth: true },
+                    field: { clearable: true },
+                  }}
+                />
+              </LocalizationProvider>
             </Grid>
           </Grid>
           {activeCount > 0 && (

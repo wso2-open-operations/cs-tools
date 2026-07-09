@@ -41,11 +41,10 @@ import {
   changeRequestImpactLabel,
   changeRequestStateColor,
   changeRequestStateLabel,
-} from "@features/csm-operations/utils/changeRequests";
-import ChangeRequestsFilterBar, {
   DEFAULT_CR_FILTERS,
   type ChangeRequestFilters,
-} from "@features/csm-operations/components/ChangeRequestsFilterBar";
+} from "@features/csm-operations/utils/changeRequests";
+import ChangeRequestsFilterBar from "@features/csm-operations/components/ChangeRequestsFilterBar";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];

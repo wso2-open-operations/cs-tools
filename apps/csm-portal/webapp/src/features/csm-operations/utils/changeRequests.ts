@@ -90,3 +90,31 @@ export function changeRequestImpactLabel(impact?: string | null): string {
 export function changeRequestImpactColor(impact?: string | null): ChipColor {
   return IMPACT_COLOR[impact as BeChangeRequestImpact] ?? "default";
 }
+
+export interface ChangeRequestFilters {
+  search: string;
+  states: BeChangeRequestState[];
+  impacts: BeChangeRequestImpact[];
+  /** YYYY-MM-DD local date string, or empty. */
+  closedStartDate: string;
+  /** YYYY-MM-DD local date string, or empty. */
+  closedEndDate: string;
+}
+
+export const DEFAULT_CR_FILTERS: ChangeRequestFilters = {
+  search: "",
+  states: [],
+  impacts: [],
+  closedStartDate: "",
+  closedEndDate: "",
+};
+
+/** Count non-search active filters (used for the badge on the Filters button). */
+export function countActiveCRFilters(filters: ChangeRequestFilters): number {
+  return (
+    (filters.states.length > 0 ? 1 : 0) +
+    (filters.impacts.length > 0 ? 1 : 0) +
+    (filters.closedStartDate ? 1 : 0) +
+    (filters.closedEndDate ? 1 : 0)
+  );
+}
