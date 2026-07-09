@@ -657,11 +657,14 @@ function FilterBar({
 }): JSX.Element {
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
+  // filterState counts here even when this tab hides its own State control
+  // (hideStateFilter) — it's shared across tabs, so a value set elsewhere
+  // must still be clearable from this one, not just invisible and stuck.
   const activeCount =
     (filterProject.length > 0 ? 1 : 0) +
     (filterWorkItem.length > 0 ? 1 : 0) +
     (engineerActive ? 1 : 0) +
-    (!hideStateFilter && filterState ? 1 : 0) +
+    (filterState ? 1 : 0) +
     (filterFrom || filterTo ? 1 : 0);
   const hasActive = activeCount > 0;
 
