@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Chip,
   Skeleton,
@@ -31,6 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { Link as RouterLink } from "react-router";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchAccounts } from "@features/csm-accounts/api/useSearchAccounts";
 import type { SearchAccountsRequest } from "@features/csm-accounts/types/csmAccounts";
@@ -98,12 +98,6 @@ export default function CsmAccountsPage(): JSX.Element {
         sx={{ maxWidth: 480 }}
       />
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load accounts: {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -129,6 +123,15 @@ export default function CsmAccountsPage(): JSX.Element {
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <QueryErrorState
+                      message={`Failed to load accounts: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : accounts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>

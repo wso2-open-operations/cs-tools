@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -49,6 +48,7 @@ import { useSearchCatalogs } from "@features/csm-operations/api/useSearchCatalog
 import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalogItemVariables";
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
 import { useNavTransition } from "@hooks/useNavTransition";
+import QueryErrorState from "@components/QueryErrorState";
 import {
   encodeVariableValue,
   getFirstEmptyRequiredField,
@@ -376,20 +376,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
                   </Typography>
                 </Box>
               ) : variables.isError ? (
-                <Alert
-                  severity="error"
-                  action={
-                    <Button
-                      color="inherit"
-                      size="small"
-                      onClick={() => void variables.refetch()}
-                    >
-                      Retry
-                    </Button>
-                  }
-                >
-                  Could not load the request form for this catalog item.
-                </Alert>
+                <QueryErrorState
+                  message={`Could not load the request form for this catalog item: ${variables.error instanceof Error ? variables.error.message : "unknown error"}`}
+                  error={variables.error}
+                />
               ) : renderableVars.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
                   This catalog item has no additional fields.

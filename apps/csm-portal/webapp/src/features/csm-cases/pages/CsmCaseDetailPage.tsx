@@ -106,6 +106,7 @@ import {
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import QueryErrorState from "@components/QueryErrorState";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
@@ -271,7 +272,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     : isServiceRequestRoute
       ? `/operations/service-requests/${caseId}`
       : `/cases/${caseId}`;
-  const { data, isLoading, isError } = useGetCsmCaseDetail(caseId);
+  const { data, isLoading, isError, error } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
     isLoading: isCommentsLoading,
@@ -973,9 +974,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
         >
           {backLabel}
         </Button>
-        <Typography variant="body1" color="error">
-          Could not load case {caseId}.
-        </Typography>
+        <QueryErrorState
+          message={`Could not load this case: ${error instanceof Error ? error.message : "unknown error"}`}
+          error={error}
+        />
       </Box>
     );
   }
