@@ -20,6 +20,7 @@ import MainLayout from "@components/layout/MainLayout";
 import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
 import SupportPage from "@pages/SupportPage";
 import CaseDetailPage from "@pages/CaseDetailPage";
+import ProfilePage from "@pages/ProfilePage";
 
 export default function App() {
   useLayoutEffect(() => {
@@ -41,6 +42,7 @@ export default function App() {
         <Route element={<MainLayout />}>
           <Route path="/" element={<SupportPage />} />
           <Route path="/cases/:id" element={<CaseDetailPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>
     </Router>

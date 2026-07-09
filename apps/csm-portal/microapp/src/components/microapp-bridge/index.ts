@@ -140,8 +140,16 @@ export const saveLocalData = (
   callback: () => void,
   failedToRespondCallback: (error: string) => void,
 ): void => {
-  key = key.toString().replace(" ", "-").toLowerCase();
-  const encodedValue = btoa(JSON.stringify(value));
+  key = key.toString().replaceAll(" ", "-").toLowerCase();
+
+  let encodedValue: string;
+  try {
+    encodedValue = btoa(JSON.stringify(value));
+  } catch (error) {
+    Logger.error("Failed to encode value for local data storage", error);
+    failedToRespondCallback("Failed to encode value for local data storage");
+    return;
+  }
 
   if (window.nativebridge && window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(
@@ -165,7 +173,7 @@ export const getLocalData = <T>(
   callback: (data: T | null) => void,
   failedToRespondCallback: (error: string) => void,
 ): void => {
-  key = key.toString().replace(" ", "-").toLowerCase();
+  key = key.toString().replaceAll(" ", "-").toLowerCase();
 
   if (window.nativebridge && window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify({ topic: TOPIC.GET_LOCAL_DATA, data: { key } }));
@@ -173,8 +181,14 @@ export const getLocalData = <T>(
     window.nativebridge.resolveGetLocalData = (encodedData: { value?: string }) => {
       if (!encodedData.value) {
         callback(null);
-      } else {
+        return;
+      }
+
+      try {
         callback(JSON.parse(atob(encodedData.value)) as T);
+      } catch (error) {
+        Logger.error("Failed to decode stored local data", error);
+        callback(null);
       }
     };
 
@@ -216,7 +230,8 @@ export const sendNativeLog = (message?: string, data?: unknown, level: LogLevel 
       level,
     });
   } else {
-    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+    // Logger.error() calls back into sendNativeLog() — must not call it here, or the two recurse forever.
+    console.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE, { message, data, level });
   }
 };
 

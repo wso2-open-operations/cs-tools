@@ -59,3 +59,23 @@ export const parseBackendTimestamp = (raw: string): Date => new Date(normalizeBa
 
 export const parseOptionalBackendTimestamp = (raw: string | null | undefined): Date | null =>
   raw ? parseBackendTimestamp(raw) : null;
+
+/**
+ * Lists the IANA time zones the runtime supports, for the profile time-zone picker.
+ * Uses `Intl.supportedValuesOf` where available; falls back to the browser's own zone
+ * on older runtimes so the picker is never empty.
+ */
+export function listSupportedTimeZones(): string[] {
+  try {
+    const fn = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+    if (typeof fn === "function") return fn("timeZone");
+  } catch {
+    /* older runtime without Intl.supportedValuesOf */
+  }
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone ? [zone] : [];
+  } catch {
+    return [];
+  }
+}
