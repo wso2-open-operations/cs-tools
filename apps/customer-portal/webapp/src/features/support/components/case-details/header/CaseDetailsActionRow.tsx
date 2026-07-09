@@ -226,8 +226,8 @@ export default function CaseDetailsActionRow({
             {
               onSuccess: () => {
                 showSuccess("State updated successfully.");
-                // Prompt for feedback after the case is closed (non-blocking).
-                if (ACTION_TO_CASE_STATE_LABEL[label] === "Closed" && caseId) {
+                // Prompt for feedback only when accepting a solution (Solution Proposed state).
+                if (label === "Accept Solution" && caseId) {
                   setFeedbackModalOpen(true);
                 }
               },
