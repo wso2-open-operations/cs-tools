@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   alpha,
   Box,
   Button,
@@ -44,6 +43,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Download, FileText, X } from "@wso2/oxygen-ui-icons-react";
+import QueryErrorState from "@components/QueryErrorState";
 import { type JSX, useCallback, useMemo, useState } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
@@ -670,12 +670,12 @@ export default function CsmUpdatesPage(): JSX.Element {
           <Typography variant="subtitle1" sx={{ mb: 2 }}>
             Search updates between levels
           </Typography>
-          {productLevels.isError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              Could not load product catalog.
-            </Alert>
-          )}
-          {productLevels.isLoading ? (
+          {productLevels.isError ? (
+            <QueryErrorState
+              message={`Could not load product catalog: ${productLevels.error instanceof Error ? productLevels.error.message : "unknown error"}`}
+              error={productLevels.error}
+            />
+          ) : productLevels.isLoading ? (
             <UpdatesFilterSkeleton />
           ) : (
           <>
@@ -777,9 +777,10 @@ export default function CsmUpdatesPage(): JSX.Element {
               <CircularProgress />
             </Box>
           ) : searchResult.isError ? (
-            <Alert severity="error">
-              Could not load updates: {searchResult.error.message}
-            </Alert>
+            <QueryErrorState
+              message={`Could not load updates: ${searchResult.error instanceof Error ? searchResult.error.message : "unknown error"}`}
+              error={searchResult.error}
+            />
           ) : sortedEntries.length === 0 ? (
             <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 4 }}>
               No updates found between level {search.startingUpdateLevel} and {search.endingUpdateLevel}.

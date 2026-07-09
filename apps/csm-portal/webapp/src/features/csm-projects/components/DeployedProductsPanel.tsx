@@ -37,6 +37,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Ban, MoreVertical, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
+import QueryErrorState from "@components/QueryErrorState";
 import { useState, type JSX } from "react";
 import { useSearchDeployedProducts } from "@features/csm-projects/api/useSearchDeployedProducts";
 import { useCreateDeployedProduct } from "@features/csm-projects/api/useCreateDeployedProduct";
@@ -174,10 +175,10 @@ export default function DeployedProductsPanel({
 
   if (isError) {
     return (
-      <Alert severity="error" sx={{ my: 1 }}>
-        Failed to load deployed products:{" "}
-        {error instanceof Error ? error.message : "unknown error"}
-      </Alert>
+      <QueryErrorState
+        message={`Failed to load deployed products: ${error instanceof Error ? error.message : "unknown error"}`}
+        error={error}
+      />
     );
   }
 

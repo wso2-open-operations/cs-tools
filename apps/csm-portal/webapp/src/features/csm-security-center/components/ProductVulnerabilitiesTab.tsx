@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Chip,
   InputAdornment,
@@ -33,7 +32,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Search } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProductVulnerabilities } from "@features/csm-security-center/api/useSearchProductVulnerabilities";
 import {
@@ -132,13 +131,6 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
         </TextField>
       </Box>
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load vulnerabilities:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -165,9 +157,14 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
                   </TableRow>
                 ))
               ) : isError ? (
-                // The error Alert above carries the detail; don't fall through
-                // to the empty state (which would read as "0 results").
-                null
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <QueryErrorState
+                      message={`Failed to load vulnerabilities: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : vulnerabilities.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>

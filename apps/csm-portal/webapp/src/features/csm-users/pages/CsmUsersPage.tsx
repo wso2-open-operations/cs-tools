@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Checkbox,
   Chip,
@@ -40,6 +39,7 @@ import {
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import {
@@ -178,12 +178,6 @@ export default function CsmUsersPage(): JSX.Element {
         </FormControl>
       </Stack>
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load users: {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" aria-label="Users search results" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -217,6 +211,15 @@ export default function CsmUsersPage(): JSX.Element {
                     <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <QueryErrorState
+                      message={`Failed to load users: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : users.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>

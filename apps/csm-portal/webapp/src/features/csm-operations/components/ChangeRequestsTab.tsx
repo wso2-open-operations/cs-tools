@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Chip,
   Skeleton,
@@ -29,8 +28,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-
 import { useNavTransition } from "@hooks/useNavTransition";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useSearchChangeRequests } from "@features/csm-operations/api/useSearchChangeRequests";
@@ -130,13 +129,6 @@ export default function ChangeRequestsTab(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen((prev: boolean) => !prev)}
       />
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load change requests:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -164,6 +156,15 @@ export default function ChangeRequestsTab(): JSX.Element {
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={7} align="center">
+                    <QueryErrorState
+                      message={`Failed to load change requests: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : changeRequests.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} align="center" sx={{ py: 4 }}>

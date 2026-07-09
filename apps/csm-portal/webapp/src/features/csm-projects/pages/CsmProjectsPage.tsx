@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Chip,
   Skeleton,
@@ -31,6 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { Link as RouterLink } from "react-router";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects";
 import type { SearchProjectsRequest } from "@features/csm-projects/types/csmProjects";
@@ -102,12 +102,6 @@ export default function CsmProjectsPage(): JSX.Element {
         sx={{ maxWidth: 480 }}
       />
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load projects: {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -131,6 +125,15 @@ export default function CsmProjectsPage(): JSX.Element {
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    <QueryErrorState
+                      message={`Failed to load projects: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : projects.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 4 }}>

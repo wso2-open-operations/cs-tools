@@ -40,6 +40,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Ban, Eye, MoreVertical, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
+import QueryErrorState from "@components/QueryErrorState";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useUpdateDeployment } from "@features/csm-projects/api/useUpdateDeployment";
 import { useCreateDeployment } from "@features/csm-projects/api/useCreateDeployment";
@@ -169,12 +170,6 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
         </Alert>
       )}
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load deployments:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
 
       <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
         <Button
@@ -201,10 +196,19 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
+              {isLoading || isFetching ? (
                 <TableRow>
                   <TableCell colSpan={COLUMN_COUNT} align="center" sx={{ py: 4 }}>
                     <CircularProgress size={24} />
+                  </TableCell>
+                </TableRow>
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={COLUMN_COUNT} align="center">
+                    <QueryErrorState
+                      message={`Failed to load deployments: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
                   </TableCell>
                 </TableRow>
               ) : deployments.length === 0 ? (

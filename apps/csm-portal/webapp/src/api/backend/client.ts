@@ -17,7 +17,7 @@
 import { useCallback, useMemo } from "react";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import type { BeErrorPayload } from "@api/backend/types";
-import { CORRELATION_ID_HEADER } from "@utils/correlationId";
+import { CORRELATION_ID_HEADER, newCorrelationId } from "@utils/correlationId";
 
 export function backendBaseUrl(): string {
   const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
@@ -53,7 +53,10 @@ export class BackendApiError extends Error {
   }
 }
 
-async function readError(response: Response): Promise<BackendApiError> {
+async function readError(
+  response: Response,
+  sentCorrelationId?: string,
+): Promise<BackendApiError> {
   let payload: BeErrorPayload | undefined;
   try {
     payload = (await response.json()) as BeErrorPayload;
@@ -64,8 +67,10 @@ async function readError(response: Response): Promise<BackendApiError> {
     payload?.message ??
     response.statusText ??
     `Request failed with status ${response.status}`;
+  // Prefer the backend-echoed header; fall back to the ID the frontend sent so
+  // the user always has a traceable reference even when the server omits it.
   const correlationId =
-    response.headers.get(CORRELATION_ID_HEADER) ?? undefined;
+    response.headers.get(CORRELATION_ID_HEADER) ?? sentCorrelationId;
   return new BackendApiError(response.status, msg, payload, correlationId);
 }
 
@@ -108,9 +113,13 @@ export function useBackendApi(): BackendApi {
   return useMemo<BackendApi>(
     () => ({
       async get<T>(path: string): Promise<T | null> {
-        const response = await authFetch(buildUrl(path), { method: "GET" });
+        const correlationId = newCorrelationId();
+        const response = await authFetch(buildUrl(path), {
+          method: "GET",
+          headers: { [CORRELATION_ID_HEADER]: correlationId },
+        });
         if (response.status === 404) return null;
-        if (!response.ok) throw await readError(response);
+        if (!response.ok) throw await readError(response, correlationId);
         if (response.status === 204) return null;
         return (await response.json()) as T;
       },
@@ -118,44 +127,64 @@ export function useBackendApi(): BackendApi {
         path: string,
         body: TRequest,
       ): Promise<TResponse> {
+        const correlationId = newCorrelationId();
         const response = await authFetch(buildUrl(path), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            [CORRELATION_ID_HEADER]: correlationId,
+          },
           body: JSON.stringify(body),
         });
-        if (!response.ok) throw await readError(response);
+        if (!response.ok) throw await readError(response, correlationId);
         return (await response.json()) as TResponse;
       },
       async patch<TRequest, TResponse>(
         path: string,
         body: TRequest,
       ): Promise<TResponse> {
+        const correlationId = newCorrelationId();
         const response = await authFetch(buildUrl(path), {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            [CORRELATION_ID_HEADER]: correlationId,
+          },
           body: JSON.stringify(body),
         });
-        if (!response.ok) throw await readError(response);
+        if (!response.ok) throw await readError(response, correlationId);
         return (await response.json()) as TResponse;
       },
       async postEmpty<TResponse>(path: string): Promise<TResponse> {
+        const correlationId = newCorrelationId();
         const response = await authFetch(buildUrl(path), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            [CORRELATION_ID_HEADER]: correlationId,
+          },
           body: "{}",
         });
-        if (!response.ok) throw await readError(response);
+        if (!response.ok) throw await readError(response, correlationId);
         return (await response.json()) as TResponse;
       },
       async del<TResponse>(path: string): Promise<TResponse | null> {
-        const response = await authFetch(buildUrl(path), { method: "DELETE" });
-        if (!response.ok) throw await readError(response);
+        const correlationId = newCorrelationId();
+        const response = await authFetch(buildUrl(path), {
+          method: "DELETE",
+          headers: { [CORRELATION_ID_HEADER]: correlationId },
+        });
+        if (!response.ok) throw await readError(response, correlationId);
         if (response.status === 204) return null;
         return (await response.json()) as TResponse;
       },
       async getBlob(path: string): Promise<Blob> {
-        const response = await authFetch(buildUrl(path), { method: "GET" });
-        if (!response.ok) throw await readError(response);
+        const correlationId = newCorrelationId();
+        const response = await authFetch(buildUrl(path), {
+          method: "GET",
+          headers: { [CORRELATION_ID_HEADER]: correlationId },
+        });
+        if (!response.ok) throw await readError(response, correlationId);
         return await response.blob();
       },
     }),
