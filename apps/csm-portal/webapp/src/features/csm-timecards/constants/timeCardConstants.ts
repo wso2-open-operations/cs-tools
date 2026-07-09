@@ -96,7 +96,7 @@ export const TIME_SHEET_STATE_META: Record<
  * Role that grants approve/reject on time cards, matched (case-insensitively)
  * against `roles` from `GET /users/me`.
  */
-export const TIMECARD_APPROVER_GROUP = "sn_customerservice_timecard_approver";
+export const TIMECARD_APPROVER_GROUP = "timecard_approver";
 
 /**
  * Role that grants time-card admin (approve by exception), matched against
