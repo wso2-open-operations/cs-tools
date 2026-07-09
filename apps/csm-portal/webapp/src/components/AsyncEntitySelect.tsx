@@ -133,10 +133,10 @@ export default function AsyncEntitySelect<T>({
         else if (reason === "clear") setSearchTerm("");
       }}
       noOptionsText={
-        isError
-          ? "Search failed. Try again."
-          : query.length === 0
-            ? "Type to search…"
+        query.length === 0
+          ? "Type to search…"
+          : isError
+            ? "Search failed. Try again."
             : isFetching
               ? "Searching…"
               : "No matches found"
