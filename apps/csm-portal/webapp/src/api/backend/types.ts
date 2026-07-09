@@ -774,9 +774,20 @@ export interface BeUser {
   updatedAt?: string;
 }
 
+export interface BeUserSearchFilters {
+  /** Case-insensitive match against username and email. */
+  searchQuery?: string;
+  /** ServiceNow data source only. */
+  roles?: string[];
+  /** Exact match. */
+  userNames?: string[];
+  /** Exact match. */
+  emails?: string[];
+}
+
 export interface BeUserSearchPayload {
   pagination?: BePagination;
-  searchQuery?: string;
+  filters?: BeUserSearchFilters;
 }
 
 export interface BeUserSearchResponse extends BeSearchResponseBase {

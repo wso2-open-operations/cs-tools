@@ -17,19 +17,14 @@
 import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
-import type { BeUser } from "@api/backend/types";
+import type {
+  BeUser,
+  BeUserSearchPayload,
+  BeUserSearchResponse,
+} from "@api/backend/types";
 
 /** A single page of matches is plenty for a type-ahead picker. */
 const USER_SEARCH_LIMIT = 20;
-
-interface SearchUsersByNamePayload {
-  filters: { searchQuery: string };
-  pagination: { offset: number; limit: number };
-}
-
-interface SearchUsersByNameResponse {
-  users: BeUser[];
-}
 
 /**
  * Type-ahead user search (`POST /users/search`, `filters.searchQuery`) that
@@ -49,7 +44,7 @@ export function useSearchUsersByName(
   return useQuery<BeUser[], Error>({
     queryKey: [ApiQueryKeys.USERS_SEARCH_BY_NAME, q],
     queryFn: async (): Promise<BeUser[]> => {
-      const res = await api.post<SearchUsersByNamePayload, SearchUsersByNameResponse>(
+      const res = await api.post<BeUserSearchPayload, BeUserSearchResponse>(
         "/users/search",
         { filters: { searchQuery: q }, pagination: { offset: 0, limit: USER_SEARCH_LIMIT } },
       );
