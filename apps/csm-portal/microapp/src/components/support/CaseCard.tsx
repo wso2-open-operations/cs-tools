@@ -45,7 +45,8 @@ export function CaseCard({ item }: { item: CaseSummary }) {
 
         <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
           <StatusChip state={item.state} />
-          <SeverityChip severity={item.severity} />
+          {/* Only "case"-type items carry a severity; service requests/security reports/etc. don't. */}
+          {item.severity && <SeverityChip severity={item.severity} />}
         </Stack>
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" mt={0.5}>

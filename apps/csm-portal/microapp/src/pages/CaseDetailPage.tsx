@@ -81,7 +81,8 @@ function CaseSummarySection({ caseDetail }: { caseDetail: CaseDetail }) {
 
       <Stack direction="row" gap={1} flexWrap="wrap">
         <StatusChip state={caseDetail.state} />
-        <SeverityChip severity={caseDetail.severity} />
+        {/* Only "case"-type items carry a severity; service requests/security reports/etc. don't. */}
+        {caseDetail.severity && <SeverityChip severity={caseDetail.severity} />}
       </Stack>
 
       <Typography variant="body1" color="text.primary" sx={{ whiteSpace: "pre-wrap" }}>

@@ -33,13 +33,38 @@ import type {
 } from "./case.dto";
 import { parseBackendTimestamp, parseOptionalBackendTimestamp } from "@utils/dateTime";
 
+// severity/issueType are only meaningful for the "case" type — the backend's create-payload docs
+// say as much ("Required for case type") — so service_request/security_report_analysis/etc. cases
+// come back with severity null. Beyond that, the backend's severity field is a best-effort value:
+// depending on data source it can be the canonical word ("high"), a legacy ServiceNow priority
+// code ("P2"), or a labeled priority ("High (P2)"). Mirrors
+// apps/csm-portal/webapp/src/api/backend/mappers.ts severityFromPriority, which defaults to the
+// mid severity on a garbled-but-present value rather than throwing.
+function normalizeSeverity(raw: string | null | undefined): CaseSeverity | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase();
+  if (s.includes("p0") || s === "catastrophic") return "catastrophic";
+  if (s.includes("p1") || s === "critical") return "critical";
+  if (s.includes("p2") || s === "high") return "high";
+  if (s.includes("p3") || s === "medium") return "medium";
+  if (s.includes("p4") || s === "low") return "low";
+  return "medium";
+}
+
+// The backend's state field is sometimes a labeled string ("Work In Progress") instead of the
+// snake_case enum. Mirrors apps/csm-portal/webapp/src/api/backend/mappers.ts uiStateFromBe.
+function normalizeState(raw: string): CaseState {
+  if (!raw) return "open";
+  return raw.trim().toLowerCase().replace(/\s+/g, "_") as CaseState;
+}
+
 export interface CaseSummary {
   id: string;
   number: string;
   wso2Id: string;
   subject: string;
   description: string;
-  severity: CaseSeverity;
+  severity: CaseSeverity | null;
   state: CaseState;
   workState: CaseWorkState;
   type: CaseType;
@@ -62,7 +87,7 @@ export interface CaseDetail {
   wso2Id: string;
   subject: string;
   description: string;
-  severity: CaseSeverity;
+  severity: CaseSeverity | null;
   state: CaseState;
   workState: CaseWorkState;
   type: CaseType | null;
@@ -98,8 +123,8 @@ export function toCaseSummary(dto: CaseSearchViewDto): CaseSummary {
     wso2Id: dto.wso2Id,
     subject: dto.subject,
     description: dto.description,
-    severity: dto.severity,
-    state: dto.state,
+    severity: normalizeSeverity(dto.severity),
+    state: normalizeState(dto.state),
     workState: dto.workState,
     type: dto.type as CaseType,
     // The search/detail views don't always populate updatedOn (e.g. a case that hasn't been
@@ -125,8 +150,8 @@ export function toCaseDetail(dto: CaseViewDto): CaseDetail {
     wso2Id: dto.wso2Id,
     subject: dto.subject,
     description: dto.description,
-    severity: dto.severity,
-    state: dto.state,
+    severity: normalizeSeverity(dto.severity),
+    state: normalizeState(dto.state),
     workState: dto.workState,
     type: dto.type as CaseType | null,
     engagementType: dto.engagementType,

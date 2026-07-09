@@ -106,9 +106,15 @@ export interface CaseSearchViewDto {
   wso2Id: string;
   subject: string;
   description: string;
-  severity: CaseSeverity;
-  issueType: CaseIssueType;
-  state: CaseState;
+  // Only meaningful for the "case" type — null for service_request/security_report_analysis/etc.
+  // Loosely typed when present: the backend sends either the canonical word ("high") or a legacy
+  // ServiceNow priority code ("P2", "High (P2)") depending on data source — see
+  // normalizeSeverity() in case.model.ts.
+  severity: string | null;
+  issueType: CaseIssueType | null;
+  // Loosely typed: e.g. "Work In Progress" (labeled, space-separated) rather than the snake_case
+  // enum — see normalizeState() in case.model.ts.
+  state: string;
   workState: CaseWorkState;
   type: string;
   createdOn?: string;
@@ -139,9 +145,9 @@ export interface CaseViewDto {
   wso2Id: string;
   subject: string;
   description: string;
-  severity: CaseSeverity;
-  issueType: CaseIssueType;
-  state: CaseState;
+  severity: string | null;
+  issueType: CaseIssueType | null;
+  state: string;
   workState: CaseWorkState;
   type: string | null;
   engagementType: string | null;

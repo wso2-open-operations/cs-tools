@@ -56,32 +56,37 @@ export const TAB_CONFIG: Record<CaseType, { title: string; subtitle: string; emp
   },
 };
 
+// Labels/colors mirror the webapp's STATE_LABEL/STATE_COLOR
+// (apps/csm-portal/webapp/src/features/csm-dashboard/utils/abtDashboard.ts). `reopened` has
+// no webapp equivalent (its 6-state UI enum omits it) so it keeps a distinct color of its own.
 export const STATE_LABELS: Record<CaseState, string> = {
   open: "Open",
-  work_in_progress: "In Progress",
+  work_in_progress: "Work in progress",
   waiting_on_wso2: "Waiting on WSO2",
-  awaiting_info: "Awaiting Info",
+  awaiting_info: "Awaiting info",
   reopened: "Reopened",
-  solution_proposed: "Solution Proposed",
+  solution_proposed: "Solution proposed",
   closed: "Closed",
 };
 
 export const STATE_CHIP_COLOR_CONFIG: Record<CaseState, NonNullable<ChipProps["color"]>> = {
   open: "info",
-  work_in_progress: "primary",
+  work_in_progress: "info",
   waiting_on_wso2: "warning",
-  awaiting_info: "warning",
+  awaiting_info: "default",
   reopened: "error",
-  solution_proposed: "success",
-  closed: "default",
+  solution_proposed: "default",
+  closed: "success",
 };
 
+// Format/order mirrors the webapp's SeverityChip withLabel mode ("S2 (High)", code first) and
+// SEVERITY_LABEL (S4 is "Low / Query", not just "Low").
 export const SEVERITY_LABELS: Record<CaseSeverity, string> = {
-  catastrophic: "Catastrophic (S0)",
-  critical: "Critical (S1)",
-  high: "High (S2)",
-  medium: "Medium (S3)",
-  low: "Low (S4)",
+  catastrophic: "S0 (Catastrophic)",
+  critical: "S1 (Critical)",
+  high: "S2 (High)",
+  medium: "S3 (Medium)",
+  low: "S4 (Low / Query)",
 };
 
 export const SEVERITY_CHIP_COLOR_CONFIG: Record<CaseSeverity, NonNullable<ChipProps["color"]>> = {
