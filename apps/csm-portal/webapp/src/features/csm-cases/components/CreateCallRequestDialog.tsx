@@ -15,8 +15,10 @@
 // under the License.
 
 import {
+  AdapterDateFns,
   Box,
   Button,
+  DatePickers,
   Dialog,
   DialogActions,
   DialogContent,
@@ -28,10 +30,14 @@ import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import {
+  formatDateTimeLocal,
+  parseDateTimeLocal,
   resolveDisplayTimeZone,
   utcMsToZonedInputValue,
   zonedInputToUtcIso,
 } from "@utils/dateTime";
+
+const { DateTimePicker, LocalizationProvider } = DatePickers;
 
 /** Formats a UTC epoch-ms instant as "Jan 23, 2026, 10:14 PM UTC" for the slot preview hint. */
 function formatUtcHint(ms: number): string {
@@ -272,38 +278,52 @@ export function CreateCallRequestDialog({
               UTC. Each must be at least {formatLeadTime(leadMinutes)} from now.
               Add up to {MAX_TIME_SLOTS} options.
             </Typography>
-            {timeslots.map((slot, i) => {
-              const status = slotStatus(slot, timeZone, minAllowedMs, leadMinutes);
-              return (
-                <Box
-                  key={i}
-                  sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}
-                >
-                  <TextField
-                    type="datetime-local"
-                    value={slot}
-                    onChange={(e) => updateTimeslot(i, e.target.value)}
-                    fullWidth
-                    disabled={submitting}
-                    size="small"
-                    error={Boolean(status.error)}
-                    helperText={status.error ?? status.hint ?? " "}
-                    inputProps={{ min: minLocal }}
-                  />
-                  {timeslots.length > 1 && (
-                    <Button
-                      size="small"
-                      color="inherit"
-                      onClick={() => removeTimeslot(i)}
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              {timeslots.map((slot, i) => {
+                const status = slotStatus(slot, timeZone, minAllowedMs, leadMinutes);
+                return (
+                  <Box
+                    key={i}
+                    sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}
+                  >
+                    <DateTimePicker
+                      value={parseDateTimeLocal(slot)}
+                      onChange={(next) =>
+                        updateTimeslot(
+                          i,
+                          next instanceof Date && !Number.isNaN(next.getTime())
+                            ? formatDateTimeLocal(next)
+                            : "",
+                        )
+                      }
+                      minDateTime={parseDateTimeLocal(minLocal) ?? undefined}
                       disabled={submitting}
-                      sx={{ minWidth: 0, px: 1, mt: 0.5 }}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </Box>
-              );
-            })}
+                      sx={{ flex: 1 }}
+                      slotProps={{
+                        textField: {
+                          fullWidth: true,
+                          size: "small",
+                          error: Boolean(status.error),
+                          helperText: status.error ?? status.hint ?? " ",
+                        },
+                        field: { clearable: true },
+                      }}
+                    />
+                    {timeslots.length > 1 && (
+                      <Button
+                        size="small"
+                        color="inherit"
+                        onClick={() => removeTimeslot(i)}
+                        disabled={submitting}
+                        sx={{ minWidth: 0, px: 1, mt: 0.5 }}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </Box>
+                );
+              })}
+            </LocalizationProvider>
             {timeslots.length < MAX_TIME_SLOTS && (
               <Button
                 size="small"

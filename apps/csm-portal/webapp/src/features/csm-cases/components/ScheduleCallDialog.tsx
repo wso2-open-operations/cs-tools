@@ -15,8 +15,10 @@
 // under the License.
 
 import {
+  AdapterDateFns,
   Box,
   Button,
+  DatePickers,
   Dialog,
   DialogActions,
   DialogContent,
@@ -30,11 +32,15 @@ import {
 import { useState, type JSX } from "react";
 import type { BeCallRequestView } from "@api/backend/types";
 import {
+  formatDateTimeLocal,
+  parseDateTimeLocal,
   resolveDisplayTimeZone,
   zonedInputToUtcIso,
   normalizeBackendTimestamp,
   formatBackendTimestampForDisplay,
 } from "@utils/dateTime";
+
+const { DateTimePicker, LocalizationProvider } = DatePickers;
 
 // ---------------------------------------------------------------------------
 // Constants — mirror the backend's schedule contract.
@@ -197,33 +203,39 @@ export function ScheduleCallDialog({
           )}
 
           {(preferredTimes.length === 0 || selectedTime === CUSTOM_TIME_VALUE) && (
-            <TextField
-              label={`Meeting time (${timeZone})`}
-              type="datetime-local"
-              value={customTime}
-              onChange={(e) => {
-                setCustomTime(e.target.value);
-                setPastError(false);
-              }}
-              fullWidth
-              required
-              size="small"
-              disabled={submitting}
-              // datetime-local always shows a placeholder, so force the label to
-              // float up — otherwise it overlaps the mm/dd/yyyy placeholder.
-              InputLabelProps={{ shrink: true }}
-              error={
-                (selectedTime === CUSTOM_TIME_VALUE && !!customTime && !customTimeValid) ||
-                pastError
-              }
-              helperText={
-                selectedTime === CUSTOM_TIME_VALUE && customTime && !customTimeValid
-                  ? "Invalid date/time."
-                  : pastError
-                    ? "Meeting time must be in the future."
-                    : `Entered in your timezone (${timeZone}); stored as UTC.`
-              }
-            />
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DateTimePicker
+                label={`Meeting time (${timeZone})`}
+                value={parseDateTimeLocal(customTime)}
+                onChange={(next) => {
+                  setCustomTime(
+                    next instanceof Date && !Number.isNaN(next.getTime())
+                      ? formatDateTimeLocal(next)
+                      : "",
+                  );
+                  setPastError(false);
+                }}
+                disabled={submitting}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    required: true,
+                    size: "small",
+                    error:
+                      (selectedTime === CUSTOM_TIME_VALUE && !!customTime && !customTimeValid) ||
+                      pastError,
+                    // The pastError message is shown by the top-level Typography
+                    // above, so it's not repeated here — only the custom-time
+                    // invalid case has its own inline text.
+                    helperText:
+                      selectedTime === CUSTOM_TIME_VALUE && customTime && !customTimeValid
+                        ? "Invalid date/time."
+                        : `Entered in your timezone (${timeZone}); stored as UTC.`,
+                  },
+                  field: { clearable: true },
+                }}
+              />
+            </LocalizationProvider>
           )}
 
           <TextField

@@ -329,3 +329,52 @@ export function formatAbsoluteForUser(
   }
 }
 
+/**
+ * "YYYY-MM-DD" to a local-midnight Date, for handing a date-only field's wire
+ * value to a picker component. Avoids the UTC-parse day-shift a plain
+ * `new Date(dateString)` can cause depending on the viewer's timezone.
+ */
+export function parseDateOnly(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Local-midnight Date back to "YYYY-MM-DD", the inverse of {@link parseDateOnly}. */
+export function formatDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * "YYYY-MM-DDTHH:MM" (the `datetime-local` wire format some fields still
+ * store their state as) to a local Date, for handing the value to a picker
+ * component. Same browser-local semantics a native `datetime-local` input
+ * already had — not timezone-aware beyond that.
+ */
+export function parseDateTimeLocal(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Local Date back to "YYYY-MM-DDTHH:MM", the inverse of {@link parseDateTimeLocal}. */
+export function formatDateTimeLocal(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${mo}-${d}T${h}:${mi}`;
+}
+
