@@ -15,7 +15,9 @@
 // under the License.
 
 import {
+  AdapterDateFns,
   Box,
+  DatePickers,
   FormControl,
   Grid,
   InputLabel,
@@ -35,6 +37,9 @@ import {
   isMultiLineField,
   variableLabel,
 } from "@features/csm-operations/utils/catalogVariables";
+import { formatDateTimeLocal, parseDateTimeLocal } from "@utils/dateTime";
+
+const { DateTimePicker, LocalizationProvider } = DatePickers;
 
 interface CatalogVariableFieldsProps {
   /** Already filtered to user-editable variables (no context/hidden fields). */
@@ -126,16 +131,24 @@ export default function CatalogVariableFields({
         if (isDateTimeField(v)) {
           return (
             <Grid key={v.id} size={{ xs: 12, sm: 6 }}>
-              <TextField
-                label={label}
-                size="small"
-                fullWidth
-                required
-                type="datetime-local"
-                value={value}
-                onChange={(e) => onChange(v.id, e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DateTimePicker
+                  label={label}
+                  value={parseDateTimeLocal(value)}
+                  onChange={(next) =>
+                    onChange(
+                      v.id,
+                      next instanceof Date && !Number.isNaN(next.getTime())
+                        ? formatDateTimeLocal(next)
+                        : "",
+                    )
+                  }
+                  slotProps={{
+                    textField: { size: "small", fullWidth: true, required: true },
+                    field: { clearable: true },
+                  }}
+                />
+              </LocalizationProvider>
             </Grid>
           );
         }
