@@ -18,6 +18,7 @@ import {
   Box,
   Button,
   Chip,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
@@ -70,13 +71,20 @@ const ACTION_LABEL: Record<CallRequestAgentAction, string> = {
 export interface CallRequestRowProps {
   cr: BeCallRequestView;
   onAction: (action: CallRequestAgentAction, cr: BeCallRequestView) => void;
+  /** True when the parent case is closed — existing call requests stay visible
+   * but can no longer be updated (scheduled, rejected, etc.). */
+  isClosed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function CallRequestRow({ cr, onAction }: CallRequestRowProps): JSX.Element {
+export function CallRequestRow({
+  cr,
+  onAction,
+  isClosed,
+}: CallRequestRowProps): JSX.Element {
   const stateKey = resolveCallRequestStateKey(cr.state);
   const actions = (stateKey && CALL_REQUEST_AGENT_ACTIONS[stateKey]) ?? [];
 
@@ -119,16 +127,23 @@ export function CallRequestRow({ cr, onAction }: CallRequestRowProps): JSX.Eleme
         {actions.length > 0 && (
           <Box sx={{ display: "flex", gap: 1, flexShrink: 0, flexWrap: "wrap" }}>
             {actions.map((action, i) => (
-              <Button
+              <Tooltip
                 key={action}
-                size="small"
-                variant={i === 0 && action !== "cancel" ? "contained" : "outlined"}
-                color={action === "reject" || action === "cancel" ? "error" : "primary"}
-                onClick={() => onAction(action, cr)}
-                sx={{ textTransform: "none" }}
+                title={isClosed ? "This case is closed — it's read-only." : ""}
               >
-                {ACTION_LABEL[action]}
-              </Button>
+                <span>
+                  <Button
+                    size="small"
+                    variant={i === 0 && action !== "cancel" ? "contained" : "outlined"}
+                    color={action === "reject" || action === "cancel" ? "error" : "primary"}
+                    onClick={() => onAction(action, cr)}
+                    disabled={isClosed}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {ACTION_LABEL[action]}
+                  </Button>
+                </span>
+              </Tooltip>
             ))}
           </Box>
         )}

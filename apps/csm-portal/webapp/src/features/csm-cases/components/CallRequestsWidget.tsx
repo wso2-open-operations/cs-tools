@@ -25,6 +25,7 @@ import {
   MenuItem,
   Select,
   Skeleton,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Phone, Plus, RefreshCw } from "@wso2/oxygen-ui-icons-react";
@@ -64,6 +65,9 @@ interface CallRequestsWidgetProps {
    * widget (e.g. just clicking back onto the tab) would reopen the dialog. */
   autoOpenCreate?: boolean;
   onAutoOpenCreateHandled?: () => void;
+  /** True when the parent case is closed — call requests stay visible but
+   * become read-only: no new requests, no updates to existing ones. */
+  isClosed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +79,7 @@ export function CallRequestsWidget({
   severity,
   autoOpenCreate,
   onAutoOpenCreateHandled,
+  isClosed,
 }: CallRequestsWidgetProps): JSX.Element {
   // State filter — empty string means "all". Filtering happens server-side
   // via `filters.states` on the search request.
@@ -93,11 +98,13 @@ export function CallRequestsWidget({
 
   useEffect(() => {
     if (autoOpenCreate) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the dialog open to an external one-shot trigger from the case action bar
-      setCreateOpen(true);
+      if (!isClosed) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the dialog open to an external one-shot trigger from the case action bar
+        setCreateOpen(true);
+      }
       onAutoOpenCreateHandled?.();
     }
-  }, [autoOpenCreate, onAutoOpenCreateHandled]);
+  }, [autoOpenCreate, isClosed, onAutoOpenCreateHandled]);
 
   // Dialog targets — only one dialog is ever open at a time, driven by which
   // action was clicked on a row.
@@ -280,15 +287,20 @@ export function CallRequestsWidget({
                 ))}
               </Select>
             </FormControl>
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} />}
-              onClick={() => setCreateOpen(true)}
-              sx={{ textTransform: "none" }}
-            >
-              Create call request
-            </Button>
+            <Tooltip title={isClosed ? "This case is closed — it's read-only." : ""}>
+              <span>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<Plus size={14} />}
+                  onClick={() => setCreateOpen(true)}
+                  disabled={isClosed}
+                  sx={{ textTransform: "none" }}
+                >
+                  Create call request
+                </Button>
+              </span>
+            </Tooltip>
           </Box>
         </Box>
 
@@ -339,7 +351,12 @@ export function CallRequestsWidget({
         {!isLoading && !isError && requests.length > 0 && (
           <Box sx={{ display: "flex", flexDirection: "column" }}>
             {requests.map((cr) => (
-              <CallRequestRow key={cr.id} cr={cr} onAction={handleAction} />
+              <CallRequestRow
+                key={cr.id}
+                cr={cr}
+                onAction={handleAction}
+                isClosed={isClosed}
+              />
             ))}
           </Box>
         )}

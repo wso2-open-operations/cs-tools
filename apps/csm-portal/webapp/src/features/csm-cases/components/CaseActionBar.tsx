@@ -286,7 +286,13 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
     { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true, tooltip: NOT_BUILT_YET },
     { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
     { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
-    { key: "request_call", label: "Request a call…", icon: <Phone size={16} /> },
+    {
+      key: "request_call",
+      label: "Request a call…",
+      icon: <Phone size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
     { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
   );

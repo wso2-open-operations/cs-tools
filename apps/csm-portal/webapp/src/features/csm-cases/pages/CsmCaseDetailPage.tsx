@@ -1464,6 +1464,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             severity={c.severity}
             autoOpenCreate={autoOpenCallCreate}
             onAutoOpenCreateHandled={() => setAutoOpenCallCreate(false)}
+            isClosed={isClosed}
           />
         </Box>
       )}
