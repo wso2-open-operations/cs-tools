@@ -18,9 +18,11 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  AdapterDateFns,
   Box,
   Button,
   Card,
+  DatePickers,
   FormControl,
   InputLabel,
   MenuItem,
@@ -28,6 +30,8 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+
+const { DateTimePicker, LocalizationProvider } = DatePickers;
 import { ArrowLeft, ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
@@ -134,6 +138,32 @@ function configurationItemLabel(ci: BeConfigurationItem): string {
  * "YYYY-MM-DD HH:MM:SS" string. */
 function toBackendDateTime(localValue: string): string {
   return `${localValue.replace("T", " ")}:00`;
+}
+
+/** "YYYY-MM-DDTHH:MM" (the wire format this form's state still uses) to a
+ * local Date, avoiding the UTC-parse day/hour shift a plain `new Date(value)`
+ * risks depending on the viewer's timezone. */
+function parseDateTimeLocal(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Local Date back to "YYYY-MM-DDTHH:MM", matching toBackendDateTime's input. */
+function formatDateTimeLocal(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${mo}-${d}T${h}:${mi}`;
 }
 
 /** "Characters left: N" once a field is more than half full, matching the
@@ -371,28 +401,46 @@ export default function CreateChangeRequestPage(): JSX.Element {
             Schedule
           </Typography>
 
-          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-            <TextField
-              label="Planned start"
-              type="datetime-local"
-              value={plannedStartDate}
-              onChange={(e) => setPlannedStartDate(e.target.value)}
-              disabled={postChangeRequest.isPending}
-              size="small"
-              sx={{ flex: "1 1 240px" }}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
-            <TextField
-              label="Planned end"
-              type="datetime-local"
-              value={plannedEndDate}
-              onChange={(e) => setPlannedEndDate(e.target.value)}
-              disabled={postChangeRequest.isPending}
-              size="small"
-              sx={{ flex: "1 1 240px" }}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
-          </Box>
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+              <DateTimePicker
+                label="Planned start"
+                value={parseDateTimeLocal(plannedStartDate)}
+                maxDateTime={parseDateTimeLocal(plannedEndDate) ?? undefined}
+                onChange={(date) =>
+                  setPlannedStartDate(
+                    date instanceof Date && !Number.isNaN(date.getTime())
+                      ? formatDateTimeLocal(date)
+                      : "",
+                  )
+                }
+                disabled={postChangeRequest.isPending}
+                sx={{ flex: "1 1 240px" }}
+                slotProps={{
+                  textField: { size: "small", fullWidth: true },
+                  field: { clearable: true },
+                }}
+              />
+              <DateTimePicker
+                label="Planned end"
+                value={parseDateTimeLocal(plannedEndDate)}
+                minDateTime={parseDateTimeLocal(plannedStartDate) ?? undefined}
+                onChange={(date) =>
+                  setPlannedEndDate(
+                    date instanceof Date && !Number.isNaN(date.getTime())
+                      ? formatDateTimeLocal(date)
+                      : "",
+                  )
+                }
+                disabled={postChangeRequest.isPending}
+                sx={{ flex: "1 1 240px" }}
+                slotProps={{
+                  textField: { size: "small", fullWidth: true },
+                  field: { clearable: true },
+                }}
+              />
+            </Box>
+          </LocalizationProvider>
 
           {/* Everything below is optional and used less often at creation
               time — collapsed by default so the form isn't dominated by
