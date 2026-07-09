@@ -33,7 +33,7 @@ import {
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
 import { ArrowLeft, ChevronDown } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -212,17 +212,17 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // this itself — see BeCreateChangeRequestPayload's doc comment). Fires
   // once, when the current user's id first loads; a ref (not the field's own
   // emptiness) gates it so manually clearing the field afterward sticks.
+  // Adjusted during render (React's recommended pattern for this) rather
+  // than in an effect, which would call setState synchronously post-commit.
   const { data: me } = useGetUsersMe();
   const meLabel = me
     ? [me.firstName, me.lastName].filter(Boolean).join(" ").trim() || me.email
     : undefined;
   const autoFilledRequester = useRef(false);
-  useEffect(() => {
-    if (me?.id && !autoFilledRequester.current) {
-      autoFilledRequester.current = true;
-      setRequestedById(me.id);
-    }
-  }, [me?.id]);
+  if (me?.id && !autoFilledRequester.current) {
+    autoFilledRequester.current = true;
+    setRequestedById(me.id);
+  }
 
   const canSubmit = subject.trim().length > 0 && !postChangeRequest.isPending;
 
