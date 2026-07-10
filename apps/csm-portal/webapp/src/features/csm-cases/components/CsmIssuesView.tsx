@@ -40,6 +40,10 @@ import {
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
 } from "@features/csm-cases/utils/casesFiltersUrl";
+import {
+  DEFAULT_CASES_SORT,
+  type CasesSortOrder,
+} from "@features/csm-cases/utils/casesSort";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, DEFAULT_ROWS_PER_PAGE, BE_MAX_PAGE_LIMIT];
@@ -103,6 +107,9 @@ export default function CsmIssuesView({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
+  const [sortOrder, setSortOrder] = useState<CasesSortOrder>(
+    DEFAULT_CASES_SORT.order,
+  );
 
   const setFilters = useCallback(
     (next: CasesFilters) => {
@@ -143,7 +150,14 @@ export default function CsmIssuesView({
     queryFilters,
     page,
     rowsPerPage,
+    true,
+    sortOrder,
   );
+
+  const handleSortOrderChange = (order: CasesSortOrder): void => {
+    setSortOrder(order);
+    setPage(0);
+  };
 
   const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
@@ -195,9 +209,6 @@ export default function CsmIssuesView({
   const breachedCount = cases.filter(
     (c) => c.minutesToBreach < 0 && c.state !== "closed",
   ).length;
-  const myCount = cases.filter(
-    (c) => c.assigneeIsMe && c.state !== "closed",
-  ).length;
   const rangeStart = total === 0 ? 0 : page * rowsPerPage + 1;
   const rangeEnd = page * rowsPerPage + cases.length;
 
@@ -231,14 +242,6 @@ export default function CsmIssuesView({
           {breachedCount > 0 && (
             <Chip size="small" color="error" label={`${breachedCount} breached`} />
           )}
-          {myCount > 0 && (
-            <Chip
-              size="small"
-              color="primary"
-              variant="outlined"
-              label={`${myCount} mine`}
-            />
-          )}
           {actions}
         </Box>
       </Box>
@@ -257,7 +260,14 @@ export default function CsmIssuesView({
         showEngagementTypeFilter={showEngagementTypeFilter}
       />
 
-      <CasesList cases={cases} isLoading={isLoading || isFetching} skeletonCount={rowsPerPage} detailBasePath={detailBasePath} />
+      <CasesList
+        cases={cases}
+        isLoading={isLoading || isFetching}
+        skeletonCount={rowsPerPage}
+        detailBasePath={detailBasePath}
+        sortOrder={sortOrder}
+        onSortOrderChange={handleSortOrderChange}
+      />
 
       <TablePagination
         component="div"

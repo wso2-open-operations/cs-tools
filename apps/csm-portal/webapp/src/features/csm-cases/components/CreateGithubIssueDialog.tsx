@@ -94,7 +94,8 @@ export interface CreateGithubIssueDialogProps {
   defaultDescription?: string;
   /** Show the repository field only for cloud subscription / cloud
    * evaluation subscription projects — other project types route by
-   * product unit on the SN side and have no repo to choose. */
+   * product unit on the SN side and have no repo to choose. Conversely,
+   * Update Level and Public Git Issue apply only when this is false. */
   showRepoField?: boolean;
   onClose: () => void;
   /** Body for `POST /cases/{id}/github-issues` (caseId is added by the caller). */
@@ -151,8 +152,13 @@ export function CreateGithubIssueDialog({
   const showSeverity = type === "Type/Incident";
   const requireSeverity = type === "Type/Incident";
   const showHotFix = type === "Type/Patch";
-  const requireUpdateLevel = type === "Type/Patch";
-  const requirePublicIssueUrl = type === "Type/Patch";
+  // Update Level / Public Git Issue apply to non-cloud projects only — cloud
+  // projects route via the repo field instead (see showRepoField).
+  const showUpdateLevelAndIssueUrl = !showRepoField;
+  const requireUpdateLevel =
+    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
+  const requirePublicIssueUrl =
+    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
 
   const resetAndClose = () => {
     setType(UNSET);
@@ -279,26 +285,30 @@ export function CreateGithubIssueDialog({
               requireSeverity,
             )}
 
-          <TextField
-            label="Update Level"
-            value={updateLevel}
-            onChange={(e) => setUpdateLevel(e.target.value)}
-            disabled={submitting}
-            required={requireUpdateLevel}
-            size="small"
-            fullWidth
-          />
+          {showUpdateLevelAndIssueUrl && (
+            <TextField
+              label="Update Level"
+              value={updateLevel}
+              onChange={(e) => setUpdateLevel(e.target.value)}
+              disabled={submitting}
+              required={requireUpdateLevel}
+              size="small"
+              fullWidth
+            />
+          )}
 
-          <TextField
-            label="Public Git Issue or Security Internal JIRA"
-            value={publicIssueUrl}
-            onChange={(e) => setPublicIssueUrl(e.target.value)}
-            disabled={submitting}
-            required={requirePublicIssueUrl}
-            size="small"
-            fullWidth
-            placeholder="https://github.com/… or JIRA link"
-          />
+          {showUpdateLevelAndIssueUrl && (
+            <TextField
+              label="Public Git Issue or Security Internal JIRA"
+              value={publicIssueUrl}
+              onChange={(e) => setPublicIssueUrl(e.target.value)}
+              disabled={submitting}
+              required={requirePublicIssueUrl}
+              size="small"
+              fullWidth
+              placeholder="https://github.com/… or JIRA link"
+            />
+          )}
 
           {showHotFix && (
             <FormControlLabel

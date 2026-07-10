@@ -245,6 +245,22 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   // attachments, and time tracking (see CsmCaseDetailPage.tsx's isClosed).
   const caseClosed = caseDetail.state === "closed";
 
+  // Git issues may only be raised while the case is active: Open, Work in
+  // progress, Waiting on client, Waiting on WSO2, or Reopened. Anything else
+  // (e.g. Solution proposed, Closed) blocks the action. `caseDetail.state` is
+  // the normalized label (see `uiStateFromBe`), so this list uses the same
+  // lowercase/underscore form the data source's raw state label normalizes to.
+  const GIT_ISSUE_ALLOWED_STATES: readonly string[] = [
+    "open",
+    "work_in_progress",
+    "waiting_on_client",
+    "waiting_on_wso2",
+    "reopened",
+  ];
+  const gitIssueStateBlocked = !GIT_ISSUE_ALLOWED_STATES.includes(
+    caseDetail.state,
+  );
+
   // Roadmap items with no backend flow yet: kept visible (so the menu still
   // advertises what's coming) but disabled with a tooltip explaining why,
   // rather than clickable and silently no-op'ing or toasting a mock message.
@@ -261,8 +277,12 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       label: "Raise internal Git issue…",
       icon: <GitBranch size={16} />,
       divider: true,
-      disabled: caseClosed,
-      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+      disabled: caseClosed || gitIssueStateBlocked,
+      tooltip: caseClosed
+        ? "This case is closed — it's read-only."
+        : gitIssueStateBlocked
+          ? "Git issues can only be raised while the case is Open, Work in progress, Waiting on client, Waiting on WSO2, or Reopened."
+          : undefined,
     },
     {
       key: "reassign_engineer",
