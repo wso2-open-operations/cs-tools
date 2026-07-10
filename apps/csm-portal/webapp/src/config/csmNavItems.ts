@@ -21,6 +21,7 @@ import {
   Clock,
   Cog,
   Headset,
+  Megaphone,
   RefreshCw,
   Settings,
   Shield,
@@ -61,6 +62,7 @@ export const CSM_NAV_ITEMS: CsmNavItem[] = [
   { id: "security-center", label: "Security Center", path: "/security-center", icon: Shield, wip: true },
   { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
   { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock },
+  { id: "announcements", label: "Announcements", path: "/announcements", icon: Megaphone },
   { id: "customers", label: "Customers", path: "/customers", icon: Building2, wip: true },
   { id: "admin", label: "Settings", path: "/admin", icon: Settings, wip: true },
 ];
