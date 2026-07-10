@@ -35,7 +35,7 @@ vi.mock("@features/csm-announcements/api/useSearchAnnouncements", () => ({
 }));
 
 // The real project picker fetches from the backend; stub it so the page test
-// stays focused on the list + its own state/severity filters.
+// stays focused on the list + its own state filter.
 vi.mock("@features/csm-cases/components/AsyncProjectMultiSelect", () => ({
   default: () => <div data-testid="project-filter" />,
 }));
@@ -97,14 +97,14 @@ describe("CsmAnnouncementsPage — list states", () => {
 });
 
 describe("CsmAnnouncementsPage — filters default to show-all", () => {
-  it("calls the search with no state/severity/project filters on first render", () => {
+  it("calls the search with no state/project filters on first render", () => {
     mockResult({
       data: { announcements: [ROW], total: 1, limit: 20, offset: 0, hasMore: false },
     });
     render(<CsmAnnouncementsPage />);
     const [filters] = mockedUseSearch.mock.calls[0];
     expect(filters).toEqual(
-      expect.objectContaining({ states: [], severities: [], projectIds: [] }),
+      expect.objectContaining({ states: [], projectIds: [] }),
     );
   });
 
@@ -121,20 +121,6 @@ describe("CsmAnnouncementsPage — filters default to show-all", () => {
     // The most recent render's filters carry the selected state.
     const lastCall = mockedUseSearch.mock.calls.at(-1)!;
     expect(lastCall[0].states).toContain("closed");
-  });
-
-  it("pushes a picked severity into the search filters", () => {
-    mockResult({
-      data: { announcements: [ROW], total: 1, limit: 20, offset: 0, hasMore: false },
-    });
-    render(<CsmAnnouncementsPage />);
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
-    const listbox = screen.getByRole("listbox");
-    fireEvent.click(within(listbox).getByRole("option", { name: /catastrophic/i }));
-
-    const lastCall = mockedUseSearch.mock.calls.at(-1)!;
-    expect(lastCall[0].severities).toContain("S0");
   });
 });
 
