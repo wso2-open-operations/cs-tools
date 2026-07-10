@@ -15,9 +15,9 @@
 // under the License.
 
 import { Suspense, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Badge, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
-import { SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
+import { Plus, SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
 import { useQuery, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { currentUser } from "@src/services/currentUser";
@@ -44,6 +44,7 @@ import { useDebouncedValue } from "@utils/useDebouncedValue";
 const RECENT_CASES_LIMIT = 5;
 
 export default function SupportPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   // Derived directly from the URL (not local state) so browser back/forward navigation that
   // changes ?tab= is reflected immediately, instead of showing a stale tab.
@@ -71,7 +72,12 @@ export default function SupportPage() {
 
   return (
     <Stack gap={2}>
-      <Typography variant="h5">Support</Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Typography variant="h5">Support</Typography>
+        <IconButton aria-label="New case" onClick={() => navigate("/cases/new")}>
+          <Plus size={20} />
+        </IconButton>
+      </Stack>
 
       <Stack direction="row" gap={1} alignItems="center">
         <SearchBar value={search} onChange={setSearch} />

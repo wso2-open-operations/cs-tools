@@ -14,10 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./case.dto";
-export * from "./case.model";
-export * from "./attachment.dto";
-export * from "./project.dto";
-export * from "./project.model";
-export * from "./deployment.dto";
-export * from "./deployment.model";
+import { ATTACHMENTS_ENDPOINT } from "@config/endpoints";
+import type { AttachmentCreatePayloadDto, AttachmentCreateResponseDto, AttachmentDetailDto } from "@src/types";
+import apiClient from "./apiClient";
+
+const createAttachment = async (payload: AttachmentCreatePayloadDto): Promise<AttachmentDetailDto> => {
+  const { data } = await apiClient.post<AttachmentCreateResponseDto>(ATTACHMENTS_ENDPOINT, payload);
+  return data.attachment;
+};
+
+export const attachments = {
+  create: createAttachment,
+};

@@ -14,10 +14,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./case.dto";
-export * from "./case.model";
-export * from "./attachment.dto";
-export * from "./project.dto";
-export * from "./project.model";
-export * from "./deployment.dto";
-export * from "./deployment.model";
+export type AttachmentReferenceType = "case" | "conversation" | "change_request" | "deployment";
+
+export interface AttachmentCreatePayloadDto {
+  referenceId: string;
+  referenceType: AttachmentReferenceType;
+  name: string;
+  type: string;
+  /** Base64 data URI, e.g. "data:image/png;base64,...". Max 10 MB decoded. */
+  file: string;
+}
+
+export interface AttachmentDetailDto {
+  id: string;
+  sizeBytes?: number;
+  downloadUrl?: string;
+}
+
+export interface AttachmentCreateResponseDto {
+  message?: string;
+  attachment: AttachmentDetailDto;
+}

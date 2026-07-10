@@ -15,13 +15,20 @@
 // under the License.
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { CASES_SEARCH_ENDPOINT, CASE_COMMENTS_SEARCH_ENDPOINT, CASE_DETAILS_ENDPOINT } from "@config/endpoints";
+import {
+  CASES_ENDPOINT,
+  CASES_SEARCH_ENDPOINT,
+  CASE_COMMENTS_SEARCH_ENDPOINT,
+  CASE_DETAILS_ENDPOINT,
+} from "@config/endpoints";
 import type {
   CaseCommentSearchResponseDto,
+  CaseCreatePayloadDto,
   CaseSearchFiltersDto,
   CaseSearchPayloadDto,
   CaseSearchResponseDto,
   CaseViewDto,
+  CreatedCaseDto,
 } from "@src/types";
 import { toCaseDetail, toCaseSummary, toComment, type CaseDetail, type CaseSummary, type Comment } from "@src/types";
 import apiClient from "./apiClient";
@@ -55,6 +62,11 @@ const getCaseComments = async (id: string): Promise<Comment[]> => {
     pagination: { limit: 50 },
   });
   return data.comments.map(toComment);
+};
+
+const createCase = async (payload: CaseCreatePayloadDto): Promise<CreatedCaseDto> => {
+  const { data } = await apiClient.post<CreatedCaseDto>(CASES_ENDPOINT, payload);
+  return data;
 };
 
 const CASES_PAGE_LIMIT = 20;
@@ -92,4 +104,6 @@ export const cases = {
       queryKey: ["case", id, "comments"],
       queryFn: () => getCaseComments(id),
     }),
+
+  create: createCase,
 };

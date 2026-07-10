@@ -16,7 +16,7 @@
 
 import { colors, type ChipProps } from "@wso2/oxygen-ui";
 import { Briefcase, Megaphone, OctagonAlert, Settings, Shield, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { CaseSeverity, CaseState, CaseType, CaseWorkState } from "@src/types";
+import type { CaseIssueType, CaseSeverity, CaseState, CaseType, CaseWorkState } from "@src/types";
 
 export const TABS: CaseType[] = ["case", "service_request", "security_report_analysis", "engagement", "announcement"];
 
@@ -116,4 +116,13 @@ export const ALL_WORK_STATES: NonNullable<CaseWorkState>[] = ["ongoing", "paused
 export const WORK_STATE_LABEL: Record<NonNullable<CaseWorkState>, string> = {
   ongoing: "Ongoing",
   paused: "Paused",
+};
+
+export const ISSUE_TYPE_LABELS: Record<CaseIssueType, string> = {
+  total_outage: "Total outage",
+  partial_outage: "Partial outage",
+  performance_degradation: "Performance degradation",
+  error: "Error",
+  security_or_compliance: "Security or compliance",
+  question: "Question",
 };

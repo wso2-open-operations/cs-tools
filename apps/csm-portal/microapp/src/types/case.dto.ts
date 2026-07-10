@@ -189,3 +189,20 @@ export interface CaseCommentSearchResponseDto {
   offset: number;
   hasMore: boolean;
 }
+
+// Mirrors the webapp's BeCaseCreatePayload (the "case" type variant only — service_request and
+// security_report_analysis creation aren't in the microapp's scope, see NewCasePage.tsx).
+export interface CaseCreatePayloadDto {
+  type: "case";
+  projectId: string;
+  deploymentId: string;
+  deployedProductId: string;
+  subject: string;
+  description: string;
+  severity: CaseSeverity;
+  issueType: CaseIssueType;
+}
+
+export interface CreatedCaseDto {
+  id: string;
+}
