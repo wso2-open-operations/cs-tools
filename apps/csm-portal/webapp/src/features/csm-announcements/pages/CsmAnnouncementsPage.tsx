@@ -50,8 +50,8 @@ import {
   DEFAULT_ANNOUNCEMENT_FILTERS,
   type AnnouncementFilters,
 } from "@features/csm-announcements/types/csmAnnouncements";
-import { SEVERITY_LABEL, STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
-import type { CaseState, Severity } from "@features/csm-dashboard/types/abtDashboard";
+import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -68,10 +68,6 @@ const STATE_OPTIONS: { value: CaseState; label: string }[] = (
     "closed",
   ] as CaseState[]
 ).map((s) => ({ value: s, label: STATE_LABEL[s] }));
-
-const SEVERITY_OPTIONS: { value: Severity; label: string }[] = (
-  ["S0", "S1", "S2", "S3", "S4"] as Severity[]
-).map((s) => ({ value: s, label: SEVERITY_LABEL[s] }));
 
 /**
  * Chip colour for an announcement's lifecycle state — announcement-specific,
@@ -107,7 +103,7 @@ interface MultiSelectProps<T extends string> {
   onChange: (next: T[]) => void;
 }
 
-/** Checkbox multi-select over a fixed enum (State / Severity). */
+/** Checkbox multi-select over a fixed enum (State). */
 function MultiSelect<T extends string>({
   id,
   label,
@@ -149,7 +145,7 @@ function MultiSelect<T extends string>({
 /**
  * Read-only announcements list. Announcements are cases of
  * `type: "announcement"` surfaced via `POST /cases/search`. Filterable by
- * state, severity, and project (all default to "show all"). Creating /
+ * state and project (all default to "show all"). Creating /
  * targeting / unpublishing needs the dedicated announcement backend
  * (digiops-cs#2053), which isn't built yet, so this page is view-only for now.
  */
@@ -174,8 +170,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
     setPage(0);
   };
 
-  const activeFilterCount =
-    filters.states.length + filters.severities.length + filters.projectIds.length;
+  const activeFilterCount = filters.states.length + filters.projectIds.length;
 
   const handleChangeRowsPerPage = (e: ChangeEvent<HTMLInputElement>): void => {
     setRowsPerPage(parseInt(e.target.value, 10));
@@ -191,7 +186,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
         </Typography>
       </Box>
 
-      {/* Filters — search + state / severity / project, all "show all" by default */}
+      {/* Filters — search + state + project, all "show all" by default */}
       <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
         <Box sx={{ flex: "1 1 260px", minWidth: 220 }}>
           <TextField
@@ -233,15 +228,6 @@ export default function CsmAnnouncementsPage(): JSX.Element {
             onChange={(next) => patchFilters({ states: next })}
           />
         </Box>
-        <Box sx={{ flex: "1 1 160px", minWidth: 150 }}>
-          <MultiSelect
-            id="announcements-filter-severity"
-            label="Severity"
-            values={filters.severities}
-            options={SEVERITY_OPTIONS}
-            onChange={(next) => patchFilters({ severities: next })}
-          />
-        </Box>
         <Box sx={{ flex: "1 1 220px", minWidth: 200 }}>
           <AsyncProjectMultiSelect
             id="announcements-filter-project"
@@ -256,7 +242,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
             size="small"
             color="primary"
             startIcon={<X size={16} />}
-            onClick={() => patchFilters({ states: [], severities: [], projectIds: [] })}
+            onClick={() => patchFilters({ states: [], projectIds: [] })}
           >
             Clear filters
           </Button>
