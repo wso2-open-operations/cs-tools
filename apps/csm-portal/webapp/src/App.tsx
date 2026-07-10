@@ -102,6 +102,9 @@ const CsmEngagementsPage = lazy(
 const CsmTimeCardsPage = lazy(
   () => import("@features/csm-timecards/pages/CsmTimeCardsPage"),
 );
+const CsmAnnouncementsPage = lazy(
+  () => import("@features/csm-announcements/pages/CsmAnnouncementsPage"),
+);
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -297,6 +300,7 @@ export default function App(): JSX.Element {
                     element={<ProductVulnerabilityDetailPage />}
                   />
                   <Route path="time-cards" element={<CsmTimeCardsPage />} />
+                  <Route path="announcements" element={<CsmAnnouncementsPage />} />
                 </Route>
               </Route>
 
