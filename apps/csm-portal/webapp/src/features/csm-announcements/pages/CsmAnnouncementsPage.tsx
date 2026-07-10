@@ -22,6 +22,7 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  LinearProgress,
   ListItemText,
   MenuItem,
   Select,
@@ -200,6 +201,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
             value={filters.search}
             onChange={(e) => patchFilters({ search: e.target.value })}
             slotProps={{
+              htmlInput: { "aria-label": "Search announcements" },
               input: {
                 startAdornment: (
                   <InputAdornment position="start">
@@ -262,6 +264,11 @@ export default function CsmAnnouncementsPage(): JSX.Element {
       </Box>
 
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+        {/* Thin bar during a background refetch (page / filter change) so the
+            table isn't blanked to skeletons — cached rows stay visible. */}
+        <Box sx={{ height: 2 }}>
+          {isFetching && !isLoading && <LinearProgress sx={{ height: 2 }} />}
+        </Box>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
@@ -275,7 +282,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading || isFetching ? (
+              {isLoading ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
                     <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
