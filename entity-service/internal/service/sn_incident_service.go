@@ -229,25 +229,19 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 			view.Caller = &domain.EntityRef{ID: sysidToUUID(inc.Caller.ID), Name: inc.Caller.Name}
 		}
 		if inc.Priority != nil {
-			label := snIncidentPriorityLabelMap[inc.Priority.ID]
-			if label == "" {
-				label = inc.Priority.Label
+			if label, ok := snIncidentPriorityLabelMap[inc.Priority.ID]; ok {
+				view.Priority = &label
 			}
-			view.Priority = &label
 		}
 		if inc.State != nil {
-			label := snIncidentStateLabelMap[inc.State.ID]
-			if label == "" {
-				label = inc.State.Label
+			if label, ok := snIncidentStateLabelMap[inc.State.ID]; ok {
+				view.State = &label
 			}
-			view.State = &label
 		}
 		if inc.Category != nil {
-			label := snIncidentCategoryLabelMap[inc.Category.ID]
-			if label == "" {
-				label = inc.Category.Label
+			if label, ok := snIncidentCategoryLabelMap[inc.Category.ID]; ok {
+				view.Category = &label
 			}
-			view.Category = &label
 		}
 		if inc.Parent != nil {
 			view.Parent = &domain.EntityRef{ID: sysidToUUID(inc.Parent.ID), Name: inc.Parent.Name}
