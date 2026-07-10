@@ -14,109 +14,269 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, type JSX } from "react";
+import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
   Box,
   Chip,
   CircularProgress,
-  InputAdornment,
   MenuItem,
   Tab,
   Tabs,
+  TablePagination,
   TextField,
   Typography,
   Button,
 } from "@wso2/oxygen-ui";
-import { ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
+import { CalendarRange, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 import {
+  useAllTimeCards,
   useApprovalQueue,
+  useCurrentEngineer,
   useDecideCard,
   useMyTimeSheets,
+  type TimeCardPagination,
 } from "@features/csm-timecards/api/useTimeSheets";
 import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
 import { BackendApiError } from "@api/backend/client";
+import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import type { BeProject } from "@api/backend/types";
 import { TIME_CARD_STATE_META } from "@features/csm-timecards/constants/timeCardConstants";
 import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 import TimeSheetCard from "@features/csm-timecards/components/TimeSheetCard";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
+import SearchableMultiSelect from "@components/SearchableMultiSelect";
 import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
 import type {
   CsmTimeCard,
+  CsmTimeSheet,
   TimeCardSearchFilters,
   TimeCardState,
 } from "@features/csm-timecards/types/timeCards";
 
-type TabId = "mine" | "approvals";
+/** Builds a `userId -> userName` lookup plus the option list a
+ * `SearchableMultiSelect` engineer filter needs, scoped to whatever sheets
+ * are currently loaded for one tab (there's no engineer-search endpoint for
+ * time cards, so — like the work-item filter — this only ever offers
+ * engineers actually present on the current page, not the full directory). */
+function engineerOptionsFrom(sheets: CsmTimeSheet[] | undefined): {
+  ids: string[];
+  nameById: Map<string, string>;
+} {
+  const nameById = new Map<string, string>();
+  (sheets ?? []).forEach((s) => nameById.set(s.userId, s.userName));
+  return { ids: [...nameById.keys()], nameById };
+}
+
+/** Distinct case numbers present in whatever sheets are currently loaded for
+ * one tab — the option list for the work-item filter. Same "current page
+ * only" caveat as {@link engineerOptionsFrom}. */
+function workItemOptionsFrom(sheets: CsmTimeSheet[] | undefined): string[] {
+  return Array.from(
+    new Set((sheets ?? []).flatMap((s) => s.cards.map((c) => c.caseNumber))),
+  );
+}
+
+const DEFAULT_ROWS_PER_PAGE = 20;
+// Top option is the backend's max page limit; larger requests are rejected.
+const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
+
+/** Strips the native date input's own chrome so it blends into the grouped
+ * pill it sits in, rather than looking like a bare HTML form control.
+ * `colorScheme: "light dark"` lets the browser render its calendar icon
+ * for whichever of light/dark actually applies, instead of always dark. */
+const dateInputSx = {
+  border: "none",
+  outline: "none",
+  background: "none",
+  font: "inherit",
+  fontSize: "0.8125rem",
+  color: "inherit",
+  colorScheme: "light dark",
+  width: 108,
+  "&::-webkit-calendar-picker-indicator": {
+    cursor: "pointer",
+    opacity: 0.7,
+  },
+};
+
+/** Page + rows-per-page state for one tab's `TablePagination`, following the
+ * same shape/convention as `CsmUsersPage.tsx` and friends. Each tab gets its
+ * own instance so switching tabs doesn't disturb another tab's position. */
+function usePagination(): {
+  pagination: TimeCardPagination;
+  onPageChange: (event: unknown, newPage: number) => void;
+  onRowsPerPageChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  setPage: (page: number) => void;
+} {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+  return {
+    pagination: { page, rowsPerPage },
+    onPageChange: (_, newPage) => setPage(newPage),
+    onRowsPerPageChange: (e) => {
+      setRowsPerPage(parseInt(e.target.value, 10));
+      setPage(0);
+    },
+    setPage,
+  };
+}
+
+type TabId = "mine" | "all" | "approvals";
 
 /**
- * Time cards workspace. Two tabs: **My time sheets** (weekly grouping, read
- * only — logging happens from a case's Time tracking tab) and **Approvals**
- * (approver/admin: approve/reject a submitted card). There's no sheet-level
- * bulk action, delegation, or reports — the backend has no endpoints for
- * those (see the module-level notes in `types/timeCards.ts`).
+ * Time cards workspace. Three tabs: **My time sheets** (own cards only),
+ * **All** (everyone's cards, read only — visibility, not action), and
+ * **Approvals** (approver/admin: approve/reject a submitted card). Logging
+ * time happens from a case's Time tracking tab, not here. There's no
+ * sheet-level bulk action, delegation, or reports — the backend has no
+ * endpoints for those (see the module-level notes in `types/timeCards.ts`).
  */
 export default function CsmTimeCardsPage(): JSX.Element {
   const role = useTimecardRole();
+  const me = useCurrentEngineer();
   const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
   const [tab, setTab] = useState<TabId>("mine");
-  const activeTab: TabId = tab !== "mine" && !role.isApprover ? "mine" : tab;
+  const activeTab: TabId = tab === "approvals" && !role.isApprover ? "mine" : tab;
 
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
 
   // Search filters (sent as a POST body, never query params). Project and
   // state are server-side; work item and engineer are client-side over the
   // returned page — the backend has no filter for either.
-  const [filterProject, setFilterProject] = useState("");
-  const [filterWorkItem, setFilterWorkItem] = useState("");
+  const [filterProject, setFilterProject] = useState<string[]>([]);
+  const [filterWorkItem, setFilterWorkItem] = useState<string[]>([]);
   const [filterState, setFilterState] = useState<TimeCardState | "">("");
-  const [filterEngineer, setFilterEngineer] = useState("");
+  const [filterEngineer, setFilterEngineer] = useState<string[]>([]);
+  // Date range (YYYY-MM-DD, inclusive) — `from`/`to` are already real
+  // server-side filters (see TimeCardSearchFilters), just never had a UI
+  // control wired to them until now.
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
 
   const projects = useProjectOptions();
-  // The backend requires a non-empty `projectIds` to return anything at all
-  // (confirmed live — an unscoped search always returns `total: 0`, despite
-  // the OpenAPI spec documenting it as optional). Default to every project
-  // the user can see (already fetched for the filter dropdown below) so
-  // "My time sheets" / "Approvals" work with no filter picked; the explicit
-  // project filter narrows that down when set.
-  const scopeProjectIds = filterProject
-    ? [filterProject]
-    : (projects.data ?? []).map((p) => p.id);
+  // Search is unscoped by default: with no project filter picked we send no
+  // `projectIds`, and the backend returns every time card the caller is
+  // entitled to (internal agents get a global list). Picking the project
+  // filter narrows it to the chosen project(s). "My time sheets" and
+  // "Approvals" are further bounded server-side by the signed-in user /
+  // approver, so they stay correct unscoped too.
+  const scopeProjectIds = filterProject;
 
   const baseFilters: TimeCardSearchFilters = {
     ...(scopeProjectIds.length && { projectIds: scopeProjectIds }),
     ...(filterState && { states: [filterState] }),
+    ...(filterFrom && { from: filterFrom }),
+    ...(filterTo && { to: filterTo }),
   };
 
-  const mySheets = useMyTimeSheets(baseFilters);
-  const queue = useApprovalQueue(role.isApprover, baseFilters);
+  // Each tab pages independently — was previously fetching its *entire*
+  // scope (up to 1,000 cards, sequential page-by-page requests) before
+  // showing anything, confirmed live to take 30-60+ seconds and, with all
+  // three tabs doing this eagerly at once, enough concurrent load to make
+  // some fail outright. Real pagination replaces that: one page at a time,
+  // driven by the TablePagination controls below each list. Still gated on
+  // its own tab actually being active, for the same concurrent-load reason.
+  const minePagination = usePagination();
+  const allPagination = usePagination();
+  const approvalsPagination = usePagination();
+
+  const mySheets = useMyTimeSheets(activeTab === "mine", baseFilters, minePagination.pagination);
+  const allCards = useAllTimeCards(activeTab === "all", baseFilters, allPagination.pagination);
+  const queue = useApprovalQueue(
+    activeTab === "approvals" && role.isApprover,
+    baseFilters,
+    approvalsPagination.pagination,
+  );
   const decideCard = useDecideCard();
 
   const anyFilterActive =
-    !!filterProject || !!filterWorkItem.trim() || !!filterState || !!filterEngineer.trim();
+    filterProject.length > 0 ||
+    filterWorkItem.length > 0 ||
+    !!filterState ||
+    filterEngineer.length > 0 ||
+    !!filterFrom ||
+    !!filterTo;
+
+  // A filter change re-scopes the search for every tab, so every tab's page
+  // position needs to reset too — otherwise "page 3" of a narrower result
+  // set could be past the end, or just show unrelated leftovers.
+  const resetAllPages = (): void => {
+    minePagination.setPage(0);
+    allPagination.setPage(0);
+    approvalsPagination.setPage(0);
+  };
+  const handleFilterProjectChange = (v: string[]): void => {
+    setFilterProject(v);
+    resetAllPages();
+  };
+  const handleFilterStateChange = (v: TimeCardState | ""): void => {
+    setFilterState(v);
+    resetAllPages();
+  };
+  const handleFilterFromChange = (v: string): void => {
+    setFilterFrom(v);
+    // min/max on the date inputs only guide the picker UI — typing a date
+    // directly can still commit an inverted range, so clamp here too.
+    if (filterTo && v > filterTo) setFilterTo(v);
+    resetAllPages();
+  };
+  const handleFilterToChange = (v: string): void => {
+    setFilterTo(v);
+    if (filterFrom && v < filterFrom) setFilterFrom(v);
+    resetAllPages();
+  };
   const clearFilters = (): void => {
-    setFilterProject("");
-    setFilterWorkItem("");
+    setFilterProject([]);
+    setFilterWorkItem([]);
     setFilterState("");
-    setFilterEngineer("");
+    setFilterEngineer([]);
+    setFilterFrom("");
+    setFilterTo("");
+    resetAllPages();
   };
 
   const handleCardAction = (card: CsmTimeCard, action: TimecardAction): void => {
     if (action === "approve" || action === "reject") setReviewCard(card);
   };
 
-  /** Client-side work-item substring filter, applied over already-fetched sheets. */
-  const byWorkItem = (userNameFiltered: typeof mySheets.data): typeof mySheets.data => {
-    const q = filterWorkItem.trim().toLowerCase();
-    if (!q || !userNameFiltered) return userNameFiltered;
-    return userNameFiltered
+  /** Client-side work-item filter (case number is in the selected set),
+   * applied over already-fetched sheets. */
+  const byWorkItem = (sheets: CsmTimeSheet[] | undefined): CsmTimeSheet[] | undefined => {
+    if (filterWorkItem.length === 0 || !sheets) return sheets;
+    return sheets
       .map((s) => ({
         ...s,
-        cards: s.cards.filter((c) => c.caseNumber.toLowerCase().includes(q)),
+        cards: s.cards.filter((c) => filterWorkItem.includes(c.caseNumber)),
       }))
       .filter((s) => s.cards.length > 0);
   };
+
+  // Work-item / engineer option lists are scoped per tab — each tab has its
+  // own loaded page of sheets, and there's no search endpoint for either, so
+  // the picker can only ever offer what's actually on the current page.
+  const mineWorkItemOptions = useMemo(
+    () => workItemOptionsFrom(mySheets.data?.sheets),
+    [mySheets.data],
+  );
+  const allWorkItemOptions = useMemo(
+    () => workItemOptionsFrom(allCards.data?.sheets),
+    [allCards.data],
+  );
+  const approvalsWorkItemOptions = useMemo(
+    () => workItemOptionsFrom(queue.data?.sheets),
+    [queue.data],
+  );
+  const allEngineerOptions = useMemo(
+    () => engineerOptionsFrom(allCards.data?.sheets),
+    [allCards.data],
+  );
+  const approvalsEngineerOptions = useMemo(
+    () => engineerOptionsFrom(queue.data?.sheets),
+    [queue.data],
+  );
 
   return (
     <Box
@@ -136,6 +296,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
         sx={{ borderBottom: 1, borderColor: "divider" }}
       >
         <Tab value="mine" label="My time sheets" />
+        <Tab value="all" label="All" />
         {role.isApprover && <Tab value="approvals" label="Approvals" />}
       </Tabs>
 
@@ -145,11 +306,16 @@ export default function CsmTimeCardsPage(): JSX.Element {
           <FilterBar
             projects={projects.data ?? []}
             filterProject={filterProject}
-            setFilterProject={setFilterProject}
+            setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
+            workItemOptions={mineWorkItemOptions}
             filterState={filterState}
-            setFilterState={setFilterState}
+            setFilterState={handleFilterStateChange}
+            filterFrom={filterFrom}
+            setFilterFrom={handleFilterFromChange}
+            filterTo={filterTo}
+            setFilterTo={handleFilterToChange}
             onClear={clearFilters}
           />
 
@@ -166,28 +332,143 @@ export default function CsmTimeCardsPage(): JSX.Element {
           ) : mySheets.isError ? (
             <Typography color="error">Could not load your time sheets.</Typography>
           ) : (
-            (() => {
-              const filtered = byWorkItem(mySheets.data) ?? [];
-              if (filtered.length === 0) {
-                return (
-                  <Empty
-                    text={
-                      anyFilterActive
-                        ? "No time cards match the current filters."
-                        : "No time logged yet. Open a case and use its Time tracking tab to log time."
-                    }
+            <>
+              {(() => {
+                const filtered = byWorkItem(mySheets.data?.sheets) ?? [];
+                if (filtered.length === 0) {
+                  return (
+                    <Empty
+                      text={
+                        anyFilterActive
+                          ? "No time cards match the current filters."
+                          : "No time logged yet. Open a case and use its Time tracking tab to log time."
+                      }
+                    />
+                  );
+                }
+                return filtered.map((s) => (
+                  <TimeSheetCard
+                    key={s.id}
+                    sheet={s}
+                    role={{ isOwner: true, isApprover: false, isAdmin: false }}
+                    onCardAction={handleCardAction}
                   />
-                );
-              }
-              return filtered.map((s) => (
-                <TimeSheetCard
-                  key={s.id}
-                  sheet={s}
-                  role={{ isOwner: true, isApprover: false, isAdmin: false }}
-                  onCardAction={handleCardAction}
+                ));
+              })()}
+              {/* Pages over raw records, not weekly sheets — a week's cards
+               can legitimately span a page boundary and look incomplete
+               until you've paged further; same for "my cards" being a small
+               slice of whatever's on each raw page. Accepted tradeoff for
+               real pagination instead of a 30-60s upfront full-scope fetch. */}
+              <TablePagination
+                component="div"
+                count={mySheets.data?.total ?? 0}
+                page={minePagination.pagination.page}
+                onPageChange={minePagination.onPageChange}
+                rowsPerPage={minePagination.pagination.rowsPerPage}
+                onRowsPerPageChange={minePagination.onRowsPerPageChange}
+                rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+                showFirstButton
+                showLastButton
+              />
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* All — everyone's cards, own included. Read only: role is always
+       passed as non-approver/non-admin here regardless of the viewer's
+       actual role, so no Approve/Reject actions ever show — that stays
+       exclusive to the Approvals tab. */}
+      {activeTab === "all" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <FilterBar
+            projects={projects.data ?? []}
+            filterProject={filterProject}
+            setFilterProject={handleFilterProjectChange}
+            filterWorkItem={filterWorkItem}
+            setFilterWorkItem={setFilterWorkItem}
+            workItemOptions={allWorkItemOptions}
+            filterState={filterState}
+            setFilterState={handleFilterStateChange}
+            filterFrom={filterFrom}
+            setFilterFrom={handleFilterFromChange}
+            filterTo={filterTo}
+            setFilterTo={handleFilterToChange}
+            onClear={clearFilters}
+            engineerSlot={
+              <Box sx={{ width: 200 }}>
+                <SearchableMultiSelect
+                  id="timecards-filter-engineer-all"
+                  label="Engineer"
+                  placeholder="Search engineers…"
+                  values={filterEngineer}
+                  options={allEngineerOptions.ids}
+                  formatOption={(id) => allEngineerOptions.nameById.get(id) ?? id}
+                  onChange={setFilterEngineer}
                 />
-              ));
-            })()
+              </Box>
+            }
+            engineerChip={
+              filterEngineer.length > 0
+                ? {
+                    label: `Engineer: ${filterEngineer
+                      .map((id) => allEngineerOptions.nameById.get(id) ?? id)
+                      .join(", ")}`,
+                    onDelete: () => setFilterEngineer([]),
+                  }
+                : undefined
+            }
+          />
+
+          {allCards.isLoading || projects.isLoading ? (
+            <Centered>
+              <CircularProgress />
+            </Centered>
+          ) : allCards.isError ? (
+            <Typography color="error">Could not load time cards.</Typography>
+          ) : (
+            <>
+              {(() => {
+                const byEngineer = (allCards.data?.sheets ?? []).filter(
+                  (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
+                );
+                const filtered = byWorkItem(byEngineer) ?? [];
+                if (filtered.length === 0) {
+                  return (
+                    <Empty
+                      text={
+                        filterEngineer.length > 0 && byEngineer.length === 0
+                          ? "No time cards match the selected engineers."
+                          : anyFilterActive
+                            ? "No time cards match the current filters."
+                            : "No time logged yet."
+                      }
+                    />
+                  );
+                }
+                return filtered.map((s) => (
+                  <TimeSheetCard
+                    key={s.id}
+                    sheet={s}
+                    role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
+                    showEngineer
+                    onCardAction={handleCardAction}
+                  />
+                ));
+              })()}
+              <TablePagination
+                component="div"
+                count={allCards.data?.total ?? 0}
+                page={allPagination.pagination.page}
+                onPageChange={allPagination.onPageChange}
+                rowsPerPage={allPagination.pagination.rowsPerPage}
+                onRowsPerPageChange={allPagination.onRowsPerPageChange}
+                rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+                showFirstButton
+                showLastButton
+              />
+            </>
           )}
         </Box>
       )}
@@ -200,27 +481,38 @@ export default function CsmTimeCardsPage(): JSX.Element {
           <FilterBar
             projects={projects.data ?? []}
             filterProject={filterProject}
-            setFilterProject={setFilterProject}
+            setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
+            workItemOptions={approvalsWorkItemOptions}
             filterState={filterState}
-            setFilterState={setFilterState}
+            setFilterState={handleFilterStateChange}
+            filterFrom={filterFrom}
+            setFilterFrom={handleFilterFromChange}
+            filterTo={filterTo}
+            setFilterTo={handleFilterToChange}
             onClear={clearFilters}
+            hideStateFilter
             engineerSlot={
-              <TextField
-                size="small"
-                label="Engineer"
-                placeholder="Name…"
-                value={filterEngineer}
-                onChange={(e) => setFilterEngineer(e.target.value)}
-                sx={{ width: 180 }}
-              />
+              <Box sx={{ width: 200 }}>
+                <SearchableMultiSelect
+                  id="timecards-filter-engineer-approvals"
+                  label="Engineer"
+                  placeholder="Search engineers…"
+                  values={filterEngineer}
+                  options={approvalsEngineerOptions.ids}
+                  formatOption={(id) => approvalsEngineerOptions.nameById.get(id) ?? id}
+                  onChange={setFilterEngineer}
+                />
+              </Box>
             }
             engineerChip={
-              filterEngineer.trim()
+              filterEngineer.length > 0
                 ? {
-                    label: `Engineer: ${filterEngineer.trim()}`,
-                    onDelete: () => setFilterEngineer(""),
+                    label: `Engineer: ${filterEngineer
+                      .map((id) => approvalsEngineerOptions.nameById.get(id) ?? id)
+                      .join(", ")}`,
+                    onDelete: () => setFilterEngineer([]),
                   }
                 : undefined
             }
@@ -232,39 +524,53 @@ export default function CsmTimeCardsPage(): JSX.Element {
             </Centered>
           ) : queue.isError ? (
             <Typography color="error">Could not load the approval queue.</Typography>
-          ) : (queue.data ?? []).length === 0 ? (
-            <Empty text="Nothing awaiting approval." />
           ) : (
-            (() => {
-              const q = filterEngineer.trim().toLowerCase();
-              const byEngineer = (queue.data ?? []).filter(
-                (s) => !q || s.userName.toLowerCase().includes(q),
-              );
-              const filtered = byWorkItem(byEngineer) ?? [];
-              if (filtered.length === 0) {
-                return (
-                  <Empty
-                    text={
-                      // Only blame the engineer filter when it's the one that
-                      // excluded everything — if it matched fine and the
-                      // work-item filter emptied the result, say that instead.
-                      q && byEngineer.length === 0
-                        ? `No engineers match "${filterEngineer}".`
-                        : "No time cards match the current filters."
-                    }
-                  />
-                );
-              }
-              return filtered.map((s) => (
-                <TimeSheetCard
-                  key={s.id}
-                  sheet={s}
-                  role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
-                  showEngineer
-                  onCardAction={handleCardAction}
-                />
-              ));
-            })()
+            <>
+              {(queue.data?.sheets ?? []).length === 0 ? (
+                <Empty text="Nothing awaiting approval." />
+              ) : (
+                (() => {
+                  const byEngineer = (queue.data?.sheets ?? []).filter(
+                    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
+                  );
+                  const filtered = byWorkItem(byEngineer) ?? [];
+                  if (filtered.length === 0) {
+                    return (
+                      <Empty
+                        text={
+                          // Only blame the engineer filter when it's the one that
+                          // excluded everything — if it matched fine and the
+                          // work-item filter emptied the result, say that instead.
+                          filterEngineer.length > 0 && byEngineer.length === 0
+                            ? "No time cards match the selected engineers."
+                            : "No time cards match the current filters."
+                        }
+                      />
+                    );
+                  }
+                  return filtered.map((s) => (
+                    <TimeSheetCard
+                      key={s.id}
+                      sheet={s}
+                      role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
+                      showEngineer
+                      onCardAction={handleCardAction}
+                    />
+                  ));
+                })()
+              )}
+              <TablePagination
+                component="div"
+                count={queue.data?.total ?? 0}
+                page={approvalsPagination.pagination.page}
+                onPageChange={approvalsPagination.onPageChange}
+                rowsPerPage={approvalsPagination.pagination.rowsPerPage}
+                onRowsPerPageChange={approvalsPagination.onRowsPerPageChange}
+                rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+                showFirstButton
+                showLastButton
+              />
+            </>
           )}
         </Box>
       )}
@@ -276,7 +582,14 @@ export default function CsmTimeCardsPage(): JSX.Element {
           onClose={() => setReviewCard(null)}
           onDecide={(decision) =>
             decideCard.mutate(decision, {
-              onSuccess: () => setReviewCard(null),
+              onSuccess: () => {
+                setReviewCard(null);
+                showSuccess(
+                  decision.state === "approved"
+                    ? "Time card approved."
+                    : "Time card rejected.",
+                );
+              },
               onError: (err) => {
                 // The backend 403s when the signed-in user isn't authorized
                 // to decide this specific card (confirmed live: approving
@@ -301,53 +614,81 @@ export default function CsmTimeCardsPage(): JSX.Element {
  * "processed" exist in the backend's enum but nothing here can produce them. */
 const FILTER_STATES: TimeCardState[] = ["submitted", "approved", "rejected"];
 
-/** Shared filter bar for the My time sheets and Approvals tabs. */
+/** Shared filter bar for the My time sheets, All, and Approvals tabs. */
 function FilterBar({
   projects,
   filterProject,
   setFilterProject,
   filterWorkItem,
   setFilterWorkItem,
+  workItemOptions,
   filterState,
   setFilterState,
+  filterFrom,
+  setFilterFrom,
+  filterTo,
+  setFilterTo,
   onClear,
   engineerSlot,
   engineerChip,
+  hideStateFilter,
 }: {
   projects: BeProject[];
-  filterProject: string;
-  setFilterProject: (v: string) => void;
-  filterWorkItem: string;
-  setFilterWorkItem: (v: string) => void;
+  filterProject: string[];
+  setFilterProject: (v: string[]) => void;
+  filterWorkItem: string[];
+  setFilterWorkItem: (v: string[]) => void;
+  /** Case numbers to offer in the work-item picker — scoped to whatever the
+   * calling tab currently has loaded (see `workItemOptionsFrom`). */
+  workItemOptions: string[];
   filterState: TimeCardState | "";
   setFilterState: (v: TimeCardState | "") => void;
+  /** Inclusive date range (YYYY-MM-DD), matched against a card's work date. */
+  filterFrom: string;
+  setFilterFrom: (v: string) => void;
+  filterTo: string;
+  setFilterTo: (v: string) => void;
   onClear: () => void;
   engineerSlot?: JSX.Element;
-  /** Active-chip for the Engineer filter — only the Approvals tab has one. */
+  /** Active-chip for the Engineer filter — only the All/Approvals tabs have one. */
   engineerChip?: { label: string; onDelete: () => void };
+  /** Approvals always forces `states: ["submitted"]` server-side (see
+   * `useApprovalQueue`), so the State control can't actually narrow anything
+   * there — hide it instead of showing a filter that silently does nothing. */
+  hideStateFilter?: boolean;
 }): JSX.Element {
   const activeChips: { key: string; label: string; onDelete: () => void }[] = [];
   if (engineerChip) activeChips.push({ key: "engineer", ...engineerChip });
-  if (filterProject) {
-    const name = projects.find((p) => p.id === filterProject)?.name ?? filterProject;
+  if (filterProject.length > 0) {
+    const names = filterProject.map((id) => projects.find((p) => p.id === id)?.name ?? id);
     activeChips.push({
       key: "project",
-      label: `Project: ${name}`,
-      onDelete: () => setFilterProject(""),
+      label: `Project: ${names.join(", ")}`,
+      onDelete: () => setFilterProject([]),
     });
   }
-  if (filterWorkItem.trim()) {
+  if (filterWorkItem.length > 0) {
     activeChips.push({
       key: "workItem",
-      label: `Work item: ${filterWorkItem.trim()}`,
-      onDelete: () => setFilterWorkItem(""),
+      label: `Work item: ${filterWorkItem.join(", ")}`,
+      onDelete: () => setFilterWorkItem([]),
     });
   }
-  if (filterState) {
+  if (!hideStateFilter && filterState) {
     activeChips.push({
       key: "state",
       label: `State: ${TIME_CARD_STATE_META[filterState].label}`,
       onDelete: () => setFilterState(""),
+    });
+  }
+  if (filterFrom || filterTo) {
+    activeChips.push({
+      key: "dateRange",
+      label: `Date: ${filterFrom || "…"} to ${filterTo || "…"}`,
+      onDelete: () => {
+        setFilterFrom("");
+        setFilterTo("");
+      },
     });
   }
 
@@ -361,77 +702,104 @@ function FilterBar({
         overflow: "hidden",
       }}
     >
-      {/* Controls row */}
-      <Box
-        sx={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 1.5,
-          px: 2,
-          py: 1.5,
-        }}
-      >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
-          <ListFilter size={16} />
-          <Typography variant="caption" fontWeight={600} color="text.secondary">
-            Filters
-          </Typography>
+      {/* Controls — a fixed two-row layout rather than one row that wraps
+       unpredictably: which controls land on row two would otherwise depend
+       on viewport width, and a single item stranding itself alone on a new
+       row (with a lot of empty space next to it) reads as broken overflow
+       rather than a deliberate section. Row one is the entity filters, row
+       two is always the date range, regardless of width. */}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, px: 2, py: 1.5 }}>
+        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
+            <ListFilter size={16} />
+            <Typography variant="caption" fontWeight={600} color="text.secondary">
+              Filters
+            </Typography>
+          </Box>
+
+          <Box sx={{ width: 220 }}>
+            <SearchableMultiSelect
+              id="timecards-filter-project"
+              label="Project"
+              placeholder="Search projects…"
+              values={filterProject}
+              options={projects.map((p) => p.id)}
+              formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
+              onChange={setFilterProject}
+            />
+          </Box>
+
+          <Box sx={{ width: 220 }}>
+            <SearchableMultiSelect
+              id="timecards-filter-work-item"
+              label="Work item"
+              placeholder="Search work items…"
+              values={filterWorkItem}
+              options={workItemOptions}
+              onChange={setFilterWorkItem}
+            />
+          </Box>
+
+          {engineerSlot}
+
+          {!hideStateFilter && (
+            <TextField
+              select
+              size="small"
+              label="State"
+              value={filterState}
+              onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+              sx={{ width: 150 }}
+            >
+              <MenuItem value="">All states</MenuItem>
+              {FILTER_STATES.map((s) => (
+                <MenuItem key={s} value={s}>
+                  {TIME_CARD_STATE_META[s].label}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
         </Box>
 
-        <TextField
-          select
-          size="small"
-          label="Project"
-          value={filterProject}
-          onChange={(e) => setFilterProject(e.target.value)}
-          sx={{ width: 200 }}
-        >
-          <MenuItem value="">All projects</MenuItem>
-          {projects.map((p) => (
-            <MenuItem key={p.id} value={p.id}>
-              {p.name ?? p.id}
-            </MenuItem>
-          ))}
-        </TextField>
-
-        <TextField
-          size="small"
-          label="Work item"
-          placeholder="e.g. CS0352584"
-          value={filterWorkItem}
-          onChange={(e) => setFilterWorkItem(e.target.value)}
-          sx={{ width: 190 }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={14} />
-                </InputAdornment>
-              ),
-            },
+        {/* One grouped pill instead of two separate outlined fields — reads
+         as a single "date range" control, always on its own row. */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 0.75,
+            width: "fit-content",
+            height: 40,
+            px: 1.25,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            color: "text.secondary",
           }}
-        />
-
-        {engineerSlot}
-
-        <TextField
-          select
-          size="small"
-          label="State"
-          value={filterState}
-          onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
-          sx={{ width: 150 }}
         >
-          <MenuItem value="">All states</MenuItem>
-          {FILTER_STATES.map((s) => (
-            <MenuItem key={s} value={s}>
-              {TIME_CARD_STATE_META[s].label}
-            </MenuItem>
-          ))}
-        </TextField>
-
-        <Box sx={{ flexGrow: 1 }} />
+          <CalendarRange size={15} style={{ flexShrink: 0, opacity: 0.7 }} />
+          <Box
+            component="input"
+            type="date"
+            aria-label="From date"
+            value={filterFrom}
+            max={filterTo || undefined}
+            onChange={(e) => setFilterFrom(e.target.value)}
+            sx={dateInputSx}
+          />
+          <Typography variant="body2" color="text.disabled">
+            –
+          </Typography>
+          <Box
+            component="input"
+            type="date"
+            aria-label="To date"
+            value={filterTo}
+            min={filterFrom || undefined}
+            onChange={(e) => setFilterTo(e.target.value)}
+            sx={dateInputSx}
+          />
+        </Box>
       </Box>
 
       {/* Active filter chips */}

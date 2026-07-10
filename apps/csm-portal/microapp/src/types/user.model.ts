@@ -14,7 +14,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./case.dto";
-export * from "./case.model";
-export * from "./user.dto";
-export * from "./user.model";
+import type { UserMeDto } from "./user.dto";
+
+export interface UserProfile {
+  id: string | null;
+  email: string;
+  fullName: string;
+  phoneNumber: string | null;
+  timeZone: string | null;
+  roles: string[];
+}
+
+export function toUserProfile(dto: UserMeDto): UserProfile {
+  return {
+    id: dto.id ?? null,
+    email: dto.email,
+    fullName: [dto.firstName, dto.lastName].filter(Boolean).join(" ").trim() || dto.email,
+    phoneNumber: dto.phoneNumber ?? null,
+    timeZone: dto.timeZone ?? null,
+    roles: dto.roles ?? [],
+  };
+}

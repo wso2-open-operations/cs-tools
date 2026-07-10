@@ -128,15 +128,92 @@ export interface CaseAttachment {
  */
 export type CustomerTier = string;
 
-export type SlaClockState = "running" | "paused" | "met" | "breached";
+/**
+ * Stage of a case SLA record, as returned by the case SLA list endpoint. An
+ * open enum: the known values below still drive autocomplete, but a stage
+ * outside this set (e.g. one added later on the backend) is kept as-is
+ * rather than forced into the closed set.
+ */
+export type SlaStage =
+  | "in_progress"
+  | "paused"
+  | "completed"
+  | "cancelled"
+  | "breached"
+  | (string & {});
 
-export interface CaseSlaClock {
-  clockType: SlaClockType;
-  state: SlaClockState;
-  /** Minutes left until breach (negative = already breached). */
-  minutesToBreach: number;
-  /** Target SLA duration in minutes (e.g. ack target = 30 min for S1). */
-  targetMinutes: number;
+/**
+ * A single SLA record attached to a case. All time fields
+ * are pre-formatted server-side (`*Label`) — the frontend renders them as-is
+ * rather than recomputing.
+ */
+export interface CaseSla {
+  id: string;
+  /** SLA definition name (e.g. "S1 - Response"). */
+  definition: string;
+  /** Target duration as a display string (e.g. "4 Business Hours"); absent for open-ended SLAs. */
+  target: string | null;
+  stage: SlaStage;
+  /** Human-readable stage label from the backend (e.g. "In progress"). */
+  stageLabel: string;
+  hasBreached: boolean;
+  businessTimeLeftLabel: string;
+  businessElapsedLabel: string;
+  /** Percentage (0-100+) of the target consumed in business time. */
+  businessElapsedPercent: number;
+  /** ISO-8601 UTC; null when the SLA clock hasn't started. */
+  startTime: string | null;
+  /** ISO-8601 UTC; null while the SLA is still running. */
+  stopTime: string | null;
+}
+
+export interface CaseSlaList {
+  caseId: string;
+  count: number;
+  slas: CaseSla[];
+}
+
+/**
+ * Raw SLA record shape returned by the task-SLA search endpoint. One record
+ * per SLA definition attached to a task (a case is a task). Kept close to the
+ * wire shape; {@link CaseSla} is the row model the SLA table actually renders,
+ * built from this by {@link useGetCsmCaseSlas}.
+ */
+export interface TaskSlaView {
+  id: string;
+  slaDefinition: {
+    id?: string | null;
+    name?: string | null;
+    type?: string | null;
+    target?: string | null;
+  } | null;
+  stage: string | null;
+  task: {
+    id?: string | null;
+    number?: string | null;
+  } | null;
+  businessTimeLeft: string | null;
+  businessElapsedTime: string | null;
+  businessElapsedPercentage: number | null;
+  startTime: string | null;
+  endTime: string | null;
+}
+
+export interface TaskSlaSearchPayload {
+  filters?: {
+    taskIds?: string[];
+  };
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  };
+}
+
+export interface TaskSlaSearchResponse {
+  slas: TaskSlaView[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface CaseWatcher {
@@ -266,7 +343,6 @@ export interface CsmCaseDetail extends CsmCaseRow {
   createdByEmail?: string;
   customerContext: CaseCustomerContext;
   productContext: CaseProductContext;
-  slaClocks: CaseSlaClock[];
   watchers: CaseWatcher[];
   linkedItems: CaseLinkedItem[];
   tags: CaseTag[];

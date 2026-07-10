@@ -26,8 +26,8 @@ interface TokenPayload {
   email?: string;
   name?: string;
   groups?: string[];
-  given_name: string;
-  family_name: string;
+  given_name?: string;
+  family_name?: string;
 }
 
 // These would be your actual token storage functions
@@ -59,10 +59,12 @@ function isTokenExpiringSoon(token: string | null): boolean {
  * This is a simplified version of the logic in the original `handleRequestWithNewToken`.
  * Skips the native-bridge round trip when the current ID token is still valid for a while,
  * and only fetches a new token and updates storage when it's missing or near-expiry.
+ * @param force - Bypasses the expiry check, e.g. after a 401 proves the current token is
+ * already rejected by the backend, regardless of what its own `exp` claim says.
  */
-export const refreshToken = (): Promise<string> => {
+export const refreshToken = (force = false): Promise<string> => {
   const currentIdToken = getIdToken();
-  if (!isTokenExpiringSoon(currentIdToken)) {
+  if (!force && !isTokenExpiringSoon(currentIdToken)) {
     return Promise.resolve(currentIdToken as string);
   }
 

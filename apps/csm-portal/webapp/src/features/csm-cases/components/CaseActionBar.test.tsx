@@ -59,7 +59,6 @@ const BASE_CASE: CsmCaseDetail = {
     deployment: "IAM Production",
     environment: "prod",
   },
-  slaClocks: [],
   watchers: [],
   linkedItems: [],
   tags: [],

@@ -63,6 +63,7 @@ func main() {
 	timeCardHandler := handler.NewTimeCardHandler(entityClient)
 	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
 	conversationHandler := handler.NewConversationHandler(entityClient)
+	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -143,6 +144,8 @@ func main() {
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)
 	mux.HandleFunc("GET /conversations/{id}/messages", conversationHandler.GetConversationMessages)
+	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
+	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 
 	addr := envOrDefault("PORT", ":8080")
 

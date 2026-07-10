@@ -57,17 +57,12 @@ import type {
   CaseCustomerContext,
   CaseLinkedItem,
   CaseProductContext,
-  CaseSlaClock,
   CaseTag,
   CaseTimeLogEntry,
   CaseWatcher,
   DeploymentCategory,
 } from "@features/csm-cases/types/csmCases";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
-import {
-  SLA_CLOCK_LABEL,
-  formatTimeToBreach,
-} from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 
 // ---------------------------------------------------------------------------
@@ -269,100 +264,6 @@ export function ProductContextWidget({
       )}
     </WidgetCard>
   );
-}
-
-// ---------------------------------------------------------------------------
-// 3. SLA timeline
-// ---------------------------------------------------------------------------
-
-function clockProgress(c: CaseSlaClock): number {
-  if (c.state === "met") return 100;
-  if (c.state === "breached") return 100;
-  const elapsed = c.targetMinutes - Math.max(0, c.minutesToBreach);
-  if (c.targetMinutes <= 0) return 0;
-  return Math.min(100, Math.max(0, (elapsed / c.targetMinutes) * 100));
-}
-
-const CLOCK_COLOR: Record<
-  CaseSlaClock["state"],
-  "primary" | "warning" | "error" | "success"
-> = {
-  running: "primary",
-  paused: "warning",
-  met: "success",
-  breached: "error",
-};
-
-export function SlaTimelineWidget({
-  clocks,
-}: {
-  clocks: CaseSlaClock[];
-}): JSX.Element {
-  return (
-    <WidgetCard title="SLA timeline" icon={<Clock size={16} />}>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-        {clocks.map((c) => {
-          const stateText =
-            c.state === "met"
-              ? "Met"
-              : c.state === "breached"
-                ? formatTimeToBreach(c.minutesToBreach)
-                : c.state === "paused"
-                  ? "Paused"
-                  : formatTimeToBreach(c.minutesToBreach);
-          return (
-            <Box
-              key={c.clockType}
-              sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}
-            >
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 1,
-                }}
-              >
-                <Typography variant="body2">
-                  {SLA_CLOCK_LABEL[c.clockType]}
-                </Typography>
-                <Typography
-                  variant="caption"
-                  color={
-                    c.state === "breached"
-                      ? "error.main"
-                      : c.state === "met"
-                        ? "success.main"
-                        : c.state === "paused"
-                          ? "warning.main"
-                          : "text.secondary"
-                  }
-                >
-                  {stateText}
-                </Typography>
-              </Box>
-              <LinearProgress
-                variant="determinate"
-                value={clockProgress(c)}
-                color={CLOCK_COLOR[c.state]}
-                sx={{ height: 6, borderRadius: 1 }}
-              />
-              <Typography variant="caption" color="text.secondary">
-                Target: {formatMinutes(c.targetMinutes)}
-              </Typography>
-            </Box>
-          );
-        })}
-      </Box>
-    </WidgetCard>
-  );
-}
-
-function formatMinutes(m: number): string {
-  if (m < 60) return `${m}m`;
-  const h = m / 60;
-  if (h < 24) return `${h}h`;
-  return `${Math.round(h / 24)}d`;
 }
 
 // ---------------------------------------------------------------------------

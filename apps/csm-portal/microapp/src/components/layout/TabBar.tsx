@@ -17,12 +17,14 @@
 import { useLayoutEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { BottomNavigation, BottomNavigationAction, Box } from "@wso2/oxygen-ui";
-import { Headset } from "@wso2/oxygen-ui-icons-react";
+import { Headset, User } from "@wso2/oxygen-ui-icons-react";
 
 export function TabBar() {
   const ref = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const isSupportActive = location.pathname === "/" || location.pathname.startsWith("/cases/");
+  const isProfileActive = location.pathname.startsWith("/profile");
+  const activeTab = isSupportActive ? "support" : isProfileActive ? "profile" : false;
 
   useLayoutEffect(() => {
     if (!ref.current) return;
@@ -47,13 +49,21 @@ export function TabBar() {
       pb={4}
       sx={{ borderTop: "1px solid", borderColor: "divider" }}
     >
-      <BottomNavigation value={isSupportActive ? "support" : false} showLabels>
+      <BottomNavigation value={activeTab} showLabels>
         <BottomNavigationAction
           component={Link}
           to="/"
           value="support"
           label="Support"
           icon={<Headset />}
+          disableRipple
+        />
+        <BottomNavigationAction
+          component={Link}
+          to="/profile"
+          value="profile"
+          label="Profile"
+          icon={<User />}
           disableRipple
         />
       </BottomNavigation>

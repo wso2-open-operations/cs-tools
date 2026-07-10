@@ -2237,6 +2237,108 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /slas/search:
+    post:
+      summary: Search task SLA records (ServiceNow data source only).
+      operationId: searchTaskSlas
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchTaskSlasPayload'
+      responses:
+        "200":
+          description: Task SLA records matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchTaskSlasResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /slas/{id}:
+    get:
+      summary: Get a task SLA record by ID (ServiceNow data source only).
+      operationId: getTaskSla
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task SLA UUID.
+      responses:
+        "200":
+          description: The task SLA record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSlaDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Task SLA not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /catalogs/{catalogId}/items/{catalogItemId}/variables:
     get:
       summary: Get variables (form fields) for a catalog item (ServiceNow data source only).
@@ -5096,3 +5198,238 @@ components:
         hasMore:
           type: boolean
           description: Whether additional pages are available.
+
+    SearchTaskSlasPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            taskIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: Filter by task UUIDs.
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
+
+    TaskSlaDefinitionRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        target:
+          type: string
+          nullable: true
+
+    TaskSlaTaskRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+
+    TaskSlaView:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slaDefinition:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TaskSlaDefinitionRef'
+        stage:
+          type: string
+          nullable: true
+        task:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TaskSlaTaskRef'
+        businessTimeLeft:
+          type: string
+          nullable: true
+        businessElapsedTime:
+          type: string
+          nullable: true
+        businessElapsedPercentage:
+          type: number
+          format: double
+          nullable: true
+        startTime:
+          type: string
+          nullable: true
+        endTime:
+          type: string
+          nullable: true
+
+    SearchTaskSlasResponse:
+      type: object
+      properties:
+        slas:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSlaView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    TaskSlaDefinitionDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        target:
+          type: string
+          nullable: true
+        flow:
+          type: string
+          nullable: true
+        workflow:
+          type: string
+          nullable: true
+        isEnableLogging:
+          type: boolean
+          nullable: true
+        durationType:
+          type: string
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        scheduleSource:
+          type: string
+          nullable: true
+        schedule:
+          type: string
+          nullable: true
+        timezoneSource:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        startCondition:
+          type: string
+          nullable: true
+        isRetroactiveStart:
+          type: boolean
+          nullable: true
+        isRetroactivePause:
+          type: boolean
+          nullable: true
+        whenToCancel:
+          type: string
+          nullable: true
+        cancelCondition:
+          type: string
+          nullable: true
+        pauseCondition:
+          type: string
+          nullable: true
+        whenToResume:
+          type: string
+          nullable: true
+        stopCondition:
+          type: string
+          nullable: true
+        resetCondition:
+          type: string
+          nullable: true
+        resetAction:
+          type: string
+          nullable: true
+
+    TaskSlaScheduleRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+
+    TaskSlaDetail:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        task:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TaskSlaTaskRef'
+        slaDefinition:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TaskSlaDefinitionDetail'
+        stage:
+          type: string
+          nullable: true
+        businessTimeLeft:
+          type: string
+          nullable: true
+        businessElapsedTime:
+          type: string
+          nullable: true
+        businessElapsedPercentage:
+          type: number
+          format: double
+          nullable: true
+        startTime:
+          type: string
+          nullable: true
+        endTime:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+          nullable: true
+        schedule:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TaskSlaScheduleRef'

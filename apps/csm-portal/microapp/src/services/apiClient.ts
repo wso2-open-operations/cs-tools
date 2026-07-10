@@ -154,7 +154,9 @@ apiClient.interceptors.response.use(
 
       try {
         Logger.info("Attempting to refresh access token");
-        await refreshToken();
+        // Force a genuine refresh: the 401 already proves the current token was rejected,
+        // regardless of what its own exp claim says, so the expiry short-circuit must not apply here.
+        await refreshToken(true);
         const newAccessToken = getAccessToken();
         apiClient.defaults.headers.common["Authorization"] = `Bearer ${newAccessToken}`;
         originalRequest.headers["Authorization"] = `Bearer ${newAccessToken}`;

@@ -116,12 +116,27 @@ export default function CsmIssuesView({
     [searchParams, setSearchParams],
   );
 
+  // Severity (S1-S4) is a support-case concept, so the severity filter is only
+  // shown on the support-cases list — i.e. when the surrounding view locks the
+  // record type to `case`. Every other list (service requests, engagements,
+  // security reports, mixed project issues) hides it.
+  const showSeverityFilter =
+    lockedFilters?.caseTypes?.length === 1 &&
+    lockedFilters.caseTypes[0] === "case";
+
   const debouncedSearch = useDebouncedValue(filters.search, 300);
   // User filters (debounced search) with the locked overrides applied last so
   // the fixed type/project can't be widened by a stale URL value.
   const queryFilters = useMemo<CasesFilters>(
-    () => ({ ...filters, search: debouncedSearch, ...lockedFilters }),
-    [filters, debouncedSearch, lockedFilters],
+    () => ({
+      ...filters,
+      search: debouncedSearch,
+      // The severity control is hidden for non-case lists, so don't let a stale
+      // `severities` value from a shared URL silently filter those results.
+      ...(showSeverityFilter ? {} : { severities: [] }),
+      ...lockedFilters,
+    }),
+    [filters, debouncedSearch, showSeverityFilter, lockedFilters],
   );
 
   const { data, isLoading, isError, error } = useGetCsmCases(
@@ -236,6 +251,7 @@ export default function CsmIssuesView({
         onFiltersToggle={() => setIsFiltersOpen((v) => !v)}
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
+        showSeverityFilter={showSeverityFilter}
         hideTypeFilter={hideTypeFilter}
         hideProjectFilter={hideProjectFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}

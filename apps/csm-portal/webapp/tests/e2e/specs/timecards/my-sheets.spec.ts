@@ -23,7 +23,7 @@
 // here without the user touching the project filter.
 //
 
-import { test, expect, withRole, currentUserSearchQuery } from "../../fixtures/test";
+import { test, expect, withRole, approverSearchQuery } from "../../fixtures/test";
 import { TimeCardsPage } from "../../pages/TimeCardsPage";
 import { LogTimeDialog } from "../../pages/LogTimeDialog";
 import { e2eWorkLogComment } from "../../utils/selectors";
@@ -36,7 +36,7 @@ async function logTimeOnFirstCase(
   page: import("@playwright/test").Page,
   label: string,
 ): Promise<string | null> {
-  const approverQuery = await currentUserSearchQuery(page);
+  const approverQuery = await approverSearchQuery(page);
   await page.goto("/cases");
   const firstCase = page
     .locator('a[href^="/cases/"]:not([href="/cases/new"])')
@@ -97,14 +97,17 @@ test.describe("time cards — my time sheets", () => {
     await tc.goto();
     await expect(tc.cardRow(caseNumber!)).toBeVisible({ timeout: 15_000 });
 
-    // Work item filter narrows to the matching card.
-    await page.getByLabel("Work item").fill(caseNumber!);
+    // Work item filter narrows to the matching card. It's a multi-select
+    // sourced from case numbers on the current page, not free text, so
+    // there's no equivalent "type something that can't match" case anymore
+    // (nothing to select if it doesn't exist) — clearing instead confirms
+    // the filter was actually applied and removable.
+    await tc.filterWorkItem(caseNumber!);
     await expect(tc.cardRow(caseNumber!)).toBeVisible();
-
-    // A work item that can't match anything hides it.
-    await page.getByLabel("Work item").fill("no-such-case-number-zzz");
-    await expect(tc.cardText(caseNumber!)).toHaveCount(0);
-    await page.getByLabel("Work item").fill("");
+    await tc.clearFilters();
+    // "Clear all" only shows up while a filter is active, so it going away
+    // means the work item filter actually got removed.
+    await expect(page.getByRole("button", { name: "Clear all" })).toHaveCount(0);
 
     // State filter: the card was just created, so it's "submitted".
     await tc.filterState("Submitted");

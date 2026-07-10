@@ -98,10 +98,12 @@ Specs skip themselves (not fail) when the session they need is missing.
 - `auth/README.md` — how to capture a session bundle (localStorage + sessionStorage).
 - `fixtures/test.ts` — `withRole(test, role)` replays a session + skips if absent;
   `openContextAs(browser, role)` opens a **second** authenticated context for
-  specs needing two identities; `currentUserSearchQuery(page)` returns a query
-  guaranteed to match the signed-in user in the approver picker (a generic
-  single-letter query can match only an empty-email service account in this
-  small staging tenant — confirmed live).
+  specs needing two identities; `approverSearchQuery(page)` returns a query
+  (the signed-in user's email domain) guaranteed to surface a real, *other*
+  candidate in the approver picker — the picker excludes the signed-in user
+  (self-approval prevention), so a generic single-letter query can match only
+  an empty-email service account in this small staging tenant, and the
+  signed-in user's own address would always come back empty (confirmed live).
 - `pages/TimeCardsPage.ts` — page object for `/time-cards`.
 - `pages/LogTimeDialog.ts` — fills and submits the real "Log time" form.
 - `utils/selectors.ts` — `E2E_TAG` / `e2eWorkLogComment()` for tagging created data.
