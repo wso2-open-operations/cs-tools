@@ -22,7 +22,6 @@ export interface UserProfile {
   fullName: string;
   phoneNumber: string | null;
   timeZone: string | null;
-  roles: string[];
 }
 
 export function toUserProfile(dto: UserMeDto): UserProfile {
@@ -32,6 +31,5 @@ export function toUserProfile(dto: UserMeDto): UserProfile {
     fullName: [dto.firstName, dto.lastName].filter(Boolean).join(" ").trim() || dto.email,
     phoneNumber: dto.phoneNumber ?? null,
     timeZone: dto.timeZone ?? null,
-    roles: dto.roles ?? [],
   };
 }

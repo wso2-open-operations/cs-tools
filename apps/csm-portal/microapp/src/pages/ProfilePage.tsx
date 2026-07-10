@@ -18,7 +18,6 @@ import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Avatar,
   Button,
-  Chip,
   Divider,
   FormControl,
   InputLabel,
@@ -161,16 +160,7 @@ function ProfileHeader({ profile }: { profile: UserProfile }) {
   return (
     <Stack direction="row" alignItems="center" gap={2}>
       <Avatar sx={{ width: 56, height: 56 }}>{initials}</Avatar>
-      <Stack gap={0.5}>
-        <Typography variant="h6">{profile.fullName}</Typography>
-        {profile.roles.length > 0 && (
-          <Stack direction="row" gap={0.5} flexWrap="wrap">
-            {profile.roles.map((role) => (
-              <Chip key={role} label={role} size="small" />
-            ))}
-          </Stack>
-        )}
-      </Stack>
+      <Typography variant="h6">{profile.fullName}</Typography>
     </Stack>
   );
 }
