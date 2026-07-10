@@ -2135,3 +2135,78 @@ type TaskSlaDetail struct {
 	Active                    *bool                    `json:"active"`
 	Schedule                  *TaskSlaScheduleRef      `json:"schedule"`
 }
+
+// IncidentPriority represents the priority level of an incident.
+type IncidentPriority string
+
+const (
+	IncidentPriorityCritical IncidentPriority = "CRITICAL"
+	IncidentPriorityHigh     IncidentPriority = "HIGH"
+	IncidentPriorityModerate IncidentPriority = "MODERATE"
+	IncidentPriorityLow      IncidentPriority = "LOW"
+	IncidentPriorityPlanning IncidentPriority = "PLANNING"
+)
+
+// IncidentSortField enumerates the columns available for sorting incident search results.
+type IncidentSortField string
+
+const (
+	IncidentSortFieldCreatedOn IncidentSortField = "createdOn"
+	IncidentSortFieldUpdatedOn IncidentSortField = "updatedOn"
+	IncidentSortFieldOpenedOn  IncidentSortField = "openedOn"
+)
+
+// IncidentSortOrder controls the sort direction for incident search.
+type IncidentSortOrder string
+
+const (
+	IncidentSortOrderAsc  IncidentSortOrder = "asc"
+	IncidentSortOrderDesc IncidentSortOrder = "desc"
+)
+
+// IncidentSort specifies the sort field and direction for incident search results.
+type IncidentSort struct {
+	Field IncidentSortField `json:"field"`
+	Order IncidentSortOrder `json:"order"`
+}
+
+// SearchIncidentsFilters holds all optional filter criteria for an incident search.
+type SearchIncidentsFilters struct {
+	SearchQuery string             `json:"searchQuery"`
+	Priorities  []IncidentPriority `json:"priorities"`
+	ParentIDs   []string           `json:"parentIds"`
+}
+
+// SearchIncidentsRequest is the input for POST /incidents/search.
+type SearchIncidentsRequest struct {
+	Filters    SearchIncidentsFilters `json:"filters"`
+	SortBy     IncidentSort           `json:"sortBy"`
+	Pagination Pagination             `json:"pagination"`
+}
+
+// SearchIncidentView is the unified incident representation returned in search results.
+type SearchIncidentView struct {
+	ID              *string              `json:"id"`
+	Number          *string              `json:"number"`
+	OpenedOn        *string              `json:"openedOn"`
+	Subject         *string              `json:"subject"`
+	Caller          *EntityRef           `json:"caller"`
+	Priority        *string `json:"priority"`
+	State           *string `json:"state"`
+	Category        *string `json:"category"`
+	Parent          *EntityRef           `json:"parent"`
+	AssignmentGroup *EntityRef           `json:"assignmentGroup"`
+	AssignedTo      *EntityRef           `json:"assignedTo"`
+	CreatedOn       string               `json:"createdOn"`
+	CreatedBy       string               `json:"createdBy"`
+	UpdatedOn       string               `json:"updatedOn"`
+	UpdatedBy       string               `json:"updatedBy"`
+}
+
+// SearchIncidentsResponse is the paginated result of an incident search.
+type SearchIncidentsResponse struct {
+	Incidents []SearchIncidentView `json:"incidents"`
+	Total     int                  `json:"total"`
+	Offset    int                  `json:"offset"`
+	Limit     int                  `json:"limit"`
+}

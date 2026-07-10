@@ -312,3 +312,10 @@ type ProductVulnerabilityService interface {
 	// A NotFoundError is returned if the vulnerability does not exist.
 	GetProductVulnerability(ctx context.Context, id string) (domain.ProductVulnerabilityView, error)
 }
+
+// IncidentService defines the operations available on the incidents entity.
+type IncidentService interface {
+	// SearchIncidents returns a paginated list of incidents filtered by optional search query,
+	// priority keys, and parent IDs. A ValidationError is returned for invalid input.
+	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
+}
