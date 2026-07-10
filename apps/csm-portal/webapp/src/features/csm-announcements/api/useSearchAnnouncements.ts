@@ -17,7 +17,11 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
+import {
+  beStateFromUi,
+  priorityFromSeverity,
+  uiStateFromBe,
+} from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
@@ -93,7 +97,10 @@ export function useSearchAnnouncements(
         number: c.number,
         subject: c.subject ?? "(no subject)",
         projectName: c.project?.name ?? "—",
-        state: c.state,
+        // The search view returns display-cased states (e.g. "Closed"); normalize
+        // to the canonical lowercase UI state so StateChip picks the right
+        // label/colour (matches the cases list — see useGetCsmCases).
+        state: c.state ? uiStateFromBe(c.state) : undefined,
         createdBy: c.createdBy,
         createdAt: c.createdOn ?? "",
         updatedAt: c.updatedOn ?? c.createdOn ?? "",
