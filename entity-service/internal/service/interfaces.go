@@ -282,6 +282,17 @@ type CommentService interface {
 	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
 }
 
+// TaskSlaService defines the operations available on the task-slas entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type TaskSlaService interface {
+	// SearchTaskSlas returns a paginated list of task SLA records filtered by optional task IDs.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchTaskSlas(ctx context.Context, req domain.SearchTaskSlasRequest) (domain.SearchTaskSlasResponse, error)
+	// GetTaskSla returns the full detail of a single task SLA record by its UUID.
+	// A NotFoundError is returned if the record does not exist.
+	GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error)
+}
+
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ProductVulnerabilityService interface {

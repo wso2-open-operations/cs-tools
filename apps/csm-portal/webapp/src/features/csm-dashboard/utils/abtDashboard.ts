@@ -17,7 +17,6 @@
 import type {
   CaseState,
   Severity,
-  SlaClockType,
 } from "@features/csm-dashboard/types/abtDashboard";
 import { parseBackendTimestamp } from "@utils/dateTime";
 
@@ -104,21 +103,6 @@ export function stateColor(
   state: string,
 ): "info" | "warning" | "success" | "default" {
   return STATE_COLOR[state as CaseState] ?? "default";
-}
-
-export const SLA_CLOCK_LABEL: Record<SlaClockType, string> = {
-  ack: "Ack",
-  first_response: "First response",
-  resolution: "Resolution",
-};
-
-export function formatTimeToBreach(minutes: number): string {
-  const abs = Math.abs(minutes);
-  const h = Math.floor(abs / 60);
-  const m = abs % 60;
-  const body =
-    h > 0 && m > 0 ? `${h}h ${m}m` : h > 0 ? `${h}h` : `${m}m`;
-  return minutes < 0 ? `breached ${body} ago` : `${body} left`;
 }
 
 export function formatRelativeTime(

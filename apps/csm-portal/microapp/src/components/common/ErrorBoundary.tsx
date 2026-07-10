@@ -15,11 +15,11 @@
 // under the License.
 
 // refer: https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary
-import * as React from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface ErrorBoundaryProps {
-  children: React.ReactNode;
-  fallback: React.ReactNode | ((error: unknown, resetErrorBoundary: () => void) => React.ReactNode);
+  children: ReactNode;
+  fallback: ReactNode | ((error: unknown, resetErrorBoundary: () => void) => ReactNode);
   onError?: (error: unknown) => void;
 }
 
@@ -28,7 +28,7 @@ interface ErrorBoundaryState {
   error: unknown;
 }
 
-export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -38,7 +38,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: unknown, info: React.ErrorInfo): void {
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
     console.error(error, info.componentStack);
     this.props.onError?.(error);
   }
@@ -47,7 +47,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     this.setState({ hasError: false, error: null });
   };
 
-  render(): React.ReactNode {
+  render(): ReactNode {
     const { hasError, error } = this.state;
     const { fallback, children } = this.props;
 

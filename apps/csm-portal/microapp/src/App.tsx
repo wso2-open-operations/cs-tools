@@ -22,6 +22,7 @@ import SupportPage from "@pages/SupportPage";
 import CaseDetailPage from "@pages/CaseDetailPage";
 import AllCasesPage from "@pages/AllCasesPage";
 import NewCasePage from "@pages/NewCasePage";
+import ProfilePage from "@pages/ProfilePage";
 
 export default function App() {
   useLayoutEffect(() => {
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="/support/:type/all" element={<AllCasesPage />} />
           <Route path="/cases/new" element={<NewCasePage />} />
           <Route path="/cases/:id" element={<CaseDetailPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>
     </Router>

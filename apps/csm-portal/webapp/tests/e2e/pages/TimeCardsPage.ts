@@ -88,6 +88,20 @@ export class TimeCardsPage {
     await this.page.getByRole("option", { name: optionLabel, exact: true }).click();
   }
 
+  /** Type into the Work item filter and pick the matching option — it's a
+   * multi-select autocomplete sourced from case numbers on the current page
+   * (`SearchableMultiSelect`), not a plain free-text field, so typing alone
+   * doesn't apply anything until an option is actually selected. */
+  async filterWorkItem(caseNumber: string): Promise<void> {
+    await this.page.getByLabel("Work item").fill(caseNumber);
+    await this.page.getByRole("option", { name: caseNumber, exact: true }).click();
+  }
+
+  /** Clears every active filter via the filter bar's "Clear all" button. */
+  async clearFilters(): Promise<void> {
+    await this.page.getByRole("button", { name: "Clear all" }).click();
+  }
+
   reviewDialog(): Locator {
     return this.page.getByRole("dialog");
   }

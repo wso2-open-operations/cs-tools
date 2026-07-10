@@ -20,7 +20,7 @@ import {
 } from "@features/csm-timecards/types/timeCards";
 import { WORK_LOG_MAX } from "@features/csm-timecards/constants/timeCardConstants";
 
-/** A fresh breakdown with every activity at zero hours. */
+/** A fresh breakdown with every activity at zero minutes. */
 export function emptyBreakdown(): ActivityBreakdown {
   return {
     analysisDebugging: 0,
@@ -31,27 +31,20 @@ export function emptyBreakdown(): ActivityBreakdown {
   };
 }
 
-/** Round to 2 decimals to avoid float drift in summed hours (e.g. 0.1 + 0.2). */
-export function roundHours(value: number): number {
-  return Math.round(value * 100) / 100;
+/** Total whole minutes across all activity buckets. */
+export function totalMinutes(breakdown: ActivityBreakdown): number {
+  return ACTIVITY_KEYS.reduce((sum, key) => sum + (breakdown[key] || 0), 0);
 }
 
-/** Total hours across all activity buckets. */
-export function totalHours(breakdown: ActivityBreakdown): number {
-  return roundHours(
-    ACTIVITY_KEYS.reduce((sum, key) => sum + (breakdown[key] || 0), 0),
-  );
-}
-
-/** True when at least one activity bucket has positive hours. */
-export function hasLoggedHours(breakdown: ActivityBreakdown): boolean {
+/** True when at least one activity bucket has logged time. */
+export function hasLoggedTime(breakdown: ActivityBreakdown): boolean {
   return ACTIVITY_KEYS.some((key) => (breakdown[key] || 0) > 0);
 }
 
 /** Field-level validation errors for the log dialog, keyed by field name. */
 export interface TimeCardDraftErrors {
   date?: string;
-  hours?: string;
+  minutes?: string;
   workLogComment?: string;
   approver?: string;
 }
@@ -71,8 +64,8 @@ export interface TimeCardDraft {
 export function timeCardDraftErrors(draft: TimeCardDraft): TimeCardDraftErrors {
   const errors: TimeCardDraftErrors = {};
   if (!draft.date) errors.date = "Pick a date.";
-  if (!hasLoggedHours(draft.breakdown)) {
-    errors.hours = "Log time against at least one activity.";
+  if (!hasLoggedTime(draft.breakdown)) {
+    errors.minutes = "Log time against at least one activity.";
   }
   if (!draft.workLogComment.trim()) {
     errors.workLogComment = "Add a work log comment.";

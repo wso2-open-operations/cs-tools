@@ -52,9 +52,11 @@ export class LogTimeDialog {
   /**
    * Fill the minimum required fields and submit, waiting for the dialog to
    * close. `approverQuery` should be a string guaranteed to match a real,
-   * email-having account — see `currentUserSearchQuery()` in `fixtures/test.ts`
-   * (a generic single-letter query can match only an empty-email service
-   * account in a small staging tenant, confirmed live).
+   * email-having, *other* account — see `approverSearchQuery()` in
+   * `fixtures/test.ts` (a generic single-letter query can match only an
+   * empty-email service account in a small staging tenant, confirmed live,
+   * and the signed-in user's own address never matches since the picker
+   * excludes them).
    */
   async fillAndSubmit(opts: {
     hours: number;

@@ -167,6 +167,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		commentHandler = handler.NewCommentHandler(service.NewServiceNowCommentService(serviceNowIntegrationServiceClient))
 	}
 
+	var taskSlaHandler *handler.TaskSlaHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		taskSlaHandler = handler.NewTaskSlaHandler(service.NewServiceNowTaskSlaService(serviceNowIntegrationServiceClient))
+	}
+
 	var snUserHandler *handler.SNUserHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		snUserHandler = handler.NewSNUserHandler(service.NewServiceNowUserService(serviceNowIntegrationServiceClient))
@@ -268,6 +273,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	if commentHandler != nil {
 		mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
+	}
+
+	if taskSlaHandler != nil {
+		mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
+		mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	}
 
 	return middleware.CorrelationID(

@@ -23,6 +23,7 @@ import {
   useCaseComposition,
 } from "@features/csm-dashboard/api/useCaseComposition";
 import { MATRIX_SEVERITIES } from "@features/csm-dashboard/api/useCaseCountsMatrix";
+import RefreshButton from "@features/csm-dashboard/components/RefreshButton";
 import CompositionDonut, {
   type CompositionSlice,
 } from "@features/csm-dashboard/components/CompositionDonut";
@@ -61,7 +62,8 @@ const STATE_SLICE_COLOR: Record<CaseState, string> = {
  * {@link useCaseComposition} query.
  */
 export default function CaseCompositionCharts(): JSX.Element {
-  const { data, isLoading, isError } = useCaseComposition();
+  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
+    useCaseComposition();
   const navigate = useNavigate();
 
   const severitySlices = useMemo<CompositionSlice[]>(
@@ -90,6 +92,24 @@ export default function CaseCompositionCharts(): JSX.Element {
 
   return (
     <Box>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 1,
+          mb: 1.5,
+          flexWrap: "wrap",
+        }}
+      >
+        <Typography variant="h6">Case composition</Typography>
+        <RefreshButton
+          onRefresh={() => void refetch()}
+          isFetching={isFetching}
+          updatedAt={dataUpdatedAt}
+          label="Refresh case composition"
+        />
+      </Box>
       <Box
         sx={{
           display: "grid",

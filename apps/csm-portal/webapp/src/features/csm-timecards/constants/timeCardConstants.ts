@@ -18,7 +18,6 @@ import type { SemanticRole } from "@components/SemanticChip";
 import type {
   ActivityKey,
   IssueComplexity,
-  TimeCardCategory,
   TimeCardState,
   TimeSheetState,
 } from "@features/csm-timecards/types/timeCards";
@@ -41,15 +40,6 @@ export const ACTIVITY_BUCKETS: ActivityBucket[] = [
   { key: "providingSolution", label: "Providing solution" },
   { key: "answering", label: "Answering" },
 ];
-
-/** Work categories (the ServiceNow "Category" field). Write-only. */
-export const TIME_CARD_CATEGORIES: readonly TimeCardCategory[] = [
-  "Task work",
-  "Investigation",
-  "Customer call",
-  "Documentation",
-];
-export const DEFAULT_TIME_CARD_CATEGORY: TimeCardCategory = "Task work";
 
 /** Issue-complexity options (the ServiceNow "Issue Complexity" field). Write-only. */
 export const ISSUE_COMPLEXITY_OPTIONS: readonly IssueComplexity[] = [

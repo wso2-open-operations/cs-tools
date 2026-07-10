@@ -30,7 +30,7 @@ export type TimeCardState =
   | "processed";
 
 /**
- * The fixed activity buckets a time card splits its hours across — the
+ * The fixed activity buckets a time card splits its time across — the
  * activity categories from the Time Management requirement (ISSU-009).
  * Write-only: the backend accepts these on create (`timeAnalyzing`,
  * `timeSettingUp`, …) but never returns them on read, so they shape the
@@ -46,7 +46,8 @@ export const ACTIVITY_KEYS = [
 
 export type ActivityKey = (typeof ACTIVITY_KEYS)[number];
 
-/** Hours logged against each activity bucket (log-time form state only). */
+/** Whole minutes logged against each activity bucket (log-time form state
+ * only) — matches the backend's own unit for these fields directly. */
 export type ActivityBreakdown = Record<ActivityKey, number>;
 
 /** A team lead eligible to approve a time card (ServiceNow "approver_list"). */
@@ -55,26 +56,16 @@ export interface TimeCardApprover {
   name: string;
 }
 
-/**
- * Work category options (the ServiceNow "Category" field). Write-only — see
- * {@link ActivityBreakdown}.
- */
-export type TimeCardCategory =
-  | "Task work"
-  | "Investigation"
-  | "Customer call"
-  | "Documentation";
-
 /** Issue-complexity options (the ServiceNow "Issue Complexity" field). Write-only. */
 export type IssueComplexity = "N/A" | "Low" | "Medium" | "High";
 
 /**
  * A time card as returned by `POST /time-cards/search` and the mutation
  * endpoints (the backend's `TimeCardView`). This is the complete set of
- * fields the backend ever returns for a card — `category`, `issueComplexity`,
- * `workLogComment`, the hour breakdown, and any lead comment are accepted on
- * write but never read back, so editing an existing card isn't supported
- * (it would silently blank those fields).
+ * fields the backend ever returns for a card — `issueComplexity`,
+ * `workLogComment`, the per-activity minute breakdown, and any lead comment
+ * are accepted on write but never read back, so editing an existing card
+ * isn't supported (it would silently blank those fields).
  */
 export interface CsmTimeCard {
   id: string;
@@ -85,8 +76,12 @@ export interface CsmTimeCard {
   projectId: string;
   projectName: string;
   /**
-   * When the record was created (ISO). The backend doesn't separately track
-   * the engineer-chosen work date on read, only creation time.
+   * The work date (ISO, YYYY-MM-DD), despite the name — confirmed live by
+   * backdating a test card and reading it back: the backend returns
+   * whatever date was submitted on create under this field, not a separate
+   * system-generated creation timestamp. Occasionally unparseable on real
+   * records (confirmed live); see `groupIntoSheets` in `useTimeSheets.ts`
+   * for how that's handled.
    */
   createdOn: string;
   userId: string;
@@ -94,7 +89,9 @@ export interface CsmTimeCard {
   state: TimeCardState;
   /** Whether the logged time is billable to the customer (ISSU-009). */
   billable: boolean;
-  totalHours: number;
+  /** Whole minutes — the backend's own unit for this field (see
+   * `mapTimeCard` in `useTimeSheets.ts`). */
+  totalMinutes: number;
   /** The deciding approver, once a decision has been made. */
   approvedById?: string;
   approvedByName?: string;
@@ -112,7 +109,6 @@ export interface CreateTimeCardInput {
   projectId: string;
   projectName: string;
   date: string;
-  category: TimeCardCategory;
   breakdown: ActivityBreakdown;
   /** Billable classification (ISSU-009). */
   billable: boolean;
@@ -147,19 +143,30 @@ export interface CsmTimeSheet {
   weekEnd: string;
   state: TimeSheetState;
   cards: CsmTimeCard[];
-  totalHours: number;
+  /** Whole minutes, summed from `cards`. */
+  totalMinutes: number;
 }
 
 /**
  * Filters for the time-card search. Sent in the POST body (never as query
- * params). The backend only supports `projectIds` / `states` / date range
- * server-side; case and engineer scoping happen client-side over the
- * returned page (see `useTimeSheets.ts`) since the backend has no `caseId`
- * or `engineerId` search filter.
+ * params). `projectIds`, `userId`, `approverId`, and `from`/`to` are all
+ * real, confirmed-working server-side filters. `states` is filtered
+ * client-side instead — see the note on `searchTimeCards` in
+ * `useTimeSheets.ts` for why. `from`/`to` currently has no UI control wired
+ * to it; kept so a future date-range filter has somewhere to plug in.
+ *
+ * There is deliberately no `caseId` here even though `entity-service`
+ * documents and implements one — confirmed live to be non-functional
+ * (always `total: 0`); case scoping goes through `projectIds` plus a
+ * client-side filter instead (see `useCaseTimeCards` in `useTimeCards.ts`).
  */
 export interface TimeCardSearchFilters {
   /** Projects to include (company customer may own several). */
   projectIds?: string[];
+  /** Only cards submitted by this user. */
+  userId?: string;
+  /** Only cards this user is eligible to approve (backend: SN `approver_list`). */
+  approverId?: string;
   /** Lifecycle states to include. */
   states?: TimeCardState[];
   /** Inclusive date range (YYYY-MM-DD), matched against `createdOn`. */

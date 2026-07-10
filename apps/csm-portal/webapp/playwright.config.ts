@@ -46,7 +46,10 @@ export default defineConfig({
     : {
         command: "pnpm run dev",
         url: BASE_URL,
-        reuseExistingServer: true,
+        // Locally, reuse an already-running dev server. In CI, always boot a
+        // fresh one — reusing a stray/stale process there could mask a real
+        // failure to start, or run against unexpected leftover state.
+        reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       },
   projects: [

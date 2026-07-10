@@ -26,9 +26,9 @@ import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
  * Build a CsmCaseDetail from the rich `BeCaseView`. The view embeds the
  * account / project / deployment / deployed-product / reporter as objects, so
  * their names (and the account tier) come straight off the response with no
- * extra lookups. Side widgets the backend doesn't return yet (SLA clocks,
- * watchers, tags, time logs, attachments, linked items) default to empty /
- * placeholder values.
+ * extra lookups. Side widgets the backend doesn't return yet (watchers, tags,
+ * time logs, attachments, linked items) default to empty / placeholder
+ * values.
  */
 function detailFromBeCase(
   c: BeCaseView,
@@ -99,7 +99,6 @@ function detailFromBeCase(
       deploymentId: c.deployment?.id,
       environment: "prod",
     },
-    slaClocks: [],
     watchers: [],
     linkedItems: [],
     tags: [],
