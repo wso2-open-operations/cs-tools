@@ -14,20 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type {
-  CaseState,
-  Severity,
-} from "@features/csm-dashboard/types/abtDashboard";
+import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
 /**
  * Filter state for the announcements list. All arrays are multi-select and
- * empty by default, so the list shows every state and severity across all
- * projects until the user narrows it. `search` matches subject / number.
+ * empty by default, so the list shows every state across all projects until
+ * the user narrows it. `search` matches subject / number. (No severity filter
+ * — announcements don't carry a severity of their own.)
  */
 export interface AnnouncementFilters {
   search: string;
   states: CaseState[];
-  severities: Severity[];
   /** Project ids (the project filter is id-based). */
   projectIds: string[];
 }
@@ -35,7 +32,6 @@ export interface AnnouncementFilters {
 export const DEFAULT_ANNOUNCEMENT_FILTERS: AnnouncementFilters = {
   search: "",
   states: [],
-  severities: [],
   projectIds: [],
 };
 
