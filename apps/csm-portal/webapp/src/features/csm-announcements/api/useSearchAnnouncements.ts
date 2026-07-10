@@ -17,11 +17,13 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
 } from "@api/backend/types";
 import type {
+  AnnouncementFilters,
   CsmAnnouncementRow,
   CsmAnnouncementsListResponse,
 } from "@features/csm-announcements/types/csmAnnouncements";
@@ -34,22 +36,36 @@ import type {
  * subject / number); the backend paginates and sorts by last-updated
  * descending, so the most recent announcements load on arrival.
  *
+ * The state / severity / project filters are pushed into the search payload:
+ * UI `CaseState` → `beStateFromUi`, UI `Severity` → `priorityFromSeverity`,
+ * project ids as-is. Empty filter arrays are omitted, so the list shows every
+ * state and severity across all projects by default.
+ *
  * Creating / targeting / unpublishing announcements is not covered here — it
  * needs the dedicated announcement backend (digiops-cs#2053), which isn't
  * built yet. `page` is zero-based (MUI `TablePagination`); `pageSize` is the
  * row limit.
  */
 export function useSearchAnnouncements(
-  search: string,
+  filters: AnnouncementFilters,
   page: number,
   pageSize: number,
 ): UseQueryResult<CsmAnnouncementsListResponse, Error> {
   const api = useBackendApi();
-  const q = search.trim();
+  const q = filters.search.trim();
   const offset = page * pageSize;
 
   return useQuery<CsmAnnouncementsListResponse, Error>({
-    queryKey: [ApiQueryKeys.CSM_ANNOUNCEMENTS, q, page, pageSize],
+    // Sort the array filters so selection order doesn't fragment the cache.
+    queryKey: [
+      ApiQueryKeys.CSM_ANNOUNCEMENTS,
+      q,
+      [...filters.states].sort(),
+      [...filters.severities].sort(),
+      [...filters.projectIds].sort(),
+      page,
+      pageSize,
+    ],
     queryFn: async (): Promise<CsmAnnouncementsListResponse> => {
       const res = await api.post<BeCaseSearchPayload, BeCaseSearchResponse>(
         "/cases/search",
@@ -59,6 +75,15 @@ export function useSearchAnnouncements(
           filters: {
             types: ["announcement"],
             ...(q.length > 0 && { searchQuery: q }),
+            ...(filters.states.length > 0 && {
+              states: filters.states.map(beStateFromUi),
+            }),
+            ...(filters.severities.length > 0 && {
+              severities: filters.severities.map(priorityFromSeverity),
+            }),
+            ...(filters.projectIds.length > 0 && {
+              projectIds: filters.projectIds,
+            }),
           },
         },
       );
