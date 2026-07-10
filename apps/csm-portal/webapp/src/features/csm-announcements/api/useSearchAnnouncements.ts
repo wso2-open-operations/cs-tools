@@ -14,7 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import {
@@ -114,6 +118,9 @@ export function useSearchAnnouncements(
         hasMore: res.hasMore ?? false,
       };
     },
+    // Keep the current page of rows on screen while the next page / a changed
+    // filter loads, instead of blanking the table to skeletons each time.
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 }
