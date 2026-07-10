@@ -19,6 +19,7 @@ import { create } from "zustand";
 export interface User {
   email: string;
   name: string;
+  avatarUrl?: string;
 }
 
 export interface UserStore {

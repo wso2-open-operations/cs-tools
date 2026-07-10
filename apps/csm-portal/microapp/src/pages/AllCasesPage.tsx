@@ -16,8 +16,8 @@
 
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Badge, IconButton, Stack, Tab, Tabs, Typography, pxToRem } from "@wso2/oxygen-ui";
-import { ArrowLeft, Plus, SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
+import { Badge, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { Plus, SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
 import { useQuery, useQueryErrorResetBoundary, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { currentUser } from "@src/services/currentUser";
@@ -72,12 +72,7 @@ export default function AllCasesPage() {
   return (
     <Stack gap={2}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-        <Stack direction="row" alignItems="center" gap={1}>
-          <IconButton onClick={() => navigate(-1)} size="small" aria-label="Go back">
-            <ArrowLeft size={pxToRem(20)} />
-          </IconButton>
-          <Typography variant="h6">{TAB_CONFIG[caseType].title}</Typography>
-        </Stack>
+        <Typography variant="h6">{TAB_CONFIG[caseType].title}</Typography>
         <IconButton
           aria-label="Create case"
           onClick={() => navigate("/cases/new")}
