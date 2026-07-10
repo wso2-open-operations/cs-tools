@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { BeCaseState } from "@api/backend/types";
 import type {
   CaseState,
   Severity,
@@ -53,7 +52,7 @@ export interface CsmAnnouncementRow {
   subject: string;
   /** Owning project display name, or "—" when cross-customer / unset. */
   projectName: string;
-  state?: BeCaseState;
+  state?: CaseState;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
