@@ -341,6 +341,19 @@ func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, pro
 	return []byte(`{}`), nil
 }
 
+// ----- mock entity incident client -----
+
+type mockEntityIncidentClient struct {
+	searchIncidentsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchIncidentsFn != nil {
+		return m.searchIncidentsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity change request client -----
 
 type mockEntityChangeRequestClient struct {

@@ -120,6 +120,12 @@ func (c *Client) SearchProductVersions(ctx context.Context, productID string, bo
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/products/%s/versions/search", url.PathEscape(productID)), body)
 }
 
+// SearchIncidents calls POST /incidents/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/incidents/search", body)
+}
+
 // PostDeployment calls POST /deployments on the entity service to create a new deployment.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) PostDeployment(ctx context.Context, body []byte) ([]byte, error) {

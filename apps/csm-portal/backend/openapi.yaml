@@ -2627,6 +2627,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /incidents/search:
+    post:
+      summary: Search incidents (ServiceNow data source only).
+      operationId: postIncidentsSearch
+      requestBody:
+        description: Incident search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5664,3 +5713,107 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/TaskSlaScheduleRef'
+
+    IncidentSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+            priorities:
+              type: array
+              items:
+                type: string
+                enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+            parentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn, openedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    IncidentSearchResponse:
+      type: object
+      properties:
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
+        total:
+          type: integer
+          description: Total number of matching incidents
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Incident:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        openedOn:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        caller:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        priority:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          nullable: true
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          nullable: true
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        parent:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        assignmentGroup:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        assignedTo:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string

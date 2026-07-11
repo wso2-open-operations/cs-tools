@@ -175,6 +175,7 @@ backend/
 │       ├── deployments.go                # HTTP handlers for deployment endpoints
 │       ├── products.go                   # HTTP handlers for product endpoints
 │       ├── projects.go                   # HTTP handlers for project endpoints
+│       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
@@ -267,6 +268,10 @@ backend/
 - `GET /updates/product-update-levels` — Get product update levels
 - `POST /updates/levels/search` — Search updates between update levels
 
+### Incidents
+
+- `POST /incidents/search` — Search incidents; optional `filters` (`searchQuery`, `priorities`, `parentIds`) and `sortBy` (`field`: `createdOn`/`updatedOn`/`openedOn`, `order`) (ServiceNow data source only)
+
 ## Run Locally
 
 ```bash
@@ -313,4 +318,10 @@ curl -X POST http://localhost:8080/updates/levels/search \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"productName":"wso2am","productVersion":"4.2.0","startingUpdateLevel":1,"endingUpdateLevel":10}'
+
+# Search incidents
+curl -X POST http://localhost:8080/incidents/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"searchQuery":"outage","priorities":["CRITICAL"]},"pagination":{"limit":10,"offset":0}}'
 ```
