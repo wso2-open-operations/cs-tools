@@ -319,3 +319,10 @@ type IncidentService interface {
 	// priority keys, and parent IDs. A ValidationError is returned for invalid input.
 	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
 }
+
+// ProblemService defines the operations available on the problems entity.
+type ProblemService interface {
+	// SearchProblems returns a paginated list of problems filtered by optional search query.
+	// A ValidationError is returned for invalid input.
+	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
+}

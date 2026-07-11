@@ -2210,3 +2210,29 @@ type SearchIncidentsResponse struct {
 	Offset    int                  `json:"offset"`
 	Limit     int                  `json:"limit"`
 }
+
+// SearchProblemsFilters holds all optional filter criteria for a problem search.
+type SearchProblemsFilters struct {
+	SearchQuery string `json:"searchQuery"`
+}
+
+// SearchProblemsRequest is the input for POST /problems/search.
+type SearchProblemsRequest struct {
+	Filters    SearchProblemsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchProblemView is the problem representation returned in search results.
+type SearchProblemView struct {
+	ID      *string `json:"id"`
+	Number  *string `json:"number"`
+	Subject *string `json:"subject"`
+}
+
+// SearchProblemsResponse is the paginated result of a problem search.
+type SearchProblemsResponse struct {
+	Problems []SearchProblemView `json:"problems"`
+	Total    int                 `json:"total"`
+	Offset   int                 `json:"offset"`
+	Limit    int                 `json:"limit"`
+}

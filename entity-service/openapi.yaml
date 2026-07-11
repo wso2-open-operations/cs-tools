@@ -1866,6 +1866,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /problems/search:
+    post:
+      summary: Search problems (ServiceNow data source only).
+      operationId: searchProblems
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProblemsRequest'
+      responses:
+        "200":
+          description: Paginated list of problems matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProblemsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     Pagination:
@@ -5314,6 +5350,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SearchIncidentView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchProblemsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchProblemView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+
+    SearchProblemsResponse:
+      type: object
+      properties:
+        problems:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchProblemView'
         total:
           type: integer
         offset:
