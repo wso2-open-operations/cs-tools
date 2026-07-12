@@ -322,6 +322,10 @@ type IncidentService interface {
 	// CreateIncident creates a new incident in ServiceNow.
 	// callerId, category, serviceId, impact, urgency, and subject are required.
 	CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error)
+
+	// GetIncidentByID returns the full detail of a single incident by its UUID.
+	// A NotFoundError is returned if the incident does not exist.
+	GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error)
 }
 
 // ProblemService defines the operations available on the problems entity.
