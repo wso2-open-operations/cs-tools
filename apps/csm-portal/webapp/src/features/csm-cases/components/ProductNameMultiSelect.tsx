@@ -16,10 +16,11 @@
 
 import {
   Autocomplete,
+  Box,
   Checkbox,
-  Chip,
   ListItemText,
   TextField,
+  Tooltip,
 } from "@wso2/oxygen-ui";
 import { useMemo, type JSX } from "react";
 import type * as React from "react";
@@ -66,6 +67,7 @@ export default function ProductNameMultiSelect({
       value={values}
       loading={isFetching && !data}
       disableCloseOnSelect
+      sx={{ "& .MuiAutocomplete-inputRoot": { flexWrap: "nowrap" } }}
       getOptionLabel={(opt) => opt}
       isOptionEqualToValue={(opt, val) => opt === val}
       onChange={(_event, next) => onChange(next)}
@@ -76,12 +78,20 @@ export default function ProductNameMultiSelect({
             ? "Loading products…"
             : "No products found"
       }
-      renderTags={(value, getTagProps) =>
-        value.map((option, index) => {
-          const { key, ...tagProps } = getTagProps({ index });
-          return <Chip key={key} size="small" label={option} {...tagProps} />;
-        })
-      }
+      renderTags={(value) => {
+        const displayText = value.join(", ");
+        const content = (
+          <Box
+            component="span"
+            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {displayText}
+          </Box>
+        );
+        return value.length === 1 ? content : (
+          <Tooltip title={displayText} placement="top">{content}</Tooltip>
+        );
+      }}
       renderOption={(props, option, { selected }) => {
         const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & {
           key: string;

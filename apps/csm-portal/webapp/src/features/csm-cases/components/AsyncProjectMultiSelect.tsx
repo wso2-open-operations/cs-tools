@@ -16,10 +16,11 @@
 
 import {
   Autocomplete,
+  Box,
   Checkbox,
-  Chip,
   ListItemText,
   TextField,
+  Tooltip,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import type * as React from "react";
@@ -127,6 +128,7 @@ export default function AsyncProjectMultiSelect({
       // Spinner only while the first page loads; later pages append on scroll.
       loading={isFetching && projects.length === 0}
       disableCloseOnSelect
+      sx={{ "& .MuiAutocomplete-inputRoot": { flexWrap: "nowrap" } }}
       // The backend already filtered by the typed term; don't re-filter locally.
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.name}
@@ -153,14 +155,20 @@ export default function AsyncProjectMultiSelect({
             ? "Loading projects…"
             : "No projects found"
       }
-      renderTags={(value, getTagProps) =>
-        value.map((option, index) => {
-          const { key, ...tagProps } = getTagProps({ index });
-          return (
-            <Chip key={key} size="small" label={option.name} {...tagProps} />
-          );
-        })
-      }
+      renderTags={(value) => {
+        const displayText = value.map((o) => o.name).join(", ");
+        const content = (
+          <Box
+            component="span"
+            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {displayText}
+          </Box>
+        );
+        return value.length === 1 ? content : (
+          <Tooltip title={displayText} placement="top">{content}</Tooltip>
+        );
+      }}
       renderOption={(props, option, { selected }) => {
         const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & {
           key: string;
