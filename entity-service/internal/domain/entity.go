@@ -2331,6 +2331,45 @@ type CreateIncidentResponse struct {
 	} `json:"incident"`
 }
 
+// IncidentWatchListItem represents a user on the incident watch list.
+type IncidentWatchListItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// IncidentView is the full detail representation returned by GET /incidents/{id}.
+type IncidentView struct {
+	ID                 *string                 `json:"id"`
+	Number             *string                 `json:"number"`
+	OpenedOn           *string                 `json:"openedOn"`
+	Subject            *string                 `json:"subject"`
+	Caller             *EntityRef              `json:"caller"`
+	Priority           *string    `json:"priority"`
+	State              *string    `json:"state"`
+	Category           *string    `json:"category"`
+	Subcategory        *string    `json:"subcategory"`
+	Parent             *EntityRef `json:"parent"`
+	AssignmentGroup    *EntityRef `json:"assignmentGroup"`
+	AssignedTo         *EntityRef `json:"assignedTo"`
+	Service            *EntityRef `json:"service"`
+	ServiceOffering    *EntityRef `json:"serviceOffering"`
+	ConfigurationItem  *EntityRef `json:"configurationItem"`
+	ContactType        *string    `json:"contactType"`
+	Impact             *string    `json:"impact"`
+	Urgency            *string    `json:"urgency"`
+	ChangeRequest      *EntityRef              `json:"changeRequest"`
+	Problem            *EntityRef              `json:"problem"`
+	CausedBy           *EntityRef              `json:"causedBy"`
+	AdditionalComments *string                 `json:"additionalComments"`
+	WorkNotes          *string                 `json:"workNotes"`
+	WatchList          []IncidentWatchListItem `json:"watchList"`
+	CreatedOn          string                  `json:"createdOn"`
+	CreatedBy          string                  `json:"createdBy"`
+	UpdatedOn          string                  `json:"updatedOn"`
+	UpdatedBy          string                  `json:"updatedBy"`
+}
+
 // SearchProblemsFilters holds all optional filter criteria for a problem search.
 type SearchProblemsFilters struct {
 	SearchQuery string `json:"searchQuery"`
