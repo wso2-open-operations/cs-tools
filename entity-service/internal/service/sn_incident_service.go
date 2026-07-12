@@ -580,3 +580,226 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	resp.Incident.CreatedBy = snResp.Incident.CreatedBy
 	return resp, nil
 }
+
+// snIncidentSubcategoryLabelMap maps SN subcategory string values to domain enum strings.
+var snIncidentSubcategoryLabelMap = map[string]string{
+	"dhcp":                   "DHCP",
+	"oracle":                 "ORACLE",
+	"cpu":                    "CPU",
+	"keyboard":               "KEYBOARD",
+	"DOS/ DDOS":              "DOS_DDOS",
+	"Privilege escalations":  "PRIVILEGE_ESCALATIONS",
+	"Threat intelligence":    "THREAT_INTELLIGENCE",
+	"Scans and Probes":       "SCANS_AND_PROBES",
+	"Application Security":   "APPLICATION_SECURITY",
+	"Config Change Request":  "CONFIG_CHANGE_REQUEST",
+	"ip address":             "IP_ADDRESS",
+	"Full Outage":            "FULL_OUTAGE",
+	"sql server":             "SQL_SERVER",
+	"Slowness":               "SLOWNESS",
+	"memory":                 "MEMORY",
+	"mouse":                  "MOUSE",
+	"Privacy":                "PRIVACY",
+	"Data Breach":            "DATA_BREACH",
+	"System Compromises":     "SYSTEM_COMPROMISES",
+	"dns":                    "DNS",
+	"os":                     "OS",
+	"disk":                   "DISK",
+	"vpn":                    "VPN",
+	"Malware":                "MALWARE",
+	"Vulnerability":          "VULNERABILITY",
+	"Unauthorized Access":    "UNAUTHORIZED_ACCESS",
+	"Identity Protection":    "IDENTITY_PROTECTION",
+	"Phishing":               "PHISHING",
+	"Improper configuration": "IMPROPER_CONFIGURATION",
+	"Information Request":    "INFORMATION_REQUEST",
+	"db2":                    "DB2",
+	"Partial Outage":         "PARTIAL_OUTAGE",
+	"email":                  "EMAIL",
+	"monitor":                "MONITOR",
+	"wireless":               "WIRELESS",
+}
+
+// snIncidentContactTypeLabelMap maps SN contact_type values to domain enum strings.
+var snIncidentContactTypeLabelMap = map[string]string{
+	"self-service":   "SELF_SERVICE",
+	"email":          "EMAIL",
+	"walk-in":        "WALK_IN",
+	"1":              "AZURE",
+	"email internal": "EMAIL_INTERNAL",
+	"2":              "SITE_247",
+	"direct":         "DIRECT",
+	"phone":          "PHONE",
+	"sentinel":       "SENTINEL",
+	"virtual_agent":  "VIRTUAL_AGENT",
+	"chat":           "CHAT",
+	"email external": "EMAIL_EXTERNAL",
+}
+
+// snIncidentImpactLabelMap maps SN numeric impact IDs to domain enum strings.
+var snIncidentImpactLabelMap = map[int]string{
+	1: "HIGH",
+	2: "MEDIUM",
+	3: "LOW",
+}
+
+// snIncidentUrgencyLabelMap maps SN numeric urgency IDs to domain enum strings.
+var snIncidentUrgencyLabelMap = map[int]string{
+	1: "HIGH",
+	2: "MEDIUM",
+	3: "LOW",
+}
+
+// snGetIncidentResponse mirrors the Choreo GET /incidents/{id} response.
+type snGetIncidentResponse struct {
+	ID                 *string                  `json:"id"`
+	Number             *string                  `json:"number"`
+	OpenedOn           *string                  `json:"openedOn"`
+	Subject            *string                  `json:"subject"`
+	Caller             *snIncidentEntityRef     `json:"caller"`
+	Priority           *snIncidentIntLabel      `json:"priority"`
+	State              *snIncidentIntLabel      `json:"state"`
+	Category           *snIncidentStrLabel      `json:"category"`
+	Subcategory        *snIncidentStrLabel      `json:"subcategory"`
+	Parent             *snIncidentEntityRef     `json:"parent"`
+	AssignmentGroup    *snIncidentEntityRef     `json:"assignmentGroup"`
+	AssignedTo         *snIncidentEntityRef     `json:"assignedTo"`
+	Service            *snIncidentEntityRef     `json:"service"`
+	ServiceOffering    *snIncidentEntityRef     `json:"serviceOffering"`
+	ConfigurationItem  *snIncidentEntityRef     `json:"configurationItem"`
+	ContactType        *snIncidentStrLabel      `json:"contactType"`
+	Impact             *snIncidentIntLabel      `json:"impact"`
+	Urgency            *snIncidentIntLabel      `json:"urgency"`
+	ChangeRequest      *snIncidentEntityRef     `json:"changeRequest"`
+	Problem            *snIncidentEntityRef     `json:"problem"`
+	CausedBy           *snIncidentEntityRef     `json:"causedBy"`
+	AdditionalComments *string                  `json:"additionalComments"`
+	WorkNotes          *string                  `json:"workNotes"`
+	WatchList          []snIncidentWatchListItem `json:"watchList"`
+	CreatedOn          string                   `json:"createdOn"`
+	CreatedBy          string                   `json:"createdBy"`
+	UpdatedOn          string                   `json:"updatedOn"`
+	UpdatedBy          string                   `json:"updatedBy"`
+}
+
+type snIncidentWatchListItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error) {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.IncidentView{}, err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.IncidentView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	raw, err := s.client.Get(ctx, "/incidents/"+uuidToSysid(id), token)
+	if err != nil {
+		return domain.IncidentView{}, err
+	}
+
+	var sn snGetIncidentResponse
+	if err := json.Unmarshal(raw, &sn); err != nil {
+		return domain.IncidentView{}, fmt.Errorf("sn get incident: parse response: %w", err)
+	}
+
+	view := domain.IncidentView{
+		OpenedOn:           sn.OpenedOn,
+		Subject:            sn.Subject,
+		AdditionalComments: sn.AdditionalComments,
+		WorkNotes:          sn.WorkNotes,
+		CreatedOn:          sn.CreatedOn,
+		CreatedBy:          sn.CreatedBy,
+		UpdatedOn:          sn.UpdatedOn,
+		UpdatedBy:          sn.UpdatedBy,
+	}
+	if sn.ID != nil && *sn.ID != "" {
+		v := sysidToUUID(*sn.ID)
+		view.ID = &v
+	}
+	if sn.Number != nil {
+		view.Number = sn.Number
+	}
+	if sn.Caller != nil {
+		view.Caller = &domain.EntityRef{ID: sysidToUUID(sn.Caller.ID), Name: sn.Caller.Name}
+	}
+	if sn.Priority != nil {
+		if label, ok := snIncidentPriorityLabelMap[sn.Priority.ID]; ok {
+			view.Priority = &label
+		}
+	}
+	if sn.State != nil {
+		if label, ok := snIncidentStateLabelMap[sn.State.ID]; ok {
+			view.State = &label
+		}
+	}
+	if sn.Category != nil {
+		if label, ok := snIncidentCategoryLabelMap[sn.Category.ID]; ok {
+			view.Category = &label
+		}
+	}
+	if sn.Subcategory != nil {
+		if label, ok := snIncidentSubcategoryLabelMap[sn.Subcategory.ID]; ok {
+			view.Subcategory = &label
+		}
+	}
+	if sn.Parent != nil {
+		view.Parent = &domain.EntityRef{ID: sysidToUUID(sn.Parent.ID), Name: sn.Parent.Name}
+	}
+	if sn.AssignmentGroup != nil {
+		view.AssignmentGroup = &domain.EntityRef{ID: sysidToUUID(sn.AssignmentGroup.ID), Name: sn.AssignmentGroup.Name}
+	}
+	if sn.AssignedTo != nil {
+		view.AssignedTo = &domain.EntityRef{ID: sysidToUUID(sn.AssignedTo.ID), Name: sn.AssignedTo.Name}
+	}
+	if sn.Service != nil {
+		view.Service = &domain.EntityRef{ID: sysidToUUID(sn.Service.ID), Name: sn.Service.Name}
+	}
+	if sn.ServiceOffering != nil {
+		view.ServiceOffering = &domain.EntityRef{ID: sysidToUUID(sn.ServiceOffering.ID), Name: sn.ServiceOffering.Name}
+	}
+	if sn.ConfigurationItem != nil {
+		view.ConfigurationItem = &domain.EntityRef{ID: sysidToUUID(sn.ConfigurationItem.ID), Name: sn.ConfigurationItem.Name}
+	}
+	if sn.ContactType != nil {
+		if label, ok := snIncidentContactTypeLabelMap[sn.ContactType.ID]; ok {
+			view.ContactType = &label
+		}
+	}
+	if sn.Impact != nil {
+		if label, ok := snIncidentImpactLabelMap[sn.Impact.ID]; ok {
+			view.Impact = &label
+		}
+	}
+	if sn.Urgency != nil {
+		if label, ok := snIncidentUrgencyLabelMap[sn.Urgency.ID]; ok {
+			view.Urgency = &label
+		}
+	}
+	if sn.ChangeRequest != nil {
+		view.ChangeRequest = &domain.EntityRef{ID: sysidToUUID(sn.ChangeRequest.ID), Name: sn.ChangeRequest.Name}
+	}
+	if sn.Problem != nil {
+		view.Problem = &domain.EntityRef{ID: sysidToUUID(sn.Problem.ID), Name: sn.Problem.Name}
+	}
+	if sn.CausedBy != nil {
+		view.CausedBy = &domain.EntityRef{ID: sysidToUUID(sn.CausedBy.ID), Name: sn.CausedBy.Name}
+	}
+
+	watchList := make([]domain.IncidentWatchListItem, 0, len(sn.WatchList))
+	for _, w := range sn.WatchList {
+		watchList = append(watchList, domain.IncidentWatchListItem{
+			ID:    sysidToUUID(w.ID),
+			Name:  w.Name,
+			Email: w.Email,
+		})
+	}
+	view.WatchList = watchList
+
+	return view, nil
+}
