@@ -61,8 +61,8 @@ func correlationIDFromContext(ctx context.Context) string {
 	return v
 }
 
-// Config holds the configuration for the entity service client.
-type Config struct {
+// CustomerEntityConfig holds the configuration for the customer entity service client.
+type CustomerEntityConfig struct {
 	BaseURL      string
 	TokenURL     string
 	ClientID     string
@@ -70,17 +70,20 @@ type Config struct {
 	Scopes       []string
 }
 
-// Client is an HTTP client authenticated via the OAuth2 client credentials grant.
-// Tokens are acquired and refreshed automatically; callers need not manage them.
-type Client struct {
+// CustomerEntityClient is an HTTP client for the customer entity service (this
+// repo's entity-service, covering cases/accounts/projects/products/etc.),
+// authenticated via the OAuth2 client credentials grant. Tokens are acquired
+// and refreshed automatically; callers need not manage them.
+type CustomerEntityClient struct {
 	http    *http.Client
 	baseURL string
 }
 
-// NewClient constructs a Client that authenticates against the entity service
-// using the OAuth2 client credentials grant type, mirroring the Ballerina
-// ClientCredentialsOauth2Config pattern in the customer-portal entity module.
-func NewClient(cfg Config) *Client {
+// NewCustomerEntityClient constructs a CustomerEntityClient that authenticates
+// against the customer entity service using the OAuth2 client credentials
+// grant type, mirroring the Ballerina ClientCredentialsOauth2Config pattern in
+// the customer-portal entity module.
+func NewCustomerEntityClient(cfg CustomerEntityConfig) *CustomerEntityClient {
 	cc := clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -96,7 +99,7 @@ func NewClient(cfg Config) *Client {
 	httpClient := cc.Client(tokenCtx)
 	httpClient.Timeout = 25 * time.Second
 
-	return &Client{
+	return &CustomerEntityClient{
 		http:    httpClient,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 	}
@@ -104,7 +107,7 @@ func NewClient(cfg Config) *Client {
 
 // do executes an authenticated HTTP request against the entity service and
 // returns the raw JSON response body. The caller owns the returned slice.
-func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
 	var reqBody io.Reader
 	if len(body) > 0 {
 		reqBody = bytes.NewReader(body)
@@ -150,7 +153,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 // doBinary executes an authenticated GET request against the entity service and
 // returns the raw response body together with the upstream Content-Type header.
 // Use this instead of do for endpoints that return non-JSON binary content.
-func (c *Client) doBinary(ctx context.Context, path string) (body []byte, contentType string, err error) {
+func (c *CustomerEntityClient) doBinary(ctx context.Context, path string) (body []byte, contentType string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("entity: build request GET %s: %w", path, err)

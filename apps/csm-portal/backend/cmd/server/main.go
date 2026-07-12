@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,38 +40,46 @@ import (
 func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
-	cfg := entity.Config{
-		BaseURL:      mustEnv("ENTITY_BASE_URL"),
-		TokenURL:     mustEnv("ENTITY_TOKEN_URL"),
-		ClientID:     mustEnv("ENTITY_CLIENT_ID"),
-		ClientSecret: mustEnv("ENTITY_CLIENT_SECRET"),
-		// Scopes is optional; set ENTITY_SCOPES as a comma-separated list if required.
-		Scopes: splitComma(os.Getenv("ENTITY_SCOPES")),
+
+	// All upstream service clients (entity, updates, SCIM, and future notification
+	// channels) authenticate as the same OAuth2 client-credentials app; only the
+	// base URL and scopes differ per service.
+	oauth2ClientID := mustEnv("OAUTH2_CLIENT_ID")
+	oauth2ClientSecret := mustEnv("OAUTH2_CLIENT_SECRET")
+	oauth2TokenURL := mustEnv("OAUTH2_TOKEN_URL")
+
+	customerEntityCfg := entity.CustomerEntityConfig{
+		BaseURL:      mustEnv("CUSTOMER_ENTITY_BASE_URL"),
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		// Scopes is optional; set CUSTOMER_ENTITY_SCOPES as a comma-separated list if required.
+		Scopes: splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
 	}
 
-	entityClient := entity.NewClient(cfg)
-	caseHandler := handler.NewCaseHandler(entityClient)
-	accountHandler := handler.NewAccountHandler(entityClient)
-	projectHandler := handler.NewProjectHandler(entityClient)
-	productHandler := handler.NewProductHandler(entityClient)
-	deploymentHandler := handler.NewDeploymentHandler(entityClient)
-	changeRequestHandler := handler.NewChangeRequestHandler(entityClient)
-	itServiceHandler := handler.NewITServiceHandler(entityClient)
-	serviceOfferingHandler := handler.NewServiceOfferingHandler(entityClient)
-	groupHandler := handler.NewGroupHandler(entityClient)
-	configurationItemHandler := handler.NewConfigurationItemHandler(entityClient)
-	catalogHandler := handler.NewCatalogHandler(entityClient)
-	timeCardHandler := handler.NewTimeCardHandler(entityClient)
-	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
-	conversationHandler := handler.NewConversationHandler(entityClient)
-	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
-	incidentHandler := handler.NewIncidentHandler(entityClient)
+	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
+	caseHandler := handler.NewCaseHandler(customerEntityClient)
+	accountHandler := handler.NewAccountHandler(customerEntityClient)
+	projectHandler := handler.NewProjectHandler(customerEntityClient)
+	productHandler := handler.NewProductHandler(customerEntityClient)
+	deploymentHandler := handler.NewDeploymentHandler(customerEntityClient)
+	changeRequestHandler := handler.NewChangeRequestHandler(customerEntityClient)
+	itServiceHandler := handler.NewITServiceHandler(customerEntityClient)
+	serviceOfferingHandler := handler.NewServiceOfferingHandler(customerEntityClient)
+	groupHandler := handler.NewGroupHandler(customerEntityClient)
+	configurationItemHandler := handler.NewConfigurationItemHandler(customerEntityClient)
+	catalogHandler := handler.NewCatalogHandler(customerEntityClient)
+	timeCardHandler := handler.NewTimeCardHandler(customerEntityClient)
+	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(customerEntityClient)
+	conversationHandler := handler.NewConversationHandler(customerEntityClient)
+	taskSlaHandler := handler.NewTaskSlaHandler(customerEntityClient)
+	incidentHandler := handler.NewIncidentHandler(customerEntityClient)
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
-		TokenURL:     mustEnv("UPDATES_TOKEN_URL"),
-		ClientID:     mustEnv("UPDATES_CLIENT_ID"),
-		ClientSecret: mustEnv("UPDATES_CLIENT_SECRET"),
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
 		Scopes:       splitComma(os.Getenv("UPDATES_SCOPES")),
 	}
 	updatesClient := updates.NewClient(updatesCfg)
@@ -78,13 +87,13 @@ func main() {
 
 	scimCfg := scim.Config{
 		BaseURL:      mustEnv("SCIM_BASE_URL"),
-		TokenURL:     mustEnv("SCIM_TOKEN_URL"),
-		ClientID:     mustEnv("SCIM_CLIENT_ID"),
-		ClientSecret: mustEnv("SCIM_CLIENT_SECRET"),
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
 		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
 	}
 	scimClient := scim.NewClient(scimCfg)
-	usersHandler := handler.NewUsersHandler(scimClient, entityClient)
+	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient)
 
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
@@ -150,7 +159,7 @@ func main() {
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 
-	addr := envOrDefault("PORT", ":8080")
+	addr := ":" + mustPort("PORT", "8080")
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -209,6 +218,19 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// mustPort returns the value of the given environment variable (or def if
+// unset) as a bare port number, e.g. "8080" — not an address like ":8080" or
+// "localhost:8080". Exits the process if the value isn't a valid TCP port.
+func mustPort(key, def string) string {
+	v := envOrDefault(key, def)
+	port, err := strconv.Atoi(v)
+	if err != nil || port < 1 || port > 65535 {
+		slog.Error("environment variable must be a plain port number (e.g. \"8080\"), not an address", "key", key, "value", v)
+		os.Exit(1)
+	}
+	return v
 }
 
 // loadDotEnv reads a .env file and sets any unset environment variables from it.

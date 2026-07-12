@@ -19,11 +19,14 @@ Each upstream service has its own client package under `internal/`:
 
 | Package | Upstream | Notes |
 |---------|----------|-------|
-| `entity` | Entity service | Most case/account/project endpoints; raw `[]byte` passthrough |
+| `entity` | Multiple entity services (see below) | Hosts `CustomerEntityClient` (this repo's entity-service; most case/account/project endpoints, raw `[]byte` passthrough) and `EngineeringEntityClient` (wso2-enterprise/digiops-engineering; `CreateGitIssue`, typed request/response). **`EngineeringEntityClient` is not wired into `cmd/server/main.go` yet** — no handler calls it |
 | `scim` | SCIM service | User/group lookups |
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
+| `notifications` | Notification channels (email today; SMS/voice-Twilio expected later) | Each channel gets its own config/client pair in its own file — `EmailConfig`/`EmailClient`/`SendEmail` in `email.go` today — since channels differ in upstream auth scheme. **Not wired into `cmd/server/main.go` yet** — no handler calls it. When the first caller is added, construct the client with `os.Getenv` (never `mustEnv`) for its config so a deployment that hasn't configured that channel yet can still start |
 
-New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern.
+New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern. `entity` and `notifications` are the exception: because each is expected to (or already does) host multiple, separately-deployed/differently-authenticated services, they use a `<Name>Config`/`<Name>Client` pair per service/file instead of one shared `Client` for the whole package — `CustomerEntityClient`/`EngineeringEntityClient` in `entity`, `EmailClient` (+ future `SMSClient`/`TwilioClient`) in `notifications`.
+
+**Shared OAuth2 credentials**: `CustomerEntityClient` and `EngineeringEntityClient` (both in `entity`), `updates`, and `scim` all authenticate as the same OAuth2 client-credentials app — `cmd/server/main.go` reads `OAUTH2_CLIENT_ID`/`OAUTH2_CLIENT_SECRET`/`OAUTH2_TOKEN_URL` once and passes them into every service's `Config`; only `<SERVICE>_BASE_URL`/`<SERVICE>_SCOPES` are per-service. `EngineeringEntityConfig` still has its own `ClientID`/`ClientSecret`/`TokenURL` fields (matching every other service's `Config` shape), but when it's wired into `main.go` those should be filled with the same shared `oauth2ClientID`/`oauth2ClientSecret`/`oauth2TokenURL` values, not new `ENGINEERING_ENTITY_*` env vars. Follow this pattern for any new upstream service client unless it genuinely uses a different OAuth2 app.
 
 ## Running locally
 
@@ -54,6 +57,7 @@ Follow these steps in order:
 4. **Route** (`cmd/server/main.go`) — register using Go 1.22 method-prefixed patterns: `"POST /cases/{id}/comments"`
 5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/401/403/404/500 responses; `403` is always required because `mapUpstreamError` can return it
 6. **Tests** — add handler tests; update the mock in `helpers_test.go` to satisfy the extended interface
+7. **gosec** — run `gosec -fmt=text ./...` (see README's Security Scanning section) before opening the PR; it must report 0 issues
 
 ## Handler conventions
 
@@ -90,6 +94,7 @@ Follow these steps in order:
 - **Input validation** — validate and reject unexpected input at the boundary (path params, body size, JSON structure) before forwarding to upstream services
 - **Error messages** — never leak upstream error details or stack traces to the caller; use the fixed `ErrMsg*` constants or a short fallback message
 - **Security fixes in PRs** — when a change is made to fix a security issue (gosec findings, input sanitization, etc.), do not mention it in the PR title or description; describe the change in neutral functional terms only
+- **Run gosec on every backend change** — `gosec -fmt=text ./...` (install once: `go install github.com/securego/gosec/v2/cmd/gosec@latest`) must report 0 issues before opening a PR touching this backend; fix the root cause of any finding rather than suppressing it, unless a `#nosec` annotation with a justification comment already covers that exact case
 
 ## Testing
 
