@@ -196,13 +196,19 @@ function SheetListView({
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
 
   const sheets = data?.sheets ?? [];
-  if (sheets.length === 0) return <EmptyState message={emptyMessage} />;
+  // Only truly empty once there are no more pages to pull. The client-side
+  // work-item / engineer filters can leave a loaded page with zero matching
+  // sheets while later pages still have matches, so keep the sentinel alive to
+  // page through them instead of short-circuiting to EmptyState.
+  if (sheets.length === 0 && !hasNextPage) return <EmptyState message={emptyMessage} />;
 
   return (
     <Stack gap={1.5}>
-      <Typography variant="caption" color="text.secondary">
-        {data?.loaded ?? sheets.length} of {data?.total ?? sheets.length}
-      </Typography>
+      {sheets.length > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          {data?.loaded ?? sheets.length} of {data?.total ?? sheets.length}
+        </Typography>
+      )}
 
       {sheets.map((sheet, index) => (
         <TimeSheetCard
@@ -218,8 +224,8 @@ function SheetListView({
       {/* IntersectionObserver can miss a zero-height target, so give the sentinel 1px to observe. */}
       <div ref={sentinelRef} style={{ height: 1 }} />
 
-      {isFetchingNextPage && <Skeleton variant="rounded" height={140} />}
-      {!hasNextPage && (
+      {(isFetchingNextPage || (sheets.length === 0 && hasNextPage)) && <Skeleton variant="rounded" height={140} />}
+      {!hasNextPage && sheets.length > 0 && (
         <Typography variant="body2" color="text.secondary" textAlign="center" py={1}>
           You're all caught up!
         </Typography>
