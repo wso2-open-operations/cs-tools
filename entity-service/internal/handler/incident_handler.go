@@ -34,6 +34,19 @@ func NewIncidentHandler(svc service.IncidentService) *IncidentHandler {
 	return &IncidentHandler{svc: svc}
 }
 
+// GetIncident handles GET /incidents/{id}.
+func (h *IncidentHandler) GetIncident(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	result, err := h.svc.GetIncidentByID(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
 // CreateIncident handles POST /incidents.
 func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateIncidentRequest
