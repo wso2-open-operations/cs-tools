@@ -15,12 +15,10 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Chip,
   InputAdornment,
   MenuItem,
-  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -34,7 +32,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Search } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useNavigate } from "react-router";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProductVulnerabilities } from "@features/csm-security-center/api/useSearchProductVulnerabilities";
 import {
@@ -43,6 +41,7 @@ import {
   vulnerabilityPriorityLabel,
 } from "@features/csm-security-center/utils/vulnerabilities";
 import type { BeVulnerabilityPriority } from "@api/backend/types";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -53,7 +52,7 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
  * a row opens the vulnerability detail page.
  */
 export default function ProductVulnerabilitiesTab(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const [searchInput, setSearchInput] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<BeVulnerabilityPriority | "">("");
   const [page, setPage] = useState(0);
@@ -132,18 +131,11 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
         </TextField>
       </Box>
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load vulnerabilities:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>CVE / Vulnerability ID</TableCell>
                 <TableCell>Component</TableCell>
                 <TableCell>Product</TableCell>
@@ -153,20 +145,26 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 6 }).map((__, j) => (
-                      <TableCell key={j}>
-                        <Skeleton variant="text" />
-                      </TableCell>
-                    ))}
+                    <TableCell><Skeleton variant="rounded" width="75%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={64} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="60%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : isError ? (
-                // The error Alert above carries the detail; don't fall through
-                // to the empty state (which would read as "0 results").
-                null
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <QueryErrorState
+                      message={`Failed to load vulnerabilities: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : vulnerabilities.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
@@ -267,13 +265,7 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

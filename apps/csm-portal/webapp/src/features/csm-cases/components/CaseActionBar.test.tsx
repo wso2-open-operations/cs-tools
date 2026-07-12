@@ -92,8 +92,8 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^closed$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^close$/i })).toBeInTheDocument();
   });
 
   it("shows exactly the transitions the backend permits, nothing more", () => {
@@ -106,10 +106,10 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /solution proposed/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /awaiting info/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^closed$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /propose solution/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /request information/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^close$/i })).not.toBeInTheDocument();
   });
 
   it("labels a target the same regardless of source state (no UI-invented verbs)", () => {
@@ -120,11 +120,11 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
     unmount();
 
-    // ...and from a paused state, the SAME target reads the same — "Waiting on
+    // ...and from a paused state, the SAME target reads the same — "Wait on
     // WSO2", not a fabricated "Resume work".
     render(
       <CaseActionBar
@@ -132,7 +132,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
   });
 
@@ -144,13 +144,16 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={onAction}
       />,
     );
-    // "Waiting on WSO2" has no confirm dialog, so it dispatches immediately, and
+    // "Wait on WSO2" has no confirm dialog, so it dispatches immediately, and
     // the target must be the real backend nextState.
-    fireEvent.click(screen.getByRole("button", { name: /waiting on wso2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /wait on wso2/i }));
     expect(onAction).toHaveBeenCalledWith("wait_on_wso2", "waiting_on_wso2");
   });
 
-  it("gates a customer-notifying transition behind a confirm dialog before dispatch", () => {
+  it("dispatches Close immediately — confirmation happens via the Post Resolution Activity dialog upstream", () => {
+    // CaseActionBar itself no longer gates close/propose-solution behind a
+    // confirm dialog; CsmCaseDetailPage's onAction opens the resolution
+    // dialog for these two, which doubles as the confirmation step.
     const onAction = vi.fn();
     render(
       <CaseActionBar
@@ -158,12 +161,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={onAction}
       />,
     );
-    // Clicking "Closed" must NOT dispatch yet — it opens a confirm dialog.
-    fireEvent.click(screen.getByRole("button", { name: /^closed$/i }));
-    expect(onAction).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    // Confirming dispatches with the close action + closed target.
-    fireEvent.click(screen.getByRole("button", { name: /close case/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
     expect(onAction).toHaveBeenCalledWith("close", "closed");
   });
 
@@ -177,10 +175,10 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /solution proposed/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /awaiting info/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^closed$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /propose solution/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /request information/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^close$/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
   });
 
@@ -212,7 +210,7 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reopened/i })).not.toBeInTheDocument();
     // The state-independent "More" overflow is unaffected.
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
@@ -277,5 +275,131 @@ describe("CaseActionBar — reassign gating for WIP-Ongoing", () => {
     expect(item).not.toHaveAttribute("aria-disabled", "true");
     fireEvent.click(item);
     expect(onAction).toHaveBeenCalledWith({ secondary: "reassign_engineer" });
+  });
+});
+
+describe("CaseActionBar — create related case (closed-case reopen replacement)", () => {
+  it("is not offered on a closed case the backend has not flagged eligible (empty nextStates)", () => {
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={() => {}} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /create related case/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders as a single primary button when the backend flags the case eligible", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("closed", ["reopened"])}
+        onAction={onAction}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /create related case/i });
+    expect(button).toBeInTheDocument();
+    // Must dispatch the create_related_case action, never a real "reopened"
+    // state PATCH — the data source has no such transition.
+    fireEvent.click(button);
+    expect(onAction).toHaveBeenCalledWith("create_related_case", "reopened");
+  });
+
+  it("never renders a literal 'Reopened' state-transition button", () => {
+    // Guards against regressing to the pre-fix behavior where a closed case's
+    // stray `reopened` nextState rendered as a generic (broken) reopen action.
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("closed", ["reopened"])}
+        onAction={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^reopened$/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("CaseActionBar — unbuilt roadmap items stay disabled, not silently mock", () => {
+  // Create incident / Link to incident / Create task / Hold auto-closure have
+  // no backend flow yet. They must never be clickable — a click that reaches
+  // onAction would surface a mock toast to a real user — and they must never
+  // depend on case state, since it isn't state that's missing, it's the
+  // feature itself.
+  const ROADMAP_ITEMS = [
+    /create incident from case/i,
+    /link to incident/i,
+    /create task/i,
+    /hold auto-closure/i,
+  ];
+
+  it.each(ROADMAP_ITEMS)("keeps %s disabled and inert", (name) => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("CaseActionBar — Raise internal Git issue is blocked on a closed case", () => {
+  it("disables the menu item once the case is closed", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /raise internal git issue/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps it enabled for a non-closed case", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /raise internal git issue/i });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: "raise_git_issue" });
+  });
+});
+
+describe("CaseActionBar — Change severity is blocked on a closed case", () => {
+  it("disables the menu item once the case is closed", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /change severity/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps it enabled for a non-closed case", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name: /change severity/i });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: "change_severity" });
   });
 });

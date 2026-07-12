@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Checkbox,
   Chip,
@@ -24,7 +23,6 @@ import {
   ListItemText,
   MenuItem,
   OutlinedInput,
-  Paper,
   Select,
   Skeleton,
   Stack,
@@ -41,6 +39,7 @@ import {
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import {
@@ -179,17 +178,11 @@ export default function CsmUsersPage(): JSX.Element {
         </FormControl>
       </Stack>
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load users: {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small" aria-label="Users search results">
+          <Table size="small" aria-label="Users search results" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Username</TableCell>
                 <TableCell sortDirection={sortField === "name" ? sortOrder : false}>
                   <TableSortLabel
@@ -207,16 +200,26 @@ export default function CsmUsersPage(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                [0, 1, 2, 3, 4, 5].map((i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    {[0, 1, 2, 3, 4, 5].map((c) => (
-                      <TableCell key={c}>
-                        <Skeleton variant="text" />
-                      </TableCell>
-                    ))}
+                    <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="75%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={64} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <QueryErrorState
+                      message={`Failed to load users: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : users.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
@@ -283,13 +286,7 @@ export default function CsmUsersPage(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

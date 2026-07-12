@@ -17,9 +17,35 @@
 import { useCallback } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { apiConfig } from "@config/apiConfig";
-import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
+import {
+  ASGARDEO_UNAUTHENTICATED_CODE,
+  AUTH_NOT_READY_ERROR_MESSAGE,
+} from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
 import { CORRELATION_ID_HEADER, newCorrelationId } from "@utils/correlationId";
+
+// Shared across every caller's hook instance. Each useAuthApiClient() call
+// creates its own authFetch closure, so this lives at module scope to ensure
+// only ONE full sign-in redirect is triggered even when many concurrent calls
+// fail authentication at once.
+let signInInFlight = false;
+
+// Only the Asgardeo "unauthenticated" code means the token was expired/missing
+// when the call ran (e.g. the refresh token itself has expired, so the SDK's
+// periodic background refresh can no longer mint a new access token). Anything
+// else (network failures, real backend 5xx) must propagate untouched so
+// existing error handling and error pages still work. Without this
+// classification, a dead refresh token sends the SDK's periodic background
+// refresh into an infinite loop of failing refresh-grant requests instead of
+// bouncing the user to sign-in.
+function isTokenExpiredError(error: unknown): boolean {
+  return (
+    error != null &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code: string }).code === ASGARDEO_UNAUTHENTICATED_CODE
+  );
+}
 
 /**
  * True when `getAccessToken()` failed because the Asgardeo SDK had not finished
@@ -122,10 +148,24 @@ function buildRequestHeaders(
 // backend; calls to any other origin are refused so credentials can't be
 // leaked to third-party hosts.
 export function useAuthApiClient() {
-  const { getAccessToken, getIdToken } = useAsgardeo();
+  const { getAccessToken, getIdToken, signIn } = useAsgardeo();
   const logger = useLogger();
 
-  return useCallback(
+  // Redirect to a full sign-in, single-flighted so concurrent auth failures
+  // don't fire multiple redirects. Returns a never-resolving promise so
+  // callers don't fall through to an error page while the browser navigates
+  // away.
+  const redirectToSignIn = useCallback((): Promise<Response> => {
+    if (!signInInFlight) {
+      signInInFlight = true;
+      void Promise.resolve(signIn()).finally(() => {
+        signInInFlight = false;
+      });
+    }
+    return new Promise<Response>(() => {});
+  }, [signIn]);
+
+  const attemptFetch = useCallback(
     async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
       const url = resolveRequestUrl(input);
       if (!trustedBackendOrigin || url.origin !== trustedBackendOrigin) {
@@ -194,5 +234,41 @@ export function useAuthApiClient() {
       }
     },
     [getAccessToken, getIdToken, logger],
+  );
+
+  return useCallback(
+    async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
+      try {
+        return await attemptFetch(input, options);
+      } catch (error) {
+        // Only an expired/missing token is recoverable here; anything else
+        // (network, real backend 5xx, auth-not-ready) must surface to
+        // existing error handling.
+        if (!isTokenExpiredError(error)) {
+          throw error;
+        }
+
+        // A concurrent caller, or the provider's periodic background refresh,
+        // may have re-minted the token in the meantime, so retry once to pick
+        // it up. If nothing refreshed it the retry fails again and we fall
+        // through to the sign-in redirect below.
+        try {
+          return await attemptFetch(input, options);
+        } catch (retryError) {
+          // Retry failed for a non-auth reason (e.g. a transient network blip
+          // on the second attempt): surface it instead of bouncing the user
+          // to sign-in.
+          if (!isTokenExpiredError(retryError)) {
+            throw retryError;
+          }
+
+          // Still unauthenticated after the retry — the session (refresh
+          // token) is gone. Redirect for a full sign-in instead of letting
+          // the SDK's periodic refresh keep retrying forever.
+          return redirectToSignIn();
+        }
+      }
+    },
+    [attemptFetch, redirectToSignIn],
   );
 }

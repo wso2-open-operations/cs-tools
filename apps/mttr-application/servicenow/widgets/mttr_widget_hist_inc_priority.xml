@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: Historical MTTR — Incidents by Priority (quarterly trend) -->
+    <!-- UI Page Name: mttr_widget_hist_inc_priority                       -->
+    <!-- Line chart: quarterly MTTR trend per priority for Incidents       -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_hist_inc_pri">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getHistoricalIncidentsByPriority();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-hist-inc-pri {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #c8d8f0;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-hist-inc-pri .header {
+            background: #c8d8f0;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-hist-inc-pri .body { padding: 16px; }
+        .mttr-chart-hist-inc-pri .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-hist-inc-pri">
+        <div class="header">Historical MTTR — Incidents by Priority (Quarterly)</div>
+        <div class="body">
+            <div id="chart_hist_inc_pri" style="width:100%;"></div>
+        </div>
+        <div class="footer">Archived quarterly summaries — P1, P2, P3 separately</div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_hist_inc_pri" style="display:none">${jvar_hist_inc_pri}</textarea>
+
+    <script type="text/javascript">
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawHistIncPri, 100); });
+
+        var _rtHIP = null;
+        function _scheduleRedrawHIP() {
+            if (_rtHIP) clearTimeout(_rtHIP);
+            _rtHIP = setTimeout(drawHistIncPri, 150);
+        }
+        // Idempotent listener setup: SN re-renders the widget by re-running
+        // this script, which would otherwise stack duplicate `resize`
+        // handlers and ResizeObservers on every re-mount. Tear down anything
+        // saved by the previous run, attach fresh, then persist the refs.
+        if (window.__mttrHistIncPriState) {
+            window.removeEventListener('resize', window.__mttrHistIncPriState.resizeHandler);
+            if (window.__mttrHistIncPriState.observer) {
+                window.__mttrHistIncPriState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedrawHIP);
+        var _obsHIP = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsHIP = new ResizeObserver(_scheduleRedrawHIP);
+            _obsHIP.observe(document.getElementById('chart_hist_inc_pri'));
+        }
+        window.__mttrHistIncPriState = { resizeHandler: _scheduleRedrawHIP, observer: _obsHIP };
+
+        var PRI_COLORS = { P1: '#e53935', P2: '#fb8c00', P3: '#fdd835', P4: '#43a047' };
+
+        function drawHistIncPri() {
+            try {
+                var _el = document.getElementById('chart_hist_inc_pri');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(300, Math.round(_w * 0.5)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_hist_inc_pri').value;
+                if (!raw || raw === 'null') { noDataHIP(); return; }
+                var resp = JSON.parse(raw);
+                if (!resp || !resp.periods || resp.periods.length === 0) {
+                    noDataHIP(); return;
+                }
+
+                var periods = resp.periods;
+                var series = resp.series;
+
+                // Sort priorities so P1, P2, P3, P4 are in order
+                var allPriorities = Object.keys(series).sort();
+                var colors = [];
+                for (var c = 0; allPriorities.length > c; c++) {
+                    colors.push(PRI_COLORS[allPriorities[c]] || '#999');
+                }
+
+                var header = ['Period'];
+                for (var pr = 0; allPriorities.length > pr; pr++) {
+                    header.push(allPriorities[pr]);
+                }
+
+                var rows = [header];
+                for (var p = 0; periods.length > p; p++) {
+                    var row = [periods[p]];
+                    for (var pi = 0; allPriorities.length > pi; pi++) {
+                        var entry = series[allPriorities[pi]][periods[p]];
+                        var hrs = entry ? entry.mttr_hours : 0;
+                        row.push(Math.round((hrs / 24) * 10) / 10);
+                    }
+                    rows.push(row);
+                }
+
+                var data = google.visualization.arrayToDataTable(rows);
+
+                // Set formatted tooltips
+                for (var fp = 0; periods.length > fp; fp++) {
+                    for (var ft = 0; allPriorities.length > ft; ft++) {
+                        var e = series[allPriorities[ft]][periods[fp]];
+                        if (e) {
+                            var h = e.mttr_hours || 0;
+                            var dm = Math.round(h * 60);
+                            var dd = Math.floor(dm / (60 * 24));
+                            var dh = Math.floor((dm % (60 * 24)) / 60);
+                            var dmin = dm % 60;
+                            data.setFormattedValue(fp, ft + 1,
+                                dd + 'd ' + dh + 'h ' + dmin + 'm (' + e.total_cases + ' cases)');
+                        }
+                    }
+                }
+
+                var chart = new google.visualization.LineChart(
+                    document.getElementById('chart_hist_inc_pri'));
+                chart.draw(data, {
+                    chartArea: { width: '80%', height: '65%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 10 } },
+                    colors: colors,
+                    backgroundColor: 'transparent',
+                    vAxis: {
+                        title: 'MTTR (Days)',
+                        format: '#.#',
+                        textStyle: { fontSize: 10 },
+                        viewWindow: { min: 0 }
+                    },
+                    hAxis: { textStyle: { fontSize: 11 }, slantedText: false },
+                    pointSize: 5,
+                    lineWidth: 2,
+                    curveType: 'function',
+                    tooltip: { textStyle: { fontSize: 11 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_hist_inc_pri error:', e);
+                noDataHIP();
+            }
+        }
+
+        function noDataHIP() {
+            // DOM-API placeholder — see mttr_widget_team_trend.xml for
+            // the full rationale (escaped-entity innerHTML rendered as
+            // literal text; createElement produces a real p node).
+            var container = document.getElementById('chart_hist_inc_pri');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No historical data available';
+            container.appendChild(p);
+        }
+    </script>
+
+</j:jelly>

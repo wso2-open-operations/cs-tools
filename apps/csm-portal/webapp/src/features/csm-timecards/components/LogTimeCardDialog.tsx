@@ -16,10 +16,12 @@
 
 import { useMemo, useState, type JSX, type KeyboardEvent } from "react";
 import {
+  AdapterDateFns,
   Avatar,
   Box,
   Button,
   Chip,
+  DatePickers,
   Dialog,
   DialogActions,
   DialogContent,
@@ -33,6 +35,8 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+
+const { DatePicker, LocalizationProvider } = DatePickers;
 import { Clock, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
@@ -63,6 +67,7 @@ import {
   totalMinutes,
 } from "@features/csm-timecards/utils/timeCardTotals";
 import { localTodayIso } from "@features/csm-timecards/utils/timeSheetWeek";
+import { formatDateOnly, parseDateOnly } from "@utils/dateTime";
 
 interface LogTimeCardDialogProps {
   /** The case the time was spent on — always known, this dialog only opens
@@ -284,19 +289,30 @@ export default function LogTimeCardDialog({
             {projectName ? ` · ${projectName}` : ""}
           </Typography>
 
-          <TextField
-            type="date"
-            label="Date"
-            size="small"
-            required
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            onBlur={() => touch("date")}
-            error={isTouched("date") && !!errors.date}
-            helperText={isTouched("date") ? errors.date : undefined}
-            slotProps={{ inputLabel: { shrink: true } }}
-            sx={{ maxWidth: { sm: 220 }, minWidth: 160 }}
-          />
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <DatePicker
+              label="Date"
+              value={parseDateOnly(date)}
+              onChange={(next) => {
+                setDate(
+                  next instanceof Date && !Number.isNaN(next.getTime())
+                    ? formatDateOnly(next)
+                    : "",
+                );
+                touch("date");
+              }}
+              slotProps={{
+                textField: {
+                  size: "small",
+                  required: true,
+                  error: isTouched("date") && !!errors.date,
+                  helperText: isTouched("date") ? errors.date : undefined,
+                  sx: { maxWidth: { sm: 220 }, minWidth: 160 },
+                },
+                field: { clearable: true },
+              }}
+            />
+          </LocalizationProvider>
 
           <Divider />
 

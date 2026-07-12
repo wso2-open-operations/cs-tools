@@ -17,15 +17,24 @@
 import { useLayoutEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { BottomNavigation, BottomNavigationAction, Box } from "@wso2/oxygen-ui";
-import { Clock, Headset, User } from "@wso2/oxygen-ui-icons-react";
+import { Cog, Headset, House, LayoutGrid } from "@wso2/oxygen-ui-icons-react";
+
+// Mirrors a subset of the webapp's CSM_NAV_ITEMS (apps/csm-portal/webapp/src/config/csmNavItems.ts):
+// Home (Dashboard), Support (Cases), Operations get their own tab; Time Cards/Security
+// Center/Updates/Engagements are grouped under More; Customers/Settings aren't in the mobile nav.
+// Profile is reached from the TopBar's top-right corner instead of a tab here.
+function activeTabFor(pathname: string): string | false {
+  if (pathname === "/") return "home";
+  if (pathname.startsWith("/support") || pathname.startsWith("/cases/")) return "support";
+  if (pathname.startsWith("/operations")) return "operations";
+  if (pathname.startsWith("/more")) return "more";
+  return false;
+}
 
 export function TabBar() {
   const ref = useRef<HTMLDivElement>(null);
   const location = useLocation();
-  const isSupportActive = location.pathname === "/" || location.pathname.startsWith("/cases/");
-  const isTimeActive = location.pathname.startsWith("/time-cards");
-  const isProfileActive = location.pathname.startsWith("/profile");
-  const activeTab = isSupportActive ? "support" : isTimeActive ? "time" : isProfileActive ? "profile" : false;
+  const activeTab = activeTabFor(location.pathname);
 
   useLayoutEffect(() => {
     if (!ref.current) return;
@@ -47,13 +56,20 @@ export function TabBar() {
       left={0}
       right={0}
       pt={1}
+      // Fixed pb (not derived from --safe-bottom), matching the customer-portal microapp's own
+      // TabBar (apps/customer-portal/microapp/src/components/core/TabBar.tsx) for the same
+      // reason as TopBar.tsx's fixed pt.
       pb={4}
-      sx={{ borderTop: "1px solid", borderColor: "divider" }}
+      sx={{
+        borderTop: "1px solid",
+        borderColor: "divider",
+      }}
     >
       <BottomNavigation value={activeTab} showLabels>
+        <BottomNavigationAction component={Link} to="/" value="home" label="Home" icon={<House />} disableRipple />
         <BottomNavigationAction
           component={Link}
-          to="/"
+          to="/support"
           value="support"
           label="Support"
           icon={<Headset />}
@@ -61,18 +77,18 @@ export function TabBar() {
         />
         <BottomNavigationAction
           component={Link}
-          to="/time-cards"
-          value="time"
-          label="Time"
-          icon={<Clock />}
+          to="/operations"
+          value="operations"
+          label="Operations"
+          icon={<Cog />}
           disableRipple
         />
         <BottomNavigationAction
           component={Link}
-          to="/profile"
-          value="profile"
-          label="Profile"
-          icon={<User />}
+          to="/more"
+          value="more"
+          label="More"
+          icon={<LayoutGrid />}
           disableRipple
         />
       </BottomNavigation>

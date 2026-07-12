@@ -131,6 +131,14 @@ export default function AllCasesPage(): JSX.Element {
     }
   }, [statusFilter, filterMetadata, filters.statusIds, setFilters]);
 
+  // On My Cases (createdByMe), the Created By filter is hidden, so drop any
+  // persisted createdBy value to keep it out of the case search request.
+  useEffect(() => {
+    if (createdByMe && filters.createdBy?.length) {
+      setFilters((prev) => ({ ...prev, createdBy: undefined }));
+    }
+  }, [createdByMe, filters.createdBy, setFilters]);
+
   // Fetch deployments for the deployment filter (10 at a time)
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
     projectId || "",
@@ -389,6 +397,7 @@ export default function AllCasesPage(): JSX.Element {
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter={isDashboardSeverityNavigation}
           hideDeploymentFilter={!permissions.hasDeployments}
+          hideCreatedByFilter={createdByMe}
           isProjectContextLoading={isProjectContextLoading}
           excludeFromCount={
             initialSeverityId && filters.severityIds?.includes(initialSeverityId)

@@ -253,7 +253,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Conflict — comments and activities (type=comment or type=activity) require the case to be work_in_progress with workState=ongoing. Work notes (type=work_note) are exempt and allowed in any state.
+          description: Conflict — comments and activities (type=comment or type=activity) require the case to be work_in_progress with workState=ongoing; work notes (type=work_note) are blocked on closed cases.
           content:
             application/json:
               schema:
@@ -322,6 +322,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/activities/search:
+    post:
+      summary: Search the activity trail of a case.
+      description: >
+        Returns the chronological activity trail for a case (comments, work notes,
+        state transitions, and other recorded field changes). The request body is
+        forwarded to the integration service as-is and the response is returned
+        verbatim. Set includeFieldChanges to also include per-field value changes.
+      operationId: postCasesIdActivitiesSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Case activity search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseActivitySearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseActivitySearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /attachments:
     post:
       summary: Upload a file attachment to a case.
@@ -360,6 +416,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — attachments cannot be uploaded to a closed case.
           content:
             application/json:
               schema:
@@ -2565,6 +2627,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /incidents/search:
+    post:
+      summary: Search incidents (ServiceNow data source only).
+      operationId: postIncidentsSearch
+      requestBody:
+        description: Incident search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2795,6 +2906,8 @@ components:
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+        `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
+        provided alongside `state: closed` or `state: solution_proposed`.
       oneOf:
         - required: [state]
         - required: [severity]
@@ -2824,6 +2937,15 @@ components:
           type: string
           format: email
           description: Email of the engineer to assign to this case (ServiceNow only).
+        resolutionCode:
+          $ref: '#/components/schemas/CaseResolutionCode'
+          description: Resolution code — only allowed when state is closed or solution_proposed.
+        cause:
+          $ref: '#/components/schemas/CaseCause'
+          description: Root-cause category — only allowed when state is closed or solution_proposed.
+        closeNotes:
+          type: string
+          description: Free-text closure notes — only allowed when state is closed or solution_proposed.
 
     UpdateCaseResponse:
       type: object
@@ -2871,6 +2993,76 @@ components:
               format: uuid
             name:
               type: string
+        resolutionCode:
+          $ref: '#/components/schemas/CaseResolutionCode'
+          nullable: true
+          description: Resolution code set when closing or proposing a solution.
+        cause:
+          $ref: '#/components/schemas/CaseCause'
+          nullable: true
+          description: Root-cause category set when closing or proposing a solution.
+        closeNotes:
+          type: string
+          nullable: true
+          description: Free-text closure notes.
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was resolved.
+
+    CaseResolutionCode:
+      type: string
+      description: Resolution code for a closed or solution-proposed case.
+      enum:
+        - SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED
+        - SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT
+        - SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET
+        - SOLVED_WORKAROUND_PROVIDED
+        - SOLVED_BY_CUSTOMER
+        - CONSIDERED_FOR_ROADMAP
+        - INCONCLUSIVE_OUT_OF_SCOPE
+        - INCONCLUSIVE_CANNOT_REPRODUCE
+        - INCONCLUSIVE_NO_WORKAROUND
+        - DUPLICATE_ISSUE
+        - VOIDED_CANCELED
+        - ON_HOLD
+        - CONSIDERED_FOR_ROADMAP_ALT
+        - SOLVED_FIXED_THE_ISSUE
+        - SOLVED_WORKAROUND_PROVIDED_ALT
+        - SOLVED_BY_CONTRIBUTOR
+        - SOLVED_BY_NOVERA
+        - ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS
+
+    CaseCause:
+      type: string
+      description: Root-cause category for a closed or solution-proposed case.
+      enum:
+        - USER_MISUNDERSTANDING_CONCEPTS
+        - USER_MISUNDERSTANDING_DOCUMENTATION
+        - USER_NOT_FOLLOWING_DOCUMENTATION
+        - USER_MISTAKE
+        - SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE
+        - SOLUTION_PROBLEMATIC_CODE
+        - APPLICATION_BUG
+        - APPLICATION_MISLEADING_UX_UI
+        - APPLICATION_LIMITATION
+        - APPLICATION_MISSING_FEATURE
+        - APPLICATION_DOCUMENTATION_GAP
+        - APPLICATION_DOCUMENTATION_ERROR
+        - INFRASTRUCTURE_CUSTOMERS_SIDE
+        - INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH
+        - INFRASTRUCTURE_SAAS_SIDE_OTHER
+        - UNKNOWN
+
+    CaseLabelRef:
+      type: object
+      description: Generic id/label pair returned by ServiceNow for choice-list fields.
+      properties:
+        id:
+          type: string
+        label:
+          type: string
 
     WatchListUser:
       type: object
@@ -3352,6 +3544,13 @@ components:
               - reopened
               - solution_proposed
               - closed
+          description: >-
+            Valid next states from the current one. A closed case can never
+            actually be reopened (the backing data source has no such
+            transition); `reopened` appears here only as a signal that a new
+            case may still be created as related to this one — true for a
+            standard `case`-type case closed within the last 60 days, empty
+            otherwise.
 
     CaseSearchView:
       type: object
@@ -4264,6 +4463,58 @@ components:
         hasMore:
           type: boolean
 
+    CaseActivitySearchPayload:
+      type: object
+      nullable: true
+      description: >
+        Payload for paginating the activity trail of a case. The case ID is taken
+        from the URL path. The payload is forwarded to the integration service as-is.
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+        includeFieldChanges:
+          type: boolean
+          description: When true, include per-field value changes in each activity entry.
+
+    CaseActivity:
+      type: object
+      description: A single entry in a case's activity trail. Shape is defined by the integration service.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        type:
+          type: string
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+
+    CaseActivitySearchResponse:
+      type: object
+      properties:
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseActivity'
+        total:
+          type: integer
+          description: Total number of activity entries on the case
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
     AssignedEngineerRef:
       type: object
       nullable: true
@@ -5066,7 +5317,7 @@ components:
           description: New state for the call request.
         cancellationReason:
           type: string
-          description: Reason for cancellation (required when cancelling).
+          description: Reason for cancellation or rejection.
         utcTimes:
           type: array
           items:
@@ -5076,6 +5327,35 @@ components:
           type: integer
           minimum: 1
           description: Updated duration in minutes.
+        meetingDate:
+          type: string
+          format: date-time
+          description: >
+            Confirmed meeting start time, in UTC (RFC 3339). Set when moving to
+            the scheduled state.
+        assignee:
+          type: string
+          description: >
+            Optional identifier of the engineer assigned to the call, set when
+            scheduling.
+        notes:
+          type: string
+          description: >
+            Free-form notes describing the outcome of the call. Set when
+            concluding the request.
+        plan:
+          type: string
+          description: Optional plan or next steps agreed during the call.
+        attendees:
+          type: string
+          description: Optional call attendees (free text).
+        actionItems:
+          type: string
+          description: Optional action items from the call (free text).
+        actualDurationMin:
+          type: integer
+          minimum: 1
+          description: Optional actual call duration in minutes.
 
     UpdateCallRequestResponse:
       type: object
@@ -5433,3 +5713,107 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/TaskSlaScheduleRef'
+
+    IncidentSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+            priorities:
+              type: array
+              items:
+                type: string
+                enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+            parentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn, openedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    IncidentSearchResponse:
+      type: object
+      properties:
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
+        total:
+          type: integer
+          description: Total number of matching incidents
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Incident:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        openedOn:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        caller:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        priority:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          nullable: true
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          nullable: true
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        parent:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        assignmentGroup:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        assignedTo:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string

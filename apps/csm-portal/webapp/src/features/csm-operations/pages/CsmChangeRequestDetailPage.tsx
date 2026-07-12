@@ -24,7 +24,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Check, Pencil, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import {  useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -38,6 +38,7 @@ import {
   changeRequestStateLabel,
 } from "@features/csm-operations/utils/changeRequests";
 import type { BeEntityRef } from "@api/backend/types";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 const OPERATIONS_CR_PATH = "/operations?tab=change_requests";
 
@@ -117,7 +118,7 @@ function PlanSection({ title, html }: { title: string; html?: string | null }): 
  */
 export default function CsmChangeRequestDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const { data, isLoading, isError } = useGetChangeRequest(id);
   const { showError } = useErrorBanner();
   const patchCr = usePatchChangeRequest();
@@ -142,8 +143,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <Skeleton variant="rectangular" height={32} width={240} />
-        <Skeleton variant="rectangular" height={260} />
+        <Skeleton variant="rounded" height={32} width={240} />
+        <Skeleton variant="rounded" height={260} />
       </Box>
     );
   }

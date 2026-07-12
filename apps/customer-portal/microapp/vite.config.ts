@@ -23,6 +23,10 @@ import tsconfigPaths from "vite-tsconfig-paths";
 export default defineConfig({
   base: "./",
   plugins: [react(), tsconfigPaths()],
+  // Scoped like csm-portal's CSM_PORTAL_ prefix — avoids this app picking up
+  // (or leaking) another app's plain VITE_* env var if they're ever built
+  // from a shared CI config/secret set.
+  envPrefix: ["CUSTOMER_PORTAL_"],
   server: {
     port: 3000,
   },

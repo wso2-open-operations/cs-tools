@@ -34,8 +34,10 @@ const (
 	ErrMsgInternal          = "An internal server error occurred. Please try again later."
 	ErrMsgInvalidTransition  = "Invalid state transition."
 	ErrMsgWorkStateNotAllowed = "Work state can only be updated when the case is in progress."
-	ErrMsgCommentNotAllowed  = "Comments can only be added when the case is in progress and the work state is ongoing."
-	ErrMsgInvalidUUID       = "Invalid UUID format."
+	ErrMsgCommentNotAllowed      = "Comments can only be added when the case is in progress and the work state is ongoing."
+	ErrMsgWorkNoteOnClosedCase   = "Work notes cannot be added to a closed case."
+	ErrMsgAttachmentOnClosedCase = "Attachments cannot be added to a closed case."
+	ErrMsgInvalidUUID            = "Invalid UUID format."
 	errMsgReadBody          = "Failed to read request body."
 )
 

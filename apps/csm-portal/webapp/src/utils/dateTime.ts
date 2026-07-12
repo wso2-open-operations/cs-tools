@@ -302,7 +302,7 @@ export function utcMsToZonedInputValue(
 /**
  * Formats a backend (UTC) timestamp as an absolute date-time string in the
  * user's resolved timezone, suitable for tooltip text. Format:
- *   "2026-05-31 20:28:33 GMT+5:30"
+ *   "Jan 23, 2026, 10:14:13 PM GMT+5:30"
  *
  * Returns `null` when the input is empty or unparseable.
  */
@@ -314,25 +314,67 @@ export function formatAbsoluteForUser(
   if (!date) return null;
   const timeZone = resolveDisplayTimeZone(explicitTimeZone);
   try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
+    return new Intl.DateTimeFormat("en-US", {
       year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
       minute: "2-digit",
       second: "2-digit",
-      hourCycle: "h23", // 00-23; avoids the h24 midnight "24" edge case
       timeZone,
       timeZoneName: "shortOffset",
-    }).formatToParts(date);
-    const find = (type: Intl.DateTimeFormatPartTypes): string =>
-      parts.find((p) => p.type === type)?.value ?? "";
-    const datePart = `${find("year")}-${find("month")}-${find("day")}`;
-    const timePart = `${find("hour")}:${find("minute")}:${find("second")}`;
-    const tzPart = find("timeZoneName") || "UTC";
-    return `${datePart} ${timePart} ${tzPart}`;
+    }).format(date);
   } catch {
     return null;
   }
+}
+
+/**
+ * "YYYY-MM-DD" to a local-midnight Date, for handing a date-only field's wire
+ * value to a picker component. Avoids the UTC-parse day-shift a plain
+ * `new Date(dateString)` can cause depending on the viewer's timezone.
+ */
+export function parseDateOnly(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Local-midnight Date back to "YYYY-MM-DD", the inverse of {@link parseDateOnly}. */
+export function formatDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * "YYYY-MM-DDTHH:MM" (the `datetime-local` wire format some fields still
+ * store their state as) to a local Date, for handing the value to a picker
+ * component. Same browser-local semantics a native `datetime-local` input
+ * already had — not timezone-aware beyond that.
+ */
+export function parseDateTimeLocal(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Local Date back to "YYYY-MM-DDTHH:MM", the inverse of {@link parseDateTimeLocal}. */
+export function formatDateTimeLocal(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${mo}-${d}T${h}:${mi}`;
 }
 

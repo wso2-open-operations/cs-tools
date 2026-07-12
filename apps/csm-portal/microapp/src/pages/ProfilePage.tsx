@@ -31,9 +31,11 @@ import {
 import { useMutation, useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { users } from "@src/services/users";
 import type { UserMeUpdateDto, UserProfile } from "@src/types";
+import { useUserStore } from "@src/store/user";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { ErrorState } from "@components/support/ErrorState";
 import { listSupportedTimeZones } from "@utils/dateTime";
+import { initialsOf } from "@utils/initials";
 
 export default function ProfilePage() {
   return (
@@ -149,17 +151,17 @@ function ProfileContent() {
 }
 
 function ProfileHeader({ profile }: { profile: UserProfile }) {
-  const initials =
-    profile.fullName
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") || "?";
+  // The photo isn't part of the backend /users/me profile — it only lives in the ID token
+  // claims (decodeTokenAndStoreUser in auth.ts), so it's read from the user store directly here,
+  // same as the TopBar's avatar (components/layout/TopBar.tsx).
+  const avatarUrl = useUserStore((state) => state.user?.avatarUrl);
+  const initials = initialsOf(profile.fullName);
 
   return (
     <Stack direction="row" alignItems="center" gap={2}>
-      <Avatar sx={{ width: 56, height: 56 }}>{initials}</Avatar>
+      <Avatar src={avatarUrl} slotProps={{ img: { referrerPolicy: "no-referrer" } }} sx={{ width: 56, height: 56 }}>
+        {initials}
+      </Avatar>
       <Typography variant="h6">{profile.fullName}</Typography>
     </Stack>
   );

@@ -20,16 +20,13 @@ import {
   Button,
   FormControl,
   FormHelperText,
-  IconButton,
   InputLabel,
   MenuItem,
   Select,
   Stack,
   TextField,
   Typography,
-  pxToRem,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { deployments } from "@src/services/deployments";
@@ -157,12 +154,7 @@ export default function NewCasePage() {
 
   return (
     <Stack gap={2}>
-      <Stack direction="row" alignItems="center" gap={1}>
-        <IconButton onClick={() => navigate(-1)} size="small" aria-label="Go back">
-          <ArrowLeft size={pxToRem(20)} />
-        </IconButton>
-        <Typography variant="h6">New Case</Typography>
-      </Stack>
+      <Typography variant="h6">New Case</Typography>
 
       <Stack gap={2}>
         <ProjectSelect value={project} onChange={handleProjectChange} disabled={createCase.isPending} />

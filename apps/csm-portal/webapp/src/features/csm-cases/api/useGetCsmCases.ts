@@ -37,6 +37,10 @@ import type {
   CsmCaseRow,
   CsmCasesListResponse,
 } from "@features/csm-cases/types/csmCases";
+import {
+  DEFAULT_CASES_SORT,
+  type CasesSortOrder,
+} from "@features/csm-cases/utils/casesSort";
 
 /**
  * Cross-project CSM cases list.
@@ -56,15 +60,18 @@ import type {
  * `limit` / `offset` / `hasMore`).
  *
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
- * limit (≤ {@link BE_MAX_PAGE_LIMIT}). With no filters the backend sorts by
- * last-updated descending, so the cases page loads the most recently updated
- * cases on arrival. `enabled` is an optional escape hatch to suspend the fetch.
+ * limit (≤ {@link BE_MAX_PAGE_LIMIT}). Cases are always sorted by `updatedOn`;
+ * `sortOrder` (default `"desc"`) controls direction, so the cases page loads
+ * the most recently updated cases on arrival by default but can be flipped
+ * to oldest-updated-first. `enabled` is an optional escape hatch to suspend
+ * the fetch.
  */
 export function useGetCsmCases(
   filters: CasesFilters,
   page: number,
   pageSize: number,
   enabled = true,
+  sortOrder: CasesSortOrder = DEFAULT_CASES_SORT.order,
 ): UseQueryResult<CsmCasesListResponse, Error> {
   const logger = useLogger();
   const api = useBackendApi();
@@ -100,6 +107,7 @@ export function useGetCsmCases(
       currentUserId ?? "",
       page,
       pageSize,
+      sortOrder,
     ],
     queryFn: async (): Promise<CsmCasesListResponse> => {
       // Resolve the assignee filter (engineer emails + the `@me` sentinel) to
@@ -159,7 +167,7 @@ export function useGetCsmCases(
         BeCaseSearchResponse
       >("/cases/search", {
           pagination: { offset, limit: pageSize },
-          sortBy: { field: "updatedOn", order: "desc" },
+          sortBy: { field: "updatedOn", order: sortOrder },
           // Filter fields are nested under `filters` (BE payload restructure).
           filters: {
             ...(search.length > 0 && { searchQuery: search }),
@@ -231,6 +239,7 @@ export function useGetCsmCases(
           hasSla: false,
           createdAt: c.createdOn ?? "",
           updatedAt: c.updatedOn ?? c.createdOn ?? "",
+          updatedAtIsCreatedFallback: !c.updatedOn && !!c.createdOn,
         };
       });
 

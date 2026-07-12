@@ -36,8 +36,8 @@ export default function RouteSuspenseFallback(): JSX.Element {
       }}
     >
       <LinearProgress
-        color="primary"
-        sx={{ width: "80%", maxWidth: 400, height: 4 }}
+        color="inherit"
+        sx={{ color: "primary.main", width: "80%", maxWidth: 400, height: 4 }}
       />
     </Box>
   );

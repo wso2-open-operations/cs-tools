@@ -15,12 +15,12 @@
 // under the License.
 
 import {
+  alpha,
   Box,
   Button,
   Card,
   Chip,
   IconButton,
-  LinearProgress,
   Skeleton,
   Table,
   TableBody,
@@ -53,7 +53,6 @@ const SLA_STAGE_COLOR: Record<
 
 const SLA_TABLE_COLUMNS = [
   "SLA definition",
-  "Target",
   "Stage",
   "Business time left",
   "Business elapsed time",
@@ -200,38 +199,37 @@ export function CaseSlaTable({ caseId }: CaseSlaTableProps): JSX.Element {
                   </TableCell>
                 </TableRow>
               ) : (
-                slas.map((sla) => (
-                  <TableRow key={sla.id} hover>
-                    <TableCell>{sla.definition}</TableCell>
-                    <TableCell>{sla.target ?? "—"}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        color={stageColor(sla)}
-                        label={sla.stageLabel}
-                      />
-                    </TableCell>
-                    <TableCell sx={{ minWidth: 140 }}>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={Math.min(Math.max(sla.businessElapsedPercent, 0), 100)}
-                          color={slaProgressColor(sla)}
-                          aria-label={`${sla.definition} ${Math.round(sla.businessElapsedPercent)}% elapsed`}
-                          sx={{ height: 6, borderRadius: 1, width: "100%" }}
+                slas.map((sla) => {
+                  const elapsedPct = Math.min(Math.max(sla.businessElapsedPercent, 0), 100);
+                  return (
+                    <TableRow
+                      key={sla.id}
+                      hover
+                      aria-label={`${sla.definition} ${Math.round(elapsedPct)}% elapsed`}
+                      sx={(theme) => ({
+                        background: `linear-gradient(to right, ${alpha(
+                          theme.palette[slaProgressColor(sla)].main,
+                          0.14,
+                        )} ${elapsedPct}%, transparent ${elapsedPct}%)`,
+                      })}
+                    >
+                      <TableCell>{sla.definition}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          color={stageColor(sla)}
+                          label={sla.stageLabel}
                         />
-                        <Typography variant="caption" color="text.secondary">
-                          {sla.businessTimeLeftLabel}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>{sla.businessElapsedLabel}</TableCell>
-                    <TableCell>{`${Math.round(sla.businessElapsedPercent)}%`}</TableCell>
-                    <TableCell>{formatSlaDateTime(sla.startTime)}</TableCell>
-                    <TableCell>{formatSlaDateTime(sla.stopTime)}</TableCell>
-                  </TableRow>
-                ))
+                      </TableCell>
+                      <TableCell>{sla.businessTimeLeftLabel}</TableCell>
+                      <TableCell>{sla.businessElapsedLabel}</TableCell>
+                      <TableCell>{`${Math.round(sla.businessElapsedPercent)}%`}</TableCell>
+                      <TableCell>{formatSlaDateTime(sla.startTime)}</TableCell>
+                      <TableCell>{formatSlaDateTime(sla.stopTime)}</TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

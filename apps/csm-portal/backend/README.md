@@ -100,24 +100,39 @@ The scan should report **0 issues**. If a new finding appears, fix the root caus
 
 Copy `.env` and fill in the values:
 
-### Entity service
+### Shared OAuth2 client credentials
+
+Every upstream service client (customer entity, engineering entity, updates, SCIM, and future notification channels) authenticates as the same OAuth2 client-credentials app — only each service's base URL and scopes differ, so the credentials are configured once and reused.
 
 | Variable | Description |
 |---|---|
-| `ENTITY_BASE_URL` | Base URL of the entity service |
-| `ENTITY_TOKEN_URL` | OAuth2 token endpoint |
-| `ENTITY_CLIENT_ID` | OAuth2 client ID |
-| `ENTITY_CLIENT_SECRET` | OAuth2 client secret |
-| `ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+| `OAUTH2_CLIENT_ID` | OAuth2 client ID, shared by every upstream service client |
+| `OAUTH2_CLIENT_SECRET` | OAuth2 client secret, shared by every upstream service client |
+| `OAUTH2_TOKEN_URL` | OAuth2 token endpoint, shared by every upstream service client |
+
+### Customer entity service
+
+Backs `entity.CustomerEntityClient` (this repo's entity-service; cases, accounts, projects, products, etc.) — uses the shared OAuth2 credentials above.
+
+| Variable | Description |
+|---|---|
+| `CUSTOMER_ENTITY_BASE_URL` | Base URL of the customer entity service |
+| `CUSTOMER_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
+### Engineering entity service (not yet wired in)
+
+Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-engineering) but is not constructed in `cmd/server/main.go` — no handler calls it yet. These variables are not read by any code today. It uses the same shared OAuth2 credentials above (same `OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own.
+
+| Variable | Description |
+|---|---|
+| `ENGINEERING_ENTITY_BASE_URL` | Base URL of the engineering entity service |
+| `ENGINEERING_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### Updates service
 
 | Variable | Description |
 |---|---|
 | `UPDATES_BASE_URL` | Base URL of the updates service |
-| `UPDATES_TOKEN_URL` | OAuth2 token endpoint |
-| `UPDATES_CLIENT_ID` | OAuth2 client ID |
-| `UPDATES_CLIENT_SECRET` | OAuth2 client secret |
 | `UPDATES_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### SCIM operations service
@@ -125,16 +140,32 @@ Copy `.env` and fill in the values:
 | Variable | Description |
 |---|---|
 | `SCIM_BASE_URL` | Base URL of the SCIM operations service |
-| `SCIM_TOKEN_URL` | OAuth2 token endpoint |
-| `SCIM_CLIENT_ID` | OAuth2 client ID |
-| `SCIM_CLIENT_SECRET` | OAuth2 client secret |
 | `SCIM_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
+### Notifications — email channel (not yet wired in)
+
+`internal/notifications` (`EmailClient.SendEmail`) is ready to use but is not constructed in `cmd/server/main.go` — no handler calls it yet. These variables are not read by any code today; they're documented here for when the first caller is added, which should reuse the shared `OAUTH2_*` credentials above rather than adding its own. Each notification channel gets its own `NOTIFICATIONS_<CHANNEL>_*` prefix for its channel-specific settings — SMS/Twilio will follow this same convention once added.
+
+| Variable | Description |
+|---|---|
+| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service |
+| `NOTIFICATIONS_EMAIL_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email |
+
+### Auth
+
+| Variable | Description |
+|---|---|
+| `AUTH_JWKS_ENDPOINT` | JWKS endpoint used to verify JWT signatures |
+| `AUTH_ISSUER` | Expected `iss` claim value |
+| `AUTH_AUDIENCE` | Comma-separated accepted `aud` values; token passes if any listed value is present in its `aud` claim |
+| `AUTH_TOKEN_VALIDATOR_ENABLED` | Set to `false` for local development to skip signature verification (default `true`) |
 
 ### Server
 
 | Variable | Description |
 |---|---|
-| `PORT` | Server listen address (default `:8080`) |
+| `PORT` | Server listen port — a plain number, not an address (default `8080`) |
 
 ## Project Structure
 
@@ -144,13 +175,18 @@ backend/
 ├── internal/
 │   ├── apierror/               # Typed upstream error types (4xx/5xx passthrough)
 │   ├── entity/
-│   │   ├── client.go           # OAuth2 HTTP client for the entity service
-│   │   └── entity.go           # Entity service operations (cases, accounts, projects, ...)
+│   │   ├── doc.go               # Package overview — one config/client pair per entity service
+│   │   ├── customer_client.go   # OAuth2 HTTP client for the customer entity service (this repo's entity-service)
+│   │   ├── customer.go          # CustomerEntityClient operations (cases, accounts, projects, ...)
+│   │   └── engineering.go       # EngineeringEntityClient — CreateGitIssue (not yet wired into main.go — no caller)
 │   ├── scim/
 │   │   └── client.go           # OAuth2 HTTP client for the SCIM operations service
 │   ├── updates/
 │   │   ├── client.go           # OAuth2 HTTP client for the updates service
 │   │   └── updates.go          # Updates service operations
+│   ├── notifications/
+│   │   ├── doc.go               # Package overview — one config/client pair per channel
+│   │   └── email.go             # EmailConfig/EmailClient/SendEmail (not yet wired into main.go — no caller)
 │   ├── middleware/
 │   │   ├── auth.go             # JWT validation; injects UserInfo into context
 │   │   ├── correlation.go      # X-CSM-Correlation-ID propagation + slog enrichment
@@ -158,7 +194,7 @@ backend/
 │   │   └── security_headers.go # X-Content-Type-Options, CSP, HSTS on every response
 │   └── handler/
 │       ├── cases.go            # HTTP handlers for case endpoints
-│       ├── state.go            # Case state machine (nextStates, isValidStateTransition)
+│       ├── state.go            # Case state machine (nextStates, isValidStateTransition, canCreateRelatedCase)
 │       ├── catalogs.go                   # HTTP handlers for catalog endpoints (ServiceNow only)
 │       ├── change_requests.go            # HTTP handlers for change-request endpoints
 │       ├── product_vulnerabilities.go    # HTTP handlers for product vulnerability endpoints (ServiceNow only)
@@ -166,6 +202,7 @@ backend/
 │       ├── deployments.go                # HTTP handlers for deployment endpoints
 │       ├── products.go                   # HTTP handlers for product endpoints
 │       ├── projects.go                   # HTTP handlers for project endpoints
+│       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
@@ -178,7 +215,7 @@ backend/
 
 - `POST /cases` — Create a case (`type`: `case`; `service_request` and `security_report_analysis` are ServiceNow data source only)
 - `GET /cases/{id}` — Get case by ID
-- `PATCH /cases/{id}` — Update a case (state, severity, workState, watchList, or assigneeEmail)
+- `PATCH /cases/{id}` — Update a case (state, severity, workState, watchList, or assigneeEmail); optional `resolutionCode`, `cause`, `closeNotes` accepted alongside `state: closed` or `state: solution_proposed`
 - `POST /cases/search` — Search cases; filters include `searchQuery`, `types`, `states`, `severities`, `workStates` (`ongoing`/`paused`), `assignedUserIds`, `projectIds`, `deploymentIds`, `engagementTypes`, `issueTypes`, date ranges, `createdBy`, `createdByMe`
 - `POST /cases/{id}/comments` — Create a comment on a case
 - `POST /cases/{id}/comments/search` — Search comments on a case
@@ -258,6 +295,10 @@ backend/
 - `GET /updates/product-update-levels` — Get product update levels
 - `POST /updates/levels/search` — Search updates between update levels
 
+### Incidents
+
+- `POST /incidents/search` — Search incidents; optional `filters` (`searchQuery`, `priorities`, `parentIds`) and `sortBy` (`field`: `createdOn`/`updatedOn`/`openedOn`, `order`) (ServiceNow data source only)
+
 ## Run Locally
 
 ```bash
@@ -304,4 +345,10 @@ curl -X POST http://localhost:8080/updates/levels/search \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"productName":"wso2am","productVersion":"4.2.0","startingUpdateLevel":1,"endingUpdateLevel":10}'
+
+# Search incidents
+curl -X POST http://localhost:8080/incidents/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"searchQuery":"outage","priorities":["CRITICAL"]},"pagination":{"limit":10,"offset":0}}'
 ```

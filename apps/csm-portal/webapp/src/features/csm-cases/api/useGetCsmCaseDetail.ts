@@ -67,6 +67,9 @@ function detailFromBeCase(
     state: uiStateFromBe(c.state),
     workState: c.workState ?? null,
     nextStates: (c.nextStates ?? []).map(uiStateFromBe),
+    relatedCase: c.relatedCase
+      ? { id: c.relatedCase.id, caseNumber: c.relatedCase.number }
+      : undefined,
     assignee,
     assigneeIsMe,
     slaClockType: "ack",
@@ -74,6 +77,7 @@ function detailFromBeCase(
     createdAt: c.createdOn ?? "",
     updatedAt: c.updatedOn ?? c.createdOn ?? "",
     description: c.description ?? "",
+    issueType: c.issueType,
     assignmentGroup: "grp.cre_team",
     conversationId: c.conversation?.id,
     createdBy: reporter,
@@ -97,6 +101,7 @@ function detailFromBeCase(
       version: "—",
       deployment: c.deployment?.name ?? "—",
       deploymentId: c.deployment?.id,
+      deployedProductId: c.deployedProduct?.id,
       environment: "prod",
     },
     watchers: [],

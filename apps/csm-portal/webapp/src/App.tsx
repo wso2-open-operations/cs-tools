@@ -60,6 +60,9 @@ const CreateServiceRequestPage = lazy(
 const CsmChangeRequestDetailPage = lazy(
   () => import("@features/csm-operations/pages/CsmChangeRequestDetailPage"),
 );
+const CreateChangeRequestPage = lazy(
+  () => import("@features/csm-operations/pages/CreateChangeRequestPage"),
+);
 const CsmAdminLayout = lazy(
   () => import("@features/csm-admin/pages/CsmAdminLayout"),
 );
@@ -98,6 +101,9 @@ const CsmEngagementsPage = lazy(
 );
 const CsmTimeCardsPage = lazy(
   () => import("@features/csm-timecards/pages/CsmTimeCardsPage"),
+);
+const CsmAnnouncementsPage = lazy(
+  () => import("@features/csm-announcements/pages/CsmAnnouncementsPage"),
 );
 
 /**
@@ -273,6 +279,10 @@ export default function App(): JSX.Element {
                     element={<CsmCaseDetailPage />}
                   />
                   <Route
+                    path="operations/change-requests/new"
+                    element={<CreateChangeRequestPage />}
+                  />
+                  <Route
                     path="operations/change-requests/:id"
                     element={<CsmChangeRequestDetailPage />}
                   />
@@ -290,6 +300,7 @@ export default function App(): JSX.Element {
                     element={<ProductVulnerabilityDetailPage />}
                   />
                   <Route path="time-cards" element={<CsmTimeCardsPage />} />
+                  <Route path="announcements" element={<CsmAnnouncementsPage />} />
                 </Route>
               </Route>
 

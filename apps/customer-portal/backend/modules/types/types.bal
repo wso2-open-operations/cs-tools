@@ -26,12 +26,40 @@ public type FeatureFlags record {|
     boolean usageMetricsEnabled;
 |};
 
+# Feedback emoji chip information.
+public type FeedbackEmojiChip record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Value
+    string value;
+|};
+
+# Feedback emoji information.
+public type FeedbackEmoji record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Value
+    string value;
+    # Unselected image URL
+    string unselectedImage;
+    # Selected image URL
+    string selectedImage;
+    # Chips
+    FeedbackEmojiChip[] chips;
+|};
+
 # Metadata.
 public type MetadataResponse record {|
     # List of available time zones
     ReferenceItem[] timeZones;
     # List of available project types
     ReferenceItem[] projectTypes;
+    # List of feedback emojies
+    FeedbackEmoji[] feedbackEmojies;
     # Indicate which features are enabled
     FeatureFlags featureFlags;
 |};
@@ -853,6 +881,66 @@ public type CommentCreatePayload record {|
     string content;
     # Comment type (eg: case, change request, etc.)
     entity:CommentType 'type;
+|};
+
+# Feedback emoji summary.
+public type FeedbackEmojiSummary record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Selected image URL
+    string selectedImage;
+|};
+
+# Case feedback details.
+public type CaseFeedback record {|
+    # ID
+    entity:IdString id;
+    # Emoji summary
+    FeedbackEmojiSummary emoji;
+    # Chips
+    string[]? chips;
+    # Assessment ID
+    entity:IdString assessmentId;
+    # User who created the feedback
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Additional comment
+    string? additionalComment;
+|};
+
+# Payload for submitting case feedback.
+public type CaseFeedbackPayload record {|
+    # Emoji ID
+    string emojiId;
+    # Chip IDs
+    string[] chipIds?;
+    # Additional comment
+    string additionalComment?;
+|};
+
+# Submitted feedback details.
+public type SubmittedFeedback record {|
+    # ID
+    entity:IdString id;
+    # Assessment ID
+    entity:IdString assessmentId;
+    # Case ID
+    entity:IdString caseId;
+    # User who created the feedback
+    string createdBy;
+    # Created date and time
+    string createdOn;
+|};
+
+# Response from submitting case feedback.
+public type CaseFeedbackResponse record {|
+    # Success message
+    string message;
+    # Submitted feedback details
+    SubmittedFeedback feedback;
 |};
 
 # Payload for creating an attachment.

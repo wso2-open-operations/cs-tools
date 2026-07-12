@@ -77,7 +77,7 @@ export default function UpdateProfileSettingsPage() {
   const formik = useFormik<UpdateProfileFormValues>({
     initialValues: {
       phoneNumber: me.phoneNumber ?? "",
-      timeZone: me.timezone !== "--None--" ? me.timezone : "",
+      timeZone: me.timezone !== "--None--" ? (me.timezone ?? "") : "",
     },
     validationSchema: updatetProfileValidationSchema,
     validateOnBlur: true,

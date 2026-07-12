@@ -15,9 +15,8 @@
 // under the License.
 
 import { Suspense, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Divider, IconButton, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { useParams } from "react-router-dom";
+import { Divider, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import type { CaseDetail, Comment } from "@src/types";
@@ -29,16 +28,10 @@ import { formatDate } from "@utils/dateTime";
 
 export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
 
   return (
     <Stack gap={2}>
-      <Stack direction="row" alignItems="center" gap={1}>
-        <IconButton onClick={() => navigate(-1)} size="small" aria-label="Go back">
-          <ArrowLeft size={pxToRem(20)} />
-        </IconButton>
-        <Typography variant="h6">Case Details</Typography>
-      </Stack>
+      <Typography variant="h6">Case Details</Typography>
 
       <CaseDetailErrorBoundary>
         <Suspense fallback={<CaseDetailSkeleton />}>

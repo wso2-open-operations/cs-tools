@@ -28,6 +28,10 @@ interface TokenPayload {
   groups?: string[];
   given_name?: string;
   family_name?: string;
+  // Either OIDC claim may carry the profile picture URL depending on the IdP — same fallback the
+  // webapp uses (apps/csm-portal/webapp/src/utils/userClaims.ts).
+  picture?: string;
+  profile?: string;
 }
 
 // These would be your actual token storage functions
@@ -38,11 +42,6 @@ export const setIdToken = (token: string): void => localStorage.setItem(LocalSto
 
 // Refresh early rather than right at expiry, to cover in-flight request latency.
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
-
-// apiClient calls refreshToken() on every request; without this check that means a native-bridge
-// round trip (plus a full user-store re-init) per request even when the current token is still
-// valid for a while. Treat undecodable/expired-soon tokens as needing refresh, same as a missing
-// token, so this fails toward refreshing rather than toward silently reusing a stale token.
 function isTokenExpiringSoon(token: string | null): boolean {
   if (!token) return true;
   try {
@@ -53,18 +52,12 @@ function isTokenExpiringSoon(token: string | null): boolean {
     return true;
   }
 }
-
-/**
- * A function to refresh the token.
- * This is a simplified version of the logic in the original `handleRequestWithNewToken`.
- * Skips the native-bridge round trip when the current ID token is still valid for a while,
- * and only fetches a new token and updates storage when it's missing or near-expiry.
- * @param force - Bypasses the expiry check, e.g. after a 401 proves the current token is
- * already rejected by the backend, regardless of what its own `exp` claim says.
- */
 export const refreshToken = (force = false): Promise<string> => {
   const currentIdToken = getIdToken();
   if (!force && !isTokenExpiringSoon(currentIdToken)) {
+    if (!useUserStore.getState().user) {
+      decodeTokenAndStoreUser();
+    }
     return Promise.resolve(currentIdToken as string);
   }
 
@@ -143,6 +136,7 @@ export const decodeTokenAndStoreUser = (): User | null => {
     const user: User = {
       email: decoded.email || "",
       name: `${decoded.given_name || ""} ${decoded.family_name || ""}`,
+      avatarUrl: decoded.picture || decoded.profile,
     };
 
     useUserStore.getState().setUser(user);

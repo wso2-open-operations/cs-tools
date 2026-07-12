@@ -15,10 +15,8 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Chip,
-  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -32,6 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { Link as RouterLink } from "react-router";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects";
 import type { SearchProjectsRequest } from "@features/csm-projects/types/csmProjects";
@@ -44,7 +43,13 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
 function formatDate(value?: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
+  return Number.isNaN(d.getTime())
+    ? value
+    : d.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
 }
 
 function formatSubscriptionType(value: string): string {
@@ -97,17 +102,11 @@ export default function CsmProjectsPage(): JSX.Element {
         sx={{ maxWidth: 480 }}
       />
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load projects: {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Name</TableCell>
                 <TableCell>Project key</TableCell>
                 <TableCell>Subscription</TableCell>
@@ -116,16 +115,25 @@ export default function CsmProjectsPage(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                [0, 1, 2, 3, 4, 5].map((i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    <QueryErrorState
+                      message={`Failed to load projects: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : projects.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
@@ -179,13 +187,7 @@ export default function CsmProjectsPage(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

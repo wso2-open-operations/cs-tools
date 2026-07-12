@@ -76,6 +76,15 @@ type ForbiddenError struct {
 // Error implements the error interface.
 func (e *ForbiddenError) Error() string { return e.Msg }
 
+// ConflictError signals that the request conflicts with the current state of
+// the resource and should be reported as HTTP 409.
+type ConflictError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *ConflictError) Error() string { return e.Msg }
+
 // WriteJSON writes an ErrorResponse JSON body with the given HTTP status code.
 func WriteJSON(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")

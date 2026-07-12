@@ -134,6 +134,22 @@ func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// SearchCaseActivities handles POST /cases/{id}/activities/search.
+func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchCaseActivitiesRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = r.PathValue("id")
+	resp, err := h.svc.SearchCaseActivities(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // SearchCases handles POST /cases/search.
 func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchCasesRequest

@@ -25,10 +25,11 @@ import {
   MenuItem,
   Select,
   Skeleton,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Phone, Plus, RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import type { BeCallRequestView, BeCallRequestStateKey } from "@api/backend/types";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import {
@@ -39,9 +40,14 @@ import {
 import {
   ALL_CALL_REQUEST_STATES,
   CALL_REQUEST_STATE_LABEL,
+  type CallRequestAgentAction,
+  resolveCallRequestStateKey,
 } from "@features/csm-cases/utils/callRequestState";
 import { CreateCallRequestDialog } from "./CreateCallRequestDialog";
-import { UpdateCallRequestDialog } from "./UpdateCallRequestDialog";
+import { ScheduleCallDialog } from "./ScheduleCallDialog";
+import { RejectCallDialog } from "./RejectCallDialog";
+import { SendCallNotesDialog } from "./SendCallNotesDialog";
+import { CancelCallDialog } from "./CancelCallDialog";
 import { CallRequestRow } from "./CallRequestRow";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +58,16 @@ interface CallRequestsWidgetProps {
   caseId: string;
   /** Case severity (S0-S4) — passed to the create dialog to enforce the lead-time rule. */
   severity?: Severity;
+  /** True to pop the "Create call request" dialog from outside the widget
+   * (e.g. the case action bar's "Request a call" item). One-shot: the
+   * widget calls `onAutoOpenCreateHandled` once it has acted on it, so the
+   * caller can drop it back to false — otherwise every remount of this
+   * widget (e.g. just clicking back onto the tab) would reopen the dialog. */
+  autoOpenCreate?: boolean;
+  onAutoOpenCreateHandled?: () => void;
+  /** True when the parent case is closed — call requests stay visible but
+   * become read-only: no new requests, no updates to existing ones. */
+  isClosed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,25 +77,47 @@ interface CallRequestsWidgetProps {
 export function CallRequestsWidget({
   caseId,
   severity,
+  autoOpenCreate,
+  onAutoOpenCreateHandled,
+  isClosed,
 }: CallRequestsWidgetProps): JSX.Element {
-  const { data, isLoading, isError, refetch } = useGetCsmCaseCallRequests(caseId);
+  // State filter — empty string means "all". Filtering happens server-side
+  // via `filters.states` on the search request.
+  const [stateFilter, setStateFilter] = useState<BeCallRequestStateKey | "">("");
+  const activeStates = stateFilter ? [stateFilter] : undefined;
+
+  const { data, isLoading, isError, refetch } = useGetCsmCaseCallRequests(
+    caseId,
+    activeStates,
+  );
   const postCallRequest = usePostCsmCaseCallRequest();
   const patchCallRequest = usePatchCsmCaseCallRequest();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const [updateTarget, setUpdateTarget] = useState<BeCallRequestView | null>(null);
-  const [updateError, setUpdateError] = useState<string | null>(null);
+  useEffect(() => {
+    if (autoOpenCreate) {
+      if (!isClosed) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the dialog open to an external one-shot trigger from the case action bar
+        setCreateOpen(true);
+      }
+      onAutoOpenCreateHandled?.();
+    }
+  }, [autoOpenCreate, isClosed, onAutoOpenCreateHandled]);
 
-  // State filter — empty string means "all".
-  const [stateFilter, setStateFilter] = useState<BeCallRequestStateKey | "">("");
+  // Dialog targets — only one dialog is ever open at a time, driven by which
+  // action was clicked on a row.
+  const [scheduleTarget, setScheduleTarget] = useState<BeCallRequestView | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<BeCallRequestView | null>(null);
+  const [notesTarget, setNotesTarget] = useState<BeCallRequestView | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<BeCallRequestView | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const filteredRequests = stateFilter
-    ? (data ?? []).filter(
-        (cr) => String(cr.state?.id) === stateFilter,
-      )
-    : (data ?? []);
+  const isReschedule =
+    resolveCallRequestStateKey(scheduleTarget?.state) === "scheduled";
+
+  const requests = data ?? [];
 
   const handleCreate = async (
     reason: string,
@@ -97,25 +135,109 @@ export function CallRequestsWidget({
     }
   };
 
-  const handleUpdateState = async (
-    newState: BeCallRequestStateKey,
-    cancellationReason?: string,
-  ) => {
-    if (!updateTarget) return;
-    setUpdateError(null);
+  const handleAction = (action: CallRequestAgentAction, cr: BeCallRequestView) => {
+    setActionError(null);
+    switch (action) {
+      case "schedule":
+      case "reschedule":
+        setScheduleTarget(cr);
+        break;
+      case "reject":
+        setRejectTarget(cr);
+        break;
+      case "sendNotes":
+        setNotesTarget(cr);
+        break;
+      case "cancel":
+        setCancelTarget(cr);
+        break;
+    }
+  };
+
+  const handleSchedule = async (input: {
+    meetingDate: string;
+    durationInMinutes: number;
+    assignee?: string;
+  }) => {
+    if (!scheduleTarget) return;
+    setActionError(null);
     try {
       await patchCallRequest.mutateAsync({
         caseId,
-        callRequestId: updateTarget.id,
+        callRequestId: scheduleTarget.id,
+        patch: { state: "scheduled", ...input },
+      });
+      setScheduleTarget(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Could not schedule the call.",
+      );
+    }
+  };
+
+  const handleReject = async (reason?: string) => {
+    if (!rejectTarget) return;
+    setActionError(null);
+    try {
+      await patchCallRequest.mutateAsync({
+        caseId,
+        callRequestId: rejectTarget.id,
         patch: {
-          state: newState,
-          ...(cancellationReason ? { cancellationReason } : {}),
+          state: "wso2_rejected",
+          ...(reason ? { cancellationReason: reason } : {}),
         },
       });
-      setUpdateTarget(null);
+      setRejectTarget(null);
     } catch (err) {
-      setUpdateError(
-        err instanceof Error ? err.message : "Could not update the call request.",
+      setActionError(
+        err instanceof Error ? err.message : "Could not reject the call request.",
+      );
+    }
+  };
+
+  const handleSendNotes = async (input: {
+    notes: string;
+    plan?: string;
+    attendees?: string;
+    actionItems?: string;
+    actualDuration?: number;
+  }) => {
+    if (!notesTarget) return;
+    setActionError(null);
+    try {
+      const { actualDuration, ...rest } = input;
+      await patchCallRequest.mutateAsync({
+        caseId,
+        callRequestId: notesTarget.id,
+        patch: {
+          state: "concluded",
+          ...rest,
+          ...(actualDuration !== undefined
+            ? { actualDurationMin: actualDuration }
+            : {}),
+        },
+      });
+      setNotesTarget(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Could not send the call notes.",
+      );
+    }
+  };
+
+  const handleCancel = async (cancellationReason: string) => {
+    if (!cancelTarget) return;
+    setActionError(null);
+    try {
+      await patchCallRequest.mutateAsync({
+        caseId,
+        callRequestId: cancelTarget.id,
+        patch: { state: "canceled", cancellationReason },
+      });
+      setCancelTarget(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Could not cancel the call request.",
       );
     }
   };
@@ -140,7 +262,7 @@ export function CallRequestsWidget({
               <Chip
                 size="small"
                 variant="outlined"
-                label={`${data?.length ?? 0} total`}
+                label={`${requests.length} ${stateFilter ? "matching" : "total"}`}
               />
             )}
           </Box>
@@ -165,15 +287,20 @@ export function CallRequestsWidget({
                 ))}
               </Select>
             </FormControl>
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} />}
-              onClick={() => setCreateOpen(true)}
-              sx={{ textTransform: "none" }}
-            >
-              Request a call
-            </Button>
+            <Tooltip title={isClosed ? "This case is closed — it's read-only." : ""}>
+              <span>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<Plus size={14} />}
+                  onClick={() => setCreateOpen(true)}
+                  disabled={isClosed}
+                  sx={{ textTransform: "none" }}
+                >
+                  Create call request
+                </Button>
+              </span>
+            </Tooltip>
           </Box>
         </Box>
 
@@ -181,7 +308,7 @@ export function CallRequestsWidget({
         {isLoading && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             {[0, 1, 2].map((i) => (
-              <Skeleton key={i} variant="rectangular" height={64} />
+              <Skeleton key={i} variant="rounded" height={64} />
             ))}
           </Box>
         )}
@@ -211,7 +338,7 @@ export function CallRequestsWidget({
           </Box>
         )}
 
-        {!isLoading && !isError && filteredRequests.length === 0 && (
+        {!isLoading && !isError && requests.length === 0 && (
           <Box sx={{ py: 3, textAlign: "center" }}>
             <Typography variant="body2" color="text.secondary">
               {stateFilter
@@ -221,13 +348,14 @@ export function CallRequestsWidget({
           </Box>
         )}
 
-        {!isLoading && !isError && filteredRequests.length > 0 && (
+        {!isLoading && !isError && requests.length > 0 && (
           <Box sx={{ display: "flex", flexDirection: "column" }}>
-            {filteredRequests.map((cr) => (
+            {requests.map((cr) => (
               <CallRequestRow
                 key={cr.id}
                 cr={cr}
-                onUpdateState={setUpdateTarget}
+                onAction={handleAction}
+                isClosed={isClosed}
               />
             ))}
           </Box>
@@ -248,17 +376,49 @@ export function CallRequestsWidget({
         }
       />
 
-      <UpdateCallRequestDialog
-        callRequest={updateTarget}
+      <ScheduleCallDialog
+        callRequest={scheduleTarget}
+        isReschedule={!!isReschedule}
         submitting={patchCallRequest.isPending}
-        error={updateError}
+        error={actionError}
         onClose={() => {
-          setUpdateTarget(null);
-          setUpdateError(null);
+          setScheduleTarget(null);
+          setActionError(null);
         }}
-        onSubmit={(newState, cancellationReason) =>
-          void handleUpdateState(newState, cancellationReason)
-        }
+        onSubmit={(input) => void handleSchedule(input)}
+      />
+
+      <RejectCallDialog
+        callRequest={rejectTarget}
+        submitting={patchCallRequest.isPending}
+        error={actionError}
+        onClose={() => {
+          setRejectTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={(reason) => void handleReject(reason)}
+      />
+
+      <SendCallNotesDialog
+        callRequest={notesTarget}
+        submitting={patchCallRequest.isPending}
+        error={actionError}
+        onClose={() => {
+          setNotesTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={(input) => void handleSendNotes(input)}
+      />
+
+      <CancelCallDialog
+        callRequest={cancelTarget}
+        submitting={patchCallRequest.isPending}
+        error={actionError}
+        onClose={() => {
+          setCancelTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={(reason) => void handleCancel(reason)}
       />
     </>
   );

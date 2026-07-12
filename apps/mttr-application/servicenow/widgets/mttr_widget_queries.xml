@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: MTTR for Queries                                          -->
+    <!-- UI Page Name: mttr_widget_queries                                 -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_query_mttr">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var result = api.getOverallByType();
+            result ? result.query : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-kpi-queries {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #a8e6a3;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-kpi-queries .header {
+            background: #a8e6a3;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-kpi-queries .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #43A047;
+            text-align: center;
+            padding: 24px 16px;
+        }
+        @media (max-width: 768px) {
+            .mttr-kpi-queries .header { font-size: 12px; padding: 8px 12px; }
+            .mttr-kpi-queries .value  { font-size: 22px; padding: 16px 12px; }
+        }
+        @media (max-width: 480px) {
+            .mttr-kpi-queries .header { font-size: 11px; padding: 6px 10px; }
+            .mttr-kpi-queries .value  { font-size: 18px; padding: 12px 10px; }
+        }
+    </style>
+
+    <div class="mttr-kpi-queries">
+        <div class="header">MTTR for Queries - Last 12 Months</div>
+        <div class="value">${jvar_query_mttr}</div>
+    </div>
+
+</j:jelly>

@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -30,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+
 import { BackendApiError } from "@api/backend/client";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import {
@@ -48,6 +47,8 @@ import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useSearchCatalogs } from "@features/csm-operations/api/useSearchCatalogs";
 import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalogItemVariables";
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
+import { useNavTransition } from "@hooks/useNavTransition";
+import QueryErrorState from "@components/QueryErrorState";
 import {
   encodeVariableValue,
   getFirstEmptyRequiredField,
@@ -56,7 +57,7 @@ import {
 } from "@features/csm-operations/utils/catalogVariables";
 
 export default function CreateServiceRequestPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const { showError } = useErrorBanner();
 
   const [projectId, setProjectId] = useState("");
@@ -280,6 +281,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText>Select a project first</FormHelperText>
               ) : deployments.isLoading ? (
                 <FormHelperText>Loading deployments…</FormHelperText>
+              ) : (deployments.data ?? []).length === 0 ? (
+                <FormHelperText>No deployments found for this project.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -304,6 +307,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText>Select a deployment first</FormHelperText>
               ) : deployedProducts.isLoading ? (
                 <FormHelperText>Loading products…</FormHelperText>
+              ) : (deployedProducts.data ?? []).length === 0 ? (
+                <FormHelperText>No deployed products found for this deployment.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -354,6 +359,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
               </Select>
               {!catalogId ? (
                 <FormHelperText>Select a catalog first</FormHelperText>
+              ) : catalogItems.length === 0 ? (
+                <FormHelperText>No items found in this catalog.</FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -369,20 +376,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
                   </Typography>
                 </Box>
               ) : variables.isError ? (
-                <Alert
-                  severity="error"
-                  action={
-                    <Button
-                      color="inherit"
-                      size="small"
-                      onClick={() => void variables.refetch()}
-                    >
-                      Retry
-                    </Button>
-                  }
-                >
-                  Could not load the request form for this catalog item.
-                </Alert>
+                <QueryErrorState
+                  message={`Could not load the request form for this catalog item: ${variables.error instanceof Error ? variables.error.message : "unknown error"}`}
+                  error={variables.error}
+                />
               ) : renderableVars.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
                   This catalog item has no additional fields.

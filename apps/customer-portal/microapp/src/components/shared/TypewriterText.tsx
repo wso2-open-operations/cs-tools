@@ -1,4 +1,4 @@
-import { Box, colors, useTheme } from "@wso2/oxygen-ui";
+import { Box, colors } from "@wso2/oxygen-ui";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -11,7 +11,6 @@ interface TypewriterProps {
 }
 
 export function TypewriterText({ tokens, pending = false, animated = true, onAnimationComplete }: TypewriterProps) {
-  const theme = useTheme();
   const fullText = tokens.join("");
   const [cursor, setCursor] = useState(0);
   const hasCompletedRef = useRef(false);
@@ -44,6 +43,7 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           table: ({ node, ...props }) => (
             <div style={{ overflowX: "auto", marginTop: 10 }}>
               <table
@@ -56,7 +56,9 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
               />
             </div>
           ),
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           th: ({ node, ...props }) => <th style={{ border: `1px solid ${colors.grey[500]}` }} {...props} />,
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           td: ({ node, ...props }) => (
             <td style={{ padding: 5, border: `1px solid ${colors.grey[500]}`, maxWidth: 500 }} {...props} />
           ),

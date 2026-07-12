@@ -18,12 +18,20 @@ import { useLayoutEffect } from "react";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
 import MainLayout from "@components/layout/MainLayout";
 import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
+import { refreshToken } from "@src/services/auth";
+import { Logger } from "@utils/logger";
+import HomePage from "@pages/HomePage";
 import SupportPage from "@pages/SupportPage";
 import CaseDetailPage from "@pages/CaseDetailPage";
 import AllCasesPage from "@pages/AllCasesPage";
 import NewCasePage from "@pages/NewCasePage";
-import ProfilePage from "@pages/ProfilePage";
+import OperationsPage from "@pages/OperationsPage";
+import MorePage from "@pages/MorePage";
 import TimeCardsPage from "@pages/TimeCardsPage";
+import SecurityCenterPage from "@pages/SecurityCenterPage";
+import UpdatesPage from "@pages/UpdatesPage";
+import EngagementsPage from "@pages/EngagementsPage";
+import ProfilePage from "@pages/ProfilePage";
 
 export default function App() {
   useLayoutEffect(() => {
@@ -37,17 +45,31 @@ export default function App() {
       root.style.setProperty("--safe-bottom", `${bottom}px`);
       root.style.setProperty("--safe-left", `${left}px`);
     });
+
+    // Eagerly authenticate on launch so the user's name/avatar (shown in the TopBar on every
+    // page) is populated regardless of which page loads first — several pages (Home, Operations,
+    // More) don't make any API call themselves, and the user store was otherwise only ever
+    // populated as a side effect of apiClient's request interceptor refreshing the token.
+    refreshToken().catch((error) => {
+      Logger.warn("Failed to eagerly authenticate on launch", error);
+    });
   }, []);
 
   return (
     <Router>
       <Routes>
         <Route element={<MainLayout />}>
-          <Route path="/" element={<SupportPage />} />
+          <Route path="/" element={<HomePage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route path="/support/:type/all" element={<AllCasesPage />} />
           <Route path="/cases/new" element={<NewCasePage />} />
           <Route path="/cases/:id" element={<CaseDetailPage />} />
-          <Route path="/time-cards" element={<TimeCardsPage />} />
+          <Route path="/operations" element={<OperationsPage />} />
+          <Route path="/more" element={<MorePage />} />
+          <Route path="/more/time-cards" element={<TimeCardsPage />} />
+          <Route path="/more/security-center" element={<SecurityCenterPage />} />
+          <Route path="/more/updates" element={<UpdatesPage />} />
+          <Route path="/more/engagements" element={<EngagementsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>

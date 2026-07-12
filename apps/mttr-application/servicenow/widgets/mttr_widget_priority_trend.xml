@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: MTTR Trend for Incidents Based on Issue Priority           -->
+    <!-- UI Page Name: mttr_widget_priority_trend                          -->
+    <!-- Line chart: monthly MTTR per priority (P1/P2/P3/P4)              -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_priority_trend">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getMonthlyTrendPriority();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-priority {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #d5c8f0;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-priority .header {
+            background: #d5c8f0;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-priority .body { padding: 16px; }
+        .mttr-chart-priority .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-priority">
+        <div class="header">MTTR Trend for Incidents Based on Issue Priority - Last 12 Months</div>
+        <div class="body">
+            <div id="chart_priority_trend" style="width:100%;"></div>
+        </div>
+        <div class="footer">Group by Priority</div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_priority_trend" style="display:none">${jvar_priority_trend}</textarea>
+
+    <script type="text/javascript">
+    // IIFE scope-guard — see mttr_widget_team_casetype.xml for full
+    // rationale (sibling widgets declare _scheduleRedraw / drawChart /
+    // noData at top level; the wrap keeps them per-widget-scoped).
+    (function () {
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawChart, 100); });
+
+        var _rtimer = null;
+        function _scheduleRedraw() {
+            if (_rtimer) clearTimeout(_rtimer);
+            _rtimer = setTimeout(drawChart, 150);
+        }
+        // Idempotent listener setup — see mttr_widget_hist_inc_priority.xml
+        // for the rationale (SN re-renders re-run this script; naive
+        // addEventListener leaks a handler on every mount).
+        if (window.__mttrPriorityTrendState) {
+            window.removeEventListener('resize', window.__mttrPriorityTrendState.resizeHandler);
+            if (window.__mttrPriorityTrendState.observer) {
+                window.__mttrPriorityTrendState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedraw);
+        var _obsPriorityTrend = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsPriorityTrend = new ResizeObserver(_scheduleRedraw);
+            _obsPriorityTrend.observe(document.getElementById('chart_priority_trend'));
+        }
+        window.__mttrPriorityTrendState = { resizeHandler: _scheduleRedraw, observer: _obsPriorityTrend };
+
+        var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun',
+                           'Jul','Aug','Sep','Oct','Nov','Dec'];
+        var PRIORITY_COLORS = { 'P1':'#00bcd4', 'P2':'#ff5722', 'P3':'#9c27b0', 'P4':'#4caf50' };
+
+        function formatMonth(ym) {
+            var parts = ym.split('-');
+            var mi = parseInt(parts[1], 10) - 1;
+            return MONTH_NAMES[mi] + '/' + parts[0];
+        }
+
+        function drawChart() {
+            try {
+                var _el = document.getElementById('chart_priority_trend');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(250, Math.round(_w * 0.55)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_priority_trend').value;
+                if (!raw || raw === 'null' || raw === '[]') { noData(); return; }
+                var trendData = JSON.parse(raw);
+                if (!trendData || trendData.length === 0) { noData(); return; }
+
+                var prioritySet = {};
+                for (var i = 0; trendData.length > i; i++) {
+                    for (var key in trendData[i]) {
+                        if (key !== 'month') {
+                            if (key.indexOf('_display') === -1) prioritySet[key] = true;
+                        }
+                    }
+                }
+                var priorities = Object.keys(prioritySet).sort();
+
+                var header = ['Month'];
+                var colors = [];
+                for (var p = 0; priorities.length > p; p++) {
+                    header.push(priorities[p]);
+                    colors.push(PRIORITY_COLORS[priorities[p]] || '#999');
+                }
+
+                var rows = [header];
+                for (var m = 0; trendData.length > m; m++) {
+                    var row = [formatMonth(trendData[m].month)];
+                    for (var pr = 0; priorities.length > pr; pr++) {
+                        var hrs = trendData[m][priorities[pr]] || 0;
+                        row.push(Math.round((hrs / 24) * 10) / 10);
+                    }
+                    rows.push(row);
+                }
+
+                var data = google.visualization.arrayToDataTable(rows);
+                for (var fm = 0; trendData.length > fm; fm++) {
+                    for (var fp = 0; priorities.length > fp; fp++) {
+                        data.setFormattedValue(fm, fp + 1, trendData[fm][priorities[fp] + '_display'] || '');
+                    }
+                }
+                var chart = new google.visualization.LineChart(
+                    document.getElementById('chart_priority_trend'));
+                chart.draw(data, {
+                    chartArea: { width: '80%', height: '70%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+                    colors: colors,
+                    backgroundColor: 'transparent',
+                    curveType: 'function',
+                    vAxis: {
+                        title: 'Average Business Duration (Days)',
+                        format: '#.#',
+                        textStyle: { fontSize: 10 },
+                        viewWindow: { min: 0 }
+                    },
+                    hAxis: { textStyle: { fontSize: 10 }, slantedText: true },
+                    tooltip: { textStyle: { fontSize: 11 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_priority_trend error:', e);
+                noData();
+            }
+        }
+
+        function noData() {
+            // DOM-API placeholder — see mttr_widget_team_trend.xml for
+            // the full rationale (escaped-entity innerHTML rendered as
+            // literal text; createElement produces a real p node).
+            var container = document.getElementById('chart_priority_trend');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No data available';
+            container.appendChild(p);
+        }
+    })();
+    </script>
+
+</j:jelly>

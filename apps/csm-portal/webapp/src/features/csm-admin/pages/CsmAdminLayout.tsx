@@ -16,8 +16,9 @@
 
 import { Box, Chip, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { type JSX, Suspense } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router";
+import { Outlet, useLocation } from "react-router";
 import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 interface AdminTab {
   id: string;
@@ -44,7 +45,7 @@ function pickActiveTab(pathname: string): string {
 
 export default function CsmAdminLayout(): JSX.Element {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const active = pickActiveTab(location.pathname);
 
   return (

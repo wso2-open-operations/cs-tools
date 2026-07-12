@@ -48,10 +48,48 @@ export const CALL_REQUEST_STATE_COLOR: Record<
 };
 
 /**
+ * Integer choice keys the backing data source may return for `state.id`,
+ * mapped to our enum keys. The data source passes its native state through
+ * untranslated, so `state.id` can be an integer (e.g. 3) rather than a string
+ * key (e.g. "scheduled").
+ */
+const NUMERIC_STATE_KEY: Record<string, BeCallRequestStateKey> = {
+  "1": "pending_on_customer",
+  "2": "pending_on_wso2",
+  "3": "scheduled",
+  "4": "customer_rejected",
+  "5": "wso2_rejected",
+  "6": "canceled",
+  "7": "notes_pending",
+  "8": "concluded",
+};
+
+/**
+ * Resolve a backend call-request state to one of our enum keys from `state.id`,
+ * which arrives either as our string enum key or as the data source's integer
+ * choice key. Returns null otherwise, so callers must handle the null case
+ * (never index a lookup with the raw id).
+ *
+ * `state.label` is intentionally NOT used for key resolution: the FE label table
+ * (`CALL_REQUEST_STATE_LABEL`) is worded independently of the data source's
+ * labels (e.g. our `customer_rejected` -> "Rejected by customer" vs the source's
+ * "Customer Rejected"), so a reverse label lookup would resolve only some states
+ * and silently miss others. The label is display-only (see `callRequestStateLabel`).
+ * In practice the backend always sends a usable `state.id`.
+ */
+export function resolveCallRequestStateKey(
+  state: { id: number | string; label?: string } | undefined,
+): BeCallRequestStateKey | null {
+  if (!state) return null;
+  const raw = String(state.id);
+  if (raw in CALL_REQUEST_STATE_LABEL) return raw as BeCallRequestStateKey;
+  if (raw in NUMERIC_STATE_KEY) return NUMERIC_STATE_KEY[raw];
+  return null;
+}
+
+/**
  * Resolve the display label for a call request state returned by the backend.
- * The backend may return `state.label` directly; fall back to our own label map
- * using the id cast to a string key when `label` is absent or when the id is a
- * known enum key.
+ * Prefers the backend-supplied `label`, else maps the id (string or integer).
  */
 export function callRequestStateLabel(state: {
   id: number | string;
@@ -59,9 +97,8 @@ export function callRequestStateLabel(state: {
 } | undefined): string {
   if (!state) return "Unknown";
   if (state.label) return state.label;
-  // id may be the string key or an opaque integer — map what we can.
-  const key = String(state.id) as BeCallRequestStateKey;
-  return CALL_REQUEST_STATE_LABEL[key] ?? String(state.id);
+  const key = resolveCallRequestStateKey(state);
+  return key ? CALL_REQUEST_STATE_LABEL[key] : String(state.id);
 }
 
 /**
@@ -71,9 +108,8 @@ export function callRequestStateLabel(state: {
 export function callRequestStateColor(
   state: { id: number | string; label?: string } | undefined,
 ): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
-  if (!state) return "default";
-  const key = String(state.id) as BeCallRequestStateKey;
-  return CALL_REQUEST_STATE_COLOR[key] ?? "default";
+  const key = resolveCallRequestStateKey(state);
+  return key ? CALL_REQUEST_STATE_COLOR[key] : "default";
 }
 
 /** All 8 state keys, used to drive filter dropdowns. */
@@ -89,30 +125,34 @@ export const ALL_CALL_REQUEST_STATES: BeCallRequestStateKey[] = [
 ];
 
 /**
- * State transitions available to a CS engineer from a given current state.
- * This is deliberately conservative: only transitions that make operational
- * sense are exposed; the full graph is owned by the backend and may accept more.
+ * Agent-facing actions available on a call request, keyed by its current
+ * state. This mirrors exactly what the backend can fulfil today (see the
+ * cross-layer contract) -- do not add an action here unless there is a
+ * corresponding backend endpoint, otherwise the UI offers a transition that
+ * fails on submit.
  *
- * From pending states: can schedule, reject (wso2), or cancel.
- * From scheduled: can conclude, move to notes_pending, or cancel.
- * From notes_pending: can conclude or cancel.
- * Terminal states (customer_rejected, wso2_rejected, canceled, concluded): no transitions.
+ * - `pending_on_wso2`: agent can schedule the call or reject it.
+ * - `scheduled`: agent can reschedule or cancel. Sending notes from this
+ *   state is normally gated by the backend's post-due automation moving the
+ *   request to `notes_pending` first; it is not offered here.
+ * - `notes_pending`: agent can send call notes (concludes the request).
+ * - `pending_on_customer`: the customer owns scheduling/rejecting; the agent
+ *   can only cancel on their behalf.
+ * - Terminal states (`customer_rejected`, `wso2_rejected`, `canceled`,
+ *   `concluded`): no actions.
  */
-export const CALL_REQUEST_TRANSITIONS: Record<
+export type CallRequestAgentAction = "schedule" | "reschedule" | "reject" | "sendNotes" | "cancel";
+
+export const CALL_REQUEST_AGENT_ACTIONS: Record<
   BeCallRequestStateKey,
-  BeCallRequestStateKey[]
+  CallRequestAgentAction[]
 > = {
-  pending_on_customer: ["pending_on_wso2", "scheduled", "wso2_rejected", "canceled"],
-  pending_on_wso2: ["pending_on_customer", "scheduled", "wso2_rejected", "canceled"],
-  scheduled: ["notes_pending", "concluded", "canceled"],
+  pending_on_customer: ["cancel"],
+  pending_on_wso2: ["schedule", "reject"],
+  scheduled: ["reschedule", "cancel"],
   customer_rejected: [],
   wso2_rejected: [],
   canceled: [],
-  notes_pending: ["concluded", "canceled"],
+  notes_pending: ["sendNotes"],
   concluded: [],
 };
-
-/** Returns true for states where a cancellation reason is required. */
-export function requiresCancellationReason(state: BeCallRequestStateKey): boolean {
-  return state === "canceled";
-}

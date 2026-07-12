@@ -15,8 +15,10 @@
 // under the License.
 
 import {
+  AdapterDateFns,
   Box,
   Button,
+  DatePickers,
   Dialog,
   DialogActions,
   DialogContent,
@@ -28,10 +30,26 @@ import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import {
+  formatDateTimeLocal,
+  parseDateTimeLocal,
   resolveDisplayTimeZone,
   utcMsToZonedInputValue,
   zonedInputToUtcIso,
 } from "@utils/dateTime";
+
+const { DateTimePicker, LocalizationProvider } = DatePickers;
+
+/** Formats a UTC epoch-ms instant as "Jan 23, 2026, 10:14 PM UTC" for the slot preview hint. */
+function formatUtcHint(ms: number): string {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(ms));
+}
 
 // ---------------------------------------------------------------------------
 // Constants — mirror the backend's call-request contract so we fail in the
@@ -109,8 +127,7 @@ function slotStatus(
       error: `Must be at least ${formatLeadTime(leadMinutes)} from now for this case severity.`,
     };
   }
-  const utc = new Date(ms).toISOString().slice(0, 16).replace("T", " ");
-  return { hint: `= ${utc} UTC` };
+  return { hint: `= ${formatUtcHint(ms)} UTC` };
 }
 
 /** Filled slots mapped to future (>= lead time), de-duplicated UTC ISO instants. */
@@ -220,7 +237,7 @@ export function CreateCallRequestDialog({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Request a call</DialogTitle>
+      <DialogTitle>Create a call request</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           {error && (
@@ -228,6 +245,10 @@ export function CreateCallRequestDialog({
               {error}
             </Typography>
           )}
+          <Typography variant="body2" color="text.secondary">
+            Creates a call request on behalf of the customer on this case,
+            ready for an agent to schedule.
+          </Typography>
           <TextField
             label="Reason for the call"
             multiline
@@ -257,38 +278,52 @@ export function CreateCallRequestDialog({
               UTC. Each must be at least {formatLeadTime(leadMinutes)} from now.
               Add up to {MAX_TIME_SLOTS} options.
             </Typography>
-            {timeslots.map((slot, i) => {
-              const status = slotStatus(slot, timeZone, minAllowedMs, leadMinutes);
-              return (
-                <Box
-                  key={i}
-                  sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}
-                >
-                  <TextField
-                    type="datetime-local"
-                    value={slot}
-                    onChange={(e) => updateTimeslot(i, e.target.value)}
-                    fullWidth
-                    disabled={submitting}
-                    size="small"
-                    error={Boolean(status.error)}
-                    helperText={status.error ?? status.hint ?? " "}
-                    inputProps={{ min: minLocal }}
-                  />
-                  {timeslots.length > 1 && (
-                    <Button
-                      size="small"
-                      color="inherit"
-                      onClick={() => removeTimeslot(i)}
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              {timeslots.map((slot, i) => {
+                const status = slotStatus(slot, timeZone, minAllowedMs, leadMinutes);
+                return (
+                  <Box
+                    key={i}
+                    sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}
+                  >
+                    <DateTimePicker
+                      value={parseDateTimeLocal(slot)}
+                      onChange={(next) =>
+                        updateTimeslot(
+                          i,
+                          next instanceof Date && !Number.isNaN(next.getTime())
+                            ? formatDateTimeLocal(next)
+                            : "",
+                        )
+                      }
+                      minDateTime={parseDateTimeLocal(minLocal) ?? undefined}
                       disabled={submitting}
-                      sx={{ minWidth: 0, px: 1, mt: 0.5 }}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </Box>
-              );
-            })}
+                      sx={{ flex: 1 }}
+                      slotProps={{
+                        textField: {
+                          fullWidth: true,
+                          size: "small",
+                          error: Boolean(status.error),
+                          helperText: status.error ?? status.hint ?? " ",
+                        },
+                        field: { clearable: true },
+                      }}
+                    />
+                    {timeslots.length > 1 && (
+                      <Button
+                        size="small"
+                        color="inherit"
+                        onClick={() => removeTimeslot(i)}
+                        disabled={submitting}
+                        sx={{ minWidth: 0, px: 1, mt: 0.5 }}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </Box>
+                );
+              })}
+            </LocalizationProvider>
             {timeslots.length < MAX_TIME_SLOTS && (
               <Button
                 size="small"

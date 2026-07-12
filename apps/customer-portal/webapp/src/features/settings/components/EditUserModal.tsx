@@ -197,7 +197,7 @@ export default function EditUserModal({
                 flexShrink: 0,
               }}
             >
-              {getInitials(contact.firstName, contact.lastName, contact.email)}
+              {getInitials(contact.firstName ?? undefined, contact.lastName, contact.email)}
             </Box>
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>

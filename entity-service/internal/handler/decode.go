@@ -24,6 +24,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -65,7 +66,14 @@ func decodeErrMsg(err error) string {
 	}
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
-		return fmt.Sprintf("invalid value for field %q: expected %s", typeErr.Field, typeErr.Type)
+		typeName := typeErr.Type.String()
+		// Strip package prefix from named types (e.g. "domain.CaseResolutionCode" → "string").
+		if typeErr.Type.Kind() == reflect.String {
+			typeName = "string"
+		} else if typeErr.Type.Kind() == reflect.Int || typeErr.Type.Kind() == reflect.Int64 {
+			typeName = "integer"
+		}
+		return fmt.Sprintf("invalid value for field %q: expected %s", typeErr.Field, typeName)
 	}
 	// DisallowUnknownFields produces "json: unknown field "<name>"".
 	msg := err.Error()
@@ -86,6 +94,7 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		sue *apierror.ServiceUnavailableError
 		ue  *apierror.UnauthorizedError
 		fe  *apierror.ForbiddenError
+		ce  *apierror.ConflictError
 	)
 	switch {
 	case errors.As(err, &ve):
@@ -107,6 +116,11 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		// 404 – resource not found; message is safe to return.
 		log.Printf("Not found: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(nfe.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusNotFound, nfe.Msg)
+
+	case errors.As(err, &ce):
+		// 409 – request conflicts with the current state of the resource; message is safe to return.
+		log.Printf("Conflict: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ce.Msg)) // #nosec G706 -- path and message sanitized
+		apierror.WriteJSON(w, http.StatusConflict, ce.Msg)
 
 	case errors.As(err, &sue):
 		// 503 – downstream dependency unavailable; log details, return generic message.

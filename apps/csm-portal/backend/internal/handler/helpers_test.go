@@ -89,6 +89,7 @@ type mockEntityCaseClient struct {
 	patchCaseFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	createCaseCommentFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
+	searchCaseActivitiesFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
 	createCaseAttachmentFn     func(ctx context.Context, body []byte) ([]byte, error)
@@ -127,6 +128,13 @@ func (m *mockEntityCaseClient) SearchComments(ctx context.Context, body []byte) 
 		return m.searchCommentsFn(ctx, body)
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchCaseActivities(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.searchCaseActivitiesFn != nil {
+		return m.searchCaseActivitiesFn(ctx, caseID, body)
+	}
+	return []byte(`{"activities":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }
 
 func (m *mockEntityCaseClient) SearchCases(ctx context.Context, body []byte) ([]byte, error) {
@@ -329,6 +337,19 @@ func (m *mockEntityProductClient) SearchProducts(ctx context.Context, body []byt
 func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, productID string, body []byte) ([]byte, error) {
 	if m.searchProductVersionsFn != nil {
 		return m.searchProductVersionsFn(ctx, productID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity incident client -----
+
+type mockEntityIncidentClient struct {
+	searchIncidentsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchIncidentsFn != nil {
+		return m.searchIncidentsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }

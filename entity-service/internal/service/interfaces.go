@@ -169,6 +169,11 @@ type CaseService interface {
 	// SearchCaseAttachments returns a paginated list of attachments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error)
+	// SearchCaseActivities returns a paginated activity feed (comments, attachments, and
+	// optionally field changes) for the case identified by req.CaseID. Field-change entries
+	// are included only when req.IncludeFieldChanges is set. A ValidationError is returned
+	// for invalid input. Supported by the ServiceNow data source only.
+	SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) (domain.SearchCaseActivitiesResponse, error)
 	// GetCaseAttachmentContent returns the raw binary content and its Content-Type
 	// for the attachment identified by attachmentID.
 	// A NotFoundError is returned if absent.
@@ -208,7 +213,9 @@ type CallRequestService interface {
 	// A ValidationError is returned for invalid input.
 	SearchCallRequests(ctx context.Context, req domain.SearchCallRequestsRequest) (domain.SearchCallRequestsResponse, error)
 	// UpdateCallRequest updates the state or other fields of a call request.
-	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
+	// The target state selects the behaviour (customer/agent transitions, scheduling,
+	// rejection, conclusion with notes). A ValidationError is returned for invalid
+	// input; a NotFoundError if no call request matches.
 	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error)
 }
 
@@ -304,4 +311,11 @@ type ProductVulnerabilityService interface {
 	// GetProductVulnerability returns the detail of a single vulnerability by its UUID.
 	// A NotFoundError is returned if the vulnerability does not exist.
 	GetProductVulnerability(ctx context.Context, id string) (domain.ProductVulnerabilityView, error)
+}
+
+// IncidentService defines the operations available on the incidents entity.
+type IncidentService interface {
+	// SearchIncidents returns a paginated list of incidents filtered by optional search query,
+	// priority keys, and parent IDs. A ValidationError is returned for invalid input.
+	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
 }

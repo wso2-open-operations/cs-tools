@@ -14,18 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, ToggleButton, ToggleButtonGroup } from "@wso2/oxygen-ui";
+import { Box, Button } from "@wso2/oxygen-ui";
 import { Upload } from "@wso2/oxygen-ui-icons-react";
 import type { ReactNode } from "react";
 import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
-import { DataSource } from "@features/project-details/types/usage";
-import {
-  USAGE_METRICS_DATA_SOURCE_API_CALL,
-  USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD,
-  USAGE_METRICS_DATA_SOURCE_LABEL,
-  USAGE_METRICS_DEPLOYMENT_TAB_PREFIX,
-} from "@features/usage-metrics/constants/usageMetricsConstants";
+import { USAGE_METRICS_DEPLOYMENT_TAB_PREFIX } from "@features/usage-metrics/constants/usageMetricsConstants";
 import { useParams } from "react-router";
 import TabBar from "@components/tab-bar/TabBar";
 import UsageEnvironmentProductsPanel from "@features/usage-metrics/components/UsageEnvironmentProductsPanel";
@@ -58,7 +52,6 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [appliedCustomStart, setAppliedCustomStart] = useState<string>("");
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
-  const [dataSource] = useState<DataSource>(DataSource.API_CALL);
 
   const dateRange = useMemo(
     () => resolveUsagePresetDateRange(timeRange),
@@ -121,31 +114,6 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     setTimeRange(UsageTimeRange.ONE_MONTH);
   };
 
-  const dataSourceToggle: ReactNode = (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
-      <Box
-        component="span"
-        sx={{ fontSize: "0.75rem", color: "text.secondary", whiteSpace: "nowrap" }}
-      >
-        {USAGE_METRICS_DATA_SOURCE_LABEL}
-      </Box>
-      <ToggleButtonGroup
-        size="small"
-        exclusive
-        value={dataSource}
-        aria-label="data source filter"
-        sx={{ pointerEvents: "none" }}
-      >
-        <ToggleButton value={DataSource.API_CALL} aria-label={USAGE_METRICS_DATA_SOURCE_API_CALL}>
-          {USAGE_METRICS_DATA_SOURCE_API_CALL}
-        </ToggleButton>
-        <ToggleButton value={DataSource.FILE_UPLOAD} aria-label={USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}>
-          {USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}
-        </ToggleButton>
-      </ToggleButtonGroup>
-    </Box>
-  );
-
   const uploadButton: ReactNode = (
     <Button
       variant="outlined"
@@ -172,12 +140,6 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
       onCancelCustom={handleCancelCustom}
       appliedCustomStart={appliedCustomStart}
       appliedCustomEnd={appliedCustomEnd}
-      rightAction={
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexShrink: 0 }}>
-          {dataSourceToggle}
-          {uploadButton}
-        </Box>
-      }
     />
   );
 
@@ -196,32 +158,43 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     >
       <Box
         sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1.5,
           width: "100%",
           maxWidth: "100%",
           minWidth: 0,
-          overflow: "hidden",
-          contain: "inline-size",
         }}
       >
         <Box
           sx={{
-            overflowX: "auto",
-            overflowY: "hidden",
-            scrollbarWidth: "none",
-            "&::-webkit-scrollbar": { display: "none" },
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            contain: "inline-size",
           }}
         >
-          <Box sx={{ width: "max-content" }}>
-            <TabBar
-              tabs={deploymentTabs}
-              activeTab={activeTab}
-              onTabChange={setInnerTab}
-              keepButtonWidth={true}
-              compact={true}
-              sx={{ mb: 0, border: "none", boxShadow: "none" }}
-            />
+          <Box
+            sx={{
+              overflowX: "auto",
+              overflowY: "hidden",
+              scrollbarWidth: "none",
+              "&::-webkit-scrollbar": { display: "none" },
+            }}
+          >
+            <Box sx={{ width: "max-content" }}>
+              <TabBar
+                tabs={deploymentTabs}
+                activeTab={activeTab}
+                onTabChange={setInnerTab}
+                keepButtonWidth={true}
+                compact={true}
+                sx={{ mb: 0, border: "none", boxShadow: "none" }}
+              />
+            </Box>
           </Box>
         </Box>
+        {uploadButton}
       </Box>
 
       <DeploymentUsageUploadDialog

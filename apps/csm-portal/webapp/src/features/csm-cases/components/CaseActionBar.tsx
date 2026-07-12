@@ -17,14 +17,9 @@
 import {
   Box,
   Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Menu,
   MenuItem,
   Tooltip,
-  Typography,
 } from "@wso2/oxygen-ui";
 import {
   AlertTriangle,
@@ -33,6 +28,7 @@ import {
   ChevronDown,
   Clock,
   Copy,
+  Gauge,
   GitBranch,
   Inbox,
   Link as LinkIcon,
@@ -41,8 +37,6 @@ import {
   Phone,
   Play,
   Send,
-  ShieldAlert,
-  TriangleAlert,
   User,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
@@ -53,25 +47,19 @@ import type {
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 
-type ActionConfirm = {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  confirmColor: "primary" | "error" | "warning";
-};
-
 /**
  * Presentation for a transition *into* a given state. The button LABEL is never
  * stored here — it always comes from `stateLabel(targetState)`, so the bar
  * honours the backend transition graph verbatim and never invents UI-specific
- * verbs. This only carries the icon/colour, the lifecycle action used for the
- * post-transition toast, and an optional confirm gate.
+ * verbs. This only carries the icon/colour and the lifecycle action used for
+ * the post-transition toast. `closed`/`solution_proposed` don't need a
+ * confirm gate here — `onAction` opens the Post Resolution Activity dialog
+ * for those, which doubles as the confirmation step.
  */
 type TargetConfig = {
   action: CaseLifecycleAction;
   color: "primary" | "success" | "warning" | "error";
   icon: JSX.Element;
-  confirm?: ActionConfirm;
 };
 
 /** A concrete button: a target state plus its presentation. */
@@ -81,17 +69,13 @@ type PrimaryButton = TargetConfig & {
   tooltip?: string;
 };
 
-const CLOSE_CONFIRM: ActionConfirm = {
-  title: "Close this case?",
-  body: "The customer receives a closure notification and the case moves to “Closed”.",
-  confirmLabel: "Close case",
-  confirmColor: "warning",
-};
-
 /**
  * Per-target-state presentation. One entry per state a case can move INTO.
- * Customer-notifying / hard-to-undo transitions carry a confirm gate so a stray
- * click in a busy queue can't silently close a case or email the customer.
+ * `closed` and `solution_proposed` dispatch immediately like every other
+ * target, but `onAction` (in CsmCaseDetailPage) opens the Post Resolution
+ * Activity dialog for those two (resolution code, cause, close notes —
+ * ISSU-026) instead of PATCHing right away — that dialog is the confirm
+ * gate for a customer-notifying transition, so no separate one is needed here.
  */
 const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
   work_in_progress: {
@@ -113,18 +97,20 @@ const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
     action: "propose_solution",
     color: "success",
     icon: <Send size={16} />,
-    confirm: {
-      title: "Propose solution to the customer?",
-      body: "The customer is notified that a solution has been proposed and the case moves to “Solution proposed”.",
-      confirmLabel: "Propose solution",
-      confirmColor: "primary",
-    },
   },
   closed: {
     action: "close",
     color: "warning",
     icon: <CheckCircle size={16} />,
-    confirm: CLOSE_CONFIRM,
+  },
+  // Not a real reopen — the data source has no transition out of closed. The
+  // backend only puts `reopened` in a closed case's `nextStates` as a signal
+  // that a related case may still be created (see that field's doc); `action`
+  // routes to the create-related-case flow in `onAction` instead of a PATCH.
+  reopened: {
+    action: "create_related_case",
+    color: "primary",
+    icon: <LinkIcon size={16} />,
   },
 };
 
@@ -141,12 +127,38 @@ const DEFAULT_TARGET_CONFIG: TargetConfig = {
   icon: <ArrowRight size={16} />,
 };
 
+// Friendlier verbs for the transition buttons than the raw state name reads
+// as. `work_in_progress` is special-cased in `buttonFor` since its wording
+// (and underlying action) depends on who the case is assigned to.
+const TRANSITION_LABEL: Partial<Record<CaseState, string>> = {
+  solution_proposed: "Propose solution",
+  awaiting_info: "Request information",
+  waiting_on_wso2: "Wait on WSO2",
+  closed: "Close",
+  reopened: "Create related case",
+};
+
 /** Build the button for a transition into `target`, labelled by the BE state. */
-function buttonFor(target: CaseState): PrimaryButton {
+function buttonFor(target: CaseState, caseDetail: CsmCaseDetail): PrimaryButton {
+  const config = TARGET_CONFIG[target] ?? DEFAULT_TARGET_CONFIG;
+  if (target === "work_in_progress") {
+    // Moving into Work in progress reads differently depending on whether the
+    // case is already the current engineer's: unassigned/someone-else's case
+    // needs claiming first ("Assign to me"), while an already-own case just
+    // needs its work started ("Start progress"). `onAction` uses the `action`
+    // value (not just the target state) to decide whether to PATCH the
+    // assignee before moving the state.
+    return {
+      targetState: target,
+      ...config,
+      label: caseDetail.assigneeIsMe ? "Start progress" : "Assign to me",
+      action: caseDetail.assigneeIsMe ? "start_work" : "assign_to_me",
+    };
+  }
   return {
     targetState: target,
-    label: stateLabel(target),
-    ...(TARGET_CONFIG[target] ?? DEFAULT_TARGET_CONFIG),
+    label: TRANSITION_LABEL[target] ?? stateLabel(target),
+    ...config,
   };
 }
 
@@ -186,18 +198,20 @@ interface SecondaryItem {
  * The "More" overflow lists state-independent actions on a case. Items here
  * map to documented use cases — see `UseCases.md`:
  *   - Reassign engineer              → ISSU-002 (self-assign generalised)
- *   - Escalate / Severity change     → ISSU-006, ISSU-007
- *   - Hold auto-closure              → ISSU-027
+ *   - Hold auto-closure              → ISSU-027 (only while awaiting info / solution proposed)
  *   - Create incident / link incident → ISSU-021
  *   - Raise Git issue                → ISSU-020
  *   - Create task                    → ISSU-025
- *   - Request a call                 → ISSU-008
+ *   - Request a call                 → ISSU-008 (opens the Call requests tab's create dialog)
  *   - Log time                       → ISSU-017
+ *   - Change severity                → PATCH /cases/{id} { severity }, already fully
+ *                                       backend-supported (see ChangeSeverityDialog.tsx)
  *   - Copy case link                 → ISSU-010 (per-comment + per-case permalinks)
  *
  * Intentionally NOT here:
- *   - Watch / unwatch  → managed via the Watchers widget in Details (ISSU-018)
+ *   - Watch / unwatch  → withdrawn along with the Watchers widget (ISSU-018), no backend flow planned yet
  *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
+ *   - Escalate to lead → withdrawn, no backend flow planned yet
  */
 function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const items: SecondaryItem[] = [];
@@ -226,28 +240,81 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   const reassignBlocked =
     caseDetail.state === "work_in_progress" && caseDetail.workState === "ongoing";
 
-  // Only "Copy case link" is wired up for now. The rest are disabled until
-  // their backend flows land, so the menu advertises the roadmap without
-  // exposing dead actions that would no-op or toast a mock message.
+  // A closed case is done — filing a new Git issue against it doesn't fit
+  // the same "closed is read-only" rule already applied to comments,
+  // attachments, and time tracking (see CsmCaseDetailPage.tsx's isClosed).
+  const caseClosed = caseDetail.state === "closed";
+
+  // Git issues may only be raised while the case is active: Open, Work in
+  // progress, Awaiting info, Waiting on WSO2, or Reopened. Anything else
+  // (e.g. Solution proposed, Closed) blocks the action. `caseDetail.state` is
+  // the normalized label (see `uiStateFromBe`) — this must match the real
+  // `CaseState` values (there is no "waiting_on_client" state).
+  const GIT_ISSUE_ALLOWED_STATES: readonly string[] = [
+    "open",
+    "work_in_progress",
+    "awaiting_info",
+    "waiting_on_wso2",
+    "reopened",
+  ];
+  const gitIssueStateBlocked = !GIT_ISSUE_ALLOWED_STATES.includes(
+    caseDetail.state,
+  );
+
+  // Roadmap items with no backend flow yet: kept visible (so the menu still
+  // advertises what's coming) but disabled with a tooltip explaining why,
+  // rather than clickable and silently no-op'ing or toasting a mock message.
+  // "Hold auto-closure…" belongs here too — it isn't state-gated, it's simply
+  // not built yet, regardless of the case's current state.
+  const NOT_BUILT_YET = "Not available yet — this action is planned but not built.";
+
+  // Only "Copy case link", "Request a call", "Log time", "Assign / reassign
+  // engineer…", "Raise internal Git issue…", and "Change severity…" are wired
+  // up. The rest are disabled until their backend flows land.
   items.push(
-    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
+    {
+      key: "raise_git_issue",
+      label: "Raise internal Git issue…",
+      icon: <GitBranch size={16} />,
+      divider: true,
+      disabled: caseClosed || gitIssueStateBlocked,
+      tooltip: caseClosed
+        ? "This case is closed — it's read-only."
+        : gitIssueStateBlocked
+          ? "Git issues can only be raised while the case is Open, Work in progress, Awaiting info, Waiting on WSO2, or Reopened."
+          : undefined,
+    },
     {
       key: "reassign_engineer",
       label: "Assign / reassign engineer…",
       icon: <User size={16} />,
       divider: true,
-      disabled: reassignBlocked,
-      tooltip: reassignBlocked
-        ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
-        : undefined,
+      disabled: caseClosed || reassignBlocked,
+      tooltip: caseClosed
+        ? "This case is closed — it's read-only."
+        : reassignBlocked
+          ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
+          : undefined,
     },
-    { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
-    { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },
-    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true },
-    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true },
-    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true },
-    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
-    { key: "request_call", label: "Request a call…", icon: <Phone size={16} />, disabled: true },
+    {
+      key: "change_severity",
+      label: "Change severity…",
+      icon: <Gauge size={16} />,
+      divider: true,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
+    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true, tooltip: NOT_BUILT_YET },
+    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    {
+      key: "request_call",
+      label: "Request a call…",
+      icon: <Phone size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
     { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
   );
@@ -276,9 +343,6 @@ export default function CaseActionBar({
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [stateMenuAnchor, setStateMenuAnchor] = useState<HTMLElement | null>(null);
-  const [pendingConfirm, setPendingConfirm] = useState<PrimaryButton | null>(
-    null,
-  );
 
   // Render a button for every state the backend says the case can move to. The
   // backend `nextStates` is the single source of truth: an empty/terminal list
@@ -287,15 +351,11 @@ export default function CaseActionBar({
   const targets = caseDetail.nextStates ?? [];
   const lifecycle = [...new Set(targets)]
     .sort((a, b) => orderRank(a) - orderRank(b))
-    .map(buttonFor);
+    .map((target) => buttonFor(target, caseDetail));
   const primary = lifecycle;
   const secondary = buildSecondaryItems(caseDetail);
 
   const runPrimary = (p: PrimaryButton): void => {
-    if (p.confirm) {
-      setPendingConfirm(p);
-      return;
-    }
     void onAction(p.action, p.targetState);
   };
 
@@ -309,11 +369,25 @@ export default function CaseActionBar({
         justifyContent: { xs: "flex-start", md: "flex-end" },
       }}
     >
-      {primary.length > 0 && (
+      {primary.length === 1 && (
+        // A single reachable state needs no menu — show the transition
+        // itself as one click rather than "Change state" → pick the only item.
+        <Button
+          size="small"
+          variant="contained"
+          color={primary[0].color}
+          startIcon={primary[0].icon}
+          onClick={() => runPrimary(primary[0])}
+        >
+          {primary[0].label}
+        </Button>
+      )}
+      {primary.length > 1 && (
         <>
           <Button
             size="small"
-            variant="outlined"
+            variant="contained"
+            color="primary"
             endIcon={<ChevronDown size={16} />}
             onClick={(e) => setStateMenuAnchor(e.currentTarget)}
           >
@@ -396,35 +470,6 @@ export default function CaseActionBar({
           ];
         })}
       </Menu>
-
-      <Dialog
-        open={!!pendingConfirm}
-        onClose={() => setPendingConfirm(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>{pendingConfirm?.confirm?.title}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            {pendingConfirm?.confirm?.body}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPendingConfirm(null)}>Cancel</Button>
-          <Button
-            variant="contained"
-            color={pendingConfirm?.confirm?.confirmColor ?? "primary"}
-            startIcon={pendingConfirm?.icon}
-            onClick={() => {
-              const p = pendingConfirm;
-              setPendingConfirm(null);
-              if (p) void onAction(p.action, p.targetState);
-            }}
-          >
-            {pendingConfirm?.confirm?.confirmLabel ?? "Confirm"}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }
