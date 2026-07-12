@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: Historical MTTR — Incidents by Team (quarterly trend)     -->
+    <!-- UI Page Name: mttr_widget_hist_inc_team                           -->
+    <!-- Line chart: quarterly MTTR trend per CS team for Incidents        -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_hist_inc_team">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getHistoricalIncidentsByTeam();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-hist-inc-team {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #e0c8f0;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-hist-inc-team .header {
+            background: #e0c8f0;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-hist-inc-team .body { padding: 16px; }
+        .mttr-chart-hist-inc-team .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-hist-inc-team">
+        <div class="header">Historical MTTR — Incidents by Team (Quarterly)</div>
+        <div class="body">
+            <div id="chart_hist_inc_team" style="width:100%;"></div>
+        </div>
+        <div class="footer">Archived quarterly summaries (P95 truncated mean)</div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_hist_inc_team" style="display:none">${jvar_hist_inc_team}</textarea>
+
+    <script type="text/javascript">
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawHistIncTeam, 100); });
+
+        var _rtHIT = null;
+        function _scheduleRedrawHIT() {
+            if (_rtHIT) clearTimeout(_rtHIT);
+            _rtHIT = setTimeout(drawHistIncTeam, 150);
+        }
+        // Idempotent listener setup — see mttr_widget_hist_inc_priority.xml
+        // for the rationale (SN re-renders re-run this script; naive
+        // addEventListener leaks a handler on every mount).
+        if (window.__mttrHistIncTeamState) {
+            window.removeEventListener('resize', window.__mttrHistIncTeamState.resizeHandler);
+            if (window.__mttrHistIncTeamState.observer) {
+                window.__mttrHistIncTeamState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedrawHIT);
+        var _obsHIT = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsHIT = new ResizeObserver(_scheduleRedrawHIT);
+            _obsHIT.observe(document.getElementById('chart_hist_inc_team'));
+        }
+        window.__mttrHistIncTeamState = { resizeHandler: _scheduleRedrawHIT, observer: _obsHIT };
+
+        var TEAM_COLORS_HIT = ['#4dc9f6','#f67019','#f53794','#00a950',
+                                '#8549ba','#ff6384','#36a2eb','#cddc39'];
+
+        function drawHistIncTeam() {
+            try {
+                var _el = document.getElementById('chart_hist_inc_team');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(300, Math.round(_w * 0.5)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_hist_inc_team').value;
+                if (!raw || raw === 'null') { noDataHIT(); return; }
+                var resp = JSON.parse(raw);
+                if (!resp || !resp.periods || resp.periods.length === 0) {
+                    noDataHIT(); return;
+                }
+
+                var periods = resp.periods;
+                var series = resp.series;
+                var teamNames = Object.keys(series).sort();
+
+                var header = ['Period'];
+                for (var t = 0; teamNames.length > t; t++) {
+                    header.push(teamNames[t]);
+                }
+
+                var rows = [header];
+                for (var p = 0; periods.length > p; p++) {
+                    var row = [periods[p]];
+                    for (var ti = 0; teamNames.length > ti; ti++) {
+                        var entry = series[teamNames[ti]][periods[p]];
+                        var hrs = entry ? entry.mttr_hours : 0;
+                        row.push(Math.round((hrs / 24) * 10) / 10);
+                    }
+                    rows.push(row);
+                }
+
+                var data = google.visualization.arrayToDataTable(rows);
+
+                // Set formatted tooltips (Days Hours Minutes)
+                for (var fp = 0; periods.length > fp; fp++) {
+                    for (var ft = 0; teamNames.length > ft; ft++) {
+                        var e = series[teamNames[ft]][periods[fp]];
+                        if (e) {
+                            var h = e.mttr_hours || 0;
+                            var dm = Math.round(h * 60);
+                            var dd = Math.floor(dm / (60 * 24));
+                            var dh = Math.floor((dm % (60 * 24)) / 60);
+                            var dmin = dm % 60;
+                            data.setFormattedValue(fp, ft + 1,
+                                dd + 'd ' + dh + 'h ' + dmin + 'm (' + e.total_cases + ' cases)');
+                        }
+                    }
+                }
+
+                var chart = new google.visualization.LineChart(
+                    document.getElementById('chart_hist_inc_team'));
+                chart.draw(data, {
+                    chartArea: { width: '80%', height: '65%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 10 } },
+                    colors: TEAM_COLORS_HIT,
+                    backgroundColor: 'transparent',
+                    vAxis: {
+                        title: 'MTTR (Days)',
+                        format: '#.#',
+                        textStyle: { fontSize: 10 },
+                        viewWindow: { min: 0 }
+                    },
+                    hAxis: { textStyle: { fontSize: 11 }, slantedText: false },
+                    pointSize: 5,
+                    lineWidth: 2,
+                    curveType: 'function',
+                    tooltip: { textStyle: { fontSize: 11 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_hist_inc_team error:', e);
+                noDataHIT();
+            }
+        }
+
+        function noDataHIT() {
+            // DOM-API placeholder — see mttr_widget_team_trend.xml for
+            // the full rationale (escaped-entity innerHTML rendered as
+            // literal text; createElement produces a real p node).
+            var container = document.getElementById('chart_hist_inc_team');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No historical data available';
+            container.appendChild(p);
+        }
+    </script>
+
+</j:jelly>

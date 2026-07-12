@@ -24,6 +24,7 @@ import {
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
+  BeCallRequestStateKey,
   BeCallRequestView,
   BeCreateCallRequestPayload,
   BeCreateCallRequestResponse,
@@ -40,18 +41,24 @@ const CALL_REQUESTS_PAGE_LIMIT = 20;
  * Load call requests for a case via `POST /cases/{id}/call-requests/search`.
  * A single wide page is used; the number of call requests per case is expected
  * to be small enough that pagination is not needed in the detail view.
+ *
+ * `states` filters server-side via `filters.states` (rather than fetching one
+ * page and filtering client-side, which would silently drop matches beyond
+ * the page limit).
  */
 export function useGetCsmCaseCallRequests(
   caseId: string | undefined,
+  states?: BeCallRequestStateKey[],
 ): UseQueryResult<BeCallRequestView[], Error> {
   const api = useBackendApi();
 
   return useQuery<BeCallRequestView[], Error>({
-    queryKey: [ApiQueryKeys.CASE_CALL_REQUESTS, caseId ?? ""],
+    queryKey: [ApiQueryKeys.CASE_CALL_REQUESTS, caseId ?? "", states ?? []],
     queryFn: async (): Promise<BeCallRequestView[]> => {
       if (!caseId) return [];
 
       const payload: BeSearchCallRequestsPayload = {
+        ...(states && states.length > 0 ? { filters: { states } } : {}),
         pagination: { offset: 0, limit: CALL_REQUESTS_PAGE_LIMIT },
       };
       const response = await api.post<
@@ -140,3 +147,4 @@ export function usePatchCsmCaseCallRequest(): UseMutationResult<
     },
   });
 }
+

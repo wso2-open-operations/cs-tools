@@ -15,15 +15,16 @@
 // under the License.
 
 import {
+  AdapterDateFns,
   Box,
   Button,
+  DatePickers,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   FormControlLabel,
   Switch,
-  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
@@ -31,6 +32,9 @@ import type {
   BeChangeRequestDetail,
   BePatchChangeRequestPayload,
 } from "@api/backend/types";
+import { formatDateTimeLocal, parseDateTimeLocal } from "@utils/dateTime";
+
+const { DateTimePicker, LocalizationProvider } = DatePickers;
 
 interface EditChangeRequestDialogProps {
   cr: BeChangeRequestDetail;
@@ -43,8 +47,9 @@ interface EditChangeRequestDialogProps {
 
 /**
  * Convert a backend timestamp (`YYYY-MM-DD HH:MM:SS`, or ISO `T`-separated) to
- * the `YYYY-MM-DDTHH:MM` shape an `<input type="datetime-local">` expects. The
- * value is treated as plain wall-clock text so no timezone shift is applied.
+ * the `YYYY-MM-DDTHH:MM` shape this form's state (and the DateTimePicker via
+ * {@link parseDateTimeLocal}) uses. The value is treated as plain wall-clock
+ * text so no timezone shift is applied.
  */
 function toDateTimeLocal(raw?: string | null): string {
   const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(raw?.trim() ?? "");
@@ -99,15 +104,23 @@ export default function EditChangeRequestDialog({
       <DialogTitle>Edit change request</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
-          <TextField
-            label="Planned start"
-            type="datetime-local"
-            size="small"
-            fullWidth
-            value={plannedStart}
-            onChange={(e) => setPlannedStart(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <DateTimePicker
+              label="Planned start"
+              value={parseDateTimeLocal(plannedStart)}
+              onChange={(next) =>
+                setPlannedStart(
+                  next instanceof Date && !Number.isNaN(next.getTime())
+                    ? formatDateTimeLocal(next)
+                    : "",
+                )
+              }
+              slotProps={{
+                textField: { size: "small", fullWidth: true },
+                field: { clearable: true },
+              }}
+            />
+          </LocalizationProvider>
           <FormControlLabel
             control={
               <Switch

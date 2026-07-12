@@ -64,6 +64,7 @@ func main() {
 	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
 	conversationHandler := handler.NewConversationHandler(entityClient)
 	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
+	incidentHandler := handler.NewIncidentHandler(entityClient)
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -88,7 +89,7 @@ func main() {
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
 		Issuer:                mustEnv("AUTH_ISSUER"),
-		Audience:              mustEnv("AUTH_AUDIENCE"),
+		Audiences:             splitComma(mustEnv("AUTH_AUDIENCE")),
 		ClockSkew:             5 * time.Second,
 		TokenValidatorEnabled: os.Getenv("AUTH_TOKEN_VALIDATOR_ENABLED") != "false",
 	}
@@ -102,6 +103,7 @@ func main() {
 	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
 	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
+	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
 	mux.HandleFunc("POST /attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)
@@ -146,6 +148,7 @@ func main() {
 	mux.HandleFunc("GET /conversations/{id}/messages", conversationHandler.GetConversationMessages)
 	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
+	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 
 	addr := envOrDefault("PORT", ":8080")
 

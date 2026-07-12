@@ -445,6 +445,10 @@ func (s *caseService) SearchCaseAttachments(_ context.Context, _ domain.SearchAt
 	return domain.SearchAttachmentsResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
 }
 
+func (s *caseService) SearchCaseActivities(_ context.Context, _ domain.SearchCaseActivitiesRequest) (domain.SearchCaseActivitiesResponse, error) {
+	return domain.SearchCaseActivitiesResponse{}, &apierror.ServiceUnavailableError{Msg: "case activities are only supported for the ServiceNow data source"}
+}
+
 func (s *caseService) GetCaseAttachmentContent(_ context.Context, _ string) ([]byte, string, error) {
 	return nil, "", &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
 }

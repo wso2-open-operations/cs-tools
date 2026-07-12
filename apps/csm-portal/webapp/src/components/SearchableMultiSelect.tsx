@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Checkbox, Chip, ListItemText, TextField } from "@wso2/oxygen-ui";
+import { Autocomplete, Box, Checkbox, ListItemText, TextField, Tooltip } from "@wso2/oxygen-ui";
 import type * as React from "react";
 import type { JSX } from "react";
 
@@ -75,6 +75,10 @@ export default function SearchableMultiSelect({
           modifiers: [{ name: "flip", enabled: false }],
         },
       }}
+      sx={{
+        // Prevent selected-value text from wrapping to a second line.
+        "& .MuiAutocomplete-inputRoot": { flexWrap: "nowrap" },
+      }}
       getOptionLabel={(opt) => format(opt as string)}
       isOptionEqualToValue={(opt, val) => opt === val}
       filterOptions={(opts, state) => {
@@ -82,19 +86,20 @@ export default function SearchableMultiSelect({
         if (!q) return opts;
         return opts.filter((o) => searchText(o as string).toLowerCase().includes(q));
       }}
-      renderTags={(value, getTagProps) =>
-        value.map((option, index) => {
-          const { key, ...tagProps } = getTagProps({ index });
-          return (
-            <Chip
-              key={key}
-              size="small"
-              label={format(option as string)}
-              {...tagProps}
-            />
-          );
-        })
-      }
+      renderTags={(value) => {
+        const displayText = (value as string[]).map(format).join(", ");
+        const content = (
+          <Box
+            component="span"
+            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {displayText}
+          </Box>
+        );
+        return value.length === 1 ? content : (
+          <Tooltip title={displayText} placement="top">{content}</Tooltip>
+        );
+      }}
       renderOption={(props, option, { selected }) => {
         const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & {
           key: string;

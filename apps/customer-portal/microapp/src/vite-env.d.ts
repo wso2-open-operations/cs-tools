@@ -19,7 +19,7 @@
 type ViteTypeOptions = object;
 
 interface ImportMetaEnv {
-  readonly VITE_BACKEND_URL: string;
+  readonly CUSTOMER_PORTAL_BACKEND_URL: string;
 }
 
 interface ImportMeta {

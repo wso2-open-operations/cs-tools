@@ -33,7 +33,7 @@ public type Contact record {|
     # Email
     string email;
     # First name
-    string firstName;
+    string? firstName?;
     # Last name
     string lastName;
     # Whether the contact is a customer admin or not

@@ -14,20 +14,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Chip,
+  Skeleton,
+  TableSortLabel,
+  Typography,
+  useTheme,
+} from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
+import { preloadRoute } from "@utils/routePreloaders";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
 import { WORK_STATE_LABEL } from "@features/csm-cases/utils/caseWorkState";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
+import type { CasesSortOrder } from "@features/csm-cases/utils/casesSort";
 
 interface CasesListProps {
   cases: CsmCaseRow[];
   isLoading: boolean;
+  /** Number of skeleton rows to show while loading. Defaults to 6. */
+  skeletonCount?: number;
   /** Base path for detail links. Defaults to "/cases". */
   detailBasePath?: string;
+  /** Current sort order for the "Updated" column, when the caller wants it
+   * sortable. Omit both `sortOrder` and `onSortOrderChange` for a plain
+   * (non-interactive) header — the list is always server-sorted by
+   * `updatedOn`, this just lets the user flip the direction. */
+  sortOrder?: CasesSortOrder;
+  onSortOrderChange?: (order: CasesSortOrder) => void;
 }
 
 // Every column is left-aligned for a consistent scan line down the table.
@@ -37,7 +54,6 @@ const HEADER_CELLS: string[] = [
   "Product",
   "Severity",
   "State",
-  "Updated",
 ];
 
 // Subject gets the lion's share of the row; the ids sit in their own narrow
@@ -50,7 +66,10 @@ const GRID =
 export default function CasesList({
   cases,
   isLoading,
+  skeletonCount = 6,
   detailBasePath = "/cases",
+  sortOrder,
+  onSortOrderChange,
 }: CasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -93,11 +112,40 @@ export default function CasesList({
             {label}
           </Typography>
         ))}
+        {sortOrder && onSortOrderChange ? (
+          <TableSortLabel
+            active
+            direction={sortOrder}
+            onClick={() =>
+              onSortOrderChange(sortOrder === "desc" ? "asc" : "desc")
+            }
+            sx={{
+              justifySelf: "start",
+              "& .MuiTableSortLabel-icon": { fontSize: "1rem" },
+            }}
+          >
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontWeight: 600 }}
+            >
+              Updated
+            </Typography>
+          </TableSortLabel>
+        ) : (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ fontWeight: 600, textAlign: "left" }}
+          >
+            Updated
+          </Typography>
+        )}
       </Box>
 
       {/* Rows */}
       {isLoading &&
-        [0, 1, 2, 3, 4, 5].map((i) => (
+        Array.from({ length: skeletonCount }).map((_, i) => (
           <Box
             key={i}
             sx={{
@@ -109,7 +157,7 @@ export default function CasesList({
               "&:last-of-type": { borderBottom: 0 },
             }}
           >
-            <Skeleton variant="rectangular" height={28} />
+            <Skeleton variant="rounded" height={28} />
           </Box>
         ))}
 
@@ -132,6 +180,7 @@ export default function CasesList({
               key={c.id}
               component={RouterLink}
               to={`${detailBasePath}/${c.id}`}
+              onMouseEnter={() => preloadRoute(detailBasePath)}
               sx={{
                 gridColumn: "1 / -1",
                 display: "grid",
@@ -224,6 +273,7 @@ export default function CasesList({
                 )}
               </Box>
               <Typography variant="caption" color="text.secondary" noWrap>
+                {c.updatedAtIsCreatedFallback && "Created "}
                 <RelativeTime iso={c.updatedAt} />
               </Typography>
             </Box>

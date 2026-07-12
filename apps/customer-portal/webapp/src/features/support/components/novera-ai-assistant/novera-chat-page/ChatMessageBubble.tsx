@@ -142,7 +142,20 @@ export default function ChatMessageBubble({
   const isUser = message.sender === ChatSender.USER;
   const isCurrentUserMessage = isUser && (message.isCurrentUser ?? true);
 
-  const displayText = message.isError ? "Something went wrong" : message.text;
+  /**
+   * Errors caused by AI usage/credit/token limits get a specific, customer-safe
+   * message; all other errors keep the generic text (never leak raw error details).
+   */
+  const isUsageLimitError =
+    !!message.text &&
+    /\b(credit|quota|billing)\b|token limit|usage limit|rate limit/i.test(
+      message.text,
+    );
+  const displayText = message.isError
+    ? isUsageLimitError
+      ? "The AI assistant is temporarily unavailable due to usage limits. Please try again later."
+      : "Something went wrong"
+    : message.text;
 
   /** Until the final assistant message, hide thumbs and timestamp only (header stays). */
   const hideFeedbackRow =

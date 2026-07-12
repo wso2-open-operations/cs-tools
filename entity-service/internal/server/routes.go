@@ -142,6 +142,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		productVulnerabilityHandler = handler.NewProductVulnerabilityHandler(service.NewServiceNowProductVulnerabilityService(serviceNowIntegrationServiceClient))
 	}
 
+	var incidentHandler *handler.IncidentHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		incidentHandler = handler.NewIncidentHandler(service.NewServiceNowIncidentService(serviceNowIntegrationServiceClient))
+	}
+
 	var itServiceHandler *handler.ITServiceHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		itServiceHandler = handler.NewITServiceHandler(service.NewServiceNowITServiceService(serviceNowIntegrationServiceClient))
@@ -217,6 +222,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
+	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
 	mux.HandleFunc("POST /attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)
@@ -278,6 +284,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	if taskSlaHandler != nil {
 		mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 		mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
+	}
+
+	if incidentHandler != nil {
+		mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 	}
 
 	return middleware.CorrelationID(

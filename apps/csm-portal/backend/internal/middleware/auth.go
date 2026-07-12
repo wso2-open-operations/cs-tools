@@ -57,7 +57,7 @@ type UserInfo struct {
 type Config struct {
 	JWKSEndpoint          string
 	Issuer                string
-	Audience              string
+	Audiences             []string
 	ClockSkew             time.Duration
 	TokenValidatorEnabled bool
 }
@@ -145,7 +145,6 @@ func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInf
 	} else {
 		token, err := jwt.ParseWithClaims(tokenStr, &c, keyFunc,
 			jwt.WithIssuer(cfg.Issuer),
-			jwt.WithAudience(cfg.Audience),
 			jwt.WithLeeway(cfg.ClockSkew),
 			jwt.WithExpirationRequired(),
 		)
@@ -154,6 +153,12 @@ func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInf
 		}
 		if !token.Valid {
 			return nil, fmt.Errorf("invalid token")
+		}
+		if len(cfg.Audiences) > 0 {
+			tokenAuds, _ := token.Claims.GetAudience()
+			if !hasAnyAudience(tokenAuds, cfg.Audiences) {
+				return nil, fmt.Errorf("token audience not accepted")
+			}
 		}
 	}
 
@@ -169,6 +174,17 @@ func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInf
 		UserID: c.UserID,
 		Groups: c.Groups,
 	}, nil
+}
+
+func hasAnyAudience(tokenAuds jwt.ClaimStrings, expected []string) bool {
+	for _, want := range expected {
+		for _, got := range tokenAuds {
+			if got == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // addSecurityHeaders mirrors the Ballerina ResponseInterceptor security headers.

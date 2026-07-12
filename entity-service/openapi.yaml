@@ -626,6 +626,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/activities/search:
+    post:
+      summary: Search the activity feed of a support case (comments, attachments, and optional field changes).
+      operationId: searchCaseActivities
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCaseActivitiesRequest'
+      responses:
+        "200":
+          description: Paginated activity feed for the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCaseActivitiesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/{id}/github-issues:
     post:
       summary: File a GitHub issue against a product's internal repo from a support case (ServiceNow data source only).
@@ -1019,7 +1062,13 @@ paths:
 
   /call-requests/{id}:
     patch:
-      summary: Update a call request (ServiceNow data source only).
+      summary: Update a call request (supported by the backing data source only).
+      description: >
+        The target state selects the behaviour: customer/agent state
+        transitions, scheduling (with meetingDate, durationInMinutes,
+        assignee), rejection or cancellation (with cancellationReason), or
+        conclusion with post-call notes (notes, plan, attendees, actionItems,
+        actualDurationMin).
       operationId: updateCallRequest
       parameters:
         - name: id
@@ -1666,6 +1715,85 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /slas/{id}:
+    get:
+      summary: Get a task SLA record by ID (ServiceNow data source only).
+      operationId: getTaskSla
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The task SLA record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSlaDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Task SLA not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /slas/search:
+    post:
+      summary: Search task SLA records (ServiceNow data source only).
+      operationId: searchTaskSlas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchTaskSlasRequest'
+      responses:
+        "200":
+          description: Task SLA records matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchTaskSlasResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /comments/search:
     post:
       summary: Search comments by reference entity (ServiceNow data source only).
@@ -1685,6 +1813,42 @@ paths:
                 $ref: '#/components/schemas/SearchCommentsResponse'
         "400":
           description: Bad request (missing or invalid referenceId/referenceType).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /incidents/search:
+    post:
+      summary: Search incidents (ServiceNow data source only).
+      operationId: searchIncidents
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchIncidentsRequest'
+      responses:
+        "200":
+          description: Paginated list of incidents matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchIncidentsResponse'
+        "400":
+          description: Bad request.
           content:
             application/json:
               schema:
@@ -2566,6 +2730,8 @@ components:
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+        `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
+        `state` when the state is `closed` or `solution_proposed`.
       oneOf:
         - required: [state]
         - required: [severity]
@@ -2595,6 +2761,51 @@ components:
           type: string
           format: email
           description: Email of the engineer to assign to this case (ServiceNow only).
+        resolutionCode:
+          type: string
+          enum:
+            - SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED
+            - SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT
+            - SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET
+            - SOLVED_WORKAROUND_PROVIDED
+            - SOLVED_BY_CUSTOMER
+            - CONSIDERED_FOR_ROADMAP
+            - INCONCLUSIVE_OUT_OF_SCOPE
+            - INCONCLUSIVE_CANNOT_REPRODUCE
+            - INCONCLUSIVE_NO_WORKAROUND
+            - DUPLICATE_ISSUE
+            - VOIDED_CANCELED
+            - ON_HOLD
+            - CONSIDERED_FOR_ROADMAP_ALT
+            - SOLVED_FIXED_THE_ISSUE
+            - SOLVED_WORKAROUND_PROVIDED_ALT
+            - SOLVED_BY_CONTRIBUTOR
+            - SOLVED_BY_NOVERA
+            - ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS
+          description: Resolution code. Only allowed when state is closed or solution_proposed.
+        cause:
+          type: string
+          enum:
+            - USER_MISUNDERSTANDING_CONCEPTS
+            - USER_MISUNDERSTANDING_DOCUMENTATION
+            - USER_NOT_FOLLOWING_DOCUMENTATION
+            - USER_MISTAKE
+            - SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE
+            - SOLUTION_PROBLEMATIC_CODE
+            - APPLICATION_BUG
+            - APPLICATION_MISLEADING_UX_UI
+            - APPLICATION_LIMITATION
+            - APPLICATION_MISSING_FEATURE
+            - APPLICATION_DOCUMENTATION_GAP
+            - APPLICATION_DOCUMENTATION_ERROR
+            - INFRASTRUCTURE_CUSTOMERS_SIDE
+            - INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH
+            - INFRASTRUCTURE_SAAS_SIDE_OTHER
+            - UNKNOWN
+          description: Root-cause category. Only allowed when state is closed or solution_proposed.
+        closeNotes:
+          type: string
+          description: Close notes. Only allowed when state is closed or solution_proposed.
 
     UpdateCaseResponse:
       type: object
@@ -2636,6 +2847,70 @@ components:
         assignedTo:
           nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
+        resolutionCode:
+          type: string
+          nullable: true
+          enum:
+            - SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED
+            - SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT
+            - SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET
+            - SOLVED_WORKAROUND_PROVIDED
+            - SOLVED_BY_CUSTOMER
+            - CONSIDERED_FOR_ROADMAP
+            - INCONCLUSIVE_OUT_OF_SCOPE
+            - INCONCLUSIVE_CANNOT_REPRODUCE
+            - INCONCLUSIVE_NO_WORKAROUND
+            - DUPLICATE_ISSUE
+            - VOIDED_CANCELED
+            - ON_HOLD
+            - CONSIDERED_FOR_ROADMAP_ALT
+            - SOLVED_FIXED_THE_ISSUE
+            - SOLVED_WORKAROUND_PROVIDED_ALT
+            - SOLVED_BY_CONTRIBUTOR
+            - SOLVED_BY_NOVERA
+            - ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS
+          description: Resolution code, present when the case was closed or solution proposed.
+        cause:
+          type: string
+          nullable: true
+          enum:
+            - USER_MISUNDERSTANDING_CONCEPTS
+            - USER_MISUNDERSTANDING_DOCUMENTATION
+            - USER_NOT_FOLLOWING_DOCUMENTATION
+            - USER_MISTAKE
+            - SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE
+            - SOLUTION_PROBLEMATIC_CODE
+            - APPLICATION_BUG
+            - APPLICATION_MISLEADING_UX_UI
+            - APPLICATION_LIMITATION
+            - APPLICATION_MISSING_FEATURE
+            - APPLICATION_DOCUMENTATION_GAP
+            - APPLICATION_DOCUMENTATION_ERROR
+            - INFRASTRUCTURE_CUSTOMERS_SIDE
+            - INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH
+            - INFRASTRUCTURE_SAAS_SIDE_OTHER
+            - UNKNOWN
+          description: Root-cause category, present when the case was closed or solution proposed.
+        closeNotes:
+          type: string
+          nullable: true
+          description: Close notes, present when the case was closed or solution proposed.
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was resolved, present when state is closed or solution_proposed.
+
+    CaseLabelRef:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          description: Internal identifier for the choice-list value.
+        label:
+          type: string
+          description: Human-readable label for the choice-list value.
 
     WatchListUser:
       type: object
@@ -3225,6 +3500,101 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseComment'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    ActivityType:
+      type: string
+      enum:
+        - comment
+        - attachment
+        - field_change
+
+    FieldChange:
+      type: object
+      properties:
+        field:
+          type: string
+        fieldLabel:
+          type: string
+        previousValue:
+          type: string
+        newValue:
+          type: string
+
+    CaseActivity:
+      type: object
+      description: >-
+        A single entry in a case activity feed. A discriminated union on `type`:
+        the shared fields are always present, while type-specific fields are set
+        only for the matching `type` (`commentType` for comments;
+        `fileName`/`contentType`/`sizeBytes`/`downloadUrl` for attachments;
+        `changes` for field changes).
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/ActivityType'
+        content:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        createdByFirstName:
+          type: string
+        createdByLastName:
+          type: string
+        createdByFullName:
+          type: string
+        commentType:
+          type: string
+          enum: [work_note, comment, activity]
+          description: Set only when type is comment.
+        fileName:
+          type: string
+          description: Set only when type is attachment.
+        contentType:
+          type: string
+          description: Set only when type is attachment.
+        sizeBytes:
+          type: integer
+          description: Set only when type is attachment.
+        downloadUrl:
+          type: string
+          description: Set only when type is attachment.
+        changes:
+          type: array
+          description: Set only when type is field_change.
+          items:
+            $ref: '#/components/schemas/FieldChange'
+
+    SearchCaseActivitiesRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        includeFieldChanges:
+          type: boolean
+          description: >-
+            When omitted or false, only comment and attachment entries are
+            returned. When true, field-change entries are included as well.
+
+    SearchCaseActivitiesResponse:
+      type: object
+      properties:
+        activity:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseActivity'
         total:
           type: integer
         limit:
@@ -4054,10 +4424,20 @@ components:
 
     CallRequestState:
       type: object
-      description: Choice-list state item. id may be an integer or a string depending on the ServiceNow configuration.
+      description: State of a call request.
       properties:
         id:
-          description: State key (int or string).
+          type: string
+          enum:
+            - pending_on_customer
+            - pending_on_wso2
+            - scheduled
+            - customer_rejected
+            - wso2_rejected
+            - canceled
+            - notes_pending
+            - concluded
+          description: State enum key.
         label:
           type: string
           description: Human-readable state label.
@@ -4242,6 +4622,21 @@ components:
           $ref: '#/components/schemas/CallRequestState'
         cancellationReason:
           type: string
+        assignee:
+          type: string
+          description: Identifier of the engineer the call is assigned to.
+        notes:
+          type: string
+          description: Notes captured from the concluded call.
+        plan:
+          type: string
+        attendees:
+          type: string
+        actionItems:
+          type: string
+        actualDurationMin:
+          type: integer
+          description: Actual call duration in minutes.
 
     SearchCallRequestsResponse:
       type: object
@@ -4276,7 +4671,7 @@ components:
           description: New state for the call request.
         cancellationReason:
           type: string
-          description: Reason for cancellation (required when cancelling).
+          description: Reason for cancellation or rejection.
         utcTimes:
           type: array
           items:
@@ -4286,6 +4681,29 @@ components:
           type: integer
           minimum: 1
           description: Updated duration in minutes.
+        meetingDate:
+          type: string
+          format: date-time
+          description: Scheduled meeting start time as an RFC3339 UTC timestamp (used when scheduling).
+        assignee:
+          type: string
+          description: Identifier of the engineer the call is assigned to.
+        notes:
+          type: string
+          description: Notes captured from the concluded call.
+        plan:
+          type: string
+          description: Plan discussed during the call.
+        attendees:
+          type: string
+          description: List of call attendees.
+        actionItems:
+          type: string
+          description: Action items agreed during the call.
+        actualDurationMin:
+          type: integer
+          minimum: 1
+          description: Actual call duration in minutes.
 
     UpdateCallRequestResponse:
       type: object
@@ -4581,3 +4999,324 @@ components:
           type: integer
         message:
           type: string
+
+    SearchTaskSlasRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            taskIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
+
+    TaskSlaDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        target:
+          type: string
+          nullable: true
+
+    TaskSlaTaskRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+
+    TaskSlaView:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slaDefinition:
+          $ref: '#/components/schemas/TaskSlaDefinition'
+          nullable: true
+        stage:
+          type: string
+          nullable: true
+        task:
+          $ref: '#/components/schemas/TaskSlaTaskRef'
+          nullable: true
+        businessTimeLeft:
+          type: string
+          nullable: true
+        businessElapsedTime:
+          type: string
+          nullable: true
+        businessElapsedPercentage:
+          type: number
+          format: double
+          nullable: true
+        startTime:
+          type: string
+          nullable: true
+        endTime:
+          type: string
+          nullable: true
+
+    SearchTaskSlasResponse:
+      type: object
+      properties:
+        slas:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSlaView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    TaskSlaDefinitionDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        target:
+          type: string
+          nullable: true
+        flow:
+          type: string
+          nullable: true
+        workflow:
+          type: string
+          nullable: true
+        isEnableLogging:
+          type: boolean
+          nullable: true
+        durationType:
+          type: string
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        scheduleSource:
+          type: string
+          nullable: true
+        schedule:
+          type: string
+          nullable: true
+        timezoneSource:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        startCondition:
+          type: string
+          nullable: true
+        isRetroactiveStart:
+          type: boolean
+          nullable: true
+        isRetroactivePause:
+          type: boolean
+          nullable: true
+        whenToCancel:
+          type: string
+          nullable: true
+        cancelCondition:
+          type: string
+          nullable: true
+        pauseCondition:
+          type: string
+          nullable: true
+        whenToResume:
+          type: string
+          nullable: true
+        stopCondition:
+          type: string
+          nullable: true
+        resetCondition:
+          type: string
+          nullable: true
+        resetAction:
+          type: string
+          nullable: true
+
+    TaskSlaScheduleRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+
+    TaskSlaDetail:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        task:
+          $ref: '#/components/schemas/TaskSlaTaskRef'
+          nullable: true
+        slaDefinition:
+          $ref: '#/components/schemas/TaskSlaDefinitionDetail'
+          nullable: true
+        stage:
+          type: string
+          nullable: true
+        businessTimeLeft:
+          type: string
+          nullable: true
+        businessElapsedTime:
+          type: string
+          nullable: true
+        businessElapsedPercentage:
+          type: number
+          format: double
+          nullable: true
+        startTime:
+          type: string
+          nullable: true
+        endTime:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+          nullable: true
+        schedule:
+          $ref: '#/components/schemas/TaskSlaScheduleRef'
+          nullable: true
+
+    SearchIncidentsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+            priorities:
+              type: array
+              items:
+                type: string
+                enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+            parentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn, openedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchIncidentView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        openedOn:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        caller:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        priority:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          nullable: true
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          nullable: true
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        parent:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+        updatedBy:
+          type: string
+
+    SearchIncidentsResponse:
+      type: object
+      properties:
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchIncidentView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer

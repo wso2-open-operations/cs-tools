@@ -14,8 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Checkbox, Chip, ListItemText, TextField } from "@wso2/oxygen-ui";
-import type * as React from "react";
+import {
+  Box,
+  Checkbox,
+  FormControl,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  Select,
+  Tooltip,
+} from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 export interface MultiSelectFieldProps<T extends string> {
@@ -25,14 +33,17 @@ export interface MultiSelectFieldProps<T extends string> {
   options: { value: T; label: string }[];
   onChange: (next: T[]) => void;
   disabled?: boolean;
+  /**
+   * Explains why the field is disabled. Shown as a hover tooltip; ignored
+   * when `disabled` is false.
+   */
+  disabledTooltip?: string;
 }
 
 /**
- * Autocomplete-based multi-select for a fixed, small set of options (e.g. an
- * enum) — selected values render as chips, options are type-to-search +
- * checkboxes. Pairs with {@link SearchableMultiSelect} for larger/dynamic
- * option lists. Extracted from `CasesFilterBar.tsx` so other feature filter
- * bars (e.g. time cards) can reuse the same look and behavior.
+ * Select-based multi-select for a fixed, small set of options (e.g. an enum).
+ * Selected values render as comma-separated text — no chips, fixed height.
+ * Pairs with async pickers for larger/dynamic option lists.
  */
 export default function MultiSelectField<T extends string>({
   id,
@@ -41,49 +52,69 @@ export default function MultiSelectField<T extends string>({
   options,
   onChange,
   disabled,
+  disabledTooltip,
 }: MultiSelectFieldProps<T>): JSX.Element {
-  const selected = options.filter((o) => values.includes(o.value));
-  return (
-    <Autocomplete<{ value: T; label: string }, true>
-      multiple
-      size="small"
-      id={id}
-      disabled={disabled}
-      options={options}
-      value={selected}
-      disableCloseOnSelect
-      getOptionLabel={(o) => o.label}
-      isOptionEqualToValue={(o, v) => o.value === v.value}
-      onChange={(_event, next) => onChange(next.map((o) => o.value))}
-      renderTags={(value, getTagProps) =>
-        value.map((option, index) => {
-          const { key, ...tagProps } = getTagProps({ index });
-          return (
-            <Chip key={key} size="small" label={option.label} {...tagProps} />
+  const field = (
+    <FormControl fullWidth size="small" disabled={disabled}>
+      <InputLabel id={`${id}-label`}>{label}</InputLabel>
+      <Select
+        multiple
+        labelId={`${id}-label`}
+        id={id}
+        value={values}
+        label={label}
+        onChange={(event) => {
+          const val = event.target.value;
+          onChange(Array.isArray(val) ? (val as T[]) : []);
+        }}
+        renderValue={(selected) => {
+          if (selected.length === 0) return "";
+          const labels = selected.map(
+            (v) => options.find((o) => o.value === v)?.label ?? v,
           );
-        })
-      }
-      renderOption={(props, option, { selected: isSelected }) => {
-        const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & {
-          key: string;
-        };
-        return (
-          <li key={key} {...liProps} style={{ paddingTop: 2, paddingBottom: 2 }}>
-            <Checkbox size="small" checked={isSelected} sx={{ mr: 1, p: 0.25 }} />
+          const displayText = labels.join(", ");
+          if (labels.length === 1) return displayText;
+          return (
+            <Tooltip title={displayText} placement="top">
+              <Box
+                component="span"
+                sx={{
+                  display: "block",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {displayText}
+              </Box>
+            </Tooltip>
+          );
+        }}
+      >
+        {options.map((option) => (
+          <MenuItem key={option.value} value={option.value} sx={{ py: 0.5 }}>
+            <Checkbox
+              size="small"
+              checked={values.includes(option.value)}
+              sx={{ mr: 1, p: 0.25 }}
+            />
             <ListItemText
               primary={option.label}
               slotProps={{ primary: { style: { fontSize: 13 } } }}
             />
-          </li>
-        );
-      }}
-      renderInput={(params) => (
-        <TextField
-          {...params}
-          label={label}
-          placeholder={values.length ? undefined : "Select…"}
-        />
-      )}
-    />
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+
+  if (!disabled || !disabledTooltip) return field;
+
+  return (
+    <Tooltip title={disabledTooltip}>
+      <Box component="span" sx={{ display: "block" }}>
+        {field}
+      </Box>
+    </Tooltip>
   );
 }

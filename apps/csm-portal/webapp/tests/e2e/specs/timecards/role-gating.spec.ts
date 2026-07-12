@@ -17,7 +17,7 @@
 //
 // Role gating on /time-cards. The Approvals tab is driven by useTimecardRole,
 // which resolves isApprover from GET /users/me roles
-// (sn_customerservice_timecard_approver, or the "admin" role). Approvers see
+// (timecard_approver, or the "admin" role). Approvers see
 // it; plain engineers do not, even when the tab is forced via the URL.
 //
 

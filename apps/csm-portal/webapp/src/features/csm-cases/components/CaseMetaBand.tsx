@@ -125,6 +125,12 @@ function LinkButton({
       noWrap
       sx={(t) => ({
         display: "block",
+        // `<button>` is a form control: browsers give it an intrinsic
+        // "auto" min-width that resolves to its content size and refuses to
+        // shrink as a grid item, unlike the `<a>` LinkText renders — without
+        // this it overflows into the next grid cell instead of truncating.
+        minWidth: 0,
+        width: "100%",
         cursor: "pointer",
         textAlign: "left",
         padding: 0,
@@ -224,7 +230,10 @@ export default function CaseMetaBand({
           sx={{
             display: "grid",
             gridTemplateColumns: {
-              xs: "1fr 1fr",
+              // `minmax(0, 1fr)` everywhere: a plain `1fr` track's implicit
+              // minimum is content-based ("auto"), so a long value in one
+              // cell pushes into its neighbour instead of truncating.
+              xs: "repeat(2, minmax(0, 1fr))",
               sm: "repeat(3, minmax(0, 1fr))",
               md: "repeat(4, minmax(0, 1fr))",
             },
@@ -236,25 +245,6 @@ export default function CaseMetaBand({
             borderColor: "divider",
           }}
         >
-          <Cell label="Tier">
-            <Box sx={{ minWidth: 0 }}>
-              <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
-            </Box>
-          </Cell>
-          <Cell label="Assignee">
-            <Typography variant="body2" noWrap>
-              {c.assigneeIsMe ? (
-                <strong>{c.assignee}</strong>
-              ) : (
-                c.assignee
-              )}
-            </Typography>
-          </Cell>
-          <Cell label="Created by">
-            <Typography variant="body2" noWrap>
-              {c.createdBy ?? c.customerContext.primaryContact ?? "—"}
-            </Typography>
-          </Cell>
           <Cell label="Account">
             {c.accountId ? (
               <LinkText to={`/customers/accounts/${c.accountId}`}>
@@ -265,6 +255,11 @@ export default function CaseMetaBand({
                 {c.customer}
               </Typography>
             )}
+          </Cell>
+          <Cell label="Tier">
+            <Box sx={{ minWidth: 0 }}>
+              <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
+            </Box>
           </Cell>
           <Cell label="Project">
             {c.projectId ? (
@@ -296,6 +291,20 @@ export default function CaseMetaBand({
           <Cell label="Product">
             <Typography variant="body2" noWrap>
               {product.product ?? "—"}
+            </Typography>
+          </Cell>
+          <Cell label="Created by">
+            <Typography variant="body2" noWrap>
+              {c.createdBy ?? c.customerContext.primaryContact ?? "—"}
+            </Typography>
+          </Cell>
+          <Cell label="Assignee">
+            <Typography variant="body2" noWrap>
+              {c.assigneeIsMe ? (
+                <strong>{c.assignee}</strong>
+              ) : (
+                c.assignee
+              )}
             </Typography>
           </Cell>
         </Box>

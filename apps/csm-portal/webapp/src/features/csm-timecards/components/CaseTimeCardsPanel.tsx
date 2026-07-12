@@ -19,8 +19,8 @@ import {
   Box,
   Button,
   Card,
-  CircularProgress,
   Divider,
+  Skeleton,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Clock, Plus } from "@wso2/oxygen-ui-icons-react";
@@ -42,24 +42,18 @@ interface CaseTimeCardsPanelProps {
   projectId: string;
   /** Opens the log-time dialog (owned by the page so the action bar can trigger it). */
   onLogTime: () => void;
-  /**
-   * When true the case is closed (CAMG-006): time tracking is read-only, so
-   * logging and inline review are disabled. Existing entries stay visible.
-   */
-  readOnly?: boolean;
 }
 
 /**
  * The body of a case's "Time tracking" tab: the time cards logged on this
  * case, with a running total and per-entry status. A team lead can review
- * (accept or reject) any submitted entry inline — unless the case is closed,
- * in which case the panel is read-only.
+ * (accept or reject) any submitted entry inline. Available even after the
+ * case is closed — time is often logged after the fact.
  */
 export default function CaseTimeCardsPanel({
   caseId,
   projectId,
   onLogTime,
-  readOnly = false,
 }: CaseTimeCardsPanelProps): JSX.Element {
   const { data, isLoading, isError } = useCaseTimeCards(caseId, projectId);
   const isTeamLead = useIsTeamLead();
@@ -89,23 +83,15 @@ export default function CaseTimeCardsPanel({
           <Clock size={16} />
           <Typography variant="subtitle2">Time tracked</Typography>
         </Box>
-        {!readOnly && (
-          <Button
-            size="small"
-            variant="text"
-            startIcon={<Plus size={14} />}
-            onClick={onLogTime}
-          >
-            Log time
-          </Button>
-        )}
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<Plus size={14} />}
+          onClick={onLogTime}
+        >
+          Log time
+        </Button>
       </Box>
-
-      {readOnly && (
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-          This case is closed — time tracking is read-only.
-        </Typography>
-      )}
 
       <Box
         sx={{
@@ -130,8 +116,19 @@ export default function CaseTimeCardsPanel({
       )}
 
       {isLoading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
-          <CircularProgress size={22} />
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {[0, 1, 2].map((i) => (
+            <Box
+              key={i}
+              sx={{ p: 1, borderRadius: 1, border: 1, borderColor: "divider" }}
+            >
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                <Skeleton variant="rounded" width="40%" height={20} />
+                <Skeleton variant="rounded" width="20%" height={20} />
+              </Box>
+              <Skeleton variant="rounded" width="25%" height={16} />
+            </Box>
+          ))}
         </Box>
       ) : isError ? (
         <Typography variant="body2" color="error" sx={{ py: 2 }}>
@@ -172,7 +169,6 @@ export default function CaseTimeCardsPanel({
                    self-decide regardless of approver status, so a card you
                    submitted yourself can never actually be reviewed by you. */}
                   {isTeamLead &&
-                    !readOnly &&
                     c.state === "submitted" &&
                     !!me.id &&
                     c.userId !== me.id && (

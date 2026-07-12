@@ -1,0 +1,195 @@
+name: Reusable Frontend Build Release
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      app_path:
+        required: true
+        type: string
+      initial_version:
+        required: false
+        type: string
+        default: ""
+        description: "Last known version from the DB (e.g. 2.4.0-build.5). Used as baseline only when no git tag exists yet."
+      bump_type:
+        required: false
+        type: string
+        default: patch
+        description: "Version bump type (patch, minor, major). Defaults to patch for workflow_dispatch."
+      node_version:
+        required: false
+        type: string
+        default: "20"
+      build_command:
+        required: false
+        type: string
+        default: npm run build
+      output_dir:
+        required: false
+        type: string
+        default: build
+      # ── Dispatch hints: used as INITIAL_VERSION baseline when no git tag exists ──
+      # These are NEVER used verbatim as the output version — detect-version-bump.sh
+      # always auto-increments to guarantee a unique new tag on every run.
+      override_version:
+        required: false
+        type: string
+        default: ""
+        description: "Version hint from Release Dashboard (e.g. 2.0.3). Used as initial_version baseline only if no git tag exists."
+      override_build:
+        required: false
+        type: string
+        default: ""
+        description: "Build hint from Release Dashboard (e.g. 19). Used as initial_version baseline only if no git tag exists."
+      service_url_env_name:
+        required: false
+        type: string
+        default: REACT_APP_API_BASE
+        description: "Name of the process.env variable the frontend's own code reads for its backend base URL (e.g. REACT_APP_ACCESS_BE_URL, REACT_APP_MENU_BE_URL). Each app should use its own distinct name to avoid sharing a single generic secret/value across apps. Defaults to REACT_APP_API_BASE for backward compatibility."
+      extra_plain_env_json:
+        required: false
+        type: string
+        default: "{}"
+        description: "JSON object of additional build-time env var name/value pairs that are NOT sensitive and don't vary by environment (e.g. REACT_APP_DOD_IS_MICROAPP, REACT_APP_DOD_APP_NAME). Safe to hardcode directly in the calling workflow. Keys are the literal process.env names the frontend code expects."
+    secrets:
+      REACT_APP_API_BASE:
+        required: false
+      EXTRA_SECRET_ENV_JSON:
+        required: false
+        description: "JSON object of additional build-time env var name/value pairs that ARE sensitive or app/environment-specific (e.g. Asgardeo client ID, OAuth redirect URLs). Keys are the literal process.env names the frontend code expects."
+
+jobs:
+  detect_version_bump:
+    name: Detect Version Bump
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      build: ${{ steps.resolve.outputs.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Version (always auto-increment for a new unique tag)
+        id: resolve
+        env:
+          BUMP_TYPE: ${{ inputs.bump_type }}
+          APP_NAME: ${{ inputs.app_name }}
+          INITIAL_VERSION: ${{ inputs.initial_version }}
+          OVERRIDE_VERSION: ${{ inputs.override_version }}
+          OVERRIDE_BUILD: ${{ inputs.override_build }}
+        run: |
+          # If the Release Dashboard provides version/build hints, treat them as the
+          # initial_version baseline so the script knows where to start when no git
+          # tag exists yet.  The script ALWAYS increments → always produces a new tag.
+          if [ -n "$OVERRIDE_VERSION" ] && [ -n "$OVERRIDE_BUILD" ]; then
+            export INITIAL_VERSION="${OVERRIDE_VERSION}-build.${OVERRIDE_BUILD}"
+          fi
+          bash .github/scripts/detect-version-bump.sh
+
+  staging_build:
+    name: Staging Build
+    needs: detect_version_bump
+    # Always build staging — both staging and production are required on every run.
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.app_path }}/package-lock.json
+
+      - name: Expose build-time env vars
+        env:
+          SERVICE_URL_NAME: ${{ inputs.service_url_env_name }}
+          SERVICE_URL_VALUE: ${{ secrets.REACT_APP_API_BASE }}
+          EXTRA_SECRET_JSON: ${{ secrets.EXTRA_SECRET_ENV_JSON }}
+          EXTRA_PLAIN_JSON: ${{ inputs.extra_plain_env_json }}
+        run: |
+          echo "${SERVICE_URL_NAME}=${SERVICE_URL_VALUE}" >> "$GITHUB_ENV"
+          echo "${EXTRA_SECRET_JSON:-{\}}" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"
+          echo "${EXTRA_PLAIN_JSON:-{\}}" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        working-directory: ${{ inputs.app_path }}
+        env:
+          CI: false
+        run: |
+          npm ci
+          ${{ inputs.build_command }}
+          BUILD_FILE="${{ inputs.app_name }}-staging-v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}"
+          mv "${{ inputs.output_dir }}" "$BUILD_FILE"
+          zip -r "$BUILD_FILE.zip" "$BUILD_FILE"
+
+      - name: Upload Staging Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.app_name }}-staging-build
+          path: ${{ inputs.app_path }}/${{ inputs.app_name }}-staging-v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}.zip
+
+  production_build:
+    name: Production Build
+    needs: [detect_version_bump, staging_build]
+    # Always build production — runs after staging completes successfully.
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.app_path }}/package-lock.json
+
+      - name: Expose build-time env vars
+        env:
+          SERVICE_URL_NAME: ${{ inputs.service_url_env_name }}
+          SERVICE_URL_VALUE: ${{ secrets.REACT_APP_API_BASE }}
+          EXTRA_SECRET_JSON: ${{ secrets.EXTRA_SECRET_ENV_JSON }}
+          EXTRA_PLAIN_JSON: ${{ inputs.extra_plain_env_json }}
+        run: |
+          echo "${SERVICE_URL_NAME}=${SERVICE_URL_VALUE}" >> "$GITHUB_ENV"
+          echo "${EXTRA_SECRET_JSON:-{\}}" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"
+          echo "${EXTRA_PLAIN_JSON:-{\}}" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        working-directory: ${{ inputs.app_path }}
+        env:
+          CI: false
+        run: |
+          npm ci
+          ${{ inputs.build_command }}
+          BUILD_FILE="${{ inputs.app_name }}-production-v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}"
+          mv "${{ inputs.output_dir }}" "$BUILD_FILE"
+          zip -r "$BUILD_FILE.zip" "$BUILD_FILE"
+
+      - name: Download Staging Artifact
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: ${{ inputs.app_name }}-staging-build
+          path: ${{ inputs.app_path }}
+
+      - name: Create GitHub Release (staging + production)
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          tag_name: ${{ inputs.app_name }}-v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}
+          name: ${{ inputs.app_name }} v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}
+          files: |
+            ${{ inputs.app_path }}/${{ inputs.app_name }}-staging-v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}.zip
+            ${{ inputs.app_path }}/${{ inputs.app_name }}-production-v${{ needs.detect_version_bump.outputs.version }}-build.${{ needs.detect_version_bump.outputs.build }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

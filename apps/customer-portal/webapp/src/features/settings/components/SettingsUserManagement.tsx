@@ -325,7 +325,7 @@ export default function SettingsUserManagement({
                         }}
                       >
                         {getInitials(
-                          contact.firstName,
+                          contact.firstName ?? undefined,
                           contact.lastName,
                           contact.email,
                         )}

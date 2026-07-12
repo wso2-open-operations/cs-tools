@@ -68,7 +68,7 @@ export default function RecentActivitySection({
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
         {isLoading &&
           [0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} variant="rectangular" height={44} />
+            <Skeleton key={i} variant="rounded" height={44} />
           ))}
         {!isLoading && (activity?.length ?? 0) === 0 && (
           <Typography variant="body2" color="text.secondary">

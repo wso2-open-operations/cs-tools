@@ -461,6 +461,14 @@ export type EscalateCaseModalProps = {
   onError?: (message: string) => void;
 };
 
+export type CaseFeedbackModalProps = {
+  open: boolean;
+  caseId: string;
+  onClose: () => void;
+  onSubmitted?: () => void;
+  onError?: (message: string) => void;
+};
+
 export type CasesOverviewStatCardProps = {
   isLoading: boolean;
   isError?: boolean;

@@ -46,8 +46,12 @@ test.describe("time cards — approvals queue", () => {
       0,
       { timeout: 15_000 },
     );
+    await tc.openFilters();
     await expect(page.getByLabel("Project")).toBeVisible();
-    await expect(page.getByLabel("State")).toBeVisible();
+    // No State control here: Approvals is server-forced to "submitted"
+    // (see useApprovalQueue), so FilterBar hides it via hideStateFilter
+    // rather than showing a filter that can't narrow anything.
+    await expect(page.getByLabel("State")).toHaveCount(0);
     await expect(page.getByLabel("Engineer")).toBeVisible();
   });
 

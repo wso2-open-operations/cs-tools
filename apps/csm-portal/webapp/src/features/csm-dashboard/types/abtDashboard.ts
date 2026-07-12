@@ -22,7 +22,14 @@ export type CaseState =
   | "solution_proposed"
   | "awaiting_info"
   | "waiting_on_wso2"
-  | "closed";
+  | "closed"
+  /**
+   * Only ever appears as a `nextStates` entry on a closed case, never as a
+   * case's own `state` — it signals "Create related case" is available, not
+   * an actual reopen (the data source has no such transition). See
+   * `CsmCaseDetail.nextStates` and `CaseActionBar`'s `reopened` handling.
+   */
+  | "reopened";
 
 /**
  * Work sub-state of a `work_in_progress` case. `null` / absent when the case is

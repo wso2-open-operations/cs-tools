@@ -82,8 +82,22 @@ export class TimeCardsPage {
     return this.page.getByRole("button", { name, exact: true });
   }
 
+  /** Opens the collapsible filter section (the "Filters"/"Filters (N)"
+   * toggle button) if the fields inside it aren't already visible. */
+  async openFilters(): Promise<void> {
+    const isOpen = await this.page
+      .getByLabel("Work item")
+      .isVisible()
+      .catch(() => false);
+    if (!isOpen) {
+      await this.page.getByRole("button", { name: /^filters/i }).click();
+      await expect(this.page.getByLabel("Work item")).toBeVisible();
+    }
+  }
+
   /** Set the State filter select (label "State") to an option label. */
   async filterState(optionLabel: string): Promise<void> {
+    await this.openFilters();
     await this.page.getByLabel("State").click();
     await this.page.getByRole("option", { name: optionLabel, exact: true }).click();
   }
@@ -93,13 +107,16 @@ export class TimeCardsPage {
    * (`SearchableMultiSelect`), not a plain free-text field, so typing alone
    * doesn't apply anything until an option is actually selected. */
   async filterWorkItem(caseNumber: string): Promise<void> {
+    await this.openFilters();
     await this.page.getByLabel("Work item").fill(caseNumber);
     await this.page.getByRole("option", { name: caseNumber, exact: true }).click();
   }
 
-  /** Clears every active filter via the filter bar's "Clear all" button. */
+  /** Clears every active filter via the filter bar's "Clear filters" button
+   * (only shown once a filter is active, replacing the plain "Filters"
+   * toggle in the same spot). */
   async clearFilters(): Promise<void> {
-    await this.page.getByRole("button", { name: "Clear all" }).click();
+    await this.page.getByRole("button", { name: "Clear filters" }).click();
   }
 
   reviewDialog(): Locator {

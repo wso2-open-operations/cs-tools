@@ -15,10 +15,9 @@
 // under the License.
 
 import {
-  Alert,
   Box,
+  Button,
   Chip,
-  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -29,8 +28,10 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
+import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { useNavTransition } from "@hooks/useNavTransition";
+import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useSearchChangeRequests } from "@features/csm-operations/api/useSearchChangeRequests";
@@ -39,11 +40,10 @@ import {
   changeRequestImpactLabel,
   changeRequestStateColor,
   changeRequestStateLabel,
-} from "@features/csm-operations/utils/changeRequests";
-import ChangeRequestsFilterBar, {
   DEFAULT_CR_FILTERS,
   type ChangeRequestFilters,
-} from "@features/csm-operations/components/ChangeRequestsFilterBar";
+} from "@features/csm-operations/utils/changeRequests";
+import ChangeRequestsFilterBar from "@features/csm-operations/components/ChangeRequestsFilterBar";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -52,7 +52,7 @@ function formatDate(value?: string | null): string {
   return (
     formatBackendTimestampForDisplay(value, {
       year: "numeric",
-      month: "numeric",
+      month: "short",
       day: "numeric",
     }) ?? "—"
   );
@@ -74,7 +74,7 @@ function toISOEnd(date: string): string {
  * (state, impact, closed date range, free-text search).
  */
 export default function ChangeRequestsTab(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const [filters, setFilters] = useState<ChangeRequestFilters>(DEFAULT_CR_FILTERS);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -122,6 +122,18 @@ export default function ChangeRequestsTab(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="contained"
+          color="primary"
+          size="small"
+          startIcon={<Plus size={16} />}
+          onClick={() => navigate("/operations/change-requests/new")}
+        >
+          Create change request
+        </Button>
+      </Box>
+
       <ChangeRequestsFilterBar
         filters={filters}
         onChange={handleFiltersChange}
@@ -130,18 +142,11 @@ export default function ChangeRequestsTab(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen((prev: boolean) => !prev)}
       />
 
-      {isError && (
-        <Alert severity="error">
-          Failed to load change requests:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
-        </Alert>
-      )}
-
-      <Paper variant="outlined">
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Number</TableCell>
                 <TableCell>Subject</TableCell>
                 <TableCell>Project</TableCell>
@@ -152,18 +157,27 @@ export default function ChangeRequestsTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
-                [0, 1, 2, 3, 4, 5].map((i) => (
+              {isLoading || isFetching ? (
+                Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
-                    <TableCell><Skeleton variant="text" /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={72} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={7} align="center">
+                    <QueryErrorState
+                      message={`Failed to load change requests: ${error instanceof Error ? error.message : "unknown error"}`}
+                      error={error}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : changeRequests.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
@@ -230,13 +244,7 @@ export default function ChangeRequestsTab(): JSX.Element {
           showFirstButton
           showLastButton
         />
-      </Paper>
-
-      {isFetching && !isLoading && (
-        <Typography variant="caption" color="text.secondary">
-          Updating…
-        </Typography>
-      )}
+      </Box>
     </Box>
   );
 }

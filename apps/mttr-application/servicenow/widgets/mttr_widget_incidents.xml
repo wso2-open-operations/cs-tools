@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: MTTR for Incidents                                        -->
+    <!-- UI Page Name: mttr_widget_incidents                               -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_incident_mttr">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var result = api.getOverallByType();
+            result ? result.incident : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-kpi-incidents {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #f5a9a9;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-kpi-incidents .header {
+            background: #f5a9a9;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-kpi-incidents .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #e53935;
+            text-align: center;
+            padding: 24px 16px;
+        }
+        @media (max-width: 768px) {
+            .mttr-kpi-incidents .header { font-size: 12px; padding: 8px 12px; }
+            .mttr-kpi-incidents .value  { font-size: 22px; padding: 16px 12px; }
+        }
+        @media (max-width: 480px) {
+            .mttr-kpi-incidents .header { font-size: 11px; padding: 6px 10px; }
+            .mttr-kpi-incidents .value  { font-size: 18px; padding: 12px 10px; }
+        }
+    </style>
+
+    <div class="mttr-kpi-incidents">
+        <div class="header">MTTR for Incidents - Last 12 Months</div>
+        <div class="value">${jvar_incident_mttr}</div>
+    </div>
+
+</j:jelly>

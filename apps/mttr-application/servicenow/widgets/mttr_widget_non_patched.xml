@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: MTTR For Non Patches (donut pie by Case Type)             -->
+    <!-- UI Page Name: mttr_widget_non_patched                             -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_non_patched">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getPatchedMTTR();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-nonpatched {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #c2d84f;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-nonpatched .header {
+            background: #c2d84f;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-nonpatched .body { padding: 16px; }
+        .mttr-chart-nonpatched .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-nonpatched">
+        <div class="header">MTTR For Non Patches - Last 12 Months</div>
+        <div class="body">
+            <div id="chart_non_patched" style="width:100%;"></div>
+        </div>
+        <div class="footer">Group by Case Type</div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_non_patched" style="display:none">${jvar_non_patched}</textarea>
+
+    <script type="text/javascript">
+    // IIFE scope-guard — see mttr_widget_team_casetype.xml for full
+    // rationale (sibling widgets declare _scheduleRedraw / drawChart /
+    // noData at top level; the wrap keeps them per-widget-scoped).
+    (function () {
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawChart, 100); });
+
+        var _rtimer = null;
+        function _scheduleRedraw() {
+            if (_rtimer) clearTimeout(_rtimer);
+            _rtimer = setTimeout(drawChart, 150);
+        }
+        // Idempotent listener setup — see mttr_widget_hist_inc_priority.xml
+        // for the rationale (SN re-renders re-run this script; naive
+        // addEventListener leaks a handler on every mount).
+        if (window.__mttrNonPatchedState) {
+            window.removeEventListener('resize', window.__mttrNonPatchedState.resizeHandler);
+            if (window.__mttrNonPatchedState.observer) {
+                window.__mttrNonPatchedState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedraw);
+        var _obsNonPatched = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsNonPatched = new ResizeObserver(_scheduleRedraw);
+            _obsNonPatched.observe(document.getElementById('chart_non_patched'));
+        }
+        window.__mttrNonPatchedState = { resizeHandler: _scheduleRedraw, observer: _obsNonPatched };
+
+        function drawChart() {
+            try {
+                var _el = document.getElementById('chart_non_patched');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(220, Math.round(_w * 0.75)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_non_patched').value;
+                if (!raw || raw === 'null') { noData(); return; }
+                var allData = JSON.parse(raw);
+                var d = allData.non_patched;
+                if (!d) { noData(); return; }
+
+                var incH = d.incident_hours || 0;
+                var qryH = d.query_hours || 0;
+                if (incH + qryH === 0) { noData(); return; }
+
+                var rows = [['Case Type', 'MTTR (Days)', { role: 'tooltip' }]];
+                if (incH > 0)
+                    rows.push(['Incident = ' + (d.Incident || ''), Math.round((incH / 24) * 10) / 10, 'Incident: ' + (d.Incident || '')]);
+                if (qryH > 0)
+                    rows.push(['Query = ' + (d.Query || ''), Math.round((qryH / 24) * 10) / 10, 'Query: ' + (d.Query || '')]);
+
+                var data = google.visualization.arrayToDataTable(rows);
+                var chart = new google.visualization.PieChart(
+                    document.getElementById('chart_non_patched'));
+                chart.draw(data, {
+                    pieHole: 0.35,
+                    chartArea: { width: '85%', height: '85%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+                    colors: ['#2ecc71', '#3498db'],
+                    backgroundColor: 'transparent',
+                    pieSliceText: 'none',
+                    tooltip: { textStyle: { fontSize: 12 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_non_patched error:', e);
+                noData();
+            }
+        }
+
+        function noData() {
+            // DOM-API placeholder — see mttr_widget_team_trend.xml for
+            // the full rationale (escaped-entity innerHTML rendered as
+            // literal text; createElement produces a real p node).
+            var container = document.getElementById('chart_non_patched');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No data available';
+            container.appendChild(p);
+        }
+    })();
+    </script>
+
+</j:jelly>

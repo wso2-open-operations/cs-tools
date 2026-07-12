@@ -130,6 +130,15 @@ Copy `.env` and fill in the values:
 | `SCIM_CLIENT_SECRET` | OAuth2 client secret |
 | `SCIM_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
+### Auth
+
+| Variable | Description |
+|---|---|
+| `AUTH_JWKS_ENDPOINT` | JWKS endpoint used to verify JWT signatures |
+| `AUTH_ISSUER` | Expected `iss` claim value |
+| `AUTH_AUDIENCE` | Comma-separated accepted `aud` values; token passes if any listed value is present in its `aud` claim |
+| `AUTH_TOKEN_VALIDATOR_ENABLED` | Set to `false` for local development to skip signature verification (default `true`) |
+
 ### Server
 
 | Variable | Description |
@@ -158,7 +167,7 @@ backend/
 │   │   └── security_headers.go # X-Content-Type-Options, CSP, HSTS on every response
 │   └── handler/
 │       ├── cases.go            # HTTP handlers for case endpoints
-│       ├── state.go            # Case state machine (nextStates, isValidStateTransition)
+│       ├── state.go            # Case state machine (nextStates, isValidStateTransition, canCreateRelatedCase)
 │       ├── catalogs.go                   # HTTP handlers for catalog endpoints (ServiceNow only)
 │       ├── change_requests.go            # HTTP handlers for change-request endpoints
 │       ├── product_vulnerabilities.go    # HTTP handlers for product vulnerability endpoints (ServiceNow only)
@@ -166,6 +175,7 @@ backend/
 │       ├── deployments.go                # HTTP handlers for deployment endpoints
 │       ├── products.go                   # HTTP handlers for product endpoints
 │       ├── projects.go                   # HTTP handlers for project endpoints
+│       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
@@ -178,7 +188,7 @@ backend/
 
 - `POST /cases` — Create a case (`type`: `case`; `service_request` and `security_report_analysis` are ServiceNow data source only)
 - `GET /cases/{id}` — Get case by ID
-- `PATCH /cases/{id}` — Update a case (state, severity, workState, watchList, or assigneeEmail)
+- `PATCH /cases/{id}` — Update a case (state, severity, workState, watchList, or assigneeEmail); optional `resolutionCode`, `cause`, `closeNotes` accepted alongside `state: closed` or `state: solution_proposed`
 - `POST /cases/search` — Search cases; filters include `searchQuery`, `types`, `states`, `severities`, `workStates` (`ongoing`/`paused`), `assignedUserIds`, `projectIds`, `deploymentIds`, `engagementTypes`, `issueTypes`, date ranges, `createdBy`, `createdByMe`
 - `POST /cases/{id}/comments` — Create a comment on a case
 - `POST /cases/{id}/comments/search` — Search comments on a case
@@ -258,6 +268,10 @@ backend/
 - `GET /updates/product-update-levels` — Get product update levels
 - `POST /updates/levels/search` — Search updates between update levels
 
+### Incidents
+
+- `POST /incidents/search` — Search incidents; optional `filters` (`searchQuery`, `priorities`, `parentIds`) and `sortBy` (`field`: `createdOn`/`updatedOn`/`openedOn`, `order`) (ServiceNow data source only)
+
 ## Run Locally
 
 ```bash
@@ -304,4 +318,10 @@ curl -X POST http://localhost:8080/updates/levels/search \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"productName":"wso2am","productVersion":"4.2.0","startingUpdateLevel":1,"endingUpdateLevel":10}'
+
+# Search incidents
+curl -X POST http://localhost:8080/incidents/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"searchQuery":"outage","priorities":["CRITICAL"]},"pagination":{"limit":10,"offset":0}}'
 ```

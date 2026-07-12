@@ -59,6 +59,13 @@ func (c *Client) SearchCaseComments(ctx context.Context, caseID string, body []b
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/comments/search", url.PathEscape(caseID)), body)
 }
 
+// SearchCaseActivities calls POST /cases/{id}/activities/search on the entity service.
+// The path-scoped body is forwarded verbatim and the response is returned as raw JSON;
+// typed response structs are deferred.
+func (c *Client) SearchCaseActivities(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(caseID)+"/activities/search", body)
+}
+
 // GetUserMe calls GET /users/me on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) GetUserMe(ctx context.Context) ([]byte, error) {
@@ -111,6 +118,12 @@ func (c *Client) SearchProducts(ctx context.Context, body []byte) ([]byte, error
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchProductVersions(ctx context.Context, productID string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/products/%s/versions/search", url.PathEscape(productID)), body)
+}
+
+// SearchIncidents calls POST /incidents/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/incidents/search", body)
 }
 
 // PostDeployment calls POST /deployments on the entity service to create a new deployment.

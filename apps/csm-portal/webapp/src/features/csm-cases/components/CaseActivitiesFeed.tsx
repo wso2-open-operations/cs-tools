@@ -45,6 +45,7 @@ import { useMemo, useState, type JSX } from "react";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import RelativeTime from "@components/RelativeTime";
 import { formatBytes } from "@utils/formatBytes";
+import { formatAbsoluteForUser } from "@utils/dateTime";
 import {
   compareFeedEntries,
   type FeedEntry,
@@ -74,7 +75,51 @@ const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
   attachment_added: <Paperclip size={14} />,
   sla_breached: <TriangleAlert size={14} />,
   created: <Plus size={14} />,
+  field_change: <Activity size={14} />,
 };
+
+// Matches the handful of backend timestamp shapes `parseBackendTimestamp`
+// understands (space-separated, "M/D/YYYY h:m:s", ISO "T"-separated). Plain
+// text values ("High", "3", "2026") must NOT match — `new Date(...)` parses
+// bare years/numbers as valid dates, which would misclassify them.
+const TIMESTAMP_VALUE_PATTERN =
+  /^(\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:\d{1,2}(:\d{1,2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?|\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{1,2}(:\d{1,2})?)$/;
+
+/** True when `value` looks like a full date-time (not a bare number/year). */
+function isTimestampLikeValue(value: string | undefined): boolean {
+  return !!value && TIMESTAMP_VALUE_PATTERN.test(value.trim());
+}
+
+/** Renders a field's value, formatting it in the user's local timezone when
+ * it is itself a timestamp; otherwise the raw value is shown as-is. */
+function formatChangeValue(value: string | undefined): string | undefined {
+  if (!isTimestampLikeValue(value)) return value;
+  return formatAbsoluteForUser(value) ?? value;
+}
+
+/** One "<label>: <old> → <new>" line for a field-change entry's audit strip. */
+function FieldChangeLine({
+  field,
+}: {
+  field: { fieldLabel: string; previousValue?: string; newValue?: string };
+}): JSX.Element {
+  const hadPrevious = !!field.previousValue?.trim();
+  const hasNew = !!field.newValue?.trim();
+  return (
+    <Typography variant="body2" component="div">
+      <strong>{field.fieldLabel}:</strong>{" "}
+      {hadPrevious && (
+        <>
+          <Box component="span" sx={{ color: "text.secondary" }}>
+            {formatChangeValue(field.previousValue)}
+          </Box>
+          {" → "}
+        </>
+      )}
+      {hasNew ? formatChangeValue(field.newValue) : <em>cleared</em>}
+    </Typography>
+  );
+}
 
 export default function CaseActivitiesFeed({
   comments,
@@ -223,47 +268,90 @@ export default function CaseActivitiesFeed({
             if (e.kind === "audit") {
               const isBreach = e.entry.kind === "sla_breached";
               return (
-                <Paper
+                <Box
                   id={e.entry.id}
                   key={`a-${e.entry.id}`}
-                  variant="outlined"
                   sx={{
-                    p: 1,
                     display: "flex",
-                    alignItems: "center",
-                    gap: 1.25,
-                    backgroundColor: isBreach ? "error.50" : "background.default",
-                    borderColor: isBreach ? "error.main" : undefined,
+                    gap: 1.5,
+                    alignItems: "flex-start",
                     scrollMarginTop: 96,
                   }}
                 >
-                  <Box
+                  <Avatar
                     sx={{
-                      color: isBreach ? "error.main" : "text.secondary",
-                      display: "flex",
+                      width: 32,
+                      height: 32,
+                      bgcolor: isBreach ? "error.main" : "action.selected",
+                      color: isBreach ? "error.contrastText" : "text.secondary",
                     }}
                   >
                     {AUDIT_ICON[e.entry.kind]}
-                  </Box>
-                  <Box sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
-                    <Typography variant="body2">
-                      {e.entry.description}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {e.entry.actor} ·{" "}
-                      <RelativeTime
-                        iso={e.entry.createdAt}
-                        href={`#${e.entry.id}`}
-                      />
-                    </Typography>
-                  </Box>
-                  <Chip
-                    size="small"
+                  </Avatar>
+                  <Paper
                     variant="outlined"
-                    label="Lifecycle"
-                    color={isBreach ? "error" : "default"}
-                  />
-                </Paper>
+                    sx={{
+                      p: 1.5,
+                      flex: 1,
+                      minWidth: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 0.75,
+                      backgroundColor: isBreach ? "error.50" : undefined,
+                      borderColor: isBreach ? "error.main" : undefined,
+                    }}
+                  >
+                    {/* Header mirrors the comment bubble: actor + time up top,
+                        so a field-change entry reads the same way as a
+                        comment before the reader gets to what changed. */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Typography variant="subtitle2">
+                        {e.entry.actor}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label="Lifecycle"
+                        color={isBreach ? "error" : "default"}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        <RelativeTime
+                          iso={e.entry.createdAt}
+                          href={`#${e.entry.id}`}
+                        />
+                      </Typography>
+                    </Box>
+                    <Box sx={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                      {e.entry.changes && e.entry.changes.length > 0 ? (
+                        <Box
+                          sx={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 0.25,
+                          }}
+                        >
+                          {e.entry.changes.map((change, i) => (
+                            <FieldChangeLine
+                              key={`${change.field}-${i}`}
+                              field={change}
+                            />
+                          ))}
+                        </Box>
+                      ) : (
+                        <Typography variant="body2">
+                          {e.entry.description}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Paper>
+                </Box>
               );
             }
             // attachment — rendered like a comment: avatar + card carrying the

@@ -18,14 +18,17 @@ import {
   Box,
   Button,
   Chip,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { BeCallRequestView, BeCallRequestStateKey } from "@api/backend/types";
+import type { BeCallRequestView } from "@api/backend/types";
 import {
-  CALL_REQUEST_TRANSITIONS,
+  CALL_REQUEST_AGENT_ACTIONS,
+  type CallRequestAgentAction,
   callRequestStateColor,
   callRequestStateLabel,
+  resolveCallRequestStateKey,
 } from "@features/csm-cases/utils/callRequestState";
 import RelativeTime from "@components/RelativeTime";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -53,26 +56,37 @@ function formatPreferredTimes(times: string[] | undefined): string {
     .join(", ");
 }
 
+const ACTION_LABEL: Record<CallRequestAgentAction, string> = {
+  schedule: "Schedule",
+  reschedule: "Reschedule",
+  reject: "Reject",
+  sendNotes: "Send call notes",
+  cancel: "Cancel",
+};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface CallRequestRowProps {
   cr: BeCallRequestView;
-  onUpdateState: (cr: BeCallRequestView) => void;
+  onAction: (action: CallRequestAgentAction, cr: BeCallRequestView) => void;
+  /** True when the parent case is closed — existing call requests stay visible
+   * but can no longer be updated (scheduled, rejected, etc.). */
+  isClosed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function CallRequestRow({ cr, onUpdateState }: CallRequestRowProps): JSX.Element {
-  const stateKey = cr.state
-    ? (String(cr.state.id) as BeCallRequestStateKey)
-    : null;
-  const hasTransitions = stateKey
-    ? CALL_REQUEST_TRANSITIONS[stateKey].length > 0
-    : false;
+export function CallRequestRow({
+  cr,
+  onAction,
+  isClosed,
+}: CallRequestRowProps): JSX.Element {
+  const stateKey = resolveCallRequestStateKey(cr.state);
+  const actions = (stateKey && CALL_REQUEST_AGENT_ACTIONS[stateKey]) ?? [];
 
   return (
     <Box
@@ -110,16 +124,28 @@ export function CallRequestRow({ cr, onUpdateState }: CallRequestRowProps): JSX.
             color={callRequestStateColor(cr.state)}
           />
         </Box>
-        {hasTransitions && (
-          <Button
-            size="small"
-            variant="outlined"
-            color="inherit"
-            onClick={() => onUpdateState(cr)}
-            sx={{ textTransform: "none", flexShrink: 0 }}
-          >
-            Change state
-          </Button>
+        {actions.length > 0 && (
+          <Box sx={{ display: "flex", gap: 1, flexShrink: 0, flexWrap: "wrap" }}>
+            {actions.map((action, i) => (
+              <Tooltip
+                key={action}
+                title={isClosed ? "This case is closed — it's read-only." : ""}
+              >
+                <span>
+                  <Button
+                    size="small"
+                    variant={i === 0 && action !== "cancel" ? "contained" : "outlined"}
+                    color={action === "reject" || action === "cancel" ? "error" : "primary"}
+                    onClick={() => onAction(action, cr)}
+                    disabled={isClosed}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {ACTION_LABEL[action]}
+                  </Button>
+                </span>
+              </Tooltip>
+            ))}
+          </Box>
         )}
       </Box>
 
@@ -159,6 +185,14 @@ export function CallRequestRow({ cr, onUpdateState }: CallRequestRowProps): JSX.
             <Typography variant="body2">
               {formatPreferredTimes([cr.scheduleTime])}
             </Typography>
+          </Box>
+        )}
+        {cr.assignee && (
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Assignee
+            </Typography>
+            <Typography variant="body2">{cr.assignee}</Typography>
           </Box>
         )}
         {cr.meetingLink && (
@@ -207,6 +241,17 @@ export function CallRequestRow({ cr, onUpdateState }: CallRequestRowProps): JSX.
           </Box>
         )}
       </Box>
+
+      {cr.notes && (
+        <Box sx={{ mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" display="block">
+            Call notes
+          </Typography>
+          <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+            {cr.notes}
+          </Typography>
+        </Box>
+      )}
     </Box>
   );
 }

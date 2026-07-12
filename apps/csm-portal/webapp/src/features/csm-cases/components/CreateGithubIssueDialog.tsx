@@ -22,14 +22,21 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   InputLabel,
+  Link,
   MenuItem,
   Select,
+  Switch,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+import { CheckCircle } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
-import type { BeCreateCaseGithubIssuePayload } from "@api/backend/types";
+import type {
+  BeCreateCaseGithubIssuePayload,
+  BeCreateCaseGithubIssueResponse,
+} from "@api/backend/types";
 
 // ---------------------------------------------------------------------------
 // Option lists. Every select starts unset ("" → "-- Select --") and omits its
@@ -41,7 +48,9 @@ import type { BeCreateCaseGithubIssuePayload } from "@api/backend/types";
 const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
 
-const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+type IssueTypeValue = "" | "Type/Query" | "Type/Incident" | "Type/Patch";
+
+const TYPE_OPTIONS: Array<{ value: IssueTypeValue; label: string }> = [
   { value: "Type/Query", label: "Query" },
   { value: "Type/Incident", label: "Incident" },
   { value: "Type/Patch", label: "Patch" },
@@ -64,11 +73,6 @@ const REPO_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "wso2-integration-internal", label: "Devant / Integration" },
 ];
 
-const YES_NO_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "yes", label: "Yes" },
-  { value: "no", label: "No" },
-];
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -78,12 +82,21 @@ export interface CreateGithubIssueDialogProps {
   submitting: boolean;
   /** Backend error message to surface inline (cleared by the parent on retry). */
   error: string | null;
+  /** Set once the current submission has succeeded — the dialog shows a
+   * "created" screen with a clickable link instead of closing immediately.
+   * The parent clears this (along with `error`) when the dialog is dismissed. */
+  createdIssue?: BeCreateCaseGithubIssueResponse | null;
   /** Prefill for the update-level field, taken from the case's product context. */
   defaultUpdateLevel?: string;
-  /** Prefill for the Summary field, taken from the case's subject. */
+  /** Prefill for the Subject field, taken from the case's subject. */
   defaultTitle?: string;
   /** Prefill for the Description field, taken from the case's description. */
   defaultDescription?: string;
+  /** Show the repository field only for cloud subscription / cloud
+   * evaluation subscription projects — other project types route by
+   * product unit on the SN side and have no repo to choose. Conversely,
+   * Update Level and Public Git Issue apply only when this is false. */
+  showRepoField?: boolean;
   onClose: () => void;
   /** Body for `POST /cases/{id}/github-issues` (caseId is added by the caller). */
   onSubmit: (payload: BeCreateCaseGithubIssuePayload) => void;
@@ -95,46 +108,79 @@ export interface CreateGithubIssueDialogProps {
 
 /**
  * Form for filing an internal GitHub issue from a case (ISSU-020). Mirrors the
- * legacy ServiceNow "Open Git Issue" form: Summary + Description are required;
- * everything else is optional. Reason is fixed to `default` (the migration /
- * R&D-ticket variants were separate SN actions). Repo selection is offered for
- * cloud cases; when unset the SN side routes by the case's product unit.
+ * legacy ServiceNow "Open Git Issue" form. Subject + Description are always
+ * required; Type is required too and drives which other fields are shown/
+ * required (per review on #1085):
+ *   - Query: Severity and Hotfix Required are hidden.
+ *   - Incident: Severity is required; Hotfix Required is hidden.
+ *   - Patch: Severity is hidden; Update Level, Public Git Issue, and Hotfix
+ *     Required are all required.
+ * Reason is fixed to `default` (the migration / R&D-ticket variants were
+ * separate SN actions). Repo selection is offered for cloud cases; when unset
+ * the SN side routes by the case's product unit.
  */
 export function CreateGithubIssueDialog({
   open,
   submitting,
   error,
+  createdIssue,
   defaultUpdateLevel,
   defaultTitle,
   defaultDescription,
+  showRepoField,
   onClose,
   onSubmit,
 }: CreateGithubIssueDialogProps): JSX.Element {
+  const [type, setType] = useState<IssueTypeValue>(UNSET);
   const [title, setTitle] = useState(defaultTitle ?? "");
   const [description, setDescription] = useState(defaultDescription ?? "");
   const [updateLevel, setUpdateLevel] = useState(defaultUpdateLevel ?? "");
   const [publicIssueUrl, setPublicIssueUrl] = useState("");
-  const [issueTypeLabel, setIssueTypeLabel] = useState<string>(UNSET);
   const [priorityLevel, setPriorityLevel] = useState<string>(UNSET);
   const [repo, setRepo] = useState<string>(UNSET);
-  const [hotFix, setHotFix] = useState<string>(UNSET);
-  const [regression, setRegression] = useState<string>(UNSET);
+  const [hotFix, setHotFix] = useState(false);
+  const [regression, setRegression] = useState(false);
+  // Set once the user clicks "Create issue" on the form; holds the built
+  // payload until they confirm on the follow-up step below. Filing this issue
+  // is a real write to an external GitHub repo, so it gets an explicit
+  // confirm step like the case's other hard-to-undo actions (see
+  // CaseActionBar's TARGET_CONFIG.confirm).
+  const [confirmPayload, setConfirmPayload] =
+    useState<BeCreateCaseGithubIssuePayload | null>(null);
+
+  // Type drives which fields apply — see the component doc comment above.
+  const showSeverity = type === "Type/Incident";
+  const requireSeverity = type === "Type/Incident";
+  const showHotFix = type === "Type/Patch";
+  // Update Level / Public Git Issue apply to non-cloud projects only — cloud
+  // projects route via the repo field instead (see showRepoField).
+  const showUpdateLevelAndIssueUrl = !showRepoField;
+  const requireUpdateLevel =
+    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
+  const requirePublicIssueUrl =
+    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
 
   const resetAndClose = () => {
+    setType(UNSET);
     setTitle(defaultTitle ?? "");
     setDescription(defaultDescription ?? "");
     setUpdateLevel(defaultUpdateLevel ?? "");
     setPublicIssueUrl("");
-    setIssueTypeLabel(UNSET);
     setPriorityLevel(UNSET);
     setRepo(UNSET);
-    setHotFix(UNSET);
-    setRegression(UNSET);
+    setHotFix(false);
+    setRegression(false);
+    setConfirmPayload(null);
     onClose();
   };
 
   const canSubmit =
-    title.trim().length > 0 && description.trim().length > 0;
+    !!type &&
+    title.trim().length > 0 &&
+    description.trim().length > 0 &&
+    (!requireSeverity || !!priorityLevel) &&
+    (!requireUpdateLevel || updateLevel.trim().length > 0) &&
+    (!requirePublicIssueUrl || publicIssueUrl.trim().length > 0);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -143,29 +189,32 @@ export function CreateGithubIssueDialog({
       reason: "default",
       title: title.trim(),
       description: description.trim(),
+      issueTypeLabel: type,
     };
     if (updateLevel.trim()) payload.updateLevel = updateLevel.trim();
     if (publicIssueUrl.trim()) payload.publicIssueUrl = publicIssueUrl.trim();
-    if (issueTypeLabel) payload.issueTypeLabel = issueTypeLabel;
     // Priority only carries meaning for incidents on the SN side; send it
     // whenever the user picked one and let the SN side decide to apply it.
     if (priorityLevel) payload.priorityLevel = priorityLevel;
     if (repo) payload.repoOverride = { owner: REPO_OWNER, repo };
-    if (hotFix === "yes") payload.hotFixRequired = true;
-    if (regression === "yes") payload.regression = true;
+    if (showHotFix && hotFix) payload.hotFixRequired = true;
+    if (regression) payload.regression = true;
 
-    onSubmit(payload);
+    setConfirmPayload(payload);
   };
 
+  const repoLabel = REPO_OPTIONS.find((o) => o.value === repo)?.label;
+
   // Shared renderer for a "-- Select --" dropdown.
-  const renderSelect = (
+  const renderSelect = <V extends string>(
     id: string,
     label: string,
-    value: string,
-    onChange: (v: string) => void,
-    options: Array<{ value: string; label: string }>,
+    value: V,
+    onChange: (v: V) => void,
+    options: Array<{ value: V; label: string }>,
+    required?: boolean,
   ): JSX.Element => (
-    <FormControl fullWidth size="small" disabled={submitting}>
+    <FormControl fullWidth size="small" disabled={submitting} required={required}>
       <InputLabel id={`${id}-label`} shrink>
         {label}
       </InputLabel>
@@ -174,7 +223,7 @@ export function CreateGithubIssueDialog({
         label={label}
         value={value}
         displayEmpty
-        onChange={(e) => onChange(String(e.target.value))}
+        onChange={(e) => onChange(e.target.value as V)}
       >
         <MenuItem value={UNSET}>
           <Typography component="span" color="text.secondary">
@@ -201,8 +250,10 @@ export function CreateGithubIssueDialog({
             </Typography>
           )}
 
+          {renderSelect("ghi-type", "Type", type, setType, TYPE_OPTIONS, true)}
+
           <TextField
-            label="Summary"
+            label="Subject"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             fullWidth
@@ -224,40 +275,73 @@ export function CreateGithubIssueDialog({
             helperText="Case number, product and reporter are appended to the issue body automatically."
           />
 
-          <TextField
-            label="Update Level"
-            value={updateLevel}
-            onChange={(e) => setUpdateLevel(e.target.value)}
-            disabled={submitting}
-            size="small"
-            fullWidth
-          />
+          {showSeverity &&
+            renderSelect(
+              "ghi-severity",
+              "Severity",
+              priorityLevel,
+              setPriorityLevel,
+              SEVERITY_OPTIONS,
+              requireSeverity,
+            )}
 
-          <TextField
-            label="Public Git Issue or Security Internal JIRA"
-            value={publicIssueUrl}
-            onChange={(e) => setPublicIssueUrl(e.target.value)}
-            disabled={submitting}
-            size="small"
-            fullWidth
-            placeholder="https://github.com/… or JIRA link"
-          />
-
-          {renderSelect("ghi-type", "Type", issueTypeLabel, setIssueTypeLabel, TYPE_OPTIONS)}
-
-          {renderSelect("ghi-severity", "Severity", priorityLevel, setPriorityLevel, SEVERITY_OPTIONS)}
-
-          {renderSelect(
-            "ghi-repo",
-            "Choose repository (only for cloud cases)",
-            repo,
-            setRepo,
-            REPO_OPTIONS,
+          {showUpdateLevelAndIssueUrl && (
+            <TextField
+              label="Update Level"
+              value={updateLevel}
+              onChange={(e) => setUpdateLevel(e.target.value)}
+              disabled={submitting}
+              required={requireUpdateLevel}
+              size="small"
+              fullWidth
+            />
           )}
 
-          {renderSelect("ghi-hotfix", "Hotfix Required", hotFix, setHotFix, YES_NO_OPTIONS)}
+          {showUpdateLevelAndIssueUrl && (
+            <TextField
+              label="Public Git Issue or Security Internal JIRA"
+              value={publicIssueUrl}
+              onChange={(e) => setPublicIssueUrl(e.target.value)}
+              disabled={submitting}
+              required={requirePublicIssueUrl}
+              size="small"
+              fullWidth
+              placeholder="https://github.com/… or JIRA link"
+            />
+          )}
 
-          {renderSelect("ghi-regression", "Regression", regression, setRegression, YES_NO_OPTIONS)}
+          {showHotFix && (
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={hotFix}
+                  onChange={(e) => setHotFix(e.target.checked)}
+                  disabled={submitting}
+                />
+              }
+              label="Hotfix Required"
+            />
+          )}
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={regression}
+                onChange={(e) => setRegression(e.target.checked)}
+                disabled={submitting}
+              />
+            }
+            label="Regression"
+          />
+
+          {showRepoField &&
+            renderSelect(
+              "ghi-repo",
+              "Choose repository",
+              repo,
+              setRepo,
+              REPO_OPTIONS,
+            )}
         </Box>
       </DialogContent>
       <DialogActions>
@@ -273,6 +357,90 @@ export function CreateGithubIssueDialog({
           Create issue
         </Button>
       </DialogActions>
+
+      {/* Filing a GitHub issue is a real write to an external repo, so it
+          gets its own explicit confirm step. Once createdIssue is set (the
+          submission succeeded), the same dialog switches to a success view
+          with a clickable link instead of closing itself. */}
+      <Dialog
+        open={!!confirmPayload}
+        onClose={() => setConfirmPayload(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        {createdIssue ? (
+          <>
+            <DialogTitle>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: "success.main" }}>
+                <CheckCircle size={20} />
+                <Box component="span" sx={{ color: "text.primary" }}>
+                  Issue created
+                </Box>
+              </Box>
+            </DialogTitle>
+            <DialogContent>
+              {createdIssue.issue?.url ? (
+                <Typography variant="body2">
+                  Filed as{" "}
+                  <Link href={createdIssue.issue.url} target="_blank" rel="noopener noreferrer">
+                    {createdIssue.issue.repo && createdIssue.issue.number
+                      ? `${createdIssue.issue.repo}#${createdIssue.issue.number}`
+                      : createdIssue.issue.url}
+                  </Link>
+                  .
+                </Typography>
+              ) : (
+                <Typography variant="body2">
+                  {createdIssue.message ?? "The issue was created."}
+                </Typography>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button variant="contained" onClick={resetAndClose}>
+                Done
+              </Button>
+            </DialogActions>
+          </>
+        ) : (
+          <>
+            <DialogTitle>File this GitHub issue?</DialogTitle>
+            <DialogContent>
+              <Typography variant="body2">
+                This files a real issue in{" "}
+                {repoLabel
+                  ? `wso2-enterprise/${repo} (${repoLabel})`
+                  : "a WSO2 product repository, routed automatically by the case's product"}
+                . Make sure no sensitive information is included.
+              </Typography>
+              {/* Errors surface here too, not just on the form step behind
+                  this dialog — otherwise a failed submit leaves the user
+                  looking at this confirm step with no visible reason why it
+                  stopped. */}
+              {error && (
+                <Typography variant="body2" color="error" sx={{ mt: 1.5 }}>
+                  {error}
+                </Typography>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setConfirmPayload(null)} disabled={submitting}>
+                Back
+              </Button>
+              <Button
+                variant="contained"
+                color="warning"
+                disabled={submitting}
+                loading={submitting}
+                onClick={() => {
+                  if (confirmPayload) onSubmit(confirmPayload);
+                }}
+              >
+                File issue
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Dialog>
   );
 }

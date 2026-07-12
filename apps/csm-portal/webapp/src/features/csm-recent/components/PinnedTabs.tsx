@@ -17,13 +17,14 @@
 import { Box, Chip, Tooltip } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { useLocation, useNavigate } from "react-router";
+import { useLocation } from "react-router";
 import {
   toggleRecentViewPin,
   useRecentViews,
   type RecentView,
 } from "@features/csm-recent/hooks/useRecentViews";
 import { kindIcon } from "@features/csm-recent/kindMeta";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 /** Compact chip label: the case id / entity name (the part before " · "). */
 function shortLabel(entry: RecentView): string {
@@ -42,7 +43,7 @@ function shortLabel(entry: RecentView): string {
  */
 export default function PinnedTabs(): JSX.Element {
   const { isSignedIn } = useAsgardeo();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const location = useLocation();
   const pinned = useRecentViews().filter((e) => e.pinned);
 

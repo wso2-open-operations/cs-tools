@@ -35,6 +35,7 @@ import {
   ArrowLeft,
   Clock,
   Layers,
+  Link as LinkIcon,
   ListChecks,
   MessageSquarePlus,
   Paperclip,
@@ -42,7 +43,7 @@ import {
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import {
   usePatchCsmCase,
@@ -52,14 +53,21 @@ import {
   useFindMyOngoingCases,
   type MyOngoingCase,
 } from "@features/csm-cases/api/useFindMyOngoingCases";
-import type { BeCaseState } from "@api/backend/types";
-import { beStateFromUi } from "@api/backend/mappers";
+import type {
+  BeCaseCause,
+  BeCaseResolutionCode,
+  BeCaseState,
+  BeCreateCaseGithubIssueResponse,
+} from "@api/backend/types";
+import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
+import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import { BackendApiError } from "@api/backend/client";
 import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
 import { useGetCsmConversationMessages } from "@features/csm-cases/api/useCsmConversationMessages";
+import { useGetCsmCaseActivities } from "@features/csm-cases/api/useCsmCaseActivities";
 import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
@@ -69,19 +77,24 @@ import {
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
+import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
+import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
+import { isCloudSupportSubscription } from "@features/csm-projects/utils/subscriptionType";
 import { usePostCaseGithubIssue } from "@features/csm-cases/api/useCsmCaseGithubIssue";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
   AttachmentsWidget,
   CustomerContextWidget,
-  LinkedItemsWidget,
   ProductContextWidget,
-  WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
+import { useGetCsmCaseCallRequests } from "@features/csm-cases/api/useCsmCaseCallRequests";
+import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
+import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { CaseSlaTable } from "@features/csm-cases/components/CaseSlaTable";
+import { useGetCsmCaseSlas } from "@features/csm-cases/api/useGetCsmCaseSlas";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
@@ -93,6 +106,7 @@ import {
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import QueryErrorState from "@components/QueryErrorState";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
@@ -100,8 +114,10 @@ import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import type {
   CaseAttachment,
   CaseLifecycleAction,
+  CreateRelatedCaseNavState,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
+import { useNavTransition } from "@hooks/useNavTransition";
 
 function MetaCell({
   label,
@@ -129,6 +145,10 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   resume_work: "Resumed work on this case.",
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
+  // Unused: intercepted before this map is read (see onAction) since it
+  // navigates instead of showing a toast. Present only to satisfy the
+  // exhaustive Record.
+  create_related_case: "",
   transition: "Case updated.",
 };
 
@@ -153,6 +173,8 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   resume_work: "info",
   close: "success",
   close_no_response: "success",
+  // Unused — see the matching note in LIFECYCLE_TOAST.
+  create_related_case: "info",
   transition: "info",
 };
 
@@ -181,19 +203,10 @@ const FEEDBACK_PALETTE: Record<
   error: { bg: "error.50", border: "error.main", fg: "error.main" },
 };
 
+// Only covers secondary actions that are handled inline below with a fixed,
+// literal toast — every action with real branching feedback (success/error,
+// dynamic text) sets its own message directly instead of reading this map.
 const SECONDARY_TOAST: Record<string, string> = {
-  reassign_engineer: "Reassign engineer dialog (mock).",
-  reassign_group: "Reassign group dialog (mock).",
-  escalate: "Escalation form (mock).",
-  change_severity: "Severity change request (mock).",
-  hold_auto_close: "Hold auto-closure dialog (mock).",
-  create_incident: "Create incident from case (mock).",
-  link_case: "Link related case picker (mock).",
-  link_incident: "Link to incident picker (mock).",
-  manage_watchers: "Add/remove watcher dialog (mock).",
-  create_task: "Create task dialog (mock).",
-  request_call: "Request a call dialog (mock).",
-  log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
 };
 
@@ -233,7 +246,7 @@ const TAB_DEFS: Array<{
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
-  { id: "sla", label: "SLA", icon: <Clock size={16} /> },
+  { id: "sla", label: "SLAs", icon: <Clock size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
@@ -241,7 +254,7 @@ const TAB_DEFS: Array<{
 
 export default function CsmCaseDetailPage(): JSX.Element {
   const { caseId } = useParams<{ caseId: string }>();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
   const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
@@ -260,12 +273,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
     : isServiceRequestRoute
       ? `/operations/service-requests/${caseId}`
       : `/cases/${caseId}`;
-  const { data, isLoading, isError } = useGetCsmCaseDetail(caseId);
+  const { data, isLoading, isError, error } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
     isLoading: isCommentsLoading,
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
+  // Audited field/state changes (the "State changes" lifecycle lane), loaded
+  // from the dedicated activities endpoint — kept separate from the comments
+  // hook above, which is the sole source for comments/work notes.
+  const {
+    data: activityAudit,
+    isLoading: isActivityLoading,
+    isError: isActivityError,
+  } = useGetCsmCaseActivities(caseId);
   // The chat transcript the case was spawned from, when linked. Loaded lazily
   // off the case's conversation id and merged into the comment stream below so
   // it renders as the earliest activity entries — mirrors the customer portal.
@@ -286,6 +307,27 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const postAttachment = usePostCsmCaseAttachment();
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const deleteAttachment = useDeleteCsmCaseAttachment();
+  // Fetched unconditionally (not just while their tab is active) purely for
+  // the tab-label counts below; each widget still runs its own scoped query
+  // when its tab mounts, deduped against this one by react-query's cache.
+  const { data: slaList } = useGetCsmCaseSlas(caseId);
+  const { data: callRequests } = useGetCsmCaseCallRequests(caseId);
+  // Live deployment lookup for the Details tab's "Deployment info" widget —
+  // only runs when the case actually has a deployment link (SN-sourced cases
+  // may have none). Reuses the project's deployment list rather than a
+  // single-deployment GET, since the backend has no `/deployments/{id}` route.
+  const { data: projectDeployments, isLoading: isProjectDeploymentsLoading } =
+    useSearchDeployments(
+      data?.productContext.deploymentId ? data.projectId : undefined,
+    );
+  const liveDeployment = projectDeployments?.find(
+    (d) => d.id === data?.productContext.deploymentId,
+  );
+  // Richer account/project facts for the Customer card, beyond what's
+  // embedded in the case-detail payload's `customerContext` snapshot.
+  const { data: caseProject, isLoading: isCaseProjectLoading } = useGetProject(
+    data?.projectId,
+  );
   const patchCase = usePatchCsmCase(caseId);
   const patchCaseById = usePatchCsmCaseById();
   const findMyOngoingCases = useFindMyOngoingCases();
@@ -305,11 +347,27 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [metaCollapsed, setMetaCollapsed] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  // ISSU-026: closing or proposing a solution opens this instead of PATCHing
+  // immediately — it collects the Post Resolution Activity and doubles as
+  // the confirmation step for these two customer-notifying transitions.
+  const [resolutionDialog, setResolutionDialog] = useState<{
+    kind: "close" | "propose_solution";
+    targetState: BeCaseState;
+  } | null>(null);
+  const [severityOpen, setSeverityOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
+  // One-shot: true to pop open the Call requests tab's "Create call request"
+  // dialog from the action bar's "Request a call" item. The widget flips it
+  // back to false once handled, so switching tabs afterwards doesn't reopen it.
+  const [autoOpenCallCreate, setAutoOpenCallCreate] = useState(false);
   const [githubIssueOpen, setGithubIssueOpen] = useState(false);
   // Inline error shown inside the Git-issue dialog (e.g. the SN routing 422 /
   // state 409). Cleared when the dialog opens or a submit is retried.
   const [githubIssueError, setGithubIssueError] = useState<string | null>(null);
+  // Set on a successful submit so the dialog can show its own "created" view
+  // with a clickable link instead of closing itself immediately.
+  const [githubIssueResult, setGithubIssueResult] =
+    useState<BeCreateCaseGithubIssueResponse | null>(null);
   const postGithubIssue = usePostCaseGithubIssue();
   const postTimeCard = usePostTimeCard();
   // Attachment pending delete confirmation (drives the confirm dialog).
@@ -323,6 +381,29 @@ export default function CsmCaseDetailPage(): JSX.Element {
   );
   // Email of the signed-in engineer, for the "Assign to me" shortcut.
   const currentUserEmail = claims?.email ?? undefined;
+
+  // This page stays mounted across case-to-case navigation (route pattern is
+  // the same, only :caseId changes), so state left over from the previous
+  // case — e.g. a sticky "requested more info" banner, or an open dialog —
+  // would otherwise leak into the newly opened case. Reset it synchronously
+  // during render (React's recommended pattern for resetting state when a
+  // prop changes) rather than in an effect, to avoid an extra render pass.
+  const [prevCaseId, setPrevCaseId] = useState(caseId);
+  if (caseId !== prevCaseId) {
+    setPrevCaseId(caseId);
+    setFeedback(null);
+    setComposerOpen(false);
+    setAssignOpen(false);
+    setResolutionDialog(null);
+    setSeverityOpen(false);
+    setLogTimeOpen(false);
+    setAutoOpenCallCreate(false);
+    setGithubIssueOpen(false);
+    setGithubIssueError(null);
+    setGithubIssueResult(null);
+    setPendingDelete(null);
+    setPauseConflict(null);
+  }
 
   // Twitter-style permalinks: when the URL has a fragment matching an entry id,
   // jump to the Activities tab, scroll the entry into view vertically, and
@@ -411,6 +492,72 @@ export default function CsmCaseDetailPage(): JSX.Element {
     });
   }, [data, recordView]);
 
+  // Resolve the single-active-case rule once the engineer's other ongoing
+  // cases are already known: mark THIS case ongoing if there are none, or
+  // prompt to pause the others first (handled in onConfirmStartWork). Shared
+  // by `startWork` (after moving to Work in progress) and the resume-work
+  // path in `onAction` (case is already Work in progress, just un-pausing).
+  const resolveOngoingConflict = useCallback(
+    async (
+      others: MyOngoingCase[],
+      successMessage: string,
+      successSeverity: FeedbackSeverity,
+    ) => {
+      if (others.length > 0) {
+        setPauseConflict(others);
+        return;
+      }
+      try {
+        await patchCase.mutateAsync({ workState: "ongoing" });
+      } catch (err) {
+        showError("Could not mark the case ongoing. Please try again.", err);
+        return;
+      }
+      setFeedback({
+        message: successMessage,
+        severity: successSeverity,
+        sticky: true,
+      });
+    },
+    [patchCase, showError],
+  );
+
+  // Starting work: enforce the single-active-case rule.
+  // 1) look up the engineer's other ongoing cases (abort on failure — we
+  //    must not transition without knowing), 2) move this case to
+  // work_in_progress, 3) resolve via `resolveOngoingConflict`. Shared by the
+  // "Start progress" transition and the "Assign to me" shortcut, which also
+  // puts the case into progress once the assignment lands.
+  const startWork = useCallback(
+    async (successMessage: string, successSeverity: FeedbackSeverity) => {
+      if (!data) return;
+      const caseId = data.id;
+      let others: MyOngoingCase[];
+      try {
+        others = await findMyOngoingCases(caseId);
+      } catch (err) {
+        // Don't proceed blind: marking this ongoing without knowing the
+        // other active cases would break the single-active-case rule.
+        showError(
+          "Couldn't check your other active cases. Please try again.",
+          err,
+        );
+        return;
+      }
+      try {
+        await patchCase.mutateAsync({ state: "work_in_progress" });
+      } catch (err) {
+        showError(
+          "Could not move the case to Work in progress. Please try again.",
+          err,
+        );
+        return;
+      }
+      await resolveOngoingConflict(others, successMessage, successSeverity);
+    },
+    [data, findMyOngoingCases, patchCase, showError, resolveOngoingConflict],
+  );
+
   const onAction = useCallback(
     (
       action: CaseLifecycleAction | { secondary: string },
@@ -425,56 +572,61 @@ export default function CsmCaseDetailPage(): JSX.Element {
           ? beStateFromUi(nextState)
           : LIFECYCLE_TARGET_STATE[action];
 
-        // Starting work: enforce the single-active-case rule.
-        // 1) look up the engineer's other ongoing cases (abort on failure — we
-        //    must not transition without knowing), 2) move this case to
-        // work_in_progress, 3) if none ongoing → mark this one ongoing; if some
-        // exist → ask before pausing them (handled in onConfirmStartWork).
+        // "Assign to me" on the Change-state button: the case isn't the
+        // engineer's yet, so claim it (PATCH assigneeEmail) before starting
+        // work — a plain state PATCH would move it to Work in progress
+        // without ever making it the clicking engineer's case. Guarded on its
+        // own (not folded into the generic work_in_progress branch below) so
+        // a missing email surfaces an error instead of silently starting work
+        // on a case that was never actually assigned.
+        if (action === "assign_to_me" && data) {
+          if (!currentUserEmail) {
+            showError("Could not assign the case to you: no signed-in email found.");
+            return;
+          }
+          patchCase.mutate(
+            { assigneeEmail: currentUserEmail },
+            {
+              onSuccess: () =>
+                void startWork(LIFECYCLE_TOAST.assign_to_me, LIFECYCLE_SEVERITY.assign_to_me),
+              onError: (err) =>
+                showError("Could not assign the case to you.", err),
+            },
+          );
+          return;
+        }
+
+        // ISSU-004: the backend puts `reopened` in a closed case's
+        // `nextStates` only as a signal — there is no real reopen (the data
+        // source has no such transition). Never PATCH it; open the new-case
+        // form pre-filled with relatedCaseId instead. Must run before the
+        // generic `targetState` PATCH below, since `beStateFromUi("reopened")`
+        // is truthy and would otherwise be sent as a state transition.
+        if (action === "create_related_case" && data) {
+          const navState: CreateRelatedCaseNavState = {
+            projectId: data.projectId,
+            relatedCaseId: data.id,
+            relatedCaseNumber: data.caseNumber,
+            deploymentId: data.productContext.deploymentId,
+            deployedProductId: data.productContext.deployedProductId,
+            severity: data.severity,
+            issueType: data.issueType,
+            subject: `Related Case : ${data.subject}`,
+          };
+          navigate("/cases/new", { state: navState });
+          return;
+        }
+
+        // ISSU-026: closing or proposing a solution records the Post
+        // Resolution Activity first — open that dialog instead of PATCHing
+        // immediately. Must run before the generic `targetState` PATCH below.
+        if ((action === "close" || action === "propose_solution") && targetState) {
+          setResolutionDialog({ kind: action, targetState });
+          return;
+        }
+
         if (targetState === "work_in_progress" && data) {
-          const caseId = data.id;
-          void (async () => {
-            let others: MyOngoingCase[];
-            try {
-              others = await findMyOngoingCases(caseId);
-            } catch (err) {
-              // Don't proceed blind: marking this ongoing without knowing the
-              // other active cases would break the single-active-case rule.
-              showError(
-                "Couldn't check your other active cases. Please try again.",
-                err,
-              );
-              return;
-            }
-            try {
-              await patchCase.mutateAsync({ state: "work_in_progress" });
-            } catch (err) {
-              showError(
-                "Could not move the case to Work in progress. Please try again.",
-                err,
-              );
-              return;
-            }
-            if (others.length === 0) {
-              // No competing case → make this the active (ongoing) one.
-              try {
-                await patchCase.mutateAsync({ workState: "ongoing" });
-              } catch (err) {
-                showError(
-                  "Moved to Work in progress, but could not mark it ongoing.",
-                  err,
-                );
-                return;
-              }
-              setFeedback({
-                message: LIFECYCLE_TOAST[action],
-                severity: LIFECYCLE_SEVERITY[action],
-                sticky: true,
-              });
-              return;
-            }
-            // Others are ongoing → confirm before pausing them.
-            setPauseConflict(others);
-          })();
+          void startWork(LIFECYCLE_TOAST[action], LIFECYCLE_SEVERITY[action]);
           return;
         }
 
@@ -513,6 +665,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
       // onAssign once an engineer is chosen.
       if (action.secondary === "reassign_engineer") {
         setAssignOpen(true);
+        return;
+      }
+
+      // Change severity opens the severity picker; the PATCH happens in
+      // onChangeSeverity once a new value is confirmed.
+      if (action.secondary === "change_severity") {
+        setSeverityOpen(true);
         return;
       }
 
@@ -561,24 +720,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             );
             return;
           }
-          if (others.length === 0) {
-            try {
-              await patchCase.mutateAsync({ workState: "ongoing" });
-            } catch (err) {
-              showError(
-                "Could not resume work on this case. Please try again.",
-                err,
-              );
-              return;
-            }
-            setFeedback({
-              message: "Resumed work on this case.",
-              severity: "info",
-              sticky: true,
-            });
-            return;
-          }
-          setPauseConflict(others);
+          await resolveOngoingConflict(others, "Resumed work on this case.", "info");
         })();
         return;
       }
@@ -605,32 +747,52 @@ export default function CsmCaseDetailPage(): JSX.Element {
       }
 
       if (action.secondary === "log_time") {
-        // CAMG-006: closed cases are read-only — no new time entries.
-        if (data?.state === "closed") {
-          showError("This case is closed — time tracking is read-only.");
-          return;
-        }
+        // Time cards can still be logged after a case is closed — engineers
+        // often record time after the fact.
         setLogTimeOpen(true);
         return;
       }
 
-      // ISSU-020: file an internal GitHub issue from the case. The SN side
-      // gates on the case state (only certain states may file) and resolves
-      // the target repo from the product; we don't pre-gate here — open the
-      // dialog and surface any backend rejection inline.
+      // ISSU-020: file an internal GitHub issue from the case. Closed cases
+      // are blocked at the menu level (CaseActionBar's raise_git_issue item
+      // is disabled — see caseClosed there); this handler only runs for a
+      // non-closed case. The SN side still resolves the target repo from the
+      // product and may reject other states we don't otherwise pre-gate, so
+      // any backend rejection still surfaces inline in the dialog.
       if (action.secondary === "raise_git_issue") {
         setGithubIssueError(null);
         setGithubIssueOpen(true);
         return;
       }
 
+      // Jump to the Call requests tab and pop its own "Create call request"
+      // dialog, rather than a second/duplicate entry point for the same form.
+      if (action.secondary === "request_call") {
+        setActiveTab("call-requests");
+        setAutoOpenCallCreate(true);
+        return;
+      }
+
+      // Reachable only for a secondary action with no handler above — every
+      // menu item that isn't wired up yet is disabled in CaseActionBar, so
+      // this is a defensive fallback, not a normal path.
       setFeedback({
-        message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
+        message: SECONDARY_TOAST[action.secondary] ?? "This action isn't available yet.",
         severity: "info",
         sticky: false,
       });
     },
-    [data, showError, patchCase, findMyOngoingCases, detailPath],
+    [
+      data,
+      showError,
+      patchCase,
+      findMyOngoingCases,
+      detailPath,
+      startWork,
+      resolveOngoingConflict,
+      currentUserEmail,
+      navigate,
+    ],
   );
 
   // Confirm pausing the engineer's other ongoing case(s) and making this case
@@ -694,6 +856,56 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [patchCase, showError],
   );
 
+  // Submits the Post Resolution Activity dialog: PATCHes state alongside
+  // resolutionCode/cause/closeNotes in one call (the backend accepts all
+  // four together for these two transitions — see BeCaseUpdatePayload).
+  const onResolutionSubmit = useCallback(
+    (fields: {
+      resolutionCode: BeCaseResolutionCode;
+      cause: BeCaseCause;
+      closeNotes: string;
+    }) => {
+      if (!resolutionDialog) return;
+      const { kind, targetState } = resolutionDialog;
+      patchCase.mutate(
+        { state: targetState, ...fields },
+        {
+          onSuccess: () => {
+            setResolutionDialog(null);
+            setFeedback({
+              message: LIFECYCLE_TOAST[kind],
+              severity: LIFECYCLE_SEVERITY[kind],
+              sticky: true,
+            });
+          },
+          onError: (err) =>
+            showError("Could not update the case. Please try again.", err),
+        },
+      );
+    },
+    [patchCase, resolutionDialog, showError],
+  );
+
+  const onChangeSeverity = useCallback(
+    (next: Severity) => {
+      patchCase.mutate(
+        { severity: priorityFromSeverity(next) },
+        {
+          onSuccess: () => {
+            setSeverityOpen(false);
+            setFeedback({
+              message: `Severity changed to ${next}.`,
+              severity: "success",
+              sticky: true,
+            });
+          },
+          onError: (err) => showError("Could not change the severity.", err),
+        },
+      );
+    },
+    [patchCase, showError],
+  );
+
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
 
   // Case comments + the linked chat transcript, as one list for the activity
@@ -706,6 +918,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const onUploadAttachment = useCallback(
     (file: File) => {
       if (!caseId) return;
+      if (data?.state === "closed") {
+        showError("This case is closed — attachments are read-only.");
+        return;
+      }
       postAttachment.mutate(
         { caseId, file, uploadedBy: engineerName },
         {
@@ -719,7 +935,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         },
       );
     },
-    [caseId, engineerName, postAttachment],
+    [caseId, engineerName, postAttachment, data, showError],
   );
 
   const onDownloadAttachment = useCallback(
@@ -787,9 +1003,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
         >
           {backLabel}
         </Button>
-        <Typography variant="body1" color="error">
-          Could not load case {caseId}.
-        </Typography>
+        <QueryErrorState
+          message={`Could not load this case: ${error instanceof Error ? error.message : "unknown error"}`}
+          error={error}
+        />
       </Box>
     );
   }
@@ -815,6 +1032,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   }
 
   const c = data;
+  // Narrowed once here so the JSX below can use it without a non-null
+  // assertion — `c.relatedCase` on its own doesn't stay narrowed across the
+  // `onClick` closure.
+  const relatedCase = c.relatedCase;
   const isClosed = c.state === "closed";
   // The backend rejects a customer-visible comment unless the case is
   // work_in_progress + ongoing. Internal work notes are allowed in any state,
@@ -906,6 +1127,17 @@ export default function CsmCaseDetailPage(): JSX.Element {
             )}
             <SeverityChip severity={c.severity} withLabel />
             <StateChip state={c.state} />
+            {relatedCase && (
+              <Chip
+                size="small"
+                variant="outlined"
+                clickable
+                icon={<LinkIcon size={14} />}
+                label={`Related: ${relatedCase.caseNumber ?? relatedCase.id}`}
+                onClick={() => navigate(`/cases/${relatedCase.id}`)}
+                sx={{ fontWeight: 600 }}
+              />
+            )}
             {c.state === "work_in_progress" && c.workState && (
               <Chip
                 size="small"
@@ -980,11 +1212,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
           {TAB_DEFS.map((t) => {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
-              t.id === "attachments"
-                ? attachmentList.length
-                : t.id === "time"
-                  ? c.timeLogs.length
-                  : undefined;
+              t.id === "sla"
+                ? slaList?.count
+                : t.id === "attachments"
+                  ? attachmentList.length
+                  : t.id === "time"
+                    ? c.timeLogs.length
+                    : t.id === "call-requests"
+                      ? callRequests?.length
+                      : undefined;
             return (
               <Tab
                 key={t.id}
@@ -1028,7 +1264,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
-                disabled={!caseId}
+                disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
@@ -1072,6 +1308,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               fullWidth
               variant="outlined"
               color="inherit"
+              disabled={isClosed}
               startIcon={<MessageSquarePlus size={18} />}
               onClick={() => setComposerOpen(true)}
               sx={{
@@ -1090,9 +1327,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 },
               }}
             >
-              {publicReplyGateReason
-                ? "Add an internal work note…"
-                : "Compose a reply to the customer…"}
+              {isClosed
+                ? "This case is closed — comments and work notes are read-only."
+                : publicReplyGateReason
+                  ? "Add an internal work note…"
+                  : "Compose a reply to the customer…"}
             </Button>
           )}
 
@@ -1103,14 +1342,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 <Chip
                   size="small"
                   variant="outlined"
-                  label={`${safeComments.length + c.audit.length + attachmentList.length} entries`}
+                  label={`${safeComments.length + (activityAudit?.length ?? 0) + attachmentList.length} entries`}
                 />
               )}
             </Box>
 
-            {isCommentsLoading || isChatLoading ? (
-              // Wait for both the comments and the linked chat transcript so the
-              // transcript doesn't pop into an already-rendered timeline.
+            {isCommentsLoading || isChatLoading || isActivityLoading ? (
+              // Wait for the comments, linked chat transcript, and activity
+              // audit so nothing pops into an already-rendered timeline.
               // isChatLoading is false for chat-less cases (query disabled).
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {[0, 1, 2].map((i) => (
@@ -1118,8 +1357,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 ))}
               </Box>
             ) : (
-              // A comments/chat failure shouldn't blank the timeline — the
-              // description, audit, and attachments loaded fine. Show them with
+              // A comments/chat/activity failure shouldn't blank the timeline —
+              // the description and whatever else loaded fine. Show them with
               // an inline notice.
               <>
                 {isCommentsError && (
@@ -1134,9 +1373,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
                     activity — reload to try again.
                   </Typography>
                 )}
+                {isActivityError && (
+                  <Typography variant="body2" color="error">
+                    Could not load state changes. Showing the rest of the
+                    activity — reload to try again.
+                  </Typography>
+                )}
                 <CaseActivitiesFeed
                   comments={safeComments}
-                  audit={c.audit}
+                  audit={activityAudit ?? []}
                   attachments={attachmentList}
                   onDownloadAttachment={onDownloadAttachment}
                 />
@@ -1187,22 +1432,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <RelativeTime iso={c.updatedAt} />
                 </Typography>
               </MetaCell>
-              <MetaCell label="Assignment group (ABT)">
-                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                  {c.assignmentGroup}
-                </Typography>
-              </MetaCell>
             </Box>
           </Card>
-          <CustomerContextWidget ctx={c.customerContext} />
-          <ProductContextWidget ctx={c.productContext} />
-          <WatchersWidget
-            watchers={c.watchers}
-            onAdd={() => onAction({ secondary: "manage_watchers" })}
+          <CustomerContextWidget
+            ctx={c.customerContext}
+            project={caseProject}
+            isLoadingProject={isCaseProjectLoading}
           />
-          <LinkedItemsWidget
-            items={c.linkedItems}
-            onLink={() => onAction({ secondary: "link_case" })}
+          <ProductContextWidget
+            ctx={c.productContext}
+            liveDeployment={liveDeployment}
+            isLoadingLiveDeployment={
+              !!c.productContext.deploymentId && isProjectDeploymentsLoading
+            }
           />
         </Box>
       )}
@@ -1224,7 +1466,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   "Could not upload the attachment.")
                 : null
             }
-            onUpload={onUploadAttachment}
+            onUpload={isClosed ? undefined : onUploadAttachment}
             onDownloadAll={onDownloadAllAttachments}
             onDownload={onDownloadAttachment}
             onDelete={setPendingDelete}
@@ -1239,14 +1481,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
             caseId={c.id}
             projectId={c.projectId}
             onLogTime={() => setLogTimeOpen(true)}
-            readOnly={isClosed}
           />
         </Box>
       )}
 
       {activeTab === "call-requests" && caseId && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
-          <CallRequestsWidget caseId={caseId} severity={c.severity} />
+          <CallRequestsWidget
+            caseId={caseId}
+            severity={c.severity}
+            autoOpenCreate={autoOpenCallCreate}
+            onAutoOpenCreateHandled={() => setAutoOpenCallCreate(false)}
+            isClosed={isClosed}
+          />
         </Box>
       )}
 
@@ -1257,6 +1504,28 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isAssigning={patchCase.isPending}
           onClose={() => setAssignOpen(false)}
           onAssign={onAssign}
+        />
+      )}
+
+      {resolutionDialog && (
+        <ResolutionDialog
+          kind={resolutionDialog.kind}
+          isSubmitting={patchCase.isPending}
+          onClose={() => setResolutionDialog(null)}
+          onSubmit={onResolutionSubmit}
+        />
+      )}
+
+      {severityOpen && (
+        <ChangeSeverityDialog
+          currentSeverity={c.severity}
+          // S0 is reserved for Managed Cloud, same rule as case creation (see
+          // CsmCaseCreatePage.tsx) — caseProject is the same project fetch
+          // already used for the Customer card above.
+          isManagedCloud={caseProject?.subscriptionType === "managed_cloud_subscription"}
+          isChanging={patchCase.isPending}
+          onClose={() => setSeverityOpen(false)}
+          onChange={onChangeSeverity}
         />
       )}
 
@@ -1299,12 +1568,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
           open={githubIssueOpen}
           submitting={postGithubIssue.isPending}
           error={githubIssueError}
+          createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
           defaultTitle={c.subject}
           defaultDescription={c.description}
+          showRepoField={isCloudSupportSubscription(caseProject?.subscriptionType)}
           onClose={() => {
             setGithubIssueOpen(false);
             setGithubIssueError(null);
+            setGithubIssueResult(null);
           }}
           onSubmit={(payload) => {
             setGithubIssueError(null);
@@ -1312,17 +1584,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
               { caseId: c.id, ...payload },
               {
                 onSuccess: (res) => {
-                  setGithubIssueOpen(false);
-                  // The SN side writes the issue URL into work notes; show that
-                  // entry by switching to the activities feed (just refetched).
+                  // Dialog shows its own "created" view with a clickable
+                  // link (see createdIssue) instead of closing immediately —
+                  // still switch to the activities feed in the background so
+                  // the SN-written work-note entry is visible once they're
+                  // done reading the confirmation.
                   setActiveTab("activities");
-                  setFeedback({
-                    message: res.issue?.url
-                      ? `Internal Git issue created: ${res.issue.url}`
-                      : "Internal Git issue created.",
-                    severity: "success",
-                    sticky: true,
-                  });
+                  setGithubIssueResult(res);
                 },
                 onError: (err) => {
                   // Surface the backend's own message on 4xx (invalid state,

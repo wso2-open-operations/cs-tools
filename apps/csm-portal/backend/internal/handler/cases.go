@@ -48,6 +48,7 @@ type entityCaseClient interface {
 	PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
+	SearchCaseActivities(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
 	CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error)
@@ -213,6 +214,28 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Work notes are blocked on closed cases (separate from the in-progress guard above).
+	if reqMeta.Type == "work_note" {
+		current, err := h.entity.GetCase(r.Context(), caseID)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "entity GetCase failed during work-note closed guard", "userID", user.UserID, "caseID", caseID, "err", err)
+			mapUpstreamError(w, err, "Failed to create case comment.")
+			return
+		}
+		var currentCase struct {
+			State string `json:"state"`
+		}
+		if err := json.Unmarshal(current, &currentCase); err != nil {
+			slog.ErrorContext(r.Context(), "failed to parse case state for work-note guard", "userID", user.UserID, "caseID", caseID, "err", err)
+			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+			return
+		}
+		if currentCase.State == "closed" {
+			writeError(w, http.StatusConflict, ErrMsgWorkNoteOnClosedCase)
+			return
+		}
+	}
+
 	result, err := h.entity.CreateCaseComment(r.Context(), caseID, body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateCaseComment failed", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -267,6 +290,48 @@ func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to search case comments.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchCaseActivities handles POST /cases/{id}/activities/search.
+// The endpoint is path-scoped, so the request body is capped and forwarded to the
+// entity service as-is (no fields are injected) and the response is returned verbatim.
+func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if len(body) > 0 && !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchCaseActivities(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchCaseActivities failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to search case activities.")
 		return
 	}
 
@@ -330,6 +395,33 @@ func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Reques
 	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
+	}
+
+	// Block attachment uploads on closed cases.
+	var attachMeta struct {
+		ReferenceID   string `json:"referenceId"`
+		ReferenceType string `json:"referenceType"`
+	}
+	_ = json.Unmarshal(body, &attachMeta) // body is already validated JSON
+	if attachMeta.ReferenceType == "case" && attachMeta.ReferenceID != "" {
+		current, err := h.entity.GetCase(r.Context(), attachMeta.ReferenceID)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "entity GetCase failed during attachment closed guard", "userID", user.UserID, "caseID", attachMeta.ReferenceID, "err", err)
+			mapUpstreamError(w, err, "Failed to create case attachment.")
+			return
+		}
+		var currentCase struct {
+			State string `json:"state"`
+		}
+		if err := json.Unmarshal(current, &currentCase); err != nil {
+			slog.ErrorContext(r.Context(), "failed to parse case state for attachment guard", "userID", user.UserID, "caseID", attachMeta.ReferenceID, "err", err)
+			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+			return
+		}
+		if currentCase.State == "closed" {
+			writeError(w, http.StatusConflict, ErrMsgAttachmentOnClosedCase)
+			return
+		}
 	}
 
 	result, err := h.entity.CreateCaseAttachment(r.Context(), body)
@@ -658,6 +750,12 @@ func (h *CaseHandler) SearchCallRequests(w http.ResponseWriter, r *http.Request)
 
 // PatchCallRequest handles PATCH /cases/{id}/call-requests/{callRequestId}.
 // Forwards the body unchanged to the entity service's PATCH /call-requests/{callRequestId}.
+//
+// This is the single mutation surface for call requests, including the agent-only
+// (WSO2 engineer) state transitions (schedule/reschedule, reject, conclude+notes)
+// selected by the target `state` in the body. The backend has no role-based access
+// control layer yet, so any authenticated user may invoke them today; engineer-only
+// gating is a follow-up and MUST NOT be invented here.
 func (h *CaseHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {

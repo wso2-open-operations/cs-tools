@@ -1,0 +1,41 @@
+# Choreo component.yaml
+# Tells Choreo how to build and deploy this service.
+# See: https://wso2.com/choreo/docs/develop-components/manage-component-source-configurations/
+#
+# ─── Security posture ──────────────────────────────────────────────────────
+#
+# TRUST BOUNDARY
+#   The Choreo managed gateway is the ONLY ingress path to this container.
+#   The pod exposes port 3000 to the Choreo internal network only; there is
+#   no NodePort, no LoadBalancer, no ClusterIP that a caller outside Choreo
+#   can reach directly. Every request that arrives at src/index.js has
+#   already transited:
+#     1. The Choreo edge (TLS termination, DDoS/rate-limit at the edge)
+#     2. The Choreo gateway (OAuth 2.0 validation against Choreo STS)
+#
+# WHY networkVisibilities: [Public]
+#   "Public" here means "the gateway is reachable from the internet" —
+#   NOT "the container is publicly routable." ServiceNow (WSO2's SN
+#   instance) is an external caller, so the gateway needs to accept
+#   internet-origin traffic. The gateway still refuses every request
+#   that doesn't carry a valid Choreo-STS-issued JWT (per the
+#   `security: - BearerAuth: []` declaration in openapi.yaml).
+#
+# WHY the app runs with AUTH_ENABLED=false
+#   Because the gateway is the enforcement point. Double-validating the
+#   JWT inside the container would only add latency (another JWKS fetch,
+#   another signature check). The trust boundary above guarantees the
+#   container never sees an unauthenticated request. See §4.10 and the
+#   "Trust Boundary" section of docs/design-document.md.
+# ───────────────────────────────────────────────────────────────────────────
+schemaVersion: 1.2
+endpoints:
+  - name: mttr-api
+    displayName: MTTR API
+    service:
+      basePath: /api/v1
+      port: 3000
+    type: REST
+    networkVisibilities:
+      - Public   # gateway is public; container is not (see comment above)
+    schemaFilePath: openapi.yaml

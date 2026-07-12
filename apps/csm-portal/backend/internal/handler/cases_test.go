@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
@@ -264,15 +265,13 @@ func TestCreateCaseComment(t *testing.T) {
 		assertErrorMessage(t, w, ErrMsgCommentNotAllowed)
 	})
 
-	t.Run("allows work_note in any case state without calling GetCase", func(t *testing.T) {
-		for _, state := range []string{"open", "work_in_progress", "waiting_on_wso2", "awaiting_info", "solution_proposed", "closed"} {
+	t.Run("allows work_note when case is not closed", func(t *testing.T) {
+		for _, state := range []string{"open", "work_in_progress", "waiting_on_wso2", "awaiting_info", "solution_proposed"} {
 			state := state
 			t.Run(state, func(t *testing.T) {
 				t.Parallel()
-				getCalled := false
 				client := &mockEntityCaseClient{
 					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
-						getCalled = true
 						return []byte(`{"state":"` + state + `"}`), nil
 					},
 					createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
@@ -285,11 +284,24 @@ func TestCreateCaseComment(t *testing.T) {
 				w := httptest.NewRecorder()
 				h.CreateCaseComment(w, r)
 				assertStatus(t, w, http.StatusCreated)
-				if getCalled {
-					t.Errorf("GetCase should not be called for work_note")
-				}
 			})
 		}
+	})
+
+	t.Run("blocks work_note on closed case", func(t *testing.T) {
+		t.Parallel()
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"closed"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(`{"type":"work_note","content":"internal note"}`)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgWorkNoteOnClosedCase)
 	})
 
 	t.Run("forwards body to entity and returns response", func(t *testing.T) {
@@ -448,6 +460,107 @@ func TestSearchCaseComments(t *testing.T) {
 				r.SetPathValue("id", "case-1")
 				w := httptest.NewRecorder()
 				h.SearchCaseComments(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+// ----- SearchCaseActivities -----
+
+func TestSearchCaseActivities(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/case-1/activities/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.SearchCaseActivities(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//activities/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchCaseActivities(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/activities/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.SearchCaseActivities(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/activities/search", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.SearchCaseActivities(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body verbatim and returns upstream response", func(t *testing.T) {
+		var capturedCaseID string
+		var capturedBody []byte
+		reqBody := `{"pagination":{"limit":20,"offset":0},"includeFieldChanges":true}`
+		client := &mockEntityCaseClient{
+			searchCaseActivitiesFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
+				capturedCaseID = caseID
+				capturedBody = body
+				return []byte(`{"activities":[{"id":"a-1"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-42/activities/search", strings.NewReader(reqBody)))
+		r.SetPathValue("id", "case-42")
+		w := httptest.NewRecorder()
+		h.SearchCaseActivities(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedCaseID != "case-42" {
+			t.Errorf("caseID = %q, want %q", capturedCaseID, "case-42")
+		}
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to search case activities.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					searchCaseActivitiesFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/activities/search", strings.NewReader(`{}`)))
+				r.SetPathValue("id", "case-1")
+				w := httptest.NewRecorder()
+				h.SearchCaseActivities(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")
@@ -939,7 +1052,7 @@ func TestGetCase(t *testing.T) {
 			{caseStateWaitingOnWSO2, []string{caseStateWorkInProgress}},
 			{caseStateAwaitingInfo, []string{caseStateWaitingOnWSO2}},
 			{caseStateSolutionProposed, []string{caseStateClosed, caseStateWaitingOnWSO2}},
-			{caseStateClosed, []string{caseStateReopened}},
+			{caseStateClosed, []string{}},
 			{caseStateReopened, []string{caseStateWorkInProgress}},
 		}
 		for _, tc := range cases {
@@ -957,6 +1070,58 @@ func TestGetCase(t *testing.T) {
 
 				assertStatus(t, w, http.StatusOK)
 				resp := decodeJSON[getCaseResp](t, w)
+				if len(resp.NextStates) != len(tc.wantNext) {
+					t.Fatalf("nextStates = %v, want %v", resp.NextStates, tc.wantNext)
+				}
+				for i, got := range resp.NextStates {
+					if got != tc.wantNext[i] {
+						t.Errorf("nextStates[%d] = %v, want %v", i, got, tc.wantNext[i])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("nextStates surfaces reopened as the create-related-case signal", func(t *testing.T) {
+		type getCaseNextStatesResp struct {
+			NextStates []string `json:"nextStates"`
+		}
+		recentClosed := time.Now().Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+		oldClosed := time.Now().Add(-90 * 24 * time.Hour).Format(time.RFC3339)
+		recentClosedNoZone := time.Now().Add(-10 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+		cases := []struct {
+			name     string
+			body     string
+			wantNext []string
+		}{
+			{"closed case within the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
+			{"closed case outside the 60-day window", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `"}`, []string{}},
+			{"closed case with a zoneless space-separated closedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + recentClosedNoZone + `"}`, []string{caseStateReopened}},
+			{"closed case with no closedOn or updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed"}`, []string{}},
+			{"open case with a closedOn value", `{"id":"` + testCaseID + `","type":"case","state":"open","closedOn":"` + recentClosed + `"}`, []string{caseStateWorkInProgress}},
+			{"closed service_request within the window", `{"id":"` + testCaseID + `","type":"service_request","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
+			{"closed case with no type set", `{"id":"` + testCaseID + `","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
+			// ServiceNow-backed cases never populate closedOn today, so
+			// updatedOn stands in for it.
+			{"closed case with no closedOn, falls back to a recent updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
+			{"closed case with no closedOn, falls back to an old updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + oldClosed + `"}`, []string{}},
+			{"closed case prefers closedOn over updatedOn when both present", `{"id":"` + testCaseID + `","type":"case","state":"closed","closedOn":"` + oldClosed + `","updatedOn":"` + recentClosed + `"}`, []string{}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+						return []byte(tc.body), nil
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+				r.SetPathValue("id", testCaseID)
+				w := httptest.NewRecorder()
+				h.GetCase(w, r)
+				assertStatus(t, w, http.StatusOK)
+				resp := decodeJSON[getCaseNextStatesResp](t, w)
 				if len(resp.NextStates) != len(tc.wantNext) {
 					t.Fatalf("nextStates = %v, want %v", resp.NextStates, tc.wantNext)
 				}
@@ -1060,6 +1225,40 @@ func TestCreateCaseAttachment(t *testing.T) {
 				assertContentType(t, w, "application/json")
 			})
 		}
+	})
+
+	t.Run("blocks attachment upload on closed case", func(t *testing.T) {
+		t.Parallel()
+		casePayload := `{"referenceId":"` + testCaseID + `","referenceType":"case","name":"file.png","type":"image/png","file":"data:image/png;base64,aGVsbG8="}`
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"closed"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(casePayload)))
+		w := httptest.NewRecorder()
+		h.CreateCaseAttachment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgAttachmentOnClosedCase)
+	})
+
+	t.Run("allows attachment upload on open case", func(t *testing.T) {
+		t.Parallel()
+		casePayload := `{"referenceId":"` + testCaseID + `","referenceType":"case","name":"file.png","type":"image/png","file":"data:image/png;base64,aGVsbG8="}`
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"work_in_progress"}`), nil
+			},
+			createCaseAttachmentFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"att-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(casePayload)))
+		w := httptest.NewRecorder()
+		h.CreateCaseAttachment(w, r)
+		assertStatus(t, w, http.StatusCreated)
 	})
 }
 

@@ -16,7 +16,8 @@
 
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useEffect, useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { useNavTransition } from "@hooks/useNavTransition";
+
 
 /**
  * Brand component for the header.
@@ -30,7 +31,7 @@ export default function Brand({
 }: {
   isNavigationDisabled?: boolean;
 }): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
 
   // TODO : This need to remove once svg available on oxygen ui
   const [isDarkMode, setIsDarkMode] = useState<boolean>(

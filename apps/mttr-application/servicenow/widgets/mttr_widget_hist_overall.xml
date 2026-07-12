@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly xmlns:j="jelly:core" xmlns:g="glide" xmlns:sn="jelly:sn">
+
+    <!-- ================================================================ -->
+    <!-- Widget: Historical MTTR — Overall (Incidents vs Queries)          -->
+    <!-- UI Page Name: mttr_widget_hist_overall                            -->
+    <!-- Line chart: quarterly MTTR trend for Incidents and Queries        -->
+    <!-- ================================================================ -->
+
+    <g:evaluate var="jvar_hist_overall">
+        <![CDATA[
+            var api = new MttrDashboardAPI();
+            var r = api.getHistoricalOverall();
+            r ? JSON.stringify(r) : '';
+        ]]>
+    </g:evaluate>
+
+    <style>
+        .mttr-chart-hist-overall {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #c8d0e0;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        .mttr-chart-hist-overall .header {
+            background: #c8d0e0;
+            padding: 10px 16px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .mttr-chart-hist-overall .body { padding: 16px; }
+        .mttr-chart-hist-overall .footer {
+            padding: 8px 16px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            background: #fafafa;
+        }
+    </style>
+
+    <div class="mttr-chart-hist-overall">
+        <div class="header">Historical MTTR — Overall Trend (Incidents vs Queries)</div>
+        <div class="body">
+            <div id="chart_hist_overall" style="width:100%;"></div>
+        </div>
+        <div class="footer">Archived quarterly summaries — Incidents vs Queries (P95 truncated mean)</div>
+    </div>
+
+    <script src="https://www.gstatic.com/charts/loader.js" type="text/javascript"></script>
+    <textarea id="mttr_data_hist_overall" style="display:none">${jvar_hist_overall}</textarea>
+
+    <script type="text/javascript">
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(function() { setTimeout(drawHistOverall, 100); });
+
+        var _rtHO = null;
+        function _scheduleRedrawHO() {
+            if (_rtHO) clearTimeout(_rtHO);
+            _rtHO = setTimeout(drawHistOverall, 150);
+        }
+        // Idempotent listener setup — see mttr_widget_hist_inc_priority.xml
+        // for the rationale (SN re-renders re-run this script; naive
+        // addEventListener leaks a handler on every mount).
+        if (window.__mttrHistOverallState) {
+            window.removeEventListener('resize', window.__mttrHistOverallState.resizeHandler);
+            if (window.__mttrHistOverallState.observer) {
+                window.__mttrHistOverallState.observer.disconnect();
+            }
+        }
+        window.addEventListener('resize', _scheduleRedrawHO);
+        var _obsHO = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            _obsHO = new ResizeObserver(_scheduleRedrawHO);
+            _obsHO.observe(document.getElementById('chart_hist_overall'));
+        }
+        window.__mttrHistOverallState = { resizeHandler: _scheduleRedrawHO, observer: _obsHO };
+
+        function drawHistOverall() {
+            try {
+                var _el = document.getElementById('chart_hist_overall');
+                var _w = _el.offsetWidth;
+                if (_w > 0) {
+                    _el.style.height = Math.max(300, Math.round(_w * 0.5)) + 'px';
+                }
+                var raw = document.getElementById('mttr_data_hist_overall').value;
+                if (!raw || raw === 'null') { noDataHO(); return; }
+                var resp = JSON.parse(raw);
+                if (!resp || !resp.periods || resp.periods.length === 0) {
+                    noDataHO(); return;
+                }
+
+                var periods = resp.periods;
+                var series = resp.series;
+                var caseTypes = ['Incident', 'Query'];
+
+                var rows = [['Period', 'Incident', 'Query']];
+                for (var p = 0; periods.length > p; p++) {
+                    var incEntry = series.Incident ? series.Incident[periods[p]] : null;
+                    var qryEntry = series.Query    ? series.Query[periods[p]]    : null;
+                    var incHrs = incEntry ? incEntry.mttr_hours : 0;
+                    var qryHrs = qryEntry ? qryEntry.mttr_hours : 0;
+                    rows.push([
+                        periods[p],
+                        Math.round((incHrs / 24) * 10) / 10,
+                        Math.round((qryHrs / 24) * 10) / 10
+                    ]);
+                }
+
+                var data = google.visualization.arrayToDataTable(rows);
+
+                // Set formatted tooltips (Days Hours Minutes + case count)
+                for (var fp = 0; periods.length > fp; fp++) {
+                    for (var ct = 0; caseTypes.length > ct; ct++) {
+                        var entry = series[caseTypes[ct]] ? series[caseTypes[ct]][periods[fp]] : null;
+                        if (entry) {
+                            var h = entry.mttr_hours || 0;
+                            var dm = Math.round(h * 60);
+                            var dd = Math.floor(dm / (60 * 24));
+                            var dh = Math.floor((dm % (60 * 24)) / 60);
+                            var dmin = dm % 60;
+                            data.setFormattedValue(fp, ct + 1,
+                                dd + 'd ' + dh + 'h ' + dmin + 'm (' + (entry.total_cases || 0) + ' cases)');
+                        }
+                    }
+                }
+
+                var chart = new google.visualization.LineChart(
+                    document.getElementById('chart_hist_overall'));
+                chart.draw(data, {
+                    chartArea: { width: '80%', height: '65%' },
+                    legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+                    colors: ['#e74c3c', '#3498db'],
+                    backgroundColor: 'transparent',
+                    vAxis: {
+                        title: 'MTTR (Days)',
+                        format: '#.#',
+                        textStyle: { fontSize: 10 },
+                        viewWindow: { min: 0 }
+                    },
+                    hAxis: {
+                        textStyle: { fontSize: 11 },
+                        slantedText: false
+                    },
+                    pointSize: 5,
+                    lineWidth: 2,
+                    curveType: 'function',
+                    tooltip: { textStyle: { fontSize: 11 } }
+                });
+            } catch (e) {
+                console.error('mttr_widget_hist_overall error:', e);
+                noDataHO();
+            }
+        }
+
+        function noDataHO() {
+            // DOM-API placeholder — see mttr_widget_team_trend.xml for
+            // the full rationale (escaped-entity innerHTML rendered as
+            // literal text; createElement produces a real p node).
+            var container = document.getElementById('chart_hist_overall');
+            container.innerHTML = '';
+            var p = document.createElement('p');
+            p.style.color = '#999';
+            p.style.textAlign = 'center';
+            p.style.padding = '40px';
+            p.textContent = 'No historical data available';
+            container.appendChild(p);
+        }
+    </script>
+
+</j:jelly>

@@ -16,7 +16,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { useMemo, type JSX } from "react";
-import { useNavigate } from "react-router";
+
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import {
   COMPOSITION_STATES,
@@ -32,6 +32,7 @@ import {
   SEVERITY_LABEL,
   STATE_LABEL,
 } from "@features/csm-dashboard/utils/abtDashboard";
+import { useNavTransition } from "@hooks/useNavTransition";
 import type {
   CaseState,
   Severity,
@@ -54,6 +55,7 @@ const STATE_SLICE_COLOR: Record<CaseState, string> = {
   awaiting_info: paletteColor("cyan", 500, "#06b6d4"),
   solution_proposed: paletteColor("teal", 500, "#14b8a6"),
   closed: paletteColor("grey", 500, "#6b7280"),
+  reopened: paletteColor("purple", 500, "#a855f7"),
 };
 
 /**
@@ -64,7 +66,7 @@ const STATE_SLICE_COLOR: Record<CaseState, string> = {
 export default function CaseCompositionCharts(): JSX.Element {
   const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
     useCaseComposition();
-  const navigate = useNavigate();
+  const navigate = useNavTransition();
 
   const severitySlices = useMemo<CompositionSlice[]>(
     () =>

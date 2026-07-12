@@ -87,6 +87,50 @@ export type BeCaseState =
  */
 export type BeCaseWorkState = "ongoing" | "paused";
 
+/**
+ * Resolution code for a closed or solution-proposed case (the Post
+ * Resolution Activity — see UseCases.md ISSU-026). Only accepted by
+ * `PATCH /cases/{id}` alongside `state: "closed"` or `"solution_proposed"`.
+ */
+export type BeCaseResolutionCode =
+  | "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
+  | "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
+  | "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
+  | "SOLVED_WORKAROUND_PROVIDED"
+  | "SOLVED_BY_CUSTOMER"
+  | "CONSIDERED_FOR_ROADMAP"
+  | "INCONCLUSIVE_OUT_OF_SCOPE"
+  | "INCONCLUSIVE_CANNOT_REPRODUCE"
+  | "INCONCLUSIVE_NO_WORKAROUND"
+  | "DUPLICATE_ISSUE"
+  | "VOIDED_CANCELED"
+  | "ON_HOLD"
+  | "CONSIDERED_FOR_ROADMAP_ALT"
+  | "SOLVED_FIXED_THE_ISSUE"
+  | "SOLVED_WORKAROUND_PROVIDED_ALT"
+  | "SOLVED_BY_CONTRIBUTOR"
+  | "SOLVED_BY_NOVERA"
+  | "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS";
+
+/** Root-cause category for a closed or solution-proposed case. Same gating as {@link BeCaseResolutionCode}. */
+export type BeCaseCause =
+  | "USER_MISUNDERSTANDING_CONCEPTS"
+  | "USER_MISUNDERSTANDING_DOCUMENTATION"
+  | "USER_NOT_FOLLOWING_DOCUMENTATION"
+  | "USER_MISTAKE"
+  | "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
+  | "SOLUTION_PROBLEMATIC_CODE"
+  | "APPLICATION_BUG"
+  | "APPLICATION_MISLEADING_UX_UI"
+  | "APPLICATION_LIMITATION"
+  | "APPLICATION_MISSING_FEATURE"
+  | "APPLICATION_DOCUMENTATION_GAP"
+  | "APPLICATION_DOCUMENTATION_ERROR"
+  | "INFRASTRUCTURE_CUSTOMERS_SIDE"
+  | "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
+  | "INFRASTRUCTURE_SAAS_SIDE_OTHER"
+  | "UNKNOWN";
+
 export type BeCaseSortField = "createdOn" | "updatedOn" | "severity" | "state";
 
 export interface BeCase {
@@ -105,7 +149,7 @@ export interface BeCase {
   state?: BeCaseState;
   createdAt?: string;
   updatedAt?: string;
-  closedAt?: string;
+  closedOn?: string;
 }
 
 /** A referenced user, as embedded in case views (not just an id string). */
@@ -120,6 +164,12 @@ export interface BeUserRef {
 export interface BeEntityRef {
   id: string;
   name: string;
+}
+
+/** A referenced case carrying only its display number, e.g. the related case. */
+export interface BeCaseNumberRef {
+  id: string;
+  number?: string;
 }
 
 /**
@@ -173,7 +223,15 @@ export interface BeCaseView {
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
   workState?: BeCaseWorkState | null;
+  /**
+   * States this case may transition into next. For a closed case, `reopened`
+   * appearing here is not a real reopen (the data source has no such
+   * transition) — it signals that a new case may still be created as related
+   * to this one, within its 60-day window.
+   */
   nextStates?: BeCaseState[];
+  /** The case this one was created as related to, when any. */
+  relatedCase?: BeCaseNumberRef | null;
   createdBy?: BeUserRef;
   /** The CS engineer the case is assigned to; null when unassigned. */
   assignedEngineer?: BeAssignedEngineerRef | null;
@@ -196,7 +254,7 @@ export interface BeCaseView {
   conversation?: BeEntityRef | null;
   createdOn?: string;
   updatedOn?: string;
-  closedAt?: string | null;
+  closedOn?: string | null;
 }
 
 export interface BeCaseCreatePayload {
@@ -209,6 +267,12 @@ export interface BeCaseCreatePayload {
   description: string;
   severity: BeCaseSeverity;
   issueType: BeCaseIssueType;
+  /**
+   * UUID of the closed case this one is related to. The data source only
+   * accepts this for a case closed within the last 60 days — otherwise it
+   * rejects the create with a "related case too old" error.
+   */
+  relatedCaseId?: string;
   /** Optional supporting files (raw base64), like the customer portal. */
   attachments?: BeCaseAttachmentPayload[];
 }
@@ -348,7 +412,17 @@ export interface BeGetCatalogItemVariablesResponse {
  * `work_in_progress`.
  */
 export type BeCaseUpdatePayload =
-  | { state: BeCaseState; severity?: never; workState?: never; assigneeEmail?: never; watchList?: never }
+  | {
+      state: BeCaseState;
+      severity?: never;
+      workState?: never;
+      assigneeEmail?: never;
+      watchList?: never;
+      /** Post Resolution Activity — only meaningful (and only accepted by the backend) alongside `state: "closed"` or `"solution_proposed"`. */
+      resolutionCode?: BeCaseResolutionCode;
+      cause?: BeCaseCause;
+      closeNotes?: string;
+    }
   | { state?: never; severity: BeCaseSeverity; workState?: never; assigneeEmail?: never; watchList?: never }
   /** Work sub-state toggle (`ongoing` / `paused`) for an in-progress case. */
   | { state?: never; severity?: never; workState: BeCaseWorkState; assigneeEmail?: never; watchList?: never }
@@ -557,6 +631,54 @@ export interface BeCommentSearchResponse extends BeSearchResponseBase {
 }
 
 // ---------------------------------------------------------------------------
+// Case activities (unified comment / attachment / field-change stream)
+// ---------------------------------------------------------------------------
+
+/** One field changed within a single audited save-transaction. */
+export interface BeFieldChange {
+  /** Wire field name (e.g. `state`, `priority`, `assignedEngineer`). */
+  field: string;
+  /** Human-readable label for the field (e.g. "State", "Severity"). */
+  fieldLabel: string;
+  /** Absent/empty when the field was previously unset. */
+  previousValue?: string;
+  /** Absent/empty when the field was cleared. */
+  newValue?: string;
+}
+
+export type BeCaseActivityType = "comment" | "attachment" | "field_change";
+
+/**
+ * One entry from `POST /cases/{id}/activities/search`. Shared fields are
+ * present on every entry regardless of `type`; `changes` is populated only
+ * for `type === "field_change"`. This endpoint intentionally excludes work
+ * notes — the comments/work-notes feed continues to read from
+ * `/cases/{id}/comments/search` (see {@link BeComment}).
+ */
+export interface BeCaseActivityEntry {
+  id: string;
+  type: BeCaseActivityType;
+  content?: string;
+  createdOn: string;
+  createdBy?: string;
+  createdByFirstName?: string;
+  createdByLastName?: string;
+  createdByFullName?: string;
+  /** Only present on `type === "field_change"` entries. */
+  changes?: BeFieldChange[];
+}
+
+export interface BeCaseActivitiesSearchPayload {
+  pagination?: BePagination;
+  /** Whether the response should include `field_change` entries. */
+  includeFieldChanges?: boolean;
+}
+
+export interface BeCaseActivitiesSearchResponse extends BeSearchResponseBase {
+  activity?: BeCaseActivityEntry[];
+}
+
+// ---------------------------------------------------------------------------
 // Attachments
 // ---------------------------------------------------------------------------
 
@@ -652,9 +774,20 @@ export interface BeUser {
   updatedAt?: string;
 }
 
+export interface BeUserSearchFilters {
+  /** Case-insensitive match against username and email. */
+  searchQuery?: string;
+  /** ServiceNow data source only. */
+  roles?: string[];
+  /** Exact match. */
+  userNames?: string[];
+  /** Exact match. */
+  emails?: string[];
+}
+
 export interface BeUserSearchPayload {
   pagination?: BePagination;
-  searchQuery?: string;
+  filters?: BeUserSearchFilters;
 }
 
 export interface BeUserSearchResponse extends BeSearchResponseBase {
@@ -1007,6 +1140,18 @@ export interface BeCallRequestView {
   updatedOn?: string;
   state?: BeCallRequestState;
   cancellationReason?: string;
+  /** Agent (or team) assigned to run the call, once scheduled. */
+  assignee?: string;
+  /** Call notes recorded after the call concludes. */
+  notes?: string;
+  /** Follow-up plan recorded alongside the call notes. */
+  plan?: string;
+  /** Attendee list recorded alongside the call notes. */
+  attendees?: string;
+  /** Action items recorded alongside the call notes. */
+  actionItems?: string;
+  /** Actual call duration in minutes, recorded alongside the call notes. */
+  actualDurationMin?: number;
 }
 
 /** `POST /cases/{id}/call-requests` request body. */
@@ -1103,15 +1248,41 @@ export interface BeSearchCallRequestsResponse {
   limit: number;
 }
 
-/** `PATCH /cases/{caseId}/call-requests/{callRequestId}` request body. */
+/**
+ * `PATCH /cases/{caseId}/call-requests/{callRequestId}` request body.
+ * `state` selects the transition; the optional fields below are interpreted
+ * according to the target `state`:
+ * - `scheduled` (agent schedule/reschedule): `meetingDate` + `durationInMinutes`
+ *   required, `assignee` optional.
+ * - `wso2_rejected` (agent reject) / `canceled`: `cancellationReason` optional
+ *   (used as the reject/cancel reason).
+ * - `concluded` (agent send notes): `notes` required, `plan`/`attendees`/
+ *   `actionItems`/`actualDurationMin` optional.
+ * - `pending_on_wso2` (reschedule request back to the customer): `utcTimes` +
+ *   `durationInMinutes`.
+ */
 export interface BeUpdateCallRequestPayload {
   state: BeCallRequestStateKey;
-  /** Required when `state` is `"canceled"`. */
+  /** Used as the reject/cancellation reason for `wso2_rejected`/`canceled`. */
   cancellationReason?: string;
-  /** Updated preferred UTC datetimes. */
+  /** Updated preferred UTC datetimes (used when `state` is `pending_on_wso2`). */
   utcTimes?: string[];
-  /** Updated duration in minutes (min 1). */
+  /** Updated duration in minutes (min 1); used for `pending_on_wso2`/`scheduled`. */
   durationInMinutes?: number;
+  /** UTC datetime (ISO string) the call is scheduled for; required for `scheduled`. */
+  meetingDate?: string;
+  /** Agent (or team) assigned to run the call; used for `scheduled`. */
+  assignee?: string;
+  /** Call notes; required for `concluded`. */
+  notes?: string;
+  /** Follow-up plan recorded alongside the call notes; used for `concluded`. */
+  plan?: string;
+  /** Attendee list recorded alongside the call notes; used for `concluded`. */
+  attendees?: string;
+  /** Action items recorded alongside the call notes; used for `concluded`. */
+  actionItems?: string;
+  /** Actual call duration in minutes; used for `concluded`. */
+  actualDurationMin?: number;
 }
 
 /** `PATCH /cases/{caseId}/call-requests/{callRequestId}` response. */
@@ -1129,6 +1300,9 @@ export interface BeUpdateCallRequestResponse {
 // ---------------------------------------------------------------------------
 
 export type BeChangeRequestState =
+  | "new"
+  | "assess"
+  | "authorize"
   | "customer_approval"
   | "scheduled"
   | "implement"
@@ -1139,6 +1313,33 @@ export type BeChangeRequestState =
   | "canceled";
 
 export type BeChangeRequestImpact = "high" | "medium" | "low";
+
+export type BeChangeRequestType =
+  | "standard"
+  | "normal"
+  | "emergency"
+  | "model"
+  | "site_reliability_ops"
+  | "azure";
+
+export type BeChangeRequestPriority = "critical" | "high" | "moderate" | "low";
+
+export type BeChangeRequestRisk = "high" | "moderate" | "low";
+
+export type BeChangeRequestCategory =
+  | "hardware"
+  | "software"
+  | "service"
+  | "system_software"
+  | "applications_software"
+  | "network"
+  | "telecom"
+  | "documentation"
+  | "other"
+  | "regular_release_cloud"
+  | "hotfix_release_cloud"
+  | "devops"
+  | "cloud_computing";
 
 /** List-item / shared shape for a change request (`POST /change-requests/search`). */
 export interface BeChangeRequestSearchView {
@@ -1176,6 +1377,139 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   hasCustomerReviewed?: boolean;
   approvedBy?: BeEntityRef | null;
   approvedOn?: string | null;
+}
+
+/**
+ * `POST /change-requests` body (ServiceNow data source only). `subject` is
+ * the only required field; every ID field (`serviceId`, `serviceOfferingId`,
+ * `configurationItemId`, `groupId`, `assignedEngineerId`, `requestedById`)
+ * is a portal UUID resolved server-side against the backing data source, via
+ * the matching `/*\/search` endpoint (see `AsyncEntitySelect` usages in
+ * `CreateChangeRequestPage.tsx`). `state` accepts any valid lifecycle state,
+ * but the create form restricts the selectable options to the pre-workflow
+ * states (new/assess/authorize), defaulting to "new", so a CR can't be created
+ * already past its own approval flow.
+ * `plannedStartDate`/`plannedEndDate` are `YYYY-MM-DD HH:MM:SS` strings.
+ */
+export interface BeCreateChangeRequestPayload {
+  subject: string;
+  category?: BeChangeRequestCategory;
+  serviceId?: string;
+  serviceOfferingId?: string;
+  configurationItemId?: string;
+  priority?: BeChangeRequestPriority;
+  impact?: BeChangeRequestImpact;
+  type?: BeChangeRequestType;
+  state?: BeChangeRequestState;
+  groupId?: string;
+  assignedEngineerId?: string;
+  risk?: BeChangeRequestRisk;
+  requestedById?: string;
+  description?: string;
+  justification?: string;
+  implementationPlan?: string;
+  riskImpactAnalysis?: string;
+  backoutPlan?: string;
+  testPlan?: string;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
+  comment?: string;
+  workNote?: string;
+}
+
+/** `POST /change-requests` response — the created identifiers. */
+export interface BeCreateChangeRequestResponse {
+  message: string;
+  changeRequest: {
+    id: string;
+    number: string;
+    createdOn: string;
+    createdBy: string;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Change-request reference lookups (ServiceNow CMDB — groups, IT services,
+// service offerings, configuration items). Each search response carries no
+// `hasMore` (same as change requests), so these don't extend
+// BeSearchResponseBase.
+// ---------------------------------------------------------------------------
+
+export interface BeGroup {
+  id: string;
+  name: string;
+  active: boolean;
+  parent?: BeEntityRef | null;
+}
+
+export interface BeGroupSearchPayload {
+  filters?: { searchQuery?: string };
+  pagination: BePagination;
+}
+
+export interface BeGroupSearchResponse {
+  groups: BeGroup[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BeItService {
+  id: string;
+  name?: string | null;
+  class?: string | null;
+  businessCriticality?: string | null;
+  serviceClassification?: string | null;
+}
+
+export interface BeItServiceSearchPayload {
+  filters?: { searchQuery?: string };
+  pagination: BePagination;
+}
+
+export interface BeItServiceSearchResponse {
+  services: BeItService[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BeServiceOffering {
+  id: string;
+  name: string;
+  service?: BeEntityRef | null;
+}
+
+export interface BeServiceOfferingSearchPayload {
+  /** Narrow to offerings under a specific service (its portal UUID). */
+  filters?: { serviceIds?: string[]; searchQuery?: string };
+  pagination: BePagination;
+}
+
+export interface BeServiceOfferingSearchResponse {
+  serviceOfferings: BeServiceOffering[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BeConfigurationItem {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  class?: string | null;
+}
+
+export interface BeConfigurationItemSearchPayload {
+  filters?: { searchQuery?: string };
+  pagination: BePagination;
+}
+
+export interface BeConfigurationItemSearchResponse {
+  configurationItems: BeConfigurationItem[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 /**

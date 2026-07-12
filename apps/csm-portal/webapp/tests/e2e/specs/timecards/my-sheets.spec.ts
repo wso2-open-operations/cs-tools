@@ -70,6 +70,7 @@ test.describe("time cards — my time sheets", () => {
     const tc = new TimeCardsPage(page);
     await tc.goto();
     await expect(tc.myTab()).toBeVisible();
+    await tc.openFilters();
     await expect(page.getByLabel("Project")).toBeVisible();
     await expect(page.getByLabel("Work item")).toBeVisible();
     await expect(page.getByLabel("State")).toBeVisible();
@@ -105,9 +106,9 @@ test.describe("time cards — my time sheets", () => {
     await tc.filterWorkItem(caseNumber!);
     await expect(tc.cardRow(caseNumber!)).toBeVisible();
     await tc.clearFilters();
-    // "Clear all" only shows up while a filter is active, so it going away
-    // means the work item filter actually got removed.
-    await expect(page.getByRole("button", { name: "Clear all" })).toHaveCount(0);
+    // "Clear filters" only shows up while a filter is active, so it going
+    // away means the work item filter actually got removed.
+    await expect(page.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
 
     // State filter: the card was just created, so it's "submitted".
     await tc.filterState("Submitted");

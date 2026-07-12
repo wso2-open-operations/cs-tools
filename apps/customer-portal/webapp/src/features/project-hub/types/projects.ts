@@ -19,6 +19,7 @@ import type {
   PaginationResponse,
   SearchRequestBase,
 } from "@/types/common";
+import type { FeedbackEmoji } from "@features/support/types/feedback";
 
 // Item type for basic project definition returned in search list responses.
 export type ProjectListItem = {
@@ -117,6 +118,7 @@ export type PortalFeatureFlags = {
 export type PortalMetadataResponse = {
   timeZones: TimeZoneOption[];
   featureFlags?: PortalFeatureFlags;
+  feedbackEmojies?: FeedbackEmoji[];
 };
 
 // Response type for project support statistics.

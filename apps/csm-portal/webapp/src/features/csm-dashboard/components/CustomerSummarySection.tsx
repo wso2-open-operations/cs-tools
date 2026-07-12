@@ -100,7 +100,7 @@ export default function CustomerSummarySection({
         {isLoading &&
           [0, 1, 2, 3, 4].map((i) => (
             <Box key={i} sx={{ gridColumn: "1 / -1" }}>
-              <Skeleton variant="rectangular" height={32} />
+              <Skeleton variant="rounded" height={32} />
             </Box>
           ))}
 
