@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"compress/flate"
 	"crypto/md5"
@@ -10,7 +9,6 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -24,7 +22,7 @@ import (
 	"time"
 )
 
-const version = "0.1.0"
+var version = "0.1.0"
 
 // main runs the CLI and reports user-facing errors with a non-zero exit code.
 func main() {
@@ -446,13 +444,23 @@ func password(input string) (string, error) {
 	if *length < 1 || *length > 1024 {
 		return "", errors.New("length must be 1–1024")
 	}
+	max := 256 - (256 % len(chars))
 	b := make([]byte, *length)
-	for i := range b {
-		n := make([]byte, 1)
-		if _, err := rand.Read(n); err != nil {
+	buf := make([]byte, *length)
+	for i := 0; i < *length; {
+		if _, err := rand.Read(buf); err != nil {
 			return "", err
 		}
-		b[i] = chars[int(n[0])%len(chars)]
+		for _, n := range buf {
+			if int(n) >= max {
+				continue
+			}
+			b[i] = chars[int(n)%len(chars)]
+			i++
+			if i == *length {
+				break
+			}
+		}
 	}
 	return string(b), nil
 }
@@ -476,7 +484,3 @@ func convertTimestamp(s string) (string, error) {
 	}
 	return fmt.Sprintf("UTC: %s\nLocal: %s\nISO 8601: %s\nUnix (seconds): %d\nUnix (ms): %d", t.UTC().Format(time.RFC1123), t.Local().Format(time.RFC1123), t.UTC().Format(time.RFC3339Nano), t.Unix(), t.UnixMilli()), nil
 }
-
-// Kept referenced so go vet recognizes the import as intentional in older toolchains.
-var _ = hex.EncodeToString
-var _ = bufio.NewReader
