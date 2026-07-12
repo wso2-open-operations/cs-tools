@@ -161,6 +161,9 @@ export function cardDateLabel(iso: string): string {
 
 /** Roll a week's cards up into a single display status. */
 export function sheetStatus(cards: CsmTimeCard[]): TimeSheetState {
+  // Guard the empty case first: `[].every(...)` is `true`, which would otherwise
+  // report an empty sheet as "approved". Fall back to the same "submitted" default.
+  if (cards.length === 0) return "submitted";
   if (cards.some((c) => c.state === "rejected")) return "rejected";
   if (cards.every((c) => c.state === "approved" || c.state === "processed")) return "approved";
   return "submitted";
