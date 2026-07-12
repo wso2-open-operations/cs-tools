@@ -1830,6 +1830,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents:
+    post:
+      summary: Create a new incident (ServiceNow data source only).
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        "201":
+          description: Incident created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIncidentResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents/search:
     post:
       summary: Search incidents (ServiceNow data source only).
@@ -5356,6 +5392,101 @@ components:
           type: integer
         limit:
           type: integer
+
+    CreateIncidentRequest:
+      type: object
+      required: [callerId, category, serviceId, impact, urgency, subject]
+      properties:
+        callerId:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE,
+                 SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS,
+                 FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH,
+                 SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY,
+                 UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION,
+                 INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
+          nullable: true
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+          nullable: true
+        configurationItemId:
+          type: string
+          format: uuid
+          nullable: true
+        contactType:
+          type: string
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT,
+                 PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+          nullable: true
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+        assignedEngineerId:
+          type: string
+          format: uuid
+          nullable: true
+        subject:
+          type: string
+        watchList:
+          type: array
+          items:
+            type: string
+        additionalComments:
+          type: string
+          nullable: true
+        workNotes:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        changeRequestId:
+          type: string
+          format: uuid
+          nullable: true
+        problemId:
+          type: string
+          format: uuid
+          nullable: true
+        causedById:
+          type: string
+          format: uuid
+          nullable: true
+
+    CreateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          type: object
+          properties:
+            id:
+              type: string
+            number:
+              type: string
+            createdOn:
+              type: string
+            createdBy:
+              type: string
 
     SearchProblemsRequest:
       type: object
