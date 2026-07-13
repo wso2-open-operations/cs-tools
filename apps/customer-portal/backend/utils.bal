@@ -224,7 +224,7 @@ public isolated function getStatusCode(error err) returns int {
     return statusCodeValue is int ? statusCodeValue : http:STATUS_INTERNAL_SERVER_ERROR;
 }
 
-# Get the error message from the given error.
+# Get HTTP status code from the given error.
 #
 # + err - Error to handle
 # + return - Error message
