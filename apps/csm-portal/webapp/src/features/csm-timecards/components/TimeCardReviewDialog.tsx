@@ -142,7 +142,7 @@ export default function TimeCardReviewDialog({
         {action !== "reject" && (
           <Button
             color="success"
-            variant="contained"
+            variant="outlined"
             startIcon={<Check size={16} />}
             onClick={() => decide("approved")}
             disabled={isDeciding}
