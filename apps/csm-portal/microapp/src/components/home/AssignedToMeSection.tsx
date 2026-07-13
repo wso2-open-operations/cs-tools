@@ -47,8 +47,12 @@ export function AssignedToMeSection() {
       </Stack>
 
       {isPending ? (
+        // Only 2 (not the 6 Support's own list skeleton shows) — this is a short preview widget,
+        // not a case list. Keeping it short leaves the Case composition donuts visible in the
+        // same first viewport, so Home's loading state reads as the dashboard it is rather than
+        // looking like Support's own (much longer) loading skeleton.
         <Stack gap={1.5}>
-          {Array.from({ length: 3 }).map((_, index) => (
+          {Array.from({ length: 2 }).map((_, index) => (
             <CaseCardSkeleton key={index} />
           ))}
         </Stack>
