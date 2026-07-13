@@ -39,8 +39,6 @@ import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
 interface CaseTimeCardsPanelProps {
   caseId: string;
-  /** The case's project — required to scope `/time-cards/search` (see useCaseTimeCards). */
-  projectId: string;
   /** Opens the log-time dialog (owned by the page so the action bar can trigger it). */
   onLogTime: () => void;
 }
@@ -53,10 +51,9 @@ interface CaseTimeCardsPanelProps {
  */
 export default function CaseTimeCardsPanel({
   caseId,
-  projectId,
   onLogTime,
 }: CaseTimeCardsPanelProps): JSX.Element {
-  const { data, isLoading, isError } = useCaseTimeCards(caseId, projectId);
+  const { data, isLoading, isError } = useCaseTimeCards(caseId);
   const isTeamLead = useIsTeamLead();
   const me = useCurrentEngineer();
   const decide = useDecideTimeCard();
