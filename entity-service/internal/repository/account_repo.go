@@ -56,8 +56,8 @@ func (r *accountRepo) SearchAccounts(ctx context.Context, req domain.SearchAccou
 
 	where := "WHERE 1=1"
 
-	if req.SearchQuery != "" {
-		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.SearchQuery)
+	if req.Filters.SearchQuery != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.Filters.SearchQuery)
 		pattern := "%" + escaped + "%"
 		where += fmt.Sprintf(" AND (name ILIKE $%d ESCAPE '\\' OR sf_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx)
 		filterArgs = append(filterArgs, pattern)

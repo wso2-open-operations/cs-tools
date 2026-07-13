@@ -38,7 +38,7 @@ func (s *accountService) SearchAccounts(ctx context.Context, req domain.SearchAc
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchAccountsResponse{}, err
 	}
-	if err := validateSearchQuery(req.SearchQuery); err != nil {
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchAccountsResponse{}, err
 	}
 	accounts, total, err := s.repo.SearchAccounts(ctx, req)

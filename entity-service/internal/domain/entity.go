@@ -198,11 +198,18 @@ type Account struct {
 	UpdatedOn           time.Time   `json:"updatedOn"`
 }
 
+// SearchAccountsFilters holds the optional filter criteria for an account search.
+type SearchAccountsFilters struct {
+	SearchQuery    string `json:"searchQuery,omitempty"`
+	Active         *bool  `json:"active,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	Classification string `json:"classification,omitempty"`
+}
+
 // SearchAccountsRequest is the input for an account search operation.
-// SearchQuery is matched case-insensitively against name and sf_id.
 type SearchAccountsRequest struct {
-	Pagination  Pagination `json:"pagination"`
-	SearchQuery string     `json:"searchQuery"`
+	Pagination Pagination            `json:"pagination"`
+	Filters    SearchAccountsFilters `json:"filters,omitempty"`
 }
 
 // SearchAccountsResponse is the paginated result of an account search.
@@ -215,31 +222,36 @@ type SearchAccountsResponse struct {
 	HasMore  bool      `json:"hasMore"`
 }
 
-// SNAccount is the account view returned by the ServiceNow data source.
+// SNAccountView is the account view returned by the ServiceNow data source.
 // Timestamp fields are kept as strings to accommodate empty values from ServiceNow.
-type SNAccount struct {
-	ID                  string  `json:"id"`
-	SfID                string  `json:"sfId"`
-	Name                string  `json:"name"`
-	Tier                string  `json:"tier"`
-	Region              *string `json:"region"`
-	ActivationDate      string  `json:"activationDate"`
-	DeactivationDate    *string `json:"deactivationDate"`
-	OwnerID             string  `json:"ownerId"`
-	TechnicalOwnerID    *string `json:"technicalOwnerId"`
-	AgentEnabled        bool    `json:"agentEnabled"`
-	KbReferencesEnabled bool    `json:"kbReferencesEnabled"`
-	CreatedOn           string  `json:"createdOn"`
-	UpdatedOn           string  `json:"updatedOn"`
+// SupportTier is returned as a plain label string (no ID).
+type SNAccountView struct {
+	ID               string     `json:"id"`
+	SysID            string     `json:"sysId"`
+	Name             string     `json:"name"`
+	Classification   string     `json:"classification"`
+	Pod              *string    `json:"pod"`
+	Region           *string    `json:"region"`
+	SupportTier      *string    `json:"supportTier"`
+	ArrToday         *string    `json:"arrToday"`
+	TechnicalOwner   *EntityRef `json:"technicalOwner"`
+	Owner            *EntityRef `json:"owner"`
+	ActivationDate   string     `json:"activationDate"`
+	DeactivationDate *string    `json:"deactivationDate"`
+	HasAgent         bool       `json:"hasAgent"`
+	HasKbReferences  bool       `json:"hasKbReferences"`
+	CreatedOn        string     `json:"createdOn"`
+	CreatedBy        *string    `json:"createdBy"`
+	UpdatedOn        string     `json:"updatedOn"`
 }
 
 // SearchSNAccountsResponse is the paginated result of a ServiceNow account search.
 type SearchSNAccountsResponse struct {
-	Accounts []SNAccount `json:"accounts"`
-	Total    int         `json:"total"`
-	Limit    int         `json:"limit"`
-	Offset   int         `json:"offset"`
-	HasMore  bool        `json:"hasMore"`
+	Accounts []SNAccountView `json:"accounts"`
+	Total    int             `json:"total"`
+	Limit    int             `json:"limit"`
+	Offset   int             `json:"offset"`
+	HasMore  bool            `json:"hasMore"`
 }
 
 // SubscriptionType classifies the subscription type of a project.
