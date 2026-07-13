@@ -150,7 +150,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
   // exported filename's date mid-session.
   const todayStamp = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
+  // Carries the action the user already picked (clicking Approve vs Reject in
+  // the list), so the dialog reflects that one decision instead of asking
+  // again — see TimeCardReviewDialog's `action` prop.
+  const [review, setReview] = useState<{ card: CsmTimeCard; action: TimecardAction } | null>(null);
 
   // Search filters (sent as a POST body, never query params). Project, state,
   // and engineer (see filtersWithEngineer below) are all server-side; work
@@ -260,7 +263,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
   };
 
   const handleCardAction = (card: CsmTimeCard, action: TimecardAction): void => {
-    if (action === "approve" || action === "reject") setReviewCard(card);
+    if (action === "approve" || action === "reject") setReview({ card, action });
   };
 
   /** Client-side work-item filter (case number is in the selected set),
@@ -566,15 +569,16 @@ export default function CsmTimeCardsPage(): JSX.Element {
         </Box>
       )}
 
-      {reviewCard && (
+      {review && (
         <TimeCardReviewDialog
-          card={reviewCard}
+          card={review.card}
+          action={review.action}
           isDeciding={decideCard.isPending}
-          onClose={() => setReviewCard(null)}
+          onClose={() => setReview(null)}
           onDecide={(decision) =>
             decideCard.mutate(decision, {
               onSuccess: () => {
-                setReviewCard(null);
+                setReview(null);
                 showSuccess(
                   decision.state === "approved"
                     ? "Time card approved."
