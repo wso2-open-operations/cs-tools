@@ -172,6 +172,36 @@ func TestCreateIncident(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects missing required fields", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{"category":"SECURITY","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`)))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects unknown category enum value", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{"callerId":"11111111-1111-1111-1111-111111111111","category":"NOT_A_CATEGORY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`)))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID callerId", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{"callerId":"not-a-uuid","category":"SECURITY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`)))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("forwards body to upstream and returns 201 with response", func(t *testing.T) {
 		const reqPayload = `{"callerId":"11111111-1111-1111-1111-111111111111","category":"SECURITY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`
 		var capturedBody []byte
@@ -198,6 +228,7 @@ func TestCreateIncident(t *testing.T) {
 	})
 
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		const validPayload = `{"callerId":"11111111-1111-1111-1111-111111111111","category":"SECURITY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`
 		for _, tc := range upstreamErrors("Failed to create incident.") {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -207,7 +238,7 @@ func TestCreateIncident(t *testing.T) {
 					},
 				}
 				h := NewIncidentHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{}`)))
+				r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(validPayload)))
 				w := httptest.NewRecorder()
 				h.CreateIncident(w, r)
 				assertStatus(t, w, tc.wantCode)
@@ -221,8 +252,8 @@ func TestCreateIncident(t *testing.T) {
 func TestGetIncident(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewIncidentHandler(&mockEntityIncidentClient{})
-		r := httptest.NewRequest(http.MethodGet, "/incidents/inc-1", nil)
-		r.SetPathValue("id", "inc-1")
+		r := httptest.NewRequest(http.MethodGet, "/incidents/11111111-1111-1111-1111-111111111111", nil)
+		r.SetPathValue("id", "11111111-1111-1111-1111-111111111111")
 		w := httptest.NewRecorder()
 		h.GetIncident(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)

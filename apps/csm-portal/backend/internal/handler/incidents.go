@@ -58,7 +58,114 @@ var (
 	}
 	validIncidentSortFields = map[string]bool{"createdOn": true, "updatedOn": true, "openedOn": true}
 	validIncidentSortOrders = map[string]bool{"asc": true, "desc": true}
+
+	validIncidentCategories    = map[string]bool{"INQUIRY": true, "SERVICE_INTERRUPTION": true, "SECURITY": true}
+	validIncidentSubcategories = map[string]bool{
+		"DHCP": true, "ORACLE": true, "CPU": true, "KEYBOARD": true, "DOS_DDOS": true,
+		"PRIVILEGE_ESCALATIONS": true, "THREAT_INTELLIGENCE": true, "SCANS_AND_PROBES": true,
+		"APPLICATION_SECURITY": true, "CONFIG_CHANGE_REQUEST": true, "IP_ADDRESS": true,
+		"FULL_OUTAGE": true, "SQL_SERVER": true, "SLOWNESS": true, "MEMORY": true, "MOUSE": true,
+		"PRIVACY": true, "DATA_BREACH": true, "SYSTEM_COMPROMISES": true, "DNS": true, "OS": true,
+		"DISK": true, "VPN": true, "MALWARE": true, "VULNERABILITY": true, "UNAUTHORIZED_ACCESS": true,
+		"IDENTITY_PROTECTION": true, "PHISHING": true, "IMPROPER_CONFIGURATION": true,
+		"INFORMATION_REQUEST": true, "DB2": true, "PARTIAL_OUTAGE": true, "EMAIL": true,
+		"MONITOR": true, "WIRELESS": true,
+	}
+	validIncidentContactTypes = map[string]bool{
+		"SELF_SERVICE": true, "EMAIL": true, "WALK_IN": true, "AZURE": true, "EMAIL_INTERNAL": true,
+		"SITE_247": true, "DIRECT": true, "PHONE": true, "SENTINEL": true, "VIRTUAL_AGENT": true,
+		"CHAT": true, "EMAIL_EXTERNAL": true,
+	}
+	validIncidentImpacts   = map[string]bool{"HIGH": true, "MEDIUM": true, "LOW": true}
+	validIncidentUrgencies = map[string]bool{"HIGH": true, "MEDIUM": true, "LOW": true}
 )
+
+// createIncidentRequest mirrors the enum/format-constrained fields of the documented
+// CreateIncidentPayload schema. It is decoded only to validate those fields at the
+// boundary; the original raw body is still forwarded to the entity service unchanged.
+type createIncidentRequest struct {
+	CallerID            string   `json:"callerId"`
+	Category            string   `json:"category"`
+	Subcategory         string   `json:"subcategory"`
+	ServiceID           string   `json:"serviceId"`
+	ServiceOfferingID   string   `json:"serviceOfferingId"`
+	ConfigurationItemID string   `json:"configurationItemId"`
+	ContactType         string   `json:"contactType"`
+	Impact              string   `json:"impact"`
+	Urgency             string   `json:"urgency"`
+	AssignmentGroupID   string   `json:"assignmentGroupId"`
+	AssignedEngineerID  string   `json:"assignedEngineerId"`
+	Subject             string   `json:"subject"`
+	WatchList           []string `json:"watchList"`
+	ParentID            string   `json:"parentId"`
+	ChangeRequestID     string   `json:"changeRequestId"`
+	ProblemID           string   `json:"problemId"`
+	CausedByID          string   `json:"causedById"`
+}
+
+// validateCreateIncidentBody checks the required fields, enum fields (category, subcategory,
+// contactType, impact, urgency), and every UUID-formatted field with a known, fixed set of
+// valid values so obviously invalid requests are rejected before reaching the entity service.
+func validateCreateIncidentBody(body []byte) bool {
+	var req createIncidentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	if req.CallerID == "" || !uuidRe.MatchString(req.CallerID) {
+		return false
+	}
+	if !validIncidentCategories[req.Category] {
+		return false
+	}
+	if req.Subcategory != "" && !validIncidentSubcategories[req.Subcategory] {
+		return false
+	}
+	if req.ServiceID == "" || !uuidRe.MatchString(req.ServiceID) {
+		return false
+	}
+	if req.ServiceOfferingID != "" && !uuidRe.MatchString(req.ServiceOfferingID) {
+		return false
+	}
+	if req.ConfigurationItemID != "" && !uuidRe.MatchString(req.ConfigurationItemID) {
+		return false
+	}
+	if req.ContactType != "" && !validIncidentContactTypes[req.ContactType] {
+		return false
+	}
+	if !validIncidentImpacts[req.Impact] {
+		return false
+	}
+	if !validIncidentUrgencies[req.Urgency] {
+		return false
+	}
+	if req.AssignmentGroupID != "" && !uuidRe.MatchString(req.AssignmentGroupID) {
+		return false
+	}
+	if req.AssignedEngineerID != "" && !uuidRe.MatchString(req.AssignedEngineerID) {
+		return false
+	}
+	if req.Subject == "" {
+		return false
+	}
+	for _, w := range req.WatchList {
+		if !uuidRe.MatchString(w) {
+			return false
+		}
+	}
+	if req.ParentID != "" && !uuidRe.MatchString(req.ParentID) {
+		return false
+	}
+	if req.ChangeRequestID != "" && !uuidRe.MatchString(req.ChangeRequestID) {
+		return false
+	}
+	if req.ProblemID != "" && !uuidRe.MatchString(req.ProblemID) {
+		return false
+	}
+	if req.CausedByID != "" && !uuidRe.MatchString(req.CausedByID) {
+		return false
+	}
+	return true
+}
 
 // validateSearchIncidentsBody checks the filter/sort fields with a known, fixed set of
 // valid values (priority enums, parentIds as UUIDs, sort field/order enums) so obviously
@@ -164,7 +271,10 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// TODO: Decode into a typed CreateIncidentRequest and validate fields before forwarding.
+	if !validateCreateIncidentBody(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
 
 	result, err := h.entity.CreateIncident(r.Context(), body)
 	if err != nil {
