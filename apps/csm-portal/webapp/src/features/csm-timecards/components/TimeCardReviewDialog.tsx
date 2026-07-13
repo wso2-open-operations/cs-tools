@@ -94,7 +94,7 @@ export default function TimeCardReviewDialog({
                 Logged
               </Typography>
               <Typography variant="body2">
-                <RelativeTime iso={card.createdOn} />
+                <RelativeTime iso={card.workDate} />
               </Typography>
             </Box>
           </Box>
