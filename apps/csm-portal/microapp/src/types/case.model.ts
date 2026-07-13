@@ -28,7 +28,6 @@ import type {
   CaseWorkState,
   DeployedProductRefDto,
   EntityRefDto,
-  UserIdEmailRefDto,
   UserRefDto,
 } from "./case.dto";
 import { parseBackendTimestamp, parseOptionalBackendTimestamp } from "@utils/dateTime";
@@ -71,7 +70,8 @@ export interface CaseSummary {
   createdOn: Date;
   updatedOn: Date;
   closedOn: Date | null;
-  createdBy: UserIdEmailRefDto;
+  /** Creator's email (the case-search view returns it as a plain string). */
+  createdBy: string;
   project: EntityRefDto;
   deployment: EntityRefDto | null;
   product: EntityRefDto | null;

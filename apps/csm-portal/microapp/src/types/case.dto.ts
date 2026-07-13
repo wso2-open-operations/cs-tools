@@ -121,7 +121,9 @@ export interface CaseSearchViewDto {
   createdOn?: string;
   updatedOn?: string;
   closedOn: string | null;
-  createdBy: UserIdEmailRefDto;
+  // The case-search view returns the creator's email as a plain string (unlike
+  // the by-id detail view, which returns a full user object).
+  createdBy: string;
   project: EntityRefDto;
   deployment: EntityRefDto | null;
   deployedProduct: EntityRefDto | null;

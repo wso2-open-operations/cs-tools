@@ -26,6 +26,7 @@ import CaseDetailPage from "@pages/CaseDetailPage";
 import NewCasePage from "@pages/NewCasePage";
 import OperationsPage from "@pages/OperationsPage";
 import MorePage from "@pages/MorePage";
+import AnnouncementsPage from "@pages/AnnouncementsPage";
 import TimeCardsPage from "@pages/TimeCardsPage";
 import SecurityCenterPage from "@pages/SecurityCenterPage";
 import UpdatesPage from "@pages/UpdatesPage";
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="/cases/:id" element={<CaseDetailPage />} />
           <Route path="/operations" element={<OperationsPage />} />
           <Route path="/more" element={<MorePage />} />
+          <Route path="/more/announcements" element={<AnnouncementsPage />} />
           <Route path="/more/time-cards" element={<TimeCardsPage />} />
           <Route path="/more/security-center" element={<SecurityCenterPage />} />
           <Route path="/more/updates" element={<UpdatesPage />} />

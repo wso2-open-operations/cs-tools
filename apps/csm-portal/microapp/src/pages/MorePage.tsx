@@ -16,7 +16,15 @@
 
 import { Link } from "react-router-dom";
 import { List, ListItemButton, ListItemIcon, ListItemText, Stack, Typography } from "@wso2/oxygen-ui";
-import { Briefcase, ChevronRight, Clock, RefreshCw, Shield, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
+import {
+  Briefcase,
+  ChevronRight,
+  Clock,
+  Megaphone,
+  RefreshCw,
+  Shield,
+  type LucideIcon,
+} from "@wso2/oxygen-ui-icons-react";
 
 interface MoreItem {
   label: string;
@@ -28,6 +36,7 @@ interface MoreItem {
 // CSM_NAV_ITEMS (apps/csm-portal/webapp/src/config/csmNavItems.ts) — Customers and Settings are
 // deliberately left out here.
 const MORE_ITEMS: MoreItem[] = [
+  { label: "Announcements", path: "/more/announcements", icon: Megaphone },
   { label: "Time Cards", path: "/more/time-cards", icon: Clock },
   { label: "Security Center", path: "/more/security-center", icon: Shield },
   { label: "Updates", path: "/more/updates", icon: RefreshCw },
