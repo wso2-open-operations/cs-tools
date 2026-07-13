@@ -32,7 +32,10 @@ export function sheetStatus(cards: CsmTimeCard[]): TimeSheetState {
 
 /**
  * Group a flat list of cards into weekly sheets (Mon–Sun), newest first.
- * `weekStartOf` throws (`RangeError: Invalid time value`) if `createdOn`
+ * Grouped by `workDate` — the date the work was actually carried out — so a
+ * backdated card lands in the week it was worked, not the week it was logged.
+ *
+ * `weekStartOf` throws (`RangeError: Invalid time value`) if `workDate`
  * isn't a parseable date — confirmed live: at least one real card has one
  * (blank or otherwise malformed). Skip that one card rather than losing the
  * whole group of otherwise-good cards to it — the same "one bad record
@@ -49,7 +52,7 @@ export function groupIntoSheets(
   for (const c of cards) {
     let wk: string;
     try {
-      wk = weekStartOf(c.createdOn);
+      wk = weekStartOf(c.workDate);
     } catch {
       continue;
     }
@@ -59,7 +62,7 @@ export function groupIntoSheets(
   }
   const sheets: CsmTimeSheet[] = [];
   for (const [weekStart, weekCards] of byWeek) {
-    weekCards.sort((a, b) => b.createdOn.localeCompare(a.createdOn));
+    weekCards.sort((a, b) => b.workDate.localeCompare(a.workDate));
     sheets.push({
       id: `${userId}:${weekStart}`,
       userId,
