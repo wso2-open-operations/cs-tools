@@ -36,9 +36,14 @@ export function TopBar() {
       display="flex"
       alignItems="center"
       px={2}
-      pb={1}
+      pb={2}
       sx={{
-        pt: 7,
+        // Ties directly to the device's actual safe-area inset (--safe-top, set from the native
+        // bridge) plus enough clearance for the ExitButton pill's own height, rather than a fixed
+        // value — a fixed pt (the customer-portal microapp's own AppBar.tsx uses one too) is only
+        // correct for whatever inset it was tuned against; on a Dynamic Island phone (~59px inset)
+        // it undershoots and the pill visually overflows into the page content below it.
+        pt: "calc(var(--safe-top, 44px) + 40px)",
         borderBottom: "1px solid",
         borderColor: "divider",
         zIndex: (theme) => theme.zIndex.appBar,
@@ -73,7 +78,7 @@ function ExitButton() {
         sx={{
           gap: 1,
           position: "absolute",
-          top: "var(--safe-top)",
+          top: "var(--safe-top, 44px)",
           left: 10,
           p: 0,
         }}
