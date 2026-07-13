@@ -234,6 +234,28 @@ public isolated function extractErrorMessage(error err) returns string {
     return errorMessage is string ? errorMessage : UNEXPECTED_ERROR_MSG;
 }
 
+# Get the user-facing message from the JSON error body of the given client error.
+#
+# + err - Client error to handle
+# + return - Value of the 'message' field in the error body, or a generic message if unavailable
+public isolated function extractClientErrorMessage(error err) returns string {
+    map<anydata|readonly> & readonly errorDetails = err.detail();
+    anydata|readonly errorBody = errorDetails[ERR_BODY] ?: ();
+    if errorBody is map<anydata> {
+        anydata message = errorBody[ERR_MESSAGE];
+        return message is string ? message : UNEXPECTED_ERROR_MSG;
+    }
+    if errorBody is string {
+        json|error parsedBody = errorBody.fromJsonString();
+        if parsedBody is map<json> {
+            json message = parsedBody[ERR_MESSAGE];
+            return message is string ? message : UNEXPECTED_ERROR_MSG;
+        }
+        return errorBody;
+    }
+    return UNEXPECTED_ERROR_MSG;
+}
+
 # Log forbidden project access attempt.
 #
 # + id - Project ID
