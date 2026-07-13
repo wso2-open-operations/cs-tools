@@ -83,7 +83,7 @@ export default function TimeCardReviewDialog({
     onDecide({ cardId: card.id, state, leadComment });
 
   const titlePrefix =
-    action === "approve" ? "Approve" : action === "reject" ? "Reject" : "Review";
+    action === "approve" ? "Accept" : action === "reject" ? "Reject" : "Review";
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
