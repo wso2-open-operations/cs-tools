@@ -238,8 +238,8 @@ public isolated function extractErrorMessage(error err) returns string {
     if errorBody is string {
         json|error parsedBody = errorBody.fromJsonString();
         if parsedBody is map<json> {
-            json message = parsedBody[ERR_MESSAGE] ?: ();
-            return message is string ? message : errorBody;
+            json message = parsedBody[ERR_MESSAGE];
+            return message is string ? message : UNEXPECTED_ERROR_MSG;
         }
         return errorBody;
     }
