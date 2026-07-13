@@ -152,9 +152,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
 
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
 
-  // Search filters (sent as a POST body, never query params). Project and
-  // state are server-side; work item and engineer are client-side over the
-  // returned page — the backend has no filter for either.
+  // Search filters (sent as a POST body, never query params). Project, state,
+  // and engineer (see filtersWithEngineer below) are all server-side; work
+  // item stays client-side over the returned page — the backend has no
+  // case-number filter, only caseId (see byWorkItem below).
   const [filterProject, setFilterProject] = useState<string[]>([]);
   const [filterWorkItem, setFilterWorkItem] = useState<string[]>([]);
   const [filterState, setFilterState] = useState<TimeCardState | "">("");
@@ -180,6 +181,13 @@ export default function CsmTimeCardsPage(): JSX.Element {
     ...(filterFrom && { from: filterFrom }),
     ...(filterTo && { to: filterTo }),
   };
+  // The Engineer filter only has a control on the All/Approvals tabs (see
+  // engineerSlot below) — folded in as a separate `userIds` filter, not into
+  // baseFilters itself, so a value picked on those tabs can never leak into
+  // "My time sheets" (which is already its own-user-only via useMyTimeSheets).
+  const filtersWithEngineer: TimeCardSearchFilters = filterEngineer.length
+    ? { ...baseFilters, userIds: filterEngineer }
+    : baseFilters;
 
   // Each tab pages independently — was previously fetching its *entire*
   // scope (up to 1,000 cards, sequential page-by-page requests) before
@@ -193,10 +201,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const approvalsPagination = usePagination();
 
   const mySheets = useMyTimeSheets(activeTab === "mine", baseFilters, minePagination.pagination);
-  const allCards = useAllTimeCards(activeTab === "all", baseFilters, allPagination.pagination);
+  const allCards = useAllTimeCards(activeTab === "all", filtersWithEngineer, allPagination.pagination);
   const queue = useApprovalQueue(
     activeTab === "approvals" && role.isApprover,
-    baseFilters,
+    filtersWithEngineer,
     approvalsPagination.pagination,
   );
   const decideCard = useDecideCard();
@@ -223,6 +231,10 @@ export default function CsmTimeCardsPage(): JSX.Element {
   };
   const handleFilterStateChange = (v: TimeCardState | ""): void => {
     setFilterState(v);
+    resetAllPages();
+  };
+  const handleFilterEngineerChange = (v: string[]): void => {
+    setFilterEngineer(v);
     resetAllPages();
   };
   const handleFilterFromChange = (v: string): void => {
@@ -289,16 +301,12 @@ export default function CsmTimeCardsPage(): JSX.Element {
 
   // Filtered sheets per tab, computed once and shared between the FilterBar's
   // export action and the list rendering below — rather than recomputing (and
-  // risking drift) in two places.
+  // risking drift) in two places. Engineer is already applied server-side (via
+  // filtersWithEngineer) by the time allCards/queue resolve — only work item
+  // still needs a client-side pass here.
   const mineFilteredSheets = byWorkItem(mySheets.data?.sheets) ?? [];
-  const allByEngineer = (allCards.data?.sheets ?? []).filter(
-    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
-  );
-  const allFilteredSheets = byWorkItem(allByEngineer) ?? [];
-  const approvalsByEngineer = (queue.data?.sheets ?? []).filter(
-    (s) => filterEngineer.length === 0 || filterEngineer.includes(s.userId),
-  );
-  const approvalsFilteredSheets = byWorkItem(approvalsByEngineer) ?? [];
+  const allFilteredSheets = byWorkItem(allCards.data?.sheets) ?? [];
+  const approvalsFilteredSheets = byWorkItem(queue.data?.sheets) ?? [];
 
   return (
     <Box
@@ -426,7 +434,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
                 values={filterEngineer}
                 options={allEngineerOptions.ids}
                 formatOption={(id) => allEngineerOptions.nameById.get(id) ?? id}
-                onChange={setFilterEngineer}
+                onChange={handleFilterEngineerChange}
               />
             }
             engineerActive={filterEngineer.length > 0}
@@ -447,11 +455,9 @@ export default function CsmTimeCardsPage(): JSX.Element {
               {allFilteredSheets.length === 0 ? (
                 <Empty
                   text={
-                    filterEngineer.length > 0 && allByEngineer.length === 0
-                      ? "No time cards match the selected engineers."
-                      : anyFilterActive
-                        ? "No time cards match the current filters."
-                        : "No time logged yet."
+                    anyFilterActive
+                      ? "No time cards match the current filters."
+                      : "No time logged yet."
                   }
                 />
               ) : (
@@ -507,7 +513,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
                 values={filterEngineer}
                 options={approvalsEngineerOptions.ids}
                 formatOption={(id) => approvalsEngineerOptions.nameById.get(id) ?? id}
-                onChange={setFilterEngineer}
+                onChange={handleFilterEngineerChange}
               />
             }
             engineerActive={filterEngineer.length > 0}
@@ -525,17 +531,12 @@ export default function CsmTimeCardsPage(): JSX.Element {
                   filename={`time-cards-approvals-${todayStamp}.csv`}
                 />
               </Box>
-              {(queue.data?.sheets ?? []).length === 0 ? (
-                <Empty text="Nothing awaiting approval." />
-              ) : approvalsFilteredSheets.length === 0 ? (
+              {approvalsFilteredSheets.length === 0 ? (
                 <Empty
                   text={
-                    // Only blame the engineer filter when it's the one that
-                    // excluded everything — if it matched fine and the
-                    // work-item filter emptied the result, say that instead.
-                    filterEngineer.length > 0 && approvalsByEngineer.length === 0
-                      ? "No time cards match the selected engineers."
-                      : "No time cards match the current filters."
+                    anyFilterActive
+                      ? "No time cards match the current filters."
+                      : "Nothing awaiting approval."
                   }
                 />
               ) : (
