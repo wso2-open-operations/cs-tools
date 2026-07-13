@@ -31,6 +31,7 @@ import {
   billableLabel,
   LEAD_COMMENT_MAX,
 } from "@features/csm-timecards/constants/timeCardConstants";
+import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
 import type {
   CsmTimeCard,
   TimeCardDecisionInput,
@@ -38,6 +39,14 @@ import type {
 
 interface TimeCardReviewDialogProps {
   card: CsmTimeCard;
+  /**
+   * The decision already chosen (e.g. the Approve/Reject button clicked on the
+   * list) — when set, the dialog only offers that one action, instead of
+   * asking the user to pick again from both. Omit for a generic "Review" entry
+   * point (see `CaseTimeCardsPanel`'s single Review button) where no decision
+   * has been made yet and both options should show.
+   */
+  action?: TimecardAction;
   /** True while the decision mutation is in flight. */
   isDeciding: boolean;
   onClose: () => void;
@@ -63,6 +72,7 @@ function Field({ label, value }: { label: string; value: string }): JSX.Element 
  */
 export default function TimeCardReviewDialog({
   card,
+  action,
   isDeciding,
   onClose,
   onDecide,
@@ -72,10 +82,13 @@ export default function TimeCardReviewDialog({
   const decide = (state: "approved" | "rejected"): void =>
     onDecide({ cardId: card.id, state, leadComment });
 
+  const titlePrefix =
+    action === "approve" ? "Approve" : action === "reject" ? "Reject" : "Review";
+
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
-        Review time card · {card.caseNumber} · {card.totalMinutes} min
+        {titlePrefix} time card · {card.caseNumber} · {card.totalMinutes} min
       </DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -115,24 +128,28 @@ export default function TimeCardReviewDialog({
         <Button color="inherit" onClick={onClose} disabled={isDeciding}>
           Cancel
         </Button>
-        <Button
-          color="error"
-          variant="outlined"
-          startIcon={<X size={16} />}
-          onClick={() => decide("rejected")}
-          disabled={isDeciding}
-        >
-          Reject
-        </Button>
-        <Button
-          color="success"
-          variant="contained"
-          startIcon={<Check size={16} />}
-          onClick={() => decide("approved")}
-          disabled={isDeciding}
-        >
-          Accept
-        </Button>
+        {action !== "approve" && (
+          <Button
+            color="error"
+            variant="outlined"
+            startIcon={<X size={16} />}
+            onClick={() => decide("rejected")}
+            disabled={isDeciding}
+          >
+            Reject
+          </Button>
+        )}
+        {action !== "reject" && (
+          <Button
+            color="success"
+            variant="contained"
+            startIcon={<Check size={16} />}
+            onClick={() => decide("approved")}
+            disabled={isDeciding}
+          >
+            Accept
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
