@@ -4302,11 +4302,25 @@ components:
           items:
             $ref: '#/components/schemas/TimeCardState'
 
+    TimeCardSort:
+      type: object
+      properties:
+        field:
+          type: string
+          enum: [updatedOn, workDate]
+          description: Column to sort by. Defaults to updatedOn when omitted.
+        order:
+          type: string
+          enum: [asc, desc]
+          description: Sort direction. Defaults to desc when omitted.
+
     SearchTimeCardsRequest:
       type: object
       properties:
         filters:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
+        sortBy:
+          $ref: '#/components/schemas/TimeCardSort'
         pagination:
           type: object
           properties:
@@ -4351,10 +4365,45 @@ components:
           format: double
         createdOn:
           type: string
+          deprecated: true
+          description: Deprecated alias for workDate — same value, kept until callers migrate.
+        workDate:
+          type: string
+          description: The date work was actually carried out (not the record's real creation timestamp).
         hasBillable:
           type: boolean
+        timeAnalyzing:
+          type: integer
+          description: Minutes spent analyzing.
+        timeSettingUp:
+          type: integer
+          description: Minutes spent setting up.
+        timeReproducingDebugging:
+          type: integer
+          description: Minutes spent reproducing/debugging.
+        timeProvidingSolution:
+          type: integer
+          description: Minutes spent providing a solution.
+        timePatching:
+          type: integer
+          description: Minutes spent patching.
+        issueComplexity:
+          type: string
+          nullable: true
+        workLogComment:
+          type: string
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+          description: The approver's comment when rejecting. Only who/when rejected is not currently tracked by the backing data source.
         state:
           type: string
+        approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeCardRef'
+          description: Users eligible to approve this time card.
         user:
           $ref: '#/components/schemas/TimeCardRef'
         approvedBy:
