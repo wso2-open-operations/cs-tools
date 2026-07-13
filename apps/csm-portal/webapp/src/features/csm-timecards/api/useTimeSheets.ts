@@ -15,16 +15,17 @@
 // under the License.
 
 //
-// React Query hooks for weekly time sheets and approvals, backed by the real
+// React Query hooks for time cards and approvals, backed by the real
 // csm-portal-backend endpoints:
 //
-//   POST  /time-cards/search   my sheets / approval queue (client-grouped into weeks)
+//   POST  /time-cards/search   my cards / all cards / approval queue
 //   PATCH /time-cards/{id}     approve / reject a card
 //
-// The backend has no "sheet" concept, no bulk (approve/reject/submit a whole
-// week) endpoint, no delegation, and no reports/aggregates endpoint — those
-// features from the earlier FE-first mock are not available here. Weekly
-// sheets are a pure client-side grouping of individual cards for display.
+// The backend has no bulk (approve/reject a whole batch) endpoint, no
+// delegation, and no reports/aggregates endpoint — those features from the
+// earlier FE-first mock are not available here. Cards come back flat; any
+// visual grouping (by case or by engineer) is done client-side in
+// `TimeCardsTable`, not here — see `timeCardGrouping.ts`.
 //
 
 import {
@@ -51,11 +52,9 @@ import type {
 } from "@api/backend/types";
 import type {
   CsmTimeCard,
-  CsmTimeSheet,
   TimeCardDecisionInput,
   TimeCardSearchFilters,
 } from "@features/csm-timecards/types/timeCards";
-import { groupIntoSheets } from "@features/csm-timecards/utils/timeSheetGrouping";
 
 /**
  * The signed-in engineer's stable identity, resolved from `GET /users/me`.
@@ -144,7 +143,7 @@ export interface TimeCardSearchResult {
  * `states`, and `from`/`to` are all real server-side filters — every one of
  * them is forwarded on the wire and the response is returned as-is, with no
  * client-side re-filtering. Callers should still scope as precisely as
- * possible at the source (see {@link useMyTimeSheets}, {@link useApprovalQueue}
+ * possible at the source (see {@link useMyTimeCards}, {@link useApprovalQueue}
  * below) so `total` and the page's contents reflect exactly what's shown.
  * `limit` is capped at `BE_MAX_PAGE_LIMIT` — the backend rejects anything
  * above that with a generic 400 despite the OpenAPI spec documenting up to
@@ -191,30 +190,10 @@ export async function searchTimeCards(
   return { cards: (res.timeCards ?? []).map(mapTimeCard), total: res.total };
 }
 
-/** Weekly sheets on the requested page, plus `total` — see {@link TimeCardSearchResult}. */
-export interface TimeSheetsResult {
-  sheets: CsmTimeSheet[];
-  total: number;
-}
-
-/** Groups cards by `userId` into per-user weekly sheets, newest first —
- * shared by {@link useApprovalQueue} and {@link useAllTimeCards}, which only
- * differ in which cards they pass in (others' submitted cards vs everyone's). */
-function groupCardsByUserIntoSheets(cards: CsmTimeCard[]): CsmTimeSheet[] {
-  const byUser = new Map<string, CsmTimeCard[]>();
-  for (const c of cards) {
-    const bucket = byUser.get(c.userId);
-    if (bucket) bucket.push(c);
-    else byUser.set(c.userId, [c]);
-  }
-  return [...byUser.entries()].flatMap(([userId, userCards]) =>
-    groupIntoSheets(userCards, userId, userCards[0]?.userName ?? "—"),
-  );
-}
-
 /**
- * The signed-in user's own cards on the requested page, grouped into weekly
- * sheets, newest first. Scoped server-side by `userId` (on top of the
+ * The signed-in user's own cards on the requested page, newest work date
+ * first — grouping (by case or by engineer) is a display concern now, done in
+ * `TimeCardsTable`, not here. Scoped server-side by `userId` (on top of the
  * existing `projectIds` default-scope) so `total` and the fetched page both
  * reflect just this user's cards — paginating over a project-wide page and
  * filtering to "mine" client-side would make `total` and the page size
@@ -230,23 +209,18 @@ function groupCardsByUserIntoSheets(cards: CsmTimeCard[]): CsmTimeSheet[] {
  * is shown was enough concurrent load to make some fail outright or never
  * settle.
  */
-export function useMyTimeSheets(
+export function useMyTimeCards(
   enabled: boolean,
   filters: TimeCardSearchFilters | undefined,
   pagination: TimeCardPagination,
-): UseQueryResult<TimeSheetsResult, Error> {
+): UseQueryResult<TimeCardSearchResult, Error> {
   const api = useBackendApi();
   const me = useCurrentEngineer();
-  return useQuery<TimeSheetsResult, Error>({
+  return useQuery<TimeCardSearchResult, Error>({
     queryKey: [ApiQueryKeys.TIME_SHEETS_SEARCH, "mine", me.id, filters, pagination],
-    queryFn: async (): Promise<TimeSheetsResult> => {
-      if (!me.id) return { sheets: [], total: 0 };
-      const { cards, total } = await searchTimeCards(
-        api,
-        { ...filters, userId: me.id },
-        pagination,
-      );
-      return { sheets: groupIntoSheets(cards, me.id, me.name), total };
+    queryFn: async (): Promise<TimeCardSearchResult> => {
+      if (!me.id) return { cards: [], total: 0 };
+      return searchTimeCards(api, { ...filters, userId: me.id }, pagination);
     },
     enabled: enabled && !!me.id,
     staleTime: 5_000,
@@ -254,37 +228,32 @@ export function useMyTimeSheets(
 }
 
 /**
- * Other engineers' sheets on the requested page containing a card awaiting
- * the signed-in approver's decision. Scoped server-side by `approverId` (on
- * top of the existing `projectIds` default-scope) so the queue only ever
- * contains cards the signed-in user is actually eligible to decide —
- * previously this fetched every submitted card in scope regardless of who
- * could approve it, so clicking Approve/Reject on a card the viewer wasn't
- * the assigned approver for 403'd. `approverId` alone is sufficient for
- * self-exclusion too: the backend excludes the caller's own cards from an
+ * Other engineers' cards on the requested page awaiting the signed-in
+ * approver's decision. Scoped server-side by `approverId` (on top of the
+ * existing `projectIds` default-scope) so the queue only ever contains cards
+ * the signed-in user is actually eligible to decide — previously this
+ * fetched every submitted card in scope regardless of who could approve it,
+ * so clicking Approve/Reject on a card the viewer wasn't the assigned
+ * approver for 403'd. `approverId` alone is sufficient for self-exclusion
+ * too: the backend excludes the caller's own cards from an
  * `approverId`-scoped search unconditionally, so no client-side "exclude
  * myself" filtering (or an `excludeUserId` wire field) is needed here. Like
- * {@link useMyTimeSheets}, no project scope is required (the search runs
+ * {@link useMyTimeCards}, no project scope is required (the search runs
  * unscoped when no project filter is picked), and `enabled` should be gated on
- * this tab actually being active (see the note on {@link useMyTimeSheets}).
+ * this tab actually being active (see the note on {@link useMyTimeCards}).
  */
 export function useApprovalQueue(
   enabled: boolean,
   filters: TimeCardSearchFilters | undefined,
   pagination: TimeCardPagination,
-): UseQueryResult<TimeSheetsResult, Error> {
+): UseQueryResult<TimeCardSearchResult, Error> {
   const api = useBackendApi();
   const me = useCurrentEngineer();
-  return useQuery<TimeSheetsResult, Error>({
+  return useQuery<TimeCardSearchResult, Error>({
     queryKey: [ApiQueryKeys.TIME_CARD_APPROVAL_QUEUE, me.id, filters, pagination],
-    queryFn: async (): Promise<TimeSheetsResult> => {
-      if (!me.id) return { sheets: [], total: 0 };
-      const { cards, total } = await searchTimeCards(
-        api,
-        { ...filters, approverId: me.id, states: ["submitted"] },
-        pagination,
-      );
-      return { sheets: groupCardsByUserIntoSheets(cards), total };
+    queryFn: async (): Promise<TimeCardSearchResult> => {
+      if (!me.id) return { cards: [], total: 0 };
+      return searchTimeCards(api, { ...filters, approverId: me.id, states: ["submitted"] }, pagination);
     },
     enabled: enabled && !!me.id,
     staleTime: 5_000,
@@ -292,27 +261,24 @@ export function useApprovalQueue(
 }
 
 /**
- * Every visible user's sheets on the requested page, own included — unlike
- * {@link useMyTimeSheets} (self only) and {@link useApprovalQueue} (others'
+ * Every visible user's cards on the requested page, own included — unlike
+ * {@link useMyTimeCards} (self only) and {@link useApprovalQueue} (others'
  * submitted cards only, for deciding), this is a read-only "see everything"
  * view: no state restriction, no ownership exclusion. Runs unscoped when no
  * project filter is picked (the backend returns the caller's full
  * entitlement), and `enabled` should be gated on this tab actually being
- * active (see the note on {@link useMyTimeSheets} for why).
+ * active (see the note on {@link useMyTimeCards} for why).
  */
 export function useAllTimeCards(
   enabled: boolean,
   filters: TimeCardSearchFilters | undefined,
   pagination: TimeCardPagination,
-): UseQueryResult<TimeSheetsResult, Error> {
+): UseQueryResult<TimeCardSearchResult, Error> {
   const api = useBackendApi();
   const me = useCurrentEngineer();
-  return useQuery<TimeSheetsResult, Error>({
+  return useQuery<TimeCardSearchResult, Error>({
     queryKey: [ApiQueryKeys.TIME_CARD_ALL, filters, pagination],
-    queryFn: async (): Promise<TimeSheetsResult> => {
-      const { cards, total } = await searchTimeCards(api, filters, pagination);
-      return { sheets: groupCardsByUserIntoSheets(cards), total };
-    },
+    queryFn: (): Promise<TimeCardSearchResult> => searchTimeCards(api, filters, pagination),
     enabled: enabled && !!me.id,
     staleTime: 5_000,
   });
