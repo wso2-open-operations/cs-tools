@@ -16,7 +16,15 @@
 
 import { Link } from "react-router-dom";
 import { List, ListItemButton, ListItemIcon, ListItemText, Stack, Typography } from "@wso2/oxygen-ui";
-import { Briefcase, ChevronRight, Clock, RefreshCw, Shield, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
+import {
+  Briefcase,
+  ChevronRight,
+  Clock,
+  RefreshCw,
+  Settings,
+  Shield,
+  type LucideIcon,
+} from "@wso2/oxygen-ui-icons-react";
 
 interface MoreItem {
   label: string;
@@ -25,13 +33,14 @@ interface MoreItem {
 }
 
 // Secondary sections that don't get their own tab, mirroring a subset of the webapp's
-// CSM_NAV_ITEMS (apps/csm-portal/webapp/src/config/csmNavItems.ts) — Customers and Settings are
-// deliberately left out here.
+// CSM_NAV_ITEMS (apps/csm-portal/webapp/src/config/csmNavItems.ts) — Customers is deliberately
+// left out here. Settings is last, same position it has in CSM_NAV_ITEMS.
 const MORE_ITEMS: MoreItem[] = [
   { label: "Time Cards", path: "/more/time-cards", icon: Clock },
   { label: "Security Center", path: "/more/security-center", icon: Shield },
   { label: "Updates", path: "/more/updates", icon: RefreshCw },
   { label: "Engagements", path: "/more/engagements", icon: Briefcase },
+  { label: "Settings", path: "/more/settings", icon: Settings },
 ];
 
 export default function MorePage() {

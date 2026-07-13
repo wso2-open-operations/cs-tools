@@ -14,16 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./case.dto";
-export * from "./case.model";
-export * from "./attachment.dto";
-export * from "./project.dto";
-export * from "./project.model";
-export * from "./deployment.dto";
-export * from "./deployment.model";
-export * from "./user.dto";
-export * from "./user.model";
-export * from "./adminUser.dto";
-export * from "./adminUser.model";
-export * from "./timecard.dto";
-export * from "./timecard.model";
+import Settings from "@components/settings/Settings";
+
+// Reached from More > Settings, mirroring the webapp's /admin route. Settings itself is
+// self-contained (components/settings/Settings.tsx) — this page is just its mount point, so it
+// stays trivial to move elsewhere again later.
+export default function SettingsPage() {
+  return <Settings />;
+}

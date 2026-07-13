@@ -21,6 +21,7 @@ if (!BACKEND_URL) {
 }
 
 export const USERS_ME_ENDPOINT = "/users/me";
+export const USERS_SEARCH_ENDPOINT = "/users/search";
 
 export const CASES_ENDPOINT = "/cases";
 export const CASES_SEARCH_ENDPOINT = "/cases/search";

@@ -19,20 +19,26 @@ import { Card, Chip, Stack, Typography } from "@wso2/oxygen-ui";
 interface ComingSoonPageProps {
   title: string;
   description: string;
+  blockedOn?: string;
 }
 
 // Placeholder for microapp sections not yet built, mirroring the webapp's CsmComingSoonPage
 // (apps/csm-portal/webapp/src/features/csm-coming-soon/pages/CsmComingSoonPage.tsx) — used
 // deliberately so a reserved tab/route feels real instead of dead or missing.
-export function ComingSoonPage({ title, description }: ComingSoonPageProps) {
+export function ComingSoonPage({ title, description, blockedOn }: ComingSoonPageProps) {
   return (
     <Stack gap={3}>
       <Stack direction="row" alignItems="center" gap={1.5}>
         <Typography variant="h5">{title}</Typography>
         <Chip size="small" label="Coming soon" color="warning" variant="outlined" />
       </Stack>
-      <Card sx={{ p: 3 }}>
+      <Card sx={{ p: 3, display: "flex", flexDirection: "column", gap: 1.5 }}>
         <Typography variant="body1">{description}</Typography>
+        {blockedOn && (
+          <Typography variant="body2" color="text.secondary">
+            Blocked on: {blockedOn}
+          </Typography>
+        )}
       </Card>
     </Stack>
   );

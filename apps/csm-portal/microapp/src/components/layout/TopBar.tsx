@@ -52,8 +52,6 @@ export function TopBar() {
             <ArrowLeft size={22} />
           </IconButton>
         ) : (
-          // Mirrors the webapp's Brand (apps/csm-portal/webapp/src/components/header/Brand.tsx):
-          // same logo asset + "CSM Portal" title, shown on root pages in place of the back button.
           <Stack direction="row" alignItems="center" gap={1}>
             <img src="/logo-dark.svg" alt="Company Logo" style={{ height: 20, width: "auto" }} />
             <Typography variant="subtitle1" fontWeight={600}>

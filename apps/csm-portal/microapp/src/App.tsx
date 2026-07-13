@@ -30,6 +30,7 @@ import TimeCardsPage from "@pages/TimeCardsPage";
 import SecurityCenterPage from "@pages/SecurityCenterPage";
 import UpdatesPage from "@pages/UpdatesPage";
 import EngagementsPage from "@pages/EngagementsPage";
+import SettingsPage from "@pages/SettingsPage";
 import ProfilePage from "@pages/ProfilePage";
 
 export default function App() {
@@ -68,6 +69,7 @@ export default function App() {
           <Route path="/more/security-center" element={<SecurityCenterPage />} />
           <Route path="/more/updates" element={<UpdatesPage />} />
           <Route path="/more/engagements" element={<EngagementsPage />} />
+          <Route path="/more/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>
