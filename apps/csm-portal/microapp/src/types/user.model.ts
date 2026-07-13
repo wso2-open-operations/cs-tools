@@ -22,6 +22,9 @@ export interface UserProfile {
   fullName: string;
   phoneNumber: string | null;
   timeZone: string | null;
+  /** Platform roles from `GET /users/me`, used to gate role-specific features
+   * (e.g. the time-card Approvals tab). Empty when the user has none. */
+  roles: string[];
 }
 
 export function toUserProfile(dto: UserMeDto): UserProfile {
@@ -31,5 +34,6 @@ export function toUserProfile(dto: UserMeDto): UserProfile {
     fullName: [dto.firstName, dto.lastName].filter(Boolean).join(" ").trim() || dto.email,
     phoneNumber: dto.phoneNumber ?? null,
     timeZone: dto.timeZone ?? null,
+    roles: dto.roles ?? [],
   };
 }

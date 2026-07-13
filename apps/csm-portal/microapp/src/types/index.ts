@@ -23,3 +23,5 @@ export * from "./deployment.dto";
 export * from "./deployment.model";
 export * from "./user.dto";
 export * from "./user.model";
+export * from "./timecard.dto";
+export * from "./timecard.model";

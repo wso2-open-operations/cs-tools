@@ -33,3 +33,7 @@ export const DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT = (deploymentId: string) =>
   `/deployments/${deploymentId}/products/search`;
 
 export const ATTACHMENTS_ENDPOINT = "/attachments";
+
+export const TIME_CARDS_ENDPOINT = "/time-cards";
+export const TIME_CARDS_SEARCH_ENDPOINT = "/time-cards/search";
+export const TIME_CARD_ENDPOINT = (id: string) => `/time-cards/${id}`;
