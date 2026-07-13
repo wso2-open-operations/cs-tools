@@ -69,6 +69,7 @@ type snTimeCardFilters struct {
 	UserID       string   `json:"userId,omitempty"`
 	ApproverID   string   `json:"approverId,omitempty"`
 	ApprovedByID string   `json:"approvedById,omitempty"`
+	UserIDs      []string `json:"userIds,omitempty"`
 	StartDate    string   `json:"startDate,omitempty"`
 	EndDate      string   `json:"endDate,omitempty"`
 	States       []string `json:"states,omitempty"`
@@ -197,6 +198,9 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 				return domain.SearchTimeCardsResponse{}, err
 			}
 		}
+		if err := validateUUIDs("userIds", req.Filters.UserIDs); err != nil {
+			return domain.SearchTimeCardsResponse{}, err
+		}
 
 		snStates := make([]string, 0, len(req.Filters.States))
 		for _, state := range req.Filters.States {
@@ -218,6 +222,9 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 		}
 		if req.Filters.ApprovedByID != nil {
 			filters.ApprovedByID = uuidToSysid(*req.Filters.ApprovedByID)
+		}
+		if len(req.Filters.UserIDs) > 0 {
+			filters.UserIDs = uuidsToSysids(req.Filters.UserIDs)
 		}
 		if req.Filters.StartDate != nil {
 			filters.StartDate = *req.Filters.StartDate

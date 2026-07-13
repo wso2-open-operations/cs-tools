@@ -1615,8 +1615,9 @@ type SearchTimeCardsFilters struct {
 	ProjectIDs   []string        `json:"projectIds,omitempty"`
 	CaseID       *string         `json:"caseId,omitempty"`
 	UserID       *string         `json:"userId,omitempty"`
-	ApproverID   *string         `json:"approverId,omitempty"`   // eligible approver (SN approver_list)
+	ApproverID   *string         `json:"approverId,omitempty"`   // eligible approver (SN approver_list); their own cards are always excluded server-side
 	ApprovedByID *string         `json:"approvedById,omitempty"` // who actually approved (SN approved_by)
+	UserIDs      []string        `json:"userIds,omitempty"`      // match cards submitted by any of these users (OR semantics)
 	StartDate    *string         `json:"startDate,omitempty"`
 	EndDate      *string         `json:"endDate,omitempty"`
 	States       []TimeCardState `json:"states,omitempty"`
