@@ -36,7 +36,10 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 
-const { DatePicker, LocalizationProvider } = DatePickers;
+// See CsmTimeCardsPage's identical comment: DesktopDatePicker avoids the
+// mobile dialog (title bar + Cancel/OK) the plain DatePicker falls back to
+// below the sm breakpoint, on this desktop-only portal page.
+const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 import { Clock, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
