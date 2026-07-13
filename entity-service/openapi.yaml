@@ -4302,11 +4302,25 @@ components:
           items:
             $ref: '#/components/schemas/TimeCardState'
 
+    TimeCardSortBy:
+      type: object
+      properties:
+        field:
+          type: string
+          enum: [updatedOn, workDate]
+          description: Column to sort by. Defaults to updatedOn when omitted.
+        order:
+          type: string
+          enum: [asc, desc]
+          description: Sort direction. Defaults to desc when omitted.
+
     SearchTimeCardsRequest:
       type: object
       properties:
         filters:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
+        sortBy:
+          $ref: '#/components/schemas/TimeCardSortBy'
         pagination:
           type: object
           properties:
@@ -4351,6 +4365,11 @@ components:
           format: double
         createdOn:
           type: string
+          deprecated: true
+          description: Deprecated alias for workDate — same value, kept until callers migrate.
+        workDate:
+          type: string
+          description: The date work was actually carried out (not the record's real creation timestamp).
         hasBillable:
           type: boolean
         timeAnalyzing:
@@ -4374,6 +4393,10 @@ components:
         workLogComment:
           type: string
           nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+          description: The approver's comment when rejecting. Only who/when rejected is not currently tracked by the backing data source.
         state:
           type: string
         approvers:

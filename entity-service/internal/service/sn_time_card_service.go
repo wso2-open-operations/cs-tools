@@ -60,7 +60,19 @@ var snTimeCardStateLabelToDomain = map[string]string{
 
 type snTimeCardSearchPayload struct {
 	Filters    *snTimeCardFilters  `json:"filters,omitempty"`
+	SortBy     *snTimeCardSort     `json:"sortBy,omitempty"`
 	Pagination snProjectPagination `json:"pagination"`
+}
+
+type snTimeCardSort struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}
+
+// snTimeCardSortFieldMap maps domain TimeCardSortField values to SN field names.
+var snTimeCardSortFieldMap = map[domain.TimeCardSortField]string{
+	domain.TimeCardSortFieldUpdatedOn: "updatedOn",
+	domain.TimeCardSortFieldWorkDate:  "workDate",
 }
 
 type snTimeCardFilters struct {
@@ -86,6 +98,7 @@ type snTimeCard struct {
 	ID                       string             `json:"id"`
 	TotalTime                float64            `json:"totalTime"`
 	CreatedOn                string             `json:"createdOn"`
+	WorkDate                 string             `json:"workDate"`
 	HasBillable              bool               `json:"hasBillable"`
 	TimeAnalyzing            int                `json:"timeAnalyzing"`
 	TimeSettingUp            int                `json:"timeSettingUp"`
@@ -94,6 +107,7 @@ type snTimeCard struct {
 	TimePatching             int                `json:"timePatching"`
 	IssueComplexity          *string            `json:"issueComplexity"`
 	WorkLogComment           *string            `json:"workLogComment"`
+	RejectionReason          *string            `json:"rejectionReason"`
 	State                    *snTimeCardLabel   `json:"state"`
 	Approvers                []snTimeCardRef    `json:"approvers"`
 	User                     *snTimeCardRef     `json:"user"`
@@ -122,6 +136,7 @@ func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 		ID:                       sysidToUUID(tc.ID),
 		TotalTime:                tc.TotalTime,
 		CreatedOn:                tc.CreatedOn,
+		WorkDate:                 tc.WorkDate,
 		HasBillable:              tc.HasBillable,
 		TimeAnalyzing:            tc.TimeAnalyzing,
 		TimeSettingUp:            tc.TimeSettingUp,
@@ -130,6 +145,7 @@ func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 		TimePatching:             tc.TimePatching,
 		IssueComplexity:          tc.IssueComplexity,
 		WorkLogComment:           tc.WorkLogComment,
+		RejectionReason:          tc.RejectionReason,
 	}
 
 	if tc.State != nil {
@@ -187,7 +203,21 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 		return domain.SearchTimeCardsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
+	var snSortBy *snTimeCardSort
+	if req.SortBy.Field != "" {
+		snField, ok := snTimeCardSortFieldMap[req.SortBy.Field]
+		if !ok {
+			return domain.SearchTimeCardsResponse{}, &apierror.ValidationError{Msg: "sortBy.field " + string(req.SortBy.Field) + " is not supported by ServiceNow"}
+		}
+		order := string(req.SortBy.Order)
+		if order == "" {
+			order = "desc"
+		}
+		snSortBy = &snTimeCardSort{Field: snField, Order: order}
+	}
+
 	payload := snTimeCardSearchPayload{
+		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 

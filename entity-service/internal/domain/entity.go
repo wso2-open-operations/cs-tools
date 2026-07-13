@@ -1623,9 +1623,33 @@ type SearchTimeCardsFilters struct {
 	States       []TimeCardState `json:"states,omitempty"`
 }
 
+// TimeCardSortField enumerates the columns available for sorting time-card search results.
+type TimeCardSortField string
+
+const (
+	TimeCardSortFieldUpdatedOn TimeCardSortField = "updatedOn"
+	TimeCardSortFieldWorkDate  TimeCardSortField = "workDate"
+)
+
+// TimeCardSortOrder controls the sort direction.
+type TimeCardSortOrder string
+
+const (
+	TimeCardSortOrderAsc  TimeCardSortOrder = "asc"
+	TimeCardSortOrderDesc TimeCardSortOrder = "desc"
+)
+
+// TimeCardSort specifies the sort field and direction for time-card search results.
+type TimeCardSort struct {
+	Field TimeCardSortField `json:"field"`
+	Order TimeCardSortOrder `json:"order"`
+}
+
 // SearchTimeCardsRequest is the request body for POST /time-cards/search.
+// SortBy defaults to updatedOn desc when its Field is left empty.
 type SearchTimeCardsRequest struct {
 	Filters    *SearchTimeCardsFilters `json:"filters,omitempty"`
+	SortBy     TimeCardSort            `json:"sortBy"`
 	Pagination Pagination              `json:"pagination"`
 }
 
@@ -1646,7 +1670,8 @@ type TimeCardCaseRef struct {
 type TimeCardView struct {
 	ID                       string           `json:"id"`
 	TotalTime                float64          `json:"totalTime"`
-	CreatedOn                string           `json:"createdOn"`
+	CreatedOn                string           `json:"createdOn"` // deprecated: same value as WorkDate; kept until callers migrate
+	WorkDate                 string           `json:"workDate"`  // the date work was actually carried out (not the record's real creation timestamp)
 	HasBillable              bool             `json:"hasBillable"`
 	TimeAnalyzing            int              `json:"timeAnalyzing"`
 	TimeSettingUp            int              `json:"timeSettingUp"`
@@ -1655,6 +1680,7 @@ type TimeCardView struct {
 	TimePatching             int              `json:"timePatching"`
 	IssueComplexity          *string          `json:"issueComplexity"`
 	WorkLogComment           *string          `json:"workLogComment"`
+	RejectionReason          *string          `json:"rejectionReason"`
 	State                    *string          `json:"state"`
 	Approvers                []TimeCardRef    `json:"approvers,omitempty"`
 	User                     *TimeCardRef     `json:"user"`
