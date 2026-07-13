@@ -15,8 +15,8 @@
 // under the License.
 
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
-import { Badge, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Badge, Chip, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { Plus, SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
 import { useQuery, useQueryErrorResetBoundary, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
@@ -28,8 +28,19 @@ import { EmptyState } from "@components/support/EmptyState";
 import { ErrorState } from "@components/support/ErrorState";
 import { SearchBar } from "@components/support/SearchBar";
 import { FiltersSheet } from "@components/support/FiltersSheet";
-import { countActiveFilters, EMPTY_FILTERS, toCaseSearchFilters, type CaseFilters } from "@components/support/filters";
-import { FILTERABLE_STATES, STATE_LABELS, TAB_CONFIG } from "@components/support/config";
+import {
+  countActiveFilters,
+  filtersFromSearchParams,
+  toCaseSearchFilters,
+  type CaseFilters,
+} from "@components/support/filters";
+import {
+  FILTERABLE_STATES,
+  SEVERITY_LABELS,
+  STATE_LABELS,
+  TAB_CONFIG,
+  WORK_STATE_LABEL,
+} from "@components/support/config";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
 
 const ALL_STATES_TAB = "all" as const;
@@ -37,12 +48,15 @@ type StateTabValue = CaseState | typeof ALL_STATES_TAB;
 
 // Cases only (mirrors AllCasesPage's former "View All" list, now the Support page itself): a
 // single infinite-scrolled, most-recently-updated-first list with search/filters/create inline,
-// no separate recent-preview + "View All" hop.
+// no separate recent-preview + "View All" hop. search/filters are seeded once from the URL on
+// mount — lets Home's composition donuts deep-link here with a filter pre-applied — then managed
+// as plain local state from there (not kept in sync back to the URL).
 export default function SupportPage() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => filtersFromSearchParams(searchParams).search);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [filters, setFilters] = useState<CaseFilters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<CaseFilters>(() => filtersFromSearchParams(searchParams).filters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterCount = countActiveFilters(filters);
 
@@ -84,6 +98,8 @@ export default function SupportPage() {
         </Badge>
       </Stack>
 
+      {activeFilterCount > 0 && <ActiveFiltersRow filters={filters} onChange={setFilters} />}
+
       <Tabs variant="scrollable" value={stateTab} onChange={(_, value: StateTabValue) => handleStateTabChange(value)}>
         <Tab label="All" value={ALL_STATES_TAB} disableRipple />
         {FILTERABLE_STATES.map((state) => (
@@ -98,6 +114,40 @@ export default function SupportPage() {
       </CaseListErrorBoundary>
 
       <FiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} filters={filters} onApply={setFilters} />
+    </Stack>
+  );
+}
+
+// One removable chip per active filter (severities, work states, assigned/created-by-me) — lets
+// a filter picked up via the FiltersSheet, or deep-linked in from Home's composition donuts, be
+// removed individually instead of only via the sheet's "Clear all". Deliberately excludes state
+// (it has its own dedicated Tab row above, so a chip here would just duplicate that) — same
+// exclusion countActiveFilters already makes for its badge count.
+function ActiveFiltersRow({ filters, onChange }: { filters: CaseFilters; onChange: (filters: CaseFilters) => void }) {
+  return (
+    <Stack direction="row" gap={1} flexWrap="wrap">
+      {filters.severities.map((severity) => (
+        <Chip
+          key={`severity-${severity}`}
+          label={SEVERITY_LABELS[severity]}
+          size="small"
+          onDelete={() => onChange({ ...filters, severities: filters.severities.filter((s) => s !== severity) })}
+        />
+      ))}
+      {filters.workStates.map((workState) => (
+        <Chip
+          key={`work-state-${workState}`}
+          label={WORK_STATE_LABEL[workState]}
+          size="small"
+          onDelete={() => onChange({ ...filters, workStates: filters.workStates.filter((w) => w !== workState) })}
+        />
+      ))}
+      {filters.assignedToMe && (
+        <Chip label="Assigned to me" size="small" onDelete={() => onChange({ ...filters, assignedToMe: false })} />
+      )}
+      {filters.createdByMe && (
+        <Chip label="Created by me" size="small" onDelete={() => onChange({ ...filters, createdByMe: false })} />
+      )}
     </Stack>
   );
 }
