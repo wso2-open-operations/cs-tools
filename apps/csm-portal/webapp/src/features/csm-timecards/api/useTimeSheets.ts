@@ -41,6 +41,7 @@ import { resolveUserInfo } from "@utils/userClaims";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useBackendApi, type BackendApi } from "@api/backend/client";
 import type {
+  BeSearchTimeCardsFilters,
   BeSearchTimeCardsPayload,
   BeSearchTimeCardsResponse,
   BeTimeCardState,
@@ -95,6 +96,12 @@ export function invalidateTimecards(queryClient: QueryClient): void {
  * is already whole minutes on the wire (see `usePostTimeCard`'s note on why),
  * which is also the unit the portal displays throughout — a direct
  * passthrough, no conversion needed.
+ *
+ * `workDate` falls back to the deprecated `createdOn` so a backend that hasn't
+ * rolled out the new field yet still yields a usable date — the two currently
+ * read the same underlying value, so the fallback is a no-op in practice.
+ * `approvedBy` / `rejectionReason` are mutually exclusive: only one of them is
+ * ever populated (see {@link CsmTimeCard}).
  */
 export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
   return {
@@ -103,7 +110,7 @@ export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
     caseNumber: v.case?.number || v.case?.name || "—",
     projectId: v.project?.id ?? "",
     projectName: v.project?.name ?? "—",
-    createdOn: v.createdOn,
+    workDate: v.workDate || v.createdOn,
     userId: v.user?.id ?? "",
     userName: v.user?.name ?? "—",
     state: v.state,
@@ -111,6 +118,7 @@ export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
     totalMinutes: v.totalTime,
     approvedById: v.approvedBy?.id,
     approvedByName: v.approvedBy?.name,
+    rejectionReason: v.rejectionReason ?? undefined,
   };
 }
 
@@ -174,39 +182,79 @@ export interface TimeCardSearchResult {
  * "submitted" filter and still defaults `projectIds` to every visible
  * project (alongside its more precise `approverId` scope), sending `states`
  * server-side would risk the same 500 for any user with enough visible
- * projects — worse than not filtering at all. One consequence of filtering
- * client-side over a single server page: a page can legitimately come back
- * with fewer matching cards than `rowsPerPage` (or none at all) even though
- * `total` says there's more data — the states filter just happened to
- * exclude most/all of that particular page.
+ * projects — worse than not filtering at all.
+ *
+ * One consequence of filtering client-side over a single raw server page: that
+ * page can legitimately contain zero matches even though matching cards exist
+ * elsewhere in the scope — confirmed live, a real `approved` card was
+ * invisible in the "Approved" filter simply because it fell outside the first
+ * raw page fetched, even though `total` reported plenty more data. To fix
+ * that common case without the removed "walk the entire scope" — see
+ * {@link MAX_STATE_FILTER_WALK_PAGES}.
  */
+
+/**
+ * How many additional raw server pages {@link searchTimeCards} will walk
+ * through, beyond the one `pagination` asks for, to backfill enough
+ * `states`-matching cards to fill the requested page. Bounds the extra fetch
+ * cost instead of walking the entire remaining scope (the slow behaviour real
+ * pagination replaced — see the note above): at most this many extra
+ * requests, not one per remaining record.
+ *
+ * This does not make paging exact under an active state filter — advancing to
+ * the next `TablePagination` page still starts from `(page+1) * limit` in raw
+ * (unfiltered) offset terms, not from wherever this walk left off, so a match
+ * found only via the walk on one page isn't "carried over" to the next; true
+ * correctness would need cursor-based pagination this UI doesn't have. What
+ * this fixes is the reported bug: a page reading as empty purely because the
+ * filter excluded everything on that one raw page, even though matches exist
+ * close by.
+ */
+const MAX_STATE_FILTER_WALK_PAGES = 5;
+
 export async function searchTimeCards(
   api: BackendApi,
   filters?: TimeCardSearchFilters,
   pagination?: TimeCardPagination,
 ): Promise<TimeCardSearchResult> {
   const limit = Math.min(pagination?.rowsPerPage ?? BE_MAX_PAGE_LIMIT, BE_MAX_PAGE_LIMIT);
-  const payload: BeSearchTimeCardsPayload = {
-    filters: {
-      ...(filters?.projectIds?.length ? { projectIds: filters.projectIds } : {}),
-      ...(filters?.userId ? { userId: filters.userId } : {}),
-      ...(filters?.approverId ? { approverId: filters.approverId } : {}),
-      ...(filters?.from ? { startDate: filters.from } : {}),
-      ...(filters?.to ? { endDate: filters.to } : {}),
-    },
-    pagination: { limit, offset: (pagination?.page ?? 0) * limit },
+  const wireFilters: BeSearchTimeCardsFilters = {
+    ...(filters?.projectIds?.length ? { projectIds: filters.projectIds } : {}),
+    ...(filters?.userId ? { userId: filters.userId } : {}),
+    ...(filters?.approverId ? { approverId: filters.approverId } : {}),
+    ...(filters?.from ? { startDate: filters.from } : {}),
+    ...(filters?.to ? { endDate: filters.to } : {}),
   };
-  const res = await api.post<BeSearchTimeCardsPayload, BeSearchTimeCardsResponse>(
-    "/time-cards/search",
-    payload,
-  );
-  const cards = (res.timeCards ?? []).map(mapTimeCard);
-  return {
-    cards: filters?.states?.length
-      ? cards.filter((c) => (filters.states as BeTimeCardState[]).includes(c.state))
-      : cards,
-    total: res.total,
+
+  const fetchRawPage = async (offset: number): Promise<{ cards: CsmTimeCard[]; total: number }> => {
+    const payload: BeSearchTimeCardsPayload = { filters: wireFilters, pagination: { limit, offset } };
+    const res = await api.post<BeSearchTimeCardsPayload, BeSearchTimeCardsResponse>(
+      "/time-cards/search",
+      payload,
+    );
+    return { cards: (res.timeCards ?? []).map(mapTimeCard), total: res.total };
   };
+
+  const startOffset = (pagination?.page ?? 0) * limit;
+  const first = await fetchRawPage(startOffset);
+
+  if (!filters?.states?.length) {
+    return { cards: first.cards, total: first.total };
+  }
+
+  const states = filters.states as BeTimeCardState[];
+  let matched = first.cards.filter((c) => states.includes(c.state));
+  let total = first.total;
+  let nextOffset = startOffset + limit;
+
+  for (let walked = 0; matched.length < limit && nextOffset < total && walked < MAX_STATE_FILTER_WALK_PAGES; walked++) {
+    const page = await fetchRawPage(nextOffset);
+    matched = matched.concat(page.cards.filter((c) => states.includes(c.state)));
+    total = page.total;
+    nextOffset += limit;
+  }
+
+  return { cards: matched.slice(0, limit), total };
 }
 
 /** Weekly sheets on the requested page, plus `total` — see the note on
