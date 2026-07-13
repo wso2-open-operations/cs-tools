@@ -18,15 +18,20 @@ import { saveBlob } from "@utils/saveBlob";
 import { TIME_CARD_STATE_META } from "@features/csm-timecards/constants/timeCardConstants";
 import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
+// "Approved by" and "Rejection reason" are separate columns because the upstream
+// data is asymmetric: ServiceNow records who approved a card but nothing about who
+// rejected one — a rejection leaves only the approver's comment. The old single
+// "Decided by" column was therefore always blank for rejected cards.
 const CSV_HEADER = [
-  "Date",
+  "Work date",
   "Case",
   "Project",
   "Engineer",
   "State",
   "Billable",
   "Minutes",
-  "Decided by",
+  "Approved by",
+  "Rejection reason",
 ];
 
 /** Quotes a CSV field only when it needs it (contains a comma, quote, or
@@ -43,7 +48,7 @@ function csvField(value: string): string {
 export function timeCardsToCsv(cards: CsmTimeCard[]): string {
   const rows = cards.map((c) =>
     [
-      c.createdOn,
+      c.workDate,
       c.caseNumber,
       c.projectName,
       c.userName,
@@ -51,6 +56,7 @@ export function timeCardsToCsv(cards: CsmTimeCard[]): string {
       c.billable ? "Yes" : "No",
       String(c.totalMinutes),
       c.approvedByName ?? "",
+      c.rejectionReason ?? "",
     ]
       .map(csvField)
       .join(","),
