@@ -1677,9 +1677,14 @@ export interface BeTimeCardView {
  */
 export interface BeSearchTimeCardsFilters {
   projectIds?: string[];
+  /** Only time cards logged against this case. */
+  caseId?: string;
   /** Only time cards submitted by this user. */
   userId?: string;
-  /** Only time cards this user is eligible to approve (SN `approver_list`). */
+  /** Only time cards submitted by any of these users (multi-engineer filter). */
+  userIds?: string[];
+  /** Only time cards this user is eligible to approve (SN `approver_list`);
+   * the caller's own cards are excluded unconditionally when this is set. */
   approverId?: string;
   /** Only time cards actually approved by this user (SN `approved_by`). */
   approvedById?: string;
