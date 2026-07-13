@@ -35,6 +35,8 @@ interface CompositionDonutProps {
   isError: boolean;
   /** Noun for the empty state, e.g. "cases". */
   emptyNoun?: string;
+
+  onSliceClick?: (id: string) => void;
 }
 
 // A donut chart with a value/percentage legend and a centred total — mirrors the webapp's
@@ -48,6 +50,7 @@ export function CompositionDonut({
   isLoading,
   isError,
   emptyNoun = "cases",
+  onSliceClick,
 }: CompositionDonutProps) {
   const pieData = slices.filter((s) => s.value > 0);
   const isEmpty = !isLoading && !isError && total === 0;
@@ -84,7 +87,15 @@ export function CompositionDonut({
         </Box>
       ) : (
         <Box sx={{ mt: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-          <Box sx={{ position: "relative", width: DONUT_SIZE, height: DONUT_SIZE, flexShrink: 0 }}>
+          <Box
+            sx={{
+              position: "relative",
+              width: DONUT_SIZE,
+              height: DONUT_SIZE,
+              flexShrink: 0,
+              ...(onSliceClick && { "& .recharts-pie-sector": { cursor: "pointer" } }),
+            }}
+          >
             <PieChart
               data={pieData}
               colors={pieData.map((s) => s.color)}
@@ -104,6 +115,12 @@ export function CompositionDonut({
                   endAngle: -270,
                   label: false,
                   labelLine: false,
+                  ...(onSliceClick && {
+                    onClick: (_data: unknown, index: number) => {
+                      const slice = pieData[index];
+                      if (slice) onSliceClick(slice.id);
+                    },
+                  }),
                 },
               ]}
             />
@@ -144,7 +161,17 @@ export function CompositionDonut({
             {slices.map((s) => {
               const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
               return (
-                <Box key={s.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                <Box
+                  key={s.id}
+                  onClick={onSliceClick ? () => onSliceClick(s.id) : undefined}
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 1,
+                    cursor: onSliceClick ? "pointer" : "default",
+                  }}
+                >
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
                     <Box sx={{ width: 12, height: 12, borderRadius: "50%", bgcolor: s.color, flexShrink: 0 }} />
                     <Typography variant="body2" color="text.secondary" noWrap>

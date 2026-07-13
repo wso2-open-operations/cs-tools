@@ -16,11 +16,23 @@
 
 import { useMemo } from "react";
 import { Grid, Stack, Typography } from "@wso2/oxygen-ui";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { dashboard } from "@src/services/dashboard";
+import type { CaseSeverity, CaseState } from "@src/types";
 import { ALL_SEVERITIES, STATE_LABELS } from "@components/support/config";
+import { EMPTY_FILTERS, filtersToSearchParams } from "@components/support/filters";
 import { COMPOSITION_STATES, SEVERITY_SHORT_LABELS, SEVERITY_SLICE_COLOR, STATE_SLICE_COLOR } from "./config";
 import { CompositionDonut, type CompositionSlice } from "./CompositionDonut";
+
+// Mirrors the webapp's CaseCompositionCharts onSliceClick (navigate(casesHref({...}))): clicking
+// a slice replaces whatever's currently on Support with just that one filter, rather than merging
+// with it — same behavior as the webapp, since a dashboard drill-down is meant to start fresh.
+function supportHref(overrides: Partial<{ severities: CaseSeverity[]; states: CaseState[] }>): string {
+  const params = filtersToSearchParams("", { ...EMPTY_FILTERS, ...overrides });
+  const qs = params.toString();
+  return qs ? `/support?${qs}` : "/support";
+}
 
 // Two donuts — severity composition and state composition of active cases — mirrors the webapp's
 // CaseCompositionCharts (apps/csm-portal/webapp/src/features/csm-dashboard/components/CaseCompositionCharts.tsx),
@@ -29,6 +41,7 @@ import { CompositionDonut, type CompositionSlice } from "./CompositionDonut";
 // TimeCardsPage.tsx already handles independent, non-blocking widgets in this app — one
 // failed/slow widget shouldn't hold up the rest of the Home page.
 export function CaseCompositionSection() {
+  const navigate = useNavigate();
   const { data, isLoading, isError } = useQuery(dashboard.composition());
 
   const severitySlices = useMemo<CompositionSlice[]>(
@@ -68,6 +81,7 @@ export function CaseCompositionSection() {
             total={data?.severityTotal ?? 0}
             isLoading={isLoading}
             isError={isError}
+            onSliceClick={(id) => navigate(supportHref({ severities: [id as CaseSeverity] }))}
           />
         </Grid>
         <Grid size={6}>
@@ -76,6 +90,7 @@ export function CaseCompositionSection() {
             description="Share of active cases in each lifecycle state, excluding closed."
             slices={stateSlices}
             total={data?.stateTotal ?? 0}
+            onSliceClick={(id) => navigate(supportHref({ states: [id as CaseState] }))}
             isLoading={isLoading}
             isError={isError}
           />
