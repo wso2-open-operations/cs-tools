@@ -128,6 +128,7 @@ export default function TimeCardsPage() {
         showEngineer={activeTab !== "mine"}
         onDecide={activeTab === "approvals" ? handleDecide : undefined}
         decidingCardId={decide.isPending ? review?.card.id : null}
+        clientFiltered={filters.states.length > 0 || filters.workItems.length > 0 || filters.engineers.length > 0}
       />
 
       <TimeCardFiltersSheet
@@ -166,12 +167,17 @@ function SheetListView({
   showEngineer = false,
   onDecide,
   decidingCardId,
+  clientFiltered = false,
 }: {
   query: UseInfiniteQueryResult<TimeSheetsView, Error>;
   emptyMessage: string;
   showEngineer?: boolean;
   onDecide?: (card: CsmTimeCard, decision: "approved" | "rejected") => void;
   decidingCardId?: string | null;
+  /** True when a client-side filter (state / work item / engineer) is applied.
+   * The backend `total` is pre-client-filter, so "N of total" would misdescribe
+   * what's on screen — show just the shown count instead. */
+  clientFiltered?: boolean;
 }) {
   const { data, isLoading, isError, refetch, hasNextPage, isFetchingNextPage, fetchNextPage } = query;
 
@@ -202,11 +208,15 @@ function SheetListView({
   // page through them instead of short-circuiting to EmptyState.
   if (sheets.length === 0 && !hasNextPage) return <EmptyState message={emptyMessage} />;
 
+  const shownCards = sheets.reduce((n, s) => n + s.cards.length, 0);
+
   return (
     <Stack gap={1.5}>
       {sheets.length > 0 && (
         <Typography variant="caption" color="text.secondary">
-          {data?.loaded ?? sheets.length} of {data?.total ?? sheets.length}
+          {clientFiltered
+            ? `${shownCards} ${shownCards === 1 ? "card" : "cards"}`
+            : `${data?.loaded ?? shownCards} of ${data?.total ?? shownCards}`}
         </Typography>
       )}
 
