@@ -140,3 +140,162 @@ func TestSearchIncidents(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateIncident(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 201 with response", func(t *testing.T) {
+		const reqPayload = `{"callerId":"11111111-1111-1111-1111-111111111111","category":"SECURITY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			createIncidentFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"message":"incident created","incident":{"id":"33333333-3333-3333-3333-333333333333","number":"INC0002"}}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "incident created" {
+			t.Errorf("message = %v, want %q", resp["message"], "incident created")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create incident.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					createIncidentFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.CreateIncident(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestGetIncident(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodGet, "/incidents/inc-1", nil)
+		r.SetPathValue("id", "inc-1")
+		w := httptest.NewRecorder()
+		h.GetIncident(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/incidents/", nil))
+		w := httptest.NewRecorder()
+		h.GetIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/incidents/inc-42", nil))
+		r.SetPathValue("id", "inc-42")
+		w := httptest.NewRecorder()
+		h.GetIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("passes ID to upstream and returns 200 with response", func(t *testing.T) {
+		const incidentID = "11111111-1111-1111-1111-111111111111"
+		var capturedID string
+		client := &mockEntityIncidentClient{
+			getIncidentFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"id":"` + incidentID + `","number":"INC0001"}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/incidents/"+incidentID, nil))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.GetIncident(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != incidentID {
+			t.Errorf("upstream received id %q, want %q", capturedID, incidentID)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["number"] != "INC0001" {
+			t.Errorf("number = %v, want %q", resp["number"], "INC0001")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		const incidentID = "11111111-1111-1111-1111-111111111111"
+		for _, tc := range upstreamErrors("Failed to retrieve incident.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					getIncidentFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/incidents/"+incidentID, nil))
+				r.SetPathValue("id", incidentID)
+				w := httptest.NewRecorder()
+				h.GetIncident(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

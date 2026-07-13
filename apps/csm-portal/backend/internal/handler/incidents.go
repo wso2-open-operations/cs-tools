@@ -30,6 +30,8 @@ import (
 // entityIncidentClient abstracts the entity service incident operations used by IncidentHandler.
 type entityIncidentClient interface {
 	SearchIncidents(ctx context.Context, body []byte) ([]byte, error)
+	CreateIncident(ctx context.Context, body []byte) ([]byte, error)
+	GetIncident(ctx context.Context, id string) ([]byte, error)
 }
 
 // searchIncidentsRequest mirrors the enum/format-constrained fields of the documented
@@ -134,5 +136,66 @@ func (h *IncidentHandler) SearchIncidents(w http.ResponseWriter, r *http.Request
 	}
 
 	// TODO: Unmarshal result and filter to only the fields required by the frontend.
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateIncident handles POST /incidents.
+func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	// TODO: Decode into a typed CreateIncidentRequest and validate fields before forwarding.
+
+	result, err := h.entity.CreateIncident(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateIncident failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to create incident.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// GetIncident handles GET /incidents/{id}.
+func (h *IncidentHandler) GetIncident(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetIncident(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetIncident failed", "userID", user.UserID, "incidentID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve incident.")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
