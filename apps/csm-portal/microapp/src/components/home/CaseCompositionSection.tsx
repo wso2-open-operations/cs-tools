@@ -18,8 +18,8 @@ import { useMemo } from "react";
 import { Grid, Stack, Typography } from "@wso2/oxygen-ui";
 import { useQuery } from "@tanstack/react-query";
 import { dashboard } from "@src/services/dashboard";
-import { ALL_SEVERITIES, SEVERITY_LABELS, STATE_LABELS } from "@components/support/config";
-import { COMPOSITION_STATES, SEVERITY_SLICE_COLOR, STATE_SLICE_COLOR } from "./config";
+import { ALL_SEVERITIES, STATE_LABELS } from "@components/support/config";
+import { COMPOSITION_STATES, SEVERITY_SHORT_LABELS, SEVERITY_SLICE_COLOR, STATE_SLICE_COLOR } from "./config";
 import { CompositionDonut, type CompositionSlice } from "./CompositionDonut";
 
 // Two donuts — severity composition and state composition of active cases — mirrors the webapp's
@@ -35,7 +35,7 @@ export function CaseCompositionSection() {
     () =>
       ALL_SEVERITIES.map((severity) => ({
         id: severity,
-        name: SEVERITY_LABELS[severity],
+        name: SEVERITY_SHORT_LABELS[severity],
         value: data?.bySeverity[severity] ?? 0,
         color: SEVERITY_SLICE_COLOR[severity],
       })),

@@ -33,6 +33,16 @@ export const COMPOSITION_STATES: CaseState[] = [
 // includes reopened unlike the composition set above.
 export const ASSIGNED_TO_ME_STATES: CaseState[] = [...COMPOSITION_STATES, "reopened"];
 
+// Short severity code only (no "(Catastrophic)" etc.) — the composition donut's legend is too
+// narrow, sitting in a half-width card, for support/config.tsx's full SEVERITY_LABELS.
+export const SEVERITY_SHORT_LABELS: Record<CaseSeverity, string> = {
+  catastrophic: "S0",
+  critical: "S1",
+  high: "S2",
+  medium: "S3",
+  low: "S4",
+};
+
 // Distinct hue per slice — mirrors the webapp's SEVERITY_SLICE_COLOR/STATE_SLICE_COLOR
 // (CaseCompositionCharts.tsx). The support/config.tsx chip color configs reuse the same role
 // color for several keys (e.g. every "info" state), which would merge pie slices together.
