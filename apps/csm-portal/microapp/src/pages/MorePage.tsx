@@ -15,7 +15,7 @@
 // under the License.
 
 import { Link } from "react-router-dom";
-import { List, ListItemButton, ListItemIcon, ListItemText, Stack, Typography } from "@wso2/oxygen-ui";
+import { List, ListItemButton, ListItemIcon, ListItemText, Stack } from "@wso2/oxygen-ui";
 import {
   Briefcase,
   ChevronRight,
@@ -51,8 +51,6 @@ const MORE_ITEMS: MoreItem[] = [
 export default function MorePage() {
   return (
     <Stack gap={2}>
-      <Typography variant="h5">More</Typography>
-
       <List disablePadding>
         {MORE_ITEMS.map((item) => (
           <ListItemButton key={item.path} component={Link} to={item.path} sx={{ borderRadius: 1 }}>
