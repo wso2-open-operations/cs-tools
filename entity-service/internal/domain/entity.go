@@ -227,7 +227,6 @@ type SearchAccountsResponse struct {
 // SupportTier is returned as a plain label string (no ID).
 type SNAccountView struct {
 	ID               string     `json:"id"`
-	SysID            string     `json:"sysId"`
 	Name             string     `json:"name"`
 	Classification   string     `json:"classification"`
 	Pod              *string    `json:"pod"`
@@ -252,6 +251,33 @@ type SearchSNAccountsResponse struct {
 	Limit    int             `json:"limit"`
 	Offset   int             `json:"offset"`
 	HasMore  bool            `json:"hasMore"`
+}
+
+// SNSupportTierRef is a compact reference to a support tier carrying its label.
+type SNSupportTierRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// SNAccountDetail is the full account detail returned by the ServiceNow data source
+// for GET /accounts/{id}. SupportTier is returned as an {id, label} object.
+type SNAccountDetail struct {
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Classification   string            `json:"classification"`
+	Pod              *string           `json:"pod"`
+	Region           *string           `json:"region"`
+	SupportTier      *SNSupportTierRef `json:"supportTier"`
+	ArrToday         *string           `json:"arrToday"`
+	TechnicalOwner   *EntityRef        `json:"technicalOwner"`
+	Owner            *EntityRef        `json:"owner"`
+	ActivationDate   string            `json:"activationDate"`
+	DeactivationDate *string           `json:"deactivationDate"`
+	HasAgent         bool              `json:"hasAgent"`
+	HasKbReferences  bool              `json:"hasKbReferences"`
+	CreatedOn        string            `json:"createdOn"`
+	CreatedBy        *string           `json:"createdBy"`
+	UpdatedOn        string            `json:"updatedOn"`
 }
 
 // SubscriptionType classifies the subscription type of a project.

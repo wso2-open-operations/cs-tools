@@ -133,65 +133,63 @@ func (s *snAccountService) SearchAccounts(ctx context.Context, req domain.Search
 	}, nil
 }
 
-func (s *snAccountService) GetAccountByID(ctx context.Context, id string) (domain.SNAccountView, error) {
+func (s *snAccountService) GetAccountByID(ctx context.Context, id string) (domain.SNAccountDetail, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.SNAccountView{}, err
+		return domain.SNAccountDetail{}, err
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
-		return domain.SNAccountView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+		return domain.SNAccountDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
 	raw, err := s.client.Get(ctx, "/accounts/"+uuidToSysid(id), token)
 	if err != nil {
-		return domain.SNAccountView{}, err
+		return domain.SNAccountDetail{}, err
 	}
 
 	var a snAccount
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return domain.SNAccountView{}, fmt.Errorf("sn accounts: parse account response: %w", err)
+		return domain.SNAccountDetail{}, fmt.Errorf("sn accounts: parse account response: %w", err)
 	}
 
-	return snAccountToDomain(a), nil
+	return snAccountToDetail(a), nil
+}
+
+func nilIfEmpty(s *string) *string {
+	if s != nil && *s == "" {
+		return nil
+	}
+	return s
+}
+
+func snAccountCommonFields(a snAccount) (deactivationDate *string, technicalOwner, owner *domain.EntityRef) {
+	deactivationDate = nilIfEmpty(a.DeactivationDate)
+	if a.TechnicalOwner != nil && a.TechnicalOwner.ID != "" {
+		technicalOwner = &domain.EntityRef{ID: sysidToUUID(a.TechnicalOwner.ID), Name: a.TechnicalOwner.Name}
+	}
+	if a.Owner != nil && a.Owner.ID != "" {
+		owner = &domain.EntityRef{ID: sysidToUUID(a.Owner.ID), Name: a.Owner.Name}
+	}
+	return
 }
 
 func snAccountToDomain(a snAccount) domain.SNAccountView {
-	var deactivationDate *string
-	if a.DeactivationDate != nil && *a.DeactivationDate != "" {
-		deactivationDate = a.DeactivationDate
-	}
+	deactivationDate, technicalOwner, owner := snAccountCommonFields(a)
 
 	var supportTier *string
 	if a.SupportTier != nil && a.SupportTier.Label != "" {
 		supportTier = &a.SupportTier.Label
 	}
 
-	var technicalOwner *domain.EntityRef
-	if a.TechnicalOwner != nil && a.TechnicalOwner.ID != "" {
-		technicalOwner = &domain.EntityRef{
-			ID:   sysidToUUID(a.TechnicalOwner.ID),
-			Name: a.TechnicalOwner.Name,
-		}
-	}
-
-	var owner *domain.EntityRef
-	if a.Owner != nil && a.Owner.ID != "" {
-		owner = &domain.EntityRef{
-			ID:   sysidToUUID(a.Owner.ID),
-			Name: a.Owner.Name,
-		}
-	}
-
 	return domain.SNAccountView{
 		ID:               sysidToUUID(a.ID),
-		SysID:            a.ID,
 		Name:             a.Name,
 		Classification:   a.Classification,
-		Pod:              a.Pod,
-		Region:           a.Region,
+		Pod:              nilIfEmpty(a.Pod),
+		Region:           nilIfEmpty(a.Region),
 		SupportTier:      supportTier,
-		ArrToday:         a.ArrToday,
+		ArrToday:         nilIfEmpty(a.ArrToday),
 		TechnicalOwner:   technicalOwner,
 		Owner:            owner,
 		ActivationDate:   a.ActivationDate,
@@ -199,7 +197,38 @@ func snAccountToDomain(a snAccount) domain.SNAccountView {
 		HasAgent:         a.HasAgent,
 		HasKbReferences:  a.HasKbReferences,
 		CreatedOn:        a.CreatedOn,
-		CreatedBy:        a.CreatedBy,
+		CreatedBy:        nilIfEmpty(a.CreatedBy),
+		UpdatedOn:        a.UpdatedOn,
+	}
+}
+
+func snAccountToDetail(a snAccount) domain.SNAccountDetail {
+	deactivationDate, technicalOwner, owner := snAccountCommonFields(a)
+
+	var supportTier *domain.SNSupportTierRef
+	if a.SupportTier != nil && a.SupportTier.ID != "" {
+		supportTier = &domain.SNSupportTierRef{
+			ID:    sysidToUUID(a.SupportTier.ID),
+			Label: a.SupportTier.Label,
+		}
+	}
+
+	return domain.SNAccountDetail{
+		ID:               sysidToUUID(a.ID),
+		Name:             a.Name,
+		Classification:   a.Classification,
+		Pod:              nilIfEmpty(a.Pod),
+		Region:           nilIfEmpty(a.Region),
+		SupportTier:      supportTier,
+		ArrToday:         nilIfEmpty(a.ArrToday),
+		TechnicalOwner:   technicalOwner,
+		Owner:            owner,
+		ActivationDate:   a.ActivationDate,
+		DeactivationDate: deactivationDate,
+		HasAgent:         a.HasAgent,
+		HasKbReferences:  a.HasKbReferences,
+		CreatedOn:        a.CreatedOn,
+		CreatedBy:        nilIfEmpty(a.CreatedBy),
 		UpdatedOn:        a.UpdatedOn,
 	}
 }

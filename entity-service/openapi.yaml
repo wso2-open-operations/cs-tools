@@ -136,7 +136,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Account'
+                $ref: '#/components/schemas/SNAccountDetail'
         "400":
           description: Bad request.
           content:
@@ -2238,9 +2238,6 @@ components:
         id:
           type: string
           format: uuid
-        sysId:
-          type: string
-          description: Raw ServiceNow sysid.
         name:
           type: string
         classification:
@@ -2255,6 +2252,63 @@ components:
           type: string
           nullable: true
           description: Support tier label (e.g. Platinum).
+        arrToday:
+          type: string
+          nullable: true
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
+
+    SNSupportTierRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+
+    SNAccountDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SNSupportTierRef'
         arrToday:
           type: string
           nullable: true
