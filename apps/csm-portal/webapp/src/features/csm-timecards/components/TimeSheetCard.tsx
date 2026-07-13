@@ -27,6 +27,7 @@ import {
   type TimecardRoleCtx,
 } from "@features/csm-timecards/utils/timeSheetState";
 import { weekLabel } from "@features/csm-timecards/utils/timeSheetWeek";
+import { decisionSummary } from "@features/csm-timecards/utils/timeCardDecision";
 import type { CsmTimeCard, CsmTimeSheet } from "@features/csm-timecards/types/timeCards";
 
 interface TimeSheetCardProps {
@@ -109,6 +110,7 @@ export default function TimeSheetCard({
       <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
         {sheet.cards.map((c) => {
           const actions = cardActions(c.state, role);
+          const decision = decisionSummary(c);
           return (
             <Box
               key={c.id}
@@ -140,8 +142,8 @@ export default function TimeSheetCard({
                   />
                 </Box>
                 <Typography variant="caption" color="text.secondary">
-                  <RelativeTime iso={c.createdOn} />
-                  {c.approvedByName && ` · Decided by ${c.approvedByName}`}
+                  <RelativeTime iso={c.workDate} />
+                  {decision && ` · ${decision}`}
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>

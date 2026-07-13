@@ -29,6 +29,7 @@ import { useCaseTimeCards, useDecideTimeCard } from "@features/csm-timecards/api
 import { useCurrentEngineer } from "@features/csm-timecards/api/useTimeSheets";
 import { useIsTeamLead } from "@features/csm-timecards/hooks/useIsTeamLead";
 import { billableLabel } from "@features/csm-timecards/constants/timeCardConstants";
+import { decisionSummary } from "@features/csm-timecards/utils/timeCardDecision";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import TimeCardStatusChip from "@features/csm-timecards/components/TimeCardStatusChip";
@@ -38,8 +39,6 @@ import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
 interface CaseTimeCardsPanelProps {
   caseId: string;
-  /** The case's project — required to scope `/time-cards/search` (see useCaseTimeCards). */
-  projectId: string;
   /** Opens the log-time dialog (owned by the page so the action bar can trigger it). */
   onLogTime: () => void;
 }
@@ -52,10 +51,9 @@ interface CaseTimeCardsPanelProps {
  */
 export default function CaseTimeCardsPanel({
   caseId,
-  projectId,
   onLogTime,
 }: CaseTimeCardsPanelProps): JSX.Element {
-  const { data, isLoading, isError } = useCaseTimeCards(caseId, projectId);
+  const { data, isLoading, isError } = useCaseTimeCards(caseId);
   const isTeamLead = useIsTeamLead();
   const me = useCurrentEngineer();
   const decide = useDecideTimeCard();
@@ -140,7 +138,9 @@ export default function CaseTimeCardsPanel({
         </Typography>
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          {cards.map((c) => (
+          {cards.map((c) => {
+            const decision = decisionSummary(c);
+            return (
             <Box
               key={c.id}
               sx={{
@@ -183,11 +183,12 @@ export default function CaseTimeCardsPanel({
                 </Box>
               </Box>
               <Typography variant="caption" color="text.secondary">
-                {billableLabel(c.billable)} · <RelativeTime iso={c.createdOn} />
-                {c.approvedByName && ` · Decided by ${c.approvedByName}`}
+                {billableLabel(c.billable)} · <RelativeTime iso={c.workDate} />
+                {decision && ` · ${decision}`}
               </Typography>
             </Box>
-          ))}
+            );
+          })}
         </Box>
       )}
 

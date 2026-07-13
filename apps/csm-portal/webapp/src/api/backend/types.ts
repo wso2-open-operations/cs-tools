@@ -1637,11 +1637,32 @@ export interface BeTimeCardCaseRef {
 export interface BeTimeCardView {
   id: string;
   totalTime: number;
+  /**
+   * The date the work was actually carried out (YYYY-MM-DD) — what the engineer
+   * picked in the log form, so it can be in the past. This is the field to
+   * display and to group/sort by ("the week this work happened").
+   */
+  workDate: string;
+  /**
+   * @deprecated Superseded by {@link workDate}; don't build new logic on it. It
+   * currently reads the same underlying field, so the two hold the same value.
+   */
   createdOn: string;
   hasBillable: boolean;
   state: BeTimeCardState;
   user?: BeTimeCardRef;
-  approvedBy?: BeTimeCardRef;
+  /**
+   * The approver who accepted the card — populated **only** when `state` is
+   * `approved`. ServiceNow does not record who rejected a card, so this is null
+   * for a `rejected` card (and for an undecided one); see {@link rejectionReason}.
+   */
+  approvedBy?: BeTimeCardRef | null;
+  /**
+   * The approver's comment when rejecting — populated **only** when `state` is
+   * `rejected`, otherwise null. It's the only trace a rejection leaves: there is
+   * no "rejected by" / "rejected on" field (a known backend gap).
+   */
+  rejectionReason?: string | null;
   project?: BeTimeCardRef;
   case?: BeTimeCardCaseRef;
 }
@@ -1656,9 +1677,14 @@ export interface BeTimeCardView {
  */
 export interface BeSearchTimeCardsFilters {
   projectIds?: string[];
+  /** Only time cards logged against this case. */
+  caseId?: string;
   /** Only time cards submitted by this user. */
   userId?: string;
-  /** Only time cards this user is eligible to approve (SN `approver_list`). */
+  /** Only time cards submitted by any of these users (multi-engineer filter). */
+  userIds?: string[];
+  /** Only time cards this user is eligible to approve (SN `approver_list`);
+   * the caller's own cards are excluded unconditionally when this is set. */
   approverId?: string;
   /** Only time cards actually approved by this user (SN `approved_by`). */
   approvedById?: string;

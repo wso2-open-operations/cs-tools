@@ -25,7 +25,7 @@ function card(overrides: Partial<CsmTimeCard>): CsmTimeCard {
     caseNumber: "CS0000001",
     projectId: "project-1",
     projectName: "Project",
-    createdOn: "2026-06-01",
+    workDate: "2026-06-01",
     userId: "user-1",
     userName: "Test User",
     state: "submitted",
@@ -58,7 +58,7 @@ describe("sheetStatus", () => {
 describe("groupIntoSheets", () => {
   it("groups cards into weekly sheets", () => {
     const sheets = groupIntoSheets(
-      [card({ id: "a", createdOn: "2026-06-01" }), card({ id: "b", createdOn: "2026-06-02" })],
+      [card({ id: "a", workDate: "2026-06-01" }), card({ id: "b", workDate: "2026-06-02" })],
       "user-1",
       "Test User",
     );
@@ -68,7 +68,7 @@ describe("groupIntoSheets", () => {
 
   it("splits cards from different weeks into separate sheets, newest first", () => {
     const sheets = groupIntoSheets(
-      [card({ id: "a", createdOn: "2026-06-01" }), card({ id: "b", createdOn: "2026-06-15" })],
+      [card({ id: "a", workDate: "2026-06-01" }), card({ id: "b", workDate: "2026-06-15" })],
       "user-1",
       "Test User",
     );
@@ -76,12 +76,12 @@ describe("groupIntoSheets", () => {
     expect(sheets[0].cards[0].id).toBe("b");
   });
 
-  it("skips a card with an unparseable createdOn instead of throwing, keeping the rest", () => {
+  it("skips a card with an unparseable workDate instead of throwing, keeping the rest", () => {
     const sheets = groupIntoSheets(
       [
-        card({ id: "good-1", createdOn: "2026-06-01" }),
-        card({ id: "bad", createdOn: "" }),
-        card({ id: "good-2", createdOn: "2026-06-02" }),
+        card({ id: "good-1", workDate: "2026-06-01" }),
+        card({ id: "bad", workDate: "" }),
+        card({ id: "good-2", workDate: "2026-06-02" }),
       ],
       "user-1",
       "Test User",
@@ -92,8 +92,8 @@ describe("groupIntoSheets", () => {
     expect(ids).toHaveLength(2);
   });
 
-  it("returns an empty list when every card has an unparseable createdOn", () => {
-    const sheets = groupIntoSheets([card({ id: "bad", createdOn: "" })], "user-1", "Test User");
+  it("returns an empty list when every card has an unparseable workDate", () => {
+    const sheets = groupIntoSheets([card({ id: "bad", workDate: "" })], "user-1", "Test User");
     expect(sheets).toEqual([]);
   });
 });

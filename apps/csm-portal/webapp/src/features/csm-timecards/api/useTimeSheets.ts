@@ -41,6 +41,7 @@ import { resolveUserInfo } from "@utils/userClaims";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useBackendApi, type BackendApi } from "@api/backend/client";
 import type {
+  BeSearchTimeCardsFilters,
   BeSearchTimeCardsPayload,
   BeSearchTimeCardsResponse,
   BeTimeCardState,
@@ -95,6 +96,12 @@ export function invalidateTimecards(queryClient: QueryClient): void {
  * is already whole minutes on the wire (see `usePostTimeCard`'s note on why),
  * which is also the unit the portal displays throughout — a direct
  * passthrough, no conversion needed.
+ *
+ * `workDate` falls back to the deprecated `createdOn` so a backend that hasn't
+ * rolled out the new field yet still yields a usable date — the two currently
+ * read the same underlying value, so the fallback is a no-op in practice.
+ * `approvedBy` / `rejectionReason` are mutually exclusive: only one of them is
+ * ever populated (see {@link CsmTimeCard}).
  */
 export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
   return {
@@ -103,7 +110,7 @@ export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
     caseNumber: v.case?.number || v.case?.name || "—",
     projectId: v.project?.id ?? "",
     projectName: v.project?.name ?? "—",
-    createdOn: v.createdOn,
+    workDate: v.workDate || v.createdOn,
     userId: v.user?.id ?? "",
     userName: v.user?.name ?? "—",
     state: v.state,
@@ -111,6 +118,7 @@ export function mapTimeCard(v: BeTimeCardView): CsmTimeCard {
     totalMinutes: v.totalTime,
     approvedById: v.approvedBy?.id,
     approvedByName: v.approvedBy?.name,
+    rejectionReason: v.rejectionReason ?? undefined,
   };
 }
 
@@ -122,11 +130,8 @@ export interface TimeCardPagination {
 }
 
 /** Result of {@link searchTimeCards}: the cards on the requested page, and
- * `total` — the backend's count for the whole scope (all states, all
- * cards), *not* the count after `filters.states` client-side filtering
- * (see the note on that below) — so a caller filtering further should treat
- * `total` as "how big is the underlying page-able scope", not "how many of
- * these match my filter". */
+ * `total` — the backend's count for the whole (filtered) scope, driving
+ * `TablePagination`'s `count` directly. */
 export interface TimeCardSearchResult {
   cards: CsmTimeCard[];
   total: number;
@@ -134,28 +139,22 @@ export interface TimeCardSearchResult {
 
 /**
  * Search against `POST /time-cards/search`, fetching exactly the requested
- * page (defaults to the first `BE_MAX_PAGE_LIMIT` cards when `pagination`
- * is omitted). `projectIds`, `userId`, `approverId`, and `from`/`to` are all
- * real server-side filters, confirmed live (not just by reading
- * `entity-service`'s `sn_time_card_service.go` — see the note below on
- * `caseId`, which looked equally real in code but isn't). Callers should
- * scope as precisely as possible at the source (see {@link useMyTimeSheets},
- * {@link useApprovalQueue} below) rather than fetching a broad page and
- * filtering client-side — the latter makes `total` and the page's contents
- * diverge from what's actually shown. `limit` is capped at
- * `BE_MAX_PAGE_LIMIT` — the backend rejects anything above that with a
- * generic 400 despite the OpenAPI spec documenting up to 100 (confirmed
- * live).
+ * page (defaults to the first `BE_MAX_PAGE_LIMIT` cards when `pagination` is
+ * omitted). `projectIds`, `caseId`, `userId`/`userIds`, `approverId`,
+ * `states`, and `from`/`to` are all real server-side filters — every one of
+ * them is forwarded on the wire and the response is returned as-is, with no
+ * client-side re-filtering. Callers should still scope as precisely as
+ * possible at the source (see {@link useMyTimeSheets}, {@link useApprovalQueue}
+ * below) so `total` and the page's contents reflect exactly what's shown.
+ * `limit` is capped at `BE_MAX_PAGE_LIMIT` — the backend rejects anything
+ * above that with a generic 400 despite the OpenAPI spec documenting up to
+ * 100 (confirmed live).
  *
- * `filters.caseId` is deliberately *not* forwarded, unlike the others,
- * despite existing in `openapi.yaml` and being genuinely implemented
- * end-to-end in `entity-service` — confirmed live to be non-functional: a
- * search scoped only by a case's own id returns `total: 0` unconditionally,
- * even though the exact same cards are provably present and correctly
- * tagged with that `case.id` when the search is instead scoped by
- * `projectIds` (see {@link useCaseTimeCards} in `useTimeCards.ts`, which
- * scopes by project and filters to the case client-side instead). Don't
- * re-add it without re-confirming live first.
+ * `caseId` and `states` were previously avoided here — `caseId` alone used to
+ * return `total: 0` unconditionally, and `states` combined with a large
+ * `projectIds` scope used to 500 — both fixed upstream on the entity-service
+ * data source (see PR #1133); this now forwards them directly instead of the
+ * removed caseId-via-project / states-client-filter-and-walk workarounds.
  *
  * This used to page through the *entire* scope internally (up to 1,000
  * cards) before returning, so every view always had "everything". That was
@@ -164,21 +163,6 @@ export interface TimeCardSearchResult {
  * their own such walk — was slow enough to sometimes fail outright. Real,
  * caller-driven pagination replaces that: callers ask for one page at a
  * time via `pagination`, and `total` lets them drive page controls.
- *
- * `filters.states` is deliberately filtered client-side, never sent as
- * `filters.states` on the wire: confirmed live that the backend 500s
- * ("Failed to search time cards.") when `states` is combined with a large
- * `projectIds` array (reproduced: 2 or 10 project ids + `states` → 200; the
- * full ~88-project default scope + `states` → 500; that same full scope
- * *without* `states` → 200). Since {@link useApprovalQueue} always needs a
- * "submitted" filter and still defaults `projectIds` to every visible
- * project (alongside its more precise `approverId` scope), sending `states`
- * server-side would risk the same 500 for any user with enough visible
- * projects — worse than not filtering at all. One consequence of filtering
- * client-side over a single server page: a page can legitimately come back
- * with fewer matching cards than `rowsPerPage` (or none at all) even though
- * `total` says there's more data — the states filter just happened to
- * exclude most/all of that particular page.
  */
 export async function searchTimeCards(
   api: BackendApi,
@@ -186,32 +170,28 @@ export async function searchTimeCards(
   pagination?: TimeCardPagination,
 ): Promise<TimeCardSearchResult> {
   const limit = Math.min(pagination?.rowsPerPage ?? BE_MAX_PAGE_LIMIT, BE_MAX_PAGE_LIMIT);
+  const wireFilters: BeSearchTimeCardsFilters = {
+    ...(filters?.caseId ? { caseId: filters.caseId } : {}),
+    ...(filters?.projectIds?.length ? { projectIds: filters.projectIds } : {}),
+    ...(filters?.userId ? { userId: filters.userId } : {}),
+    ...(filters?.userIds?.length ? { userIds: filters.userIds } : {}),
+    ...(filters?.approverId ? { approverId: filters.approverId } : {}),
+    ...(filters?.states?.length ? { states: filters.states as BeTimeCardState[] } : {}),
+    ...(filters?.from ? { startDate: filters.from } : {}),
+    ...(filters?.to ? { endDate: filters.to } : {}),
+  };
   const payload: BeSearchTimeCardsPayload = {
-    filters: {
-      ...(filters?.projectIds?.length ? { projectIds: filters.projectIds } : {}),
-      ...(filters?.userId ? { userId: filters.userId } : {}),
-      ...(filters?.approverId ? { approverId: filters.approverId } : {}),
-      ...(filters?.from ? { startDate: filters.from } : {}),
-      ...(filters?.to ? { endDate: filters.to } : {}),
-    },
+    filters: wireFilters,
     pagination: { limit, offset: (pagination?.page ?? 0) * limit },
   };
   const res = await api.post<BeSearchTimeCardsPayload, BeSearchTimeCardsResponse>(
     "/time-cards/search",
     payload,
   );
-  const cards = (res.timeCards ?? []).map(mapTimeCard);
-  return {
-    cards: filters?.states?.length
-      ? cards.filter((c) => (filters.states as BeTimeCardState[]).includes(c.state))
-      : cards,
-    total: res.total,
-  };
+  return { cards: (res.timeCards ?? []).map(mapTimeCard), total: res.total };
 }
 
-/** Weekly sheets on the requested page, plus `total` — see the note on
- * {@link TimeCardSearchResult}, the same caveat about client-side-filtered
- * scopes applies here. */
+/** Weekly sheets on the requested page, plus `total` — see {@link TimeCardSearchResult}. */
 export interface TimeSheetsResult {
   sheets: CsmTimeSheet[];
   total: number;
@@ -280,11 +260,11 @@ export function useMyTimeSheets(
  * contains cards the signed-in user is actually eligible to decide —
  * previously this fetched every submitted card in scope regardless of who
  * could approve it, so clicking Approve/Reject on a card the viewer wasn't
- * the assigned approver for 403'd. Still excludes the signed-in user's own
- * cards client-side as a defense-in-depth self-approval guard: a card
- * created before `LogTimeCardDialog` started excluding the submitter from
- * the approver picker could still name themselves as an eligible approver.
- * Like {@link useMyTimeSheets}, no project scope is required (the search runs
+ * the assigned approver for 403'd. `approverId` alone is sufficient for
+ * self-exclusion too: the backend excludes the caller's own cards from an
+ * `approverId`-scoped search unconditionally, so no client-side "exclude
+ * myself" filtering (or an `excludeUserId` wire field) is needed here. Like
+ * {@link useMyTimeSheets}, no project scope is required (the search runs
  * unscoped when no project filter is picked), and `enabled` should be gated on
  * this tab actually being active (see the note on {@link useMyTimeSheets}).
  */
@@ -304,8 +284,7 @@ export function useApprovalQueue(
         { ...filters, approverId: me.id, states: ["submitted"] },
         pagination,
       );
-      const others = cards.filter((c) => c.userId !== me.id);
-      return { sheets: groupCardsByUserIntoSheets(others), total };
+      return { sheets: groupCardsByUserIntoSheets(cards), total };
     },
     enabled: enabled && !!me.id,
     staleTime: 5_000,

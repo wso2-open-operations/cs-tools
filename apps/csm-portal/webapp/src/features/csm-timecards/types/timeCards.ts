@@ -76,14 +76,14 @@ export interface CsmTimeCard {
   projectId: string;
   projectName: string;
   /**
-   * The work date (ISO, YYYY-MM-DD), despite the name — confirmed live by
-   * backdating a test card and reading it back: the backend returns
-   * whatever date was submitted on create under this field, not a separate
-   * system-generated creation timestamp. Occasionally unparseable on real
-   * records (confirmed live); see `groupIntoSheets` in `useTimeSheets.ts`
-   * for how that's handled.
+   * The date the work was actually carried out (ISO, YYYY-MM-DD) — what the
+   * engineer picked in the log form, so it can be backdated. This is the field
+   * to display and to group/sort by ("the week this work happened"); it replaces
+   * the deprecated `createdOn`, which currently holds the same value.
+   * Occasionally unparseable on real records (confirmed live); see
+   * `groupIntoSheets` in `timeSheetGrouping.ts` for how that's handled.
    */
-  createdOn: string;
+  workDate: string;
   userId: string;
   userName: string;
   state: TimeCardState;
@@ -92,9 +92,20 @@ export interface CsmTimeCard {
   /** Whole minutes — the backend's own unit for this field (see
    * `mapTimeCard` in `useTimeSheets.ts`). */
   totalMinutes: number;
-  /** The deciding approver, once a decision has been made. */
+  /**
+   * The approver who accepted the card — set **only** when `state` is
+   * `approved`. ServiceNow doesn't record who rejected a card, so there is
+   * deliberately no `rejectedBy`: a rejection surfaces {@link rejectionReason}
+   * instead (see `decisionSummary`).
+   */
   approvedById?: string;
   approvedByName?: string;
+  /**
+   * The approver's comment when rejecting — set **only** when `state` is
+   * `rejected`. It's the only trace a rejection leaves (no rejecter identity or
+   * timestamp exists upstream).
+   */
+  rejectionReason?: string;
 }
 
 /**
@@ -149,27 +160,28 @@ export interface CsmTimeSheet {
 
 /**
  * Filters for the time-card search. Sent in the POST body (never as query
- * params). `projectIds`, `userId`, `approverId`, and `from`/`to` are all
- * real, confirmed-working server-side filters. `states` is filtered
- * client-side instead — see the note on `searchTimeCards` in
- * `useTimeSheets.ts` for why. `from`/`to` currently has no UI control wired
- * to it; kept so a future date-range filter has somewhere to plug in.
- *
- * There is deliberately no `caseId` here even though `entity-service`
- * documents and implements one — confirmed live to be non-functional
- * (always `total: 0`); case scoping goes through `projectIds` plus a
- * client-side filter instead (see `useCaseTimeCards` in `useTimeCards.ts`).
+ * params). `projectIds`, `caseId`, `userId`/`userIds`, `approverId`, `states`,
+ * and `from`/`to` are all real server-side filters — every one of them is
+ * forwarded on the wire, none filtered client-side. `from`/`to` currently has
+ * no UI control wired to it on most tabs; kept so a date-range filter has
+ * somewhere to plug in (the Time Cards page does wire it up).
  */
 export interface TimeCardSearchFilters {
   /** Projects to include (company customer may own several). */
   projectIds?: string[];
+  /** Scope to a single case's own time cards (see `useCaseTimeCards`). */
+  caseId?: string;
   /** Only cards submitted by this user. */
   userId?: string;
-  /** Only cards this user is eligible to approve (backend: SN `approver_list`). */
+  /** Only cards submitted by any of these users — the Engineer multi-select
+   * filter (All/Approvals tabs), distinct from the single-user `userId`. */
+  userIds?: string[];
+  /** Only cards this user is eligible to approve (backend: SN `approver_list`);
+   * the caller's own cards are excluded unconditionally when this is set. */
   approverId?: string;
   /** Lifecycle states to include. */
   states?: TimeCardState[];
-  /** Inclusive date range (YYYY-MM-DD), matched against `createdOn`. */
+  /** Inclusive date range (YYYY-MM-DD), matched against the card's work date. */
   from?: string;
   to?: string;
 }
