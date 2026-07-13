@@ -5009,7 +5009,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                         userInfo.userId}`, response);
                 return <http:BadRequest>{
                     body: {
-                        message: extractErrorMessage(response)
+                        message: extractClientErrorMessage(response)
                     }
                 };
             }
