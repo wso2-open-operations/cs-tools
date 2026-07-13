@@ -28,7 +28,7 @@ import { ErrorState } from "@components/support/ErrorState";
 // short 5-item preview with a "View all" link out to Support, rather than paginated in place.
 export function AssignedToMeSection() {
   const { data: currentUserId } = useQuery(currentUser.id());
-  const { data, isLoading, isError, refetch } = useQuery(dashboard.assignedToMe(currentUserId ?? null));
+  const { data, isPending, isError, refetch } = useQuery(dashboard.assignedToMe(currentUserId ?? null));
 
   const items = data?.items ?? [];
 
