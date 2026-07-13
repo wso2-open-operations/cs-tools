@@ -17,7 +17,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { searchTimeCards } from "@features/csm-timecards/api/useTimeSheets";
 import type { BackendApi } from "@api/backend/client";
-import type { BeSearchTimeCardsResponse, BeTimeCardState, BeTimeCardView } from "@api/backend/types";
+import type {
+  BeSearchTimeCardsPayload,
+  BeSearchTimeCardsResponse,
+  BeTimeCardState,
+  BeTimeCardView,
+} from "@api/backend/types";
 
 // useTimeSheets.ts pulls in @config/apiConfig transitively (via useGetUsersMe)
 // and @api/backend/client directly; both read window.config at module load
@@ -46,12 +51,11 @@ function bePage(timeCards: BeTimeCardView[], total: number, offset: number, limi
   return { timeCards, total, offset, limit };
 }
 
-/** A mock `BackendApi` whose `post` returns each of `pages` in call order —
- * safe because `searchTimeCards` awaits each raw-page fetch before issuing
- * the next, so there's never more than one in-flight `post` call. */
-function mockApi(pages: BeSearchTimeCardsResponse[]): { api: BackendApi; post: ReturnType<typeof vi.fn> } {
-  let call = 0;
-  const post = vi.fn(async () => pages[Math.min(call++, pages.length - 1)]);
+/** A mock `BackendApi` whose `post` resolves to `page` and records every
+ * payload it was called with, so a test can assert on exactly what
+ * `searchTimeCards` forwarded on the wire. */
+function mockApi(page: BeSearchTimeCardsResponse): { api: BackendApi; post: ReturnType<typeof vi.fn> } {
+  const post = vi.fn(async () => page);
   const api: BackendApi = {
     get: vi.fn(),
     post: post as unknown as BackendApi["post"],
@@ -63,10 +67,14 @@ function mockApi(pages: BeSearchTimeCardsResponse[]): { api: BackendApi; post: R
   return { api, post };
 }
 
+function lastPayload(post: ReturnType<typeof vi.fn>): BeSearchTimeCardsPayload {
+  return post.mock.calls.at(-1)![1] as BeSearchTimeCardsPayload;
+}
+
 describe("searchTimeCards", () => {
-  it("makes a single request and returns the page as-is when no states filter is set", async () => {
+  it("makes a single request and returns the response as-is", async () => {
     const cards = [beCard("a", "submitted"), beCard("b", "approved")];
-    const { api, post } = mockApi([bePage(cards, 2, 0, 20)]);
+    const { api, post } = mockApi(bePage(cards, 2, 0, 20));
 
     const result = await searchTimeCards(api, undefined, { page: 0, rowsPerPage: 20 });
 
@@ -75,76 +83,50 @@ describe("searchTimeCards", () => {
     expect(result.total).toBe(2);
   });
 
-  it("doesn't walk forward when the first page already has enough matches", async () => {
-    const cards = [beCard("a", "approved"), beCard("b", "approved")];
-    const { api, post } = mockApi([bePage(cards, 2, 0, 20)]);
+  // states used to be filtered client-side over one raw page (with a
+  // walk-forward workaround for the 500 that combining it with projectIds
+  // used to cause); both are fixed upstream now, so this just forwards.
+  it("forwards states directly on the wire, in a single request", async () => {
+    const { api, post } = mockApi(bePage([beCard("a", "approved")], 1, 0, 20));
 
-    const result = await searchTimeCards(api, { states: ["approved"] }, { page: 0, rowsPerPage: 20 });
+    await searchTimeCards(api, { states: ["approved", "rejected"] }, { page: 0, rowsPerPage: 20 });
 
     expect(post).toHaveBeenCalledTimes(1);
-    expect(result.cards.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(lastPayload(post).filters?.states).toEqual(["approved", "rejected"]);
   });
 
-  // Regression test for the reported bug: a state filter reading as "no
-  // results" purely because the filter excluded everything on the first raw
-  // page, even though a matching card existed a page later.
-  it("walks forward into later raw pages to find matches the first page excluded", async () => {
-    const page0 = [beCard("a", "submitted"), beCard("b", "rejected")];
-    const page1 = [beCard("c", "approved")];
-    const { api, post } = mockApi([
-      bePage(page0, 3, 0, 2),
-      bePage(page1, 3, 2, 2),
-    ]);
+  // caseId used to always return total: 0 (worked around via projectIds +
+  // client-side filtering in useCaseTimeCards); fixed upstream now.
+  it("forwards caseId directly on the wire", async () => {
+    const { api, post } = mockApi(bePage([], 0, 0, 20));
 
-    const result = await searchTimeCards(api, { states: ["approved"] }, { page: 0, rowsPerPage: 2 });
+    await searchTimeCards(api, { caseId: "case-123" }, { page: 0, rowsPerPage: 20 });
 
-    expect(post).toHaveBeenCalledTimes(2);
-    expect(result.cards.map((c) => c.id)).toEqual(["c"]);
+    expect(lastPayload(post).filters?.caseId).toBe("case-123");
   });
 
-  it("stops walking once it has collected a full page of matches", async () => {
-    const page0 = [beCard("a", "submitted")];
-    const page1 = [beCard("b", "approved"), beCard("c", "approved")];
-    const page2 = [beCard("d", "approved")];
-    const { api, post } = mockApi([
-      bePage(page0, 10, 0, 2),
-      bePage(page1, 10, 2, 2),
-      bePage(page2, 10, 4, 2),
-    ]);
+  it("forwards userIds directly on the wire, alongside the single-user userId", async () => {
+    const { api, post } = mockApi(bePage([], 0, 0, 20));
 
-    const result = await searchTimeCards(api, { states: ["approved"] }, { page: 0, rowsPerPage: 2 });
+    await searchTimeCards(
+      api,
+      { userId: "me", userIds: ["eng-1", "eng-2"] },
+      { page: 0, rowsPerPage: 20 },
+    );
 
-    // Found 2 matches (== rowsPerPage) on the walk's first extra page — the
-    // third page must never be requested.
-    expect(post).toHaveBeenCalledTimes(2);
-    expect(result.cards.map((c) => c.id)).toEqual(["b", "c"]);
+    const filters = lastPayload(post).filters;
+    expect(filters?.userId).toBe("me");
+    expect(filters?.userIds).toEqual(["eng-1", "eng-2"]);
   });
 
-  it("stops walking once the scope is exhausted, without over-fetching", async () => {
-    const page0 = [beCard("a", "submitted")];
-    const page1 = [beCard("b", "rejected")];
-    const { api, post } = mockApi([
-      bePage(page0, 2, 0, 1),
-      bePage(page1, 2, 1, 1),
-    ]);
+  it("omits caseId/states/userIds from the payload when unset", async () => {
+    const { api, post } = mockApi(bePage([], 0, 0, 20));
 
-    const result = await searchTimeCards(api, { states: ["approved"] }, { page: 0, rowsPerPage: 1 });
+    await searchTimeCards(api, undefined, { page: 0, rowsPerPage: 20 });
 
-    // total is 2 and both raw records were consumed (offsets 0 and 1) — the
-    // walk must stop there rather than requesting a third, out-of-range page.
-    expect(post).toHaveBeenCalledTimes(2);
-    expect(result.cards).toHaveLength(0);
-  });
-
-  it("caps the walk at MAX_STATE_FILTER_WALK_PAGES extra requests even if nothing matches", async () => {
-    // A large unmatching scope (bigger than the walk budget could ever cover).
-    const pages = Array.from({ length: 10 }, (_, i) => bePage([beCard(`x${i}`, "submitted")], 1000, i, 1));
-    const { api, post } = mockApi(pages);
-
-    const result = await searchTimeCards(api, { states: ["approved"] }, { page: 0, rowsPerPage: 1 });
-
-    // 1 initial fetch + 5 walked extra fetches (MAX_STATE_FILTER_WALK_PAGES) = 6.
-    expect(post).toHaveBeenCalledTimes(6);
-    expect(result.cards).toHaveLength(0);
+    const filters = lastPayload(post).filters;
+    expect(filters?.caseId).toBeUndefined();
+    expect(filters?.states).toBeUndefined();
+    expect(filters?.userIds).toBeUndefined();
   });
 });
