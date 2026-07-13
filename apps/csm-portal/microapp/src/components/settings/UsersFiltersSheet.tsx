@@ -86,6 +86,7 @@ export function UsersFiltersSheet({ open, onClose, filters, onApply }: UsersFilt
                     size="small"
                     variant={isSelected ? "filled" : "outlined"}
                     color={isSelected ? "primary" : "default"}
+                    aria-pressed={isSelected}
                     onClick={() => setDraft({ ...draft, roles: toggleRole(draft.roles, role) })}
                   />
                 );
@@ -95,7 +96,7 @@ export function UsersFiltersSheet({ open, onClose, filters, onApply }: UsersFilt
 
           <Stack gap={1}>
             <Typography variant="subtitle2">Status</Typography>
-            <Stack direction="row" gap={1} flexWrap="wrap">
+            <Stack direction="row" gap={1} flexWrap="wrap" role="radiogroup" aria-label="Status">
               {STATUS_OPTIONS.map((option) => {
                 const isSelected = draft.active === option.value;
                 return (
@@ -105,6 +106,8 @@ export function UsersFiltersSheet({ open, onClose, filters, onApply }: UsersFilt
                     size="small"
                     variant={isSelected ? "filled" : "outlined"}
                     color={isSelected ? "primary" : "default"}
+                    role="radio"
+                    aria-checked={isSelected}
                     onClick={() => setDraft({ ...draft, active: option.value })}
                   />
                 );
