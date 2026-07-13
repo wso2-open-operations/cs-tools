@@ -65,6 +65,7 @@ func main() {
 	conversationHandler := handler.NewConversationHandler(entityClient)
 	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
 	incidentHandler := handler.NewIncidentHandler(entityClient)
+	problemHandler := handler.NewProblemHandler(entityClient)
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -149,6 +150,9 @@ func main() {
 	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
+	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
+	mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)
+	mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
 
 	addr := envOrDefault("PORT", ":8080")
 

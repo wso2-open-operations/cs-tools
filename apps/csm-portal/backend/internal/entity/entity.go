@@ -126,6 +126,24 @@ func (c *Client) SearchIncidents(ctx context.Context, body []byte) ([]byte, erro
 	return c.do(ctx, http.MethodPost, "/incidents/search", body)
 }
 
+// CreateIncident calls POST /incidents on the entity service to create a new incident.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) CreateIncident(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/incidents", body)
+}
+
+// GetIncident calls GET /incidents/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) GetIncident(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/incidents/%s", url.PathEscape(id)), nil)
+}
+
+// SearchProblems calls POST /problems/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/problems/search", body)
+}
+
 // PostDeployment calls POST /deployments on the entity service to create a new deployment.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) PostDeployment(ctx context.Context, body []byte) ([]byte, error) {

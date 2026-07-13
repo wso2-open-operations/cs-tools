@@ -345,11 +345,40 @@ func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, pro
 
 type mockEntityIncidentClient struct {
 	searchIncidentsFn func(ctx context.Context, body []byte) ([]byte, error)
+	createIncidentFn  func(ctx context.Context, body []byte) ([]byte, error)
+	getIncidentFn     func(ctx context.Context, id string) ([]byte, error)
 }
 
 func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchIncidentsFn != nil {
 		return m.searchIncidentsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityIncidentClient) CreateIncident(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createIncidentFn != nil {
+		return m.createIncidentFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityIncidentClient) GetIncident(ctx context.Context, id string) ([]byte, error) {
+	if m.getIncidentFn != nil {
+		return m.getIncidentFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity problem client -----
+
+type mockEntityProblemClient struct {
+	searchProblemsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchProblemsFn != nil {
+		return m.searchProblemsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }

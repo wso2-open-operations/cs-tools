@@ -176,6 +176,7 @@ backend/
 │       ├── products.go                   # HTTP handlers for product endpoints
 │       ├── projects.go                   # HTTP handlers for project endpoints
 │       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
+│       ├── problems.go                   # HTTP handlers for problem endpoints (ServiceNow only)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
@@ -271,6 +272,12 @@ backend/
 ### Incidents
 
 - `POST /incidents/search` — Search incidents; optional `filters` (`searchQuery`, `priorities`, `parentIds`) and `sortBy` (`field`: `createdOn`/`updatedOn`/`openedOn`, `order`) (ServiceNow data source only)
+- `POST /incidents` — Create an incident (`callerId`, `category`, `serviceId`, `impact`, `urgency`, `subject` required; `subcategory`, `serviceOfferingId`, `configurationItemId`, `contactType`, `assignmentGroupId`, `assignedEngineerId`, `watchList`, `additionalComments`, `workNotes`, `parentId`, `changeRequestId`, `problemId`, `causedById` optional) (ServiceNow data source only)
+- `GET /incidents/{id}` — Get full incident detail by ID (ServiceNow data source only)
+
+### Problems
+
+- `POST /problems/search` — Search problems; optional `filters` (`searchQuery`) (ServiceNow data source only)
 
 ## Run Locally
 
@@ -324,4 +331,19 @@ curl -X POST http://localhost:8080/incidents/search \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"filters":{"searchQuery":"outage","priorities":["CRITICAL"]},"pagination":{"limit":10,"offset":0}}'
+
+# Create an incident
+curl -X POST http://localhost:8080/incidents \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"callerId":"<caller-id>","category":"SECURITY","serviceId":"<service-id>","impact":"HIGH","urgency":"HIGH","subject":"Suspicious login activity"}'
+
+# Get an incident by ID
+curl -H "x-jwt-assertion: $JWT" http://localhost:8080/incidents/<incident-id>
+
+# Search problems
+curl -X POST http://localhost:8080/problems/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"searchQuery":"database"},"pagination":{"limit":10,"offset":0}}'
 ```
