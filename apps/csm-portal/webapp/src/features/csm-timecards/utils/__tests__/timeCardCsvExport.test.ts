@@ -25,7 +25,7 @@ function card(overrides: Partial<CsmTimeCard> = {}): CsmTimeCard {
     caseNumber: "CS0352584",
     projectId: "proj-1",
     projectName: "Acme Corp",
-    createdOn: "2026-06-27",
+    workDate: "2026-06-27",
     userId: "user-1",
     userName: "Jane Doe",
     state: "submitted",
@@ -38,7 +38,7 @@ function card(overrides: Partial<CsmTimeCard> = {}): CsmTimeCard {
 describe("timeCardsToCsv", () => {
   it("emits just the header for an empty list", () => {
     expect(timeCardsToCsv([])).toBe(
-      "Date,Case,Project,Engineer,State,Billable,Minutes,Decided by",
+      "Work date,Case,Project,Engineer,State,Billable,Minutes,Approved by,Rejection reason",
     );
   });
 
@@ -47,15 +47,24 @@ describe("timeCardsToCsv", () => {
     const lines = csv.split("\r\n");
     expect(lines).toHaveLength(2);
     expect(lines[1]).toBe(
-      "2026-06-27,CS0352584,Acme Corp,Jane Doe,Submitted,Yes,90,",
+      "2026-06-27,CS0352584,Acme Corp,Jane Doe,Submitted,Yes,90,,",
     );
   });
 
-  it("includes the deciding approver once a card has one", () => {
+  it("includes the approver on an approved card, leaving the rejection reason blank", () => {
     const csv = timeCardsToCsv([
       card({ state: "approved", approvedByName: "Lead Person" }),
     ]);
-    expect(csv).toContain("Approved,Yes,90,Lead Person");
+    expect(csv).toContain("Approved,Yes,90,Lead Person,");
+  });
+
+  // ServiceNow records no rejecter identity, so a rejected card carries only the
+  // reason — the "Approved by" column stays empty for it.
+  it("includes the rejection reason on a rejected card, leaving the approver blank", () => {
+    const csv = timeCardsToCsv([
+      card({ state: "rejected", rejectionReason: "Break down the debug time." }),
+    ]);
+    expect(csv).toContain("Rejected,Yes,90,,Break down the debug time.");
   });
 
   it("quotes a field that contains a comma", () => {
