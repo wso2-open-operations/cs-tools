@@ -1479,7 +1479,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <CaseTimeCardsPanel
             caseId={c.id}
-            projectId={c.projectId}
             onLogTime={() => setLogTimeOpen(true)}
           />
         </Box>
