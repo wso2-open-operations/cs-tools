@@ -50,13 +50,13 @@ export function CaseCard({ item }: { item: CaseSummary }) {
         </Stack>
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" mt={0.5}>
-          <Stack direction="row" alignItems="center" gap={0.5}>
+          <Stack direction="row" alignItems="center" gap={0.5} flexShrink={0}>
             <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
             <Typography variant="subtitle2" color="text.secondary" sx={{ fontSize: pxToRem(12) }}>
               Updated {fromNow(item.updatedOn)}
             </Typography>
           </Stack>
-          <Typography variant="subtitle2" color="text.secondary" noWrap>
+          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
             {item.assignedEngineer?.name ?? "Unassigned"}
           </Typography>
         </Stack>

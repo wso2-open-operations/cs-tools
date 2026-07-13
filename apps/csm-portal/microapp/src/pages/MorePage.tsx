@@ -22,6 +22,7 @@ import {
   Clock,
   Megaphone,
   RefreshCw,
+  Settings,
   Shield,
   type LucideIcon,
 } from "@wso2/oxygen-ui-icons-react";

@@ -14,21 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Button, Stack, Typography } from "@wso2/oxygen-ui";
+import { Card, Stack, Typography } from "@wso2/oxygen-ui";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { currentUser } from "@src/services/currentUser";
 import { dashboard } from "@src/services/dashboard";
 import { CaseCard, CaseCardSkeleton } from "@components/support/CaseCard";
-import { EmptyState } from "@components/support/EmptyState";
 import { ErrorState } from "@components/support/ErrorState";
+import { RefreshButton } from "./RefreshButton";
 
 // The signed-in user's own non-closed cases — mirrors the webapp's "Assigned to me" widget
 // (apps/csm-portal/webapp/src/features/csm-dashboard/components/MyAssignedCases.tsx), capped to a
-// short 5-item preview with a "View all" link out to Support, rather than paginated in place.
+// short 5-item preview. No "View all" (Support already covers the full list) — instead a
+// RefreshButton, same as the webapp's widget header.
 export function AssignedToMeSection() {
   const { data: currentUserId } = useQuery(currentUser.id());
-  const { data, isPending, isError, refetch } = useQuery(dashboard.assignedToMe(currentUserId ?? null));
+  const { data, isPending, isFetching, isError, dataUpdatedAt, refetch } = useQuery(
+    dashboard.assignedToMe(currentUserId ?? null),
+  );
 
   const items = data?.items ?? [];
 
@@ -36,12 +38,15 @@ export function AssignedToMeSection() {
     <Stack gap={1.5}>
       <Stack direction="row" alignItems="center" justifyContent="space-between">
         <Typography variant="subtitle1">Assigned to me</Typography>
-        <Button component={Link} to="/support" variant="text" size="small" disableRipple>
-          View all
-        </Button>
+        <RefreshButton
+          onRefresh={() => void refetch()}
+          isFetching={isFetching}
+          updatedAt={dataUpdatedAt}
+          label="Refresh assigned cases"
+        />
       </Stack>
 
-      {isLoading ? (
+      {isPending ? (
         <Stack gap={1.5}>
           {Array.from({ length: 3 }).map((_, index) => (
             <CaseCardSkeleton key={index} />
@@ -50,7 +55,14 @@ export function AssignedToMeSection() {
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState message="No cases assigned to you." />
+        // Lighter than the shared EmptyState (no icon, less padding) — a big "nothing here"
+        // block reads as too prominent for the first thing on the home page — but still boxed
+        // in a card so it's clearly this section's content, not blank/broken-looking space.
+        <Card variant="outlined" sx={{ p: 1.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            No cases assigned to you.
+          </Typography>
+        </Card>
       ) : (
         <Stack gap={1.5}>
           {items.map((item) => (

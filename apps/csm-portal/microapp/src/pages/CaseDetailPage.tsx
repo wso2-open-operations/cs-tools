@@ -130,10 +130,10 @@ function CaseCommentsSection({ comments }: { comments: Comment[] }) {
       {comments.map((comment) => (
         <Stack key={comment.id} gap={0.5} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
           <Stack direction="row" justifyContent="space-between" gap={2}>
-            <Typography variant="subtitle2" color="text.secondary" noWrap>
+            <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
               {comment.createdBy}
             </Typography>
-            <Typography variant="subtitle2" color="text.secondary" noWrap>
+            <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ flexShrink: 0 }}>
               {formatDate(comment.createdOn)}
             </Typography>
           </Stack>

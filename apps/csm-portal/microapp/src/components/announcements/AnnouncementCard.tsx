@@ -27,7 +27,7 @@ export function AnnouncementCard({ item }: { item: CaseSummary }) {
     <Card variant="outlined" sx={{ p: 2 }}>
       <Stack gap={1}>
         <Stack direction="row" alignItems="flex-start" justifyContent="space-between" gap={1}>
-          <Typography variant="subtitle2" noWrap>
+          <Typography variant="subtitle2" noWrap sx={{ minWidth: 0 }}>
             {item.number || "—"}
           </Typography>
           <AnnouncementStateChip state={item.state} />
