@@ -224,14 +224,26 @@ public isolated function getStatusCode(error err) returns int {
     return statusCodeValue is int ? statusCodeValue : http:STATUS_INTERNAL_SERVER_ERROR;
 }
 
-# Get HTTP status code from the given error.
+# Get the error message from the given error.
 #
 # + err - Error to handle
 # + return - Error message
 public isolated function extractErrorMessage(error err) returns string {
     map<anydata|readonly> & readonly errorDetails = err.detail();
-    anydata|readonly errorMessage = errorDetails[ERR_BODY] ?: ();
-    return errorMessage is string ? errorMessage : UNEXPECTED_ERROR_MSG;
+    anydata|readonly errorBody = errorDetails[ERR_BODY] ?: ();
+    if errorBody is map<anydata> {
+        anydata message = errorBody[ERR_MESSAGE];
+        return message is string ? message : UNEXPECTED_ERROR_MSG;
+    }
+    if errorBody is string {
+        json|error parsedBody = errorBody.fromJsonString();
+        if parsedBody is map<json> {
+            json message = parsedBody[ERR_MESSAGE] ?: ();
+            return message is string ? message : errorBody;
+        }
+        return errorBody;
+    }
+    return UNEXPECTED_ERROR_MSG;
 }
 
 # Log forbidden project access attempt.
