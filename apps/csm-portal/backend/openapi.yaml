@@ -2730,6 +2730,28 @@ components:
           items:
             type: string
             format: uuid
+        caseId:
+          type: string
+          format: uuid
+          description: Only time cards logged against this case.
+        userId:
+          type: string
+          format: uuid
+          description: Only time cards submitted by this user.
+        approverId:
+          type: string
+          format: uuid
+          description: Only time cards this user is eligible to approve (SN approver_list). The approver's own cards are always excluded server-side.
+        approvedById:
+          type: string
+          format: uuid
+          description: Only time cards actually approved by this user (SN approved_by).
+        userIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Match cards submitted by any of these users.
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
