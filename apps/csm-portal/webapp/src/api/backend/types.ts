@@ -1637,11 +1637,32 @@ export interface BeTimeCardCaseRef {
 export interface BeTimeCardView {
   id: string;
   totalTime: number;
+  /**
+   * The date the work was actually carried out (YYYY-MM-DD) — what the engineer
+   * picked in the log form, so it can be in the past. This is the field to
+   * display and to group/sort by ("the week this work happened").
+   */
+  workDate: string;
+  /**
+   * @deprecated Superseded by {@link workDate}; don't build new logic on it. It
+   * currently reads the same underlying field, so the two hold the same value.
+   */
   createdOn: string;
   hasBillable: boolean;
   state: BeTimeCardState;
   user?: BeTimeCardRef;
-  approvedBy?: BeTimeCardRef;
+  /**
+   * The approver who accepted the card — populated **only** when `state` is
+   * `approved`. ServiceNow does not record who rejected a card, so this is null
+   * for a `rejected` card (and for an undecided one); see {@link rejectionReason}.
+   */
+  approvedBy?: BeTimeCardRef | null;
+  /**
+   * The approver's comment when rejecting — populated **only** when `state` is
+   * `rejected`, otherwise null. It's the only trace a rejection leaves: there is
+   * no "rejected by" / "rejected on" field (a known backend gap).
+   */
+  rejectionReason?: string | null;
   project?: BeTimeCardRef;
   case?: BeTimeCardCaseRef;
 }
