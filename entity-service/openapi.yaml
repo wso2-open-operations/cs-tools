@@ -4302,7 +4302,7 @@ components:
           items:
             $ref: '#/components/schemas/TimeCardState'
 
-    TimeCardSortBy:
+    TimeCardSort:
       type: object
       properties:
         field:
@@ -4320,7 +4320,7 @@ components:
         filters:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
         sortBy:
-          $ref: '#/components/schemas/TimeCardSortBy'
+          $ref: '#/components/schemas/TimeCardSort'
         pagination:
           type: object
           properties:

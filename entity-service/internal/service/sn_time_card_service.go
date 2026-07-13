@@ -135,7 +135,7 @@ func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 	view := domain.TimeCardView{
 		ID:                       sysidToUUID(tc.ID),
 		TotalTime:                tc.TotalTime,
-		CreatedOn:                tc.CreatedOn,
+		CreatedOn:                tc.WorkDate, // deprecated alias — always mirrors WorkDate, not SN's separate createdOn field
 		WorkDate:                 tc.WorkDate,
 		HasBillable:              tc.HasBillable,
 		TimeAnalyzing:            tc.TimeAnalyzing,
