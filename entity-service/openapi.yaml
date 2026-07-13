@@ -2232,7 +2232,7 @@ components:
           type: string
           description: Filter by account classification (e.g. enterprise).
 
-    Account:
+    SNAccountView:
       type: object
       properties:
         id:
@@ -2343,7 +2343,7 @@ components:
         accounts:
           type: array
           items:
-            $ref: '#/components/schemas/Account'
+            $ref: '#/components/schemas/SNAccountView'
         total:
           type: integer
         limit:
