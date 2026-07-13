@@ -30,7 +30,7 @@ export const TIME_CARD_MAX_PAGE_LIMIT = 50;
 
 // Role that grants approve/reject on time cards, matched (case-insensitively)
 // against `roles` from `GET /users/me`.
-export const TIMECARD_APPROVER_ROLE = "sn_customerservice_timecard_approver";
+export const TIMECARD_APPROVER_ROLE = "timecard_approver";
 
 // Time-card admin (approve by exception). Mapped to the real "admin" role for
 // now; revisit once dedicated time-card roles are provisioned.
