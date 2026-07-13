@@ -160,23 +160,24 @@ export interface CsmTimeSheet {
 
 /**
  * Filters for the time-card search. Sent in the POST body (never as query
- * params). `projectIds`, `userId`, `approverId`, and `from`/`to` are all
- * real, confirmed-working server-side filters. `states` is filtered
- * client-side instead — see the note on `searchTimeCards` in
- * `useTimeSheets.ts` for why. `from`/`to` currently has no UI control wired
- * to it; kept so a future date-range filter has somewhere to plug in.
- *
- * There is deliberately no `caseId` here even though `entity-service`
- * documents and implements one — confirmed live to be non-functional
- * (always `total: 0`); case scoping goes through `projectIds` plus a
- * client-side filter instead (see `useCaseTimeCards` in `useTimeCards.ts`).
+ * params). `projectIds`, `caseId`, `userId`/`userIds`, `approverId`, `states`,
+ * and `from`/`to` are all real server-side filters — every one of them is
+ * forwarded on the wire, none filtered client-side. `from`/`to` currently has
+ * no UI control wired to it on most tabs; kept so a date-range filter has
+ * somewhere to plug in (the Time Cards page does wire it up).
  */
 export interface TimeCardSearchFilters {
   /** Projects to include (company customer may own several). */
   projectIds?: string[];
+  /** Scope to a single case's own time cards (see `useCaseTimeCards`). */
+  caseId?: string;
   /** Only cards submitted by this user. */
   userId?: string;
-  /** Only cards this user is eligible to approve (backend: SN `approver_list`). */
+  /** Only cards submitted by any of these users — the Engineer multi-select
+   * filter (All/Approvals tabs), distinct from the single-user `userId`. */
+  userIds?: string[];
+  /** Only cards this user is eligible to approve (backend: SN `approver_list`);
+   * the caller's own cards are excluded unconditionally when this is set. */
   approverId?: string;
   /** Lifecycle states to include. */
   states?: TimeCardState[];
