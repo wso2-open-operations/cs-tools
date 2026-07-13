@@ -83,15 +83,23 @@ type snTimeCardsResponse struct {
 }
 
 type snTimeCard struct {
-	ID          string             `json:"id"`
-	TotalTime   float64            `json:"totalTime"`
-	CreatedOn   string             `json:"createdOn"`
-	HasBillable bool               `json:"hasBillable"`
-	State       *snTimeCardLabel   `json:"state"`
-	User        *snTimeCardRef     `json:"user"`
-	ApprovedBy  *snTimeCardRef     `json:"approvedBy"`
-	Project     *snTimeCardRef     `json:"project"`
-	Case        *snTimeCardCaseRef `json:"case"`
+	ID                       string             `json:"id"`
+	TotalTime                float64            `json:"totalTime"`
+	CreatedOn                string             `json:"createdOn"`
+	HasBillable              bool               `json:"hasBillable"`
+	TimeAnalyzing            int                `json:"timeAnalyzing"`
+	TimeSettingUp            int                `json:"timeSettingUp"`
+	TimeReproducingDebugging int                `json:"timeReproducingDebugging"`
+	TimeProvidingSolution    int                `json:"timeProvidingSolution"`
+	TimePatching             int                `json:"timePatching"`
+	IssueComplexity          *string            `json:"issueComplexity"`
+	WorkLogComment           *string            `json:"workLogComment"`
+	State                    *snTimeCardLabel   `json:"state"`
+	Approvers                []snTimeCardRef    `json:"approvers"`
+	User                     *snTimeCardRef     `json:"user"`
+	ApprovedBy               *snTimeCardRef     `json:"approvedBy"`
+	Project                  *snTimeCardRef     `json:"project"`
+	Case                     *snTimeCardCaseRef `json:"case"`
 }
 
 type snTimeCardLabel struct {
@@ -111,10 +119,17 @@ type snTimeCardCaseRef struct {
 
 func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 	view := domain.TimeCardView{
-		ID:          sysidToUUID(tc.ID),
-		TotalTime:   tc.TotalTime,
-		CreatedOn:   tc.CreatedOn,
-		HasBillable: tc.HasBillable,
+		ID:                       sysidToUUID(tc.ID),
+		TotalTime:                tc.TotalTime,
+		CreatedOn:                tc.CreatedOn,
+		HasBillable:              tc.HasBillable,
+		TimeAnalyzing:            tc.TimeAnalyzing,
+		TimeSettingUp:            tc.TimeSettingUp,
+		TimeReproducingDebugging: tc.TimeReproducingDebugging,
+		TimeProvidingSolution:    tc.TimeProvidingSolution,
+		TimePatching:             tc.TimePatching,
+		IssueComplexity:          tc.IssueComplexity,
+		WorkLogComment:           tc.WorkLogComment,
 	}
 
 	if tc.State != nil {
@@ -126,6 +141,13 @@ func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 		}
 	}
 
+	if len(tc.Approvers) > 0 {
+		approvers := make([]domain.TimeCardRef, 0, len(tc.Approvers))
+		for _, a := range tc.Approvers {
+			approvers = append(approvers, domain.TimeCardRef{ID: sysidToUUID(a.ID), Name: a.Name})
+		}
+		view.Approvers = approvers
+	}
 	if tc.User != nil {
 		view.User = &domain.TimeCardRef{ID: sysidToUUID(tc.User.ID), Name: tc.User.Name}
 	}

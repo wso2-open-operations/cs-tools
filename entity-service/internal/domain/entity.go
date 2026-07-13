@@ -1644,15 +1644,23 @@ type TimeCardCaseRef struct {
 
 // TimeCardView is a single time card in search results.
 type TimeCardView struct {
-	ID          string           `json:"id"`
-	TotalTime   float64          `json:"totalTime"`
-	CreatedOn   string           `json:"createdOn"`
-	HasBillable bool             `json:"hasBillable"`
-	State       *string          `json:"state"`
-	User        *TimeCardRef     `json:"user"`
-	ApprovedBy  *TimeCardRef     `json:"approvedBy"`
-	Project     *TimeCardRef     `json:"project"`
-	Case        *TimeCardCaseRef `json:"case"`
+	ID                       string           `json:"id"`
+	TotalTime                float64          `json:"totalTime"`
+	CreatedOn                string           `json:"createdOn"`
+	HasBillable              bool             `json:"hasBillable"`
+	TimeAnalyzing            int              `json:"timeAnalyzing"`
+	TimeSettingUp            int              `json:"timeSettingUp"`
+	TimeReproducingDebugging int              `json:"timeReproducingDebugging"`
+	TimeProvidingSolution    int              `json:"timeProvidingSolution"`
+	TimePatching             int              `json:"timePatching"`
+	IssueComplexity          *string          `json:"issueComplexity"`
+	WorkLogComment           *string          `json:"workLogComment"`
+	State                    *string          `json:"state"`
+	Approvers                []TimeCardRef    `json:"approvers,omitempty"`
+	User                     *TimeCardRef     `json:"user"`
+	ApprovedBy               *TimeCardRef     `json:"approvedBy"`
+	Project                  *TimeCardRef     `json:"project"`
+	Case                     *TimeCardCaseRef `json:"case"`
 }
 
 // SearchTimeCardsResponse is the response for POST /time-cards/search.

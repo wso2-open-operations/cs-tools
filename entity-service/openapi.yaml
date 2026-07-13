@@ -4353,8 +4353,34 @@ components:
           type: string
         hasBillable:
           type: boolean
+        timeAnalyzing:
+          type: integer
+          description: Minutes spent analyzing.
+        timeSettingUp:
+          type: integer
+          description: Minutes spent setting up.
+        timeReproducingDebugging:
+          type: integer
+          description: Minutes spent reproducing/debugging.
+        timeProvidingSolution:
+          type: integer
+          description: Minutes spent providing a solution.
+        timePatching:
+          type: integer
+          description: Minutes spent patching.
+        issueComplexity:
+          type: string
+          nullable: true
+        workLogComment:
+          type: string
+          nullable: true
         state:
           type: string
+        approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeCardRef'
+          description: Users eligible to approve this time card.
         user:
           $ref: '#/components/schemas/TimeCardRef'
         approvedBy:
