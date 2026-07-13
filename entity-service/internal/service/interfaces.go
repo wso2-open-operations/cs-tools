@@ -318,4 +318,19 @@ type IncidentService interface {
 	// SearchIncidents returns a paginated list of incidents filtered by optional search query,
 	// priority keys, and parent IDs. A ValidationError is returned for invalid input.
 	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
+
+	// CreateIncident creates a new incident in ServiceNow.
+	// callerId, category, serviceId, impact, urgency, and subject are required.
+	CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error)
+
+	// GetIncidentByID returns the full detail of a single incident by its UUID.
+	// A NotFoundError is returned if the incident does not exist.
+	GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error)
+}
+
+// ProblemService defines the operations available on the problems entity.
+type ProblemService interface {
+	// SearchProblems returns a paginated list of problems filtered by optional search query.
+	// A ValidationError is returned for invalid input.
+	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
 }

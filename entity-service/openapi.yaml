@@ -1830,6 +1830,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents/{id}:
+    get:
+      summary: Get an incident by ID (ServiceNow data source only).
+      operationId: getIncident
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Incident detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /incidents:
+    post:
+      summary: Create a new incident (ServiceNow data source only).
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        "201":
+          description: Incident created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIncidentResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Referenced resource not found (e.g. caller, service, or assignment group).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents/search:
     post:
       summary: Search incidents (ServiceNow data source only).
@@ -1847,6 +1932,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SearchIncidentsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /problems/search:
+    post:
+      summary: Search problems (ServiceNow data source only).
+      operationId: searchProblems
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProblemsRequest'
+      responses:
+        "200":
+          description: Paginated list of problems matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProblemsResponse'
         "400":
           description: Bad request.
           content:
@@ -5314,6 +5435,237 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SearchIncidentView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    CreateIncidentRequest:
+      type: object
+      required: [callerId, category, serviceId, impact, urgency, subject]
+      properties:
+        callerId:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE,
+                 SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS,
+                 FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH,
+                 SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY,
+                 UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION,
+                 INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
+          nullable: true
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+          nullable: true
+        configurationItemId:
+          type: string
+          format: uuid
+          nullable: true
+        contactType:
+          type: string
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT,
+                 PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+          nullable: true
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+        assignedEngineerId:
+          type: string
+          format: uuid
+          nullable: true
+        subject:
+          type: string
+        watchList:
+          type: array
+          items:
+            type: string
+        additionalComments:
+          type: string
+          nullable: true
+        workNotes:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        changeRequestId:
+          type: string
+          format: uuid
+          nullable: true
+        problemId:
+          type: string
+          format: uuid
+          nullable: true
+        causedById:
+          type: string
+          format: uuid
+          nullable: true
+
+    CreateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          type: object
+          properties:
+            id:
+              type: string
+            number:
+              type: string
+            createdOn:
+              type: string
+            createdBy:
+              type: string
+
+    IncidentView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        openedOn:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        caller:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        priority:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          nullable: true
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          nullable: true
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          nullable: true
+        parent:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        service:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        serviceOffering:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        configurationItem:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        contactType:
+          type: string
+          nullable: true
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT, PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+        impact:
+          type: string
+          nullable: true
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          nullable: true
+          enum: [HIGH, MEDIUM, LOW]
+        changeRequest:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        problem:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        causedBy:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        additionalComments:
+          type: string
+          nullable: true
+        workNotes:
+          type: string
+          nullable: true
+        watchList:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              email:
+                type: string
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+        updatedBy:
+          type: string
+
+    SearchProblemsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchProblemView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+
+    SearchProblemsResponse:
+      type: object
+      properties:
+        problems:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchProblemView'
         total:
           type: integer
         offset:

@@ -2210,3 +2210,188 @@ type SearchIncidentsResponse struct {
 	Offset    int                  `json:"offset"`
 	Limit     int                  `json:"limit"`
 }
+
+// IncidentCategory represents the category of an incident.
+type IncidentCategory string
+
+const (
+	IncidentCategoryInquiry             IncidentCategory = "INQUIRY"
+	IncidentCategoryServiceInterruption IncidentCategory = "SERVICE_INTERRUPTION"
+	IncidentCategorySecurity            IncidentCategory = "SECURITY"
+)
+
+// IncidentSubcategory represents the subcategory of an incident.
+type IncidentSubcategory string
+
+const (
+	IncidentSubcategoryDHCP                  IncidentSubcategory = "DHCP"
+	IncidentSubcategoryOracle                IncidentSubcategory = "ORACLE"
+	IncidentSubcategoryCPU                   IncidentSubcategory = "CPU"
+	IncidentSubcategoryKeyboard              IncidentSubcategory = "KEYBOARD"
+	IncidentSubcategoryDOSDDOS               IncidentSubcategory = "DOS_DDOS"
+	IncidentSubcategoryPrivilegeEscalations  IncidentSubcategory = "PRIVILEGE_ESCALATIONS"
+	IncidentSubcategoryThreatIntelligence    IncidentSubcategory = "THREAT_INTELLIGENCE"
+	IncidentSubcategoryScansAndProbes        IncidentSubcategory = "SCANS_AND_PROBES"
+	IncidentSubcategoryApplicationSecurity   IncidentSubcategory = "APPLICATION_SECURITY"
+	IncidentSubcategoryConfigChangeRequest   IncidentSubcategory = "CONFIG_CHANGE_REQUEST"
+	IncidentSubcategoryIPAddress             IncidentSubcategory = "IP_ADDRESS"
+	IncidentSubcategoryFullOutage            IncidentSubcategory = "FULL_OUTAGE"
+	IncidentSubcategorySQLServer             IncidentSubcategory = "SQL_SERVER"
+	IncidentSubcategorySlowness              IncidentSubcategory = "SLOWNESS"
+	IncidentSubcategoryMemory                IncidentSubcategory = "MEMORY"
+	IncidentSubcategoryMouse                 IncidentSubcategory = "MOUSE"
+	IncidentSubcategoryPrivacy               IncidentSubcategory = "PRIVACY"
+	IncidentSubcategoryDataBreach            IncidentSubcategory = "DATA_BREACH"
+	IncidentSubcategorySystemCompromises     IncidentSubcategory = "SYSTEM_COMPROMISES"
+	IncidentSubcategoryDNS                   IncidentSubcategory = "DNS"
+	IncidentSubcategoryOS                    IncidentSubcategory = "OS"
+	IncidentSubcategoryDisk                  IncidentSubcategory = "DISK"
+	IncidentSubcategoryVPN                   IncidentSubcategory = "VPN"
+	IncidentSubcategoryMalware               IncidentSubcategory = "MALWARE"
+	IncidentSubcategoryVulnerability         IncidentSubcategory = "VULNERABILITY"
+	IncidentSubcategoryUnauthorizedAccess    IncidentSubcategory = "UNAUTHORIZED_ACCESS"
+	IncidentSubcategoryIdentityProtection    IncidentSubcategory = "IDENTITY_PROTECTION"
+	IncidentSubcategoryPhishing              IncidentSubcategory = "PHISHING"
+	IncidentSubcategoryImproperConfiguration IncidentSubcategory = "IMPROPER_CONFIGURATION"
+	IncidentSubcategoryInformationRequest    IncidentSubcategory = "INFORMATION_REQUEST"
+	IncidentSubcategoryDB2                   IncidentSubcategory = "DB2"
+	IncidentSubcategoryPartialOutage         IncidentSubcategory = "PARTIAL_OUTAGE"
+	IncidentSubcategoryEmail                 IncidentSubcategory = "EMAIL"
+	IncidentSubcategoryMonitor               IncidentSubcategory = "MONITOR"
+	IncidentSubcategoryWireless              IncidentSubcategory = "WIRELESS"
+)
+
+// IncidentContactType represents the contact type of an incident.
+type IncidentContactType string
+
+const (
+	IncidentContactTypeSelfService   IncidentContactType = "SELF_SERVICE"
+	IncidentContactTypeEmail         IncidentContactType = "EMAIL"
+	IncidentContactTypeWalkIn        IncidentContactType = "WALK_IN"
+	IncidentContactTypeAzure         IncidentContactType = "AZURE"
+	IncidentContactTypeEmailInternal IncidentContactType = "EMAIL_INTERNAL"
+	IncidentContactTypeSite247       IncidentContactType = "SITE_247"
+	IncidentContactTypeDirect        IncidentContactType = "DIRECT"
+	IncidentContactTypePhone         IncidentContactType = "PHONE"
+	IncidentContactTypeSentinel      IncidentContactType = "SENTINEL"
+	IncidentContactTypeVirtualAgent  IncidentContactType = "VIRTUAL_AGENT"
+	IncidentContactTypeChat          IncidentContactType = "CHAT"
+	IncidentContactTypeEmailExternal IncidentContactType = "EMAIL_EXTERNAL"
+)
+
+// IncidentImpact represents the impact level of an incident.
+type IncidentImpact string
+
+const (
+	IncidentImpactHigh   IncidentImpact = "HIGH"
+	IncidentImpactMedium IncidentImpact = "MEDIUM"
+	IncidentImpactLow    IncidentImpact = "LOW"
+)
+
+// IncidentUrgency represents the urgency level of an incident.
+type IncidentUrgency string
+
+const (
+	IncidentUrgencyHigh   IncidentUrgency = "HIGH"
+	IncidentUrgencyMedium IncidentUrgency = "MEDIUM"
+	IncidentUrgencyLow    IncidentUrgency = "LOW"
+)
+
+// CreateIncidentRequest is the input for POST /incidents.
+type CreateIncidentRequest struct {
+	CallerID            string               `json:"callerId"`
+	Category            IncidentCategory     `json:"category"`
+	Subcategory         *IncidentSubcategory `json:"subcategory,omitempty"`
+	ServiceID           string               `json:"serviceId"`
+	ServiceOfferingID   *string              `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string              `json:"configurationItemId,omitempty"`
+	ContactType         *IncidentContactType `json:"contactType,omitempty"`
+	Impact              IncidentImpact       `json:"impact"`
+	Urgency             IncidentUrgency      `json:"urgency"`
+	AssignmentGroupID   *string              `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string              `json:"assignedEngineerId,omitempty"`
+	Subject             string               `json:"subject"`
+	WatchList           []string             `json:"watchList,omitempty"`
+	AdditionalComments  *string              `json:"additionalComments,omitempty"`
+	WorkNotes           *string              `json:"workNotes,omitempty"`
+	ParentID            *string              `json:"parentId,omitempty"`
+	ChangeRequestID     *string              `json:"changeRequestId,omitempty"`
+	ProblemID           *string              `json:"problemId,omitempty"`
+	CausedByID          *string              `json:"causedById,omitempty"`
+}
+
+// CreateIncidentResponse is the output for POST /incidents.
+type CreateIncidentResponse struct {
+	Message  string `json:"message"`
+	Incident struct {
+		ID        string `json:"id"`
+		Number    string `json:"number"`
+		CreatedOn string `json:"createdOn"`
+		CreatedBy string `json:"createdBy"`
+	} `json:"incident"`
+}
+
+// IncidentWatchListItem represents a user on the incident watch list.
+type IncidentWatchListItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// IncidentView is the full detail representation returned by GET /incidents/{id}.
+type IncidentView struct {
+	ID                 *string                 `json:"id"`
+	Number             *string                 `json:"number"`
+	OpenedOn           *string                 `json:"openedOn"`
+	Subject            *string                 `json:"subject"`
+	Caller             *EntityRef              `json:"caller"`
+	Priority           *string    `json:"priority"`
+	State              *string    `json:"state"`
+	Category           *string    `json:"category"`
+	Subcategory        *string    `json:"subcategory"`
+	Parent             *EntityRef `json:"parent"`
+	AssignmentGroup    *EntityRef `json:"assignmentGroup"`
+	AssignedTo         *EntityRef `json:"assignedTo"`
+	Service            *EntityRef `json:"service"`
+	ServiceOffering    *EntityRef `json:"serviceOffering"`
+	ConfigurationItem  *EntityRef `json:"configurationItem"`
+	ContactType        *string    `json:"contactType"`
+	Impact             *string    `json:"impact"`
+	Urgency            *string    `json:"urgency"`
+	ChangeRequest      *EntityRef              `json:"changeRequest"`
+	Problem            *EntityRef              `json:"problem"`
+	CausedBy           *EntityRef              `json:"causedBy"`
+	AdditionalComments *string                 `json:"additionalComments"`
+	WorkNotes          *string                 `json:"workNotes"`
+	WatchList          []IncidentWatchListItem `json:"watchList"`
+	CreatedOn          string                  `json:"createdOn"`
+	CreatedBy          string                  `json:"createdBy"`
+	UpdatedOn          string                  `json:"updatedOn"`
+	UpdatedBy          string                  `json:"updatedBy"`
+}
+
+// SearchProblemsFilters holds all optional filter criteria for a problem search.
+type SearchProblemsFilters struct {
+	SearchQuery string `json:"searchQuery"`
+}
+
+// SearchProblemsRequest is the input for POST /problems/search.
+type SearchProblemsRequest struct {
+	Filters    SearchProblemsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchProblemView is the problem representation returned in search results.
+type SearchProblemView struct {
+	ID      *string `json:"id"`
+	Number  *string `json:"number"`
+	Subject *string `json:"subject"`
+}
+
+// SearchProblemsResponse is the paginated result of a problem search.
+type SearchProblemsResponse struct {
+	Problems []SearchProblemView `json:"problems"`
+	Total    int                 `json:"total"`
+	Offset   int                 `json:"offset"`
+	Limit    int                 `json:"limit"`
+}
