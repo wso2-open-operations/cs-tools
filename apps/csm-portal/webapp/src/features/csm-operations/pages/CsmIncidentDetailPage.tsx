@@ -163,39 +163,29 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             },
           }}
         >
-          <MetaCell label="Caller"><RefText value={incident.caller} /></MetaCell>
-          <MetaCell label="Category">
-            <Typography variant="body2">{incident.category || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Subcategory">
-            <Typography variant="body2">{incident.subcategory || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Contact type">
-            <Typography variant="body2">{incident.contactType || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Impact">
-            <Typography variant="body2">{incident.impact || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Urgency">
-            <Typography variant="body2">{incident.urgency || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Service"><RefText value={incident.service} /></MetaCell>
-          <MetaCell label="Service offering"><RefText value={incident.serviceOffering} /></MetaCell>
-          <MetaCell label="Configuration item"><RefText value={incident.configurationItem} /></MetaCell>
-          <MetaCell label="Assignment group"><RefText value={incident.assignmentGroup} /></MetaCell>
-          <MetaCell label="Assigned to"><RefText value={incident.assignedTo} /></MetaCell>
-          <MetaCell label="Opened">
-            <Typography variant="body2">{formatDateTime(incident.openedOn)}</Typography>
-          </MetaCell>
-          <MetaCell label="Created">
-            <Typography variant="body2">{formatDateTime(incident.createdOn)}</Typography>
-          </MetaCell>
-          <MetaCell label="Created by">
-            <Typography variant="body2">{incident.createdBy || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Last updated">
-            <Typography variant="body2">{formatDateTime(incident.updatedOn)}</Typography>
-          </MetaCell>
+          {(
+            [
+              { label: "Caller", render: () => <RefText value={incident.caller} /> },
+              { label: "Category", render: () => <Typography variant="body2">{incident.category || "—"}</Typography> },
+              { label: "Subcategory", render: () => <Typography variant="body2">{incident.subcategory || "—"}</Typography> },
+              { label: "Contact type", render: () => <Typography variant="body2">{incident.contactType || "—"}</Typography> },
+              { label: "Impact", render: () => <Typography variant="body2">{incident.impact || "—"}</Typography> },
+              { label: "Urgency", render: () => <Typography variant="body2">{incident.urgency || "—"}</Typography> },
+              { label: "Service", render: () => <RefText value={incident.service} /> },
+              { label: "Service offering", render: () => <RefText value={incident.serviceOffering} /> },
+              { label: "Configuration item", render: () => <RefText value={incident.configurationItem} /> },
+              { label: "Assignment group", render: () => <RefText value={incident.assignmentGroup} /> },
+              { label: "Assigned to", render: () => <RefText value={incident.assignedTo} /> },
+              { label: "Opened", render: () => <Typography variant="body2">{formatDateTime(incident.openedOn)}</Typography> },
+              { label: "Created", render: () => <Typography variant="body2">{formatDateTime(incident.createdOn)}</Typography> },
+              { label: "Created by", render: () => <Typography variant="body2">{incident.createdBy || "—"}</Typography> },
+              { label: "Last updated", render: () => <Typography variant="body2">{formatDateTime(incident.updatedOn)}</Typography> },
+            ] satisfies Array<{ label: string; render: () => JSX.Element }>
+          ).map((field) => (
+            <MetaCell key={field.label} label={field.label}>
+              {field.render()}
+            </MetaCell>
+          ))}
         </Box>
       </Card>
 
