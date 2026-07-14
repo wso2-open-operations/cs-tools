@@ -247,12 +247,16 @@ export default function LogTimeCardDialog({
     });
   };
 
-  /** Submit on Enter, except inside the multiline work-log (where Enter = newline). */
+  /** Submit on Enter, except inside a multiline field (where Enter = newline)
+   * — the plain-textarea case (TEXTAREA) and the rich-text work log comment
+   * (a contenteditable div, not a TEXTAREA, so it needs its own check). */
   const handleKeyDown = (e: KeyboardEvent): void => {
+    const target = e.target as HTMLElement;
     if (
       e.key === "Enter" &&
       !e.shiftKey &&
-      (e.target as HTMLElement).tagName !== "TEXTAREA"
+      target.tagName !== "TEXTAREA" &&
+      !target.isContentEditable
     ) {
       e.preventDefault();
       handleSubmit();
@@ -399,7 +403,6 @@ export default function LogTimeCardDialog({
           <Box>
             <Typography
               id="work-log-comment-label"
-              component="label"
               variant="caption"
               color={
                 isTouched("workLogComment") && errors.workLogComment
