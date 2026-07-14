@@ -730,6 +730,11 @@ paths:
   /accounts/{id}:
     get:
       summary: Get an account by ID.
+      description: >
+        Returns full account detail. When the entity-service data source is
+        ServiceNow the response uses SNAccountDetail (supportTier as an
+        {id, label} object, owner/technicalOwner as {id, name} references);
+        for the postgres data source it uses Account.
       operationId: getAccountsId
       parameters:
         - name: id
@@ -744,7 +749,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Account'
+                oneOf:
+                  - $ref: '#/components/schemas/Account'
+                  - $ref: '#/components/schemas/SNAccountDetail'
         "400":
           description: BadRequest
           content:
@@ -779,6 +786,12 @@ paths:
   /accounts/search:
     post:
       summary: Search accounts.
+      description: >
+        Returns a paginated list of accounts. When the entity-service data
+        source is ServiceNow the response uses SNAccountSearchResponse
+        (supportTier as a plain label string, owner/technicalOwner as
+        {id, name} references); for the postgres data source it uses
+        AccountSearchResponse.
       operationId: postAccountsSearch
       requestBody:
         description: Account search payload
@@ -793,7 +806,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AccountSearchResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AccountSearchResponse'
+                  - $ref: '#/components/schemas/SNAccountSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -4042,9 +4057,21 @@ components:
                 limit:
                   default: 20
                   maximum: 100
-        searchQuery:
-          type: string
-          description: Searches across name and sfId (case-insensitive); max 200 characters
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across name and sfId (case-insensitive); max 200 characters
+            active:
+              type: boolean
+              description: Filter by active status. ServiceNow data source only.
+            pod:
+              type: string
+              description: Filter by pod. ServiceNow data source only.
+            classification:
+              type: string
+              description: Filter by classification. ServiceNow data source only.
 
     AccountSearchResponse:
       type: object
@@ -4097,6 +4124,130 @@ components:
         updatedOn:
           type: string
           format: date-time
+
+    SNAccountSearchResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SNAccountView'
+        total:
+          type: integer
+          description: Total number of matching accounts
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SNAccountView:
+      description: Account search view returned by the ServiceNow data source.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          type: string
+          nullable: true
+          description: Support tier label (e.g. "Gold", "Platinum").
+        arrToday:
+          type: string
+          nullable: true
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
+
+    SNSupportTierRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+
+    SNAccountDetail:
+      description: Full account detail returned by the ServiceNow data source.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SNSupportTierRef'
+        arrToday:
+          type: string
+          nullable: true
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
 
     ProjectSearchPayload:
       type: object

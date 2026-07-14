@@ -210,8 +210,8 @@ backend/
 
 ### Accounts
 
-- `GET /accounts/{id}` — Get account by ID
-- `POST /accounts/search` — Search accounts
+- `GET /accounts/{id}` — Get account by ID; response shape depends on data source (`Account` for postgres, `SNAccountDetail` for ServiceNow — `supportTier` as `{id, label}`, `owner`/`technicalOwner` as `{id, name}`)
+- `POST /accounts/search` — Search accounts; optional `filters` (`searchQuery`; `active`, `pod`, `classification` are ServiceNow data source only); response shape depends on data source (`Account` for postgres, `SNAccountView` for ServiceNow — `supportTier` as a label string, `owner`/`technicalOwner` as `{id, name}`)
 
 ### Projects
 
