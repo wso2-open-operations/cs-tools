@@ -45,6 +45,7 @@ type snIncident struct {
 	State           *snIncidentIntLabel  `json:"state"`
 	Category        *snIncidentStrLabel  `json:"category"`
 	Parent          *snIncidentEntityRef `json:"parent"`
+	ParentIncident  *snIncidentEntityRef `json:"parentIncident"`
 	AssignmentGroup *snIncidentEntityRef `json:"assignmentGroup"`
 	AssignedTo      *snIncidentEntityRef `json:"assignedTo"`
 	CreatedOn       string               `json:"createdOn"`
@@ -246,6 +247,9 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 		if inc.Parent != nil {
 			view.Parent = &domain.EntityRef{ID: sysidToUUID(inc.Parent.ID), Name: inc.Parent.Name}
 		}
+		if inc.ParentIncident != nil {
+			view.ParentIncident = &domain.EntityRef{ID: sysidToUUID(inc.ParentIncident.ID), Name: inc.ParentIncident.Name}
+		}
 		if inc.AssignmentGroup != nil {
 			view.AssignmentGroup = &domain.EntityRef{ID: sysidToUUID(inc.AssignmentGroup.ID), Name: inc.AssignmentGroup.Name}
 		}
@@ -428,6 +432,7 @@ type snCreateIncidentPayload struct {
 	AdditionalComments  *string  `json:"additionalComments,omitempty"`
 	WorkNotes           *string  `json:"workNotes,omitempty"`
 	ParentID            *string  `json:"parentId,omitempty"`
+	ParentIncidentID    *string  `json:"parentIncidentId,omitempty"`
 	ChangeRequestID     *string  `json:"changeRequestId,omitempty"`
 	ProblemID           *string  `json:"problemId,omitempty"`
 	CausedByID          *string  `json:"causedById,omitempty"`
@@ -494,6 +499,7 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 		"assignmentGroupId":   req.AssignmentGroupID,
 		"assignedEngineerId":  req.AssignedEngineerID,
 		"parentId":            req.ParentID,
+		"parentIncidentId":    req.ParentIncidentID,
 		"changeRequestId":     req.ChangeRequestID,
 		"problemId":           req.ProblemID,
 		"causedById":          req.CausedByID,
@@ -549,6 +555,10 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	if req.ParentID != nil {
 		v := uuidToSysid(*req.ParentID)
 		payload.ParentID = &v
+	}
+	if req.ParentIncidentID != nil {
+		v := uuidToSysid(*req.ParentIncidentID)
+		payload.ParentIncidentID = &v
 	}
 	if req.ChangeRequestID != nil {
 		v := uuidToSysid(*req.ChangeRequestID)
@@ -662,6 +672,7 @@ type snGetIncidentResponse struct {
 	Category           *snIncidentStrLabel      `json:"category"`
 	Subcategory        *snIncidentStrLabel      `json:"subcategory"`
 	Parent             *snIncidentEntityRef     `json:"parent"`
+	ParentIncident     *snIncidentEntityRef     `json:"parentIncident"`
 	AssignmentGroup    *snIncidentEntityRef     `json:"assignmentGroup"`
 	AssignedTo         *snIncidentEntityRef     `json:"assignedTo"`
 	Service            *snIncidentEntityRef     `json:"service"`
@@ -750,6 +761,9 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 	}
 	if sn.Parent != nil {
 		view.Parent = &domain.EntityRef{ID: sysidToUUID(sn.Parent.ID), Name: sn.Parent.Name}
+	}
+	if sn.ParentIncident != nil {
+		view.ParentIncident = &domain.EntityRef{ID: sysidToUUID(sn.ParentIncident.ID), Name: sn.ParentIncident.Name}
 	}
 	if sn.AssignmentGroup != nil {
 		view.AssignmentGroup = &domain.EntityRef{ID: sysidToUUID(sn.AssignmentGroup.ID), Name: sn.AssignmentGroup.Name}

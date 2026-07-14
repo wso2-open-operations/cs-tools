@@ -2268,6 +2268,7 @@ type SearchIncidentView struct {
 	State           *string    `json:"state"`
 	Category        *string    `json:"category"`
 	Parent          *EntityRef `json:"parent"`
+	ParentIncident  *EntityRef `json:"parentIncident"`
 	AssignmentGroup *EntityRef `json:"assignmentGroup"`
 	AssignedTo      *EntityRef `json:"assignedTo"`
 	CreatedOn       string     `json:"createdOn"`
@@ -2388,6 +2389,7 @@ type CreateIncidentRequest struct {
 	AdditionalComments  *string              `json:"additionalComments,omitempty"`
 	WorkNotes           *string              `json:"workNotes,omitempty"`
 	ParentID            *string              `json:"parentId,omitempty"`
+	ParentIncidentID    *string              `json:"parentIncidentId,omitempty"`
 	ChangeRequestID     *string              `json:"changeRequestId,omitempty"`
 	ProblemID           *string              `json:"problemId,omitempty"`
 	CausedByID          *string              `json:"causedById,omitempty"`
@@ -2418,19 +2420,20 @@ type IncidentView struct {
 	OpenedOn           *string                 `json:"openedOn"`
 	Subject            *string                 `json:"subject"`
 	Caller             *EntityRef              `json:"caller"`
-	Priority           *string                 `json:"priority"`
-	State              *string                 `json:"state"`
-	Category           *string                 `json:"category"`
-	Subcategory        *string                 `json:"subcategory"`
-	Parent             *EntityRef              `json:"parent"`
-	AssignmentGroup    *EntityRef              `json:"assignmentGroup"`
-	AssignedTo         *EntityRef              `json:"assignedTo"`
-	Service            *EntityRef              `json:"service"`
-	ServiceOffering    *EntityRef              `json:"serviceOffering"`
-	ConfigurationItem  *EntityRef              `json:"configurationItem"`
-	ContactType        *string                 `json:"contactType"`
-	Impact             *string                 `json:"impact"`
-	Urgency            *string                 `json:"urgency"`
+	Priority           *string    `json:"priority"`
+	State              *string    `json:"state"`
+	Category           *string    `json:"category"`
+	Subcategory        *string    `json:"subcategory"`
+	Parent             *EntityRef `json:"parent"`
+	ParentIncident     *EntityRef `json:"parentIncident"`
+	AssignmentGroup    *EntityRef `json:"assignmentGroup"`
+	AssignedTo         *EntityRef `json:"assignedTo"`
+	Service            *EntityRef `json:"service"`
+	ServiceOffering    *EntityRef `json:"serviceOffering"`
+	ConfigurationItem  *EntityRef `json:"configurationItem"`
+	ContactType        *string    `json:"contactType"`
+	Impact             *string    `json:"impact"`
+	Urgency            *string    `json:"urgency"`
 	ChangeRequest      *EntityRef              `json:"changeRequest"`
 	Problem            *EntityRef              `json:"problem"`
 	CausedBy           *EntityRef              `json:"causedBy"`

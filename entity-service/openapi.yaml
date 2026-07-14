@@ -5587,6 +5587,9 @@ components:
         parent:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
+        parentIncident:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
         assignmentGroup:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -5681,6 +5684,10 @@ components:
           type: string
           format: uuid
           nullable: true
+        parentIncidentId:
+          type: string
+          format: uuid
+          nullable: true
         changeRequestId:
           type: string
           format: uuid
@@ -5745,6 +5752,9 @@ components:
           type: string
           nullable: true
         parent:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        parentIncident:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
         assignmentGroup:
