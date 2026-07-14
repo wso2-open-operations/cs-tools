@@ -328,7 +328,6 @@ export default function CreateChangeRequestPage(): JSX.Element {
     <Box>
       <Typography
         id={`${id}-label`}
-        component="label"
         variant="caption"
         color="text.secondary"
         sx={{ display: "block", mb: 0.5 }}
