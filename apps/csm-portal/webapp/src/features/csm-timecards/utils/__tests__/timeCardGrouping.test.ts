@@ -52,6 +52,19 @@ describe("groupTimeCards", () => {
     expect(cs001.totalMinutes).toBe(45);
   });
 
+  it("falls back to caseNumber as the group key when caseId is empty", () => {
+    const groups = groupTimeCards(
+      [
+        card({ id: "a", caseId: "", caseNumber: "CS0000003", totalMinutes: 20 }),
+        card({ id: "b", caseId: "", caseNumber: "CS0000003", totalMinutes: 10 }),
+      ],
+      "case",
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe("CS0000003");
+    expect(groups[0].totalMinutes).toBe(30);
+  });
+
   it("groups by engineer instead when asked", () => {
     const groups = groupTimeCards(
       [
@@ -61,6 +74,19 @@ describe("groupTimeCards", () => {
       "engineer",
     );
     expect(groups.map((g) => g.label).sort()).toEqual(["Alice", "Bob"]);
+  });
+
+  it("groups by engineer, summing minutes across that engineer's cards", () => {
+    const groups = groupTimeCards(
+      [
+        card({ id: "a", userId: "u1", userName: "Alice", totalMinutes: 25 }),
+        card({ id: "b", userId: "u1", userName: "Alice", totalMinutes: 35 }),
+      ],
+      "engineer",
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].cards).toHaveLength(2);
+    expect(groups[0].totalMinutes).toBe(60);
   });
 
   it("sorts cards within a group newest work date first", () => {
