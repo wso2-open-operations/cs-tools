@@ -557,7 +557,8 @@ func (m *mockEntityDeploymentClient) PatchDeployedProduct(ctx context.Context, d
 // ----- mock entity conversation client -----
 
 type mockEntityConversationClient struct {
-	searchCommentsFn func(ctx context.Context, body []byte) ([]byte, error)
+	searchCommentsFn      func(ctx context.Context, body []byte) ([]byte, error)
+	searchConversationsFn func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityConversationClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
@@ -565,6 +566,13 @@ func (m *mockEntityConversationClient) SearchComments(ctx context.Context, body 
 		return m.searchCommentsFn(ctx, body)
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
+}
+
+func (m *mockEntityConversationClient) SearchConversations(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchConversationsFn != nil {
+		return m.searchConversationsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
 }
 
 // ----- mock entity task SLA client -----

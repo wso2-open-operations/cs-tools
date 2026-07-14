@@ -753,24 +753,24 @@ const (
 type CaseResolutionCode string
 
 const (
-	CaseResolutionCodeSolvedFixedBySupportGuidanceProvided    CaseResolutionCode = "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
-	CaseResolutionCodeSolvedFixedByClosingRelatedIncident     CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
-	CaseResolutionCodeSolvedFixedByClosingRelatedRDTicket     CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
-	CaseResolutionCodeSolvedWorkaroundProvided                CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED"
-	CaseResolutionCodeSolvedByCustomer                        CaseResolutionCode = "SOLVED_BY_CUSTOMER"
-	CaseResolutionCodeConsideredForRoadmap                    CaseResolutionCode = "CONSIDERED_FOR_ROADMAP"
-	CaseResolutionCodeInconclusiveOutOfScope                  CaseResolutionCode = "INCONCLUSIVE_OUT_OF_SCOPE"
-	CaseResolutionCodeInconclusiveCannotReproduce             CaseResolutionCode = "INCONCLUSIVE_CANNOT_REPRODUCE"
-	CaseResolutionCodeInconclusiveNoWorkaround                CaseResolutionCode = "INCONCLUSIVE_NO_WORKAROUND"
-	CaseResolutionCodeDuplicateIssue                          CaseResolutionCode = "DUPLICATE_ISSUE"
-	CaseResolutionCodeVoidedCanceled                          CaseResolutionCode = "VOIDED_CANCELED"
-	CaseResolutionCodeOnHold                                  CaseResolutionCode = "ON_HOLD"
-	CaseResolutionCodeConsideredForRoadmapAlt                 CaseResolutionCode = "CONSIDERED_FOR_ROADMAP_ALT"
-	CaseResolutionCodeSolvedFixedTheIssue                     CaseResolutionCode = "SOLVED_FIXED_THE_ISSUE"
-	CaseResolutionCodeSolvedWorkaroundProvidedAlt             CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED_ALT"
-	CaseResolutionCodeSolvedByContributor                     CaseResolutionCode = "SOLVED_BY_CONTRIBUTOR"
-	CaseResolutionCodeSolvedByNovera                          CaseResolutionCode = "SOLVED_BY_NOVERA"
-	CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness    CaseResolutionCode = "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS"
+	CaseResolutionCodeSolvedFixedBySupportGuidanceProvided CaseResolutionCode = "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
+	CaseResolutionCodeSolvedFixedByClosingRelatedIncident  CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
+	CaseResolutionCodeSolvedFixedByClosingRelatedRDTicket  CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
+	CaseResolutionCodeSolvedWorkaroundProvided             CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED"
+	CaseResolutionCodeSolvedByCustomer                     CaseResolutionCode = "SOLVED_BY_CUSTOMER"
+	CaseResolutionCodeConsideredForRoadmap                 CaseResolutionCode = "CONSIDERED_FOR_ROADMAP"
+	CaseResolutionCodeInconclusiveOutOfScope               CaseResolutionCode = "INCONCLUSIVE_OUT_OF_SCOPE"
+	CaseResolutionCodeInconclusiveCannotReproduce          CaseResolutionCode = "INCONCLUSIVE_CANNOT_REPRODUCE"
+	CaseResolutionCodeInconclusiveNoWorkaround             CaseResolutionCode = "INCONCLUSIVE_NO_WORKAROUND"
+	CaseResolutionCodeDuplicateIssue                       CaseResolutionCode = "DUPLICATE_ISSUE"
+	CaseResolutionCodeVoidedCanceled                       CaseResolutionCode = "VOIDED_CANCELED"
+	CaseResolutionCodeOnHold                               CaseResolutionCode = "ON_HOLD"
+	CaseResolutionCodeConsideredForRoadmapAlt              CaseResolutionCode = "CONSIDERED_FOR_ROADMAP_ALT"
+	CaseResolutionCodeSolvedFixedTheIssue                  CaseResolutionCode = "SOLVED_FIXED_THE_ISSUE"
+	CaseResolutionCodeSolvedWorkaroundProvidedAlt          CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED_ALT"
+	CaseResolutionCodeSolvedByContributor                  CaseResolutionCode = "SOLVED_BY_CONTRIBUTOR"
+	CaseResolutionCodeSolvedByNovera                       CaseResolutionCode = "SOLVED_BY_NOVERA"
+	CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness CaseResolutionCode = "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS"
 )
 
 // CaseCause enumerates the root-cause categories for a resolved case.
@@ -1004,15 +1004,15 @@ type SearchCasesResponse struct {
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
 type UpdateCaseRequest struct {
-	ID             string         `json:"-"`
-	State          *CaseState     `json:"state"`
-	Severity       *CaseSeverity  `json:"severity"`
-	WorkState      *CaseWorkState `json:"workState"`
-	WatchList      []string       `json:"watchList"`
-	AssigneeEmail  *string        `json:"assigneeEmail"`
+	ID             string              `json:"-"`
+	State          *CaseState          `json:"state"`
+	Severity       *CaseSeverity       `json:"severity"`
+	WorkState      *CaseWorkState      `json:"workState"`
+	WatchList      []string            `json:"watchList"`
+	AssigneeEmail  *string             `json:"assigneeEmail"`
 	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
-	Cause          *CaseCause     `json:"cause"`
-	CloseNotes     *string        `json:"closeNotes"`
+	Cause          *CaseCause          `json:"cause"`
+	CloseNotes     *string             `json:"closeNotes"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -2259,21 +2259,21 @@ type SearchIncidentsRequest struct {
 
 // SearchIncidentView is the unified incident representation returned in search results.
 type SearchIncidentView struct {
-	ID              *string              `json:"id"`
-	Number          *string              `json:"number"`
-	OpenedOn        *string              `json:"openedOn"`
-	Subject         *string              `json:"subject"`
-	Caller          *EntityRef           `json:"caller"`
-	Priority        *string `json:"priority"`
-	State           *string `json:"state"`
-	Category        *string `json:"category"`
-	Parent          *EntityRef           `json:"parent"`
-	AssignmentGroup *EntityRef           `json:"assignmentGroup"`
-	AssignedTo      *EntityRef           `json:"assignedTo"`
-	CreatedOn       string               `json:"createdOn"`
-	CreatedBy       string               `json:"createdBy"`
-	UpdatedOn       string               `json:"updatedOn"`
-	UpdatedBy       string               `json:"updatedBy"`
+	ID              *string    `json:"id"`
+	Number          *string    `json:"number"`
+	OpenedOn        *string    `json:"openedOn"`
+	Subject         *string    `json:"subject"`
+	Caller          *EntityRef `json:"caller"`
+	Priority        *string    `json:"priority"`
+	State           *string    `json:"state"`
+	Category        *string    `json:"category"`
+	Parent          *EntityRef `json:"parent"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
+	CreatedOn       string     `json:"createdOn"`
+	CreatedBy       string     `json:"createdBy"`
+	UpdatedOn       string     `json:"updatedOn"`
+	UpdatedBy       string     `json:"updatedBy"`
 }
 
 // SearchIncidentsResponse is the paginated result of an incident search.
@@ -2418,19 +2418,19 @@ type IncidentView struct {
 	OpenedOn           *string                 `json:"openedOn"`
 	Subject            *string                 `json:"subject"`
 	Caller             *EntityRef              `json:"caller"`
-	Priority           *string    `json:"priority"`
-	State              *string    `json:"state"`
-	Category           *string    `json:"category"`
-	Subcategory        *string    `json:"subcategory"`
-	Parent             *EntityRef `json:"parent"`
-	AssignmentGroup    *EntityRef `json:"assignmentGroup"`
-	AssignedTo         *EntityRef `json:"assignedTo"`
-	Service            *EntityRef `json:"service"`
-	ServiceOffering    *EntityRef `json:"serviceOffering"`
-	ConfigurationItem  *EntityRef `json:"configurationItem"`
-	ContactType        *string    `json:"contactType"`
-	Impact             *string    `json:"impact"`
-	Urgency            *string    `json:"urgency"`
+	Priority           *string                 `json:"priority"`
+	State              *string                 `json:"state"`
+	Category           *string                 `json:"category"`
+	Subcategory        *string                 `json:"subcategory"`
+	Parent             *EntityRef              `json:"parent"`
+	AssignmentGroup    *EntityRef              `json:"assignmentGroup"`
+	AssignedTo         *EntityRef              `json:"assignedTo"`
+	Service            *EntityRef              `json:"service"`
+	ServiceOffering    *EntityRef              `json:"serviceOffering"`
+	ConfigurationItem  *EntityRef              `json:"configurationItem"`
+	ContactType        *string                 `json:"contactType"`
+	Impact             *string                 `json:"impact"`
+	Urgency            *string                 `json:"urgency"`
 	ChangeRequest      *EntityRef              `json:"changeRequest"`
 	Problem            *EntityRef              `json:"problem"`
 	CausedBy           *EntityRef              `json:"causedBy"`
@@ -2467,4 +2467,70 @@ type SearchProblemsResponse struct {
 	Total    int                 `json:"total"`
 	Offset   int                 `json:"offset"`
 	Limit    int                 `json:"limit"`
+}
+
+// ConversationState represents the state of a conversation.
+type ConversationState string
+
+const (
+	ConversationStateActive   ConversationState = "ACTIVE"
+	ConversationStateResolved ConversationState = "RESOLVED"
+)
+
+// ConversationSortField enumerates the columns available for sorting conversation search results.
+type ConversationSortField string
+
+const (
+	ConversationSortFieldCreatedOn ConversationSortField = "createdOn"
+	ConversationSortFieldUpdatedOn ConversationSortField = "updatedOn"
+)
+
+// ConversationSortOrder controls the sort direction for conversation search.
+type ConversationSortOrder string
+
+const (
+	ConversationSortOrderAsc  ConversationSortOrder = "asc"
+	ConversationSortOrderDesc ConversationSortOrder = "desc"
+)
+
+// ConversationSort specifies the sort field and direction for conversation search results.
+type ConversationSort struct {
+	Field ConversationSortField `json:"field"`
+	Order ConversationSortOrder `json:"order"`
+}
+
+// SearchConversationsFilters holds all optional filter criteria for a conversation search.
+type SearchConversationsFilters struct {
+	ProjectIDs  []string            `json:"projectIds"`
+	States      []ConversationState `json:"states"`
+	SearchQuery string              `json:"searchQuery"`
+	CreatedByMe bool                `json:"createdByMe"`
+}
+
+// SearchConversationsRequest is the input for POST /conversations/search.
+type SearchConversationsRequest struct {
+	Filters    SearchConversationsFilters `json:"filters"`
+	SortBy     ConversationSort           `json:"sortBy"`
+	Pagination Pagination                 `json:"pagination"`
+}
+
+// SearchConversationView is the conversation representation returned in search results.
+type SearchConversationView struct {
+	ID             *string    `json:"id"`
+	Number         *string    `json:"number"`
+	InitialMessage *string    `json:"initialMessage"`
+	MessageCount   int        `json:"messageCount"`
+	Project        *EntityRef `json:"project"`
+	Case           *EntityRef `json:"case"`
+	State          *string    `json:"state"`
+	CreatedOn      string     `json:"createdOn"`
+	CreatedBy      string     `json:"createdBy"`
+}
+
+// SearchConversationsResponse is the paginated result of a conversation search.
+type SearchConversationsResponse struct {
+	Conversations []SearchConversationView `json:"conversations"`
+	Total         int                      `json:"total"`
+	Offset        int                      `json:"offset"`
+	Limit         int                      `json:"limit"`
 }

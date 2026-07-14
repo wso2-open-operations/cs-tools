@@ -325,6 +325,12 @@ func (c *Client) SearchComments(ctx context.Context, body []byte) ([]byte, error
 	return c.do(ctx, http.MethodPost, "/comments/search", body)
 }
 
+// SearchConversations calls POST /conversations/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchConversations(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/conversations/search", body)
+}
+
 // SearchTaskSlas calls POST /slas/search on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) SearchTaskSlas(ctx context.Context, body []byte) ([]byte, error) {
