@@ -85,7 +85,8 @@ export function CompositionDonut({
           <Box
             sx={{
               position: "relative",
-              width: DONUT_SIZE,
+              width: "100%",
+              maxWidth: DONUT_SIZE,
               height: DONUT_SIZE,
               flexShrink: 0,
               ...(onSliceClick && { "& .recharts-pie-sector": { cursor: "pointer" } }),
