@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { useCallback, useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
   AdapterDateFns,
   Box,
@@ -291,12 +291,17 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const approvalsRole = approvalsRoleFor(role.isAdmin);
 
   /** Client-side work-item filter (case number is in the selected set),
-   * applied over an already-fetched page of cards. */
-  const byWorkItem = (cards: CsmTimeCard[] | undefined): CsmTimeCard[] => {
-    if (!cards) return [];
-    if (filterWorkItem.length === 0) return cards;
-    return cards.filter((c) => filterWorkItem.includes(c.caseNumber));
-  };
+   * applied over an already-fetched page of cards. Stable per filterWorkItem
+   * so the memoized *FilteredCards below only recompute when it (or the
+   * underlying data) actually changes. */
+  const byWorkItem = useCallback(
+    (cards: CsmTimeCard[] | undefined): CsmTimeCard[] => {
+      if (!cards) return [];
+      if (filterWorkItem.length === 0) return cards;
+      return cards.filter((c) => filterWorkItem.includes(c.caseNumber));
+    },
+    [filterWorkItem],
+  );
 
   // Work-item / engineer option lists are scoped per tab — each tab has its
   // own loaded page of cards, and there's no search endpoint for either, so
@@ -326,10 +331,21 @@ export default function CsmTimeCardsPage(): JSX.Element {
   // export action and the table rendering below — rather than recomputing
   // (and risking drift) in two places. Engineer is already applied
   // server-side (via filtersWithEngineer) by the time allCards/queue resolve
-  // — only work item still needs a client-side pass here.
-  const mineFilteredCards = byWorkItem(myCards.data?.cards);
-  const allFilteredCards = byWorkItem(allCards.data?.cards);
-  const approvalsFilteredCards = byWorkItem(queue.data?.cards);
+  // — only work item still needs a client-side pass here. Memoized so a
+  // render triggered by unrelated state (e.g. the groupBy toggle) doesn't
+  // reallocate these arrays on every tab.
+  const mineFilteredCards = useMemo(
+    () => byWorkItem(myCards.data?.cards),
+    [myCards.data, byWorkItem],
+  );
+  const allFilteredCards = useMemo(
+    () => byWorkItem(allCards.data?.cards),
+    [allCards.data, byWorkItem],
+  );
+  const approvalsFilteredCards = useMemo(
+    () => byWorkItem(queue.data?.cards),
+    [queue.data, byWorkItem],
+  );
 
   return (
     <Box
@@ -372,12 +388,11 @@ export default function CsmTimeCardsPage(): JSX.Element {
             onClear={clearFilters}
           />
 
-          {/* myCards stays disabled until `projects` resolves a project
-           scope (see scopeProjectIds above), so its own isLoading never
-           turns true during that wait — fold projects.isLoading in too, or
-           this would flash the empty state before real data has a chance to
-           load. The filter bar itself renders regardless, same as Approvals
-           below, so it's never hidden behind this spinner. */}
+          {/* projects.isLoading is folded into the table's isLoading (not
+           just myCards.isLoading) so the empty state doesn't flash while
+           the Project filter dropdown's own data is still loading. The
+           filter bar itself renders regardless, same as Approvals below,
+           so it's never hidden behind this spinner. */}
           {myCards.isError ? (
             <Typography color="error">Could not load your time cards.</Typography>
           ) : (
