@@ -41,6 +41,7 @@ import {
 // below the sm breakpoint, on this desktop-only portal page.
 const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 import { Clock, Search, X } from "@wso2/oxygen-ui-icons-react";
+import Editor from "@components/rich-text-editor/Editor";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
@@ -246,12 +247,16 @@ export default function LogTimeCardDialog({
     });
   };
 
-  /** Submit on Enter, except inside the multiline work-log (where Enter = newline). */
+  /** Submit on Enter, except inside a multiline field (where Enter = newline)
+   * — the plain-textarea case (TEXTAREA) and the rich-text work log comment
+   * (a contenteditable div, not a TEXTAREA, so it needs its own check). */
   const handleKeyDown = (e: KeyboardEvent): void => {
+    const target = e.target as HTMLElement;
     if (
       e.key === "Enter" &&
       !e.shiftKey &&
-      (e.target as HTMLElement).tagName !== "TEXTAREA"
+      target.tagName !== "TEXTAREA" &&
+      !target.isContentEditable
     ) {
       e.preventDefault();
       handleSubmit();
@@ -389,24 +394,50 @@ export default function LogTimeCardDialog({
             />
           </Box>
 
-          {/* Work log */}
-          <TextField
-            label="Work log comment"
-            required
-            multiline
-            minRows={3}
-            value={workLogComment}
-            onChange={(e) =>
-              setWorkLogComment(e.target.value.slice(0, WORK_LOG_MAX))
-            }
-            onBlur={() => touch("workLogComment")}
-            error={isTouched("workLogComment") && !!errors.workLogComment}
-            helperText={
-              isTouched("workLogComment") && errors.workLogComment
+          {/* Work log — rich text, matching ServiceNow's own work-notes
+              convention. Never truncated on input (unlike the old plain
+              TextField's live .slice()): naively cutting HTML at a fixed
+              offset risks slicing a tag in half and corrupting the markup.
+              The WORK_LOG_MAX cap is still enforced (see
+              timeCardDraftErrors), just not by mid-typing truncation. */}
+          <Box>
+            <Typography
+              id="work-log-comment-label"
+              variant="caption"
+              color={
+                isTouched("workLogComment") && errors.workLogComment
+                  ? "error"
+                  : "text.secondary"
+              }
+              sx={{ display: "block", mb: 0.5 }}
+            >
+              Work log comment *
+            </Typography>
+            <Box role="group" aria-labelledby="work-log-comment-label">
+              <Editor
+                value={workLogComment}
+                onChange={setWorkLogComment}
+                onBlur={() => touch("workLogComment")}
+                placeholder="What did you work on?"
+                minHeight={80}
+                maxHeight={240}
+                toolbarVariant="full"
+              />
+            </Box>
+            <Typography
+              variant="caption"
+              color={
+                isTouched("workLogComment") && errors.workLogComment
+                  ? "error"
+                  : "text.secondary"
+              }
+              sx={{ display: "block", mt: 0.5 }}
+            >
+              {isTouched("workLogComment") && errors.workLogComment
                 ? errors.workLogComment
-                : `${WORK_LOG_MAX - workLogComment.length} characters left`
-            }
-          />
+                : `${WORK_LOG_MAX - workLogComment.length} characters left`}
+            </Typography>
+          </Box>
 
           {/* Approver */}
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>

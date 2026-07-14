@@ -77,5 +77,21 @@ describe("timeCardTotals", () => {
       });
       expect(errors.workLogComment).toBeDefined();
     });
+
+    it("flags an untouched rich-text editor's empty-looking HTML as blank", () => {
+      const errors = timeCardDraftErrors({
+        ...valid,
+        workLogComment: "<p><br></p>",
+      });
+      expect(errors.workLogComment).toBeDefined();
+    });
+
+    it("accepts real HTML content from the rich-text editor", () => {
+      const errors = timeCardDraftErrors({
+        ...valid,
+        workLogComment: "<p>Investigated <strong>root cause</strong>.</p>",
+      });
+      expect(errors.workLogComment).toBeUndefined();
+    });
   });
 });
