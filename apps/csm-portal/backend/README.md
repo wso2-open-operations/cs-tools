@@ -210,8 +210,8 @@ backend/
 
 ### Accounts
 
-- `GET /accounts/{id}` — Get account by ID
-- `POST /accounts/search` — Search accounts
+- `GET /accounts/{id}` — Get account by ID; response takes one of two shapes: `Account`, or `AccountDetail` (`supportTier` as `{id, label}`, `owner`/`technicalOwner` as `{id, name}`)
+- `POST /accounts/search` — Search accounts; optional `filters` (`searchQuery`, `active`, `pod`, `classification`); response takes one of two shapes: `AccountSearchResponse`, or `AccountViewSearchResponse` (`supportTier` as a label string, `owner`/`technicalOwner` as `{id, name}`)
 
 ### Projects
 

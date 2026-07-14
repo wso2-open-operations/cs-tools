@@ -730,6 +730,10 @@ paths:
   /accounts/{id}:
     get:
       summary: Get an account by ID.
+      description: >
+        Returns full account detail. The response takes one of two shapes:
+        Account, or AccountDetail (supportTier as an {id, label} object,
+        owner/technicalOwner as {id, name} references).
       operationId: getAccountsId
       parameters:
         - name: id
@@ -744,7 +748,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Account'
+                oneOf:
+                  - $ref: '#/components/schemas/Account'
+                  - $ref: '#/components/schemas/AccountDetail'
         "400":
           description: BadRequest
           content:
@@ -779,6 +785,11 @@ paths:
   /accounts/search:
     post:
       summary: Search accounts.
+      description: >
+        Returns a paginated list of accounts. The response takes one of two
+        shapes: AccountSearchResponse, or AccountViewSearchResponse
+        (supportTier as a plain label string, owner/technicalOwner as
+        {id, name} references).
       operationId: postAccountsSearch
       requestBody:
         description: Account search payload
@@ -793,7 +804,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AccountSearchResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AccountSearchResponse'
+                  - $ref: '#/components/schemas/AccountViewSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -802,6 +815,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -4042,9 +4061,21 @@ components:
                 limit:
                   default: 20
                   maximum: 100
-        searchQuery:
-          type: string
-          description: Searches across name and sfId (case-insensitive); max 200 characters
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across name and sfId (case-insensitive); max 200 characters
+            active:
+              type: boolean
+              description: Filter by active status.
+            pod:
+              type: string
+              description: Filter by pod.
+            classification:
+              type: string
+              description: Filter by classification.
 
     AccountSearchResponse:
       type: object
@@ -4097,6 +4128,130 @@ components:
         updatedOn:
           type: string
           format: date-time
+
+    AccountViewSearchResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountView'
+        total:
+          type: integer
+          description: Total number of matching accounts
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    AccountView:
+      description: Account search view (alternate response shape).
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          type: string
+          nullable: true
+          description: Support tier label (e.g. "Gold", "Platinum").
+        arrToday:
+          type: string
+          nullable: true
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
+
+    SupportTierRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+
+    AccountDetail:
+      description: Full account detail (alternate response shape).
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SupportTierRef'
+        arrToday:
+          type: string
+          nullable: true
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
 
     ProjectSearchPayload:
       type: object
