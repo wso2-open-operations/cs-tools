@@ -110,6 +110,7 @@ export default function TimeCardsTable({
   return (
     <Fragment>
       <Box
+        role="table"
         sx={{
           border: 1,
           borderColor: "divider",
@@ -121,6 +122,7 @@ export default function TimeCardsTable({
         }}
       >
         <Box
+          role="row"
           sx={{
             gridColumn: "1 / -1",
             display: "grid",
@@ -137,6 +139,7 @@ export default function TimeCardsTable({
           {headerCells.map((label, i) => (
             <Typography
               key={`${label}-${i}`}
+              role="columnheader"
               variant="caption"
               color="text.secondary"
               sx={{
@@ -154,6 +157,7 @@ export default function TimeCardsTable({
           Array.from({ length: skeletonCount }).map((_, i) => (
             <Box
               key={i}
+              role="presentation"
               sx={{
                 gridColumn: "1 / -1",
                 px: 2,
@@ -168,7 +172,7 @@ export default function TimeCardsTable({
           ))}
 
         {!isLoading && orderedCards.length === 0 && (
-          <Box sx={{ gridColumn: "1 / -1", px: 2, py: 4, textAlign: "center" }}>
+          <Box role="presentation" sx={{ gridColumn: "1 / -1", px: 2, py: 4, textAlign: "center" }}>
             <Typography variant="body2" color="text.secondary">
               {emptyText}
             </Typography>
@@ -183,6 +187,7 @@ export default function TimeCardsTable({
             return (
               <Box
                 key={c.id}
+                role="row"
                 data-testid={`timecard-row-${c.id}`}
                 sx={{
                   gridColumn: "1 / -1",
@@ -198,23 +203,23 @@ export default function TimeCardsTable({
               >
                 {showCaseEngineerColumns && (
                   <>
-                    <Typography variant="body2" noWrap title={c.caseNumber}>
+                    <Typography role="cell" variant="body2" noWrap title={c.caseNumber}>
                       {c.caseNumber}
                     </Typography>
-                    <Typography variant="body2" noWrap title={c.userName}>
+                    <Typography role="cell" variant="body2" noWrap title={c.userName}>
                       {c.userName}
                     </Typography>
                   </>
                 )}
                 <Tooltip title={c.projectName}>
-                  <Typography variant="body2" noWrap>
+                  <Typography role="cell" variant="body2" noWrap>
                     {c.projectName}
                   </Typography>
                 </Tooltip>
-                <Typography variant="body2" noWrap>
+                <Typography role="cell" variant="body2" noWrap>
                   <RelativeTime iso={c.workDate} />
                 </Typography>
-                <Box sx={{ minWidth: 0 }}>
+                <Box role="cell" sx={{ minWidth: 0 }}>
                   <Typography variant="body2" noWrap>
                     {c.totalMinutes} min
                   </Typography>
@@ -224,10 +229,13 @@ export default function TimeCardsTable({
                     </Typography>
                   )}
                 </Box>
-                <Box sx={{ minWidth: 0, justifySelf: "center" }}>
+                <Box role="cell" sx={{ minWidth: 0, justifySelf: "center" }}>
                   <TimeCardStatusChip state={c.state} />
                 </Box>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, justifySelf: "end" }}>
+                <Box
+                  role="cell"
+                  sx={{ display: "flex", alignItems: "center", gap: 0.75, justifySelf: "end" }}
+                >
                   <IconButton
                     size="small"
                     aria-label="View details"
