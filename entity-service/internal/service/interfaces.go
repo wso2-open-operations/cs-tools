@@ -334,3 +334,12 @@ type ProblemService interface {
 	// A ValidationError is returned for invalid input.
 	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
 }
+
+// ConversationService defines the operations available on the conversations entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ConversationService interface {
+	// SearchConversations returns a paginated list of conversations filtered by optional
+	// project IDs, states, search query, and createdByMe. A ValidationError is returned
+	// for invalid input.
+	SearchConversations(ctx context.Context, req domain.SearchConversationsRequest) (domain.SearchConversationsResponse, error)
+}

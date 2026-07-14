@@ -1987,6 +1987,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /conversations/search:
+    post:
+      summary: Search conversations (ServiceNow data source only).
+      operationId: searchConversations
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchConversationsRequest'
+      responses:
+        "200":
+          description: Paginated list of conversations matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchConversationsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     Pagination:
@@ -5804,6 +5840,81 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SearchProblemView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchConversationsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            projectIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            states:
+              type: array
+              items:
+                type: string
+                enum: [ACTIVE, RESOLVED]
+            searchQuery:
+              type: string
+            createdByMe:
+              type: boolean
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchConversationView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        initialMessage:
+          type: string
+          nullable: true
+        messageCount:
+          type: integer
+        project:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        case:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          enum: [ACTIVE, RESOLVED]
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+
+    SearchConversationsResponse:
+      type: object
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchConversationView'
         total:
           type: integer
         offset:
