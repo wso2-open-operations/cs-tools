@@ -98,6 +98,7 @@ type createIncidentRequest struct {
 	Subject             string   `json:"subject"`
 	WatchList           []string `json:"watchList"`
 	ParentID            string   `json:"parentId"`
+	ParentIncidentID    string   `json:"parentIncidentId"`
 	ChangeRequestID     string   `json:"changeRequestId"`
 	ProblemID           string   `json:"problemId"`
 	CausedByID          string   `json:"causedById"`
@@ -153,6 +154,9 @@ func validateCreateIncidentBody(body []byte) bool {
 		}
 	}
 	if req.ParentID != "" && !uuidRe.MatchString(req.ParentID) {
+		return false
+	}
+	if req.ParentIncidentID != "" && !uuidRe.MatchString(req.ParentIncidentID) {
 		return false
 	}
 	if req.ChangeRequestID != "" && !uuidRe.MatchString(req.ChangeRequestID) {

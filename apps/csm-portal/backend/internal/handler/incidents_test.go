@@ -202,6 +202,16 @@ func TestCreateIncident(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects non-UUID parentIncidentId", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(`{"callerId":"11111111-1111-1111-1111-111111111111","category":"SECURITY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke","parentIncidentId":"not-a-uuid"}`)))
+		w := httptest.NewRecorder()
+		h.CreateIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("forwards body to upstream and returns 201 with response", func(t *testing.T) {
 		const reqPayload = `{"callerId":"11111111-1111-1111-1111-111111111111","category":"SECURITY","serviceId":"22222222-2222-2222-2222-222222222222","impact":"HIGH","urgency":"HIGH","subject":"Something broke"}`
 		var capturedBody []byte

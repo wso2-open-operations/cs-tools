@@ -6263,6 +6263,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/EntityRef'
+        parentIncident:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
         assignmentGroup:
           nullable: true
           allOf:
@@ -6331,6 +6335,9 @@ components:
         workNotes:
           type: string
         parentId:
+          type: string
+          format: uuid
+        parentIncidentId:
           type: string
           format: uuid
         changeRequestId:
@@ -6409,6 +6416,10 @@ components:
           nullable: true
           enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
         parent:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        parentIncident:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/EntityRef'
