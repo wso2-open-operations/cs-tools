@@ -263,6 +263,7 @@ backend/
 ### Conversations
 
 - `GET /conversations/{id}/messages` — Get paginated messages for a conversation; optional query params `limit` (1–100, default 20) and `offset` (default 0) (ServiceNow data source only)
+- `POST /conversations/search` — Search conversations; optional `filters` (`projectIds`, `states` (`ACTIVE`/`RESOLVED`), `searchQuery`, `createdByMe`) and `sortBy` (`field`: `createdOn`/`updatedOn`, `order`) (ServiceNow data source only)
 
 ### Updates
 
@@ -346,4 +347,10 @@ curl -X POST http://localhost:8080/problems/search \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"filters":{"searchQuery":"database"},"pagination":{"limit":10,"offset":0}}'
+
+# Search conversations
+curl -X POST http://localhost:8080/conversations/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"states":["ACTIVE"]},"pagination":{"limit":10,"offset":0}}'
 ```

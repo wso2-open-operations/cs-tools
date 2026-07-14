@@ -2318,6 +2318,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /conversations/search:
+    post:
+      summary: Search conversations (ServiceNow data source only).
+      operationId: postConversationsSearch
+      security:
+        - bearerAuth: []
+      requestBody:
+        description: Conversation search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /slas/search:
     post:
       summary: Search task SLA records (ServiceNow data source only).
@@ -5808,6 +5859,89 @@ components:
         hasMore:
           type: boolean
           description: Whether additional pages are available.
+
+    ConversationSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            projectIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            states:
+              type: array
+              items:
+                type: string
+                enum: [ACTIVE, RESOLVED]
+            searchQuery:
+              type: string
+            createdByMe:
+              type: boolean
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 50
+
+    ConversationView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        initialMessage:
+          type: string
+          nullable: true
+        messageCount:
+          type: integer
+        project:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        case:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        state:
+          type: string
+          nullable: true
+          enum: [ACTIVE, RESOLVED]
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+
+    ConversationSearchResponse:
+      type: object
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationView'
+        total:
+          type: integer
+          description: Total number of matching conversations
+        limit:
+          type: integer
+        offset:
+          type: integer
 
     SearchTaskSlasPayload:
       type: object

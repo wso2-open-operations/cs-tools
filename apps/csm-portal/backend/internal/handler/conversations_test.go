@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,123 @@ func TestGetConversationMessages(t *testing.T) {
 				h.GetConversationMessages(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}
+
+func TestSearchConversations(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects unknown state enum value", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{"filters":{"states":["CLOSED"]}}`)))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID projectIds entry", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{"filters":{"projectIds":["not-a-uuid"]}}`)))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid sortBy field", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{"sortBy":{"field":"subject","order":"asc"}}`)))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid sortBy order", func(t *testing.T) {
+		h := NewConversationHandler(&mockEntityConversationClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{"sortBy":{"field":"createdOn","order":"sideways"}}`)))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
+		const reqPayload = `{"filters":{"searchQuery":"outage","states":["ACTIVE"]},"pagination":{"limit":10,"offset":0}}`
+		var capturedBody []byte
+		client := &mockEntityConversationClient{
+			searchConversationsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"conversations":[{"id":"11111111-1111-1111-1111-111111111111","number":"CONV0001"}],"total":1}`), nil
+			},
+		}
+		h := NewConversationHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.SearchConversations(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to search conversations.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityConversationClient{
+					searchConversationsFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewConversationHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.SearchConversations(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
 			})
 		}
 	})

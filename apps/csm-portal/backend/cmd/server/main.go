@@ -147,6 +147,7 @@ func main() {
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)
 	mux.HandleFunc("GET /conversations/{id}/messages", conversationHandler.GetConversationMessages)
+	mux.HandleFunc("POST /conversations/search", conversationHandler.SearchConversations)
 	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
