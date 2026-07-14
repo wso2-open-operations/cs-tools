@@ -14,16 +14,47 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useState } from "react";
+import { Stack, Tab, Tabs } from "@wso2/oxygen-ui";
 import { ComingSoonPage } from "@components/common/ComingSoonPage";
+import { ServiceRequestsTab } from "@components/operations/ServiceRequestsTab";
+import { ChangeRequestsTab } from "@components/operations/ChangeRequestsTab";
 
-// The webapp itself marks Operations as wip:true (apps/csm-portal/webapp/src/config/csmNavItems.ts)
-// and shows its own coming-soon page — mirroring that here rather than building ahead of it.
+type OperationsTabId = "service_requests" | "change_requests" | "incidents";
+
+const TABS: { id: OperationsTabId; label: string }[] = [
+  { id: "service_requests", label: "Service Requests" },
+  { id: "change_requests", label: "Change Requests" },
+  { id: "incidents", label: "Incidents" },
+];
+
+// Mirrors the webapp's OperationsPage (apps/csm-portal/webapp/src/features/csm-operations/pages/OperationsPage.tsx):
+// three tabs — Service requests (cases with type=service_request, reusing the Support page's own
+// list/pagination/filter infra), Change requests (its own list/detail/edit), and Incidents (no
+// backend endpoint exists yet, in this repo or the webapp's — kept as a placeholder like the
+// webapp's own IssuesListUnavailable). "Create service request"/"Create change request" are
+// deliberately out of scope for this pass — each is its own large form (cascading
+// project/deployment/catalog selects with dynamic variables, or a 15+ field change-request form).
 export default function OperationsPage() {
+  const [activeTab, setActiveTab] = useState<OperationsTabId>("service_requests");
+
   return (
-    <ComingSoonPage
-      title="Operations"
-      description="Operations tooling is still under construction."
-      showTitle={false}
-    />
+    <Stack gap={2}>
+      <Tabs variant="scrollable" value={activeTab} onChange={(_, value: OperationsTabId) => setActiveTab(value)}>
+        {TABS.map((tab) => (
+          <Tab key={tab.id} label={tab.label} value={tab.id} disableRipple />
+        ))}
+      </Tabs>
+
+      {activeTab === "service_requests" && <ServiceRequestsTab />}
+      {activeTab === "change_requests" && <ChangeRequestsTab />}
+      {activeTab === "incidents" && (
+        <ComingSoonPage
+          title="Incidents"
+          description="Incident tracking is still under construction."
+          showTitle={false}
+        />
+      )}
+    </Stack>
   );
 }

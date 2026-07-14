@@ -14,18 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./case.dto";
-export * from "./case.model";
-export * from "./attachment.dto";
-export * from "./project.dto";
-export * from "./project.model";
-export * from "./deployment.dto";
-export * from "./deployment.model";
-export * from "./user.dto";
-export * from "./user.model";
-export * from "./adminUser.dto";
-export * from "./adminUser.model";
-export * from "./timecard.dto";
-export * from "./timecard.model";
-export * from "./changeRequest.dto";
-export * from "./changeRequest.model";
+import type { ReactNode } from "react";
+import { Card, Stack, Typography } from "@wso2/oxygen-ui";
+
+// Mirrors the customer-portal microapp's own SectionCard
+// (apps/customer-portal/microapp/src/components/shared/SectionCard.tsx).
+export function SectionCard({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
+      {title && (
+        <Typography variant="h6" fontWeight="medium">
+          {title}
+        </Typography>
+      )}
+      {children}
+    </Card>
+  );
+}

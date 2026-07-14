@@ -47,12 +47,16 @@ export interface CaseSearchResult {
 // api client directly for the same reason.
 export const getAllCases = async (payload: CaseSearchPayloadDto = {}): Promise<CaseSearchResult> => {
   const { data } = await apiClient.post<CaseSearchResponseDto>(CASES_SEARCH_ENDPOINT, payload);
+  const items = data.cases.map(toCaseSummary);
   return {
-    items: data.cases.map(toCaseSummary),
+    items,
     total: data.total,
     limit: data.limit,
     offset: data.offset,
-    hasMore: data.hasMore,
+    // Some data sources omit hasMore from the search envelope (see adminUsers.ts's searchUsers,
+    // which hits the same quirk on /users/search); derive it from offset/total when that happens
+    // instead of treating a missing field as "no more pages".
+    hasMore: data.hasMore ?? data.offset + items.length < data.total,
   };
 };
 

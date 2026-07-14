@@ -28,6 +28,9 @@ export const CASES_SEARCH_ENDPOINT = "/cases/search";
 export const CASE_DETAILS_ENDPOINT = (id: string) => `/cases/${id}`;
 export const CASE_COMMENTS_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/comments/search`;
 
+export const CHANGE_REQUESTS_SEARCH_ENDPOINT = "/change-requests/search";
+export const CHANGE_REQUEST_ENDPOINT = (id: string) => `/change-requests/${id}`;
+
 export const PROJECTS_SEARCH_ENDPOINT = "/projects/search";
 export const DEPLOYMENTS_SEARCH_ENDPOINT = "/deployments/search";
 export const DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT = (deploymentId: string) =>
