@@ -14,16 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { useCallback, useMemo, useState, type ChangeEvent, type JSX } from "react";
 import {
   AdapterDateFns,
   Box,
-  Card,
   DatePickers,
   Divider,
   MenuItem,
   Paper,
-  Skeleton,
   Tab,
   Tabs,
   TablePagination,
@@ -33,7 +31,10 @@ import {
 } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp, Download, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 
-const { DatePicker, LocalizationProvider } = DatePickers;
+// The plain (responsive) DatePicker switches to a mobile dialog (title bar +
+// Cancel/OK) below the sm breakpoint — this is a desktop-only portal page, so
+// DesktopDatePicker is used directly to always get the inline popup calendar.
+const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 
 /** "YYYY-MM-DD" to a local-midnight Date (avoids the UTC-parse day-shift
  * `new Date(dateString)` can cause depending on the viewer's timezone). */
@@ -57,7 +58,7 @@ import {
   useApprovalQueue,
   useCurrentEngineer,
   useDecideCard,
-  useMyTimeSheets,
+  useMyTimeCards,
   type TimeCardPagination,
 } from "@features/csm-timecards/api/useTimeSheets";
 import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
@@ -68,44 +69,50 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import type { BeProject } from "@api/backend/types";
 import { TIME_CARD_STATE_META } from "@features/csm-timecards/constants/timeCardConstants";
 import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
-import TimeSheetCard from "@features/csm-timecards/components/TimeSheetCard";
+import TimeCardsTable from "@features/csm-timecards/components/TimeCardsTable";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
 import SearchableMultiSelect from "@components/SearchableMultiSelect";
 import { exportTimeCardsCsv } from "@features/csm-timecards/utils/timeCardCsvExport";
-import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
+import type { TimecardAction, TimecardRoleCtx } from "@features/csm-timecards/utils/timeSheetState";
+import type { TimeCardGroupBy } from "@features/csm-timecards/utils/timeCardGrouping";
 import type {
   CsmTimeCard,
-  CsmTimeSheet,
   TimeCardSearchFilters,
   TimeCardState,
 } from "@features/csm-timecards/types/timeCards";
 
 /** Builds a `userId -> userName` lookup plus the option list a
- * `SearchableMultiSelect` engineer filter needs, scoped to whatever sheets
- * are currently loaded for one tab (there's no engineer-search endpoint for
- * time cards, so — like the work-item filter — this only ever offers
- * engineers actually present on the current page, not the full directory). */
-function engineerOptionsFrom(sheets: CsmTimeSheet[] | undefined): {
+ * `SearchableMultiSelect` engineer filter needs, scoped to whatever cards are
+ * currently loaded for one tab (there's no engineer-search endpoint for time
+ * cards, so — like the work-item filter — this only ever offers engineers
+ * actually present on the current page, not the full directory). */
+function engineerOptionsFrom(cards: CsmTimeCard[] | undefined): {
   ids: string[];
   nameById: Map<string, string>;
 } {
   const nameById = new Map<string, string>();
-  (sheets ?? []).forEach((s) => nameById.set(s.userId, s.userName));
+  (cards ?? []).forEach((c) => nameById.set(c.userId, c.userName));
   return { ids: [...nameById.keys()], nameById };
 }
 
-/** Distinct case numbers present in whatever sheets are currently loaded for
+/** Distinct case numbers present in whatever cards are currently loaded for
  * one tab — the option list for the work-item filter. Same "current page
  * only" caveat as {@link engineerOptionsFrom}. */
-function workItemOptionsFrom(sheets: CsmTimeSheet[] | undefined): string[] {
-  return Array.from(
-    new Set((sheets ?? []).flatMap((s) => s.cards.map((c) => c.caseNumber))),
-  );
+function workItemOptionsFrom(cards: CsmTimeCard[] | undefined): string[] {
+  return Array.from(new Set((cards ?? []).map((c) => c.caseNumber)));
 }
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
 const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
+
+// Static role contexts for `TimeCardsTable`'s `roleFor` — constant regardless
+// of which card is being rendered, unlike the "All" tab's (see allRoleFor in
+// the component, which depends on the signed-in user's id per card).
+const mineRole = (): TimecardRoleCtx => ({ isOwner: true, isApprover: false, isAdmin: false });
+const approvalsRoleFor =
+  (isAdmin: boolean) =>
+  (): TimecardRoleCtx => ({ isOwner: false, isApprover: true, isAdmin });
 
 /** Page + rows-per-page state for one tab's `TablePagination`, following the
  * same shape/convention as `CsmUsersPage.tsx` and friends. Each tab gets its
@@ -155,6 +162,13 @@ export default function CsmTimeCardsPage(): JSX.Element {
   // again — see TimeCardReviewDialog's `action` prop.
   const [review, setReview] = useState<{ card: CsmTimeCard; action: TimecardAction } | null>(null);
 
+  // How the table clusters its rows — a display-only choice (see
+  // `groupTimeCards`), independent of the server-side filters below. Only
+  // toggleable on All/Approvals (see the Group-by control); "My time sheets"
+  // stays grouped by case, since every card already belongs to the same
+  // engineer (you).
+  const [groupBy, setGroupBy] = useState<TimeCardGroupBy>("case");
+
   // Search filters (sent as a POST body, never query params). Project, state,
   // and engineer (see filtersWithEngineer below) are all server-side; work
   // item stays client-side over the returned page — the backend has no
@@ -187,7 +201,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
   // The Engineer filter only has a control on the All/Approvals tabs (see
   // engineerSlot below) — folded in as a separate `userIds` filter, not into
   // baseFilters itself, so a value picked on those tabs can never leak into
-  // "My time sheets" (which is already its own-user-only via useMyTimeSheets).
+  // "My time sheets" (which is already its own-user-only via useMyTimeCards).
   const filtersWithEngineer: TimeCardSearchFilters = filterEngineer.length
     ? { ...baseFilters, userIds: filterEngineer }
     : baseFilters;
@@ -203,7 +217,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const allPagination = usePagination();
   const approvalsPagination = usePagination();
 
-  const mySheets = useMyTimeSheets(activeTab === "mine", baseFilters, minePagination.pagination);
+  const myCards = useMyTimeCards(activeTab === "mine", baseFilters, minePagination.pagination);
   const allCards = useAllTimeCards(activeTab === "all", filtersWithEngineer, allPagination.pagination);
   const queue = useApprovalQueue(
     activeTab === "approvals" && role.isApprover,
@@ -266,50 +280,72 @@ export default function CsmTimeCardsPage(): JSX.Element {
     if (action === "approve" || action === "reject") setReview({ card, action });
   };
 
+  // "All" shows everyone's cards, own included, and is always read-only
+  // (isApprover/isAdmin false regardless of the viewer's actual role) — that
+  // stays exclusive to the Approvals tab. Only isOwner varies per card here.
+  const allRoleFor = (card: CsmTimeCard): TimecardRoleCtx => ({
+    isOwner: card.userId === me.id,
+    isApprover: false,
+    isAdmin: false,
+  });
+  const approvalsRole = approvalsRoleFor(role.isAdmin);
+
   /** Client-side work-item filter (case number is in the selected set),
-   * applied over already-fetched sheets. */
-  const byWorkItem = (sheets: CsmTimeSheet[] | undefined): CsmTimeSheet[] | undefined => {
-    if (filterWorkItem.length === 0 || !sheets) return sheets;
-    return sheets
-      .map((s) => ({
-        ...s,
-        cards: s.cards.filter((c) => filterWorkItem.includes(c.caseNumber)),
-      }))
-      .filter((s) => s.cards.length > 0);
-  };
+   * applied over an already-fetched page of cards. Stable per filterWorkItem
+   * so the memoized *FilteredCards below only recompute when it (or the
+   * underlying data) actually changes. */
+  const byWorkItem = useCallback(
+    (cards: CsmTimeCard[] | undefined): CsmTimeCard[] => {
+      if (!cards) return [];
+      if (filterWorkItem.length === 0) return cards;
+      return cards.filter((c) => filterWorkItem.includes(c.caseNumber));
+    },
+    [filterWorkItem],
+  );
 
   // Work-item / engineer option lists are scoped per tab — each tab has its
-  // own loaded page of sheets, and there's no search endpoint for either, so
+  // own loaded page of cards, and there's no search endpoint for either, so
   // the picker can only ever offer what's actually on the current page.
   const mineWorkItemOptions = useMemo(
-    () => workItemOptionsFrom(mySheets.data?.sheets),
-    [mySheets.data],
+    () => workItemOptionsFrom(myCards.data?.cards),
+    [myCards.data],
   );
   const allWorkItemOptions = useMemo(
-    () => workItemOptionsFrom(allCards.data?.sheets),
+    () => workItemOptionsFrom(allCards.data?.cards),
     [allCards.data],
   );
   const approvalsWorkItemOptions = useMemo(
-    () => workItemOptionsFrom(queue.data?.sheets),
+    () => workItemOptionsFrom(queue.data?.cards),
     [queue.data],
   );
   const allEngineerOptions = useMemo(
-    () => engineerOptionsFrom(allCards.data?.sheets),
+    () => engineerOptionsFrom(allCards.data?.cards),
     [allCards.data],
   );
   const approvalsEngineerOptions = useMemo(
-    () => engineerOptionsFrom(queue.data?.sheets),
+    () => engineerOptionsFrom(queue.data?.cards),
     [queue.data],
   );
 
-  // Filtered sheets per tab, computed once and shared between the FilterBar's
-  // export action and the list rendering below — rather than recomputing (and
-  // risking drift) in two places. Engineer is already applied server-side (via
-  // filtersWithEngineer) by the time allCards/queue resolve — only work item
-  // still needs a client-side pass here.
-  const mineFilteredSheets = byWorkItem(mySheets.data?.sheets) ?? [];
-  const allFilteredSheets = byWorkItem(allCards.data?.sheets) ?? [];
-  const approvalsFilteredSheets = byWorkItem(queue.data?.sheets) ?? [];
+  // Filtered cards per tab, computed once and shared between the FilterBar's
+  // export action and the table rendering below — rather than recomputing
+  // (and risking drift) in two places. Engineer is already applied
+  // server-side (via filtersWithEngineer) by the time allCards/queue resolve
+  // — only work item still needs a client-side pass here. Memoized so a
+  // render triggered by unrelated state (e.g. the groupBy toggle) doesn't
+  // reallocate these arrays on every tab.
+  const mineFilteredCards = useMemo(
+    () => byWorkItem(myCards.data?.cards),
+    [myCards.data, byWorkItem],
+  );
+  const allFilteredCards = useMemo(
+    () => byWorkItem(allCards.data?.cards),
+    [allCards.data, byWorkItem],
+  );
+  const approvalsFilteredCards = useMemo(
+    () => byWorkItem(queue.data?.cards),
+    [queue.data, byWorkItem],
+  );
 
   return (
     <Box
@@ -318,8 +354,8 @@ export default function CsmTimeCardsPage(): JSX.Element {
       <Box>
         <Typography variant="h5">Time cards</Typography>
         <Typography variant="body2" color="text.secondary">
-          Review your weekly time sheets and (for approvers) submissions. Log
-          time from a case&apos;s <strong>Time tracking</strong> tab.
+          Review your logged time and (for approvers) submissions. Log time
+          from a case&apos;s <strong>Time tracking</strong> tab.
         </Typography>
       </Box>
 
@@ -352,50 +388,40 @@ export default function CsmTimeCardsPage(): JSX.Element {
             onClear={clearFilters}
           />
 
-          {/* mySheets stays disabled until `projects` resolves a project
-           scope (see scopeProjectIds above), so its own isLoading never
-           turns true during that wait — fold projects.isLoading in too, or
-           this would flash the empty state before real data has a chance to
-           load. The filter bar itself renders regardless, same as Approvals
-           below, so it's never hidden behind this spinner. */}
-          {mySheets.isLoading || projects.isLoading ? (
-            <TimeSheetCardSkeletons />
-          ) : mySheets.isError ? (
-            <Typography color="error">Could not load your time sheets.</Typography>
+          {/* projects.isLoading is folded into the table's isLoading (not
+           just myCards.isLoading) so the empty state doesn't flash while
+           the Project filter dropdown's own data is still loading. The
+           filter bar itself renders regardless, same as Approvals below,
+           so it's never hidden behind this spinner. */}
+          {myCards.isError ? (
+            <Typography color="error">Could not load your time cards.</Typography>
           ) : (
             <>
               <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <ExportCsvButton
-                  cards={mineFilteredSheets.flatMap((s) => s.cards)}
+                  cards={mineFilteredCards}
                   filename={`time-cards-my-sheets-${todayStamp}.csv`}
                 />
               </Box>
-              {mineFilteredSheets.length === 0 ? (
-                <Empty
-                  text={
-                    anyFilterActive
-                      ? "No time cards match the current filters."
-                      : "No time logged yet. Open a case and use its Time tracking tab to log time."
-                  }
-                />
-              ) : (
-                mineFilteredSheets.map((s) => (
-                  <TimeSheetCard
-                    key={s.id}
-                    sheet={s}
-                    role={{ isOwner: true, isApprover: false, isAdmin: false }}
-                    onCardAction={handleCardAction}
-                  />
-                ))
-              )}
-              {/* Pages over raw records, not weekly sheets — a week's cards
-               can legitimately span a page boundary and look incomplete
-               until you've paged further; same for "my cards" being a small
-               slice of whatever's on each raw page. Accepted tradeoff for
-               real pagination instead of a 30-60s upfront full-scope fetch. */}
+              <TimeCardsTable
+                cards={mineFilteredCards}
+                isLoading={myCards.isLoading || projects.isLoading}
+                groupBy="case"
+                roleFor={mineRole}
+                onCardAction={handleCardAction}
+                emptyText={
+                  anyFilterActive
+                    ? "No time cards match the current filters."
+                    : "No time logged yet. Open a case and use its Time tracking tab to log time."
+                }
+              />
+              {/* Pages over raw cards, not display groups — a case's cards can
+               legitimately span a page boundary and look incomplete until
+               you've paged further. Accepted tradeoff for real pagination
+               instead of a 30-60s upfront full-scope fetch. */}
               <TablePagination
                 component="div"
-                count={mySheets.data?.total ?? 0}
+                count={myCards.data?.total ?? 0}
                 page={minePagination.pagination.page}
                 onPageChange={minePagination.onPageChange}
                 rowsPerPage={minePagination.pagination.rowsPerPage}
@@ -443,37 +469,27 @@ export default function CsmTimeCardsPage(): JSX.Element {
             engineerActive={filterEngineer.length > 0}
           />
 
-          {allCards.isLoading || projects.isLoading ? (
-            <TimeSheetCardSkeletons />
-          ) : allCards.isError ? (
+          <GroupByToggle value={groupBy} onChange={setGroupBy} />
+
+          {allCards.isError ? (
             <Typography color="error">Could not load time cards.</Typography>
           ) : (
             <>
               <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <ExportCsvButton
-                  cards={allFilteredSheets.flatMap((s) => s.cards)}
+                  cards={allFilteredCards}
                   filename={`time-cards-all-${todayStamp}.csv`}
                 />
               </Box>
-              {allFilteredSheets.length === 0 ? (
-                <Empty
-                  text={
-                    anyFilterActive
-                      ? "No time cards match the current filters."
-                      : "No time logged yet."
-                  }
-                />
-              ) : (
-                allFilteredSheets.map((s) => (
-                  <TimeSheetCard
-                    key={s.id}
-                    sheet={s}
-                    role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
-                    showEngineer
-                    onCardAction={handleCardAction}
-                  />
-                ))
-              )}
+              <TimeCardsTable
+                cards={allFilteredCards}
+                isLoading={allCards.isLoading || projects.isLoading}
+                groupBy={groupBy}
+                showCaseEngineerColumns
+                roleFor={allRoleFor}
+                onCardAction={handleCardAction}
+                emptyText={anyFilterActive ? "No time cards match the current filters." : "No time logged yet."}
+              />
               <TablePagination
                 component="div"
                 count={allCards.data?.total ?? 0}
@@ -522,37 +538,28 @@ export default function CsmTimeCardsPage(): JSX.Element {
             engineerActive={filterEngineer.length > 0}
           />
 
-          {queue.isLoading || projects.isLoading ? (
-            <TimeSheetCardSkeletons />
-          ) : queue.isError ? (
+          <GroupByToggle value={groupBy} onChange={setGroupBy} />
+
+          {queue.isError ? (
             <Typography color="error">Could not load the approval queue.</Typography>
           ) : (
             <>
               <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <ExportCsvButton
-                  cards={approvalsFilteredSheets.flatMap((s) => s.cards)}
+                  cards={approvalsFilteredCards}
                   filename={`time-cards-approvals-${todayStamp}.csv`}
                 />
               </Box>
-              {approvalsFilteredSheets.length === 0 ? (
-                <Empty
-                  text={
-                    anyFilterActive
-                      ? "No time cards match the current filters."
-                      : "Nothing awaiting approval."
-                  }
-                />
-              ) : (
-                approvalsFilteredSheets.map((s) => (
-                  <TimeSheetCard
-                    key={s.id}
-                    sheet={s}
-                    role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
-                    showEngineer
-                    onCardAction={handleCardAction}
-                  />
-                ))
-              )}
+              <TimeCardsTable
+                cards={approvalsFilteredCards}
+                isLoading={queue.isLoading || projects.isLoading}
+                groupBy={groupBy}
+                showCaseEngineerColumns
+                showActionsColumn
+                roleFor={approvalsRole}
+                onCardAction={handleCardAction}
+                emptyText={anyFilterActive ? "No time cards match the current filters." : "Nothing awaiting approval."}
+              />
               <TablePagination
                 component="div"
                 count={queue.data?.total ?? 0}
@@ -838,39 +845,40 @@ function ExportCsvButton({
   );
 }
 
-function TimeSheetCardSkeletons(): JSX.Element {
+/**
+ * Switches the table between clustering rows by case or by engineer (see
+ * `groupTimeCards`) — only shown on All/Approvals, where more than one
+ * engineer's cards can appear together. "My time sheets" stays grouped by
+ * case only, since every card there already belongs to the signed-in user.
+ */
+function GroupByToggle({
+  value,
+  onChange,
+}: {
+  value: TimeCardGroupBy;
+  onChange: (v: TimeCardGroupBy) => void;
+}): JSX.Element {
+  const options: { value: TimeCardGroupBy; label: string }[] = [
+    { value: "case", label: "Case" },
+    { value: "engineer", label: "Engineer" },
+  ];
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {[0, 1, 2].map((i) => (
-        <Card key={i} variant="outlined" sx={{ p: 2 }}>
-          <Box
-            sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">
+        Group by
+      </Typography>
+      <Box sx={{ display: "flex", gap: 0.5 }}>
+        {options.map((o) => (
+          <Button
+            key={o.value}
+            size="small"
+            variant={value === o.value ? "contained" : "outlined"}
+            onClick={() => onChange(o.value)}
           >
-            <Skeleton variant="rounded" width={140} height={20} />
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Skeleton variant="rounded" width={64} height={24} />
-              <Skeleton variant="rounded" width={56} height={24} />
-            </Box>
-          </Box>
-          <Divider sx={{ mb: 1 }} />
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
-            {[0, 1].map((j) => (
-              <Box key={j} sx={{ display: "flex", justifyContent: "space-between" }}>
-                <Skeleton variant="rounded" width="55%" height={20} />
-                <Skeleton variant="rounded" width="15%" height={20} />
-              </Box>
-            ))}
-          </Box>
-        </Card>
-      ))}
+            {o.label}
+          </Button>
+        ))}
+      </Box>
     </Box>
-  );
-}
-
-function Empty({ text }: { text: string }): JSX.Element {
-  return (
-    <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
-      {text}
-    </Typography>
   );
 }

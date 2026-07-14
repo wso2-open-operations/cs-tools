@@ -78,10 +78,10 @@ export interface CsmTimeCard {
   /**
    * The date the work was actually carried out (ISO, YYYY-MM-DD) — what the
    * engineer picked in the log form, so it can be backdated. This is the field
-   * to display and to group/sort by ("the week this work happened"); it replaces
-   * the deprecated `createdOn`, which currently holds the same value.
-   * Occasionally unparseable on real records (confirmed live); see
-   * `groupIntoSheets` in `timeSheetGrouping.ts` for how that's handled.
+   * to display and to sort by; it replaces the deprecated `createdOn`, which
+   * currently holds the same value. Occasionally unparseable on real records
+   * (confirmed live); see `groupTimeCards` in `timeCardGrouping.ts`, which
+   * sorts by it but tolerates a bad value rather than dropping the card.
    */
   workDate: string;
   userId: string;
@@ -133,29 +133,6 @@ export interface TimeCardDecisionInput {
   cardId: string;
   state: Extract<TimeCardState, "approved" | "rejected">;
   leadComment?: string;
-}
-
-/**
- * Rolled-up status of a weekly time sheet, derived from its cards. Purely a
- * frontend display grouping — the backend has no "sheet" concept, and there
- * is no bulk endpoint, so sheets carry no bulk actions.
- */
-export type TimeSheetState = "submitted" | "approved" | "rejected";
-
-/** A user's time cards for one ISO week (Mon–Sun), a display-only grouping. */
-export interface CsmTimeSheet {
-  /** `${userId}:${weekStart}`. */
-  id: string;
-  userId: string;
-  userName: string;
-  /** Monday of the week (YYYY-MM-DD). */
-  weekStart: string;
-  /** Sunday of the week (YYYY-MM-DD). */
-  weekEnd: string;
-  state: TimeSheetState;
-  cards: CsmTimeCard[];
-  /** Whole minutes, summed from `cards`. */
-  totalMinutes: number;
 }
 
 /**
