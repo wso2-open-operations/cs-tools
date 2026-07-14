@@ -731,10 +731,9 @@ paths:
     get:
       summary: Get an account by ID.
       description: >
-        Returns full account detail. When the entity-service data source is
-        ServiceNow the response uses SNAccountDetail (supportTier as an
-        {id, label} object, owner/technicalOwner as {id, name} references);
-        for the postgres data source it uses Account.
+        Returns full account detail. The response takes one of two shapes:
+        Account, or AccountDetail (supportTier as an {id, label} object,
+        owner/technicalOwner as {id, name} references).
       operationId: getAccountsId
       parameters:
         - name: id
@@ -751,7 +750,7 @@ paths:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/Account'
-                  - $ref: '#/components/schemas/SNAccountDetail'
+                  - $ref: '#/components/schemas/AccountDetail'
         "400":
           description: BadRequest
           content:
@@ -787,11 +786,10 @@ paths:
     post:
       summary: Search accounts.
       description: >
-        Returns a paginated list of accounts. When the entity-service data
-        source is ServiceNow the response uses SNAccountSearchResponse
+        Returns a paginated list of accounts. The response takes one of two
+        shapes: AccountSearchResponse, or AccountViewSearchResponse
         (supportTier as a plain label string, owner/technicalOwner as
-        {id, name} references); for the postgres data source it uses
-        AccountSearchResponse.
+        {id, name} references).
       operationId: postAccountsSearch
       requestBody:
         description: Account search payload
@@ -808,7 +806,7 @@ paths:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/AccountSearchResponse'
-                  - $ref: '#/components/schemas/SNAccountSearchResponse'
+                  - $ref: '#/components/schemas/AccountViewSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -4065,13 +4063,13 @@ components:
               description: Searches across name and sfId (case-insensitive); max 200 characters
             active:
               type: boolean
-              description: Filter by active status. ServiceNow data source only.
+              description: Filter by active status.
             pod:
               type: string
-              description: Filter by pod. ServiceNow data source only.
+              description: Filter by pod.
             classification:
               type: string
-              description: Filter by classification. ServiceNow data source only.
+              description: Filter by classification.
 
     AccountSearchResponse:
       type: object
@@ -4125,13 +4123,13 @@ components:
           type: string
           format: date-time
 
-    SNAccountSearchResponse:
+    AccountViewSearchResponse:
       type: object
       properties:
         accounts:
           type: array
           items:
-            $ref: '#/components/schemas/SNAccountView'
+            $ref: '#/components/schemas/AccountView'
         total:
           type: integer
           description: Total number of matching accounts
@@ -4142,8 +4140,8 @@ components:
         hasMore:
           type: boolean
 
-    SNAccountView:
-      description: Account search view returned by the ServiceNow data source.
+    AccountView:
+      description: Account search view (alternate response shape).
       type: object
       properties:
         id:
@@ -4191,7 +4189,7 @@ components:
         updatedOn:
           type: string
 
-    SNSupportTierRef:
+    SupportTierRef:
       type: object
       properties:
         id:
@@ -4200,8 +4198,8 @@ components:
         label:
           type: string
 
-    SNAccountDetail:
-      description: Full account detail returned by the ServiceNow data source.
+    AccountDetail:
+      description: Full account detail (alternate response shape).
       type: object
       properties:
         id:
@@ -4220,7 +4218,7 @@ components:
         supportTier:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/SNSupportTierRef'
+            - $ref: '#/components/schemas/SupportTierRef'
         arrToday:
           type: string
           nullable: true
