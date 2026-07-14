@@ -54,3 +54,22 @@ export const CHANGE_REQUEST_CREATE = {
   path: "/operations/change-requests/new",
   heading: "New change request",
 } as const;
+
+//
+// Incidents are wired to the real csm-portal-backend too — POST /incidents
+// has no delete endpoint (only search/create/get), so anything a spec
+// creates becomes a permanent ServiceNow record. Same tagging rule as time
+// cards and change requests.
+//
+
+/** Same E2E_TAG + label + timestamp format as {@link e2eWorkLogComment} —
+ * kept as its own named export since it tags a different kind of record,
+ * but delegates to avoid duplicating the format itself. */
+export function e2eIncidentSubject(label: string): string {
+  return e2eWorkLogComment(label);
+}
+
+export const INCIDENT_CREATE = {
+  path: "/operations/incidents/new",
+  heading: "New incident",
+} as const;
