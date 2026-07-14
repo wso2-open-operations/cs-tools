@@ -37,6 +37,8 @@ import { useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import Editor from "@components/rich-text-editor/Editor";
+import { isBlankHtml } from "@utils/sanitizeHtml";
 import { usePostChangeRequest } from "@features/csm-operations/api/usePostChangeRequest";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useSearchGroups } from "@api/useSearchGroups";
@@ -65,11 +67,13 @@ const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
 
 // Field limits and defaults below mirror the legacy ServiceNow "Create New
-// Change Request" form (Short description: 500 chars; the five Planning
-// journal fields: 4000 chars each; Type/Category/Impact/Risk pre-selected
-// rather than left blank).
+// Change Request" form (Short description: 500 chars; Type/Category/Impact/
+// Risk pre-selected rather than left blank). The Planning journal fields
+// (Description onward) are ServiceNow rich-text fields — no character cap
+// here, since naively truncating HTML at a fixed offset risks cutting a tag
+// in half and corrupting the markup; the backend rejects an overlong
+// submission with a real error instead (see handleSubmit's onError).
 const SUBJECT_MAX = 500;
-const PLAN_FIELD_MAX = 4000;
 
 const TYPE_OPTIONS: Array<{ value: BeChangeRequestType; label: string }> = [
   { value: "standard", label: "Standard" },
@@ -239,12 +243,17 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (state) payload.state = state as BeChangeRequestState;
     if (plannedStartDate) payload.plannedStartDate = toBackendDateTime(plannedStartDate);
     if (plannedEndDate) payload.plannedEndDate = toBackendDateTime(plannedEndDate);
-    if (description.trim()) payload.description = description.trim();
-    if (justification.trim()) payload.justification = justification.trim();
-    if (implementationPlan.trim()) payload.implementationPlan = implementationPlan.trim();
-    if (riskImpactAnalysis.trim()) payload.riskImpactAnalysis = riskImpactAnalysis.trim();
-    if (backoutPlan.trim()) payload.backoutPlan = backoutPlan.trim();
-    if (testPlan.trim()) payload.testPlan = testPlan.trim();
+    // These six are rich-text HTML from Editor, not plain strings — an
+    // untouched editor still produces non-empty-looking HTML (e.g.
+    // "<p><br></p>"), so `.trim()` truthiness would send blank content as
+    // if it were real. isBlankHtml is the same check the detail page uses
+    // to decide whether to render a plan section at all.
+    if (!isBlankHtml(description)) payload.description = description;
+    if (!isBlankHtml(justification)) payload.justification = justification;
+    if (!isBlankHtml(implementationPlan)) payload.implementationPlan = implementationPlan;
+    if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
+    if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
+    if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
     if (serviceId.trim()) payload.serviceId = serviceId.trim();
     if (serviceOfferingId.trim()) payload.serviceOfferingId = serviceOfferingId.trim();
     if (configurationItemId.trim()) payload.configurationItemId = configurationItemId.trim();
@@ -303,24 +312,41 @@ export default function CreateChangeRequestPage(): JSX.Element {
     </FormControl>
   );
 
-  // Shared renderer for a 4000-char-capped Planning textarea.
-  const renderPlanField = (
+  // Shared renderer for a Planning rich-text field. Editor doesn't accept an
+  // `id`/native label association, so the visible label is a separate
+  // Typography and the pair is tied together via role="group" +
+  // aria-labelledby for assistive tech (matches CsmCaseCreatePage's own
+  // Description field, the other place this editor is used for a form
+  // field rather than a comment box).
+  const renderEditorField = (
+    id: string,
     label: string,
     value: string,
     onChange: (v: string) => void,
     placeholder?: string,
   ): JSX.Element => (
-    <TextField
-      label={label}
-      multiline
-      minRows={3}
-      value={value}
-      onChange={(e) => onChange(e.target.value.slice(0, PLAN_FIELD_MAX))}
-      fullWidth
-      disabled={postChangeRequest.isPending}
-      placeholder={placeholder}
-      helperText={charsLeftHelper(value, PLAN_FIELD_MAX)}
-    />
+    <Box>
+      <Typography
+        id={`${id}-label`}
+        component="label"
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: "block", mb: 0.5 }}
+      >
+        {label}
+      </Typography>
+      <Box role="group" aria-labelledby={`${id}-label`}>
+        <Editor
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          minHeight={100}
+          maxHeight={300}
+          toolbarVariant="full"
+          disabled={postChangeRequest.isPending}
+        />
+      </Box>
+    </Box>
   );
 
   return (
@@ -377,26 +403,28 @@ export default function CreateChangeRequestPage(): JSX.Element {
             Planning
           </Typography>
 
-          <TextField
-            label="Description"
-            multiline
-            minRows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            fullWidth
-            disabled={postChangeRequest.isPending}
-            placeholder="What is changing?"
-          />
-          {renderPlanField(
+          {renderEditorField("cr-description", "Description", description, setDescription, "What is changing?")}
+          {renderEditorField(
+            "cr-justification",
             "Justification",
             justification,
             setJustification,
             "Why is this change needed?",
           )}
-          {renderPlanField("Implementation plan", implementationPlan, setImplementationPlan)}
-          {renderPlanField("Risk and impact analysis", riskImpactAnalysis, setRiskImpactAnalysis)}
-          {renderPlanField("Backout plan", backoutPlan, setBackoutPlan)}
-          {renderPlanField("Test plan", testPlan, setTestPlan)}
+          {renderEditorField(
+            "cr-implementation-plan",
+            "Implementation plan",
+            implementationPlan,
+            setImplementationPlan,
+          )}
+          {renderEditorField(
+            "cr-risk-impact-analysis",
+            "Risk and impact analysis",
+            riskImpactAnalysis,
+            setRiskImpactAnalysis,
+          )}
+          {renderEditorField("cr-backout-plan", "Backout plan", backoutPlan, setBackoutPlan)}
+          {renderEditorField("cr-test-plan", "Test plan", testPlan, setTestPlan)}
 
           <Typography variant="subtitle2" sx={{ mt: 1 }}>
             Schedule
