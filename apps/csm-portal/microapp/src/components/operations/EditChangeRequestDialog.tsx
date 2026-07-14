@@ -26,7 +26,11 @@ interface EditChangeRequestDialogProps {
   changeRequest: ChangeRequestDetail;
   isSubmitting: boolean;
   onClose: () => void;
-  onSubmit: (fields: { plannedStartOn?: string; isCustomerApproved?: boolean; isCustomerReviewed?: boolean }) => void;
+  onSubmit: (fields: {
+    plannedStartOn?: string | null;
+    isCustomerApproved?: boolean;
+    isCustomerReviewed?: boolean;
+  }) => void;
 }
 
 // Mirrors the webapp's EditChangeRequestDialog: only 3 fields are editable, matching exactly what
@@ -51,7 +55,9 @@ export function EditChangeRequestDialog({
 
   const handleSave = () => {
     onSubmit({
-      ...(plannedStartChanged && plannedStart && { plannedStartOn: format(plannedStart, WIRE_FORMAT) }),
+      ...(plannedStartChanged && {
+        plannedStartOn: plannedStart ? format(plannedStart, WIRE_FORMAT) : null,
+      }),
       ...(customerApproved !== changeRequest.hasCustomerApproved && { isCustomerApproved: customerApproved }),
       ...(customerReviewed !== changeRequest.hasCustomerReviewed && { isCustomerReviewed: customerReviewed }),
     });

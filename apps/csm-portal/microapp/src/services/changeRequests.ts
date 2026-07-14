@@ -46,7 +46,9 @@ const searchChangeRequests = async (
     total: data.total,
     limit: data.limit,
     offset: data.offset,
-    hasMore: data.offset + items.length < data.total,
+    // Guard against an empty page still reporting hasMore (e.g. a stale/inconsistent total) —
+    // an empty page always means there's nothing further to fetch, regardless of total.
+    hasMore: items.length > 0 && data.offset + items.length < data.total,
   };
 };
 

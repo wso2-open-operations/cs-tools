@@ -98,8 +98,8 @@ export interface ChangeRequestSearchResponseDto {
 
 // minProperties: 1 on the backend — caller must send at least one field.
 export interface PatchChangeRequestPayloadDto {
-  /** "YYYY-MM-DD HH:MM:SS" */
-  plannedStartOn?: string;
+  /** "YYYY-MM-DD HH:MM:SS", or null to clear a previously-set planned start. */
+  plannedStartOn?: string | null;
   isCustomerApproved?: boolean;
   isCustomerReviewed?: boolean;
 }
