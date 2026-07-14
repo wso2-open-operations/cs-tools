@@ -1555,6 +1555,187 @@ export interface BeChangeRequestSearchResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Incidents (ServiceNow data source only). Unlike change requests, every
+// enum here is UPPER_SNAKE_CASE on the wire (matches
+// apps/csm-portal/backend/internal/handler/incidents.go's validation maps
+// exactly) — don't copy change requests' lowercase convention for these.
+// ---------------------------------------------------------------------------
+
+export type BeIncidentPriority = "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "PLANNING";
+
+export type BeIncidentState =
+  | "NEW"
+  | "IN_PROGRESS"
+  | "ON_HOLD"
+  | "RESOLVED"
+  | "CLOSED"
+  | "CANCELLED";
+
+export type BeIncidentCategory = "INQUIRY" | "SERVICE_INTERRUPTION" | "SECURITY";
+
+export type BeIncidentSubcategory =
+  | "DHCP"
+  | "ORACLE"
+  | "CPU"
+  | "KEYBOARD"
+  | "DOS_DDOS"
+  | "PRIVILEGE_ESCALATIONS"
+  | "THREAT_INTELLIGENCE"
+  | "SCANS_AND_PROBES"
+  | "APPLICATION_SECURITY"
+  | "CONFIG_CHANGE_REQUEST"
+  | "IP_ADDRESS"
+  | "FULL_OUTAGE"
+  | "SQL_SERVER"
+  | "SLOWNESS"
+  | "MEMORY"
+  | "MOUSE"
+  | "PRIVACY"
+  | "DATA_BREACH"
+  | "SYSTEM_COMPROMISES"
+  | "DNS"
+  | "OS"
+  | "DISK"
+  | "VPN"
+  | "MALWARE"
+  | "VULNERABILITY"
+  | "UNAUTHORIZED_ACCESS"
+  | "IDENTITY_PROTECTION"
+  | "PHISHING"
+  | "IMPROPER_CONFIGURATION"
+  | "INFORMATION_REQUEST"
+  | "DB2"
+  | "PARTIAL_OUTAGE"
+  | "EMAIL"
+  | "MONITOR"
+  | "WIRELESS";
+
+export type BeIncidentContactType =
+  | "SELF_SERVICE"
+  | "EMAIL"
+  | "WALK_IN"
+  | "AZURE"
+  | "EMAIL_INTERNAL"
+  | "SITE_247"
+  | "DIRECT"
+  | "PHONE"
+  | "SENTINEL"
+  | "VIRTUAL_AGENT"
+  | "CHAT"
+  | "EMAIL_EXTERNAL";
+
+export type BeIncidentImpact = "HIGH" | "MEDIUM" | "LOW";
+export type BeIncidentUrgency = "HIGH" | "MEDIUM" | "LOW";
+
+/** List-item shape for an incident (`POST /incidents/search`). */
+export interface BeIncident {
+  id: string | null;
+  number: string | null;
+  openedOn: string | null;
+  subject: string | null;
+  caller?: BeEntityRef | null;
+  priority: BeIncidentPriority | null;
+  state: BeIncidentState | null;
+  category: BeIncidentCategory | null;
+  parent?: BeEntityRef | null;
+  assignmentGroup?: BeEntityRef | null;
+  assignedTo?: BeEntityRef | null;
+  createdOn?: string;
+  createdBy?: string;
+  updatedOn?: string;
+  updatedBy?: string;
+}
+
+export interface BeIncidentWatchListItem {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * `GET /incidents/{id}` — the search view plus the fields only the detail
+ * endpoint returns (subcategory, service/serviceOffering/configurationItem,
+ * contactType, impact/urgency, the changeRequest/problem/causedBy links,
+ * comments, and the watch list).
+ */
+export interface BeIncidentDetail extends BeIncident {
+  subcategory?: BeIncidentSubcategory | null;
+  service?: BeEntityRef | null;
+  serviceOffering?: BeEntityRef | null;
+  configurationItem?: BeEntityRef | null;
+  contactType?: BeIncidentContactType | null;
+  impact?: BeIncidentImpact | null;
+  urgency?: BeIncidentUrgency | null;
+  changeRequest?: BeEntityRef | null;
+  problem?: BeEntityRef | null;
+  causedBy?: BeEntityRef | null;
+  additionalComments?: string | null;
+  workNotes?: string | null;
+  watchList?: BeIncidentWatchListItem[];
+}
+
+/**
+ * `POST /incidents` body. `callerId`, `category`, `serviceId`, `impact`,
+ * `urgency`, and `subject` are required by the backend
+ * (`validateCreateIncidentBody` in incidents.go); everything else is
+ * optional. There is no `priority` field here — ServiceNow computes it
+ * server-side from `impact` × `urgency`, so it only ever appears on read
+ * (see {@link BeIncident.priority}).
+ */
+export interface BeCreateIncidentPayload {
+  callerId: string;
+  category: BeIncidentCategory;
+  subcategory?: BeIncidentSubcategory;
+  serviceId: string;
+  serviceOfferingId?: string;
+  configurationItemId?: string;
+  contactType?: BeIncidentContactType;
+  impact: BeIncidentImpact;
+  urgency: BeIncidentUrgency;
+  assignmentGroupId?: string;
+  assignedEngineerId?: string;
+  subject: string;
+  watchList?: string[];
+  additionalComments?: string;
+  workNotes?: string;
+  parentId?: string;
+  changeRequestId?: string;
+  problemId?: string;
+  causedById?: string;
+}
+
+/** `POST /incidents` response — the created identifiers. */
+export interface BeCreateIncidentResponse {
+  message: string;
+  incident: {
+    id: string;
+    number: string;
+    createdOn: string;
+    createdBy: string;
+  };
+}
+
+export interface BeIncidentSearchPayload {
+  filters?: {
+    searchQuery?: string;
+    priorities?: BeIncidentPriority[];
+    parentIds?: string[];
+  };
+  sortBy?: {
+    field?: "createdOn" | "updatedOn" | "openedOn";
+    order?: "asc" | "desc";
+  };
+  pagination?: BePagination;
+}
+
+export interface BeIncidentSearchResponse {
+  incidents: BeIncident[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ---------------------------------------------------------------------------
 // Product vulnerabilities (managed-cloud; ServiceNow data source only)
 // ---------------------------------------------------------------------------
 

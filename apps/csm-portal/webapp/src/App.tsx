@@ -63,6 +63,12 @@ const CsmChangeRequestDetailPage = lazy(
 const CreateChangeRequestPage = lazy(
   () => import("@features/csm-operations/pages/CreateChangeRequestPage"),
 );
+const CsmIncidentDetailPage = lazy(
+  () => import("@features/csm-operations/pages/CsmIncidentDetailPage"),
+);
+const CreateIncidentPage = lazy(
+  () => import("@features/csm-operations/pages/CreateIncidentPage"),
+);
 const CsmAdminLayout = lazy(
   () => import("@features/csm-admin/pages/CsmAdminLayout"),
 );
@@ -285,6 +291,14 @@ export default function App(): JSX.Element {
                   <Route
                     path="operations/change-requests/:id"
                     element={<CsmChangeRequestDetailPage />}
+                  />
+                  <Route
+                    path="operations/incidents/new"
+                    element={<CreateIncidentPage />}
+                  />
+                  <Route
+                    path="operations/incidents/:id"
+                    element={<CsmIncidentDetailPage />}
                   />
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />
