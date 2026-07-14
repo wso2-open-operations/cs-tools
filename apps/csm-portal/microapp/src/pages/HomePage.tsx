@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Stack, Typography } from "@wso2/oxygen-ui";
+import { Stack } from "@wso2/oxygen-ui";
 import { AssignedToMeSection } from "@components/home/AssignedToMeSection";
 import { CaseCompositionSection } from "@components/home/CaseCompositionSection";
 
@@ -27,7 +27,6 @@ import { CaseCompositionSection } from "@components/home/CaseCompositionSection"
 export default function HomePage() {
   return (
     <Stack gap={3}>
-      <Typography variant="h5">Home</Typography>
       <AssignedToMeSection />
       <CaseCompositionSection />
     </Stack>

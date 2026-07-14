@@ -14,20 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Avatar, Box, IconButton, Stack, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { useUserStore } from "@src/store/user";
-import { initialsOf } from "@utils/initials";
+import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Box, IconButton, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft, Grip } from "@wso2/oxygen-ui-icons-react";
+import { goToMyAppsScreen } from "@components/microapp-bridge";
+import { ConfirmDialog } from "@components/common/ConfirmDialog";
 
-const ROOT_PATHS = ["/", "/support", "/operations", "/more", "/profile"];
+const ROOT_PATHS = ["/", "/support", "/operations", "/more"];
 
 export function TopBar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const user = useUserStore((state) => state.user);
-  const isProfileActive = location.pathname.startsWith("/profile");
-  const showBackButton = !ROOT_PATHS.includes(location.pathname);
+  const isRootPath = ROOT_PATHS.includes(location.pathname);
 
   return (
     <Box
@@ -35,46 +34,71 @@ export function TopBar() {
       top={0}
       bgcolor="background.paper"
       display="flex"
-      justifyContent="space-between"
       alignItems="center"
       px={2}
-      pb={1}
+      pb={2}
       sx={{
-        pt: 7,
+        // Ties directly to the device's actual safe-area inset (--safe-top, set from the native
+        // bridge) plus enough clearance for the ExitButton pill's own height, rather than a fixed
+        // value — a fixed pt (the customer-portal microapp's own AppBar.tsx uses one too) is only
+        // correct for whatever inset it was tuned against; on a Dynamic Island phone (~59px inset)
+        // it undershoots and the pill visually overflows into the page content below it.
+        pt: "calc(var(--safe-top, 44px) + 40px)",
         borderBottom: "1px solid",
         borderColor: "divider",
         zIndex: (theme) => theme.zIndex.appBar,
       }}
     >
       <Box sx={{ minWidth: 32 }}>
-        {showBackButton ? (
+        {isRootPath ? (
+          <ExitButton />
+        ) : (
           <IconButton onClick={() => navigate(-1)} aria-label="Go back" size="small">
             <ArrowLeft size={22} />
           </IconButton>
-        ) : (
-          <Stack direction="row" alignItems="center" gap={1}>
-            <img src="/logo-dark.svg" alt="Company Logo" style={{ height: 20, width: "auto" }} />
-            <Typography variant="subtitle1" fontWeight={600}>
-              CSM Portal
-            </Typography>
-          </Stack>
         )}
       </Box>
-
-      <IconButton component={Link} to="/profile" aria-label="Profile" size="small">
-        <Avatar
-          src={user?.avatarUrl}
-          slotProps={{ img: { referrerPolicy: "no-referrer" } }}
-          sx={{
-            width: 28,
-            height: 28,
-            fontSize: 13,
-            bgcolor: isProfileActive ? "primary.main" : "grey.400",
-          }}
-        >
-          {initialsOf(user?.name ?? "")}
-        </Avatar>
-      </IconButton>
     </Box>
+  );
+}
+
+// Leaves the microapp WebView and returns to the native shell's app switcher — mirrors the
+// customer-portal microapp's own ExitButton (components/core/AppBar.tsx), shown on root pages in
+// place of the back button. Floats in the safe-area strip above the main row (same technique the
+// customer-portal version uses: absolutely positioned at `var(--safe-top)`), so it doesn't compete
+// with page content for width on narrow phones.
+function ExitButton() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <IconButton
+        disableRipple
+        color="error"
+        sx={{
+          gap: 1,
+          position: "absolute",
+          top: "var(--safe-top, 44px)",
+          left: 10,
+          p: 0,
+        }}
+        onClick={() => setOpen(true)}
+      >
+        <Grip size={20} />
+        <Typography variant="body2" fontWeight={600}>
+          Go to Apps
+        </Typography>
+      </IconButton>
+
+      <ConfirmDialog
+        open={open}
+        title="Return to Apps"
+        description="Are you sure you want to leave this application?"
+        confirmColor="error"
+        confirmLabel="Leave"
+        onClose={() => setOpen(false)}
+        onConfirm={goToMyAppsScreen}
+      />
+    </>
   );
 }

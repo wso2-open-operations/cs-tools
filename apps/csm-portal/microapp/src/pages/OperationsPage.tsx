@@ -19,5 +19,11 @@ import { ComingSoonPage } from "@components/common/ComingSoonPage";
 // The webapp itself marks Operations as wip:true (apps/csm-portal/webapp/src/config/csmNavItems.ts)
 // and shows its own coming-soon page — mirroring that here rather than building ahead of it.
 export default function OperationsPage() {
-  return <ComingSoonPage title="Operations" description="Operations tooling is still under construction." />;
+  return (
+    <ComingSoonPage
+      title="Operations"
+      description="Operations tooling is still under construction."
+      showTitle={false}
+    />
+  );
 }

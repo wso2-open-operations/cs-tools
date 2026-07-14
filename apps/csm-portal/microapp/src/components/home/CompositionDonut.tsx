@@ -17,9 +17,7 @@
 import { Box, Card, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { PieChart } from "@wso2/oxygen-ui-charts-react";
 
-// Donut sits in a fixed square; the legend fills the rest of the card width. Smaller than the
-// webapp's 200px version (CompositionDonut.tsx) to fit a phone-width card comfortably.
-const DONUT_SIZE = 160;
+const DONUT_SIZE = 165;
 
 export interface CompositionSlice {
   id: string;
@@ -30,39 +28,35 @@ export interface CompositionSlice {
 
 interface CompositionDonutProps {
   title: string;
-  description: string;
   slices: CompositionSlice[];
   total: number;
   isLoading: boolean;
   isError: boolean;
   /** Noun for the empty state, e.g. "cases". */
   emptyNoun?: string;
+
+  onSliceClick?: (id: string) => void;
 }
 
 // A donut chart with a value/percentage legend and a centred total — mirrors the webapp's
 // CompositionDonut (apps/csm-portal/webapp/src/features/csm-dashboard/components/CompositionDonut.tsx).
 // Zero-value slices drop from the ring but stay in the legend so every category remains visible.
-// No slice-click drill-down here (unlike the webapp): the microapp's Support page doesn't support
-// seeding filters from the URL, so there's nowhere to deep-link a click into yet.
 export function CompositionDonut({
   title,
-  description,
   slices,
   total,
   isLoading,
   isError,
   emptyNoun = "cases",
+  onSliceClick,
 }: CompositionDonutProps) {
   const pieData = slices.filter((s) => s.value > 0);
   const isEmpty = !isLoading && !isError && total === 0;
 
   return (
-    <Card sx={{ p: 2 }}>
+    <Card sx={{ p: 1.5, height: "100%" }}>
       <Typography variant="subtitle1" fontWeight={600}>
         {title}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
-        {description}
       </Typography>
 
       {isLoading ? (
@@ -88,7 +82,16 @@ export function CompositionDonut({
         </Box>
       ) : (
         <Box sx={{ mt: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-          <Box sx={{ position: "relative", width: DONUT_SIZE, height: DONUT_SIZE, flexShrink: 0 }}>
+          <Box
+            sx={{
+              position: "relative",
+              width: "100%",
+              maxWidth: DONUT_SIZE,
+              height: DONUT_SIZE,
+              flexShrink: 0,
+              ...(onSliceClick && { "& .recharts-pie-sector": { cursor: "pointer" } }),
+            }}
+          >
             <PieChart
               data={pieData}
               colors={pieData.map((s) => s.color)}
@@ -96,6 +99,8 @@ export function CompositionDonut({
               tooltip={{ show: true }}
               width="100%"
               height={DONUT_SIZE}
+              margin={{ top: 0, right: 0, bottom: 5, left: 0 }}
+              isAnimationActive={false}
               pies={[
                 {
                   dataKey: "value",
@@ -107,23 +112,44 @@ export function CompositionDonut({
                   endAngle: -270,
                   label: false,
                   labelLine: false,
+                  ...(onSliceClick && {
+                    onClick: (_data: unknown, index: number) => {
+                      const slice = pieData[index];
+                      if (slice) onSliceClick(slice.id);
+                    },
+                  }),
                 },
               ]}
             />
             <Box
               sx={{
                 position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                textAlign: "center",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 pointerEvents: "none",
               }}
             >
-              <Typography variant="h5">{total}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Total
-              </Typography>
+              {/* Constrained to well inside the ring's inner radius (62% of DONUT_SIZE) so the
+                  text never touches the ring, even for a wide number. */}
+              <Box
+                sx={{
+                  width: "55%",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                }}
+              >
+                <Typography variant="h5" noWrap sx={{ lineHeight: 1.2 }}>
+                  {total}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+                  Total
+                </Typography>
+              </Box>
             </Box>
           </Box>
 
@@ -132,7 +158,17 @@ export function CompositionDonut({
             {slices.map((s) => {
               const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
               return (
-                <Box key={s.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                <Box
+                  key={s.id}
+                  onClick={onSliceClick ? () => onSliceClick(s.id) : undefined}
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 1,
+                    cursor: onSliceClick ? "pointer" : "default",
+                  }}
+                >
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
                     <Box sx={{ width: 12, height: 12, borderRadius: "50%", bgcolor: s.color, flexShrink: 0 }} />
                     <Typography variant="body2" color="text.secondary" noWrap>

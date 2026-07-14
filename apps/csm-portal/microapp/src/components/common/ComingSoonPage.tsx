@@ -20,16 +20,19 @@ interface ComingSoonPageProps {
   title: string;
   description: string;
   blockedOn?: string;
+  /** False for a tab-bar landing page (e.g. Operations), whose name is already shown by the
+   * active tab itself — repeating it as a page heading is redundant there. Defaults to true. */
+  showTitle?: boolean;
 }
 
 // Placeholder for microapp sections not yet built, mirroring the webapp's CsmComingSoonPage
 // (apps/csm-portal/webapp/src/features/csm-coming-soon/pages/CsmComingSoonPage.tsx) — used
 // deliberately so a reserved tab/route feels real instead of dead or missing.
-export function ComingSoonPage({ title, description, blockedOn }: ComingSoonPageProps) {
+export function ComingSoonPage({ title, description, blockedOn, showTitle = true }: ComingSoonPageProps) {
   return (
     <Stack gap={3}>
       <Stack direction="row" alignItems="center" gap={1.5}>
-        <Typography variant="h5">{title}</Typography>
+        {showTitle && <Typography variant="h5">{title}</Typography>}
         <Chip size="small" label="Coming soon" color="warning" variant="outlined" />
       </Stack>
       <Card sx={{ p: 3, display: "flex", flexDirection: "column", gap: 1.5 }}>

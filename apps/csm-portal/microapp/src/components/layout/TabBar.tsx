@@ -21,13 +21,13 @@ import { Cog, Headset, House, LayoutGrid } from "@wso2/oxygen-ui-icons-react";
 
 // Mirrors a subset of the webapp's CSM_NAV_ITEMS (apps/csm-portal/webapp/src/config/csmNavItems.ts):
 // Home (Dashboard), Support (Cases), Operations get their own tab; Time Cards/Security
-// Center/Updates/Engagements are grouped under More; Customers/Settings aren't in the mobile nav.
-// Profile is reached from the TopBar's top-right corner instead of a tab here.
+// Center/Updates/Engagements/Settings/Profile are grouped under More; Customers isn't in the
+// mobile nav.
 function activeTabFor(pathname: string): string | false {
   if (pathname === "/") return "home";
   if (pathname.startsWith("/support") || pathname.startsWith("/cases/")) return "support";
   if (pathname.startsWith("/operations")) return "operations";
-  if (pathname.startsWith("/more")) return "more";
+  if (pathname.startsWith("/more") || pathname.startsWith("/profile")) return "more";
   return false;
 }
 
