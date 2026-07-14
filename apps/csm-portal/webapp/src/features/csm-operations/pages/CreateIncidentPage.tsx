@@ -196,14 +196,17 @@ export default function CreateIncidentPage(): JSX.Element {
 
   // Defaults "Caller" to the signed-in user, matching the change-request
   // form's "Requested by" default. Fires once, when the current user's id
-  // first loads; a ref (not the field's own emptiness) gates it so manually
-  // clearing the field afterward sticks. Adjusted during render (React's
-  // recommended pattern) rather than in an effect, which would call setState
-  // synchronously post-commit.
+  // first loads; a ref (not just the field's own emptiness) gates it so
+  // manually clearing the field afterward sticks. The `!callerId` check
+  // additionally covers the race where the user picks a different caller
+  // before `me` resolves — without it, `me` loading afterward would still
+  // overwrite their pick, since autoFilledCaller.current hadn't been set yet.
+  // Adjusted during render (React's recommended pattern) rather than in an
+  // effect, which would call setState synchronously post-commit.
   const { data: me } = useGetUsersMe();
   const meLabel = me ? userLabel(me) : undefined;
   const autoFilledCaller = useRef(false);
-  if (me?.id && !autoFilledCaller.current) {
+  if (me?.id && !autoFilledCaller.current && !callerId) {
     autoFilledCaller.current = true;
     setCallerId(me.id);
   }
