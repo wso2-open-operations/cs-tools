@@ -94,10 +94,26 @@ export function navItemForPath(pathname: string): CsmNavItem | undefined {
 }
 
 /**
+ * Sub-paths under a `wip` nav item that are actually finished and shouldn't
+ * be redirected by {@link isDisabledWipPath} — Incidents is done (search,
+ * create, detail) even though the rest of Operations (Service Requests,
+ * Change Requests) isn't, and the `operations` nav item's single `wip` flag
+ * has no per-sub-route granularity of its own.
+ */
+const WIP_EXEMPT_PATH_PREFIXES = ["/operations/incidents"];
+
+function isWipExemptPath(pathname: string): boolean {
+  return WIP_EXEMPT_PATH_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
+
+/**
  * True when `pathname` belongs to a WIP section the current config disables.
  * Used to redirect direct/deep links to disabled sections back to the dashboard.
  */
 export function isDisabledWipPath(pathname: string): boolean {
   if (!DISABLE_WIP_FEATURES) return false;
+  if (isWipExemptPath(pathname)) return false;
   return navItemForPath(pathname)?.wip === true;
 }
