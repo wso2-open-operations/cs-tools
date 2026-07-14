@@ -64,9 +64,9 @@ type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
 	// filters in req. An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchSNAccountsResponse, error)
-	// GetAccountByID returns the ServiceNow account for the given UUID.
+	// GetAccountByID returns the full account detail for the given UUID.
 	// An UnauthorizedError is returned when x-user-id-token is absent.
-	GetAccountByID(ctx context.Context, id string) (domain.SNAccount, error)
+	GetAccountByID(ctx context.Context, id string) (domain.SNAccountDetail, error)
 }
 
 // ProjectService defines the operations available on the project entity.
