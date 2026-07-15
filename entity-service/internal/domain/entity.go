@@ -2290,6 +2290,18 @@ type SearchIncidentsResponse struct {
 	Limit     int                  `json:"limit"`
 }
 
+// IncidentState represents the workflow state of an incident.
+type IncidentState string
+
+const (
+	IncidentStateNew        IncidentState = "NEW"
+	IncidentStateInProgress IncidentState = "IN_PROGRESS"
+	IncidentStateOnHold     IncidentState = "ON_HOLD"
+	IncidentStateResolved   IncidentState = "RESOLVED"
+	IncidentStateClosed     IncidentState = "CLOSED"
+	IncidentStateCancelled  IncidentState = "CANCELLED"
+)
+
 // IncidentCategory represents the category of an incident.
 type IncidentCategory string
 
@@ -2409,6 +2421,43 @@ type CreateIncidentResponse struct {
 		CreatedOn string `json:"createdOn"`
 		CreatedBy string `json:"createdBy"`
 	} `json:"incident"`
+}
+
+// UpdateIncidentRequest is the input for PATCH /incidents/{id}. All fields are optional,
+// but at least one must be provided.
+type UpdateIncidentRequest struct {
+	ID                  string               `json:"-"`
+	Subject             *string              `json:"subject,omitempty"`
+	Priority            *IncidentPriority    `json:"priority,omitempty"`
+	State               *IncidentState       `json:"state,omitempty"`
+	Category            *IncidentCategory    `json:"category,omitempty"`
+	Subcategory         *IncidentSubcategory `json:"subcategory,omitempty"`
+	ContactType         *IncidentContactType `json:"contactType,omitempty"`
+	Impact              *IncidentImpact      `json:"impact,omitempty"`
+	Urgency             *IncidentUrgency     `json:"urgency,omitempty"`
+	ResolutionCode      *string              `json:"resolutionCode,omitempty"`
+	ParentID            *string              `json:"parentId,omitempty"`
+	ParentIncidentID    *string              `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string              `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string              `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string              `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string              `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string              `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string              `json:"changeRequestId,omitempty"`
+	ProblemID           *string              `json:"problemId,omitempty"`
+	CausedByID          *string              `json:"causedById,omitempty"`
+	ResolvedByID        *string              `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string              `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string              `json:"incidentReport,omitempty"`
+	AdditionalComments  *string              `json:"additionalComments,omitempty"`
+	WorkNotes           *string              `json:"workNotes,omitempty"`
+	WatchList           []string             `json:"watchList,omitempty"`
+}
+
+// UpdateIncidentResponse is the output for PATCH /incidents/{id}.
+type UpdateIncidentResponse struct {
+	Message  string       `json:"message"`
+	Incident IncidentView `json:"incident"`
 }
 
 // IncidentWatchListItem represents a user on the incident watch list.
