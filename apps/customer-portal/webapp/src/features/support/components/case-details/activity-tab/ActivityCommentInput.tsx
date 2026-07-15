@@ -29,6 +29,9 @@ import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { useAsgardeo } from "@asgardeo/react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { hasSubmittableEditorContent } from "@features/support/utils/support";
+import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
+import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
@@ -55,6 +58,7 @@ export default function ActivityCommentInput({
   const postAttachments = usePostAttachments();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { showError } = useErrorBanner();
+  const piiGuard = usePiiGuard();
 
   // Attachment state
   type AttachmentItem = { id: string; file: File };
@@ -183,47 +187,57 @@ export default function ActivityCommentInput({
       attachmentNamesRef.current.clear();
     };
 
-    // Attachment-only: skip comment endpoint, upload directly
-    if (!hasText && hasAttachments) {
-      const ok = await uploadAttachmentsFromSnapshot(
-        attachmentsSnapshot,
-        attachmentNamesSnapshot,
-      );
-      if (ok) {
-        clearUI();
-        window.location.reload();
-      }
-      return;
-    }
-
-    // Text (with or without attachments): post comment first, then upload attachments
-    postComment.mutate(
-      {
-        caseId,
-        body: { content: currentValue.trim(), type: CommentType.COMMENT },
-      },
-      {
-        onSuccess: async () => {
+    const performSend = async () => {
+      // Attachment-only: skip comment endpoint, upload directly
+      if (!hasText && hasAttachments) {
+        const ok = await uploadAttachmentsFromSnapshot(
+          attachmentsSnapshot,
+          attachmentNamesSnapshot,
+        );
+        if (ok) {
           clearUI();
-          if (attachmentsSnapshot.length > 0) {
-            const ok = await uploadAttachmentsFromSnapshot(
-              attachmentsSnapshot,
-              attachmentNamesSnapshot,
-            );
-            if (ok) {
-              window.location.reload();
+          window.location.reload();
+        }
+        return;
+      }
+
+      // Text (with or without attachments): post comment first, then upload attachments
+      postComment.mutate(
+        {
+          caseId,
+          body: { content: currentValue.trim(), type: CommentType.COMMENT },
+        },
+        {
+          onSuccess: async () => {
+            clearUI();
+            if (attachmentsSnapshot.length > 0) {
+              const ok = await uploadAttachmentsFromSnapshot(
+                attachmentsSnapshot,
+                attachmentNamesSnapshot,
+              );
+              if (ok) {
+                window.location.reload();
+              }
             }
-          }
+          },
+          onError: (error: unknown) => {
+            const message =
+              error instanceof Error && error.message
+                ? error.message
+                : "Failed to post comment. Please try again.";
+            showError(message);
+          },
         },
-        onError: (error: unknown) => {
-          const message =
-            error instanceof Error && error.message
-              ? error.message
-              : "Failed to post comment. Please try again.";
-          showError(message);
-        },
-      },
-    );
+      );
+    };
+
+    // Warn about PII in the comment text before posting. Attachment-only
+    // sends have no text to scan, so they proceed directly.
+    if (hasText) {
+      piiGuard.checkBeforeSubmit(htmlToPlainText(currentValue), performSend);
+    } else {
+      performSend();
+    }
   };
 
   return (
@@ -293,6 +307,8 @@ export default function ActivityCommentInput({
         onClose={() => setIsAttachmentModalOpen(false)}
         onSelect={handleSelectAttachment}
       />
+
+      <PiiWarningDialog {...piiGuard.dialogProps} />
     </>
   );
 }
