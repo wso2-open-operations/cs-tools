@@ -41,7 +41,7 @@ export interface PiiWarningDialogProps {
 const TITLE = "Possible sensitive information detected";
 const DESCRIPTION =
   "Your text appears to contain personal or sensitive information. " +
-  "For your security, review and remove it before posting — or continue if " +
+  "For your security, review and remove it before posting or continue if " +
   "this information is necessary.";
 
 export default function PiiWarningDialog({

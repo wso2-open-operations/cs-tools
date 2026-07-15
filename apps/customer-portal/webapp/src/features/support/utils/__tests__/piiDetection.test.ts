@@ -95,6 +95,55 @@ describe("piiDetection", () => {
     });
   });
 
+  describe("detectPii - secrets and credentials", () => {
+    it("detects a PEM private key header", () => {
+      const matches = detectPii(
+        "Here is my key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow...",
+      );
+      expect(matches.some((m) => m.type === PiiType.PRIVATE_KEY)).toBe(true);
+    });
+
+    it("detects credentials in a JDBC connection string", () => {
+      const matches = detectPii("jdbc:mysql://admin:s3cretPw@db.internal:3306/wso2");
+      expect(matches.some((m) => m.type === PiiType.CREDENTIALS_IN_URI)).toBe(true);
+    });
+
+    it("detects credentials in an https URL without also flagging an email", () => {
+      const matches = detectPii("clone from https://user:token@github.com/org/repo");
+      expect(matches.some((m) => m.type === PiiType.CREDENTIALS_IN_URI)).toBe(true);
+      expect(matches.some((m) => m.type === PiiType.EMAIL)).toBe(false);
+    });
+
+    it("detects an AWS access key id", () => {
+      const matches = detectPii("key AKIAIOSFODNN7EXAMPLE in the config");
+      expect(matches.some((m) => m.type === PiiType.ACCESS_TOKEN)).toBe(true);
+    });
+
+    it("detects a GitHub token", () => {
+      const matches = detectPii(
+        "token ghp_1234567890abcdefghijklmnopqrstuvwxyz set",
+      );
+      expect(matches.some((m) => m.type === PiiType.ACCESS_TOKEN)).toBe(true);
+    });
+
+    it("detects a JWT", () => {
+      const matches = detectPii(
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.abc123-_",
+      );
+      expect(matches.some((m) => m.type === PiiType.JWT)).toBe(true);
+    });
+
+    it("detects a password assigned in a config line", () => {
+      const matches = detectPii('keystore password="wso2carbon123"');
+      expect(matches.some((m) => m.type === PiiType.PASSWORD)).toBe(true);
+    });
+
+    it("does not flag prose mentioning a password with no value", () => {
+      const matches = detectPii("The user forgot their password and cannot log in");
+      expect(matches.some((m) => m.type === PiiType.PASSWORD)).toBe(false);
+    });
+  });
+
   describe("detectPii - clean input", () => {
     it("returns no matches for benign text", () => {
       expect(detectPii("The deployment failed with a 500 error on startup.")).toEqual([]);

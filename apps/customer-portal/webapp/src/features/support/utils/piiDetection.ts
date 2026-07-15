@@ -26,6 +26,14 @@
  */
 
 export enum PiiType {
+  // Secrets / credentials — the highest-value category for a technical
+  // support tool, where customers paste logs and config snippets.
+  PRIVATE_KEY = "PRIVATE_KEY",
+  CREDENTIALS_IN_URI = "CREDENTIALS_IN_URI",
+  ACCESS_TOKEN = "ACCESS_TOKEN",
+  JWT = "JWT",
+  PASSWORD = "PASSWORD",
+  // Classic personal data.
   CREDIT_CARD = "CREDIT_CARD",
   DANISH_CPR = "DANISH_CPR",
   NATIONAL_ID = "NATIONAL_ID",
@@ -90,6 +98,41 @@ export const passesLuhn = (value: string): boolean => {
  * and wins. See {@link detectPii}.
  */
 export const PII_PATTERNS: readonly PiiPattern[] = [
+  {
+    // PEM-encoded private keys (RSA/EC/OpenSSH/PGP/DSA). Near-zero false rate.
+    type: PiiType.PRIVATE_KEY,
+    label: "Private key",
+    regex: /-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----/g,
+  },
+  {
+    // Credentials embedded in a URL or DB connection string, e.g.
+    // https://user:pass@host or jdbc:mysql://user:pass@host. Kept above EMAIL
+    // so "pass@host.com" isn't mis-reported as an email address.
+    type: PiiType.CREDENTIALS_IN_URI,
+    label: "Credentials in a URL or connection string",
+    regex: /\b(?:jdbc:)?[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@[^\s/]+/g,
+  },
+  {
+    // Well-known service/cloud access tokens with distinctive prefixes.
+    type: PiiType.ACCESS_TOKEN,
+    label: "API key or access token",
+    regex:
+      /\b(?:AKIA[0-9A-Z]{16}|gh[posru]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|npm_[A-Za-z0-9]{36})\b/g,
+  },
+  {
+    // JSON Web Tokens (header.payload.signature, base64url).
+    type: PiiType.JWT,
+    label: "Authentication token",
+    regex: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+  },
+  {
+    // A password/secret assigned in a config or log line, e.g.
+    // password="s3cret", clientSecret: abc123, api_key=xxxx.
+    type: PiiType.PASSWORD,
+    label: "Password or secret",
+    regex:
+      /\b(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?key|auth[_-]?token)\b\s*[:=]\s*["']?[^\s"'<>{}]{4,}["']?/gi,
+  },
   {
     type: PiiType.CREDIT_CARD,
     label: "Credit card number",
