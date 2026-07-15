@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Fragment } from "react";
 import { Button, FormControl, MenuItem, Select } from "@wso2/oxygen-ui";
 import type { CaseDetail, CaseState } from "@src/types";
 import { STATE_LABELS } from "@components/support/config";
@@ -76,66 +75,62 @@ export function CaseActionBar({
 
   if (targets.length === 1) {
     return (
-      <Fragment>
-        <Button
-          variant="contained"
-          size="small"
-          disabled={isPending}
-          onClick={() => runTarget(targets[0])}
-          sx={{ borderRadius: 999 }}
-        >
-          {labelFor(targets[0])}
-        </Button>
-      </Fragment>
+      <Button
+        variant="contained"
+        size="small"
+        disabled={isPending}
+        onClick={() => runTarget(targets[0])}
+        sx={{ borderRadius: 999 }}
+      >
+        {labelFor(targets[0])}
+      </Button>
     );
   }
 
   return (
-    <>
-      <FormControl size="small" sx={{ minWidth: 150, flexShrink: 0 }}>
-        <Select
-          value=""
-          displayEmpty
-          disabled={isPending}
-          renderValue={() => "Change state"}
-          sx={{
-            color: "#fff",
+    <FormControl size="small" sx={{ minWidth: 150, flexShrink: 0 }}>
+      <Select
+        value=""
+        displayEmpty
+        disabled={isPending}
+        renderValue={() => "Change state"}
+        sx={{
+          color: "#fff",
+          borderRadius: 999,
+          // Reuse the theme's own `gradient.primary` token (same one MuiButton/MuiFab
+          // containedPrimary use) instead of hand-deriving a gradient from
+          // palette.primary.light/main/dark — that diverged in direction, stops, and
+          // didn't track the theme (e.g. the high-contrast theme sets gradient.primary
+          // to "none").
+          background: (theme) => `${theme.gradient.primary} !important`,
+          "& .MuiSelect-icon": {
+            color: "inherit",
+          },
+          "& .MuiOutlinedInput-notchedOutline": {
+            border: "none",
             borderRadius: 999,
-            // Reuse the theme's own `gradient.primary` token (same one MuiButton/MuiFab
-            // containedPrimary use) instead of hand-deriving a gradient from
-            // palette.primary.light/main/dark — that diverged in direction, stops, and
-            // didn't track the theme (e.g. the high-contrast theme sets gradient.primary
-            // to "none").
+          },
+          "&:hover": {
             background: (theme) => `${theme.gradient.primary} !important`,
-            "& .MuiSelect-icon": {
-              color: "inherit",
-            },
-            "& .MuiOutlinedInput-notchedOutline": {
-              border: "none",
-              borderRadius: 999,
-            },
-            "&:hover": {
-              background: (theme) => `${theme.gradient.primary} !important`,
-              opacity: 0.9,
-            },
-            "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-              border: "none",
-            },
-            "&.Mui-disabled": {
-              color: "action.disabled",
-              background: "action.disabledBackground",
-              opacity: 1,
-            },
-          }}
-          onChange={(e) => runTarget(e.target.value as CaseState)}
-        >
-          {targets.map((target) => (
-            <MenuItem key={target} value={target}>
-              {labelFor(target)}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-    </>
+            opacity: 0.9,
+          },
+          "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+            border: "none",
+          },
+          "&.Mui-disabled": {
+            color: "action.disabled",
+            background: "action.disabledBackground",
+            opacity: 1,
+          },
+        }}
+        onChange={(e) => runTarget(e.target.value as CaseState)}
+      >
+        {targets.map((target) => (
+          <MenuItem key={target} value={target}>
+            {labelFor(target)}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
   );
 }
