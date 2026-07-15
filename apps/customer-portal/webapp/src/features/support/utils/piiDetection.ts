@@ -206,7 +206,12 @@ export const detectPii = (text: string): PiiMatch[] => {
 
   PII_PATTERNS.forEach((pattern, priority) => {
     // Fresh regex per scan to avoid shared lastIndex state on the /g flag.
-    const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
+    // Force the global flag so exec() advances lastIndex and the loop below
+    // terminates even if a pattern was defined without /g.
+    const flags = pattern.regex.flags.includes("g")
+      ? pattern.regex.flags
+      : `${pattern.regex.flags}g`;
+    const regex = new RegExp(pattern.regex.source, flags);
     let result: RegExpExecArray | null = regex.exec(text);
     while (result !== null) {
       const snippet = result[0];

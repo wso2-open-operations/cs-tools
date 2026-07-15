@@ -900,7 +900,7 @@ export default function CreateCasePage(): JSX.Element {
     // found the guard proceeds immediately; otherwise the dialog opens and
     // "Post anyway" re-runs the submit with the check bypassed.
     if (!bypassPii) {
-      piiGuard.checkBeforeSubmit(`${titlePlain}\n${descriptionPlain}`, () => {
+      piiGuard.checkBeforeSubmit(`${title}\n${description}`, () => {
         void handleSubmit(undefined, true);
       });
       return;

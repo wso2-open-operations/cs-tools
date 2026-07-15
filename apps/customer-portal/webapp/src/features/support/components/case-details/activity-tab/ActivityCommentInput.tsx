@@ -29,7 +29,6 @@ import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { useAsgardeo } from "@asgardeo/react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { hasSubmittableEditorContent } from "@features/support/utils/support";
-import { htmlToPlainText } from "@features/support/utils/richTextEditor";
 import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
 import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import Editor from "@components/rich-text-editor/Editor";
@@ -234,7 +233,7 @@ export default function ActivityCommentInput({
     // Warn about PII in the comment text before posting. Attachment-only
     // sends have no text to scan, so they proceed directly.
     if (hasText) {
-      piiGuard.checkBeforeSubmit(htmlToPlainText(currentValue), performSend);
+      piiGuard.checkBeforeSubmit(currentValue, performSend);
     } else {
       performSend();
     }

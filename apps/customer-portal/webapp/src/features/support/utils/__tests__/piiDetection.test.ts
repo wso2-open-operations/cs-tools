@@ -180,6 +180,25 @@ describe("piiDetection", () => {
     });
   });
 
+  describe("detectPii - rich-text HTML input", () => {
+    it("detects PII in link attributes that plain-text extraction would drop", () => {
+      const emailMatches = detectPii(
+        '<p><a href="mailto:john@example.com">contact us</a></p>',
+      );
+      expect(emailMatches.some((m) => m.type === PiiType.EMAIL)).toBe(true);
+
+      const credMatches = detectPii(
+        '<a href="https://user:token123@github.com/org/repo">clone</a>',
+      );
+      expect(credMatches.some((m) => m.type === PiiType.CREDENTIALS_IN_URI)).toBe(true);
+    });
+
+    it("detects visible PII inside markup", () => {
+      const matches = detectPii("<p>My card is 4242 4242 4242 4242</p>");
+      expect(matches.some((m) => m.type === PiiType.CREDIT_CARD)).toBe(true);
+    });
+  });
+
   describe("detectPii - clean input", () => {
     it("returns no matches for benign text", () => {
       expect(detectPii("The deployment failed with a 500 error on startup.")).toEqual([]);
