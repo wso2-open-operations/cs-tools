@@ -531,58 +531,98 @@ interface MetaField {
   icon: LucideIcon;
   label: string;
   value?: string | null;
-  /** Longer values (names, emails) get the full row width instead of sharing a 2-up grid cell. */
-  fullWidth?: boolean;
 }
 
 function CaseMetadataSection({ caseDetail }: { caseDetail: CaseDetail }) {
-  const fields: MetaField[] = [
-    { icon: Folder, label: "Project", value: caseDetail.project?.name, fullWidth: true },
-    { icon: Rocket, label: "Deployment", value: caseDetail.deployment?.name },
-    { icon: Package, label: "Product", value: caseDetail.product?.name },
-    { icon: Building2, label: "Account", value: caseDetail.account?.name },
-    { icon: UserCog, label: "Assigned Engineer", value: caseDetail.assignedEngineer?.name },
-    {
-      icon: PenLine,
-      label: "Created By",
-      value: caseDetail.createdBy?.displayName || caseDetail.createdBy?.email,
-    },
-    { icon: Clock, label: "Created On", value: formatDate(caseDetail.createdOn) },
-    { icon: RefreshCw, label: "Updated On", value: formatDate(caseDetail.updatedOn) },
-    ...(caseDetail.closedOn ? [{ icon: CheckCircle, label: "Closed On", value: formatDate(caseDetail.closedOn) }] : []),
-  ].filter((field) => field.value);
+  // Related fields share a row (2-up); each group collapses to one full-width row if its
+  // other field has no value (e.g. Account missing leaves Project alone on its row).
+  // Project and Account each get their own full-width row rather than being paired.
+  const groups: MetaField[][] = [
+    [{ icon: Folder, label: "Project", value: caseDetail.project?.name }],
+    [{ icon: Building2, label: "Account", value: caseDetail.account?.name }],
+    [
+      { icon: Rocket, label: "Deployment", value: caseDetail.deployment?.name },
+      { icon: Package, label: "Product", value: caseDetail.product?.name },
+    ],
+    [
+      { icon: UserCog, label: "Assigned Engineer", value: caseDetail.assignedEngineer?.name },
+      {
+        icon: PenLine,
+        label: "Created By",
+        value: caseDetail.createdBy?.displayName || caseDetail.createdBy?.email,
+      },
+    ],
+    [
+      { icon: Clock, label: "Created On", value: formatDate(caseDetail.createdOn) },
+      { icon: RefreshCw, label: "Updated On", value: formatDate(caseDetail.updatedOn) },
+    ],
+    ...(caseDetail.closedOn
+      ? [[{ icon: CheckCircle, label: "Closed On", value: formatDate(caseDetail.closedOn) }]]
+      : []),
+  ]
+    .map((group) => group.filter((field) => field.value))
+    .filter((group) => group.length > 0);
 
   return (
-    <Grid container spacing={1.5}>
-      {fields.map((field) => (
-        <Grid key={field.label} size={field.fullWidth ? 12 : 6}>
-          <MetaFieldCard field={field} />
-        </Grid>
-      ))}
-    </Grid>
+    <Card sx={{ p: 1.75 }}>
+      <Stack gap={1.5}>
+        {groups.map((group, index) => (
+          <Grid container spacing={2} key={index}>
+            {group.map((field) => (
+              <Grid key={field.label} size={group.length === 2 ? 6 : 12}>
+                <MetaFieldItem field={field} />
+              </Grid>
+            ))}
+          </Grid>
+        ))}
+      </Stack>
+    </Card>
   );
 }
 
-function MetaFieldCard({ field }: { field: MetaField }) {
+// Backend-supplied display names (e.g. the assigned engineer's ServiceNow name) sometimes end in
+// a trailing marker after a space, like "Hesara Perera (Intern) Ⓦ" — a normal space there lets the
+// browser wrap the marker onto its own line, splitting it from the word it qualifies. Swap the
+// last space for a non-breaking one so those two trailing tokens always wrap (or don't) together.
+function keepLastWordJoined(value: string): string {
+  const lastSpaceIndex = value.lastIndexOf(" ");
+  const NON_BREAKING_SPACE = "\u00A0";
+  return lastSpaceIndex === -1
+    ? value
+    : `${value.slice(0, lastSpaceIndex)}${NON_BREAKING_SPACE}${value.slice(lastSpaceIndex + 1)}`;
+}
+
+function MetaFieldItem({ field }: { field: MetaField }) {
   const Icon = field.icon;
   return (
-    <Card sx={{ p: 1.25, height: "100%", bgcolor: "action.hover" }}>
-      <Stack gap={0.25}>
-        {/* Icon color prop is a raw CSS color, not a MUI theme-path string (see TYPE_CONFIG's
-         * usage elsewhere in this file) — passing "text.secondary" directly breaks the SVG's
-         * stroke color. Set color on the wrapping Stack instead and let the icon's default
-         * currentColor pick it up. */}
-        <Stack direction="row" alignItems="center" gap={0.75} sx={{ color: "text.secondary" }}>
-          <Icon size={pxToRem(15)} />
-          <Typography variant="caption" color="text.secondary">
-            {field.label}
-          </Typography>
-        </Stack>
-        <Typography variant="body2" fontWeight={500} sx={{ overflowWrap: "anywhere" }}>
-          {field.value}
+    <Stack direction="row" alignItems="flex-start" gap={1}>
+      {/* Icon color prop is a raw CSS color, not a MUI theme-path string (see TYPE_CONFIG's
+       * usage elsewhere in this file) — passing "text.secondary" directly breaks the SVG's
+       * stroke color. Set color on the wrapping Stack instead and let the icon's default
+       * currentColor pick it up. */}
+      <Stack
+        alignItems="center"
+        justifyContent="center"
+        sx={{
+          width: 28,
+          height: 28,
+          flexShrink: 0,
+          borderRadius: 1.5,
+          bgcolor: "action.hover",
+          color: "text.secondary",
+        }}
+      >
+        <Icon size={pxToRem(15)} />
+      </Stack>
+      <Stack sx={{ minWidth: 0, flex: 1 }} gap={0.125}>
+        <Typography variant="caption" color="text.secondary">
+          {field.label}
+        </Typography>
+        <Typography variant="caption" fontWeight={600} sx={{ overflowWrap: "anywhere" }}>
+          {field.value ? keepLastWordJoined(field.value) : field.value}
         </Typography>
       </Stack>
-    </Card>
+    </Stack>
   );
 }
 
