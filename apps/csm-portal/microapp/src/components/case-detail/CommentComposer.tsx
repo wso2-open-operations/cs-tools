@@ -66,8 +66,15 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
 
   // Both comment types are blocked only once the case is closed (work notes' one and only gate).
   const allBlocked = publicCommentsBlocked && workNotesBlocked;
+  // The switch is forced+locked to work_note whenever public comments are blocked, but only at
+  // the moment it's toggled — if caseState/workState refreshes after the composer is already
+  // mounted (e.g. another mutation flips the case out of work_in_progress+ongoing), a previously
+  // selected "comment" type can go stale and blocked without the switch itself re-syncing. Gate
+  // on the currently selected type's own block state, not just the both-blocked case, so a post
+  // is never allowed through the UI once its type is blocked.
+  const isSelectedTypeBlocked = isWorkNote ? workNotesBlocked : publicCommentsBlocked;
   // Attachment-only posts are allowed (no text required) — the case still gets the files.
-  const canSubmit = !allBlocked && (content.trim().length > 0 || attachments.length > 0) && !isSubmitting;
+  const canSubmit = !isSelectedTypeBlocked && (content.trim().length > 0 || attachments.length > 0) && !isSubmitting;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
