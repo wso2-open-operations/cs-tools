@@ -160,7 +160,7 @@ export function AttachmentsPickerButton({
         disabled={disabled}
         onClick={openPicker}
       >
-        Attachments
+        Upload attachment
       </Button>
     </>
   );
@@ -202,7 +202,7 @@ export function AttachmentsField({
           disabled={disabled}
           onClick={openPicker}
         >
-          Attachments
+          Upload
         </Button>
       </Stack>
 
