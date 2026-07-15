@@ -45,6 +45,9 @@ function useAttachmentPicker(onChange: AttachmentsSetter, maxSizeBytes: number) 
     const oversized = files.find((f) => f.size > maxSizeBytes);
     if (oversized) {
       setError(`"${oversized.name}" is larger than ${formatBytes(maxSizeBytes)}.`);
+      // Without this, re-picking the exact same file (e.g. after shrinking it) fires no change
+      // event — the input still holds its old value, so the browser sees no change.
+      if (inputRef.current) inputRef.current.value = "";
       return;
     }
 
