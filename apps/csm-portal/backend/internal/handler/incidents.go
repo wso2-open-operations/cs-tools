@@ -201,13 +201,23 @@ type updateIncidentRequest struct {
 	WatchList           []string `json:"watchList"`
 }
 
-// validateUpdateIncidentBody checks the enum fields (priority, state, category, subcategory,
-// contactType, impact, urgency) and every UUID-formatted field with a known, fixed set of
-// valid values so obviously invalid requests are rejected before reaching the entity service.
-// An absent, null, or empty-string value for any of these optional fields is treated as
-// "leave unchanged" or "clear", matching the entity service's own PATCH semantics, and is
-// not rejected here.
+// validateUpdateIncidentBody rejects an empty JSON object (matching the documented
+// minProperties: 1 on UpdateIncidentPayload — a PATCH must change at least one field),
+// and checks the enum fields (priority, state, category, subcategory, contactType,
+// impact, urgency) and every UUID-formatted field with a known, fixed set of valid
+// values so obviously invalid requests are rejected before reaching the entity service.
+// An absent, null, or empty-string value for any individual optional field is treated
+// as "leave unchanged" or "clear", matching the entity service's own PATCH semantics,
+// and is not rejected here.
 func validateUpdateIncidentBody(body []byte) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return false
+	}
+	if len(fields) == 0 {
+		return false
+	}
+
 	var req updateIncidentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return false

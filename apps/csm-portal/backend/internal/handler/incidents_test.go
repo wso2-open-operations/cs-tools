@@ -398,6 +398,17 @@ func TestPatchIncident(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects empty JSON object", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("rejects unknown state enum value", func(t *testing.T) {
 		h := NewIncidentHandler(&mockEntityIncidentClient{})
 		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"state":"DONE"}`)))
