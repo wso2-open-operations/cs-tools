@@ -36,10 +36,10 @@ type snIncidentsResponse struct {
 }
 
 type snIncident struct {
-	ID              *string             `json:"id"`
-	Number          *string             `json:"number"`
-	OpenedOn        *string             `json:"openedOn"`
-	Subject         *string             `json:"subject"`
+	ID              *string              `json:"id"`
+	Number          *string              `json:"number"`
+	OpenedOn        *string              `json:"openedOn"`
+	Subject         *string              `json:"subject"`
 	Caller          *snIncidentEntityRef `json:"caller"`
 	Priority        *snIncidentIntLabel  `json:"priority"`
 	State           *snIncidentIntLabel  `json:"state"`
@@ -518,13 +518,13 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	}
 
 	payload := snCreateIncidentPayload{
-		CallerID:    uuidToSysid(req.CallerID),
-		CategoryKey: snIncidentCategoryKeyMap[req.Category],
-		ServiceID:   uuidToSysid(req.ServiceID),
-		ImpactKey:   snIncidentImpactKeyMap[req.Impact],
-		UrgencyKey:  snIncidentUrgencyKeyMap[req.Urgency],
-		Subject:     req.Subject,
-		WatchList:   req.WatchList,
+		CallerID:           uuidToSysid(req.CallerID),
+		CategoryKey:        snIncidentCategoryKeyMap[req.Category],
+		ServiceID:          uuidToSysid(req.ServiceID),
+		ImpactKey:          snIncidentImpactKeyMap[req.Impact],
+		UrgencyKey:         snIncidentUrgencyKeyMap[req.Urgency],
+		Subject:            req.Subject,
+		WatchList:          req.WatchList,
 		AdditionalComments: req.AdditionalComments,
 		WorkNotes:          req.WorkNotes,
 	}
@@ -662,35 +662,40 @@ var snIncidentUrgencyLabelMap = map[int]string{
 
 // snGetIncidentResponse mirrors the Choreo GET /incidents/{id} response.
 type snGetIncidentResponse struct {
-	ID                 *string                  `json:"id"`
-	Number             *string                  `json:"number"`
-	OpenedOn           *string                  `json:"openedOn"`
-	Subject            *string                  `json:"subject"`
-	Caller             *snIncidentEntityRef     `json:"caller"`
-	Priority           *snIncidentIntLabel      `json:"priority"`
-	State              *snIncidentIntLabel      `json:"state"`
-	Category           *snIncidentStrLabel      `json:"category"`
-	Subcategory        *snIncidentStrLabel      `json:"subcategory"`
-	Parent             *snIncidentEntityRef     `json:"parent"`
-	ParentIncident     *snIncidentEntityRef     `json:"parentIncident"`
-	AssignmentGroup    *snIncidentEntityRef     `json:"assignmentGroup"`
-	AssignedTo         *snIncidentEntityRef     `json:"assignedTo"`
-	Service            *snIncidentEntityRef     `json:"service"`
-	ServiceOffering    *snIncidentEntityRef     `json:"serviceOffering"`
-	ConfigurationItem  *snIncidentEntityRef     `json:"configurationItem"`
-	ContactType        *snIncidentStrLabel      `json:"contactType"`
-	Impact             *snIncidentIntLabel      `json:"impact"`
-	Urgency            *snIncidentIntLabel      `json:"urgency"`
-	ChangeRequest      *snIncidentEntityRef     `json:"changeRequest"`
-	Problem            *snIncidentEntityRef     `json:"problem"`
-	CausedBy           *snIncidentEntityRef     `json:"causedBy"`
-	AdditionalComments *string                  `json:"additionalComments"`
-	WorkNotes          *string                  `json:"workNotes"`
+	ID                 *string                   `json:"id"`
+	Number             *string                   `json:"number"`
+	OpenedOn           *string                   `json:"openedOn"`
+	Subject            *string                   `json:"subject"`
+	Caller             *snIncidentEntityRef      `json:"caller"`
+	Priority           *snIncidentIntLabel       `json:"priority"`
+	State              *snIncidentIntLabel       `json:"state"`
+	Category           *snIncidentStrLabel       `json:"category"`
+	Subcategory        *snIncidentStrLabel       `json:"subcategory"`
+	Parent             *snIncidentEntityRef      `json:"parent"`
+	ParentIncident     *snIncidentEntityRef      `json:"parentIncident"`
+	AssignmentGroup    *snIncidentEntityRef      `json:"assignmentGroup"`
+	AssignedTo         *snIncidentEntityRef      `json:"assignedTo"`
+	Service            *snIncidentEntityRef      `json:"service"`
+	ServiceOffering    *snIncidentEntityRef      `json:"serviceOffering"`
+	ConfigurationItem  *snIncidentEntityRef      `json:"configurationItem"`
+	ContactType        *snIncidentStrLabel       `json:"contactType"`
+	Impact             *snIncidentIntLabel       `json:"impact"`
+	Urgency            *snIncidentIntLabel       `json:"urgency"`
+	ChangeRequest      *snIncidentEntityRef      `json:"changeRequest"`
+	Problem            *snIncidentEntityRef      `json:"problem"`
+	CausedBy           *snIncidentEntityRef      `json:"causedBy"`
+	AdditionalComments *string                   `json:"additionalComments"`
+	WorkNotes          *string                   `json:"workNotes"`
 	WatchList          []snIncidentWatchListItem `json:"watchList"`
-	CreatedOn          string                   `json:"createdOn"`
-	CreatedBy          string                   `json:"createdBy"`
-	UpdatedOn          string                   `json:"updatedOn"`
-	UpdatedBy          string                   `json:"updatedBy"`
+	CreatedOn          string                    `json:"createdOn"`
+	CreatedBy          string                    `json:"createdBy"`
+	UpdatedOn          string                    `json:"updatedOn"`
+	UpdatedBy          string                    `json:"updatedBy"`
+	ResolutionCode     *snIncidentStrLabel       `json:"resolutionCode"`
+	ResolutionNotes    *string                   `json:"resolutionNotes"`
+	ResolvedBy         *string                   `json:"resolvedBy"`
+	Resolved           *string                   `json:"resolved"`
+	IncidentReport     *string                   `json:"incidentReport"`
 }
 
 type snIncidentWatchListItem struct {
@@ -728,6 +733,13 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 		CreatedBy:          sn.CreatedBy,
 		UpdatedOn:          sn.UpdatedOn,
 		UpdatedBy:          sn.UpdatedBy,
+		ResolutionNotes:    sn.ResolutionNotes,
+		ResolvedBy:         sn.ResolvedBy,
+		Resolved:           sn.Resolved,
+		IncidentReport:     sn.IncidentReport,
+	}
+	if sn.ResolutionCode != nil {
+		view.ResolutionCode = &sn.ResolutionCode.Label
 	}
 	if sn.ID != nil && *sn.ID != "" {
 		v := sysidToUUID(*sn.ID)

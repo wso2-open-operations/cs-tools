@@ -5837,6 +5837,26 @@ components:
           type: string
         updatedBy:
           type: string
+        resolutionCode:
+          type: string
+          nullable: true
+          description: Resolution code label. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolutionNotes:
+          type: string
+          nullable: true
+          description: Free-text resolution notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolvedBy:
+          type: string
+          nullable: true
+          description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolved:
+          type: string
+          nullable: true
+          description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        incidentReport:
+          type: string
+          nullable: true
+          description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
 
     SearchProblemsRequest:
       type: object
