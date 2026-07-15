@@ -56,6 +56,8 @@ import {
 } from "@features/support/utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/permission";
 import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
+import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import { ChatSender } from "@features/support/types/conversations";
 import type {
   ChatNavState,
@@ -348,6 +350,7 @@ export default function NoveraChatPage(): JSX.Element {
   const [isInputDisabled, setIsInputDisabled] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const inputValueRef = useRef("");
+  const piiGuard = usePiiGuard();
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -670,10 +673,16 @@ export default function NoveraChatPage(): JSX.Element {
   const handleSendMessage = useCallback(async (): Promise<boolean> => {
     const text = htmlToPlainText(inputValueRef.current).trim();
     if (!text || isSending || !projectId) return false;
-    setInputValueAndRef("");
-    setResetTrigger((prev) => prev + 1);
-    return sendViaWebSocket(text);
-  }, [isSending, projectId, sendViaWebSocket, setInputValueAndRef]);
+
+    // Warn about PII before sending. The input is only cleared once the send
+    // actually proceeds, so choosing "Edit" preserves the user's text.
+    piiGuard.checkBeforeSubmit(text, () => {
+      setInputValueAndRef("");
+      setResetTrigger((prev) => prev + 1);
+      void sendViaWebSocket(text);
+    });
+    return true;
+  }, [isSending, projectId, sendViaWebSocket, setInputValueAndRef, piiGuard]);
 
   useEffect(() => {
     if (!initialUserMessage?.trim()) return;
@@ -750,6 +759,7 @@ export default function NoveraChatPage(): JSX.Element {
         </Paper>
       </Box>
 
+      <PiiWarningDialog {...piiGuard.dialogProps} />
     </Box>
   );
 }
