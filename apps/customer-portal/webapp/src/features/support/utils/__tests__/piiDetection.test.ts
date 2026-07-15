@@ -142,6 +142,42 @@ describe("piiDetection", () => {
       const matches = detectPii("The user forgot their password and cannot log in");
       expect(matches.some((m) => m.type === PiiType.PASSWORD)).toBe(false);
     });
+
+    it("detects short secret keyword variants (pass, pin, token)", () => {
+      expect(detectPii("pass: hunter2").some((m) => m.type === PiiType.PASSWORD)).toBe(
+        true,
+      );
+      expect(detectPii("pin=4821").some((m) => m.type === PiiType.PASSWORD)).toBe(true);
+      expect(
+        detectPii("token: Xk9223LmQpR8vTnW4bLz").some(
+          (m) => m.type === PiiType.PASSWORD,
+        ),
+      ).toBe(true);
+    });
+
+    it("detects an Azure-style AccountKey", () => {
+      const matches = detectPii(
+        "DefaultEndpointsProtocol=https;AccountKey=abc123def456==",
+      );
+      expect(matches.some((m) => m.type === PiiType.PASSWORD)).toBe(true);
+    });
+  });
+
+  describe("detectPii - national identifiers", () => {
+    it("detects a UK National Insurance number", () => {
+      const matches = detectPii("My NINO is QQ 12 34 56 C");
+      expect(matches.some((m) => m.type === PiiType.UK_NINO)).toBe(true);
+    });
+
+    it("detects a passport number when labelled", () => {
+      const matches = detectPii("German passport: C01X00T47");
+      expect(matches.some((m) => m.type === PiiType.PASSPORT)).toBe(true);
+    });
+
+    it("does not flag a bare alphanumeric code without the word passport", () => {
+      const matches = detectPii("Build artifact C01X00T47 completed");
+      expect(matches.some((m) => m.type === PiiType.PASSPORT)).toBe(false);
+    });
   });
 
   describe("detectPii - clean input", () => {

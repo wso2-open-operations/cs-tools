@@ -37,6 +37,8 @@ export enum PiiType {
   CREDIT_CARD = "CREDIT_CARD",
   DANISH_CPR = "DANISH_CPR",
   NATIONAL_ID = "NATIONAL_ID",
+  UK_NINO = "UK_NINO",
+  PASSPORT = "PASSPORT",
   EMAIL = "EMAIL",
   PHONE = "PHONE",
   IBAN = "IBAN",
@@ -127,11 +129,13 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
   },
   {
     // A password/secret assigned in a config or log line, e.g.
-    // password="s3cret", clientSecret: abc123, api_key=xxxx.
+    // password="s3cret", clientSecret: abc123, api_key=xxxx, pass: hunter2,
+    // AccountKey=... (Azure). The keyword must be followed by ':' or '=' and a
+    // value, so prose like "forgot their password" is not flagged.
     type: PiiType.PASSWORD,
     label: "Password or secret",
     regex:
-      /\b(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?key|auth[_-]?token)\b\s*[:=]\s*["']?[^\s"'<>{}]{4,}["']?/gi,
+      /\b(?:passphrase|password|passwd|pwd|pass|pin|secret|credential|token|bearer|client[_-]?secret|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|auth[_-]?token)\b\s*[:=]\s*["']?[^\s"'<>{}]{4,}["']?/gi,
   },
   {
     type: PiiType.CREDIT_CARD,
@@ -156,6 +160,19 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     label: "National ID / SSN",
     // US SSN style: 3-2-4 with separators.
     regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+  },
+  {
+    // UK National Insurance number: 2 letters, 6 digits, 1 suffix letter.
+    type: PiiType.UK_NINO,
+    label: "UK National Insurance number",
+    regex: /\b[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]\b/g,
+  },
+  {
+    // Passport number — only when the word "passport" is present, since a bare
+    // 6-9 char alphanumeric alone is indistinguishable from an ID/order code.
+    type: PiiType.PASSPORT,
+    label: "Passport number",
+    regex: /\bpassport\s*(?:no\.?|number|#|id)?\s*[:=-]?\s*[A-Z0-9]{6,9}\b/gi,
   },
   {
     type: PiiType.EMAIL,
