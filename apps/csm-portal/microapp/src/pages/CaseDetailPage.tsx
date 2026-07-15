@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { Button, Divider, Skeleton, Stack, Tab, Tabs, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
-import { cases, type MyOngoingCase } from "@src/services/cases";
+import { cases, parseOngoingConflictCaseNumber, type MyOngoingCase } from "@src/services/cases";
 import { currentUser } from "@src/services/currentUser";
 import { attachments as attachmentsService } from "@src/services/attachments";
 import { useUserStore } from "@src/store/user";
@@ -110,71 +110,149 @@ function CaseDetailContent({ id }: { id: string }) {
   };
 
   // The backend allows only one `ongoing` case per engineer — PATCH { workState: "ongoing" }
-  // 409s otherwise ("the assigned engineer already has an Ongoing case: <number>"). Check first
-  // (mirrors the webapp's findMyOngoingCases) and open the pause-conflict dialog instead of
-  // hitting that 409. Shared by both handleAssignAndStart and handleToggleWorkState, same as the
-  // webapp's own startWork/resolveOngoingConflict split.
-  const attemptGoOngoing = (): Promise<void> => {
-    return cases.findMyOngoingCases(id, currentUserId, currentUserEmail?.toLowerCase() ?? null).then((others) => {
+  // 409s otherwise ("[SERVICENOW_ERROR] ...already has an Ongoing case: <number>"). Shared by
+  // handleAssignAndStart and handleToggleWorkState, same as the webapp's own
+  // startWork/resolveOngoingConflict split — with one important difference from the first version
+  // of this: the conflict check runs BEFORE any PATCH at all, and nothing is applied — not the
+  // assignee change, not the state transition, not the workState — until either the check comes
+  // back clear or the user explicitly confirms pausing the other case. Cancel must leave the case
+  // completely untouched, not "assigned and moved to work_in_progress but not ongoing".
+  //
+  // pendingOngoingAction holds the full sequence to run once a detected conflict is resolved
+  // (paused). It's a ref, not state, since it's never rendered — only read/written imperatively
+  // around the dialog's confirm/decline.
+  const pendingOngoingAction = useRef<(() => Promise<void>) | null>(null);
+
+  // Pure check — no mutation. Best-effort: this backend errors on some filter combinations (see
+  // the note in services/timecards.ts), so a failed search returns [] rather than blocking the
+  // caller — the reactive 409 catch in runOngoingAction is the backstop if this misses a conflict.
+  const checkOngoingConflict = async (): Promise<MyOngoingCase[]> => {
+    try {
+      const others = await cases.findMyOngoingCases(id, currentUserId, currentUserEmail?.toLowerCase() ?? null);
+      Logger.info("[ongoing-conflict] proactive search result", { others });
+      return others;
+    } catch (searchError) {
+      Logger.warn("[ongoing-conflict] proactive search failed; relying on the PATCH 409 instead", searchError);
+      return [];
+    }
+  };
+
+  // Runs `action` (a PATCH sequence whose last step marks this case ongoing). If ServiceNow's own
+  // 409 rejects that last step anyway (the proactive check missed a conflict), ServiceNow's
+  // message already names the real conflicting case by number — resolve it and open the same
+  // pause dialog with `action` stored, so confirming re-runs the whole thing rather than
+  // dead-ending on a raw error the user can't act on.
+  const runOngoingAction = async (action: () => Promise<void>): Promise<void> => {
+    try {
+      await action();
+    } catch (error) {
+      const conflictNumber = parseOngoingConflictCaseNumber(toApiError(error, "").message);
+      if (!conflictNumber) throw error;
+      const conflictCase = await cases.findCaseByNumber(conflictNumber);
+      pendingOngoingAction.current = action;
+      setPauseConflict([conflictCase]);
+    }
+  };
+
+  // Checks for a conflict first; only calls runOngoingAction (i.e. only touches the case at all)
+  // once the check is clear. If a conflict is already known, `action` is stashed for the dialog's
+  // confirm instead of running anything yet.
+  const goOngoingWithConflictGuard = (action: () => Promise<void>): Promise<void> =>
+    checkOngoingConflict().then((others) => {
       if (others.length > 0) {
+        pendingOngoingAction.current = action;
         setPauseConflict(others);
         return;
       }
-      return cases.patch(id, { workState: "ongoing" }).then(invalidateCase);
+      return runOngoingAction(action);
     });
-  };
 
-  // Claiming an unassigned/someone-else's case needs `assigneeEmail` PATCHed before the state
-  // move — the backend only accepts one field per PATCH (see CasePatchPayloadDto), so this is two
-  // sequential calls, mirroring the webapp's onAction assign_to_me handling. Then attempts to mark
-  // the case ongoing too (matching the webapp's startWork — assigning without also going ongoing
-  // would leave comments blocked until a separate "Resume work" tap).
+  // Any move into work_in_progress — whether the case is already assigned to the caller
+  // ("Start progress") or not ("Assign to me") — mirrors the webapp's onAction: `targetState ===
+  // "work_in_progress"` always routes through startWork() unconditionally, never a bare state
+  // PATCH, because starting is also the point where the case should go `ongoing`. Claiming an
+  // unassigned/someone else's case needs `assigneeEmail` PATCHed first — the backend only accepts
+  // one field per PATCH (see CasePatchPayloadDto) — so that step is skipped when already the
+  // caller's. The whole sequence is gated behind the ongoing-conflict check (see above) so nothing
+  // runs — not even the assign — until it's actually safe to proceed.
   const handleAssignAndStart = (): void => {
-    if (!currentUserEmail) {
+    const alreadyMine = caseDetail.assignedEngineer?.id === currentUserId;
+    if (!alreadyMine && !currentUserEmail) {
       setMutationError("Could not assign the case to you: no signed-in email found.");
       return;
     }
+    const action = async (): Promise<void> => {
+      if (!alreadyMine) await cases.patch(id, { assigneeEmail: currentUserEmail as string });
+      await cases.patch(id, { state: "work_in_progress" });
+      invalidateCase();
+      await cases.patch(id, { workState: "ongoing" });
+      invalidateCase();
+    };
     setIsMutating(true);
     setMutationError(null);
-    cases
-      .patch(id, { assigneeEmail: currentUserEmail })
-      .then(() => cases.patch(id, { state: "work_in_progress" }))
-      .then(invalidateCase)
-      .then(() => attemptGoOngoing())
-      .catch(() => setMutationError("Could not assign the case to you. Please try again."))
+    goOngoingWithConflictGuard(action)
+      .catch((error) => setMutationError(toApiError(error, "Could not start work on the case.").message))
       .finally(() => setIsMutating(false));
   };
 
   // Toggles the work sub-state — the only way to reach `ongoing`, which the comment gate
   // (CommentComposer / utils/caseWorkState.ts) requires for public comments. Only offered to the
-  // case's own assignee while `work_in_progress` (see CaseActionBar's canToggleWorkState).
+  // case's own assignee while `work_in_progress` (see CaseActionBar's canToggleWorkState). Pausing
+  // never conflicts with anything, so it skips the guard; going ongoing goes through it.
   const handleToggleWorkState = (): void => {
     setIsMutating(true);
     setMutationError(null);
     const next =
       caseDetail.workState === "ongoing"
         ? cases.patch(id, { workState: "paused" }).then(invalidateCase)
-        : attemptGoOngoing();
+        : goOngoingWithConflictGuard(async () => {
+            await cases.patch(id, { workState: "ongoing" });
+            invalidateCase();
+          });
     next
-      .catch(() => setMutationError("Could not update the work state. Please try again."))
+      .catch((error) => setMutationError(toApiError(error, "Could not update the work state.").message))
       .finally(() => setIsMutating(false));
   };
 
   const handleConfirmPauseConflict = (): void => {
     if (!pauseConflict) return;
+    // A null id means that case's UUID couldn't be resolved (the search that would find it has
+    // been unreliable) — it can't be auto-paused. Running the pending action afterward would just
+    // hit the same 409 again since the real conflict is still active, so block the confirm
+    // entirely and tell the user to pause it themselves instead of silently failing.
+    const unresolved = pauseConflict.filter((c) => !c.id);
+    if (unresolved.length > 0) {
+      setMutationError(
+        `Couldn't automatically look up ${unresolved.map((c) => c.label).join(", ")}. Please open it from Support, ` +
+          `pause the work there, then try again.`,
+      );
+      return;
+    }
+    const action = pendingOngoingAction.current;
+    if (!action) {
+      setPauseConflict(null);
+      return;
+    }
     setIsMutating(true);
     setMutationError(null);
-    Promise.all(pauseConflict.map((other) => cases.patch(other.id, { workState: "paused" })))
-      .then(() => cases.patch(id, { workState: "ongoing" }))
+    // Pause each other ongoing case, then run whatever was pending (mark ongoing, or the full
+    // assign+start+ongoing sequence) — same sequential order as the webapp's onConfirmStartWork.
+    Promise.all(pauseConflict.map((other) => cases.patch(other.id as string, { workState: "paused" })))
+      .then(() => action())
       .then(() => {
         setPauseConflict(null);
-        invalidateCase();
+        pendingOngoingAction.current = null;
       })
-      .catch(() => setMutationError("Could not update the work states. Please try again."))
+      .catch((error) => setMutationError(toApiError(error, "Could not update the work states.").message))
       .finally(() => setIsMutating(false));
   };
 
-  const handleDeclinePauseConflict = (): void => setPauseConflict(null);
+  // Cancel: nothing was ever applied (see goOngoingWithConflictGuard) — just close the dialog and
+  // drop the pending action. The case is left exactly as it was before the action was tapped.
+  const handleDeclinePauseConflict = (): void => {
+    setPauseConflict(null);
+    pendingOngoingAction.current = null;
+  };
 
   const handleResolutionSubmit = (fields: {
     resolutionCode: CaseResolutionCode;

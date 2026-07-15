@@ -31,6 +31,7 @@ import type {
   CaseSearchFiltersDto,
   CaseSearchPayloadDto,
   CaseSearchResponseDto,
+  CaseType,
   CaseViewDto,
   CreatedCaseDto,
   UpdateCaseResponseDto,
@@ -71,11 +72,28 @@ const getCase = async (id: string): Promise<CaseDetail> => {
 };
 
 /** A case the current user is actively working (in-progress + ongoing) — surfaced by the
- * single-active-case conflict dialog when resuming/starting work on a different case. */
+ * single-active-case conflict dialog when resuming/starting work on a different case.
+ * `id` is null when the case is only known by the number ServiceNow's own 409 named (the search
+ * that would resolve its UUID for an automatic pause came back empty) — the dialog still shows
+ * it and blocks the action, it just can't offer a one-tap auto-pause for that entry. */
 export interface MyOngoingCase {
-  id: string;
+  id: string | null;
   label: string;
 }
+
+// SupportPage.tsx's search (the only other place this app calls /cases/search with a text query —
+// via components/support/filters.ts's toCaseSearchFilters) always sends an explicit `types` list
+// alongside `searchQuery`. The searches below omitted it and consistently returned 0 results even
+// for a case ServiceNow itself just confirmed exists (searchTotal=0 for an exact number match) —
+// omitting `types` most likely scopes the search to nothing rather than "all types". Always send
+// the full list explicitly instead of assuming an omitted filter means unrestricted.
+const ALL_CASE_TYPES: CaseType[] = [
+  "case",
+  "service_request",
+  "security_report_analysis",
+  "engagement",
+  "announcement",
+];
 
 // Mirrors the webapp's useFindMyOngoingCases.ts exactly, including its dual-path design:
 //   - myUserId known: filter server-side by assignedUserIds — the result set is tiny (an
@@ -101,6 +119,7 @@ const findMyOngoingCases = async (
   for (let page = 0; page < CASES_SEARCH_MAX_PAGES; page += 1) {
     const result = await getAllCases({
       filters: {
+        types: ALL_CASE_TYPES,
         states: ["work_in_progress"],
         workStates: ["ongoing"],
         ...(myUserId ? { assignedUserIds: [myUserId] } : {}),
@@ -118,6 +137,54 @@ const findMyOngoingCases = async (
     if (result.items.length < CASES_PAGE_LIMIT || !result.hasMore) break;
   }
   return matches;
+};
+
+// The upstream ServiceNow instance enforces the single-ongoing-case rule itself (this message is
+// tagged [SERVICENOW_ERROR] — it never appears anywhere in the portal's own Go backend), so
+// findMyOngoingCases's proactive search is only ever a *prediction* of what ServiceNow will do,
+// not the source of truth. If the prediction misses (assignee-id/email mismatch, timing, a case
+// updated by someone else moments ago, etc.) the PATCH still 409s with this exact message — which
+// conveniently already names the real conflicting case by number. Parse it out and resolve it to
+// a MyOngoingCase via search, so the pause-conflict dialog can still recover instead of just
+// surfacing a dead-end error.
+const ONGOING_CONFLICT_MESSAGE_RE = /already has an Ongoing case:\s*([A-Za-z0-9-]+)/i;
+
+export function parseOngoingConflictCaseNumber(message: string | undefined | null): string | null {
+  if (!message) return null;
+  return ONGOING_CONFLICT_MESSAGE_RE.exec(message)?.[1] ?? null;
+}
+
+// Temporary debug shape — total hit count + a peek at what the search actually returned, so a
+// null match can be told apart from "search found nothing" vs "search found something that
+// doesn't match on number/wso2Id the way expected."
+export interface FindCaseByNumberDebug {
+  match: MyOngoingCase | null;
+  searchTotal: number;
+  searchSample: Array<{ id: string; number: string; wso2Id: string }>;
+}
+
+const findCaseByNumberDebug = async (caseNumber: string): Promise<FindCaseByNumberDebug> => {
+  const result = await getAllCases({
+    filters: { types: ALL_CASE_TYPES, searchQuery: caseNumber },
+    pagination: { limit: CASES_PAGE_LIMIT },
+  });
+  const match = result.items.find(
+    (c) => c.number?.toLowerCase() === caseNumber.toLowerCase() || c.wso2Id?.toLowerCase() === caseNumber.toLowerCase(),
+  );
+  return {
+    match: match ? { id: match.id, label: match.wso2Id || match.number || match.id } : null,
+    searchTotal: result.total,
+    searchSample: result.items.slice(0, 3).map((c) => ({ id: c.id, number: c.number, wso2Id: c.wso2Id })),
+  };
+};
+
+// Always resolves to a MyOngoingCase — never null — so the caller can always show the
+// pause-conflict dialog once ServiceNow's error names a conflicting case, even when the search
+// that would find its UUID comes back empty (confirmed live: it does, for at least some cases).
+// A null `id` just means that specific entry can't be auto-paused from the dialog.
+const findCaseByNumber = async (caseNumber: string): Promise<MyOngoingCase> => {
+  const { match } = await findCaseByNumberDebug(caseNumber);
+  return match ?? { id: null, label: caseNumber };
 };
 
 // openapi.yaml declares this endpoint's pagination.limit maximum as 100, but the live upstream
@@ -190,4 +257,6 @@ export const cases = {
   patch: patchCase,
   postComment,
   findMyOngoingCases,
+  findCaseByNumber,
+  findCaseByNumberDebug,
 };

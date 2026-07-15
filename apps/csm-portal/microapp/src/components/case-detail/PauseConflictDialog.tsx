@@ -33,6 +33,9 @@ interface PauseConflictDialogProps {
  */
 export function PauseConflictDialog({ otherCases, isSubmitting, onConfirm, onDecline }: PauseConflictDialogProps) {
   const plural = otherCases.length > 1;
+  // A null id means that case's UUID couldn't be resolved (the search that would find it has
+  // been unreliable) — it can't be auto-paused from here.
+  const unresolved = otherCases.filter((c) => !c.id);
 
   return (
     <Dialog
@@ -51,23 +54,32 @@ export function PauseConflictDialog({ otherCases, isSubmitting, onConfirm, onDec
 
       <Stack gap={0.5}>
         {otherCases.map((c) => (
-          <Typography key={c.id} variant="body2" fontWeight={500}>
+          <Typography key={c.id ?? c.label} variant="body2" fontWeight={500}>
             {c.label}
           </Typography>
         ))}
       </Stack>
 
-      <Typography variant="body2" color="text.secondary">
-        Only one case can be ongoing at a time. Pause {plural ? "them" : "it"} and make this case your active one?
-      </Typography>
+      {unresolved.length > 0 ? (
+        <Typography variant="body2" color="warning.main">
+          Couldn&apos;t automatically look {unresolved.length > 1 ? "these" : "this"} up. Open{" "}
+          {unresolved.map((c) => c.label).join(", ")} from Support and pause the work there first, then try again here.
+        </Typography>
+      ) : (
+        <Typography variant="body2" color="text.secondary">
+          Only one case can be ongoing at a time. Pause {plural ? "them" : "it"} and make this case your active one?
+        </Typography>
+      )}
 
       <Stack direction="row" justifyContent="end" gap={1}>
         <Button variant="outlined" onClick={onDecline} disabled={isSubmitting}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={onConfirm} disabled={isSubmitting}>
-          Pause &amp; continue
-        </Button>
+        {unresolved.length === 0 && (
+          <Button variant="contained" onClick={onConfirm} disabled={isSubmitting}>
+            Pause &amp; continue
+          </Button>
+        )}
       </Stack>
     </Dialog>
   );

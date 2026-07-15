@@ -24,12 +24,15 @@ interface CaseActionBarProps {
   caseDetail: CaseDetail;
   currentUserId: string | null | undefined;
   isPending: boolean;
-  /** Bare `PATCH { state }` — for any target that isn't `work_in_progress` (unassigned) or a
+  /** Bare `PATCH { state }` — for any target that isn't `work_in_progress` or a
    * resolution-collecting target (`closed`/`solution_proposed`). */
   onTransition: (target: CaseState) => void;
-  /** `work_in_progress` when the case isn't already the current user's: PATCHes `assigneeEmail`
-   * first, then `state`, mirroring the webapp's two-step assign-then-start (the backend only
-   * accepts one field per PATCH — see CasePatchPayloadDto). */
+  /** Any transition into `work_in_progress` — assigned-to-me-already or not. Mirrors the webapp's
+   * onAction: `targetState === "work_in_progress"` always routes through `startWork()`
+   * unconditionally, never a bare state PATCH, since starting is also the point where the case
+   * should go `ongoing` (checked for the single-active-case conflict first — see
+   * CaseDetailPage's attemptGoOngoing). The handler itself decides whether an `assigneeEmail`
+   * PATCH is needed first, based on whether the case is already the caller's. */
   onAssignAndStart: () => void;
   /** `closed` / `solution_proposed`: these may carry `resolutionCode`/`cause`/`closeNotes`
    * alongside `state`, so the caller opens a dialog to collect them before PATCHing. */
@@ -77,7 +80,7 @@ export function CaseActionBar({
 
   const runTarget = (target: CaseState) => {
     setPickerOpen(false);
-    if (target === "work_in_progress" && caseDetail.assignedEngineer?.id !== currentUserId) {
+    if (target === "work_in_progress") {
       onAssignAndStart();
       return;
     }
