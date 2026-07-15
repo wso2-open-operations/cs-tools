@@ -2850,6 +2850,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    patch:
+      summary: Partially update an incident (ServiceNow data source only).
+      operationId: patchIncidentById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident update payload. All fields are optional, but at least one must be provided.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIncidentPayload'
+        required: true
+      responses:
+        "200":
+          description: Incident updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIncidentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems/search:
     post:
       summary: Search problems (ServiceNow data source only).
@@ -6526,6 +6581,107 @@ components:
           type: string
           nullable: true
           description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+
+    UpdateIncidentPayload:
+      type: object
+      description: All fields are optional, but at least one must be provided. Set a field to null to clear it.
+      minProperties: 1
+      properties:
+        subject:
+          type: string
+        priority:
+          type: string
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
+        contactType:
+          type: string
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT, PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        resolutionCode:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        parentIncidentId:
+          type: string
+          format: uuid
+          nullable: true
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+        assignedEngineerId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceOfferingId:
+          type: string
+          format: uuid
+          nullable: true
+        configurationItemId:
+          type: string
+          format: uuid
+          nullable: true
+        changeRequestId:
+          type: string
+          format: uuid
+          nullable: true
+        problemId:
+          type: string
+          format: uuid
+          nullable: true
+        causedById:
+          type: string
+          format: uuid
+          nullable: true
+        resolvedById:
+          type: string
+          format: uuid
+          nullable: true
+        resolutionNotes:
+          type: string
+          nullable: true
+        incidentReport:
+          type: string
+          nullable: true
+        additionalComments:
+          type: string
+          nullable: true
+        workNotes:
+          type: string
+          nullable: true
+        watchList:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    UpdateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          $ref: '#/components/schemas/IncidentDetail'
 
     ProblemSearchPayload:
       type: object

@@ -32,6 +32,7 @@ type entityIncidentClient interface {
 	SearchIncidents(ctx context.Context, body []byte) ([]byte, error)
 	CreateIncident(ctx context.Context, body []byte) ([]byte, error)
 	GetIncident(ctx context.Context, id string) ([]byte, error)
+	PatchIncident(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // searchIncidentsRequest mirrors the enum/format-constrained fields of the documented
@@ -78,6 +79,10 @@ var (
 	}
 	validIncidentImpacts   = map[string]bool{"HIGH": true, "MEDIUM": true, "LOW": true}
 	validIncidentUrgencies = map[string]bool{"HIGH": true, "MEDIUM": true, "LOW": true}
+
+	validIncidentStates = map[string]bool{
+		"NEW": true, "IN_PROGRESS": true, "ON_HOLD": true, "RESOLVED": true, "CLOSED": true, "CANCELLED": true,
+	}
 )
 
 // createIncidentRequest mirrors the enum/format-constrained fields of the documented
@@ -167,6 +172,104 @@ func validateCreateIncidentBody(body []byte) bool {
 	}
 	if req.CausedByID != "" && !uuidRe.MatchString(req.CausedByID) {
 		return false
+	}
+	return true
+}
+
+// updateIncidentRequest mirrors the enum/format-constrained fields of the documented
+// UpdateIncidentPayload schema. It is decoded only to validate those fields at the
+// boundary; the original raw body is still forwarded to the entity service unchanged.
+type updateIncidentRequest struct {
+	Priority            string   `json:"priority"`
+	State               string   `json:"state"`
+	Category            string   `json:"category"`
+	Subcategory         string   `json:"subcategory"`
+	ContactType         string   `json:"contactType"`
+	Impact              string   `json:"impact"`
+	Urgency             string   `json:"urgency"`
+	ParentID            string   `json:"parentId"`
+	ParentIncidentID    string   `json:"parentIncidentId"`
+	AssignmentGroupID   string   `json:"assignmentGroupId"`
+	AssignedEngineerID  string   `json:"assignedEngineerId"`
+	ServiceID           string   `json:"serviceId"`
+	ServiceOfferingID   string   `json:"serviceOfferingId"`
+	ConfigurationItemID string   `json:"configurationItemId"`
+	ChangeRequestID     string   `json:"changeRequestId"`
+	ProblemID           string   `json:"problemId"`
+	CausedByID          string   `json:"causedById"`
+	ResolvedByID        string   `json:"resolvedById"`
+	WatchList           []string `json:"watchList"`
+}
+
+// validateUpdateIncidentBody checks the enum fields (priority, state, category, subcategory,
+// contactType, impact, urgency) and every UUID-formatted field with a known, fixed set of
+// valid values so obviously invalid requests are rejected before reaching the entity service.
+// An absent, null, or empty-string value for any of these optional fields is treated as
+// "leave unchanged" or "clear", matching the entity service's own PATCH semantics, and is
+// not rejected here.
+func validateUpdateIncidentBody(body []byte) bool {
+	var req updateIncidentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	if req.Priority != "" && !validIncidentPriorities[req.Priority] {
+		return false
+	}
+	if req.State != "" && !validIncidentStates[req.State] {
+		return false
+	}
+	if req.Category != "" && !validIncidentCategories[req.Category] {
+		return false
+	}
+	if req.Subcategory != "" && !validIncidentSubcategories[req.Subcategory] {
+		return false
+	}
+	if req.ContactType != "" && !validIncidentContactTypes[req.ContactType] {
+		return false
+	}
+	if req.Impact != "" && !validIncidentImpacts[req.Impact] {
+		return false
+	}
+	if req.Urgency != "" && !validIncidentUrgencies[req.Urgency] {
+		return false
+	}
+	if req.ParentID != "" && !uuidRe.MatchString(req.ParentID) {
+		return false
+	}
+	if req.ParentIncidentID != "" && !uuidRe.MatchString(req.ParentIncidentID) {
+		return false
+	}
+	if req.AssignmentGroupID != "" && !uuidRe.MatchString(req.AssignmentGroupID) {
+		return false
+	}
+	if req.AssignedEngineerID != "" && !uuidRe.MatchString(req.AssignedEngineerID) {
+		return false
+	}
+	if req.ServiceID != "" && !uuidRe.MatchString(req.ServiceID) {
+		return false
+	}
+	if req.ServiceOfferingID != "" && !uuidRe.MatchString(req.ServiceOfferingID) {
+		return false
+	}
+	if req.ConfigurationItemID != "" && !uuidRe.MatchString(req.ConfigurationItemID) {
+		return false
+	}
+	if req.ChangeRequestID != "" && !uuidRe.MatchString(req.ChangeRequestID) {
+		return false
+	}
+	if req.ProblemID != "" && !uuidRe.MatchString(req.ProblemID) {
+		return false
+	}
+	if req.CausedByID != "" && !uuidRe.MatchString(req.CausedByID) {
+		return false
+	}
+	if req.ResolvedByID != "" && !uuidRe.MatchString(req.ResolvedByID) {
+		return false
+	}
+	for _, w := range req.WatchList {
+		if !uuidRe.MatchString(w) {
+			return false
+		}
 	}
 	return true
 }
@@ -308,6 +411,52 @@ func (h *IncidentHandler) GetIncident(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetIncident failed", "userID", user.UserID, "incidentID", id, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve incident.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// PatchIncident handles PATCH /incidents/{id}.
+func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if !validateUpdateIncidentBody(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchIncident(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity PatchIncident failed", "userID", user.UserID, "incidentID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to update incident.")
 		return
 	}
 

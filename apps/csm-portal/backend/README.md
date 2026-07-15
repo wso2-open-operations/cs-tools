@@ -275,6 +275,7 @@ backend/
 - `POST /incidents/search` — Search incidents; optional `filters` (`searchQuery`, `priorities`, `parentIds`) and `sortBy` (`field`: `createdOn`/`updatedOn`/`openedOn`, `order`) (ServiceNow data source only)
 - `POST /incidents` — Create an incident (`callerId`, `category`, `serviceId`, `impact`, `urgency`, `subject` required; `subcategory`, `serviceOfferingId`, `configurationItemId`, `contactType`, `assignmentGroupId`, `assignedEngineerId`, `watchList`, `additionalComments`, `workNotes`, `parentId`, `parentIncidentId`, `changeRequestId`, `problemId`, `causedById` optional) (ServiceNow data source only)
 - `GET /incidents/{id}` — Get full incident detail by ID (ServiceNow data source only)
+- `PATCH /incidents/{id}` — Partially update an incident; all fields optional but at least one required (`subject`, `priority`, `state`, `category`/`subcategory`, `contactType`, `impact`/`urgency`, `resolutionCode`/`resolutionNotes`/`incidentReport`, `parentId`/`parentIncidentId`/`assignmentGroupId`/`assignedEngineerId`/`serviceId`/`serviceOfferingId`/`configurationItemId`/`changeRequestId`/`problemId`/`causedById`/`resolvedById`, `additionalComments`, `workNotes`, `watchList`); set a reference field to `null` to clear it (ServiceNow data source only)
 
 ### Problems
 
@@ -341,6 +342,12 @@ curl -X POST http://localhost:8080/incidents \
 
 # Get an incident by ID
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/incidents/<incident-id>
+
+# Partially update an incident
+curl -X PATCH http://localhost:8080/incidents/<incident-id> \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"state":"RESOLVED","resolutionCode":"Solved (Work Around)"}'
 
 # Search problems
 curl -X POST http://localhost:8080/problems/search \
