@@ -16,7 +16,7 @@
 
 import { Suspense, useMemo, type ReactNode } from "react";
 import { Chip, IconButton, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { Download, Eye, History, Paperclip } from "@wso2/oxygen-ui-icons-react";
+import { Eye, History, Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { activities as activitiesService } from "@src/services/activities";
 import { attachments as attachmentsService } from "@src/services/attachments";
@@ -165,22 +165,18 @@ export function CaseActivityFeed({ comments, audit, attachments }: CaseActivityF
               </Stack>
             </Stack>
             {e.attachment.downloadUrl && (
-              <Stack direction="row" gap={0.5} sx={{ flexShrink: 0 }}>
-                <IconButton
-                  size="small"
-                  aria-label={`Open ${e.attachment.name}`}
-                  onClick={() => openUrl({ url: e.attachment.downloadUrl as string, presentationStyle: "fullScreen" })}
-                >
-                  <Eye size={16} />
-                </IconButton>
-                <IconButton
-                  size="small"
-                  aria-label={`Download ${e.attachment.name}`}
-                  onClick={() => openUrl({ url: e.attachment.downloadUrl as string, presentationStyle: "fullScreen" })}
-                >
-                  <Download size={16} />
-                </IconButton>
-              </Stack>
+              // Only "Open" — the native bridge exposes a single `openUrl` action (open in the
+              // in-app browser), no distinct "save to device" primitive. A "Download" button
+              // that called the same thing was misleading rather than offering real download
+              // behavior.
+              <IconButton
+                size="small"
+                aria-label={`Open ${e.attachment.name}`}
+                onClick={() => openUrl({ url: e.attachment.downloadUrl as string, presentationStyle: "fullScreen" })}
+                sx={{ flexShrink: 0 }}
+              >
+                <Eye size={16} />
+              </IconButton>
             )}
           </Stack>
         );
