@@ -18,7 +18,7 @@ import { useState } from "react";
 import { Button, FormControlLabel, Stack, Switch, TextField, Typography } from "@wso2/oxygen-ui";
 import { Lock } from "@wso2/oxygen-ui-icons-react";
 import type { CaseCommentType, CaseState, CaseWorkState } from "@src/types";
-import { AttachmentsField } from "@components/support/AttachmentsField";
+import { AttachmentsList, AttachmentsPickerButton } from "@components/support/AttachmentsField";
 import { MAX_INLINE_ATTACHMENT_SIZE_BYTES, type PendingAttachment } from "@utils/attachments";
 import {
   caseAcceptsPublicComments,
@@ -61,6 +61,7 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
   const [type, setType] = useState<CaseCommentType>(publicCommentsBlocked ? "work_note" : "comment");
   const [content, setContent] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const isWorkNote = type === "work_note";
 
   // Both comment types are blocked only once the case is closed (work notes' one and only gate).
@@ -125,16 +126,25 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
         disabled={allBlocked}
       />
 
-      <Button variant="contained" size="small" disabled={!canSubmit} onClick={handleSubmit} sx={{ alignSelf: "end" }}>
-        Post
-      </Button>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+        <AttachmentsPickerButton
+          onChange={setAttachments}
+          disabled={isSubmitting || allBlocked}
+          maxSizeBytes={MAX_INLINE_ATTACHMENT_SIZE_BYTES}
+          onError={setAttachmentError}
+        />
+        <Button variant="contained" size="small" disabled={!canSubmit} onClick={handleSubmit}>
+          Post
+        </Button>
+      </Stack>
 
-      <AttachmentsField
-        attachments={attachments}
-        onChange={setAttachments}
-        disabled={isSubmitting || allBlocked}
-        maxSizeBytes={MAX_INLINE_ATTACHMENT_SIZE_BYTES}
-      />
+      {attachmentError && (
+        <Typography variant="caption" color="error.main">
+          {attachmentError}
+        </Typography>
+      )}
+
+      <AttachmentsList attachments={attachments} onChange={setAttachments} disabled={isSubmitting || allBlocked} />
     </Stack>
   );
 }
