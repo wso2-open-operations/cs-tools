@@ -73,7 +73,11 @@ function AttachmentsTabContent({ caseId }: { caseId: string }) {
           : `${failedCount} file(s) failed to upload.`,
       );
     }
-    setPending([]);
+    // Keep only the files that actually failed, so a partial (or total) failure leaves them
+    // selected for retry instead of silently dropping them along with the successful ones.
+    // Indexes line up with `results` since the field is disabled (via isUploading) for the
+    // duration of this upload, so `pending` can't have changed underneath us.
+    setPending(pending.filter((_, i) => results[i].status === "rejected"));
     setIsUploading(false);
     void queryClient.invalidateQueries({ queryKey: ["case", caseId, "attachments"] });
   };
