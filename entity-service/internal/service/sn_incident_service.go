@@ -122,6 +122,25 @@ var snIncidentStateLabelMap = map[int]string{
 	8: "CANCELLED",
 }
 
+// snIncidentStateKeyMap maps domain IncidentState enums to SN numeric state keys.
+var snIncidentStateKeyMap = map[domain.IncidentState]int{
+	domain.IncidentStateNew:        1,
+	domain.IncidentStateInProgress: 2,
+	domain.IncidentStateOnHold:     3,
+	domain.IncidentStateResolved:   6,
+	domain.IncidentStateClosed:     7,
+	domain.IncidentStateCancelled:  8,
+}
+
+var validIncidentState = map[domain.IncidentState]bool{
+	domain.IncidentStateNew:        true,
+	domain.IncidentStateInProgress: true,
+	domain.IncidentStateOnHold:     true,
+	domain.IncidentStateResolved:   true,
+	domain.IncidentStateClosed:     true,
+	domain.IncidentStateCancelled:  true,
+}
+
 var snIncidentCategoryLabelMap = map[string]string{
 	"inquiry":              "INQUIRY",
 	"service_interruption": "SERVICE_INTERRUPTION",
@@ -724,6 +743,12 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 		return domain.IncidentView{}, fmt.Errorf("sn get incident: parse response: %w", err)
 	}
 
+	return mapSNIncidentToView(sn), nil
+}
+
+// mapSNIncidentToView maps a Choreo incident payload to the domain IncidentView representation.
+// Shared by GetIncidentByID and UpdateIncident since both endpoints return the full incident detail.
+func mapSNIncidentToView(sn snGetIncidentResponse) domain.IncidentView {
 	view := domain.IncidentView{
 		OpenedOn:           sn.OpenedOn,
 		Subject:            sn.Subject,
@@ -827,5 +852,205 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 	}
 	view.WatchList = watchList
 
-	return view, nil
+	return view
+}
+
+// snUpdateIncidentPayload is the Choreo PATCH /incidents/{id} request body.
+type snUpdateIncidentPayload struct {
+	Subject             *string  `json:"subject,omitempty"`
+	PriorityKey         *int     `json:"priorityKey,omitempty"`
+	StateKey            *int     `json:"stateKey,omitempty"`
+	CategoryKey         *string  `json:"categoryKey,omitempty"`
+	SubcategoryKey      *string  `json:"subcategoryKey,omitempty"`
+	ContactTypeKey      *string  `json:"contactTypeKey,omitempty"`
+	ImpactKey           *int     `json:"impactKey,omitempty"`
+	UrgencyKey          *int     `json:"urgencyKey,omitempty"`
+	ResolutionCodeKey   *string  `json:"resolutionCodeKey,omitempty"`
+	ParentID            *string  `json:"parentId,omitempty"`
+	ParentIncidentID    *string  `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string  `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string  `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string  `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string  `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string  `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string  `json:"changeRequestId,omitempty"`
+	ProblemID           *string  `json:"problemId,omitempty"`
+	CausedByID          *string  `json:"causedById,omitempty"`
+	ResolvedByID        *string  `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string  `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string  `json:"incidentReport,omitempty"`
+	AdditionalComments  *string  `json:"additionalComments,omitempty"`
+	WorkNotes           *string  `json:"workNotes,omitempty"`
+	WatchList           []string `json:"watchList,omitempty"`
+}
+
+// snUpdateIncidentResponse mirrors the Choreo PATCH /incidents/{id} response.
+type snUpdateIncidentResponse struct {
+	Message  string                `json:"message"`
+	Incident snGetIncidentResponse `json:"incident"`
+}
+
+func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.UpdateIncidentResponse{}, err
+	}
+
+	hasUpdate := req.Subject != nil || req.Priority != nil || req.State != nil || req.Category != nil ||
+		req.Subcategory != nil || req.ContactType != nil || req.Impact != nil || req.Urgency != nil ||
+		req.ResolutionCode != nil || req.ParentID != nil || req.ParentIncidentID != nil ||
+		req.AssignmentGroupID != nil || req.AssignedEngineerID != nil || req.ServiceID != nil ||
+		req.ServiceOfferingID != nil || req.ConfigurationItemID != nil || req.ChangeRequestID != nil ||
+		req.ProblemID != nil || req.CausedByID != nil || req.ResolvedByID != nil ||
+		req.ResolutionNotes != nil || req.IncidentReport != nil || req.AdditionalComments != nil ||
+		req.WorkNotes != nil || len(req.WatchList) > 0
+	if !hasUpdate {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
+	}
+
+	if req.Priority != nil && !validIncidentPriority[*req.Priority] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid priority: " + string(*req.Priority)}
+	}
+	if req.State != nil && !validIncidentState[*req.State] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid state: " + string(*req.State)}
+	}
+	if req.Category != nil && !validIncidentCategory[*req.Category] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid category: " + string(*req.Category)}
+	}
+	if req.Subcategory != nil && !validIncidentSubcategory[*req.Subcategory] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid subcategory: " + string(*req.Subcategory)}
+	}
+	if req.ContactType != nil && !validIncidentContactType[*req.ContactType] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid contactType: " + string(*req.ContactType)}
+	}
+	if req.Impact != nil && !validIncidentImpact[*req.Impact] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid impact: " + string(*req.Impact)}
+	}
+	if req.Urgency != nil && !validIncidentUrgency[*req.Urgency] {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "invalid urgency: " + string(*req.Urgency)}
+	}
+
+	optionalUUIDs := map[string]*string{
+		"parentId":            req.ParentID,
+		"parentIncidentId":    req.ParentIncidentID,
+		"assignmentGroupId":   req.AssignmentGroupID,
+		"assignedEngineerId":  req.AssignedEngineerID,
+		"serviceId":           req.ServiceID,
+		"serviceOfferingId":   req.ServiceOfferingID,
+		"configurationItemId": req.ConfigurationItemID,
+		"changeRequestId":     req.ChangeRequestID,
+		"problemId":           req.ProblemID,
+		"causedById":          req.CausedByID,
+		"resolvedById":        req.ResolvedByID,
+	}
+	for field, val := range optionalUUIDs {
+		if val != nil {
+			if err := validateUUIDs(field, []string{*val}); err != nil {
+				return domain.UpdateIncidentResponse{}, err
+			}
+		}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.UpdateIncidentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snUpdateIncidentPayload{
+		Subject:            req.Subject,
+		ResolutionNotes:    req.ResolutionNotes,
+		IncidentReport:     req.IncidentReport,
+		AdditionalComments: req.AdditionalComments,
+		WorkNotes:          req.WorkNotes,
+		WatchList:          req.WatchList,
+	}
+	if req.Priority != nil {
+		v := snIncidentPriorityKeyMap[*req.Priority]
+		payload.PriorityKey = &v
+	}
+	if req.State != nil {
+		v := snIncidentStateKeyMap[*req.State]
+		payload.StateKey = &v
+	}
+	if req.Category != nil {
+		v := snIncidentCategoryKeyMap[*req.Category]
+		payload.CategoryKey = &v
+	}
+	if req.Subcategory != nil {
+		v := snIncidentSubcategoryKeyMap[*req.Subcategory]
+		payload.SubcategoryKey = &v
+	}
+	if req.ContactType != nil {
+		v := snIncidentContactTypeKeyMap[*req.ContactType]
+		payload.ContactTypeKey = &v
+	}
+	if req.Impact != nil {
+		v := snIncidentImpactKeyMap[*req.Impact]
+		payload.ImpactKey = &v
+	}
+	if req.Urgency != nil {
+		v := snIncidentUrgencyKeyMap[*req.Urgency]
+		payload.UrgencyKey = &v
+	}
+	if req.ResolutionCode != nil {
+		payload.ResolutionCodeKey = req.ResolutionCode
+	}
+	if req.ParentID != nil {
+		v := uuidToSysid(*req.ParentID)
+		payload.ParentID = &v
+	}
+	if req.ParentIncidentID != nil {
+		v := uuidToSysid(*req.ParentIncidentID)
+		payload.ParentIncidentID = &v
+	}
+	if req.AssignmentGroupID != nil {
+		v := uuidToSysid(*req.AssignmentGroupID)
+		payload.AssignmentGroupID = &v
+	}
+	if req.AssignedEngineerID != nil {
+		v := uuidToSysid(*req.AssignedEngineerID)
+		payload.AssignedEngineerID = &v
+	}
+	if req.ServiceID != nil {
+		v := uuidToSysid(*req.ServiceID)
+		payload.ServiceID = &v
+	}
+	if req.ServiceOfferingID != nil {
+		v := uuidToSysid(*req.ServiceOfferingID)
+		payload.ServiceOfferingID = &v
+	}
+	if req.ConfigurationItemID != nil {
+		v := uuidToSysid(*req.ConfigurationItemID)
+		payload.ConfigurationItemID = &v
+	}
+	if req.ChangeRequestID != nil {
+		v := uuidToSysid(*req.ChangeRequestID)
+		payload.ChangeRequestID = &v
+	}
+	if req.ProblemID != nil {
+		v := uuidToSysid(*req.ProblemID)
+		payload.ProblemID = &v
+	}
+	if req.CausedByID != nil {
+		v := uuidToSysid(*req.CausedByID)
+		payload.CausedByID = &v
+	}
+	if req.ResolvedByID != nil {
+		v := uuidToSysid(*req.ResolvedByID)
+		payload.ResolvedByID = &v
+	}
+
+	raw, err := s.client.Patch(ctx, "/incidents/"+uuidToSysid(req.ID), token, payload)
+	if err != nil {
+		return domain.UpdateIncidentResponse{}, err
+	}
+
+	var snResp snUpdateIncidentResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.UpdateIncidentResponse{}, fmt.Errorf("sn update incident: parse response: %w", err)
+	}
+
+	return domain.UpdateIncidentResponse{
+		Message:  snResp.Message,
+		Incident: mapSNIncidentToView(snResp.Incident),
+	}, nil
 }
