@@ -134,13 +134,13 @@ function AttachmentRow({ attachment }: { attachment: CaseAttachment }) {
           <Typography variant="body2" noWrap>
             {attachment.name}
           </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.7rem" }}>
             {formatBytes(attachment.sizeBytes)} · {attachment.createdBy} · {formatDate(attachment.createdOn)}
           </Typography>
         </Stack>
       </Stack>
       {attachment.downloadUrl && (
-        <Stack direction="row" gap={0.5} sx={{ flexShrink: 0 }}>
+        <Stack direction="row" gap={2} sx={{ flexShrink: 0 }}>
           <IconButton
             size="small"
             aria-label={`Open ${attachment.name}`}
