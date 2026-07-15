@@ -15,7 +15,8 @@
 // under the License.
 
 import { useState } from "react";
-import { Button, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@wso2/oxygen-ui";
+import { Button, FormControlLabel, Stack, Switch, TextField, Typography } from "@wso2/oxygen-ui";
+import { Lock } from "@wso2/oxygen-ui-icons-react";
 import type { CaseCommentType, CaseState, CaseWorkState } from "@src/types";
 import { AttachmentsField } from "@components/support/AttachmentsField";
 import { MAX_INLINE_ATTACHMENT_SIZE_BYTES, type PendingAttachment } from "@utils/attachments";
@@ -60,6 +61,7 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
   const [type, setType] = useState<CaseCommentType>(publicCommentsBlocked ? "work_note" : "comment");
   const [content, setContent] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const isWorkNote = type === "work_note";
 
   // Both comment types are blocked only once the case is closed (work notes' one and only gate).
   const allBlocked = publicCommentsBlocked && workNotesBlocked;
@@ -78,19 +80,33 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
 
   return (
     <Stack gap={1}>
-      <ToggleButtonGroup
-        size="small"
-        exclusive
-        value={type}
-        onChange={(_, next: CaseCommentType | null) => next && setType(next)}
-      >
-        <ToggleButton value="comment" disabled={publicCommentsBlocked}>
-          Comment
-        </ToggleButton>
-        <ToggleButton value="work_note" disabled={workNotesBlocked}>
-          Work note
-        </ToggleButton>
-      </ToggleButtonGroup>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap">
+        <Typography variant="caption" color="text.secondary">
+          {isWorkNote ? "Internal work note — not visible to the customer." : "Reply to this case…"}
+        </Typography>
+        <FormControlLabel
+          sx={{ mr: 0 }}
+          control={
+            <Switch
+              size="small"
+              color="primary"
+              checked={isWorkNote}
+              // Mirrors the webapp's CsmCaseCommentInput: public comments and work notes are
+              // never both blocked except when closed (allBlocked), where the whole composer is
+              // disabled anyway — so it's always safe to force+lock the toggle to work_note
+              // whenever public comments are the blocked side.
+              onChange={(e) => setType(e.target.checked ? "work_note" : "comment")}
+              disabled={publicCommentsBlocked}
+            />
+          }
+          label={
+            <Stack direction="row" alignItems="center" gap={0.5}>
+              <Lock size={14} />
+              <Typography variant="caption">Internal note</Typography>
+            </Stack>
+          }
+        />
+      </Stack>
 
       {gateReason && (
         <Typography variant="caption" color="text.secondary">
@@ -99,7 +115,7 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
       )}
 
       <TextField
-        placeholder={type === "work_note" ? "Add an internal work note…" : "Add a comment…"}
+        placeholder={isWorkNote ? "Add an internal work note…" : "Add a comment…"}
         multiline
         minRows={2}
         fullWidth
@@ -109,16 +125,16 @@ export function CommentComposer({ caseState, workState, isSubmitting, onSubmit }
         disabled={allBlocked}
       />
 
+      <Button variant="contained" size="small" disabled={!canSubmit} onClick={handleSubmit} sx={{ alignSelf: "end" }}>
+        Post
+      </Button>
+
       <AttachmentsField
         attachments={attachments}
         onChange={setAttachments}
         disabled={isSubmitting || allBlocked}
         maxSizeBytes={MAX_INLINE_ATTACHMENT_SIZE_BYTES}
       />
-
-      <Button variant="contained" size="small" disabled={!canSubmit} onClick={handleSubmit} sx={{ alignSelf: "end" }}>
-        Post
-      </Button>
     </Stack>
   );
 }
