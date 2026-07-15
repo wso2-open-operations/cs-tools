@@ -18,17 +18,22 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
   CASES_ENDPOINT,
   CASES_SEARCH_ENDPOINT,
+  CASE_COMMENTS_ENDPOINT,
   CASE_COMMENTS_SEARCH_ENDPOINT,
   CASE_DETAILS_ENDPOINT,
 } from "@config/endpoints";
 import type {
+  CaseCommentCreatePayloadDto,
+  CaseCommentCreateResponseDto,
   CaseCommentSearchResponseDto,
   CaseCreatePayloadDto,
+  CasePatchPayloadDto,
   CaseSearchFiltersDto,
   CaseSearchPayloadDto,
   CaseSearchResponseDto,
   CaseViewDto,
   CreatedCaseDto,
+  UpdateCaseResponseDto,
 } from "@src/types";
 import { toCaseDetail, toCaseSummary, toComment, type CaseDetail, type CaseSummary, type Comment } from "@src/types";
 import apiClient from "./apiClient";
@@ -65,9 +70,65 @@ const getCase = async (id: string): Promise<CaseDetail> => {
   return toCaseDetail(data);
 };
 
+/** A case the current user is actively working (in-progress + ongoing) — surfaced by the
+ * single-active-case conflict dialog when resuming/starting work on a different case. */
+export interface MyOngoingCase {
+  id: string;
+  label: string;
+}
+
+// Mirrors the webapp's useFindMyOngoingCases.ts exactly, including its dual-path design:
+//   - myUserId known: filter server-side by assignedUserIds — the result set is tiny (an
+//     engineer's own ongoing cases), so this fits one page.
+//   - myUserId unavailable (e.g. /users/me omitted it): fall back to an unfiltered-by-assignee
+//     search matched client-side by email instead, paging until results are exhausted. Without
+//     this fallback, a missing id would silently skip the whole check and let the 409 through —
+//     confirmed live: PATCH { workState: "ongoing" } 409s with "[SERVICENOW_ERROR] Cannot set
+//     work state to Ongoing — the assigned engineer already has an Ongoing case: <number>".
+//   - Either way, `workState` is re-checked case-insensitively client-side as a backstop: the
+//     search response can echo the raw ServiceNow label ("Ongoing") rather than the lowercased
+//     enum the detail endpoint returns.
+const CASES_SEARCH_MAX_PAGES = 20;
+
+const findMyOngoingCases = async (
+  excludeCaseId: string,
+  myUserId: string | null,
+  myEmail: string | null,
+): Promise<MyOngoingCase[]> => {
+  if (!myUserId && !myEmail) return [];
+
+  const matches: MyOngoingCase[] = [];
+  for (let page = 0; page < CASES_SEARCH_MAX_PAGES; page += 1) {
+    const result = await getAllCases({
+      filters: {
+        states: ["work_in_progress"],
+        workStates: ["ongoing"],
+        ...(myUserId ? { assignedUserIds: [myUserId] } : {}),
+      },
+      pagination: { offset: page * CASES_PAGE_LIMIT, limit: CASES_PAGE_LIMIT },
+    });
+    for (const c of result.items) {
+      if (c.id === excludeCaseId) continue;
+      if (c.workState?.toLowerCase() !== "ongoing") continue;
+      if (!myUserId && c.assignedEngineer?.email?.toLowerCase() !== myEmail) continue;
+      matches.push({ id: c.id, label: c.wso2Id || c.number || c.subject || c.id });
+    }
+    // Assignee-filtered path: this tiny set fits one page and breaks here.
+    // Email fallback: keep paging until the search results are exhausted.
+    if (result.items.length < CASES_PAGE_LIMIT || !result.hasMore) break;
+  }
+  return matches;
+};
+
+// openapi.yaml declares this endpoint's pagination.limit maximum as 100, but the live upstream
+// entity service actually rejects 100 with a 400 — confirmed by hitting it directly. The webapp's
+// own BE_MAX_PAGE_LIMIT constant (apiConstants.ts) is 50, not 100 as the spec claims; match that
+// real, working value instead of the doc.
+const COMMENTS_PAGE_LIMIT = 50;
+
 const getCaseComments = async (id: string): Promise<Comment[]> => {
   const { data } = await apiClient.post<CaseCommentSearchResponseDto>(CASE_COMMENTS_SEARCH_ENDPOINT(id), {
-    pagination: { limit: 50 },
+    pagination: { limit: COMMENTS_PAGE_LIMIT },
   });
   return data.comments.map(toComment);
 };
@@ -75,6 +136,18 @@ const getCaseComments = async (id: string): Promise<Comment[]> => {
 const createCase = async (payload: CaseCreatePayloadDto): Promise<CreatedCaseDto> => {
   const { data } = await apiClient.post<CreatedCaseDto>(CASES_ENDPOINT, payload);
   return data;
+};
+
+const patchCase = async (id: string, payload: CasePatchPayloadDto): Promise<UpdateCaseResponseDto> => {
+  const { data } = await apiClient.patch<UpdateCaseResponseDto>(CASE_DETAILS_ENDPOINT(id), payload);
+  return data;
+};
+
+// The create response is a thin ack (id/createdOn/createdBy only — see
+// CaseCommentCreateResponseDto), not the full comment. Callers refetch the comments list to
+// hydrate the new entry rather than rely on this response for rendering.
+const postComment = async (id: string, payload: CaseCommentCreatePayloadDto): Promise<void> => {
+  await apiClient.post<CaseCommentCreateResponseDto>(CASE_COMMENTS_ENDPOINT(id), payload);
 };
 
 const CASES_PAGE_LIMIT = 20;
@@ -114,4 +187,7 @@ export const cases = {
     }),
 
   create: createCase,
+  patch: patchCase,
+  postComment,
+  findMyOngoingCases,
 };

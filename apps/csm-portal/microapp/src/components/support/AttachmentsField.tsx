@@ -31,13 +31,21 @@ interface AttachmentsFieldProps {
   // concurrent add/remove could stomp on.
   onChange: Dispatch<SetStateAction<PendingAttachment[]>>;
   disabled?: boolean;
+  /** Per-file size cap. Defaults to the standalone-attachment ceiling; callers with a tighter
+   * budget (e.g. inline attachments on a comment) pass MAX_INLINE_ATTACHMENT_SIZE_BYTES. */
+  maxSizeBytes?: number;
 }
 
 // Mirrors the webapp's shared AttachmentsField
 // (apps/csm-portal/webapp/src/components/attachments/AttachmentsField.tsx): a button that opens
 // the native file picker, a list of added files with size + remove, oversized files rejected
 // client-side with an inline error instead of hitting the backend's 413.
-export function AttachmentsField({ attachments, onChange, disabled }: AttachmentsFieldProps) {
+export function AttachmentsField({
+  attachments,
+  onChange,
+  disabled,
+  maxSizeBytes = MAX_ATTACHMENT_SIZE_BYTES,
+}: AttachmentsFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,9 +54,9 @@ export function AttachmentsField({ attachments, onChange, disabled }: Attachment
     setError(null);
 
     const files = Array.from(fileList);
-    const oversized = files.find((f) => f.size > MAX_ATTACHMENT_SIZE_BYTES);
+    const oversized = files.find((f) => f.size > maxSizeBytes);
     if (oversized) {
-      setError(`"${oversized.name}" is larger than ${formatBytes(MAX_ATTACHMENT_SIZE_BYTES)}.`);
+      setError(`"${oversized.name}" is larger than ${formatBytes(maxSizeBytes)}.`);
       return;
     }
 

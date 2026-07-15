@@ -18,6 +18,11 @@
 // 413. Mirrors apps/csm-portal/webapp's useCsmCaseAttachments.ts MAX_ATTACHMENT_SIZE_BYTES.
 export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
+// Files attached inline from the comment composer stay under a tighter 5 MB cap — the overall
+// request payload budget (10 MB) is shared with the comment text/JSON overhead of whatever else
+// is in flight around it, so inline attachments get half the standalone attachment ceiling.
+export const MAX_INLINE_ATTACHMENT_SIZE_BYTES = 5 * 1024 * 1024;
+
 export interface PendingAttachment {
   id: string;
   name: string;

@@ -27,6 +27,11 @@ export const CASES_ENDPOINT = "/cases";
 export const CASES_SEARCH_ENDPOINT = "/cases/search";
 export const CASE_DETAILS_ENDPOINT = (id: string) => `/cases/${id}`;
 export const CASE_COMMENTS_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/comments/search`;
+export const CASE_COMMENTS_ENDPOINT = (id: string) => `/cases/${id}/comments`;
+export const CASE_CALL_REQUESTS_ENDPOINT = (id: string) => `/cases/${id}/call-requests`;
+export const CASE_CALL_REQUESTS_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/call-requests/search`;
+
+export const SLAS_SEARCH_ENDPOINT = "/slas/search";
 
 export const CHANGE_REQUESTS_SEARCH_ENDPOINT = "/change-requests/search";
 export const CHANGE_REQUEST_ENDPOINT = (id: string) => `/change-requests/${id}`;
@@ -37,6 +42,7 @@ export const DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT = (deploymentId: string) =>
   `/deployments/${deploymentId}/products/search`;
 
 export const ATTACHMENTS_ENDPOINT = "/attachments";
+export const ATTACHMENTS_SEARCH_ENDPOINT = "/attachments/search";
 
 export const TIME_CARDS_ENDPOINT = "/time-cards";
 export const TIME_CARDS_SEARCH_ENDPOINT = "/time-cards/search";

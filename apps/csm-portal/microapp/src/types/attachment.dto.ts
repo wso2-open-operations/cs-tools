@@ -35,3 +35,36 @@ export interface AttachmentCreateResponseDto {
   message?: string;
   attachment: AttachmentDetailDto;
 }
+
+// List/search view — mirrors openapi.yaml's Attachment schema (the full record, as opposed to
+// AttachmentDetailDto's thin create-response ack).
+export interface AttachmentViewDto {
+  id: string;
+  referenceId: string;
+  referenceType: AttachmentReferenceType;
+  name: string;
+  type: string;
+  sizeBytes: number;
+  description: string | null;
+  createdBy: string;
+  createdOn: string;
+  downloadUrl: string | null;
+  previewUrl: string | null;
+}
+
+export interface AttachmentSearchPayloadDto {
+  referenceId: string;
+  referenceType: AttachmentReferenceType;
+  pagination?: {
+    offset?: number;
+    limit?: number;
+  };
+}
+
+export interface AttachmentSearchResponseDto {
+  attachments: AttachmentViewDto[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore?: boolean;
+}
