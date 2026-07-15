@@ -326,6 +326,10 @@ type IncidentService interface {
 	// GetIncidentByID returns the full detail of a single incident by its UUID.
 	// A NotFoundError is returned if the incident does not exist.
 	GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error)
+
+	// UpdateIncident partially updates an existing incident. At least one field must be
+	// provided. A NotFoundError is returned if the incident does not exist.
+	UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error)
 }
 
 // ProblemService defines the operations available on the problems entity.
