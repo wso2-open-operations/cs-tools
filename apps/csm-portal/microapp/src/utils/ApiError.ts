@@ -32,6 +32,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Unwraps a backend error message for display. Upstream errors are sometimes double-wrapped — the
+ * BFF forwards the upstream body as its own `message`, and that string is itself JSON with its own
+ * `message` (e.g. a ServiceNow 409 arrives as `{"message":"{\"code\":409,\"message\":\"[SERVICENOW_ERROR]
+ * ...\"}"}`). Peel nested `{message}` layers, then strip a leading `[SOMETHING_ERROR]` tag, so the
+ * user sees the plain human sentence rather than raw JSON.
+ */
+function unwrapMessage(raw: string, depth = 0): string {
+  const trimmed = raw.trim();
+  if (depth < 3 && trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as ApiErrorMessageBody;
+      if (typeof parsed.message === "string") return unwrapMessage(parsed.message, depth + 1);
+    } catch {
+      // Not JSON after all — fall through and return it as-is.
+    }
+  }
+  return trimmed.replace(/^\[[A-Z0-9_]+\]\s*/, "");
+}
+
 export function toApiError(error: unknown, fallbackMessage: string): Error {
   if (error instanceof ApiError) {
     return error;
@@ -41,7 +61,13 @@ export function toApiError(error: unknown, fallbackMessage: string): Error {
     const status = error.response?.status ?? 500;
     const statusText = error.response?.statusText ?? "Internal Server Error";
     const apiMessage = error.response?.data?.message;
-    return new ApiError(status, statusText, apiMessage ?? fallbackMessage);
+    // unwrapMessage can itself reduce to "" (an empty/whitespace body, a bare `{"message":""}`,
+    // or a tag with nothing after it like "[SOME_ERROR]") — falling back on the unwrapped
+    // result's own truthiness, not just the raw apiMessage's, so an empty unwrap still gets
+    // fallbackMessage instead of an empty ApiError.message (the constructor's `??` default only
+    // catches null/undefined, not "").
+    const unwrapped = apiMessage ? unwrapMessage(apiMessage) : "";
+    return new ApiError(status, statusText, unwrapped || fallbackMessage);
   }
 
   return error instanceof Error ? error : new Error(fallbackMessage);

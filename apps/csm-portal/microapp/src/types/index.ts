@@ -16,7 +16,14 @@
 
 export * from "./case.dto";
 export * from "./case.model";
+export * from "./activity.dto";
+export * from "./activity.model";
 export * from "./attachment.dto";
+export * from "./attachment.model";
+export * from "./sla.dto";
+export * from "./sla.model";
+export * from "./callRequest.dto";
+export * from "./callRequest.model";
 export * from "./project.dto";
 export * from "./project.model";
 export * from "./deployment.dto";

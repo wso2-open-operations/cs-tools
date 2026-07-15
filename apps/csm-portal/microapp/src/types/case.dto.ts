@@ -175,12 +175,24 @@ export interface CaseViewDto {
 
 export type CaseCommentType = "work_note" | "comment" | "activity";
 
+// openapi.yaml declares `createdBy` as a plain string, but the live entity-service response
+// doesn't consistently match that — it comes back as a richer {id, firstName, lastName, fullName}
+// object for at least some comments (same createdBy string-vs-object drift already seen on
+// CaseSearchViewDto — see reference_csm_announcements memory). Modeled as a union and normalized
+// to a display string in `toComment` rather than trusted as a string at the DTO boundary.
+export interface CaseCommentAuthorDto {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+}
+
 export interface CaseCommentDto {
   id: string;
   caseId: string;
   type: CaseCommentType;
   content: string;
-  createdBy: string;
+  createdBy: string | CaseCommentAuthorDto;
   createdOn: string;
 }
 
@@ -191,6 +203,84 @@ export interface CaseCommentSearchResponseDto {
   offset: number;
   hasMore: boolean;
 }
+
+export interface CaseCommentCreatePayloadDto {
+  type: CaseCommentType;
+  content: string;
+}
+
+// openapi.yaml declares POST /cases/{id}/comments' 201 response as the full CaseComment shape,
+// but the live response is actually a thin ack — {message, comment: {id, createdOn, createdBy}},
+// missing type/content/caseId entirely (confirmed live: {"message":"Comment created
+// successfully","comment":{"id":"...","createdOn":"...","createdBy":"hesara@wso2.com"}}).
+// Matches the webapp's own documented workaround for this same gap (usePostCsmCaseComment.ts) —
+// don't try to build a full Comment from this response; refetch the list instead.
+export interface CaseCommentCreateResponseDto {
+  message?: string;
+  comment: {
+    id: string;
+    createdOn: string;
+    createdBy: string;
+  };
+}
+
+// Backend's UpdateCaseRequest: exactly one of state/severity/workState/assigneeEmail must be
+// provided per PATCH call (they're mutually exclusive `oneOf` branches in openapi.yaml) —
+// resolutionCode/cause/closeNotes are the exception, allowed alongside `state` only.
+export interface CasePatchPayloadDto {
+  state?: CaseState;
+  severity?: CaseSeverity;
+  workState?: NonNullable<CaseWorkState>;
+  assigneeEmail?: string;
+  resolutionCode?: CaseResolutionCode;
+  cause?: CaseCause;
+  closeNotes?: string;
+}
+
+export interface UpdateCaseResponseDto {
+  message: string;
+  case: { id: string; updatedOn: string };
+}
+
+// Mirrors backend's CaseResolutionCode/CaseCause enums (openapi.yaml) — only allowed alongside
+// `state: closed` or `state: solution_proposed`.
+export type CaseResolutionCode =
+  | "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
+  | "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
+  | "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
+  | "SOLVED_WORKAROUND_PROVIDED"
+  | "SOLVED_BY_CUSTOMER"
+  | "CONSIDERED_FOR_ROADMAP"
+  | "INCONCLUSIVE_OUT_OF_SCOPE"
+  | "INCONCLUSIVE_CANNOT_REPRODUCE"
+  | "INCONCLUSIVE_NO_WORKAROUND"
+  | "DUPLICATE_ISSUE"
+  | "VOIDED_CANCELED"
+  | "ON_HOLD"
+  | "CONSIDERED_FOR_ROADMAP_ALT"
+  | "SOLVED_FIXED_THE_ISSUE"
+  | "SOLVED_WORKAROUND_PROVIDED_ALT"
+  | "SOLVED_BY_CONTRIBUTOR"
+  | "SOLVED_BY_NOVERA"
+  | "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS";
+
+export type CaseCause =
+  | "USER_MISUNDERSTANDING_CONCEPTS"
+  | "USER_MISUNDERSTANDING_DOCUMENTATION"
+  | "USER_NOT_FOLLOWING_DOCUMENTATION"
+  | "USER_MISTAKE"
+  | "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
+  | "SOLUTION_PROBLEMATIC_CODE"
+  | "APPLICATION_BUG"
+  | "APPLICATION_MISLEADING_UX_UI"
+  | "APPLICATION_LIMITATION"
+  | "APPLICATION_MISSING_FEATURE"
+  | "APPLICATION_DOCUMENTATION_GAP"
+  | "APPLICATION_DOCUMENTATION_ERROR"
+  | "INFRASTRUCTURE_CUSTOMERS_SIDE"
+  | "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
+  | "INFRASTRUCTURE_SAAS_SIDE_OTHER"
+  | "UNKNOWN";
 
 // Mirrors the webapp's BeCaseCreatePayload (the "case" type variant only — service_request and
 // security_report_analysis creation aren't in the microapp's scope, see NewCasePage.tsx).

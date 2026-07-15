@@ -173,13 +173,24 @@ export function toCaseDetail(dto: CaseViewDto): CaseDetail {
   };
 }
 
+// See CaseCommentAuthorDto's comment: `createdBy` isn't reliably a string at runtime despite what
+// openapi.yaml declares, so this always normalizes to a display string before it reaches a
+// component — mirrors user.model.ts's fullName derivation (firstName + lastName, falling back
+// further since comments' author object carries no email to fall back to). Also guards against
+// createdBy being entirely absent — seen on some records regardless of what the DTO type claims.
+function commentAuthorLabel(createdBy: CaseCommentDto["createdBy"] | null | undefined): string {
+  if (!createdBy) return "Unknown";
+  if (typeof createdBy === "string") return createdBy;
+  return createdBy.fullName || [createdBy.firstName, createdBy.lastName].filter(Boolean).join(" ").trim() || "Unknown";
+}
+
 export function toComment(dto: CaseCommentDto): Comment {
   return {
     id: dto.id,
     caseId: dto.caseId,
     type: dto.type,
     content: dto.content,
-    createdBy: dto.createdBy,
+    createdBy: commentAuthorLabel(dto.createdBy),
     createdOn: parseBackendTimestamp(dto.createdOn),
   };
 }

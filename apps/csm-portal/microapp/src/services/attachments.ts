@@ -14,8 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { ATTACHMENTS_ENDPOINT } from "@config/endpoints";
-import type { AttachmentCreatePayloadDto, AttachmentCreateResponseDto, AttachmentDetailDto } from "@src/types";
+import { queryOptions } from "@tanstack/react-query";
+import { ATTACHMENTS_ENDPOINT, ATTACHMENTS_SEARCH_ENDPOINT } from "@config/endpoints";
+import type {
+  AttachmentCreatePayloadDto,
+  AttachmentCreateResponseDto,
+  AttachmentDetailDto,
+  AttachmentReferenceType,
+  AttachmentSearchResponseDto,
+} from "@src/types";
+import { toCaseAttachment, type CaseAttachment } from "@src/types";
 import apiClient from "./apiClient";
 
 const createAttachment = async (payload: AttachmentCreatePayloadDto): Promise<AttachmentDetailDto> => {
@@ -23,6 +31,23 @@ const createAttachment = async (payload: AttachmentCreatePayloadDto): Promise<At
   return data.attachment;
 };
 
+const searchAttachments = async (
+  referenceId: string,
+  referenceType: AttachmentReferenceType,
+): Promise<CaseAttachment[]> => {
+  const { data } = await apiClient.post<AttachmentSearchResponseDto>(ATTACHMENTS_SEARCH_ENDPOINT, {
+    referenceId,
+    referenceType,
+    pagination: { limit: 50 },
+  });
+  return (data.attachments ?? []).map(toCaseAttachment);
+};
+
 export const attachments = {
   create: createAttachment,
+  forCase: (caseId: string) =>
+    queryOptions({
+      queryKey: ["case", caseId, "attachments"],
+      queryFn: () => searchAttachments(caseId, "case"),
+    }),
 };
