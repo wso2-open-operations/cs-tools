@@ -129,7 +129,7 @@ const findMyOngoingCases = async (
     for (const c of result.items) {
       if (c.id === excludeCaseId) continue;
       if (c.workState?.toLowerCase() !== "ongoing") continue;
-      if (!myUserId && c.assignedEngineer?.email?.toLowerCase() !== myEmail) continue;
+      if (!myUserId && c.assignedEngineer?.email?.toLowerCase() !== myEmail?.toLowerCase()) continue;
       matches.push({ id: c.id, label: c.wso2Id || c.number || c.subject || c.id });
     }
     // Assignee-filtered path: this tiny set fits one page and breaks here.
