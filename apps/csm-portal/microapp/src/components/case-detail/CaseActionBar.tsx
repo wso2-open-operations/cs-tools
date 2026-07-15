@@ -77,7 +77,13 @@ export function CaseActionBar({
   if (targets.length === 1) {
     return (
       <Fragment>
-        <Button variant="contained" size="small" disabled={isPending} onClick={() => runTarget(targets[0])}>
+        <Button
+          variant="contained"
+          size="small"
+          disabled={isPending}
+          onClick={() => runTarget(targets[0])}
+          sx={{ borderRadius: 999 }}
+        >
           {labelFor(targets[0])}
         </Button>
       </Fragment>
@@ -94,6 +100,7 @@ export function CaseActionBar({
           renderValue={() => "Change state"}
           sx={{
             color: "#fff",
+            borderRadius: 999,
             // Reuse the theme's own `gradient.primary` token (same one MuiButton/MuiFab
             // containedPrimary use) instead of hand-deriving a gradient from
             // palette.primary.light/main/dark — that diverged in direction, stops, and
@@ -105,6 +112,7 @@ export function CaseActionBar({
             },
             "& .MuiOutlinedInput-notchedOutline": {
               border: "none",
+              borderRadius: 999,
             },
             "&:hover": {
               background: (theme) => `${theme.gradient.primary} !important`,
