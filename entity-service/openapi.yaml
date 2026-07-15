@@ -3586,6 +3586,25 @@ components:
         account:
           nullable: true
           $ref: '#/components/schemas/AccountRef'
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was resolved. Populated for resolved/closed ServiceNow cases; null otherwise.
+        resolutionCode:
+          type: string
+          nullable: true
+          enum: [SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED, SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT, SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET, SOLVED_WORKAROUND_PROVIDED, SOLVED_BY_CUSTOMER, CONSIDERED_FOR_ROADMAP, INCONCLUSIVE_OUT_OF_SCOPE, INCONCLUSIVE_CANNOT_REPRODUCE, INCONCLUSIVE_NO_WORKAROUND, DUPLICATE_ISSUE, VOIDED_CANCELED, ON_HOLD, CONSIDERED_FOR_ROADMAP_ALT, SOLVED_FIXED_THE_ISSUE, SOLVED_WORKAROUND_PROVIDED_ALT, SOLVED_BY_CONTRIBUTOR, SOLVED_BY_NOVERA, ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS]
+          description: Resolution code. Populated for resolved/closed ServiceNow cases; null otherwise.
+        cause:
+          type: string
+          nullable: true
+          enum: [USER_MISUNDERSTANDING_CONCEPTS, USER_MISUNDERSTANDING_DOCUMENTATION, USER_NOT_FOLLOWING_DOCUMENTATION, USER_MISTAKE, SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE, SOLUTION_PROBLEMATIC_CODE, APPLICATION_BUG, APPLICATION_MISLEADING_UX_UI, APPLICATION_LIMITATION, APPLICATION_MISSING_FEATURE, APPLICATION_DOCUMENTATION_GAP, APPLICATION_DOCUMENTATION_ERROR, INFRASTRUCTURE_CUSTOMERS_SIDE, INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH, INFRASTRUCTURE_SAAS_SIDE_OTHER, UNKNOWN]
+          description: Root-cause category. Populated for resolved/closed ServiceNow cases; null otherwise.
+        resolutionNotes:
+          type: string
+          nullable: true
+          description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
 
     CaseSearchView:
       type: object

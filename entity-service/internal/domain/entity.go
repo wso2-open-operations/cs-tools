@@ -928,6 +928,11 @@ type CaseView struct {
 	ParentCase             *CaseNumberRef       `json:"parentCase"`
 	RelatedCase            *CaseNumberRef       `json:"relatedCase"`
 	AccountDetails         *AccountRef          `json:"account"`
+	// Resolution fields — populated only for resolved/closed ServiceNow cases.
+	ResolvedOn      *time.Time          `json:"resolvedOn"`
+	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
+	Cause           *CaseCause          `json:"cause"`
+	ResolutionNotes *string             `json:"resolutionNotes"`
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
