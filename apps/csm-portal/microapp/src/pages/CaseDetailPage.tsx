@@ -61,8 +61,6 @@ import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { SeverityChip, StatusChip } from "@components/support/Chips";
 import { ErrorState } from "@components/support/ErrorState";
 import { ALL_SEVERITIES, SEVERITY_LABELS, TYPE_CONFIG } from "@components/support/config";
-import { SectionCard } from "@components/case-detail/SectionCard";
-import { CommentBody } from "@components/case-detail/CommentBody";
 import { CaseActionBar } from "@components/case-detail/CaseActionBar";
 import { ResolutionDialog } from "@components/case-detail/ResolutionDialog";
 import { CommentComposer } from "@components/case-detail/CommentComposer";
@@ -374,11 +372,6 @@ function CaseDetailContent({ id }: { id: string }) {
 
       {activeTab === "details" && (
         <Stack gap={2}>
-          {caseDetail.description && (
-            <SectionCard title="Description">
-              <CommentBody content={caseDetail.description} />
-            </SectionCard>
-          )}
           <CaseMetadataSection caseDetail={caseDetail} />
         </Stack>
       )}
@@ -480,6 +473,17 @@ function CaseSummarySection({
                 disabled={isMutating}
                 renderValue={() => "Change severity"}
                 onChange={(e) => onChangeSeverity(e.target.value as CaseSeverity)}
+                sx={{
+                  borderRadius: 999,
+                  color: "primary.main",
+                  "& .MuiOutlinedInput-notchedOutline": { borderColor: "primary.main", borderRadius: 999 },
+                  "&:hover .MuiOutlinedInput-notchedOutline": { borderColor: "primary.main" },
+                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "primary.main" },
+                  "&.Mui-disabled": {
+                    color: "action.disabled",
+                    "& .MuiOutlinedInput-notchedOutline": { borderColor: "action.disabledBackground" },
+                  },
+                }}
               >
                 {ALL_SEVERITIES.map((severity) => (
                   <MenuItem key={severity} value={severity} disabled={severity === caseDetail.severity}>
