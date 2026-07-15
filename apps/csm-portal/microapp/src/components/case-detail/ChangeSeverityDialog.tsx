@@ -15,9 +15,10 @@
 // under the License.
 
 import { useState } from "react";
-import { Button, Card, Dialog, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@wso2/oxygen-ui";
+import { Button, Dialog, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@wso2/oxygen-ui";
 import type { CaseSeverity } from "@src/types";
 import { ALL_SEVERITIES, SEVERITY_LABELS } from "@components/support/config";
+import { DialogPaper } from "@components/common/DialogPaper";
 
 interface ChangeSeverityDialogProps {
   currentSeverity: CaseSeverity;
@@ -33,7 +34,7 @@ export function ChangeSeverityDialog({ currentSeverity, isSubmitting, onClose, o
     <Dialog
       open
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>

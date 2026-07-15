@@ -17,7 +17,6 @@
 import { useState } from "react";
 import {
   Button,
-  Card,
   Dialog,
   FormControl,
   InputLabel,
@@ -29,6 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import type { CaseCause, CaseResolutionCode } from "@src/types";
 import { CASE_CAUSES, humanizeEnumValue, RESOLUTION_CODES } from "./caseResolution";
+import { DialogPaper } from "@components/common/DialogPaper";
 
 interface ResolutionDialogProps {
   /** Which lifecycle transition this resolution is being collected for — only used for the title. */
@@ -58,7 +58,7 @@ export function ResolutionDialog({ kind, isSubmitting, onClose, onSubmit }: Reso
     <Dialog
       open
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>

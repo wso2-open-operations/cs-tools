@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Button, Card, Dialog, Stack, Typography } from "@wso2/oxygen-ui";
+import { Button, Dialog, Stack, Typography } from "@wso2/oxygen-ui";
 import type { MyOngoingCase } from "@src/services/cases";
+import { DialogPaper } from "@components/common/DialogPaper";
 
 interface PauseConflictDialogProps {
   otherCases: MyOngoingCase[];
@@ -41,7 +42,7 @@ export function PauseConflictDialog({ otherCases, isSubmitting, onConfirm, onDec
     <Dialog
       open
       onClose={onDecline}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 1.5, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>

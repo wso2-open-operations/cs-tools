@@ -119,11 +119,17 @@ function CreateCallRequestDialog({
 }) {
   const [reason, setReason] = useState("");
   const [preferredTime, setPreferredTime] = useState<Date | null>(null);
-  const [durationMinutes, setDurationMinutes] = useState(30);
+  // Kept as the raw typed string — same pattern as the date picker's own `preferredTime` state
+  // (the widget's natural value, unmodified as you interact with it). Converting and clamping on
+  // every keystroke (the previous approach) snapped the field back to "1" the instant it was
+  // cleared to retype, making it impossible to type a new value normally.
+  const [durationInput, setDurationInput] = useState("30");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = reason.trim().length > 0 && preferredTime !== null && durationMinutes > 0 && !isSubmitting;
+  const durationMinutes = Number(durationInput);
+  const isDurationValid = durationInput.trim().length > 0 && Number.isFinite(durationMinutes) && durationMinutes > 0;
+  const canSubmit = reason.trim().length > 0 && preferredTime !== null && isDurationValid && !isSubmitting;
 
   const handleSubmit = () => {
     if (!canSubmit || !preferredTime) return;
@@ -175,8 +181,10 @@ function CreateCallRequestDialog({
         type="number"
         size="small"
         fullWidth
-        value={durationMinutes}
-        onChange={(e) => setDurationMinutes(Math.max(1, Number(e.target.value) || 0))}
+        value={durationInput}
+        onChange={(e) => setDurationInput(e.target.value)}
+        error={durationInput.trim().length > 0 && !isDurationValid}
+        slotProps={{ htmlInput: { min: 1 } }}
       />
 
       {error && (
