@@ -85,7 +85,7 @@ export function AttachmentsField({
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
         >
-          Add files
+          Attachments
         </Button>
       </Stack>
 
