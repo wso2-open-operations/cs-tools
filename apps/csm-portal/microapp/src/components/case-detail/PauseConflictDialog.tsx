@@ -41,7 +41,12 @@ export function PauseConflictDialog({ otherCases, isSubmitting, onConfirm, onDec
   return (
     <Dialog
       open
-      onClose={onDecline}
+      // Ignore backdrop-click/Escape dismissal while the pause+continue mutation is in flight —
+      // otherwise the dialog closes (and pendingOngoingAction is dropped) while the request it
+      // represents is still running in the background.
+      onClose={() => {
+        if (!isSubmitting) onDecline();
+      }}
       slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 1.5, m: 2 } } }}
     >
