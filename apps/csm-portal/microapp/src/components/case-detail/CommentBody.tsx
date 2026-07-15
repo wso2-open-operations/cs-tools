@@ -39,18 +39,34 @@ const TRUNCATE_AT = 500;
 export function CommentBody({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = content.length > TRUNCATE_AT;
-  const shown = isLong && !expanded ? `${content.slice(0, TRUNCATE_AT)}…` : content;
+  // Detected against the full content, not the truncated slice — otherwise HTML that only
+  // appears past the truncation point would render as plain text while collapsed and switch to
+  // HTML once expanded.
+  const isHtml = HTML_FORMAT_RE.test(content);
+  const truncated = isLong && !expanded;
+  const shown = truncated ? content.slice(0, TRUNCATE_AT) : content;
 
   return (
     <Box sx={{ overflowWrap: "anywhere" }}>
-      {HTML_FORMAT_RE.test(shown) ? (
-        <Box
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(shown) }}
-          sx={{ ...HTML_CONTENT_SX, color: "text.primary" }}
-        />
+      {isHtml ? (
+        <>
+          {/* Sanitize the sliced content on its own, then append the ellipsis outside the
+           * sanitized HTML — appending it before sanitizing risks DOMPurify swallowing it while
+           * repairing a tag the slice cut through mid-way. */}
+          <Box
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(shown) }}
+            sx={{ ...HTML_CONTENT_SX, color: "text.primary" }}
+          />
+          {truncated && (
+            <Typography variant="body2" color="text.primary">
+              …
+            </Typography>
+          )}
+        </>
       ) : (
         <Typography variant="body2" color="text.primary" sx={{ whiteSpace: "pre-wrap" }}>
           {shown}
+          {truncated && "…"}
         </Typography>
       )}
 
