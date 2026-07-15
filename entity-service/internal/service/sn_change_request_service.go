@@ -37,25 +37,25 @@ type snChangeRequestsResponse struct {
 }
 
 type snChangeRequest struct {
-	ID               string                `json:"id"`
-	Number           string                `json:"number"`
-	Title            string                `json:"title"`
-	Description      string                `json:"description"`
-	CreatedOn        string                `json:"createdOn"`
-	UpdatedOn        *string               `json:"updatedOn"`
-	Project          snCREntityRef         `json:"project"`
-	Case             *snCREntityRef        `json:"case"`
-	Deployment       *snCREntityRef        `json:"deployment"`
-	DeployedProduct  *snCREntityRef        `json:"deployedProduct"`
-	Product          *snCREntityRef        `json:"product"`
-	AssignedEngineer *snCREntityRef        `json:"assignedEngineer"`
-	AssignedTeam     *snCREntityRef        `json:"assignedTeam"`
-	PlannedStartOn   *string               `json:"plannedStartOn"`
-	PlannedEndOn     *string               `json:"plannedEndOn"`
-	Duration         *string               `json:"duration"`
-	Impact           *snCRLabel            `json:"impact"`
-	State            *snCRLabel            `json:"state"`
-	Type             *snCRLabel            `json:"type"`
+	ID               string         `json:"id"`
+	Number           string         `json:"number"`
+	Title            string         `json:"title"`
+	Description      string         `json:"description"`
+	CreatedOn        string         `json:"createdOn"`
+	UpdatedOn        *string        `json:"updatedOn"`
+	Project          snCREntityRef  `json:"project"`
+	Case             *snCREntityRef `json:"case"`
+	Deployment       *snCREntityRef `json:"deployment"`
+	DeployedProduct  *snCREntityRef `json:"deployedProduct"`
+	Product          *snCREntityRef `json:"product"`
+	AssignedEngineer *snCREntityRef `json:"assignedEngineer"`
+	AssignedTeam     *snCREntityRef `json:"assignedTeam"`
+	PlannedStartOn   *string        `json:"plannedStartOn"`
+	PlannedEndOn     *string        `json:"plannedEndOn"`
+	Duration         *string        `json:"duration"`
+	Impact           *snCRLabel     `json:"impact"`
+	State            *snCRLabel     `json:"state"`
+	Type             *snCRLabel     `json:"type"`
 }
 
 type snCREntityRef struct {
@@ -460,7 +460,6 @@ var snCRCategoryIDMap = map[domain.ChangeRequestCategory]string{
 	domain.ChangeRequestCategoryCloudComputing:       "cloud computing",
 }
 
-
 func strPtr(s string) *string { return &s }
 
 // CreateChangeRequest implements ChangeRequestService for the ServiceNow data source.
@@ -594,21 +593,50 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	return resp, nil
 }
 
+// snCRPatchStateIDMap maps domain ChangeRequestState enums to SN numeric state IDs for PATCH.
+var snCRPatchStateIDMap = map[domain.ChangeRequestState]int{
+	domain.ChangeRequestStateNew:              -5,
+	domain.ChangeRequestStateAssess:           -4,
+	domain.ChangeRequestStateAuthorize:        -3,
+	domain.ChangeRequestStateScheduled:        -2,
+	domain.ChangeRequestStateImplement:        -1,
+	domain.ChangeRequestStateReview:           0,
+	domain.ChangeRequestStateCustomerReview:   1,
+	domain.ChangeRequestStateRollback:         2,
+	domain.ChangeRequestStateClosed:           3,
+	domain.ChangeRequestStateCanceled:         4,
+	domain.ChangeRequestStateCustomerApproval: 5,
+}
+
 // snPatchChangeRequestPayload mirrors the Choreo PATCH /change-requests/{id} request body.
 type snPatchChangeRequestPayload struct {
+	Title              *string `json:"title,omitempty"`
+	Description        *string `json:"description,omitempty"`
+	ProjectID          *string `json:"projectId,omitempty"`
+	CaseID             *string `json:"caseId,omitempty"`
+	DeploymentID       *string `json:"deploymentId,omitempty"`
+	DeployedProductID  *string `json:"deployedProductId,omitempty"`
+	AssignedEngineerID *string `json:"assignedEngineerId,omitempty"`
+	AssignedTeamID     *string `json:"assignedTeamId,omitempty"`
 	PlannedStartOn     *string `json:"plannedStartOn,omitempty"`
+	PlannedEndOn       *string `json:"plannedEndOn,omitempty"`
+	ImpactKey          *int    `json:"impactKey,omitempty"`
+	StateKey           *int    `json:"stateKey,omitempty"`
+	TypeKey            *string `json:"typeKey,omitempty"`
+	Justification      *string `json:"justification,omitempty"`
+	ImpactDescription  *string `json:"impactDescription,omitempty"`
+	ServiceOutage      *string `json:"serviceOutage,omitempty"`
+	CommunicationPlan  *string `json:"communicationPlan,omitempty"`
+	RollbackPlan       *string `json:"rollbackPlan,omitempty"`
+	TestPlan           *string `json:"testPlan,omitempty"`
 	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
 }
 
 // snPatchChangeRequestResponse mirrors the Choreo PATCH /change-requests/{id} response.
 type snPatchChangeRequestResponse struct {
-	Message       string `json:"message"`
-	ChangeRequest struct {
-		ID        string `json:"id"`
-		UpdatedOn string `json:"updatedOn"`
-		UpdatedBy string `json:"updatedBy"`
-	} `json:"changeRequest"`
+	Message       string                `json:"message"`
+	ChangeRequest snChangeRequestDetail `json:"changeRequest"`
 }
 
 func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
@@ -621,14 +649,94 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		return domain.PatchChangeRequestResponse{}, err
 	}
 
-	if req.PlannedStartOn == nil && req.IsCustomerApproved == nil && req.IsCustomerReviewed == nil {
+	if req.Title == nil && req.Description == nil && req.ProjectID == nil && req.CaseID == nil &&
+		req.DeploymentID == nil && req.DeployedProductID == nil && req.AssignedEngineerID == nil &&
+		req.AssignedTeamID == nil && req.PlannedStartOn == nil && req.PlannedEndOn == nil &&
+		req.Impact == nil && req.State == nil && req.Type == nil && req.Justification == nil &&
+		req.ImpactDescription == nil && req.ServiceOutage == nil && req.CommunicationPlan == nil &&
+		req.RollbackPlan == nil && req.TestPlan == nil && req.IsCustomerApproved == nil &&
+		req.IsCustomerReviewed == nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 
+	if req.Title != nil && *req.Title == "" {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "title cannot be empty"}
+	}
+	if req.Impact != nil {
+		if _, ok := snCRImpactIDMap[*req.Impact]; !ok {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid impact %q", *req.Impact)}
+		}
+	}
+	if req.State != nil {
+		if _, ok := snCRPatchStateIDMap[*req.State]; !ok {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid state %q", *req.State)}
+		}
+	}
+	if req.Type != nil {
+		if _, ok := snCRCreateTypeIDMap[*req.Type]; !ok {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		}
+	}
+
+	uuidFields := map[string]*string{
+		"projectId":          req.ProjectID,
+		"caseId":             req.CaseID,
+		"deploymentId":       req.DeploymentID,
+		"deployedProductId":  req.DeployedProductID,
+		"assignedEngineerId": req.AssignedEngineerID,
+		"assignedTeamId":     req.AssignedTeamID,
+	}
+	for field, val := range uuidFields {
+		if val != nil {
+			if err := validateUUIDs(field, []string{*val}); err != nil {
+				return domain.PatchChangeRequestResponse{}, err
+			}
+		}
+	}
+
 	payload := snPatchChangeRequestPayload{
+		Title:              req.Title,
+		Description:        req.Description,
 		PlannedStartOn:     req.PlannedStartOn,
+		PlannedEndOn:       req.PlannedEndOn,
+		Justification:      req.Justification,
+		ImpactDescription:  req.ImpactDescription,
+		ServiceOutage:      req.ServiceOutage,
+		CommunicationPlan:  req.CommunicationPlan,
+		RollbackPlan:       req.RollbackPlan,
+		TestPlan:           req.TestPlan,
 		IsCustomerApproved: req.IsCustomerApproved,
 		IsCustomerReviewed: req.IsCustomerReviewed,
+	}
+	if req.ProjectID != nil {
+		payload.ProjectID = strPtr(uuidToSysid(*req.ProjectID))
+	}
+	if req.CaseID != nil {
+		payload.CaseID = strPtr(uuidToSysid(*req.CaseID))
+	}
+	if req.DeploymentID != nil {
+		payload.DeploymentID = strPtr(uuidToSysid(*req.DeploymentID))
+	}
+	if req.DeployedProductID != nil {
+		payload.DeployedProductID = strPtr(uuidToSysid(*req.DeployedProductID))
+	}
+	if req.AssignedEngineerID != nil {
+		payload.AssignedEngineerID = strPtr(uuidToSysid(*req.AssignedEngineerID))
+	}
+	if req.AssignedTeamID != nil {
+		payload.AssignedTeamID = strPtr(uuidToSysid(*req.AssignedTeamID))
+	}
+	if req.Impact != nil {
+		v := snCRImpactIDMap[*req.Impact]
+		payload.ImpactKey = &v
+	}
+	if req.State != nil {
+		v := snCRPatchStateIDMap[*req.State]
+		payload.StateKey = &v
+	}
+	if req.Type != nil {
+		v := snCRCreateTypeIDMap[*req.Type]
+		payload.TypeKey = &v
 	}
 
 	raw, err := s.client.Patch(ctx, "/change-requests/"+uuidToSysid(id), token, payload)
@@ -642,9 +750,8 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	}
 
 	return domain.PatchChangeRequestResponse{
-		ID:        sysidToUUID(snResp.ChangeRequest.ID),
-		UpdatedOn: snResp.ChangeRequest.UpdatedOn,
-		UpdatedBy: snResp.ChangeRequest.UpdatedBy,
+		Message:       snResp.Message,
+		ChangeRequest: mapSNChangeRequestDetailToView(snResp.ChangeRequest),
 	}, nil
 }
 
@@ -684,6 +791,12 @@ func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string
 		return domain.ChangeRequest{}, fmt.Errorf("sn get change request: parse response: %w", err)
 	}
 
+	return mapSNChangeRequestDetailToView(cr), nil
+}
+
+// mapSNChangeRequestDetailToView maps a Choreo change-request detail payload to the domain view,
+// shared by GetChangeRequest and PatchChangeRequest.
+func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeRequest {
 	subject := cr.Title
 	description := cr.Description
 
@@ -743,5 +856,5 @@ func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string
 		result.ApprovedBy = &domain.EntityRef{ID: sysidToUUID(cr.ApprovedBy.ID), Name: cr.ApprovedBy.Name}
 	}
 
-	return result, nil
+	return result
 }
