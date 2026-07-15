@@ -203,11 +203,28 @@ function CaseDetailContent({ id }: { id: string }) {
       setMutationError("Could not assign the case to you: no signed-in email found.");
       return;
     }
+    // The backend has no single atomic "assign + start + go ongoing" operation (one field per
+    // PATCH — see CasePatchPayloadDto), so this is three sequential PATCHes. The proactive
+    // conflict check (goOngoingWithConflictGuard) keeps ANY of them from running until it's
+    // clear — but the reactive fallback in runOngoingAction only catches a conflict on THIS
+    // action's own last step (workState: ongoing), by which point the assignee/state PATCHes
+    // have already landed. Revert them here before re-throwing, so the pause-conflict dialog's
+    // Cancel still leaves the case untouched even on that race, matching the invariant documented
+    // on pendingOngoingAction above.
+    const originalAssigneeEmail = caseDetail.assignedEngineer?.email ?? null;
+    const originalState = caseDetail.state;
     const action = async (): Promise<void> => {
       if (!alreadyMine) await cases.patch(id, { assigneeEmail: currentUserEmail as string });
       await cases.patch(id, { state: "work_in_progress" });
       invalidateCase();
-      await cases.patch(id, { workState: "ongoing" });
+      try {
+        await cases.patch(id, { workState: "ongoing" });
+      } catch (error) {
+        await cases.patch(id, { state: originalState });
+        if (!alreadyMine && originalAssigneeEmail) await cases.patch(id, { assigneeEmail: originalAssigneeEmail });
+        invalidateCase();
+        throw error;
+      }
       invalidateCase();
     };
     setIsMutating(true);
@@ -322,16 +339,21 @@ function CaseDetailContent({ id }: { id: string }) {
       )
       .then((results) => {
         const failedCount = results.filter((r) => r.status === "rejected").length;
+        const allAttachmentsFailed = fields.attachments.length > 0 && failedCount === fields.attachments.length;
         if (failedCount > 0) {
           Logger.warn(`${failedCount} attachment(s) failed to upload to case ${id}`);
           setMutationError(
-            failedCount === fields.attachments.length
+            allAttachmentsFailed
               ? "Could not upload the attachment(s). Please try again."
               : `${failedCount} attachment(s) failed to upload.`,
           );
         }
         void queryClient.invalidateQueries({ queryKey: ["case", id, "comments"] });
-        return true;
+        // An attachment-only submission (no text) where every upload failed posted nothing at
+        // all — resolve false so the composer keeps the picked files for retry instead of
+        // clearing them after showing the error. A submission with text still succeeds here
+        // since the text itself already landed.
+        return !(allAttachmentsFailed && !fields.content);
       })
       .catch((error) => {
         setMutationError(toApiError(error, "Could not post the comment. Please try again.").message);
