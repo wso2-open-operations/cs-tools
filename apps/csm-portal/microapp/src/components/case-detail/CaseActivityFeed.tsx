@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useMemo, type ReactNode } from "react";
 import { Chip, IconButton, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { ArrowDown, ArrowUp, Download, Eye, History, Paperclip } from "@wso2/oxygen-ui-icons-react";
+import { Download, Eye, History, Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { activities as activitiesService } from "@src/services/activities";
 import { attachments as attachmentsService } from "@src/services/attachments";
@@ -67,78 +67,26 @@ function FieldChangeLine({ field }: { field: CaseAuditEntry["changes"][number] }
 }
 
 /**
- * Unified, filterable Activities feed — merges comments, lifecycle/field-change audit entries, and
- * attachment uploads into one chronological timeline. Mirrors the webapp's CaseActivitiesFeed
- * (apps/csm-portal/webapp/src/features/csm-cases/components/CaseActivitiesFeed.tsx): public
- * comments always show; work notes, state changes, and attachments are independently toggleable,
- * each labeled with its own count. Uses inline toggle chips (this app's own filter convention —
- * see components/support/FiltersSheet.tsx's ToggleChipGroup) instead of the webapp's dropdown Menu.
+ * Unified Activities feed — merges comments, lifecycle/field-change audit entries, and attachment
+ * uploads into one chronological (newest-first) timeline. Mirrors the webapp's CaseActivitiesFeed
+ * (apps/csm-portal/webapp/src/features/csm-cases/components/CaseActivitiesFeed.tsx), minus its
+ * category filter/sort-order chips — everything is always shown here.
  */
 export function CaseActivityFeed({ comments, audit, attachments }: CaseActivityFeedProps) {
-  const [showWorkNotes, setShowWorkNotes] = useState(true);
-  const [showLifecycle, setShowLifecycle] = useState(true);
-  const [showAttachments, setShowAttachments] = useState(true);
-  const [newestFirst, setNewestFirst] = useState(true);
-
-  const counts = {
-    workNotes: comments.filter((c) => c.type === "work_note").length,
-    lifecycle: audit.length,
-    attachments: attachments.length,
-  };
-
   const entries = useMemo(() => {
     const out: FeedEntry[] = [];
-    for (const c of comments) {
-      if (c.type === "work_note" && !showWorkNotes) continue;
-      out.push({ kind: "comment", at: c.createdOn, id: c.id, comment: c });
-    }
-    if (showLifecycle) {
-      for (const a of audit) out.push({ kind: "audit", at: a.createdOn, id: a.id, entry: a });
-    }
-    if (showAttachments) {
-      for (const a of attachments) out.push({ kind: "attachment", at: a.createdOn, id: a.id, attachment: a });
-    }
-    out.sort((a, b) => (newestFirst ? -compareFeedEntries(a, b) : compareFeedEntries(a, b)));
+    for (const c of comments) out.push({ kind: "comment", at: c.createdOn, id: c.id, comment: c });
+    for (const a of audit) out.push({ kind: "audit", at: a.createdOn, id: a.id, entry: a });
+    for (const a of attachments) out.push({ kind: "attachment", at: a.createdOn, id: a.id, attachment: a });
+    out.sort((a, b) => -compareFeedEntries(a, b));
     return out;
-  }, [comments, audit, attachments, showWorkNotes, showLifecycle, showAttachments, newestFirst]);
+  }, [comments, audit, attachments]);
 
   return (
     <Stack gap={1.5}>
-      <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
-        <Chip
-          size="small"
-          label={`Work notes (${counts.workNotes})`}
-          variant={showWorkNotes ? "filled" : "outlined"}
-          color={showWorkNotes ? "primary" : "default"}
-          onClick={() => setShowWorkNotes((v) => !v)}
-        />
-        <Chip
-          size="small"
-          label={`State changes (${counts.lifecycle})`}
-          variant={showLifecycle ? "filled" : "outlined"}
-          color={showLifecycle ? "primary" : "default"}
-          onClick={() => setShowLifecycle((v) => !v)}
-        />
-        <Chip
-          size="small"
-          label={`Attachments (${counts.attachments})`}
-          variant={showAttachments ? "filled" : "outlined"}
-          color={showAttachments ? "primary" : "default"}
-          onClick={() => setShowAttachments((v) => !v)}
-        />
-        <Chip
-          size="small"
-          variant="outlined"
-          icon={newestFirst ? <ArrowDown size={14} /> : <ArrowUp size={14} />}
-          label={newestFirst ? "Newest first" : "Oldest first"}
-          onClick={() => setNewestFirst((v) => !v)}
-          sx={{ ml: "auto" }}
-        />
-      </Stack>
-
       {entries.length === 0 && (
         <Typography variant="body2" color="text.secondary">
-          Nothing to show — enable more categories above.
+          Nothing to show yet.
         </Typography>
       )}
 
