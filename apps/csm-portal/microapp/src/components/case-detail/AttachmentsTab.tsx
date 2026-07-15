@@ -17,7 +17,7 @@
 import { Suspense, useState, type ReactNode } from "react";
 import { useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, IconButton, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { Download, FileText } from "@wso2/oxygen-ui-icons-react";
+import { Download, Eye, FileText } from "@wso2/oxygen-ui-icons-react";
 import { attachments as attachmentsService } from "@src/services/attachments";
 import type { CaseAttachment } from "@src/types";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
@@ -136,13 +136,22 @@ function AttachmentRow({ attachment }: { attachment: CaseAttachment }) {
         </Stack>
       </Stack>
       {attachment.downloadUrl && (
-        <IconButton
-          size="small"
-          aria-label={`Open ${attachment.name}`}
-          onClick={() => openUrl({ url: attachment.downloadUrl as string, presentationStyle: "fullScreen" })}
-        >
-          <Download size={16} />
-        </IconButton>
+        <Stack direction="row" gap={0.5} sx={{ flexShrink: 0 }}>
+          <IconButton
+            size="small"
+            aria-label={`Open ${attachment.name}`}
+            onClick={() => openUrl({ url: attachment.downloadUrl as string, presentationStyle: "fullScreen" })}
+          >
+            <Eye size={16} />
+          </IconButton>
+          <IconButton
+            size="small"
+            aria-label={`Download ${attachment.name}`}
+            onClick={() => openUrl({ url: attachment.downloadUrl as string, presentationStyle: "fullScreen" })}
+          >
+            <Download size={16} />
+          </IconButton>
+        </Stack>
       )}
     </Stack>
   );
