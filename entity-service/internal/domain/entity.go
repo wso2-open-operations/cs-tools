@@ -2451,7 +2451,7 @@ type UpdateIncidentRequest struct {
 	IncidentReport      *string              `json:"incidentReport,omitempty"`
 	AdditionalComments  *string              `json:"additionalComments,omitempty"`
 	WorkNotes           *string              `json:"workNotes,omitempty"`
-	WatchList           []string             `json:"watchList,omitempty"`
+	WatchList           *[]string            `json:"watchList,omitempty"`
 }
 
 // UpdateIncidentResponse is the output for PATCH /incidents/{id}.
