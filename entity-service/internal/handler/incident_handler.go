@@ -63,6 +63,23 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// PatchIncident handles PATCH /incidents/{id}.
+func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateIncidentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	resp, err := h.svc.UpdateIncident(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // SearchIncidents handles POST /incidents/search.
 func (h *IncidentHandler) SearchIncidents(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchIncidentsRequest
