@@ -928,6 +928,11 @@ type CaseView struct {
 	ParentCase             *CaseNumberRef       `json:"parentCase"`
 	RelatedCase            *CaseNumberRef       `json:"relatedCase"`
 	AccountDetails         *AccountRef          `json:"account"`
+	// Resolution fields — populated only for resolved/closed ServiceNow cases.
+	ResolvedOn      *time.Time          `json:"resolvedOn"`
+	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
+	Cause           *CaseCause          `json:"cause"`
+	ResolutionNotes *string             `json:"resolutionNotes"`
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
@@ -2420,20 +2425,20 @@ type IncidentView struct {
 	OpenedOn           *string                 `json:"openedOn"`
 	Subject            *string                 `json:"subject"`
 	Caller             *EntityRef              `json:"caller"`
-	Priority           *string    `json:"priority"`
-	State              *string    `json:"state"`
-	Category           *string    `json:"category"`
-	Subcategory        *string    `json:"subcategory"`
-	Parent             *EntityRef `json:"parent"`
-	ParentIncident     *EntityRef `json:"parentIncident"`
-	AssignmentGroup    *EntityRef `json:"assignmentGroup"`
-	AssignedTo         *EntityRef `json:"assignedTo"`
-	Service            *EntityRef `json:"service"`
-	ServiceOffering    *EntityRef `json:"serviceOffering"`
-	ConfigurationItem  *EntityRef `json:"configurationItem"`
-	ContactType        *string    `json:"contactType"`
-	Impact             *string    `json:"impact"`
-	Urgency            *string    `json:"urgency"`
+	Priority           *string                 `json:"priority"`
+	State              *string                 `json:"state"`
+	Category           *string                 `json:"category"`
+	Subcategory        *string                 `json:"subcategory"`
+	Parent             *EntityRef              `json:"parent"`
+	ParentIncident     *EntityRef              `json:"parentIncident"`
+	AssignmentGroup    *EntityRef              `json:"assignmentGroup"`
+	AssignedTo         *EntityRef              `json:"assignedTo"`
+	Service            *EntityRef              `json:"service"`
+	ServiceOffering    *EntityRef              `json:"serviceOffering"`
+	ConfigurationItem  *EntityRef              `json:"configurationItem"`
+	ContactType        *string                 `json:"contactType"`
+	Impact             *string                 `json:"impact"`
+	Urgency            *string                 `json:"urgency"`
 	ChangeRequest      *EntityRef              `json:"changeRequest"`
 	Problem            *EntityRef              `json:"problem"`
 	CausedBy           *EntityRef              `json:"causedBy"`
@@ -2444,6 +2449,12 @@ type IncidentView struct {
 	CreatedBy          string                  `json:"createdBy"`
 	UpdatedOn          string                  `json:"updatedOn"`
 	UpdatedBy          string                  `json:"updatedBy"`
+	// Resolution fields — populated only for resolved/closed ServiceNow incidents.
+	ResolutionCode  *string `json:"resolutionCode"`
+	ResolutionNotes *string `json:"resolutionNotes"`
+	ResolvedBy      *string `json:"resolvedBy"`
+	ResolvedOn      *string `json:"resolvedOn"`
+	IncidentReport  *string `json:"incidentReport"`
 }
 
 // SearchProblemsFilters holds all optional filter criteria for a problem search.

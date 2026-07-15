@@ -65,6 +65,16 @@ type snCase struct {
 	ParentCase       *snCaseRef             `json:"parentCase"`
 	RelatedCase      *snCaseRef             `json:"relatedCase"`
 	Account          *snCaseAccount         `json:"account"`
+	ResolutionCode   *struct {
+		ID    json.Number `json:"id"`
+		Label string      `json:"label"`
+	} `json:"resolutionCode"`
+	Cause *struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	} `json:"cause"`
+	ResolutionNotes *string `json:"resolutionNotes"`
+	ResolvedOn      *string `json:"resolvedOn"`
 }
 
 type snCaseEntityRef struct {
@@ -566,6 +576,24 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	}
 	if c.Account != nil {
 		cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
+	}
+	if c.ResolutionCode != nil {
+		if rc, ok := snResolutionCodeByID[c.ResolutionCode.ID.String()]; ok {
+			cv.ResolutionCode = &rc
+		}
+	}
+	if c.Cause != nil {
+		if cause, ok := snCauseLabelToEnum[c.Cause.Label]; ok {
+			cv.Cause = &cause
+		}
+	}
+	cv.ResolutionNotes = c.ResolutionNotes
+	if c.ResolvedOn != nil && *c.ResolvedOn != "" {
+		resolvedOn, err := time.Parse(snCreatedOnLayout, *c.ResolvedOn)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse resolvedOn %q: %w", *c.ResolvedOn, err)
+		}
+		cv.ResolvedOn = &resolvedOn
 	}
 
 	return cv, nil
