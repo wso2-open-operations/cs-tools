@@ -6518,7 +6518,7 @@ components:
           type: string
           nullable: true
           description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
-        resolved:
+        resolvedOn:
           type: string
           nullable: true
           description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.

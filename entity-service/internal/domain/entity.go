@@ -2453,7 +2453,7 @@ type IncidentView struct {
 	ResolutionCode  *string `json:"resolutionCode"`
 	ResolutionNotes *string `json:"resolutionNotes"`
 	ResolvedBy      *string `json:"resolvedBy"`
-	Resolved        *string `json:"resolved"`
+	ResolvedOn      *string `json:"resolvedOn"`
 	IncidentReport  *string `json:"incidentReport"`
 }
 

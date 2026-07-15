@@ -694,7 +694,7 @@ type snGetIncidentResponse struct {
 	ResolutionCode     *snIncidentStrLabel       `json:"resolutionCode"`
 	ResolutionNotes    *string                   `json:"resolutionNotes"`
 	ResolvedBy         *string                   `json:"resolvedBy"`
-	Resolved           *string                   `json:"resolved"`
+	ResolvedOn         *string                   `json:"resolved"`
 	IncidentReport     *string                   `json:"incidentReport"`
 }
 
@@ -735,7 +735,7 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 		UpdatedBy:          sn.UpdatedBy,
 		ResolutionNotes:    sn.ResolutionNotes,
 		ResolvedBy:         sn.ResolvedBy,
-		Resolved:           sn.Resolved,
+		ResolvedOn:         sn.ResolvedOn,
 		IncidentReport:     sn.IncidentReport,
 	}
 	if sn.ResolutionCode != nil {
