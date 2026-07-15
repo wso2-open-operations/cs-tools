@@ -347,6 +347,7 @@ type mockEntityIncidentClient struct {
 	searchIncidentsFn func(ctx context.Context, body []byte) ([]byte, error)
 	createIncidentFn  func(ctx context.Context, body []byte) ([]byte, error)
 	getIncidentFn     func(ctx context.Context, id string) ([]byte, error)
+	patchIncidentFn   func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
@@ -366,6 +367,13 @@ func (m *mockEntityIncidentClient) CreateIncident(ctx context.Context, body []by
 func (m *mockEntityIncidentClient) GetIncident(ctx context.Context, id string) ([]byte, error) {
 	if m.getIncidentFn != nil {
 		return m.getIncidentFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityIncidentClient) PatchIncident(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.patchIncidentFn != nil {
+		return m.patchIncidentFn(ctx, id, body)
 	}
 	return []byte(`{}`), nil
 }

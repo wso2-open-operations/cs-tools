@@ -340,3 +340,160 @@ func TestGetIncident(t *testing.T) {
 		}
 	})
 }
+
+func TestPatchIncident(t *testing.T) {
+	const incidentID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"subject":"Updated"}`))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/", strings.NewReader(`{"subject":"Updated"}`)))
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/inc-42", strings.NewReader(`{"subject":"Updated"}`)))
+		r.SetPathValue("id", "inc-42")
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty JSON object", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects unknown state enum value", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"state":"DONE"}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID assignedEngineerId", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"assignedEngineerId":"not-a-uuid"}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("accepts explicit null to clear an optional reference field", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{
+			patchIncidentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"incident updated","incident":{"id":"` + incidentID + `"}}`), nil
+			},
+		})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"parentIncidentId":null}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards ID and body to upstream and returns 200 with response", func(t *testing.T) {
+		const reqPayload = `{"state":"RESOLVED","resolutionCode":"Solved (Work Around)"}`
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			patchIncidentFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedID = id
+				capturedBody = body
+				return []byte(`{"message":"incident updated","incident":{"id":"` + incidentID + `","state":"RESOLVED"}}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(reqPayload)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != incidentID {
+			t.Errorf("upstream received id %q, want %q", capturedID, incidentID)
+		}
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "incident updated" {
+			t.Errorf("message = %v, want %q", resp["message"], "incident updated")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update incident.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					patchIncidentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"subject":"Updated"}`)))
+				r.SetPathValue("id", incidentID)
+				w := httptest.NewRecorder()
+				h.PatchIncident(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
