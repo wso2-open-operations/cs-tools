@@ -16,7 +16,32 @@
 
 import { Suspense, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Divider, Skeleton, Stack, Tab, Tabs, Typography, pxToRem } from "@wso2/oxygen-ui";
+import {
+  Card,
+  Divider,
+  FormControl,
+  Grid,
+  MenuItem,
+  Select,
+  Skeleton,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+  pxToRem,
+} from "@wso2/oxygen-ui";
+import {
+  Building2,
+  CheckCircle,
+  Clock,
+  Folder,
+  Package,
+  PenLine,
+  RefreshCw,
+  Rocket,
+  UserCog,
+  type LucideIcon,
+} from "@wso2/oxygen-ui-icons-react";
 import { useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { cases, parseOngoingConflictCaseNumber, type MyOngoingCase } from "@src/services/cases";
 import { currentUser } from "@src/services/currentUser";
@@ -35,13 +60,13 @@ import type {
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { SeverityChip, StatusChip } from "@components/support/Chips";
 import { ErrorState } from "@components/support/ErrorState";
-import { TYPE_CONFIG } from "@components/support/config";
+import { ALL_SEVERITIES, SEVERITY_LABELS, TYPE_CONFIG } from "@components/support/config";
 import { SectionCard } from "@components/case-detail/SectionCard";
+import { CommentBody } from "@components/case-detail/CommentBody";
 import { CaseActionBar } from "@components/case-detail/CaseActionBar";
 import { ResolutionDialog } from "@components/case-detail/ResolutionDialog";
-import { ChangeSeverityDialog } from "@components/case-detail/ChangeSeverityDialog";
 import { CommentComposer } from "@components/case-detail/CommentComposer";
-import { CommentBody } from "@components/case-detail/CommentBody";
+import { CaseActivitiesTab } from "@components/case-detail/CaseActivityFeed";
 import { PauseConflictDialog } from "@components/case-detail/PauseConflictDialog";
 import { SlaTab } from "@components/case-detail/SlaTab";
 import { AttachmentsTab } from "@components/case-detail/AttachmentsTab";
@@ -89,7 +114,6 @@ function CaseDetailContent({ id }: { id: string }) {
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [resolutionTarget, setResolutionTarget] = useState<"closed" | "solution_proposed" | null>(null);
-  const [severityOpen, setSeverityOpen] = useState(false);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
   const [pauseConflict, setPauseConflict] = useState<MyOngoingCase[] | null>(null);
@@ -195,25 +219,6 @@ function CaseDetailContent({ id }: { id: string }) {
       .finally(() => setIsMutating(false));
   };
 
-  // Toggles the work sub-state — the only way to reach `ongoing`, which the comment gate
-  // (CommentComposer / utils/caseWorkState.ts) requires for public comments. Only offered to the
-  // case's own assignee while `work_in_progress` (see CaseActionBar's canToggleWorkState). Pausing
-  // never conflicts with anything, so it skips the guard; going ongoing goes through it.
-  const handleToggleWorkState = (): void => {
-    setIsMutating(true);
-    setMutationError(null);
-    const next =
-      caseDetail.workState === "ongoing"
-        ? cases.patch(id, { workState: "paused" }).then(invalidateCase)
-        : goOngoingWithConflictGuard(async () => {
-            await cases.patch(id, { workState: "ongoing" });
-            invalidateCase();
-          });
-    next
-      .catch((error) => setMutationError(toApiError(error, "Could not update the work state.").message))
-      .finally(() => setIsMutating(false));
-  };
-
   const handleConfirmPauseConflict = (): void => {
     if (!pauseConflict) return;
     // A null id means that case's UUID couldn't be resolved (the search that would find it has
@@ -277,10 +282,7 @@ function CaseDetailContent({ id }: { id: string }) {
     setMutationError(null);
     cases
       .patch(id, { severity: next })
-      .then(() => {
-        setSeverityOpen(false);
-        invalidateCase();
-      })
+      .then(invalidateCase)
       .catch(() => setMutationError("Could not change the severity. Please try again."))
       .finally(() => setIsMutating(false));
   };
@@ -349,9 +351,8 @@ function CaseDetailContent({ id }: { id: string }) {
         mutationError={mutationError}
         onTransition={handleTransition}
         onAssignAndStart={handleAssignAndStart}
-        onToggleWorkState={handleToggleWorkState}
         onNeedsResolution={setResolutionTarget}
-        onChangeSeverity={() => setSeverityOpen(true)}
+        onChangeSeverity={handleSeveritySubmit}
       />
 
       <Tabs value={activeTab} variant="scrollable" onChange={(_, value: CaseTabId) => setActiveTab(value)}>
@@ -362,6 +363,7 @@ function CaseDetailContent({ id }: { id: string }) {
 
       {activeTab === "activities" && (
         <CaseCommentsSection
+          caseId={id}
           comments={comments}
           caseState={caseDetail.state}
           workState={caseDetail.workState}
@@ -374,14 +376,10 @@ function CaseDetailContent({ id }: { id: string }) {
         <Stack gap={2}>
           {caseDetail.description && (
             <SectionCard title="Description">
-              <Typography variant="body2" color="text.primary" sx={{ whiteSpace: "pre-wrap" }}>
-                {caseDetail.description}
-              </Typography>
+              <CommentBody content={caseDetail.description} />
             </SectionCard>
           )}
-          <SectionCard title="Overview">
-            <CaseMetadataSection caseDetail={caseDetail} />
-          </SectionCard>
+          <CaseMetadataSection caseDetail={caseDetail} />
         </Stack>
       )}
 
@@ -401,16 +399,6 @@ function CaseDetailContent({ id }: { id: string }) {
           onSubmit={handleResolutionSubmit}
         />
       )}
-
-      {severityOpen && caseDetail.severity && (
-        <ChangeSeverityDialog
-          currentSeverity={caseDetail.severity}
-          isSubmitting={isMutating}
-          onClose={() => setSeverityOpen(false)}
-          onSubmit={handleSeveritySubmit}
-        />
-      )}
-
       {pauseConflict && (
         <PauseConflictDialog
           otherCases={pauseConflict}
@@ -430,7 +418,6 @@ function CaseSummarySection({
   mutationError,
   onTransition,
   onAssignAndStart,
-  onToggleWorkState,
   onNeedsResolution,
   onChangeSeverity,
 }: {
@@ -440,14 +427,11 @@ function CaseSummarySection({
   mutationError: string | null;
   onTransition: (target: CaseState) => void;
   onAssignAndStart: () => void;
-  onToggleWorkState: () => void;
   onNeedsResolution: (target: "closed" | "solution_proposed") => void;
-  onChangeSeverity: () => void;
+  onChangeSeverity: (next: CaseSeverity) => void;
 }) {
   const { icon: Icon, color } = TYPE_CONFIG[caseDetail.type ?? "case"] ?? TYPE_CONFIG.case;
   const canChangeSeverity = caseDetail.severity && caseDetail.state !== "closed";
-  const canToggleWorkState =
-    caseDetail.state === "work_in_progress" && caseDetail.assignedEngineer?.id === currentUserId;
 
   return (
     <Stack gap={1.5}>
@@ -471,22 +455,39 @@ function CaseSummarySection({
 
       {/* Actions live in their own row, visually separated from the identity block above so the
        * primary "what can I do" affordance isn't read as part of the case's own metadata. */}
-      {(caseDetail.nextStates.length > 0 || canChangeSeverity || canToggleWorkState) && (
-        <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center" sx={{ pt: 0.5 }}>
+      {(caseDetail.nextStates.length > 0 || canChangeSeverity) && (
+        <Stack
+          direction="row"
+          gap={1}
+          flexWrap="nowrap"
+          alignItems="center"
+          sx={{ pt: 0.5, overflowX: "auto", scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}
+        >
           <CaseActionBar
             caseDetail={caseDetail}
             currentUserId={currentUserId}
             isPending={isMutating}
             onTransition={onTransition}
             onAssignAndStart={onAssignAndStart}
-            onToggleWorkState={onToggleWorkState}
             onNeedsResolution={onNeedsResolution}
           />
           {/* Closed is read-only, same rule the webapp applies to comments/attachments/severity. */}
           {canChangeSeverity && (
-            <Button size="small" variant="outlined" disabled={isMutating} onClick={onChangeSeverity}>
-              Change severity
-            </Button>
+            <FormControl size="small" sx={{ minWidth: 150, flexShrink: 0 }}>
+              <Select
+                value=""
+                displayEmpty
+                disabled={isMutating}
+                renderValue={() => "Change severity"}
+                onChange={(e) => onChangeSeverity(e.target.value as CaseSeverity)}
+              >
+                {ALL_SEVERITIES.map((severity) => (
+                  <MenuItem key={severity} value={severity} disabled={severity === caseDetail.severity}>
+                    {SEVERITY_LABELS[severity]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           )}
         </Stack>
       )}
@@ -500,44 +501,74 @@ function CaseSummarySection({
   );
 }
 
+interface MetaField {
+  icon: LucideIcon;
+  label: string;
+  value?: string | null;
+  /** Longer values (names, emails) get the full row width instead of sharing a 2-up grid cell. */
+  fullWidth?: boolean;
+}
+
 function CaseMetadataSection({ caseDetail }: { caseDetail: CaseDetail }) {
+  const fields: MetaField[] = [
+    { icon: Folder, label: "Project", value: caseDetail.project?.name, fullWidth: true },
+    { icon: Rocket, label: "Deployment", value: caseDetail.deployment?.name },
+    { icon: Package, label: "Product", value: caseDetail.product?.name },
+    { icon: Building2, label: "Account", value: caseDetail.account?.name },
+    { icon: UserCog, label: "Assigned Engineer", value: caseDetail.assignedEngineer?.name },
+    {
+      icon: PenLine,
+      label: "Created By",
+      value: caseDetail.createdBy?.displayName || caseDetail.createdBy?.email,
+    },
+    { icon: Clock, label: "Created On", value: formatDate(caseDetail.createdOn) },
+    { icon: RefreshCw, label: "Updated On", value: formatDate(caseDetail.updatedOn) },
+    ...(caseDetail.closedOn ? [{ icon: CheckCircle, label: "Closed On", value: formatDate(caseDetail.closedOn) }] : []),
+  ].filter((field) => field.value);
+
   return (
-    <Stack gap={1}>
-      <DetailRow label="Project" value={caseDetail.project?.name} />
-      <DetailRow label="Deployment" value={caseDetail.deployment?.name} />
-      <DetailRow label="Product" value={caseDetail.product?.name} />
-      <DetailRow label="Account" value={caseDetail.account?.name} />
-      <DetailRow label="Assigned Engineer" value={caseDetail.assignedEngineer?.name} />
-      <DetailRow label="Created By" value={caseDetail.createdBy?.displayName || caseDetail.createdBy?.email} />
-      <DetailRow label="Created On" value={formatDate(caseDetail.createdOn)} />
-      <DetailRow label="Updated On" value={formatDate(caseDetail.updatedOn)} />
-      {caseDetail.closedOn && <DetailRow label="Closed On" value={formatDate(caseDetail.closedOn)} />}
-    </Stack>
+    <Grid container spacing={1.5}>
+      {fields.map((field) => (
+        <Grid key={field.label} size={field.fullWidth ? 12 : 6}>
+          <MetaFieldCard field={field} />
+        </Grid>
+      ))}
+    </Grid>
   );
 }
 
-function DetailRow({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
-
+function MetaFieldCard({ field }: { field: MetaField }) {
+  const Icon = field.icon;
   return (
-    <Stack direction="row" justifyContent="space-between" gap={2}>
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="body2" color="text.primary" textAlign="right">
-        {value}
-      </Typography>
-    </Stack>
+    <Card sx={{ p: 1.25, height: "100%", bgcolor: "action.hover" }}>
+      <Stack gap={0.25}>
+        {/* Icon color prop is a raw CSS color, not a MUI theme-path string (see TYPE_CONFIG's
+         * usage elsewhere in this file) — passing "text.secondary" directly breaks the SVG's
+         * stroke color. Set color on the wrapping Stack instead and let the icon's default
+         * currentColor pick it up. */}
+        <Stack direction="row" alignItems="center" gap={0.75} sx={{ color: "text.secondary" }}>
+          <Icon size={pxToRem(15)} />
+          <Typography variant="caption" color="text.secondary">
+            {field.label}
+          </Typography>
+        </Stack>
+        <Typography variant="body2" fontWeight={500} sx={{ overflowWrap: "anywhere" }}>
+          {field.value}
+        </Typography>
+      </Stack>
+    </Card>
   );
 }
 
 function CaseCommentsSection({
+  caseId,
   comments,
   caseState,
   workState,
   isPostingComment,
   onSubmitComment,
 }: {
+  caseId: string;
   comments: Comment[];
   caseState: CaseState;
   workState: CaseWorkState;
@@ -557,27 +588,9 @@ function CaseCommentsSection({
         onSubmit={onSubmitComment}
       />
 
-      {comments.length > 0 && <Divider />}
+      <Divider />
 
-      {comments.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          No comments yet.
-        </Typography>
-      )}
-
-      {comments.map((comment) => (
-        <Stack key={comment.id} gap={0.5} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
-          <Stack direction="row" justifyContent="space-between" gap={2}>
-            <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-              {comment.createdBy}
-            </Typography>
-            <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ flexShrink: 0 }}>
-              {formatDate(comment.createdOn)}
-            </Typography>
-          </Stack>
-          <CommentBody content={comment.content} />
-        </Stack>
-      ))}
+      <CaseActivitiesTab caseId={caseId} comments={comments} />
     </Stack>
   );
 }
