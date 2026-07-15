@@ -14,9 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Fragment, useState } from "react";
-import { Button, Card, Dialog, Stack, Typography } from "@wso2/oxygen-ui";
-import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
+import { Fragment } from "react";
+import { Button, FormControl, MenuItem, Select } from "@wso2/oxygen-ui";
 import type { CaseDetail, CaseState } from "@src/types";
 import { STATE_LABELS } from "@components/support/config";
 
@@ -37,12 +36,6 @@ interface CaseActionBarProps {
   /** `closed` / `solution_proposed`: these may carry `resolutionCode`/`cause`/`closeNotes`
    * alongside `state`, so the caller opens a dialog to collect them before PATCHing. */
   onNeedsResolution: (target: "closed" | "solution_proposed") => void;
-  /** `PATCH { workState }` — toggles ongoing/paused. Only offered to the case's own assignee
-   * while it's `work_in_progress`, mirroring the webapp's gating (pausing/resuming is the
-   * assignee's own workflow control, not something to do to someone else's active case). This is
-   * also the *only* way to reach `ongoing` — without it, an assigned-but-never-started case (or
-   * one with no workState at all) has no path to satisfying the comment gate in CommentComposer. */
-  onToggleWorkState: () => void;
 }
 
 /**
@@ -59,27 +52,12 @@ export function CaseActionBar({
   onTransition,
   onAssignAndStart,
   onNeedsResolution,
-  onToggleWorkState,
 }: CaseActionBarProps) {
-  const [pickerOpen, setPickerOpen] = useState(false);
   const targets = caseDetail.nextStates.filter((s) => s !== "reopened");
 
-  // Only `ongoing` is pausable; anything else (paused, or a null workState on a case that was
-  // never explicitly started) is resumable — otherwise the only action that can ever set
-  // `ongoing` would be hidden for a case whose workState has never been touched.
-  const canToggleWorkState =
-    caseDetail.state === "work_in_progress" && caseDetail.assignedEngineer?.id === currentUserId;
-  const isOngoing = caseDetail.workState === "ongoing";
-  const workStateToggle = canToggleWorkState && (
-    <Button variant="outlined" size="small" disabled={isPending} onClick={onToggleWorkState}>
-      {isOngoing ? "Pause work" : "Resume work"}
-    </Button>
-  );
-
-  if (targets.length === 0) return workStateToggle || null;
+  if (targets.length === 0) return null;
 
   const runTarget = (target: CaseState) => {
-    setPickerOpen(false);
     if (target === "work_in_progress") {
       onAssignAndStart();
       return;
@@ -102,39 +80,54 @@ export function CaseActionBar({
         <Button variant="contained" size="small" disabled={isPending} onClick={() => runTarget(targets[0])}>
           {labelFor(targets[0])}
         </Button>
-        {workStateToggle}
       </Fragment>
     );
   }
 
   return (
     <>
-      <Button
-        variant="contained"
-        size="small"
-        disabled={isPending}
-        endIcon={<ChevronDown size={16} />}
-        onClick={() => setPickerOpen(true)}
-      >
-        Change state
-      </Button>
-      {workStateToggle}
-
-      <Dialog
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
-        slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 1, m: 2 } } }}
-      >
-        <Typography variant="h6" fontWeight={650}>
-          Change state
-        </Typography>
-        {targets.map((target) => (
-          <Button key={target} variant="outlined" onClick={() => runTarget(target)} disabled={isPending}>
-            {labelFor(target)}
-          </Button>
-        ))}
-      </Dialog>
+      <FormControl size="small" sx={{ minWidth: 150, flexShrink: 0 }}>
+        <Select
+          value=""
+          displayEmpty
+          disabled={isPending}
+          renderValue={() => "Change state"}
+          sx={{
+            color: "#fff",
+            // Reuse the theme's own `gradient.primary` token (same one MuiButton/MuiFab
+            // containedPrimary use) instead of hand-deriving a gradient from
+            // palette.primary.light/main/dark — that diverged in direction, stops, and
+            // didn't track the theme (e.g. the high-contrast theme sets gradient.primary
+            // to "none").
+            background: (theme) => `${theme.gradient.primary} !important`,
+            "& .MuiSelect-icon": {
+              color: "inherit",
+            },
+            "& .MuiOutlinedInput-notchedOutline": {
+              border: "none",
+            },
+            "&:hover": {
+              background: (theme) => `${theme.gradient.primary} !important`,
+              opacity: 0.9,
+            },
+            "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+              border: "none",
+            },
+            "&.Mui-disabled": {
+              color: "action.disabled",
+              background: "action.disabledBackground",
+              opacity: 1,
+            },
+          }}
+          onChange={(e) => runTarget(e.target.value as CaseState)}
+        >
+          {targets.map((target) => (
+            <MenuItem key={target} value={target}>
+              {labelFor(target)}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
     </>
   );
 }
