@@ -214,8 +214,7 @@ export const sendNativeLog = (message?: string, data?: unknown, level: LogLevel 
       level,
     });
   } else {
-    // Logger.error() calls back into sendNativeLog() — must not call it here, or the two recurse forever.
-    console.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE, { message, data, level });
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
