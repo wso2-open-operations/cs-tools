@@ -2970,6 +2970,7 @@ components:
     PatchChangeRequestPayload:
       type: object
       minProperties: 1
+      additionalProperties: false
       description: >
         Any combination of fields may be supplied; at least one is required.
         Omitted fields are left unchanged.
