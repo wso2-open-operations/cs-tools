@@ -116,7 +116,7 @@ export default function CaseDetailsDetailsPanel({
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { mutate: patchCase, isPending: isPatchPending } = usePatchCase(projectId, caseId);
-  const isClosed = data?.status?.label?.toLowerCase() === "closed";
+  const isClosed = data?.status?.label?.trim().toLowerCase() === "closed";
   const { data: feedback } = useGetCaseFeedback(caseId, isClosed);
 
   const handleEditWatchList = () => {
