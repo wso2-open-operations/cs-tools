@@ -145,6 +145,9 @@ export default function NoveraChatPage(): JSX.Element {
     () => urlConversationId ?? conversationResponse?.conversationId ?? null,
   );
   const abandonConversation = useAbandonConversation(projectId || "");
+  // Set when the user creates a case before the conversation id has been
+  // received; the conversation is then abandoned once conversation_created fires.
+  const pendingAbandonRef = useRef(false);
 
   const {
     data: conversationHistory,
@@ -342,8 +345,14 @@ export default function NoveraChatPage(): JSX.Element {
     const aiResponded = messages.some(
       (m) => m.sender === ChatSender.BOT && m.id !== "1" && m.text.trim() !== "",
     );
-    if (conversationId && userAsked && !aiResponded) {
-      abandonConversation.mutate(conversationId);
+    if (userAsked && !aiResponded) {
+      if (conversationId) {
+        abandonConversation.mutate(conversationId);
+      } else {
+        // Conversation id not received yet (very fast bail). Defer the abandon
+        // until the conversation_created event arrives.
+        pendingAbandonRef.current = true;
+      }
     }
 
     if (isAllProductsLoading) {
@@ -488,6 +497,11 @@ export default function NoveraChatPage(): JSX.Element {
           const nextConversationId = String(event.conversationId ?? "");
           if (nextConversationId) {
             setConversationId(nextConversationId);
+            // The user created a case before the id was available — abandon now.
+            if (pendingAbandonRef.current) {
+              pendingAbandonRef.current = false;
+              abandonConversation.mutate(nextConversationId);
+            }
             if (!urlConversationId && projectId) {
               navigate(
                 `/projects/${projectId}/support/chat/${nextConversationId}`,
