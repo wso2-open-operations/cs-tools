@@ -18,7 +18,16 @@ export const ErrorMessages = {
   NATIVE_BRIDGE_NOT_AVAILABLE: "Native bridge is not available",
 };
 
+// Prefixed per-app so a token cached here can never be picked up by a sibling
+// microapp (e.g. customer-portal) sharing the same storage partition. Each
+// microapp is registered as its own OAuth client in the superapp, so the two
+// apps' tokens carry different audiences — they were never interchangeable.
+// Before this, both apps used the bare "accessToken"/"idToken" keys, so
+// refreshToken()'s isTokenExpiringSoon() short-circuit (added in 1644c9cf3)
+// could reuse whatever token was cached under this key regardless of which
+// app it was actually issued for, causing 403s against the CSM backend after
+// visiting Customer Portal first (confirmed live).
 export const LocalStorageKeys = {
-  accessToken: "accessToken",
-  idToken: "idToken",
+  accessToken: "csm_portal_accessToken",
+  idToken: "csm_portal_idToken",
 };
