@@ -57,6 +57,9 @@ const PRIORITY_COLOR: Record<BeIncidentPriority, ChipColor> = {
 /** All incident priorities, for a filter control. */
 export const INCIDENT_PRIORITIES = Object.keys(PRIORITY_LABEL) as BeIncidentPriority[];
 
+/** All incident states, for the Edit dialog's State select. */
+export const INCIDENT_STATES = Object.keys(STATE_LABEL) as BeIncidentState[];
+
 function humanize(value: string): string {
   return value.replace(/_/g, " ");
 }
