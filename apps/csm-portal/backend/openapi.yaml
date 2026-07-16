@@ -1714,7 +1714,7 @@ paths:
               $ref: '#/components/schemas/PatchChangeRequestPayload'
       responses:
         "200":
-          description: Updated change request identifiers.
+          description: Change request updated successfully.
           content:
             application/json:
               schema:
@@ -2970,10 +2970,61 @@ components:
     PatchChangeRequestPayload:
       type: object
       minProperties: 1
+      description: >
+        Any combination of fields may be supplied; at least one is required.
+        Omitted fields are left unchanged.
       properties:
+        title:
+          type: string
+        description:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        deployedProductId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        assignedTeamId:
+          type: string
+          format: uuid
         plannedStartOn:
           type: string
           description: Planned start date and time (format YYYY-MM-DD HH:MM:SS).
+          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+        plannedEndOn:
+          type: string
+          description: Planned end date and time (format YYYY-MM-DD HH:MM:SS).
+          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+        impact:
+          type: string
+          enum: [high, medium, low]
+        state:
+          type: string
+          enum: [new, assess, authorize, customer_approval, scheduled, implement, review, customer_review, rollback, closed, canceled]
+        type:
+          type: string
+          enum: [standard, normal, emergency, model, site_reliability_ops, azure]
+        justification:
+          type: string
+        impactDescription:
+          type: string
+        serviceOutage:
+          type: string
+        communicationPlan:
+          type: string
+        rollbackPlan:
+          type: string
+        testPlan:
+          type: string
         isCustomerApproved:
           type: boolean
         isCustomerReviewed:
@@ -2981,14 +3032,12 @@ components:
 
     PatchChangeRequestResponse:
       type: object
+      required: [message, changeRequest]
       properties:
-        id:
+        message:
           type: string
-          format: uuid
-        updatedOn:
-          type: string
-        updatedBy:
-          type: string
+        changeRequest:
+          $ref: '#/components/schemas/ChangeRequestDetail'
 
     TimeCardState:
       type: string
