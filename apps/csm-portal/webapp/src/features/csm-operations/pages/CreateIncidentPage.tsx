@@ -46,6 +46,16 @@ import { useSearchUsersByName } from "@api/useSearchUsersByName";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
 import { computeIncidentPriority } from "@features/csm-operations/utils/incidentPriorityMatrix";
+import {
+  CATEGORY_OPTIONS,
+  CONTACT_TYPE_OPTIONS,
+  IMPACT_OPTIONS,
+  SUBCATEGORY_OPTIONS_BY_CATEGORY,
+  URGENCY_OPTIONS,
+  configurationItemLabel,
+  itServiceLabel,
+  userLabel,
+} from "@features/csm-operations/utils/incidentFormOptions";
 import type {
   BeIncidentCategory,
   BeIncidentContactType,
@@ -62,90 +72,6 @@ import type {
 
 const UNSET = "" as const;
 const SELECT_PLACEHOLDER = "-- Select --";
-
-const CATEGORY_OPTIONS: Array<{ value: BeIncidentCategory; label: string }> = [
-  { value: "INQUIRY", label: "Inquiry / Help" },
-  { value: "SERVICE_INTERRUPTION", label: "Service Interruption" },
-  { value: "SECURITY", label: "Security" },
-];
-
-const IMPACT_OPTIONS: Array<{ value: BeIncidentImpact; label: string }> = [
-  { value: "HIGH", label: "High" },
-  { value: "MEDIUM", label: "Medium" },
-  { value: "LOW", label: "Low" },
-];
-
-const URGENCY_OPTIONS: Array<{ value: BeIncidentUrgency; label: string }> = [
-  { value: "HIGH", label: "High" },
-  { value: "MEDIUM", label: "Medium" },
-  { value: "LOW", label: "Low" },
-];
-
-const CONTACT_TYPE_OPTIONS: Array<{ value: BeIncidentContactType; label: string }> = [
-  { value: "SELF_SERVICE", label: "Self-service" },
-  { value: "EMAIL", label: "Email" },
-  { value: "WALK_IN", label: "Walk-in" },
-  { value: "AZURE", label: "Azure" },
-  { value: "EMAIL_INTERNAL", label: "Email Internal" },
-  { value: "SITE_247", label: "Site 24/7" },
-  { value: "DIRECT", label: "Direct" },
-  { value: "PHONE", label: "Phone" },
-  { value: "SENTINEL", label: "Sentinel" },
-  { value: "VIRTUAL_AGENT", label: "Virtual Agent" },
-  { value: "CHAT", label: "Chat" },
-  { value: "EMAIL_EXTERNAL", label: "Email External" },
-];
-
-/**
- * Subcategory options, curated per category rather than offered as one flat
- * 35-value list. The backend's `validIncidentSubcategories` enum has 16 more
- * values than appear here (DHCP, DNS, OS, VPN, disk/memory/CPU-type hardware
- * values, etc.) — they're still valid on the wire, they just don't have an
- * obvious home in Inquiry/Help, Service Interruption, or Security, so this
- * curated picker doesn't surface them.
- */
-const SUBCATEGORY_OPTIONS_BY_CATEGORY: Record<
-  BeIncidentCategory,
-  Array<{ value: BeIncidentSubcategory; label: string }>
-> = {
-  INQUIRY: [
-    { value: "CONFIG_CHANGE_REQUEST", label: "Config Change Request" },
-    { value: "INFORMATION_REQUEST", label: "Information Request" },
-  ],
-  SERVICE_INTERRUPTION: [
-    { value: "FULL_OUTAGE", label: "Full Outage" },
-    { value: "PARTIAL_OUTAGE", label: "Partial Outage" },
-    { value: "SLOWNESS", label: "Slowness" },
-  ],
-  SECURITY: [
-    { value: "DOS_DDOS", label: "DOS/DDOS" },
-    { value: "PRIVILEGE_ESCALATIONS", label: "Privilege Escalations" },
-    { value: "THREAT_INTELLIGENCE", label: "Threat Intelligence" },
-    { value: "SCANS_AND_PROBES", label: "Scans and Probes" },
-    { value: "APPLICATION_SECURITY", label: "Application Security" },
-    { value: "PRIVACY", label: "Privacy" },
-    { value: "DATA_BREACH", label: "Data Breach" },
-    { value: "SYSTEM_COMPROMISES", label: "System Compromises" },
-    { value: "MALWARE", label: "Malware" },
-    { value: "VULNERABILITY", label: "Vulnerability" },
-    { value: "UNAUTHORIZED_ACCESS", label: "Unauthorized Access" },
-    { value: "IDENTITY_PROTECTION", label: "Identity Protection" },
-    { value: "PHISHING", label: "Phishing" },
-    { value: "IMPROPER_CONFIGURATION", label: "Improper Configuration" },
-  ],
-};
-
-function userLabel(u: BeUser): string {
-  return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || u.id || "";
-}
-
-function itServiceLabel(s: BeItService): string {
-  return s.name ?? s.id;
-}
-
-function configurationItemLabel(ci: BeConfigurationItem): string {
-  return ci.name ?? ci.id;
-}
 
 const REQUIRED_HELPER = "Required";
 
