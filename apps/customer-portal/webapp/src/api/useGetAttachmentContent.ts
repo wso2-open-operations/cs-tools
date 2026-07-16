@@ -36,10 +36,6 @@ function getBackendBaseUrl(): string {
   return baseUrl.replace(/\/$/, "");
 }
 
-function openExternalDownload(url: string): void {
-  window.open(url, "_blank", "noopener,noreferrer");
-}
-
 function getFilenameFromContentDisposition(
   contentDisposition: string | null,
 ): string | null {
@@ -107,19 +103,11 @@ async function downloadAttachmentContentThroughBackend(
   try {
     response = await authFetch(url, { method: "GET" });
   } catch {
-    if (input.downloadUrl) {
-      openExternalDownload(input.downloadUrl);
-      return;
-    }
     throw new Error("Network error while downloading attachment");
   }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    if (input.downloadUrl) {
-      openExternalDownload(input.downloadUrl);
-      return;
-    }
     throw new Error(
       parseApiResponseMessage(detail, response.status, response.statusText),
     );
@@ -140,10 +128,6 @@ async function downloadAttachmentContentThroughBackend(
       return;
     }
 
-    if (input.downloadUrl) {
-      openExternalDownload(input.downloadUrl);
-      return;
-    }
     throw new Error("Attachment response did not include file content");
   }
 
