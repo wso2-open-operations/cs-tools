@@ -15,21 +15,56 @@
 // under the License.
 
 import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ReactNode } from "react";
+import { ArrowLeft, Pencil } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type ReactNode, useState } from "react";
 import { useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { BackendApiError } from "@api/backend/client";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useGetIncident } from "@features/csm-operations/api/useGetIncident";
+import { usePatchIncident } from "@features/csm-operations/api/usePatchIncident";
+import EditIncidentDialog from "@features/csm-operations/components/EditIncidentDialog";
 import {
   incidentPriorityColor,
   incidentPriorityLabel,
   incidentStateColor,
   incidentStateLabel,
 } from "@features/csm-operations/utils/incidents";
-import type { BeEntityRef } from "@api/backend/types";
+import type { BeEntityRef, BeIncidentDetail, BeUpdateIncidentPayload } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations?tab=incidents";
+
+/**
+ * Two confirmed-live upstream limitations of `PATCH /incidents/{id}`
+ * (entity-service/ServiceNow, not this BFF or the FE) — a third,
+ * `state: RESOLVED`/`CLOSED` 500ing without a resolution, was fixed by
+ * having `EditIncidentDialog` collect `resolutionCode`/`resolutionNotes`
+ * (write-only fields, no read-side model — see `BeUpdateIncidentPayload`)
+ * once the target state is one of those two:
+ *  - `watchList` 404s ("The requested resource was not found!") for *any*
+ *    id — confirmed with both an anonymous service account and a real, named
+ *    person, so it isn't a bad-id problem on our side.
+ *  - `additionalComments` (and, defensively, `workNotes` — same ServiceNow
+ *    journal-field shape, not independently confirmed) is the dangerous one:
+ *    the PATCH returns 200, but the response's own echoed value comes back
+ *    `null` even though we just set it — a silent no-op dressed as success.
+ * `watchList` already surfaces as a real error (see `onError` below) — this
+ * is correct, if unfortunate, behavior. `checkSilentlyDroppedNotes` exists so
+ * the notes case doesn't: it catches a 200 that didn't actually persist what
+ * it claims to and treats it like the failure it is, rather than closing the
+ * dialog on a false positive.
+ */
+function checkSilentlyDroppedNotes(patch: BeUpdateIncidentPayload, saved: BeIncidentDetail): string[] {
+  const dropped: string[] = [];
+  if ("additionalComments" in patch && (saved.additionalComments ?? null) !== patch.additionalComments) {
+    dropped.push("Additional comments");
+  }
+  if ("workNotes" in patch && (saved.workNotes ?? null) !== patch.workNotes) {
+    dropped.push("Internal work note");
+  }
+  return dropped;
+}
 
 function formatDateTime(value?: string | null): string {
   return (
@@ -60,15 +95,17 @@ function RefText({ value }: { value?: BeEntityRef | null }): JSX.Element {
 }
 
 /**
- * Read-only detail for a single incident (`GET /incidents/{id}`). No edit
- * flow — the backend only exposes search/create/get for incidents, no
- * PATCH — so unlike the change-request detail page, there's nothing to
- * open an edit dialog against.
+ * Detail for a single incident (`GET /incidents/{id}`), with an Edit dialog
+ * (`PATCH /incidents/{id}`) mirroring the change-request detail page's
+ * pattern.
  */
 export default function CsmIncidentDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavTransition();
   const { data, isLoading, isError } = useGetIncident(id);
+  const { showError } = useErrorBanner();
+  const patchIncident = usePatchIncident();
+  const [editOpen, setEditOpen] = useState(false);
 
   const back = (): void => {
     navigate(OPERATIONS_INCIDENTS_PATH);
@@ -144,6 +181,15 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               label={incidentPriorityLabel(incident.priority)}
             />
           )}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Pencil size={14} />}
+            onClick={() => setEditOpen(true)}
+            sx={{ ml: "auto", flexShrink: 0 }}
+          >
+            Edit
+          </Button>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
           {incident.number || incident.id}
@@ -246,6 +292,43 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             ))}
           </Box>
         </Card>
+      )}
+
+      {editOpen && (
+        <EditIncidentDialog
+          incident={incident}
+          isSaving={patchIncident.isPending}
+          onClose={() => {
+            if (!patchIncident.isPending) setEditOpen(false);
+          }}
+          onSave={(patch) =>
+            patchIncident.mutate(
+              { id: incident.id as string, patch },
+              {
+                onSuccess: (data) => {
+                  const droppedFields = checkSilentlyDroppedNotes(patch, data.incident);
+                  if (droppedFields.length > 0) {
+                    showError(
+                      `${droppedFields.join(" and ")} didn't save — ServiceNow accepted the request but ` +
+                        "silently dropped that change. Any other fields in this edit were saved; please retry the note separately.",
+                    );
+                    return;
+                  }
+                  setEditOpen(false);
+                },
+                onError: (err) => {
+                  // Real validation messages (e.g. an invalid UUID in one of the
+                  // linking fields) are worth surfacing, same as CreateIncidentPage.
+                  const msg =
+                    err instanceof BackendApiError && err.status < 500 && err.message
+                      ? err.message
+                      : "Could not update the incident. Please try again.";
+                  showError(msg, err);
+                },
+              },
+            )
+          }
+        />
       )}
     </Box>
   );
