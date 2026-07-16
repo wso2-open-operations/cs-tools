@@ -39,12 +39,14 @@ import {
   FileText,
   ExternalLink,
   Pencil,
+  MessageSquare,
 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState, useMemo } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePatchCase } from "@features/support/api/usePatchCase";
+import { useGetCaseFeedback } from "@features/support/api/useGetCaseFeedback";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import DOMPurify from "dompurify";
@@ -114,6 +116,8 @@ export default function CaseDetailsDetailsPanel({
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { mutate: patchCase, isPending: isPatchPending } = usePatchCase(projectId, caseId);
+  const isClosed = data?.status?.label?.toLowerCase() === "closed";
+  const { data: feedback } = useGetCaseFeedback(caseId, isClosed);
 
   const handleEditWatchList = () => {
     const current = savedWatchList ?? (data?.watchList ?? [])
@@ -541,7 +545,7 @@ export default function CaseDetailsDetailsPanel({
       )}
 
       {/* Section 4: Closed Case Details (only when case is closed) */}
-      {statusLabel?.toLowerCase() === "closed" && (
+      {isClosed && (
         <CaseDetailsCard
           title={
             isServiceRequest ? "Closed Request Details" : "Closed Case Details"
@@ -577,6 +581,49 @@ export default function CaseDetailsDetailsPanel({
               </Typography>
             </Box>
           </Box>
+        </CaseDetailsCard>
+      )}
+
+      {/* Section 4b: Customer Feedback (only when feedback has been submitted) */}
+      {isClosed && feedback && (
+        <CaseDetailsCard
+          title="Customer Feedback"
+          icon={<MessageSquare size={20} aria-hidden />}
+        >
+          <Stack direction="row" spacing={2} alignItems="flex-start">
+            <Box
+              component="img"
+              src={feedback.emoji.selectedImage}
+              alt={feedback.emoji.name}
+              sx={{ width: 40, height: 40, objectFit: "contain", flexShrink: 0 }}
+            />
+            <Box sx={{ flex: 1 }}>
+              <Typography {...valueSx} sx={{ fontWeight: 600 }}>
+                {feedback.emoji.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                {formatUtcToLocal(feedback.createdOn)}
+              </Typography>
+              {feedback.chips && feedback.chips.length > 0 && (
+                <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mb: feedback.additionalComment ? 1.5 : 0 }}>
+                  {feedback.chips.map((chip) => (
+                    <Chip
+                      key={chip}
+                      label={chip}
+                      size="small"
+                      variant="outlined"
+                      sx={{ fontSize: "0.75rem" }}
+                    />
+                  ))}
+                </Stack>
+              )}
+              {feedback.additionalComment && (
+                <Typography {...valueSx} sx={{ whiteSpace: "pre-wrap" }}>
+                  {feedback.additionalComment}
+                </Typography>
+              )}
+            </Box>
+          </Stack>
         </CaseDetailsCard>
       )}
 
