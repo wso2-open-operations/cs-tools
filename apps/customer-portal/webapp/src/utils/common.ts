@@ -72,6 +72,8 @@ export function stripLightModeInlineStyles(html: string): string {
           )
         )
           return false;
+        if (/^background(-color)?\s*:/.test(normalized) && isNearWhiteRgb(normalized))
+          return false;
         if (/^color\s*:/.test(normalized) && isDarkColor(normalized))
           return false;
         return true;
@@ -88,6 +90,15 @@ export const DESCRIPTION_PURIFY_CONFIG = {
   FORBID_TAGS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
   FORBID_CONTENTS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
 };
+
+function isNearWhiteRgb(bgDecl: string): boolean {
+  const rgbMatch = bgDecl.match(
+    /^background(?:-color)?\s*:\s*rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/,
+  );
+  if (!rgbMatch) return false;
+  const [, r, g, b] = rgbMatch.map(Number);
+  return r > 230 && g > 230 && b > 230;
+}
 
 function isDarkColor(colorDecl: string): boolean {
   // Named dark colors
