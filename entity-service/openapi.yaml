@@ -4446,9 +4446,11 @@ components:
         plannedStartOn:
           type: string
           description: Planned start date and time (format YYYY-MM-DD HH:MM:SS).
+          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
         plannedEndOn:
           type: string
           description: Planned end date and time (format YYYY-MM-DD HH:MM:SS).
+          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
         impact:
           type: string
           enum:
@@ -4497,6 +4499,9 @@ components:
 
     PatchChangeRequestResponse:
       type: object
+      required:
+        - message
+        - changeRequest
       properties:
         message:
           type: string

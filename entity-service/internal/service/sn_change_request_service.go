@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -675,6 +676,16 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	if req.Type != nil {
 		if _, ok := snCRCreateTypeIDMap[*req.Type]; !ok {
 			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		}
+	}
+	if req.PlannedStartOn != nil {
+		if _, err := time.Parse(snCreatedOnLayout, *req.PlannedStartOn); err != nil {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedStartOn must follow the format: YYYY-MM-DD HH:mm:ss"}
+		}
+	}
+	if req.PlannedEndOn != nil {
+		if _, err := time.Parse(snCreatedOnLayout, *req.PlannedEndOn); err != nil {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedEndOn must follow the format: YYYY-MM-DD HH:mm:ss"}
 		}
 	}
 
