@@ -3026,10 +3026,6 @@ components:
           type: string
         testPlan:
           type: string
-        isCustomerApproved:
-          type: boolean
-        isCustomerReviewed:
-          type: boolean
 
     PatchChangeRequestResponse:
       type: object

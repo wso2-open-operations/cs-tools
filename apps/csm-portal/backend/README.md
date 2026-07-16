@@ -236,7 +236,7 @@ backend/
 
 - `POST /change-requests` — Create a change request (ServiceNow data source only)
 - `GET /change-requests/{id}` — Get change request by ID (ServiceNow data source only)
-- `PATCH /change-requests/{id}` — Update a change request; all fields optional but at least one required (`title`, `description`, `projectId`, `caseId`, `deploymentId`, `deployedProductId`, `assignedEngineerId`, `assignedTeamId`, `plannedStartOn`/`plannedEndOn` (format `YYYY-MM-DD HH:MM:SS`), `impact`, `state`, `type`, `justification`, `impactDescription`, `serviceOutage`, `communicationPlan`, `rollbackPlan`, `testPlan`, `isCustomerApproved`, `isCustomerReviewed`); returns `{message, changeRequest}` with the full updated change request (ServiceNow data source only)
+- `PATCH /change-requests/{id}` — Update a change request; all fields optional but at least one required (`title`, `description`, `projectId`, `caseId`, `deploymentId`, `deployedProductId`, `assignedEngineerId`, `assignedTeamId`, `plannedStartOn`/`plannedEndOn` (format `YYYY-MM-DD HH:MM:SS`), `impact`, `state`, `type`, `justification`, `impactDescription`, `serviceOutage`, `communicationPlan`, `rollbackPlan`, `testPlan`); returns `{message, changeRequest}` with the full updated change request (ServiceNow data source only)
 - `POST /change-requests/search` — Search change requests (ServiceNow data source only)
 
 ### CMDB
