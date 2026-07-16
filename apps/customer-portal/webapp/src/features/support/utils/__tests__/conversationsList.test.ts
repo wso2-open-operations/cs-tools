@@ -16,7 +16,10 @@
 
 import { describe, expect, it } from "vitest";
 import { ConversationListRowAction } from "@features/support/types/conversations";
-import { resolveConversationListRowAction } from "@features/support/utils/conversationsList";
+import {
+  resolveConversationListRowAction,
+  isConversationResumable,
+} from "@features/support/utils/conversationsList";
 
 describe("resolveConversationListRowAction", () => {
   it("returns Resume when state label suggests open", () => {
@@ -25,9 +28,35 @@ describe("resolveConversationListRowAction", () => {
     );
   });
 
+  it("returns Resume for active conversations", () => {
+    expect(resolveConversationListRowAction("Active")).toBe(
+      ConversationListRowAction.Resume,
+    );
+  });
+
   it("returns View otherwise", () => {
     expect(resolveConversationListRowAction("Closed")).toBe(
       ConversationListRowAction.View,
     );
+  });
+
+  it("returns View for abandoned (now a terminal state)", () => {
+    expect(resolveConversationListRowAction("Abandoned")).toBe(
+      ConversationListRowAction.View,
+    );
+  });
+});
+
+describe("isConversationResumable", () => {
+  it("is true for open and active", () => {
+    expect(isConversationResumable("Open")).toBe(true);
+    expect(isConversationResumable("Active")).toBe(true);
+  });
+
+  it("is false for abandoned, resolved, converted, and unknown", () => {
+    expect(isConversationResumable("Abandoned")).toBe(false);
+    expect(isConversationResumable("Resolved")).toBe(false);
+    expect(isConversationResumable("Converted")).toBe(false);
+    expect(isConversationResumable(null)).toBe(false);
   });
 });

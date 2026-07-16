@@ -28,6 +28,7 @@ import {
   MessageSquare,
   Play,
   User,
+  X,
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
@@ -37,8 +38,12 @@ import {
   getConversationStatusColor,
 } from "@features/support/utils/support";
 import { ChatAction } from "@features/support/constants/supportConstants";
-import { resolveConversationListRowAction } from "@features/support/utils/conversationsList";
 import {
+  resolveConversationListRowAction,
+  isConversationResumable,
+} from "@features/support/utils/conversationsList";
+import {
+  ALL_CONVERSATIONS_LIST_ACTION_CLOSE_LABEL,
   ALL_CONVERSATIONS_LIST_ACTION_RESUME_LABEL,
   ALL_CONVERSATIONS_LIST_ACTION_VIEW_LABEL,
   ALL_CONVERSATIONS_LIST_CREATED_BY_PREFIX,
@@ -73,6 +78,7 @@ export default function AllConversationsList({
   isError = false,
   hasListRefinement = false,
   onConversationClick,
+  onCloseConversation,
 }: AllConversationsListProps): JSX.Element {
   if (isLoading) {
     return <AllConversationsListSkeleton />;
@@ -294,7 +300,29 @@ export default function AllConversationsList({
               </Stack>
             </Form.CardContent>
 
-            <Form.CardActions sx={{ p: 0, justifyContent: "flex-end" }}>
+            <Form.CardActions sx={{ p: 0, gap: 2, justifyContent: "flex-end" }}>
+              {onCloseConversation &&
+                isConversationResumable(conv.state?.label) && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    color="error"
+                    disableRipple
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseConversation(conv);
+                    }}
+                    startIcon={<X size={12} />}
+                    sx={{
+                      textTransform: "none",
+                      fontWeight: 500,
+                      minWidth: 0,
+                      p: 0,
+                    }}
+                  >
+                    {ALL_CONVERSATIONS_LIST_ACTION_CLOSE_LABEL}
+                  </Button>
+                )}
               <Button
                 size="small"
                 variant="text"

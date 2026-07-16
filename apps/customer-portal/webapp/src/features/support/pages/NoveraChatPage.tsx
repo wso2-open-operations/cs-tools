@@ -27,6 +27,7 @@ import { flushSync } from "react-dom";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
+import { useAbandonConversation } from "@features/support/api/useAbandonConversation";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePostCaseClassifications } from "@features/support/api/usePostCaseClassifications";
 import { useChatWebSocket } from "@features/support/api/useChatWebSocket";
@@ -143,6 +144,7 @@ export default function NoveraChatPage(): JSX.Element {
   const [conversationId, setConversationId] = useState<string | null>(
     () => urlConversationId ?? conversationResponse?.conversationId ?? null,
   );
+  const abandonConversation = useAbandonConversation(projectId || "");
 
   const {
     data: conversationHistory,
@@ -333,12 +335,29 @@ export default function NoveraChatPage(): JSX.Element {
   const handleCreateCase = useCallback(() => {
     setIsCreateCaseLoading(true);
 
+    // If the user creates a case before Novera has produced any response, mark
+    // the conversation Abandoned so it isn't left counted as an open chat.
+    // ("1" is the static welcome message id; real bot replies have non-empty text.)
+    const userAsked = messages.some((m) => m.sender === ChatSender.USER);
+    const aiResponded = messages.some(
+      (m) => m.sender === ChatSender.BOT && m.id !== "1" && m.text.trim() !== "",
+    );
+    if (conversationId && userAsked && !aiResponded) {
+      abandonConversation.mutate(conversationId);
+    }
+
     if (isAllProductsLoading) {
       setIsWaitingForClassification(true);
     } else {
       performClassification();
     }
-  }, [isAllProductsLoading, performClassification]);
+  }, [
+    isAllProductsLoading,
+    performClassification,
+    messages,
+    conversationId,
+    abandonConversation,
+  ]);
 
   useEffect(() => {
     if (isWaitingForClassification && !isAllProductsLoading) {
