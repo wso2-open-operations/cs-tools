@@ -41,6 +41,11 @@ export interface AsyncEntityMultiSelectProps<T> {
   };
   getId: (item: T) => string;
   getLabel: (item: T) => string;
+  /** Labels for `values` that didn't come from a search this component ran
+   * itself (e.g. pre-filled from another source, like an incident's existing
+   * watch list) — shown until a real search result for the same id replaces
+   * them. Same purpose as `AsyncEntitySelect`'s `knownLabel`, plural. */
+  knownLabels?: Record<string, string>;
 }
 
 /**
@@ -61,6 +66,7 @@ export default function AsyncEntityMultiSelect<T>({
   useSearch,
   getId,
   getLabel,
+  knownLabels,
 }: AsyncEntityMultiSelectProps<T>): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
@@ -70,7 +76,7 @@ export default function AsyncEntityMultiSelect<T>({
   const { data, isFetching, isError } = useSearch(query, open);
   const items = useMemo(() => data ?? [], [data]);
 
-  const [labelById, setLabelById] = useState<Record<string, string>>({});
+  const [labelById, setLabelById] = useState<Record<string, string>>(() => knownLabels ?? {});
 
   const selectedOptions = useMemo<AsyncEntityMultiSelectOption[]>(
     () =>
