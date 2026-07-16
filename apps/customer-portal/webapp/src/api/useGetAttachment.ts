@@ -54,10 +54,6 @@ function triggerDownloadFromContentField(
   link.click();
 }
 
-function openExternalDownload(url: string): void {
-  window.open(url, "_blank", "noopener,noreferrer");
-}
-
 async function downloadAttachmentThroughBackend(
   authFetch: (
     input: RequestInfo | URL,
@@ -76,28 +72,16 @@ async function downloadAttachmentThroughBackend(
   try {
     response = await authFetch(url, { method: "GET" });
   } catch {
-    if (input.downloadUrl) {
-      openExternalDownload(input.downloadUrl);
-      return;
-    }
     throw new Error("Network error while downloading attachment");
   }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    if (input.downloadUrl) {
-      openExternalDownload(input.downloadUrl);
-      return;
-    }
     throw new Error(parseApiResponseMessage(detail, response.status, response.statusText));
   }
 
   const data = (await response.json()) as AttachmentDownloadResponse;
   if (!data?.content || typeof data.content !== "string") {
-    if (input.downloadUrl) {
-      openExternalDownload(input.downloadUrl);
-      return;
-    }
     throw new Error("Attachment response did not include file content");
   }
 
@@ -118,8 +102,8 @@ export interface UseGetAttachmentResult {
 }
 
 /**
- * Authenticated attachment download via GET /attachments/:id, with optional
- * inline content shortcut and ServiceNow URL fallback.
+ * Authenticated attachment download via GET /attachments/:id, with an
+ * optional inline content shortcut.
  *
  * @returns {UseGetAttachmentResult} mutateAsync, loading flag, and active id.
  */
