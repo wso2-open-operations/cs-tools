@@ -25,6 +25,7 @@ import {
   DialogTitle,
   IconButton,
   Stack,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { ShieldAlert, X } from "@wso2/oxygen-ui-icons-react";
 
@@ -38,11 +39,11 @@ export interface PiiWarningDialogProps {
   onProceed: () => void;
 }
 
-const TITLE = "Possible sensitive information detected";
+const TITLE = "Sensitive Information Detected";
 const DESCRIPTION =
-  "Your text appears to contain personal or sensitive information. " +
-  "For your security, review and remove it before posting or continue if " +
-  "this information is necessary.";
+  "We found information in your message that's usually private, like ID " +
+  "numbers or passwords. Anyone with access to this ticket will be able to " +
+  "see it. If it's not needed to resolve your issue, we recommend removing it.";
 
 export default function PiiWarningDialog({
   open,
@@ -66,16 +67,21 @@ export default function PiiWarningDialog({
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>{DESCRIPTION}</DialogContentText>
         {detectedLabels.length > 0 && (
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-            {detectedLabels.map((label) => (
-              <Chip key={label} label={label} color="warning" size="small" />
-            ))}
-          </Stack>
+          <>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Detected:
+            </Typography>
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              {detectedLabels.map((label) => (
+                <Chip key={label} label={label} color="warning" size="small" />
+              ))}
+            </Stack>
+          </>
         )}
       </DialogContent>
       <DialogActions>
         <Button variant="contained" onClick={onEdit} autoFocus>
-          Edit text
+          Edit
         </Button>
         <Button color="warning" onClick={onProceed}>
           Post anyway
