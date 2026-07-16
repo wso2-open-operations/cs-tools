@@ -1628,17 +1628,35 @@ type GetCatalogItemVariablesResponse struct {
 }
 
 // PatchChangeRequestRequest is the request body for PATCH /change-requests/{id}.
+// All fields are optional, but at least one must be provided.
 type PatchChangeRequestRequest struct {
-	PlannedStartOn     *string `json:"plannedStartOn,omitempty"`
-	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
-	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
+	Title              *string              `json:"title,omitempty"`
+	Description        *string              `json:"description,omitempty"`
+	ProjectID          *string              `json:"projectId,omitempty"`
+	CaseID             *string              `json:"caseId,omitempty"`
+	DeploymentID       *string              `json:"deploymentId,omitempty"`
+	DeployedProductID  *string              `json:"deployedProductId,omitempty"`
+	AssignedEngineerID *string              `json:"assignedEngineerId,omitempty"`
+	AssignedTeamID     *string              `json:"assignedTeamId,omitempty"`
+	PlannedStartOn     *string              `json:"plannedStartOn,omitempty"`
+	PlannedEndOn       *string              `json:"plannedEndOn,omitempty"`
+	Impact             *ChangeRequestImpact `json:"impact,omitempty"`
+	State              *ChangeRequestState  `json:"state,omitempty"`
+	Type               *ChangeRequestType   `json:"type,omitempty"`
+	Justification      *string              `json:"justification,omitempty"`
+	ImpactDescription  *string              `json:"impactDescription,omitempty"`
+	ServiceOutage      *string              `json:"serviceOutage,omitempty"`
+	CommunicationPlan  *string              `json:"communicationPlan,omitempty"`
+	RollbackPlan       *string              `json:"rollbackPlan,omitempty"`
+	TestPlan           *string              `json:"testPlan,omitempty"`
+	IsCustomerApproved *bool                `json:"isCustomerApproved,omitempty"`
+	IsCustomerReviewed *bool                `json:"isCustomerReviewed,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
 type PatchChangeRequestResponse struct {
-	ID        string `json:"id"`
-	UpdatedOn string `json:"updatedOn"`
-	UpdatedBy string `json:"updatedBy"`
+	Message       string        `json:"message"`
+	ChangeRequest ChangeRequest `json:"changeRequest"`
 }
 
 // TimeCardState represents the workflow state of a time card.
