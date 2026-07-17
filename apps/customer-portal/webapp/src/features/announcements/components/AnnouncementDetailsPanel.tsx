@@ -33,6 +33,7 @@ import {
   resolveColorFromTheme,
 } from "@features/support/utils/support";
 import ApiErrorState from "@components/error/ApiErrorState";
+import AnnouncementActivityPanel from "@features/announcements/components/AnnouncementActivityPanel";
 import type { AnnouncementDetailsPanelProps } from "@features/announcements/types/announcements";
 import {
   ANNOUNCEMENT_DETAILS_BODY_EMPTY,
@@ -241,6 +242,11 @@ export default function AnnouncementDetailsPanel({
           )}
         </Stack>
       </Paper>
+
+      {projectId && caseId && (
+        <AnnouncementActivityPanel projectId={projectId} caseId={caseId} />
+      )}
+
       <Paper
         variant="outlined"
         elevation={0}
