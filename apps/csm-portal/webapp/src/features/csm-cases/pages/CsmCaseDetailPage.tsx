@@ -258,22 +258,34 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
   const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
+  const isAnnouncementRoute = location.pathname.startsWith("/announcements/");
   const backPath = isEngagementRoute
     ? "/engagements"
     : isServiceRequestRoute
       ? "/operations?tab=service_requests"
-      : "/cases";
+      : isAnnouncementRoute
+        ? "/announcements"
+        : "/cases";
   const backLabel = isEngagementRoute
     ? "Back to engagements"
     : isServiceRequestRoute
       ? "Back to service requests"
-      : "Back to cases";
+      : isAnnouncementRoute
+        ? "Back to announcements"
+        : "Back to cases";
   const detailPath = isEngagementRoute
     ? `/engagements/${caseId}`
     : isServiceRequestRoute
       ? `/operations/service-requests/${caseId}`
-      : `/cases/${caseId}`;
+      : isAnnouncementRoute
+        ? `/announcements/${caseId}`
+        : `/cases/${caseId}`;
   const { data, isLoading, isError, error } = useGetCsmCaseDetail(caseId);
+  // The route alone isn't a reliable signal once data has loaded: a "Related
+  // case" link always points at /cases/:id regardless of the target's actual
+  // type, so an announcement opened that way would otherwise render the full
+  // case UI. Combine the route with the loaded case's own caseType.
+  const isAnnouncement = isAnnouncementRoute || data?.caseType === "announcement";
   const {
     data: comments,
     isLoading: isCommentsLoading,
@@ -310,8 +322,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // Fetched unconditionally (not just while their tab is active) purely for
   // the tab-label counts below; each widget still runs its own scoped query
   // when its tab mounts, deduped against this one by react-query's cache.
-  const { data: slaList } = useGetCsmCaseSlas(caseId);
-  const { data: callRequests } = useGetCsmCaseCallRequests(caseId);
+  // Skipped for announcements (undefined caseId disables the query) since
+  // neither tab is shown there.
+  const { data: slaList } = useGetCsmCaseSlas(
+    isAnnouncement ? undefined : caseId,
+  );
+  const { data: callRequests } = useGetCsmCaseCallRequests(
+    isAnnouncement ? undefined : caseId,
+  );
   // Live deployment lookup for the Details tab's "Deployment info" widget —
   // only runs when the case actually has a deployment link (SN-sourced cases
   // may have none). Reuses the project's deployment list rather than a
@@ -403,6 +421,18 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setGithubIssueResult(null);
     setPendingDelete(null);
     setPauseConflict(null);
+  }
+
+  // isAnnouncement can only be confirmed once `data` loads (see its
+  // definition above) — if a case reached via /cases/:id turns out to be an
+  // announcement and the active tab is one hidden for announcements, fall
+  // back to Activities. Same render-time adjustment pattern as the reset
+  // above rather than an effect, to avoid an extra render pass.
+  if (
+    isAnnouncement &&
+    (activeTab === "sla" || activeTab === "time" || activeTab === "call-requests")
+  ) {
+    setActiveTab("activities");
   }
 
   // Twitter-style permalinks: when the URL has a fragment matching an entry id,
@@ -1117,7 +1147,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               distinct from the free-form tags by a divider, so the current
               state doesn't get lost among the tag chips. */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-            {c.caseType && CASE_TYPE_LABEL[c.caseType] && (
+            {!isAnnouncement && c.caseType && CASE_TYPE_LABEL[c.caseType] && (
               <Chip
                 size="small"
                 variant="outlined"
@@ -1125,9 +1155,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            <SeverityChip severity={c.severity} withLabel />
-            <StateChip state={c.state} />
-            {relatedCase && (
+            {!isAnnouncement && <SeverityChip severity={c.severity} withLabel />}
+            {!isAnnouncement && <StateChip state={c.state} />}
+            {!isAnnouncement && relatedCase && (
               <Chip
                 size="small"
                 variant="outlined"
@@ -1138,7 +1168,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {c.state === "work_in_progress" && c.workState && (
+            {!isAnnouncement && c.state === "work_in_progress" && c.workState && (
               <Chip
                 size="small"
                 variant="outlined"
@@ -1147,24 +1177,27 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {c.tags.length > 0 && (
+            {!isAnnouncement && c.tags.length > 0 && (
               <Divider orientation="vertical" flexItem sx={{ mx: 0.5, my: 0.25 }} />
             )}
-            {c.tags.map((t) => (
-              <Chip
-                key={t.id}
-                size="small"
-                variant="outlined"
-                color={t.color ?? "default"}
-                label={t.label}
-              />
-            ))}
+            {!isAnnouncement &&
+              c.tags.map((t) => (
+                <Chip
+                  key={t.id}
+                  size="small"
+                  variant="outlined"
+                  color={t.color ?? "default"}
+                  label={t.label}
+                />
+              ))}
           </Box>
           <Typography variant="h5">{c.subject}</Typography>
         </Box>
-        <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <CaseActionBar caseDetail={c} onAction={onAction} />
-        </Box>
+        {!isAnnouncement && (
+          <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+            <CaseActionBar caseDetail={c} onAction={onAction} />
+          </Box>
+        )}
       </Box>
 
       <CaseMetaBand
@@ -1209,7 +1242,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="scrollable"
           scrollButtons="auto"
         >
-          {TAB_DEFS.map((t) => {
+          {TAB_DEFS.filter(
+            (t) =>
+              !isAnnouncement ||
+              (t.id !== "sla" && t.id !== "time" && t.id !== "call-requests"),
+          ).map((t) => {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
               t.id === "sla"
@@ -1244,7 +1281,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
               The composer is always available (an internal work note can be
               added in any state); the public-reply path is gated inside it via
               `publicReplyGateReason` when the case isn't in-progress/ongoing. */}
-          {composerOpen ? (
+          {/* Announcements are read-only broadcasts — no reply/work-note
+              composer, matching the hidden CaseActionBar (no patch ops). */}
+          {isAnnouncement ? null : composerOpen ? (
             <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Box
                 sx={{
