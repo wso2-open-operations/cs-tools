@@ -113,7 +113,12 @@ export default function AnnouncementActivityPanel({
       .sort((a, b) => -compareByCreatedOnThenId(a, b));
   }, [commentsData?.pages]);
 
-  if (!isLoading && !isError && commentsToShow.length === 0) {
+  if (
+    !isLoading &&
+    !isError &&
+    commentsToShow.length === 0 &&
+    !hasNextPage
+  ) {
     return null;
   }
 
