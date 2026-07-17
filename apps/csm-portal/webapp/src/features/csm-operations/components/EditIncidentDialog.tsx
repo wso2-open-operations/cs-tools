@@ -202,11 +202,46 @@ export default function EditIncidentDialog({
     [incident.watchList],
   );
 
-  const subcategoryOptions = state.category ? SUBCATEGORY_OPTIONS_BY_CATEGORY[state.category] : [];
+  // The curated map (see its own doc comment) intentionally omits ~16
+  // backend-valid subcategories that don't have an obvious curated home.
+  // An existing incident can already carry one of those — inject it back in
+  // (only while the category hasn't changed, since a new category drops the
+  // old subcategory anyway) so it still displays and remains selectable
+  // rather than showing as blank.
+  const subcategoryOptions = useMemo(() => {
+    const base = state.category ? SUBCATEGORY_OPTIONS_BY_CATEGORY[state.category] : [];
+    if (
+      state.category === initial.category &&
+      initial.subcategory &&
+      !base.some((o) => o.value === initial.subcategory)
+    ) {
+      return [{ value: initial.subcategory, label: initial.subcategory.replace(/_/g, " ") }, ...base];
+    }
+    return base;
+  }, [state.category, initial.category, initial.subcategory]);
   const priority = computeIncidentPriority(state.impact || "", state.urgency || "");
 
   const patch = useMemo(() => buildPatch(initial, state), [initial, state]);
   const hasChanges = Object.keys(patch).length > 0;
+  // hasChanges alone isn't enough: clearing Subject or a fixed-enum field is
+  // silently dropped by buildPatch's diff (not sent, not blocked); changing
+  // Category resets Subcategory to blank, which the diff also drops instead
+  // of submitting; and a transition into Resolved/Closed can submit without
+  // the resolution fields ServiceNow requires for that transition (a live
+  // 500 — see the comment above buildPatch). Block Save until all of that is
+  // actually valid, rather than letting any of it silently no-op or 500.
+  const isTransitioningToResolved =
+    state.state !== initial.state && (state.state === "RESOLVED" || state.state === "CLOSED");
+  const isValid =
+    state.subject.trim().length > 0 &&
+    !!state.category &&
+    !!state.subcategory &&
+    !!state.contactType &&
+    !!state.impact &&
+    !!state.urgency &&
+    !!state.state &&
+    (!isTransitioningToResolved ||
+      (!!state.resolutionCode.trim() && !!state.resolutionNotes.trim()));
 
   const set = <K extends keyof EditState>(key: K, value: EditState[K]): void =>
     setState((prev) => ({ ...prev, [key]: value }));
@@ -505,7 +540,11 @@ export default function EditIncidentDialog({
         <Button color="inherit" onClick={onClose} disabled={isSaving}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={() => onSave(patch)} disabled={isSaving || !hasChanges}>
+        <Button
+          variant="contained"
+          onClick={() => onSave(patch)}
+          disabled={isSaving || !hasChanges || !isValid}
+        >
           {isSaving ? "Saving…" : "Save"}
         </Button>
       </DialogActions>
