@@ -258,21 +258,28 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
   const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
+  const isAnnouncementRoute = location.pathname.startsWith("/announcements/");
   const backPath = isEngagementRoute
     ? "/engagements"
     : isServiceRequestRoute
       ? "/operations?tab=service_requests"
-      : "/cases";
+      : isAnnouncementRoute
+        ? "/announcements"
+        : "/cases";
   const backLabel = isEngagementRoute
     ? "Back to engagements"
     : isServiceRequestRoute
       ? "Back to service requests"
-      : "Back to cases";
+      : isAnnouncementRoute
+        ? "Back to announcements"
+        : "Back to cases";
   const detailPath = isEngagementRoute
     ? `/engagements/${caseId}`
     : isServiceRequestRoute
       ? `/operations/service-requests/${caseId}`
-      : `/cases/${caseId}`;
+      : isAnnouncementRoute
+        ? `/announcements/${caseId}`
+        : `/cases/${caseId}`;
   const { data, isLoading, isError, error } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
@@ -310,8 +317,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // Fetched unconditionally (not just while their tab is active) purely for
   // the tab-label counts below; each widget still runs its own scoped query
   // when its tab mounts, deduped against this one by react-query's cache.
-  const { data: slaList } = useGetCsmCaseSlas(caseId);
-  const { data: callRequests } = useGetCsmCaseCallRequests(caseId);
+  // Skipped for announcements (undefined caseId disables the query) since
+  // neither tab is shown there.
+  const { data: slaList } = useGetCsmCaseSlas(
+    isAnnouncementRoute ? undefined : caseId,
+  );
+  const { data: callRequests } = useGetCsmCaseCallRequests(
+    isAnnouncementRoute ? undefined : caseId,
+  );
   // Live deployment lookup for the Details tab's "Deployment info" widget —
   // only runs when the case actually has a deployment link (SN-sourced cases
   // may have none). Reuses the project's deployment list rather than a
@@ -1117,7 +1130,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               distinct from the free-form tags by a divider, so the current
               state doesn't get lost among the tag chips. */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-            {c.caseType && CASE_TYPE_LABEL[c.caseType] && (
+            {!isAnnouncementRoute && c.caseType && CASE_TYPE_LABEL[c.caseType] && (
               <Chip
                 size="small"
                 variant="outlined"
@@ -1125,9 +1138,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            <SeverityChip severity={c.severity} withLabel />
-            <StateChip state={c.state} />
-            {relatedCase && (
+            {!isAnnouncementRoute && <SeverityChip severity={c.severity} withLabel />}
+            {!isAnnouncementRoute && <StateChip state={c.state} />}
+            {!isAnnouncementRoute && relatedCase && (
               <Chip
                 size="small"
                 variant="outlined"
@@ -1138,7 +1151,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {c.state === "work_in_progress" && c.workState && (
+            {!isAnnouncementRoute && c.state === "work_in_progress" && c.workState && (
               <Chip
                 size="small"
                 variant="outlined"
@@ -1147,24 +1160,27 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {c.tags.length > 0 && (
+            {!isAnnouncementRoute && c.tags.length > 0 && (
               <Divider orientation="vertical" flexItem sx={{ mx: 0.5, my: 0.25 }} />
             )}
-            {c.tags.map((t) => (
-              <Chip
-                key={t.id}
-                size="small"
-                variant="outlined"
-                color={t.color ?? "default"}
-                label={t.label}
-              />
-            ))}
+            {!isAnnouncementRoute &&
+              c.tags.map((t) => (
+                <Chip
+                  key={t.id}
+                  size="small"
+                  variant="outlined"
+                  color={t.color ?? "default"}
+                  label={t.label}
+                />
+              ))}
           </Box>
           <Typography variant="h5">{c.subject}</Typography>
         </Box>
-        <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <CaseActionBar caseDetail={c} onAction={onAction} />
-        </Box>
+        {!isAnnouncementRoute && (
+          <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+            <CaseActionBar caseDetail={c} onAction={onAction} />
+          </Box>
+        )}
       </Box>
 
       <CaseMetaBand
@@ -1209,7 +1225,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="scrollable"
           scrollButtons="auto"
         >
-          {TAB_DEFS.map((t) => {
+          {TAB_DEFS.filter(
+            (t) =>
+              !isAnnouncementRoute ||
+              (t.id !== "sla" && t.id !== "time" && t.id !== "call-requests"),
+          ).map((t) => {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
               t.id === "sla"
@@ -1244,7 +1264,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
               The composer is always available (an internal work note can be
               added in any state); the public-reply path is gated inside it via
               `publicReplyGateReason` when the case isn't in-progress/ongoing. */}
-          {composerOpen ? (
+          {/* Announcements are read-only broadcasts — no reply/work-note
+              composer, matching the hidden CaseActionBar (no patch ops). */}
+          {isAnnouncementRoute ? null : composerOpen ? (
             <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Box
                 sx={{
