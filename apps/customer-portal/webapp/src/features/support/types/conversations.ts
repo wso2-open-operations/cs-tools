@@ -249,7 +249,7 @@ export type ChatWebSocketPayload =
       type: "token_increase_request";
       accountId: string;
       reason: string;
-      period: "daily" | "monthly";
+      limitType: "session" | "monthly";
     };
 
 // Model type for chat WebSocket hook options.
