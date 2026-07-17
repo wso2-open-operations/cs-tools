@@ -18,6 +18,7 @@ import type { ChatMessageBubbleProps } from "@features/support/types/supportComp
 import {
   Avatar,
   Box,
+  Button,
   Paper,
   Stack,
   Typography,
@@ -138,6 +139,7 @@ function MarkdownContent({ text }: { text: string }) {
  */
 export default function ChatMessageBubble({
   message,
+  onRequestTokenIncrease,
 }: ChatMessageBubbleProps): JSX.Element {
   const isUser = message.sender === ChatSender.USER;
   const isCurrentUserMessage = isUser && (message.isCurrentUser ?? true);
@@ -156,6 +158,21 @@ export default function ChatMessageBubble({
       ? "The AI assistant is temporarily unavailable due to usage limits. Please try again later."
       : "Something went wrong"
     : message.text;
+
+  /**
+   * Token-limit signal that warrants offering a "request an increase" CTA.
+   * The limit is often delivered as a normal assistant notice (e.g. "you've
+   * reached your session token limit"), not an error bubble — so we detect it
+   * on regular messages too. The narrower pattern (no bare credit/billing/quota)
+   * avoids false positives on normal messages that merely mention those words.
+   */
+  const isTokenLimitNotice =
+    !!message.text && /token limit|usage limit|rate limit/i.test(message.text);
+  const showTokenRequestCta =
+    !!onRequestTokenIncrease &&
+    !message.isStreaming &&
+    ((message.isError && isUsageLimitError) ||
+      (!message.isError && isTokenLimitNotice));
 
   /** Until the final assistant message, hide thumbs and timestamp only (header stays). */
   const hideFeedbackRow =
@@ -408,6 +425,20 @@ export default function ChatMessageBubble({
               </Box>
             )}
           </Box>
+
+          {showTokenRequestCta && (
+            <Box sx={{ mt: 1 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                onClick={onRequestTokenIncrease}
+                sx={{ textTransform: "none" }}
+              >
+                Request a token limit increase
+              </Button>
+            </Box>
+          )}
         </Stack>
       </Stack>
 

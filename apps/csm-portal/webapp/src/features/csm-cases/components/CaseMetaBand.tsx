@@ -23,6 +23,8 @@ import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import SemanticChip from "@components/SemanticChip";
 import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
 import type { BeDeploymentType } from "@api/backend/types";
+import { announcementStateRole } from "@features/csm-announcements/utils/announcementState";
+import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 
 interface CaseMetaBandProps {
   detail: CsmCaseDetail;
@@ -33,9 +35,14 @@ interface CaseMetaBandProps {
 function Cell({
   label,
   children,
+  maxWidth,
 }: {
   label: string;
   children: ReactNode;
+  /** Caps the cell's width so long values (account/project names) still
+   * truncate via `noWrap` when the cell sizes to its content instead of
+   * stretching across a grid track — see the announcement flex row below. */
+  maxWidth?: number | string;
 }): JSX.Element {
   return (
     <Box
@@ -44,6 +51,7 @@ function Cell({
         flexDirection: "column",
         gap: 0.25,
         minWidth: 0,
+        ...(maxWidth !== undefined ? { maxWidth } : {}),
       }}
     >
       <Typography
@@ -168,6 +176,10 @@ export default function CaseMetaBand({
   const product = c.productContext;
   const tier = c.customerContext.tier;
   const [showDeployment, setShowDeployment] = useState(false);
+  // Deployment/product/assignee are support-workflow facts (which environment,
+  // who's triaging it) that don't apply to a read-only announcement broadcast —
+  // mirrors the hidden SLA/time-tracking/call-request tabs and action bar.
+  const isAnnouncement = c.caseType === "announcement";
   // Project type is encoded as the second " - "-delimited segment of the
   // project name (e.g. "Acme - Managed Cloud" → "Managed Cloud"). Temporary
   // until the backend exposes it as a first-class field.
@@ -227,25 +239,33 @@ export default function CaseMetaBand({
       </Box>
       {!collapsed && (
         <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: {
-              // `minmax(0, 1fr)` everywhere: a plain `1fr` track's implicit
-              // minimum is content-based ("auto"), so a long value in one
-              // cell pushes into its neighbour instead of truncating.
-              xs: "repeat(2, minmax(0, 1fr))",
-              sm: "repeat(3, minmax(0, 1fr))",
-              md: "repeat(4, minmax(0, 1fr))",
-            },
-            gap: 2,
-            px: 2,
-            pb: 2,
-            pt: 0.5,
-            borderTop: 1,
-            borderColor: "divider",
-          }}
+          sx={[
+            { px: 2, pb: 2, pt: 0.5, borderTop: 1, borderColor: "divider" },
+            isAnnouncement
+              ? // Announcements only ever show 5 cells (Account, Tier,
+                // Project, Project type, State). A flex row lets each cell
+                // size to its content instead of stretching across a
+                // 1/5-width grid track (which concentrated all the slack
+                // into one gap before the last cell); `space-between` then
+                // spreads that same slack evenly across the full row width,
+                // with `gap` as the floor once cells wrap on narrow screens.
+                { display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 4 }
+              : {
+                  display: "grid",
+                  // `minmax(0, 1fr)` everywhere: a plain `1fr` track's
+                  // implicit minimum is content-based ("auto"), so a long
+                  // value in one cell pushes into its neighbour instead of
+                  // truncating.
+                  gridTemplateColumns: {
+                    xs: "repeat(2, minmax(0, 1fr))",
+                    sm: "repeat(3, minmax(0, 1fr))",
+                    md: "repeat(4, minmax(0, 1fr))",
+                  },
+                  gap: 2,
+                },
+          ]}
         >
-          <Cell label="Account">
+          <Cell label="Account" maxWidth={isAnnouncement ? 240 : undefined}>
             {c.accountId ? (
               <LinkText to={`/customers/accounts/${c.accountId}`}>
                 {c.customer}
@@ -261,7 +281,7 @@ export default function CaseMetaBand({
               <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
             </Box>
           </Cell>
-          <Cell label="Project">
+          <Cell label="Project" maxWidth={isAnnouncement ? 240 : undefined}>
             {c.projectId ? (
               <LinkText to={`/customers/projects/${c.projectId}`}>
                 {c.projectName}
@@ -277,36 +297,51 @@ export default function CaseMetaBand({
               {projectType}
             </Typography>
           </Cell>
-          <Cell label="Deployment">
-            {product.deploymentId ? (
-              <LinkButton onClick={() => setShowDeployment(true)}>
-                {product.deployment}
-              </LinkButton>
-            ) : (
-              <Typography variant="body2" noWrap>
-                {product.deployment ?? "—"}
-              </Typography>
-            )}
-          </Cell>
-          <Cell label="Product">
-            <Typography variant="body2" noWrap>
-              {product.product ?? "—"}
-            </Typography>
-          </Cell>
-          <Cell label="Created by">
-            <Typography variant="body2" noWrap>
-              {c.createdBy ?? c.customerContext.primaryContact ?? "—"}
-            </Typography>
-          </Cell>
-          <Cell label="Assignee">
-            <Typography variant="body2" noWrap>
-              {c.assigneeIsMe ? (
-                <strong>{c.assignee}</strong>
-              ) : (
-                c.assignee
-              )}
-            </Typography>
-          </Cell>
+          {isAnnouncement && (
+            <Cell label="State">
+              <Box sx={{ minWidth: 0 }}>
+                <SemanticChip
+                  role={announcementStateRole(c.state)}
+                  label={STATE_LABEL[c.state] ?? c.state}
+                  variant="outlined"
+                />
+              </Box>
+            </Cell>
+          )}
+          {!isAnnouncement && (
+            <>
+              <Cell label="Deployment">
+                {product.deploymentId ? (
+                  <LinkButton onClick={() => setShowDeployment(true)}>
+                    {product.deployment}
+                  </LinkButton>
+                ) : (
+                  <Typography variant="body2" noWrap>
+                    {product.deployment ?? "—"}
+                  </Typography>
+                )}
+              </Cell>
+              <Cell label="Product">
+                <Typography variant="body2" noWrap>
+                  {product.product ?? "—"}
+                </Typography>
+              </Cell>
+              <Cell label="Created by">
+                <Typography variant="body2" noWrap>
+                  {c.createdBy ?? c.customerContext.primaryContact ?? "—"}
+                </Typography>
+              </Cell>
+              <Cell label="Assignee">
+                <Typography variant="body2" noWrap>
+                  {c.assigneeIsMe ? (
+                    <strong>{c.assignee}</strong>
+                  ) : (
+                    c.assignee
+                  )}
+                </Typography>
+              </Cell>
+            </>
+          )}
         </Box>
       )}
 

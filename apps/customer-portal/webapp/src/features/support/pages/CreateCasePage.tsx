@@ -84,6 +84,8 @@ import {
   escapeHtml,
   htmlToPlainText,
 } from "@features/support/utils/richTextEditor";
+import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
+import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
 import type {
   ProductCategory,
@@ -238,6 +240,7 @@ export default function CreateCasePage(): JSX.Element {
   }, [baseProductOptions]);
 
   const { showError } = useErrorBanner();
+  const piiGuard = usePiiGuard();
   const { showSuccess } = useSuccessBanner();
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
   const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
@@ -874,8 +877,8 @@ export default function CreateCasePage(): JSX.Element {
       reader.readAsDataURL(file);
     });
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: FormEvent, bypassPii = false) => {
+    e?.preventDefault();
     if (!projectId || isNavigatingAfterCreate) return;
     if (isProjectLoading || isProjectFeaturesLoading) return;
 
@@ -890,6 +893,16 @@ export default function CreateCasePage(): JSX.Element {
     }
     if (!descriptionPlain) {
       showError("Please enter a description.");
+      return;
+    }
+
+    // Warn about PII in the title/description before submitting. When none is
+    // found the guard proceeds immediately; otherwise the dialog opens and
+    // "Post anyway" re-runs the submit with the check bypassed.
+    if (!bypassPii) {
+      piiGuard.checkBeforeSubmit(`${title}\n${description}`, () => {
+        void handleSubmit(undefined, true);
+      });
       return;
     }
 
@@ -1280,6 +1293,8 @@ export default function CreateCasePage(): JSX.Element {
         onClose={() => setIsAttachmentModalOpen(false)}
         onSelect={handleSelectAttachment}
       />
+
+      <PiiWarningDialog {...piiGuard.dialogProps} />
     </Box>
   );
 }

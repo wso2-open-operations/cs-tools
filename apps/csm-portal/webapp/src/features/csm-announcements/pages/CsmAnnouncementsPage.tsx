@@ -40,8 +40,9 @@ import {
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type ChangeEvent, type JSX } from "react";
+import { Link as RouterLink } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
-import SemanticChip, { type SemanticRole } from "@components/SemanticChip";
+import SemanticChip from "@components/SemanticChip";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -50,6 +51,7 @@ import {
   DEFAULT_ANNOUNCEMENT_FILTERS,
   type AnnouncementFilters,
 } from "@features/csm-announcements/types/csmAnnouncements";
+import { announcementStateRole } from "@features/csm-announcements/utils/announcementState";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
@@ -68,22 +70,6 @@ const STATE_OPTIONS: { value: CaseState; label: string }[] = (
     "closed",
   ] as CaseState[]
 ).map((s) => ({ value: s, label: STATE_LABEL[s] }));
-
-/**
- * Chip colour for an announcement's lifecycle state — announcement-specific,
- * not the case-state palette (which paints a closed case green). Here an Open
- * announcement is live/published → green, a Closed one is inactive → grey.
- */
-function announcementStateRole(state?: CaseState): SemanticRole {
-  switch (state) {
-    case "open":
-      return "success";
-    case "closed":
-      return "default";
-    default:
-      return "info";
-  }
-}
 
 function formatDate(value?: string | null): string {
   return (
@@ -260,7 +246,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Number</TableCell>
-                <TableCell>Subject</TableCell>
+                <TableCell sx={{ width: "28%" }}>Subject</TableCell>
                 <TableCell>Project</TableCell>
                 <TableCell>State</TableCell>
                 <TableCell>Created by</TableCell>
@@ -298,22 +284,55 @@ export default function CsmAnnouncementsPage(): JSX.Element {
                 </TableRow>
               ) : (
                 announcements.map((a) => (
-                  <TableRow key={a.id} hover>
+                  // A real anchor (not a click-handler row) so it supports
+                  // cmd/middle-click "open in new tab" and exposes a copyable
+                  // URL — same rationale as CasesList's row links (ISSU-031).
+                  <TableRow
+                    key={a.id}
+                    hover
+                    component={RouterLink}
+                    to={`/announcements/${a.id}`}
+                    sx={{
+                      cursor: "pointer",
+                      textDecoration: "none",
+                      color: "inherit",
+                      "&:focus-visible": {
+                        outline: (t) => `2px solid ${t.palette.primary.main}`,
+                        outlineOffset: -2,
+                      },
+                    }}
+                  >
                     <TableCell>{a.number || "—"}</TableCell>
-                    <TableCell>{a.subject}</TableCell>
+                    <TableCell sx={{ width: "28%" }}>
+                      <Typography
+                        variant="body2"
+                        title={a.subject}
+                        sx={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {a.subject}
+                      </Typography>
+                    </TableCell>
                     <TableCell>{a.projectName}</TableCell>
                     <TableCell>
                       {a.state ? (
                         <SemanticChip
                           role={announcementStateRole(a.state)}
                           label={STATE_LABEL[a.state] ?? a.state}
+                          variant="outlined"
                         />
                       ) : (
                         "—"
                       )}
                     </TableCell>
                     <TableCell>{a.createdBy || "—"}</TableCell>
-                    <TableCell>{formatDate(a.updatedAt)}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {formatDate(a.updatedAt)}
+                    </TableCell>
                   </TableRow>
                 ))
               )}
