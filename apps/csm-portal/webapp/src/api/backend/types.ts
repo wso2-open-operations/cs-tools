@@ -1715,6 +1715,51 @@ export interface BeCreateIncidentResponse {
   };
 }
 
+/**
+ * `PATCH /incidents/{id}` body (ServiceNow data source only,
+ * `minProperties: 1`). Covers the in-scope subset the Edit dialog sends —
+ * the full `UpdateIncidentPayload` schema also documents `incidentReport` /
+ * `resolvedById`, deliberately left out here since there's no read-side
+ * model for them yet either (see {@link BeIncidentDetail}). `resolutionCode`
+ * / `resolutionNotes` ARE included (write-only, same as `incidentReport` —
+ * `IncidentDetail` never echoes them back on read) since ServiceNow requires
+ * them to move an incident to `RESOLVED`/`CLOSED` (confirmed live: those two
+ * state values 500 without them).
+ */
+export interface BeUpdateIncidentPayload {
+  subject?: string;
+  category?: BeIncidentCategory;
+  subcategory?: BeIncidentSubcategory;
+  contactType?: BeIncidentContactType;
+  impact?: BeIncidentImpact;
+  urgency?: BeIncidentUrgency;
+  state?: BeIncidentState;
+  resolutionCode?: string;
+  resolutionNotes?: string;
+  // Reference/note fields are `nullable: true` on the documented schema — the
+  // portal sends an explicit `null` to clear one (e.g. unassign an engineer),
+  // as distinct from omitting the field entirely, which the BE treats as
+  // "leave unchanged".
+  serviceId?: string | null;
+  serviceOfferingId?: string | null;
+  configurationItemId?: string | null;
+  assignmentGroupId?: string | null;
+  assignedEngineerId?: string | null;
+  watchList?: string[];
+  workNotes?: string | null;
+  additionalComments?: string | null;
+  parentId?: string | null;
+  changeRequestId?: string | null;
+  problemId?: string | null;
+  causedById?: string | null;
+}
+
+/** `PATCH /incidents/{id}` response — the full updated incident. */
+export interface BePatchIncidentResponse {
+  message: string;
+  incident: BeIncidentDetail;
+}
+
 export interface BeIncidentSearchPayload {
   filters?: {
     searchQuery?: string;
