@@ -524,6 +524,8 @@ export type ChatMessageListProps = {
   onFetchOlder?: () => void;
   isFetchingOlder?: boolean;
   onSolutionWorked?: () => void;
+  /** When provided, usage-limit error bubbles show a "request token increase" CTA. */
+  onRequestTokenIncrease?: () => void;
 };
 
 export type ChatMessageBubbleProps = {
@@ -532,4 +534,6 @@ export type ChatMessageBubbleProps = {
   onThumbsUp?: (messageId: string) => void;
   onThumbsDown?: (messageId: string) => void;
   onSolutionWorked?: () => void;
+  /** When provided, usage-limit error bubbles show a "request token increase" CTA. */
+  onRequestTokenIncrease?: () => void;
 };

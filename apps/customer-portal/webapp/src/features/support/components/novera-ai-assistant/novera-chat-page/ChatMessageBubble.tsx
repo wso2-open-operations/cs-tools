@@ -18,6 +18,7 @@ import type { ChatMessageBubbleProps } from "@features/support/types/supportComp
 import {
   Avatar,
   Box,
+  Button,
   Paper,
   Stack,
   Typography,
@@ -138,6 +139,7 @@ function MarkdownContent({ text }: { text: string }) {
  */
 export default function ChatMessageBubble({
   message,
+  onRequestTokenIncrease,
 }: ChatMessageBubbleProps): JSX.Element {
   const isUser = message.sender === ChatSender.USER;
   const isCurrentUserMessage = isUser && (message.isCurrentUser ?? true);
@@ -315,9 +317,22 @@ export default function ChatMessageBubble({
           {/* Message content */}
           <Box>
             {message.isError ? (
-              <Typography variant="body2" color="error.main">
-                {displayText}
-              </Typography>
+              <>
+                <Typography variant="body2" color="error.main">
+                  {displayText}
+                </Typography>
+                {isUsageLimitError && onRequestTokenIncrease && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    onClick={onRequestTokenIncrease}
+                    sx={{ mt: 1, textTransform: "none" }}
+                  >
+                    Request a token limit increase
+                  </Button>
+                )}
+              </>
             ) : showThinkingStreamFrame ? (
               <Paper
                 sx={(t) => ({

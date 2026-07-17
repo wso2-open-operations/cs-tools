@@ -66,6 +66,7 @@ import type {
 import ChatHeader from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatHeader";
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageList";
+import TokenRequestModal from "@features/support/components/novera-ai-assistant/novera-chat-page/TokenRequestModal";
 import ChatSkeleton from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatSkeleton";
 import {
   displayTextFromConversationContent,
@@ -670,6 +671,28 @@ export default function NoveraChatPage(): JSX.Element {
     void sendViaWebSocket("This Resolved My Issue");
   }, [isSending, sendViaWebSocket]);
 
+  // Feature-flagged (config.js): request a token limit increase over the chat
+  // WebSocket. Kept off until the backend handler is ready.
+  const tokenRequestEnabled =
+    window.config?.CUSTOMER_PORTAL_NOVERA_TOKEN_REQUEST_ENABLED ?? false;
+  const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
+
+  const handleTokenIncreaseSubmit = useCallback(
+    async (reason: string): Promise<void> => {
+      if (!projectId || !accountId) {
+        throw new Error("Unable to submit the request right now.");
+      }
+      await connect(projectId);
+      await sendUserMessage({
+        type: "token_increase_request",
+        accountId,
+        reason,
+        limitType: "session",
+      });
+    },
+    [projectId, accountId, connect, sendUserMessage],
+  );
+
   const handleSendMessage = useCallback(async (): Promise<boolean> => {
     const text = htmlToPlainText(inputValueRef.current).trim();
     if (!text || isSending || !projectId) return false;
@@ -734,6 +757,11 @@ export default function NoveraChatPage(): JSX.Element {
               messagesEndRef={messagesEndRef}
               onCreateCase={handleCreateCase}
               onSolutionWorked={handleSolutionWorked}
+              onRequestTokenIncrease={
+                tokenRequestEnabled
+                  ? () => setIsTokenModalOpen(true)
+                  : undefined
+              }
               onFetchOlder={
                 urlConversationId && hasNextPage && !isFetchingNextPage
                   ? () => fetchNextPage()
@@ -760,6 +788,14 @@ export default function NoveraChatPage(): JSX.Element {
       </Box>
 
       <PiiWarningDialog {...piiGuard.dialogProps} />
+
+      {tokenRequestEnabled && (
+        <TokenRequestModal
+          open={isTokenModalOpen}
+          onClose={() => setIsTokenModalOpen(false)}
+          onSubmit={handleTokenIncreaseSubmit}
+        />
+      )}
     </Box>
   );
 }

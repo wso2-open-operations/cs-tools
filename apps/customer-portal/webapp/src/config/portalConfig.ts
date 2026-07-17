@@ -34,6 +34,8 @@ export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL?: string;
   CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL?: string;
   CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED?: boolean;
+  /** Enables the Novera chat "request a token limit increase" flow. */
+  CUSTOMER_PORTAL_NOVERA_TOKEN_REQUEST_ENABLED?: boolean;
   CUSTOMER_PORTAL_TOP_BANNERS?: Array<{
     enabled: boolean;
     html: string;
