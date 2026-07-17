@@ -309,8 +309,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                   const droppedFields = checkSilentlyDroppedNotes(patch, data.incident);
                   if (droppedFields.length > 0) {
                     showError(
-                      `${droppedFields.join(" and ")} didn't save — ServiceNow accepted the request but ` +
-                        "silently dropped that change. Any other fields in this edit were saved; please retry the note separately.",
+                      `${droppedFields.join(" and ")} didn't save — the request was accepted but that ` +
+                        "change wasn't actually persisted. Any other fields in this edit were saved; please retry the note separately.",
                     );
                     return;
                   }
