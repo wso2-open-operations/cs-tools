@@ -96,6 +96,9 @@ func TestNewGoogleChatClient_MarksDuplicateNormalizedProductsUnconfigured(t *tes
 	if err == nil {
 		t.Fatal("expected error for a product with a duplicate (now unconfigured) mapping, got nil")
 	}
+	if !strings.Contains(err.Error(), "no google chat space configured") {
+		t.Errorf("expected unconfigured space error, got: %v", err)
+	}
 }
 
 func TestSendIncidentAlert_RedactsWebhookURLOnNetworkFailure(t *testing.T) {
