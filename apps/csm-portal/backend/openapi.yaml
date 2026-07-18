@@ -2676,6 +2676,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /notifications/google-chat/alerts:
+    post:
+      summary: >-
+        Send an incident alert card message to the Google Chat space
+        configured for the given product. Triggered manually today, pending
+        integration into real case/incident creation.
+      operationId: postNotificationsGoogleChatAlerts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleChatAlertPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5763,6 +5817,28 @@ components:
           type: integer
         offset:
           type: integer
+
+    GoogleChatAlertPayload:
+      type: object
+      required: [product, title, shortDescription, caseId]
+      properties:
+        product:
+          type: string
+          description: >-
+            Selects which configured Google Chat space receives the alert
+            (e.g. "api-manager", "identity-server"); matched
+            case-insensitively against NOTIFICATIONS_GOOGLE_CHAT_SPACES.
+        title:
+          type: string
+          description: Card header title (e.g. "P1 Incident - CASE-001").
+        shortDescription:
+          type: string
+          description: Card body text shown under "Short Description".
+        caseId:
+          type: string
+          description: >-
+            Case ID used to build the "Open in CSM Portal" link
+            (/operations/incidents/{caseId}).
 
     Incident:
       type: object
