@@ -20,9 +20,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -67,7 +69,19 @@ type GoogleChatClient struct {
 func NewGoogleChatClient(cfg GoogleChatConfig) *GoogleChatClient {
 	webhookURLsByProduct := make(map[string]string, len(cfg.Spaces))
 	for _, space := range cfg.Spaces {
-		webhookURLsByProduct[normalizeProduct(space.Product)] = space.WebhookURL
+		product := normalizeProduct(space.Product)
+		if product == "" || strings.TrimSpace(space.WebhookURL) == "" {
+			continue
+		}
+		// A second space normalizing to the same product (e.g. "API-Manager"
+		// and " api-manager ") is a configuration mistake — mark it
+		// unconfigured rather than silently routing to whichever URL came
+		// last.
+		if _, exists := webhookURLsByProduct[product]; exists {
+			webhookURLsByProduct[product] = ""
+			continue
+		}
+		webhookURLsByProduct[product] = space.WebhookURL
 	}
 	return &GoogleChatClient{
 		http:                 &http.Client{Timeout: 10 * time.Second},
@@ -78,6 +92,17 @@ func NewGoogleChatClient(cfg GoogleChatConfig) *GoogleChatClient {
 // normalizeProduct makes product matching case- and whitespace-insensitive.
 func normalizeProduct(product string) string {
 	return strings.ToLower(strings.TrimSpace(product))
+}
+
+// redactURLError strips the request URL — which carries the webhook's secret
+// key/token query parameters — out of a *url.Error before it's wrapped and
+// potentially logged, keeping only the underlying (safe) failure reason.
+func redactURLError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
 }
 
 // chatCardMessage is the wire shape Google Chat's webhook API expects for a
@@ -185,13 +210,13 @@ func (c *GoogleChatClient) SendIncidentAlert(ctx context.Context, product, title
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("notifications: build google chat request: %w", err)
+		return fmt.Errorf("notifications: build google chat request: %w", redactURLError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("notifications: post google chat message: %w", err)
+		return fmt.Errorf("notifications: post google chat message: %w", redactURLError(err))
 	}
 	defer resp.Body.Close()
 

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -82,6 +83,34 @@ func TestSendIncidentAlert_RoutesToTheConfiguredProductsSpace(t *testing.T) {
 
 	if err := c.SendIncidentAlert(context.Background(), "unknown-product", "title", "desc", "https://example.com"); err == nil {
 		t.Fatal("expected error for a product with no configured space, got nil")
+	}
+}
+
+func TestNewGoogleChatClient_MarksDuplicateNormalizedProductsUnconfigured(t *testing.T) {
+	c := NewGoogleChatClient(GoogleChatConfig{Spaces: []GoogleChatSpace{
+		{Product: "API-Manager", WebhookURL: "https://chat.example.com/a"},
+		{Product: " api-manager ", WebhookURL: "https://chat.example.com/b"},
+	}})
+
+	err := c.SendIncidentAlert(context.Background(), "api-manager", "title", "desc", "https://example.com")
+	if err == nil {
+		t.Fatal("expected error for a product with a duplicate (now unconfigured) mapping, got nil")
+	}
+}
+
+func TestSendIncidentAlert_RedactsWebhookURLOnNetworkFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	webhookURL := srv.URL + "/messages?key=SECRET_KEY&token=SECRET_TOKEN"
+	srv.Close() // subsequent requests to webhookURL now fail to connect
+
+	c := NewGoogleChatClient(GoogleChatConfig{Spaces: []GoogleChatSpace{{Product: "api-manager", WebhookURL: webhookURL}}})
+
+	err := c.SendIncidentAlert(context.Background(), "api-manager", "title", "desc", "https://example.com")
+	if err == nil {
+		t.Fatal("expected an error from an unreachable webhook, got nil")
+	}
+	if strings.Contains(err.Error(), "SECRET_KEY") || strings.Contains(err.Error(), "SECRET_TOKEN") {
+		t.Errorf("error leaked webhook credentials: %v", err)
 	}
 }
 

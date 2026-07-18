@@ -57,6 +57,8 @@ func TestPostGoogleChatAlert_RequiresAllFields(t *testing.T) {
 		"missing shortDescription": `{"product":"api-manager","title":"t","caseId":"c"}`,
 		"missing caseId":           `{"product":"api-manager","title":"t","shortDescription":"d"}`,
 		"empty body":               ``,
+		"whitespace-only product":  `{"product":"   ","title":"t","shortDescription":"d","caseId":"c"}`,
+		"unknown property":         `{"product":"api-manager","title":"t","shortDescription":"d","caseId":"c","extra":"x"}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

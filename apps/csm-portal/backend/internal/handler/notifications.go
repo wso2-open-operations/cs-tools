@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -83,15 +84,17 @@ func (h *NotificationHandler) PostGoogleChatAlert(w http.ResponseWriter, r *http
 		return
 	}
 
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
 	var req googleChatAlertRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+	req.Product = strings.TrimSpace(req.Product)
+	req.Title = strings.TrimSpace(req.Title)
+	req.ShortDescription = strings.TrimSpace(req.ShortDescription)
+	req.CaseID = strings.TrimSpace(req.CaseID)
 	if req.Product == "" || req.Title == "" || req.ShortDescription == "" || req.CaseID == "" {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
@@ -99,6 +102,8 @@ func (h *NotificationHandler) PostGoogleChatAlert(w http.ResponseWriter, r *http
 
 	portalURL := h.portalBaseURL + "/operations/incidents/" + url.PathEscape(req.CaseID)
 	if err := h.googleChat.SendIncidentAlert(r.Context(), req.Product, req.Title, req.ShortDescription, portalURL); err != nil {
+		// err's text is safe to log: SendIncidentAlert never wraps a URL
+		// (which would carry the webhook's key/token) into its error text.
 		slog.ErrorContext(r.Context(), "google chat SendIncidentAlert failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to send Google Chat alert.")
 		return

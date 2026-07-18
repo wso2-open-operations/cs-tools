@@ -5821,13 +5821,14 @@ components:
     GoogleChatAlertPayload:
       type: object
       required: [product, title, shortDescription, caseId]
+      additionalProperties: false
       properties:
         product:
           type: string
           description: >-
             Selects which configured Google Chat space receives the alert
-            (e.g. "api-manager", "identity-server"); matched
-            case-insensitively against NOTIFICATIONS_GOOGLE_CHAT_SPACES.
+            (e.g. "api-manager", "identity-server"); matched case- and
+            whitespace-insensitively against NOTIFICATIONS_GOOGLE_CHAT_SPACES.
         title:
           type: string
           description: Card header title (e.g. "P1 Incident - CASE-001").
