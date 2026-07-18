@@ -29,6 +29,10 @@ const HTML_CONTENT_SX = {
   "& p:last-child": { marginBottom: 0 },
   "& a": { color: "primary.main", textDecoration: "underline" },
   "& ul, & ol": { mt: 0, mb: 0.5, pl: 2.5 },
+  // Comment HTML can embed images at their original (often desktop-sized)
+  // dimensions — without a width cap they overflow the microapp's narrow
+  // viewport instead of scaling down to fit it.
+  "& img": { maxWidth: "100%", height: "auto", display: "block" },
 } as const;
 
 // System-generated entries (escalation-flow summaries, etc.) can carry a raw JSON dump thousands
