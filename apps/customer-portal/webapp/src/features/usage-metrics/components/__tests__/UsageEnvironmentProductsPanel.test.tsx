@@ -59,6 +59,16 @@ vi.mock("@features/project-details/api/usePostDeploymentProductUsageCountsSearch
   }),
 }));
 
+vi.mock("@features/project-details/api/useGetDeployedProductInstancesInfinite", () => ({
+  default: () => ({
+    data: undefined,
+    isLoading: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+
 describe("UsageEnvironmentProductsPanel", () => {
   it("renders product rows and toggles product expansion", () => {
     const onToggleProduct = vi.fn();

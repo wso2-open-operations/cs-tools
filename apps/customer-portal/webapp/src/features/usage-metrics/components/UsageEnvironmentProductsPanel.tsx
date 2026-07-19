@@ -28,11 +28,11 @@ import {
   alpha,
   colors,
 } from "@wso2/oxygen-ui";
-import { ChevronDown, Package, Server } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, Code, Monitor, Package, Server } from "@wso2/oxygen-ui-icons-react";
 import EmptyState from "@components/empty-state/EmptyState";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   USAGE_LINE_CHART_MARGIN,
   USAGE_METRICS_ENVIRONMENT_PRODUCTS_ERROR,
@@ -46,11 +46,16 @@ import {
   USAGE_METRICS_STAT_LABEL_MIN,
   USAGE_METRICS_STAT_LABEL_MAX,
   USAGE_METRICS_UNKNOWN_LABEL,
+  USAGE_METRICS_INSTANCE_OS_LABEL,
+  USAGE_METRICS_INSTANCE_JAVA_VERSION_LABEL,
+  USAGE_METRICS_INSTANCE_U2_LEVEL_LABEL,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
+import type { InstanceItem } from "@features/project-details/types/usage";
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
 import { usePostDeploymentProductsSearchAll } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import usePostDeploymentProductMetricsSearch from "@features/project-details/api/usePostDeploymentProductMetricsSearch";
 import usePostDeploymentProductUsageCountsSearch from "@features/project-details/api/usePostDeploymentProductUsageCountsSearch";
+import useGetDeployedProductInstancesInfinite from "@features/project-details/api/useGetDeployedProductInstancesInfinite";
 import { computeSeriesSummary, formatUsageMetricCount } from "@features/project-details/utils/usageMetrics";
 import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
 import type {
@@ -168,6 +173,36 @@ function ProductAccordionRow({
   const { data: countsData, isLoading: countsLoading } =
     usePostDeploymentProductUsageCountsSearch(deploymentId, product.id, payload);
 
+  const {
+    data: instancesData,
+    isLoading: instancesLoading,
+    hasNextPage: hasMoreInstances,
+    isFetchingNextPage: isFetchingMoreInstances,
+    fetchNextPage: fetchMoreInstances,
+  } = useGetDeployedProductInstancesInfinite(expanded ? product.id : undefined, dateRange);
+
+  const instances = useMemo(
+    () => instancesData?.pages.flatMap((page) => page.instances) ?? [],
+    [instancesData],
+  );
+  const totalInstances = instancesData?.pages[0]?.totalRecords ?? 0;
+
+  const instancesSentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sentinel = instancesSentinelRef.current;
+    if (!sentinel || !hasMoreInstances || isFetchingMoreInstances) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void fetchMoreInstances();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreInstances, isFetchingMoreInstances, fetchMoreInstances]);
+
   const isLoading = metricsLoading || countsLoading;
 
   const metricKeys = useMemo(
@@ -267,13 +302,6 @@ function ProductAccordionRow({
     ],
     [countTrends, coreTrend],
   );
-
-  const latestInstances = useMemo(() => {
-    const sorted = [...(metricsData?.chartData ?? [])].sort((x, y) =>
-      y.date.localeCompare(x.date),
-    );
-    return sorted[0]?.instances ?? [];
-  }, [metricsData]);
 
   // Nothing to show for this product if neither source has any data for this range.
   const hasChartData =
@@ -418,7 +446,7 @@ function ProductAccordionRow({
       >
         {isLoading ? (
           <Skeleton variant="rounded" height={200} />
-        ) : latestInstances.length === 0 && chartTrends.every((t) => t.data.length === 0) ? (
+        ) : instances.length === 0 && chartTrends.every((t) => t.data.length === 0) ? (
           <Typography variant="body2" color="text.secondary">
             {USAGE_METRICS_NO_INSTANCE_DATA}
           </Typography>
@@ -470,18 +498,30 @@ function ProductAccordionRow({
               ))}
             </Grid>
 
-            {latestInstances.length > 0 && (
+            {instancesLoading ? (
+              <Box sx={{ mt: 2 }}>
+                <Skeleton variant="rounded" height={120} />
+              </Box>
+            ) : instances.length > 0 ? (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
-                  {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({latestInstances.length})
+                  {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({totalInstances})
                 </Typography>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {latestInstances.map((inst) => (
-                    <InstanceRow key={inst.id} name={inst.name} cores={inst.cores} />
+                  {instances.map((inst) => (
+                    <InstanceRow key={inst.id} instance={inst} />
                   ))}
                 </Box>
+                {hasMoreInstances && (
+                  <Box
+                    ref={instancesSentinelRef}
+                    sx={{ display: "flex", justifyContent: "center", py: 2 }}
+                  >
+                    {isFetchingMoreInstances && <CircularProgress size={20} sx={{ color: a.iconColor }} />}
+                  </Box>
+                )}
               </Box>
-            )}
+            ) : null}
           </>
         )}
       </AccordionDetails>
@@ -491,8 +531,15 @@ function ProductAccordionRow({
 
 // ─── Flat instance row ────────────────────────────────────────────────────────
 
-function InstanceRow({ name, cores }: { name: string; cores: number }): JSX.Element {
+function InstanceRow({ instance }: { instance: InstanceItem }): JSX.Element {
   const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
+  const dm = instance.metadata?.deploymentMetadata;
+
+  const os = dm?.os ? (dm.osVersion ? `${dm.os} ${dm.osVersion}` : dm.os) : "—";
+  const jdkVersion = dm?.jdkVersion || instance.metadata?.jdkVersion || "—";
+  const u2Level = dm?.updateLevel || "—";
+  const keyDisplay =
+    instance.key.length > 20 ? `${instance.key.slice(0, 12)}…` : instance.key;
 
   return (
     <Box
@@ -509,17 +556,29 @@ function InstanceRow({ name, cores }: { name: string; cores: number }): JSX.Elem
         bgcolor: wellBg,
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
         <Server size={18} color={colors.grey?.[500]} />
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          {name}
+        <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap title={instance.key}>
+          {keyDisplay}
         </Typography>
       </Box>
-      <MetricPill
-        icon={<Package size={16} color={colors.grey?.[400]} />}
-        label={USAGE_METRICS_PRODUCT_CORE_METRICS}
-        value={String(cores)}
-      />
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+        <MetricPill
+          icon={<Monitor size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_OS_LABEL}
+          value={os}
+        />
+        <MetricPill
+          icon={<Code size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_JAVA_VERSION_LABEL}
+          value={jdkVersion}
+        />
+        <MetricPill
+          icon={<Package size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_U2_LEVEL_LABEL}
+          value={u2Level}
+        />
+      </Box>
     </Box>
   );
 }

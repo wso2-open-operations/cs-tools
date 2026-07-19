@@ -195,6 +195,12 @@ export const USAGE_METRICS_PRODUCT_INSTANCE_METRICS = "Instance Metrics";
 
 export const USAGE_METRICS_PRODUCT_CORE_METRICS = "CPU Usage";
 
+export const USAGE_METRICS_INSTANCE_OS_LABEL = "OS";
+
+export const USAGE_METRICS_INSTANCE_JAVA_VERSION_LABEL = "Java Version";
+
+export const USAGE_METRICS_INSTANCE_U2_LEVEL_LABEL = "U2 Level";
+
 export const USAGE_METRICS_STAT_LABEL_CURR = "Curr";
 
 export const USAGE_METRICS_STAT_LABEL_AVG = "Avg";
