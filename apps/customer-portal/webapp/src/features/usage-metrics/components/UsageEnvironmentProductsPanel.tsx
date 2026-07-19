@@ -281,10 +281,14 @@ function ProductAccordionRow({
     (countsData?.chartData?.length ?? 0) > 0 ||
     summaryStats.length > 0;
 
+  // While a date-range change is refetching, don't force-collapse a row that was
+  // already expanded just because the in-flight data is momentarily empty.
+  const canExpand = hasChartData || isLoading;
+
   return (
     <Accordion
-      expanded={hasChartData && expanded}
-      onChange={hasChartData ? () => onToggle() : undefined}
+      expanded={canExpand && expanded}
+      onChange={canExpand ? () => onToggle() : undefined}
       disableGutters
       elevation={0}
       sx={{
@@ -295,13 +299,13 @@ function ProductAccordionRow({
         borderColor: "divider",
         borderRadius: 0,
         bgcolor: "background.paper",
-        "&:hover": hasChartData ? { bgcolor: "action.hover" } : undefined,
+        "&:hover": canExpand ? { bgcolor: "action.hover" } : undefined,
         "&.Mui-expanded": { margin: 0 },
       }}
     >
       <AccordionSummary
         expandIcon={
-          hasChartData ? <ChevronDown size={20} color={a.iconColor} /> : null
+          canExpand ? <ChevronDown size={20} color={a.iconColor} /> : null
         }
         sx={{
           px: 2,
@@ -309,8 +313,8 @@ function ProductAccordionRow({
           minHeight: 56,
           bgcolor: a.headerBg,
           borderRadius: 0,
-          cursor: hasChartData ? "pointer" : "default",
-          "&:hover": hasChartData ? { bgcolor: a.headerHoverBg } : undefined,
+          cursor: canExpand ? "pointer" : "default",
+          "&:hover": canExpand ? { bgcolor: a.headerHoverBg } : undefined,
         }}
       >
         <Box
