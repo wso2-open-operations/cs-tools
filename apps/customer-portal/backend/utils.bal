@@ -1437,6 +1437,16 @@ public isolated function mapDeployedProductMetricsUsageCounts(
         entity:DeployedProductMetricsUsageCountsResponse response)
         returns types:DeployedProductMetricsUsageCountsResponse {
 
+    map<types:CountTypeAggregation> countTypes = {};
+    foreach [string, entity:CountTypeAggregation] [key, value] in response.summary.countTypes.entries() {
+        countTypes[key] = {
+            aggregation: value.aggregation,
+            min: value.min,
+            max: value.max,
+            avg: value.avg
+        };
+    }
+
     return {
         product: {
             id: response.deployedProduct.id,
@@ -1447,7 +1457,7 @@ public isolated function mapDeployedProductMetricsUsageCounts(
                 'start: response.summary.dateRange.'start,
                 'end: response.summary.dateRange.'end
             },
-            countTypes: response.summary.countTypes
+            countTypes
         },
         chartData: response.chartData
     };
