@@ -53,10 +53,12 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
 
-  const dateRange = useMemo(
-    () => resolveUsagePresetDateRange(timeRange),
-    [timeRange],
-  );
+  const dateRange = useMemo(() => {
+    if (timeRange === UsageTimeRange.CUSTOM && appliedCustomStart && appliedCustomEnd) {
+      return { startDate: appliedCustomStart, endDate: appliedCustomEnd };
+    }
+    return resolveUsagePresetDateRange(timeRange);
+  }, [timeRange, appliedCustomStart, appliedCustomEnd]);
 
   const { data: deploymentsData } = usePostProjectDeploymentsSearchAll(
     projectId ?? "",
