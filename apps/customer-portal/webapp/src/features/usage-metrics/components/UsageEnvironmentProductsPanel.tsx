@@ -37,6 +37,7 @@ import {
   USAGE_METRICS_ENVIRONMENT_PRODUCTS_ERROR,
   USAGE_METRICS_NO_INSTANCE_DATA,
   USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT,
+  USAGE_METRICS_PRODUCT_DATA_UNAVAILABLE,
   USAGE_METRICS_PRODUCT_INSTANCES_SECTION,
   USAGE_METRICS_PRODUCT_INSTANCE_METRICS,
   USAGE_METRICS_PRODUCT_CORE_METRICS,
@@ -265,10 +266,16 @@ function ProductAccordionRow({
     return sorted[0]?.instances ?? [];
   }, [metricsData]);
 
+  // Nothing to show for this product if neither source has any data for this range.
+  const hasChartData =
+    (metricsData?.chartData?.length ?? 0) > 0 ||
+    (countsData?.chartData?.length ?? 0) > 0 ||
+    summaryStats.length > 0;
+
   return (
     <Accordion
-      expanded={expanded}
-      onChange={() => onToggle()}
+      expanded={hasChartData && expanded}
+      onChange={hasChartData ? () => onToggle() : undefined}
       disableGutters
       elevation={0}
       sx={{
@@ -279,19 +286,22 @@ function ProductAccordionRow({
         borderColor: "divider",
         borderRadius: 0,
         bgcolor: "background.paper",
-        "&:hover": { bgcolor: "action.hover" },
+        "&:hover": hasChartData ? { bgcolor: "action.hover" } : undefined,
         "&.Mui-expanded": { margin: 0 },
       }}
     >
       <AccordionSummary
-        expandIcon={<ChevronDown size={20} color={a.iconColor} />}
+        expandIcon={
+          hasChartData ? <ChevronDown size={20} color={a.iconColor} /> : null
+        }
         sx={{
           px: 2,
           py: 2,
           minHeight: 56,
           bgcolor: a.headerBg,
           borderRadius: 0,
-          "&:hover": { bgcolor: a.headerHoverBg },
+          cursor: hasChartData ? "pointer" : "default",
+          "&:hover": hasChartData ? { bgcolor: a.headerHoverBg } : undefined,
         }}
       >
         <Box
@@ -343,29 +353,41 @@ function ProductAccordionRow({
               gap: 5,
             }}
           >
-            {summaryStats.map((stat) => (
-              <Box key={stat.label}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  display="block"
-                  sx={{ mb: 0.5 }}
-                >
-                  {stat.label}
-                </Typography>
-                <Typography variant="body1" sx={{ fontWeight: 700 }}>
-                  {stat.value}
-                </Typography>
-              </Box>
-            ))}
-            <CurrMinMaxBlock
-              label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
-              summary={instanceSummary}
-            />
-            <CurrMinMaxBlock
-              label={USAGE_METRICS_PRODUCT_CORE_METRICS}
-              summary={coreSummary}
-            />
+            {!isLoading && !hasChartData ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ fontStyle: "italic" }}
+              >
+                {USAGE_METRICS_PRODUCT_DATA_UNAVAILABLE}
+              </Typography>
+            ) : (
+              <>
+                {summaryStats.map((stat) => (
+                  <Box key={stat.label}>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      display="block"
+                      sx={{ mb: 0.5 }}
+                    >
+                      {stat.label}
+                    </Typography>
+                    <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                      {stat.value}
+                    </Typography>
+                  </Box>
+                ))}
+                <CurrMinMaxBlock
+                  label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
+                  summary={instanceSummary}
+                />
+                <CurrMinMaxBlock
+                  label={USAGE_METRICS_PRODUCT_CORE_METRICS}
+                  summary={coreSummary}
+                />
+              </>
+            )}
           </Box>
         </Box>
       </AccordionSummary>

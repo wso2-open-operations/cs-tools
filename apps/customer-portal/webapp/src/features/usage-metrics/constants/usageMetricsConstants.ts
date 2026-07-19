@@ -71,6 +71,9 @@ export const USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT =
 
 export const USAGE_METRICS_NO_INSTANCE_DATA = "No instance data available.";
 
+export const USAGE_METRICS_PRODUCT_DATA_UNAVAILABLE =
+  "Usage data is not available for this product";
+
 export const USAGE_METRICS_STAT_ENVIRONMENTS = "Environments";
 
 export const USAGE_METRICS_STAT_PRODUCTS = "Products";
