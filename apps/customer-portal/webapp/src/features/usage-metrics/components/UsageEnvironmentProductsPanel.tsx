@@ -72,6 +72,10 @@ import {
 
 const ZERO_SUMMARY: CurrMinMaxAvg = { curr: 0, avg: 0, min: 0, max: 0 };
 
+// Approximate height of a single instance row (px), used to cap the instances
+// list to ~5 visible rows before it becomes internally scrollable.
+const INSTANCE_ROW_HEIGHT = 64;
+
 /** Short period label (MM-DD) for chart x-axes. */
 function formatPeriodLabel(date: string): string {
   return date.slice(5);
@@ -507,19 +511,28 @@ function ProductAccordionRow({
                 <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
                   {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({totalInstances})
                 </Typography>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 1,
+                    maxHeight: 5 * INSTANCE_ROW_HEIGHT,
+                    overflowY: "auto",
+                    pr: 0.5,
+                  }}
+                >
                   {instances.map((inst) => (
                     <InstanceRow key={inst.id} instance={inst} />
                   ))}
+                  {hasMoreInstances && (
+                    <Box
+                      ref={instancesSentinelRef}
+                      sx={{ display: "flex", justifyContent: "center", py: 2 }}
+                    >
+                      {isFetchingMoreInstances && <CircularProgress size={20} sx={{ color: a.iconColor }} />}
+                    </Box>
+                  )}
                 </Box>
-                {hasMoreInstances && (
-                  <Box
-                    ref={instancesSentinelRef}
-                    sx={{ display: "flex", justifyContent: "center", py: 2 }}
-                  >
-                    {isFetchingMoreInstances && <CircularProgress size={20} sx={{ color: a.iconColor }} />}
-                  </Box>
-                )}
               </Box>
             ) : null}
           </>
