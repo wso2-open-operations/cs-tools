@@ -76,13 +76,35 @@ const MAX_ENTRIES = 12;
 const STORAGE_EVENT = "csm:recent-views-changed";
 
 /**
- * The signed-in user's stable id (ID token `sub` claim), or `null` before
- * it's resolved. Every read/write is scoped under this so a different
- * engineer signing in on the same browser never sees a previous user's
- * recent/pinned cases — see {@link useSyncActiveUserKey}. Scoped to this
- * tab's JS runtime; each tab resolves it independently.
+ * Pointer (in `localStorage`, so every tab can read it synchronously at
+ * startup) to the last `userid` this browser resolved. `localStorage.getItem`
+ * is never async — the only reason resolving the active user's bucket takes
+ * a moment is that the ID token decode does. Seeding `activeUserKey` from
+ * this on load lets Recents render immediately from a same-user reload/new
+ * tab, self-correcting once the real `userid` comes back if it's ever stale
+ * (e.g. a different account signs in). Just an id already visible to the
+ * user in their own token — not sensitive on its own.
  */
-let activeUserKey: string | null = null;
+const LAST_USER_KEY_STORAGE_KEY = "csm.recentViews.v1.lastUserKey";
+
+function readLastKnownUserKey(): string | null {
+  try {
+    return localStorage.getItem(LAST_USER_KEY_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The signed-in user's stable id (ID token `userid` claim — NOT `sub`,
+ * which this IdP issues per-session rather than per-account, so it changes
+ * on every fresh sign-in and can never scope anything reliably) this tab is
+ * currently using to scope reads/writes — initially an optimistic guess
+ * from {@link readLastKnownUserKey}, corrected once the real `userid`
+ * resolves (see {@link useSyncActiveUserKey}). Scoped to this tab's JS
+ * runtime; each tab seeds and (if needed) corrects it independently.
+ */
+let activeUserKey: string | null = readLastKnownUserKey();
 
 function currentStorageKey(): string {
   return `${STORAGE_KEY_BASE}.${activeUserKey ?? "pending"}`;
@@ -111,6 +133,10 @@ if (typeof window !== "undefined") {
   window.addEventListener("app:signing-out", () => {
     try {
       localStorage.removeItem(currentStorageKey());
+      // Don't leave an optimistic pointer at a user who just deliberately
+      // signed out — the next tab (same or a different person) should start
+      // from "pending" and resolve properly, not guess at the outgoing user.
+      localStorage.removeItem(LAST_USER_KEY_STORAGE_KEY);
     } catch {
       /* ignore */
     }
@@ -210,7 +236,7 @@ function writeStorage(entries: RecentView[]): void {
 
 /**
  * Resolves THIS component instance's view of the signed-in user's stable id
- * (ID token `sub` claim) and syncs it into the shared `activeUserKey`, so
+ * (ID token `userid` claim) and syncs it into the shared `activeUserKey`, so
  * `currentStorageKey()` resolves to that user's bucket. `activeUserKey` is a
  * plain module variable — scoped to this tab's JS runtime, not shared across
  * browser tabs — so every hook below calls this itself rather than trusting
@@ -221,25 +247,37 @@ function writeStorage(entries: RecentView[]): void {
  * untouched under the correct per-user key.
  */
 function useSyncActiveUserKey(): void {
-  const sub = useIdTokenClaims()?.sub;
+  const userid = useIdTokenClaims()?.userid;
 
   useEffect(() => {
     clearLegacyUnscopedKey();
   }, []);
 
   useEffect(() => {
+    // Still resolving (or genuinely signed out) — keep whatever guess
+    // `activeUserKey` already has (the cached last-known key, or "pending"
+    // if this browser has never resolved one) rather than resetting to
+    // `null`/"pending" on every render before `userid` is known.
+    if (!userid) return;
+    // The cached guess already matched — nothing to correct, no re-render.
+    if (activeUserKey === userid) return;
     // Fold in anything recorded during this session's own pre-resolution
     // window before switching the active bucket over.
-    if (sub && activeUserKey === null) {
-      migratePendingBucket(sub);
+    if (activeUserKey === null) {
+      migratePendingBucket(userid);
     }
-    activeUserKey = sub ?? null;
+    activeUserKey = userid;
+    try {
+      localStorage.setItem(LAST_USER_KEY_STORAGE_KEY, userid);
+    } catch {
+      /* ignore */
+    }
     // Let every `useRecentViews()` instance in this tab — including ones
-    // that resolved their own `sub` earlier and are just listening — pick up
-    // the now-current bucket immediately, rather than waiting for the next
-    // unrelated write to trigger a re-read.
+    // that resolved their own `userid` earlier and are just listening — pick
+    // up the now-current bucket immediately, rather than waiting for the
+    // next unrelated write to trigger a re-read.
     window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
-  }, [sub]);
+  }, [userid]);
 }
 
 /**
