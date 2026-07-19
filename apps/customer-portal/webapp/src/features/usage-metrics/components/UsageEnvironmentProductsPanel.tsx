@@ -327,7 +327,9 @@ function ProductAccordionRow({
             </Box>
             <Box sx={{ textAlign: "left", minWidth: 0 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                {product.name}
+                {product.name && product.version
+                  ? `${product.name} ${product.version}`
+                  : (product.name || product.version)}
               </Typography>
               {product.version && (
                 <Typography variant="caption" color="text.secondary">
