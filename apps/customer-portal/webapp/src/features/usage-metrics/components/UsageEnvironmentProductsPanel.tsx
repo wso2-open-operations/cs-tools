@@ -485,7 +485,7 @@ function ProductAccordionRow({
                         xAxisDataKey="name"
                         height={200}
                         width="100%"
-                        margin={USAGE_LINE_CHART_MARGIN}
+                        margin={{ ...USAGE_LINE_CHART_MARGIN, top: 5, left: 0 }}
                         accessibilityLayer={false}
                         xAxis={{ show: false }}
                         yAxis={{ show: false }}
@@ -508,7 +508,8 @@ function ProductAccordionRow({
                           tick={{ fontSize: 12 }}
                         />
                         <YAxis
-                          tickMargin={8}
+                          tickMargin={4}
+                          width={36}
                           allowDecimals={false}
                           domain={[0, (max: number) => Math.max(1, Math.ceil(max * 1.2))]}
                           tick={{ fontSize: 12 }}
