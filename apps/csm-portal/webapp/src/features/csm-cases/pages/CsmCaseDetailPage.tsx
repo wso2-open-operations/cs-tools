@@ -531,7 +531,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         workState: data.workState,
         caseType: data.caseType,
         updatedOn: data.updatedAt,
-        assigneeName: data.assignee !== "Unassigned" ? data.assignee : undefined,
+        assigneeName: data.assigneeName,
       },
     });
   }, [data, recordView]);

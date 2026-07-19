@@ -16,7 +16,6 @@
 
 import {
   Box,
-  Chip,
   Skeleton,
   TableSortLabel,
   Typography,
@@ -28,7 +27,7 @@ import { preloadRoute } from "@utils/routePreloaders";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
-import { WORK_STATE_LABEL } from "@features/csm-cases/utils/caseWorkState";
+import WorkStateChip from "@components/WorkStateChip";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 import type { CasesSortOrder } from "@features/csm-cases/utils/casesSort";
 
@@ -263,13 +262,7 @@ export default function CasesList({
               >
                 <StateChip state={c.state} variant="outlined" clickable />
                 {c.state === "work_in_progress" && c.workState && (
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    color={c.workState === "paused" ? "warning" : "default"}
-                    label={WORK_STATE_LABEL[c.workState]}
-                    sx={{ fontWeight: 600 }}
-                  />
+                  <WorkStateChip workState={c.workState} />
                 )}
               </Box>
               <Typography variant="caption" color="text.secondary" noWrap>

@@ -91,6 +91,12 @@ export default function QuickNav(): JSX.Element | null {
   const casesLoading =
     trimmedQuery.length >= QUICK_CASE_MIN_QUERY_LEN &&
     (caseSearch.isFetching || !caseHitsSettled);
+  // Skeleton only while there's nothing to show yet — `isFetching` also
+  // covers a background refetch of an already-settled, already-rendered
+  // query (e.g. re-typing a query after the 15s staleTime), where
+  // `caseSearch.data` still holds the previous results. Without this,
+  // the skeleton block and the real "Cases" section would render together.
+  const showCasesSkeleton = casesLoading && !caseSearch.data;
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -309,131 +315,131 @@ export default function QuickNav(): JSX.Element | null {
             onKeyDown={onListKeyDown}
             sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
           >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1,
-              px: 2,
-              py: 1.5,
-              borderBottom: 1,
-              borderColor: "divider",
-            }}
-          >
-            <Search size={18} />
-            <InputBase
-              autoFocus
-              inputRef={inputRef}
-              fullWidth
-              placeholder="Search cases by id, or jump to pinned, recent, pages…"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setActive(0);
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                px: 2,
+                py: 1.5,
+                borderBottom: 1,
+                borderColor: "divider",
               }}
-              inputProps={{ "aria-label": "Quick nav search" }}
-            />
-          </Box>
+            >
+              <Search size={18} />
+              <InputBase
+                autoFocus
+                inputRef={inputRef}
+                fullWidth
+                placeholder="Search cases by id, or jump to pinned, recent, pages…"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setActive(0);
+                }}
+                inputProps={{ "aria-label": "Quick nav search" }}
+              />
+            </Box>
 
-          <Box sx={{ overflowY: "auto", flex: 1, minHeight: 0, p: 2 }}>
-            {casesLoading && (
-              <Box sx={{ mb: results.length ? 2 : 0 }}>
-                <Typography
-                  variant="subtitle2"
-                  color="text.secondary"
-                  sx={{ display: "block", pb: 0.75, fontWeight: 600 }}
-                >
-                  Cases
-                </Typography>
-                <QuickNavResultSkeleton count={3} />
-              </Box>
-            )}
-            {results.length === 0 ? (
-              casesLoading ? null : (
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    py: 3,
-                  }}
-                >
-                  <SearchNoResultsIcon
-                    style={{ width: 140, height: "auto", marginBottom: 12 }}
-                  />
-                  <Typography variant="body2" color="text.secondary">
-                    {trimmedQuery.length === 0
-                      ? "Nothing pinned or recent yet. Start typing to search cases."
-                      : "No matches."}
+            <Box sx={{ overflowY: "auto", flex: 1, minHeight: 0, p: 2 }}>
+              {showCasesSkeleton && (
+                <Box sx={{ mb: results.length ? 2 : 0 }}>
+                  <Typography
+                    variant="subtitle2"
+                    color="text.secondary"
+                    sx={{ display: "block", pb: 0.75, fontWeight: 600 }}
+                  >
+                    Cases
                   </Typography>
+                  <QuickNavResultSkeleton count={3} />
                 </Box>
-              )
-            ) : (
-              results.map((r, i) => {
-                const newSection = i === 0 || results[i - 1].section !== r.section;
-                return (
-                  <Box key={r.key} sx={{ mt: newSection && i !== 0 ? 2 : 0 }}>
-                    {newSection && (
-                      <Typography
-                        variant="subtitle2"
-                        color="text.secondary"
-                        sx={{
-                          display: "block",
-                          pb: 0.75,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {r.section}
-                      </Typography>
-                    )}
-                    {r.caseHit ? (
-                      <Box sx={{ pb: 1 }}>
-                        <QuickNavCaseCard
-                          hit={r.caseHit}
-                          active={i === safeActive}
-                          onMouseEnter={() => setActive(i)}
-                          onClick={() => choose(r)}
-                        />
-                      </Box>
-                    ) : (
-                      <Box sx={{ pb: 1 }}>
-                        <Form.CardButton
-                          selected={i === safeActive}
-                          onMouseEnter={() => setActive(i)}
-                          onClick={() => choose(r)}
+              )}
+              {results.length === 0 ? (
+                casesLoading ? null : (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      py: 3,
+                    }}
+                  >
+                    <SearchNoResultsIcon
+                      style={{ width: 140, height: "auto", marginBottom: 12 }}
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {trimmedQuery.length === 0
+                        ? "Nothing pinned or recent yet. Start typing to search cases."
+                        : "No matches."}
+                    </Typography>
+                  </Box>
+                )
+              ) : (
+                results.map((r, i) => {
+                  const newSection = i === 0 || results[i - 1].section !== r.section;
+                  return (
+                    <Box key={r.key} sx={{ mt: newSection && i !== 0 ? 2 : 0 }}>
+                      {newSection && (
+                        <Typography
+                          variant="subtitle2"
+                          color="text.secondary"
                           sx={{
-                            display: "flex",
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 1.5,
-                            p: 1.25,
-                            width: "100%",
-                            minWidth: 0,
+                            display: "block",
+                            pb: 0.75,
+                            fontWeight: 600,
                           }}
                         >
-                          {r.icon}
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="body2" noWrap>
-                              {r.label}
-                            </Typography>
-                            {r.sublabel && (
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                                noWrap
-                              >
-                                {r.sublabel}
+                          {r.section}
+                        </Typography>
+                      )}
+                      {r.caseHit ? (
+                        <Box sx={{ pb: 1 }}>
+                          <QuickNavCaseCard
+                            hit={r.caseHit}
+                            active={i === safeActive}
+                            onMouseEnter={() => setActive(i)}
+                            onClick={() => choose(r)}
+                          />
+                        </Box>
+                      ) : (
+                        <Box sx={{ pb: 1 }}>
+                          <Form.CardButton
+                            selected={i === safeActive}
+                            onMouseEnter={() => setActive(i)}
+                            onClick={() => choose(r)}
+                            sx={{
+                              display: "flex",
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 1.5,
+                              p: 1.25,
+                              width: "100%",
+                              minWidth: 0,
+                            }}
+                          >
+                            {r.icon}
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography variant="body2" noWrap>
+                                {r.label}
                               </Typography>
-                            )}
-                          </Box>
-                        </Form.CardButton>
-                      </Box>
-                    )}
-                  </Box>
-                );
-              })
-            )}
-          </Box>
+                              {r.sublabel && (
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                  noWrap
+                                >
+                                  {r.sublabel}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Form.CardButton>
+                        </Box>
+                      )}
+                    </Box>
+                  );
+                })
+              )}
+            </Box>
           </Box>
         </Paper>
       </Modal>

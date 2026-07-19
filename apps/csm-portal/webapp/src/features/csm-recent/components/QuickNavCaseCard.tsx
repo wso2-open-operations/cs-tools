@@ -19,8 +19,8 @@ import { Calendar, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
+import WorkStateChip from "@components/WorkStateChip";
 import RelativeTime from "@components/RelativeTime";
-import { WORK_STATE_LABEL } from "@features/csm-cases/utils/caseWorkState";
 import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import type { QuickCaseHit } from "@features/csm-cases/api/useQuickCaseSearch";
@@ -74,13 +74,7 @@ export default function QuickNavCaseCard({
         <SeverityChip severity={hit.severity} />
         <StateChip state={hit.state} variant="outlined" />
         {hit.state === "work_in_progress" && hit.workState && (
-          <Chip
-            size="small"
-            variant="outlined"
-            color={hit.workState === "paused" ? "warning" : "default"}
-            label={WORK_STATE_LABEL[hit.workState]}
-            sx={{ fontWeight: 600 }}
-          />
+          <WorkStateChip workState={hit.workState} />
         )}
         {hit.caseType && CASE_TYPE_LABEL[hit.caseType] && (
           <Chip

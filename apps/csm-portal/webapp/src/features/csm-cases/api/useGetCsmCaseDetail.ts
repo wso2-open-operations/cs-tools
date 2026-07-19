@@ -38,7 +38,8 @@ function detailFromBeCase(
   const customer = account?.name ?? "—";
   // createdBy.name can be empty for unhydrated users, so fall back to the email.
   const reporter = c.createdBy?.name?.trim() || c.createdBy?.email;
-  const assignee = c.assignedEngineer?.name?.trim() || "Unassigned";
+  const assigneeName = c.assignedEngineer?.name?.trim() || undefined;
+  const assignee = assigneeName || "Unassigned";
   // "Is me" by comparing the assignee's email (the only stable identity the FE
   // shares with the JWT) to the signed-in user's, case-insensitively. Falls back
   // to false when either is absent — e.g. the data source doesn't return the
@@ -71,6 +72,7 @@ function detailFromBeCase(
       ? { id: c.relatedCase.id, caseNumber: c.relatedCase.number }
       : undefined,
     assignee,
+    assigneeName,
     assigneeIsMe,
     slaClockType: "ack",
     minutesToBreach: 0,

@@ -395,6 +395,13 @@ export interface CsmCaseDetail extends CsmCaseRow {
   createdBy?: string;
   /** Email of the creator — used to tell a WSO2 engineer from a customer. */
   createdByEmail?: string;
+  /**
+   * Raw assigned-engineer name, with no "Unassigned" display fallback baked
+   * in (unlike `assignee`) — for callers that need to tell "actually
+   * unassigned" apart from a display label, without string-comparing
+   * against that fallback.
+   */
+  assigneeName?: string;
   customerContext: CaseCustomerContext;
   productContext: CaseProductContext;
   watchers: CaseWatcher[];
