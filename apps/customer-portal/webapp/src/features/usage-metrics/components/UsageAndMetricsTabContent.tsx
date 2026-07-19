@@ -64,20 +64,18 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
 
   const deploymentTabs = useMemo(
     () =>
-      (deploymentsData ?? []).map((dep) => ({
-        id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
-        label: dep.name,
-        instanceCount: dep.instanceCount ?? 0,
-        productCount: dep.productCount ?? 0,
-      })),
+      (deploymentsData ?? [])
+        .filter((dep) => (dep.productCount ?? 0) > 0)
+        .map((dep) => ({
+          id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
+          label: dep.name,
+          instanceCount: dep.instanceCount ?? 0,
+          productCount: dep.productCount ?? 0,
+        })),
     [deploymentsData],
   );
 
-  // Default to the first deployment that has products, fallback to first tab.
-  const defaultTab = useMemo(() => {
-    const withProducts = deploymentTabs.find((t) => t.productCount > 0);
-    return (withProducts ?? deploymentTabs[0])?.id ?? "";
-  }, [deploymentTabs]);
+  const defaultTab = deploymentTabs[0]?.id ?? "";
 
   const activeTab = innerTab || defaultTab;
 
