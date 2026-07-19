@@ -1437,15 +1437,25 @@ public isolated function mapDeployedProductMetricsUsageCounts(
         entity:DeployedProductMetricsUsageCountsResponse response)
         returns types:DeployedProductMetricsUsageCountsResponse {
 
-    map<types:CountTypeAggregation> countTypes = {};
-    foreach [string, entity:CountTypeAggregation] [key, value] in response.summary.countTypes.entries() {
-        countTypes[key] = {
-            aggregation: value.aggregation,
-            min: value.min,
-            max: value.max,
-            avg: value.avg
-        };
-    }
+    map<types:CountTypeAggregation> countTypes = response.summary.countTypes.map(value => {
+        aggregation: value.aggregation,
+        min: value.min,
+        max: value.max,
+        avg: value.avg
+    });
+
+    types:DeployedProductUsageCountsChartEntry[] chartData = response.chartData.map(entry => {
+        date: entry.date,
+        counts: entry.counts.map(countEntry => {
+            value: countEntry.value,
+            aggregation: countEntry.aggregation,
+            instances: countEntry.instances.map(inst => {
+                id: inst.id,
+                name: inst.name,
+                value: inst.value
+            })
+        })
+    });
 
     return {
         product: {
@@ -1459,6 +1469,6 @@ public isolated function mapDeployedProductMetricsUsageCounts(
             },
             countTypes
         },
-        chartData: response.chartData
+        chartData
     };
 }
