@@ -1447,6 +1447,30 @@ public isolated function mapDeployedProductMetricsUsageCounts(
         };
     }
 
+    types:DeployedProductUsageCountsChartEntry[] chartData = [];
+    foreach entity:DeployedProductUsageCountsChartEntry entry in response.chartData {
+        map<types:UsageCountEntry> counts = {};
+        foreach [string, entity:UsageCountEntry] [countKey, countEntry] in entry.counts.entries() {
+            types:UsageCountInstance[] instances = [];
+            foreach entity:UsageCountInstance inst in countEntry.instances {
+                instances.push({
+                    id: inst.id,
+                    name: inst.name,
+                    value: inst.value
+                });
+            }
+            counts[countKey] = {
+                value: countEntry.value,
+                aggregation: countEntry.aggregation,
+                instances
+            };
+        }
+        chartData.push({
+            date: entry.date,
+            counts
+        });
+    }
+
     return {
         product: {
             id: response.deployedProduct.id,
@@ -1459,6 +1483,6 @@ public isolated function mapDeployedProductMetricsUsageCounts(
             },
             countTypes
         },
-        chartData: response.chartData
+        chartData
     };
 }

@@ -2829,6 +2829,37 @@ public type DeployedProductMetricsUsageCountsSummary record {|
     json...;
 |};
 
+# A single instance's contribution to a count-type entry.
+public type UsageCountInstance record {|
+    # System ID of the instance
+    string id;
+    # Instance name or key
+    string name;
+    # Count value contributed by this instance
+    decimal value;
+    json...;
+|};
+
+# Aggregated value for a single count type on a single date.
+public type UsageCountEntry record {|
+    # Aggregated value across instances
+    decimal value;
+    # Aggregation function applied (e.g. sum, max)
+    string aggregation;
+    # Per-instance breakdown
+    UsageCountInstance[] instances;
+    json...;
+|};
+
+# A single chart data entry for deployed product usage counts grouped by date.
+public type DeployedProductUsageCountsChartEntry record {|
+    # Date of the chart entry (format: YYYY-MM-DD)
+    string date;
+    # Pivoted counts keyed by count type
+    map<UsageCountEntry> counts;
+    json...;
+|};
+
 # Response for deployed product metrics usage counts search.
 public type DeployedProductMetricsUsageCountsResponse record {|
     # The deployed product reference
@@ -2842,6 +2873,6 @@ public type DeployedProductMetricsUsageCountsResponse record {|
     # Summary statistics for the queried range
     DeployedProductMetricsUsageCountsSummary summary;
     # Chart data points ordered by date
-    json[] chartData;
+    DeployedProductUsageCountsChartEntry[] chartData;
     json...;
 |};
