@@ -2195,6 +2195,18 @@ public type DeployedProductMetricsUsageCountsPayload record {|
     entity:Date endDate;
 |};
 
+# Aggregated statistics for a single count type over the queried date range.
+public type CountTypeAggregation record {|
+    # Aggregation function applied for this count type (e.g. sum, max)
+    string aggregation;
+    # Minimum aggregated value across the range
+    decimal min;
+    # Maximum aggregated value across the range
+    decimal max;
+    # Average aggregated value across the range
+    decimal avg;
+|};
+
 # Summary for deployed product metrics usage counts.
 public type DeployedProductMetricsUsageCountsSummary record {|
     # Date range of the metrics query
@@ -2205,7 +2217,7 @@ public type DeployedProductMetricsUsageCountsSummary record {|
         string 'end;
     |} dateRange;
     # Count types aggregated over the range
-    map<int> countTypes;
+    map<CountTypeAggregation> countTypes;
 |};
 
 # Response for deployed product metrics usage counts search.
