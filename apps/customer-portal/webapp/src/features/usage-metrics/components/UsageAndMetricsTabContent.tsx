@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button } from "@wso2/oxygen-ui";
-import { Upload } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, Typography } from "@wso2/oxygen-ui";
+import { Server, Upload } from "@wso2/oxygen-ui-icons-react";
 import type { ReactNode } from "react";
 import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
@@ -69,6 +69,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
         .map((dep) => ({
           id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
           label: dep.name,
+          icon: Server,
           instanceCount: dep.instanceCount ?? 0,
           productCount: dep.productCount ?? 0,
         })),
@@ -82,6 +83,11 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const activeDeploymentId = useMemo(
     () => getActiveUsageDeploymentId(activeTab),
     [activeTab],
+  );
+
+  const activeDeployment = useMemo(
+    () => (deploymentsData ?? []).find((dep) => dep.id === activeDeploymentId),
+    [deploymentsData, activeDeploymentId],
   );
 
   const toggleProduct = useCallback((productId: string) => {
@@ -194,6 +200,13 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
         </Box>
         {uploadButton}
       </Box>
+
+      {activeDeployment && (
+        <Typography variant="body2" color="text.secondary">
+          {activeDeployment.name}
+          {activeDeployment.type?.label && ` · ${activeDeployment.type.label}`}
+        </Typography>
+      )}
 
       <DeploymentUsageUploadDialog
         open={uploadOpen}
