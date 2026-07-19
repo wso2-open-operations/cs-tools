@@ -192,10 +192,19 @@ function ProductAccordionRow({
 
   const countTypes = countsData?.summary?.countTypes;
 
+  // Show every count type the API actually returned, ordered by the classifier's
+  // known priority first, then any additional keys the classifier didn't anticipate.
+  const countTypeKeys = useMemo(() => {
+    if (!countTypes) return [];
+    const keys = Object.keys(countTypes);
+    const known = metricKeys.filter((key) => keys.includes(key));
+    const extra = keys.filter((key) => !metricKeys.includes(key));
+    return [...known, ...extra];
+  }, [countTypes, metricKeys]);
+
   const summaryStats = useMemo(() => {
     if (!countTypes) return [];
-    return metricKeys
-      .filter((key) => countTypes[key] != null)
+    return countTypeKeys
       .map((key) => {
         const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
         const stat = countTypes[key];
@@ -216,7 +225,7 @@ function ProductAccordionRow({
         }
         return { label: cfg.title, value: formatUsageMetricCount(value) };
       });
-  }, [countTypes, metricKeys]);
+  }, [countTypes, countTypeKeys]);
 
   const coreTrend = useMemo(() => {
     const sorted = [...(metricsData?.chartData ?? [])].sort((x, y) =>
@@ -229,8 +238,7 @@ function ProductAccordionRow({
     const sortedCharts = [...(countsData?.chartData ?? [])].sort((x, y) =>
       x.date.localeCompare(y.date),
     );
-    return metricKeys
-      .filter((key) => countTypes?.[key] != null)
+    return countTypeKeys
       .map((key) => {
         const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
         return {
@@ -244,7 +252,7 @@ function ProductAccordionRow({
           })),
         };
       });
-  }, [countsData, countTypes, metricKeys]);
+  }, [countsData, countTypeKeys]);
 
   const chartTrends = useMemo(
     () => [
