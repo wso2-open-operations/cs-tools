@@ -18,6 +18,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import UsageEnvironmentProductsPanel from "@features/usage-metrics/components/UsageEnvironmentProductsPanel";
 
+vi.mock("@features/project-details/api/usePostDeploymentProductsSearch", () => ({
+  usePostDeploymentProductsSearchAll: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 vi.mock("@features/project-details/api/usePostDeploymentInstancesUsagesSearch", () => ({
   default: () => ({
     data: { usages: [] },

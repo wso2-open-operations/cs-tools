@@ -56,6 +56,7 @@ import {
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
 import usePostDeploymentInstancesUsagesSearch from "@features/project-details/api/usePostDeploymentInstancesUsagesSearch";
 import usePostDeploymentInstancesMetricsSearch from "@features/project-details/api/usePostDeploymentInstancesMetricsSearch";
+import { usePostDeploymentProductsSearchAll } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import type { CurrMinMaxAvg, UsageProductInstanceRow } from "@features/project-details/types/usage";
 import type {
   MetricPillProps,
@@ -328,6 +329,11 @@ function ProductAccordionRow({
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                 {product.name}
               </Typography>
+              {product.version && (
+                <Typography variant="caption" color="text.secondary">
+                  v{product.version}
+                </Typography>
+              )}
             </Box>
           </Box>
 
@@ -414,6 +420,12 @@ export default function UsageEnvironmentProductsPanel({
   );
 
   const {
+    data: deployedProducts,
+    isLoading: productsLoading,
+    isError: productsError,
+  } = usePostDeploymentProductsSearchAll(deploymentId);
+
+  const {
     data: usagesData,
     isLoading: usagesLoading,
     isError: usagesError,
@@ -425,13 +437,17 @@ export default function UsageEnvironmentProductsPanel({
     isError: metricsError,
   } = usePostDeploymentInstancesMetricsSearch(deploymentId, metricsPayload);
 
-  const isLoading = usagesLoading || metricsLoading;
-  const isError = usagesError || metricsError;
+  const isLoading = productsLoading || usagesLoading || metricsLoading;
+  const isError = productsError || usagesError || metricsError;
 
   const products = useMemo(() => {
-    if (!usagesData || !metricsData) return [];
-    return deriveUsageEnvironmentProducts(usagesData.usages, metricsData.metrics);
-  }, [usagesData, metricsData]);
+    if (!deployedProducts || !usagesData || !metricsData) return [];
+    return deriveUsageEnvironmentProducts(
+      deployedProducts,
+      usagesData.usages,
+      metricsData.metrics,
+    );
+  }, [deployedProducts, usagesData, metricsData]);
 
   if (isError) {
     return (

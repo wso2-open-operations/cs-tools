@@ -25,6 +25,15 @@ describe("usageMetricsEnvironmentProducts", () => {
     const products = deriveUsageEnvironmentProducts(
       [
         {
+          id: "dp-1",
+          description: null,
+          product: { id: "p-1", label: "Gateway" },
+          deployment: { id: "dep-1", label: "Dep 1" },
+          version: "1.0.0",
+        },
+      ],
+      [
+        {
           instanceId: "i-1",
           instanceKey: "i-1",
           project: null,
@@ -41,6 +50,7 @@ describe("usageMetricsEnvironmentProducts", () => {
 
     expect(products).toHaveLength(1);
     expect(products[0].id).toBe("dp-1");
+    expect(products[0].version).toBe("1.0.0");
     expect(buildUsageProductInstanceAccordionKey("p-1", "i-1")).toBe("p-1::i-1");
   });
 });

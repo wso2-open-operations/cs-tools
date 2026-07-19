@@ -23,6 +23,7 @@ import type {
   UsageInstanceChartBlock,
   UsageProductInstanceRow,
 } from "@features/project-details/types/usage";
+import type { DeploymentProductItem } from "@features/project-details/types/deployments";
 import {
   buildCoreAverageTrendFromMetrics,
   buildUsageTrendFromUsages,
@@ -36,6 +37,7 @@ import {
   USAGE_METRICS_INSTANCE_CHART_CORE_TITLE,
   USAGE_METRICS_PRODUCT_CORE_METRIC_INSTANCES,
   USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES,
+  USAGE_METRICS_UNKNOWN_LABEL,
   USAGE_METRICS_VALUE_EM_DASH,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
 import {
@@ -70,15 +72,19 @@ export function buildUsageProductInstanceAccordionKey(
 }
 
 /**
- * Derives product rows from deployment-scoped usages + metrics.
- * Groups entries by deployedProduct.id (falling back to product.id then instanceId).
+ * Derives product rows for a deployment.
+ * Products (name, version) come from the deployment's authoritative products/search
+ * result so every deployed product appears even without usage data; usage/metric
+ * entries are then attached by matching `deployedProduct.id` to the product id.
  * Metric keys and chart trends are determined per-product by the WSO2 product classifier.
  *
+ * @param products - Deployed products for the deployment (from products/search).
  * @param usages - Usage rows for the deployment.
  * @param metrics - Metric rows for the deployment.
  * @returns Built product cards for the environment tab.
  */
 export function deriveUsageEnvironmentProducts(
+  products: DeploymentProductItem[],
   usages: InstanceUsageEntry[],
   metrics: InstanceMetricEntry[],
 ): UsageEnvironmentProduct[] {
@@ -86,29 +92,35 @@ export function deriveUsageEnvironmentProducts(
     string,
     {
       label: string;
+      version: string;
       usages: InstanceUsageEntry[];
       metrics: InstanceMetricEntry[];
     }
   >();
 
+  for (const p of products) {
+    const label = p.product?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
+    const version =
+      typeof p.version === "string"
+        ? p.version
+        : (p.version?.label ?? "");
+    productMap.set(p.id, { label, version, usages: [], metrics: [] });
+  }
+
   for (const u of usages) {
-    const pid = u.deployedProduct?.id ?? u.product?.id ?? u.instanceId;
-    const label = u.deployedProduct?.label ?? u.product?.label ?? u.instanceKey;
-    const existing = productMap.get(pid) ?? { label, usages: [], metrics: [] };
-    existing.usages.push(u);
-    productMap.set(pid, existing);
+    const pid = u.deployedProduct?.id;
+    if (!pid || !productMap.has(pid)) continue;
+    productMap.get(pid)!.usages.push(u);
   }
   for (const m of metrics) {
-    const pid = m.deployedProduct?.id ?? m.product?.id ?? m.instanceId;
-    const label = m.deployedProduct?.label ?? m.product?.label ?? m.instanceKey;
-    const existing = productMap.get(pid) ?? { label, usages: [], metrics: [] };
-    existing.metrics.push(m);
-    productMap.set(pid, existing);
+    const pid = m.deployedProduct?.id;
+    if (!pid || !productMap.has(pid)) continue;
+    productMap.get(pid)!.metrics.push(m);
   }
 
   return Array.from(productMap.entries()).map(
-    ([pid, { label, usages: pUsages, metrics: pMetrics }]) => {
-      const metricKeys = getProductMetricKeys(label);
+    ([pid, { label, version, usages: pUsages, metrics: pMetrics }]) => {
+      const metricKeys = getProductMetricKeys(label, version);
 
       // Compute total for each metric key across all usage entries
       const metricTotals = new Map<string, number>();
@@ -270,7 +282,7 @@ export function deriveUsageEnvironmentProducts(
       return {
         id: pid,
         name: label,
-        version: "",
+        version,
         runningInstances: pUsages.length,
         metricKeys,
         summaryStats,
