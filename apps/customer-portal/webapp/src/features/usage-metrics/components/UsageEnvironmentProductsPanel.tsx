@@ -21,22 +21,24 @@ import {
   Alert,
   Box,
   Card,
+  CircularProgress,
   Grid,
   Skeleton,
   Typography,
   alpha,
   colors,
 } from "@wso2/oxygen-ui";
-import { ChevronDown, Package, Server } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, Code, Monitor, Package, Server } from "@wso2/oxygen-ui-icons-react";
 import EmptyState from "@components/empty-state/EmptyState";
-import { LineChart } from "@wso2/oxygen-ui-charts-react";
+import { LineChart, XAxis, YAxis } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   USAGE_LINE_CHART_MARGIN,
   USAGE_METRICS_ENVIRONMENT_PRODUCTS_ERROR,
   USAGE_METRICS_NO_INSTANCE_DATA,
   USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT,
+  USAGE_METRICS_PRODUCT_DATA_UNAVAILABLE,
   USAGE_METRICS_PRODUCT_INSTANCES_SECTION,
   USAGE_METRICS_PRODUCT_INSTANCE_METRICS,
   USAGE_METRICS_PRODUCT_CORE_METRICS,
@@ -44,12 +46,20 @@ import {
   USAGE_METRICS_STAT_LABEL_MIN,
   USAGE_METRICS_STAT_LABEL_MAX,
   USAGE_METRICS_UNKNOWN_LABEL,
+  USAGE_METRICS_INSTANCE_OS,
+  USAGE_METRICS_INSTANCE_JAVA,
+  USAGE_METRICS_INSTANCE_U2,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
+import type { InstanceItem } from "@features/project-details/types/usage";
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
 import { usePostDeploymentProductsSearchAll } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import usePostDeploymentProductMetricsSearch from "@features/project-details/api/usePostDeploymentProductMetricsSearch";
 import usePostDeploymentProductUsageCountsSearch from "@features/project-details/api/usePostDeploymentProductUsageCountsSearch";
-import { computeSeriesSummary, formatUsageMetricCount } from "@features/project-details/utils/usageMetrics";
+import useGetDeployedProductInstancesInfinite from "@features/project-details/api/useGetDeployedProductInstancesInfinite";
+import {
+  computeSeriesSummary,
+  formatUsageMetricCount,
+} from "@features/project-details/utils/usageMetrics";
 import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
 import type {
   MetricPillProps,
@@ -65,9 +75,16 @@ import {
 
 const ZERO_SUMMARY: CurrMinMaxAvg = { curr: 0, avg: 0, min: 0, max: 0 };
 
-/** Short period label (MM-DD) for chart x-axes. */
+// Approximate height of a single instance row (px), used to cap the instances
+// list to ~5 visible rows before it becomes internally scrollable.
+const INSTANCE_ROW_HEIGHT = 64;
+
+/** Short period label ("Jul 19") for chart x-axes. */
 function formatPeriodLabel(date: string): string {
-  return date.slice(5);
+  return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 // ─── Curr/Avg/Min/Max metric block ────────────────────────────────────────────
@@ -166,6 +183,36 @@ function ProductAccordionRow({
   const { data: countsData, isLoading: countsLoading } =
     usePostDeploymentProductUsageCountsSearch(deploymentId, product.id, payload);
 
+  const {
+    data: instancesData,
+    isLoading: instancesLoading,
+    hasNextPage: hasMoreInstances,
+    isFetchingNextPage: isFetchingMoreInstances,
+    fetchNextPage: fetchMoreInstances,
+  } = useGetDeployedProductInstancesInfinite(expanded ? product.id : undefined, dateRange);
+
+  const instances = useMemo(
+    () => instancesData?.pages.flatMap((page) => page.instances) ?? [],
+    [instancesData],
+  );
+  const totalInstances = instancesData?.pages[0]?.totalRecords ?? 0;
+
+  const instancesSentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sentinel = instancesSentinelRef.current;
+    if (!sentinel || !hasMoreInstances || isFetchingMoreInstances) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void fetchMoreInstances();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreInstances, isFetchingMoreInstances, fetchMoreInstances]);
+
   const isLoading = metricsLoading || countsLoading;
 
   const metricKeys = useMemo(
@@ -190,10 +237,19 @@ function ProductAccordionRow({
 
   const countTypes = countsData?.summary?.countTypes;
 
+  // Show every count type the API actually returned, ordered by the classifier's
+  // known priority first, then any additional keys the classifier didn't anticipate.
+  const countTypeKeys = useMemo(() => {
+    if (!countTypes) return [];
+    const keys = Object.keys(countTypes);
+    const known = metricKeys.filter((key) => keys.includes(key));
+    const extra = keys.filter((key) => !metricKeys.includes(key));
+    return [...known, ...extra];
+  }, [countTypes, metricKeys]);
+
   const summaryStats = useMemo(() => {
     if (!countTypes) return [];
-    return metricKeys
-      .filter((key) => countTypes[key] != null)
+    return countTypeKeys
       .map((key) => {
         const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
         const stat = countTypes[key];
@@ -214,7 +270,7 @@ function ProductAccordionRow({
         }
         return { label: cfg.title, value: formatUsageMetricCount(value) };
       });
-  }, [countTypes, metricKeys]);
+  }, [countTypes, countTypeKeys]);
 
   const coreTrend = useMemo(() => {
     const sorted = [...(metricsData?.chartData ?? [])].sort((x, y) =>
@@ -227,8 +283,7 @@ function ProductAccordionRow({
     const sortedCharts = [...(countsData?.chartData ?? [])].sort((x, y) =>
       x.date.localeCompare(y.date),
     );
-    return metricKeys
-      .filter((key) => countTypes?.[key] != null)
+    return countTypeKeys
       .map((key) => {
         const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
         return {
@@ -242,11 +297,10 @@ function ProductAccordionRow({
           })),
         };
       });
-  }, [countsData, countTypes, metricKeys]);
+  }, [countsData, countTypeKeys]);
 
   const chartTrends = useMemo(
     () => [
-      ...countTrends,
       {
         key: "CORE_USAGE",
         title: CORE_CHART_CONFIG.title,
@@ -254,21 +308,25 @@ function ProductAccordionRow({
         stroke: CORE_CHART_CONFIG.stroke,
         data: coreTrend,
       },
+      ...countTrends,
     ],
     [countTrends, coreTrend],
   );
 
-  const latestInstances = useMemo(() => {
-    const sorted = [...(metricsData?.chartData ?? [])].sort((x, y) =>
-      y.date.localeCompare(x.date),
-    );
-    return sorted[0]?.instances ?? [];
-  }, [metricsData]);
+  // Nothing to show for this product if neither source has any data for this range.
+  const hasChartData =
+    (metricsData?.chartData?.length ?? 0) > 0 ||
+    (countsData?.chartData?.length ?? 0) > 0 ||
+    summaryStats.length > 0;
+
+  // While a date-range change is refetching, don't force-collapse a row that was
+  // already expanded just because the in-flight data is momentarily empty.
+  const canExpand = hasChartData || isLoading;
 
   return (
     <Accordion
-      expanded={expanded}
-      onChange={() => onToggle()}
+      expanded={canExpand && expanded}
+      onChange={canExpand ? () => onToggle() : undefined}
       disableGutters
       elevation={0}
       sx={{
@@ -279,19 +337,22 @@ function ProductAccordionRow({
         borderColor: "divider",
         borderRadius: 0,
         bgcolor: "background.paper",
-        "&:hover": { bgcolor: "action.hover" },
+        "&:hover": canExpand ? { bgcolor: "action.hover" } : undefined,
         "&.Mui-expanded": { margin: 0 },
       }}
     >
       <AccordionSummary
-        expandIcon={<ChevronDown size={20} color={a.iconColor} />}
+        expandIcon={
+          canExpand ? <ChevronDown size={20} color={a.iconColor} /> : null
+        }
         sx={{
           px: 2,
           py: 2,
           minHeight: 56,
           bgcolor: a.headerBg,
           borderRadius: 0,
-          "&:hover": { bgcolor: a.headerHoverBg },
+          cursor: canExpand ? "pointer" : "default",
+          "&:hover": canExpand ? { bgcolor: a.headerHoverBg } : undefined,
         }}
       >
         <Box
@@ -343,29 +404,43 @@ function ProductAccordionRow({
               gap: 5,
             }}
           >
-            {summaryStats.map((stat) => (
-              <Box key={stat.label}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  display="block"
-                  sx={{ mb: 0.5 }}
-                >
-                  {stat.label}
-                </Typography>
-                <Typography variant="body1" sx={{ fontWeight: 700 }}>
-                  {stat.value}
-                </Typography>
-              </Box>
-            ))}
-            <CurrMinMaxBlock
-              label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
-              summary={instanceSummary}
-            />
-            <CurrMinMaxBlock
-              label={USAGE_METRICS_PRODUCT_CORE_METRICS}
-              summary={coreSummary}
-            />
+            {isLoading ? (
+              <CircularProgress size={20} sx={{ color: a.iconColor }} />
+            ) : !hasChartData ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ fontStyle: "italic" }}
+              >
+                {USAGE_METRICS_PRODUCT_DATA_UNAVAILABLE}
+              </Typography>
+            ) : (
+              <>
+                {summaryStats.map((stat) => (
+                  <Box key={stat.label}>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      display="block"
+                      sx={{ mb: 0.5 }}
+                    >
+                      {stat.label}
+                    </Typography>
+                    <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                      {stat.value}
+                    </Typography>
+                  </Box>
+                ))}
+                <CurrMinMaxBlock
+                  label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
+                  summary={instanceSummary}
+                />
+                <CurrMinMaxBlock
+                  label={USAGE_METRICS_PRODUCT_CORE_METRICS}
+                  summary={coreSummary}
+                />
+              </>
+            )}
           </Box>
         </Box>
       </AccordionSummary>
@@ -379,9 +454,9 @@ function ProductAccordionRow({
           borderRadius: 0,
         }}
       >
-        {isLoading ? (
+        {isLoading || instancesLoading ? (
           <Skeleton variant="rounded" height={200} />
-        ) : latestInstances.length === 0 && chartTrends.every((t) => t.data.length === 0) ? (
+        ) : instances.length === 0 && chartTrends.every((t) => t.data.length === 0) ? (
           <Typography variant="body2" color="text.secondary">
             {USAGE_METRICS_NO_INSTANCE_DATA}
           </Typography>
@@ -397,7 +472,7 @@ function ProductAccordionRow({
                   key={trend.key}
                   size={{
                     xs: 12,
-                    lg: chartTrends.length === 1 ? 12 : chartTrends.length === 3 ? 4 : 6,
+                    lg: chartTrends.length === 1 ? 12 : 4,
                   }}
                 >
                   <Card sx={{ p: 2, borderRadius: 0 }}>
@@ -410,11 +485,10 @@ function ProductAccordionRow({
                         xAxisDataKey="name"
                         height={200}
                         width="100%"
-                        margin={USAGE_LINE_CHART_MARGIN}
+                        margin={{ ...USAGE_LINE_CHART_MARGIN, top: 5, left: 0 }}
                         accessibilityLayer={false}
-                        xAxis={{
-                          interval: Math.max(0, Math.ceil(trend.data.length / 6) - 1),
-                        }}
+                        xAxis={{ show: false }}
+                        yAxis={{ show: false }}
                         legend={{ show: false }}
                         grid={{ show: true, strokeDasharray: "3 3" }}
                         lines={[
@@ -426,25 +500,61 @@ function ProductAccordionRow({
                             dot: false,
                           },
                         ]}
-                      />
+                      >
+                        <XAxis
+                          dataKey="name"
+                          tickMargin={8}
+                          interval={Math.max(0, Math.ceil(trend.data.length / 6) - 1)}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis
+                          tickMargin={4}
+                          width={36}
+                          allowDecimals={false}
+                          domain={[0, (max: number) => Math.max(1, Math.ceil(max * 1.2))]}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value: number) => formatUsageMetricCount(value)}
+                        />
+                      </LineChart>
                     </UsageChartSurface>
                   </Card>
                 </Grid>
               ))}
             </Grid>
 
-            {latestInstances.length > 0 && (
+            {instancesLoading ? (
+              <Box sx={{ mt: 2 }}>
+                <Skeleton variant="rounded" height={120} />
+              </Box>
+            ) : instances.length > 0 ? (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
-                  {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({latestInstances.length})
+                  {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({totalInstances})
                 </Typography>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {latestInstances.map((inst) => (
-                    <InstanceRow key={inst.id} name={inst.name} cores={inst.cores} />
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 1,
+                    maxHeight: 5 * INSTANCE_ROW_HEIGHT,
+                    overflowY: "auto",
+                    pr: 0.5,
+                  }}
+                >
+                  {instances.map((inst) => (
+                    <InstanceRow key={inst.id} instance={inst} />
                   ))}
+                  {hasMoreInstances && (
+                    <Box
+                      ref={instancesSentinelRef}
+                      sx={{ display: "flex", justifyContent: "center", py: 2 }}
+                    >
+                      {isFetchingMoreInstances && <CircularProgress size={20} sx={{ color: a.iconColor }} />}
+                    </Box>
+                  )}
                 </Box>
               </Box>
-            )}
+            ) : null}
           </>
         )}
       </AccordionDetails>
@@ -454,8 +564,15 @@ function ProductAccordionRow({
 
 // ─── Flat instance row ────────────────────────────────────────────────────────
 
-function InstanceRow({ name, cores }: { name: string; cores: number }): JSX.Element {
+function InstanceRow({ instance }: { instance: InstanceItem }): JSX.Element {
   const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
+  const dm = instance.metadata?.deploymentMetadata;
+
+  const os = dm?.os ? (dm.osVersion ? `${dm.os} ${dm.osVersion}` : dm.os) : "—";
+  const jdkVersion = dm?.jdkVersion || instance.metadata?.jdkVersion || "—";
+  const u2Level = dm?.updateLevel || "—";
+  const keyDisplay =
+    instance.key.length > 20 ? `${instance.key.slice(0, 12)}…` : instance.key;
 
   return (
     <Box
@@ -472,17 +589,29 @@ function InstanceRow({ name, cores }: { name: string; cores: number }): JSX.Elem
         bgcolor: wellBg,
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
         <Server size={18} color={colors.grey?.[500]} />
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          {name}
+        <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap title={instance.key}>
+          {keyDisplay}
         </Typography>
       </Box>
-      <MetricPill
-        icon={<Package size={16} color={colors.grey?.[400]} />}
-        label={USAGE_METRICS_PRODUCT_CORE_METRICS}
-        value={String(cores)}
-      />
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+        <MetricPill
+          icon={<Monitor size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_OS}
+          value={os}
+        />
+        <MetricPill
+          icon={<Code size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_JAVA}
+          value={jdkVersion}
+        />
+        <MetricPill
+          icon={<Package size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_U2}
+          value={u2Level}
+        />
+      </Box>
     </Box>
   );
 }

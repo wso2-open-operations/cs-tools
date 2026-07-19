@@ -27,7 +27,10 @@ import {
   USAGE_METRICS_CUSTOM_RANGE_APPLY,
   USAGE_METRICS_CUSTOM_RANGE_BUTTON,
   USAGE_METRICS_CUSTOM_RANGE_CANCEL,
+  USAGE_METRICS_CUSTOM_RANGE_INVALID_ORDER,
+  USAGE_METRICS_CUSTOM_RANGE_MAX_DAYS,
   USAGE_METRICS_CUSTOM_RANGE_PLACEHOLDER,
+  USAGE_METRICS_CUSTOM_RANGE_TOO_LONG,
   USAGE_METRICS_CUSTOM_RANGE_TO,
   USAGE_METRICS_PRESET_TIME_RANGES,
   USAGE_TIME_RANGE_LABELS,
@@ -62,6 +65,16 @@ export default function UsageMetricsTimeRangeSelector({
   rightAction,
 }: UsageMetricsTimeRangeSelectorProps): JSX.Element {
   const timeLabel = USAGE_TIME_RANGE_LABELS[timeRange];
+
+  const customRangeError = (() => {
+    if (!customStart || !customEnd) return null;
+    const start = new Date(customStart);
+    const end = new Date(customEnd);
+    if (end < start) return USAGE_METRICS_CUSTOM_RANGE_INVALID_ORDER;
+    const days = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+    if (days > USAGE_METRICS_CUSTOM_RANGE_MAX_DAYS) return USAGE_METRICS_CUSTOM_RANGE_TOO_LONG;
+    return null;
+  })();
 
   return (
     <Box
@@ -123,63 +136,72 @@ export default function UsageMetricsTimeRangeSelector({
           </Button>
 
           {timeRange === UsageTimeRange.CUSTOM && (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2, ml: 1 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                <TextField
-                  type="date"
-                  size="small"
-                  value={customStart}
-                  onChange={(e) => onCustomStartChange(e.target.value)}
-                  sx={{ minWidth: 160, maxWidth: "100%" }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Calendar size={16} />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mx: 0.5 }}
-                >
-                  {USAGE_METRICS_CUSTOM_RANGE_TO}
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, ml: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                  <TextField
+                    type="date"
+                    size="small"
+                    value={customStart}
+                    onChange={(e) => onCustomStartChange(e.target.value)}
+                    error={!!customRangeError}
+                    sx={{ minWidth: 160, maxWidth: "100%" }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Calendar size={16} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mx: 0.5 }}
+                  >
+                    {USAGE_METRICS_CUSTOM_RANGE_TO}
+                  </Typography>
+                  <TextField
+                    type="date"
+                    size="small"
+                    value={customEnd}
+                    onChange={(e) => onCustomEndChange(e.target.value)}
+                    error={!!customRangeError}
+                    sx={{ minWidth: 160, maxWidth: "100%" }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Calendar size={16} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </Box>
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="warning"
+                    onClick={onApplyCustom}
+                    disabled={!customStart || !customEnd || !!customRangeError}
+                  >
+                    {USAGE_METRICS_CUSTOM_RANGE_APPLY}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="inherit"
+                    onClick={onCancelCustom}
+                  >
+                    {USAGE_METRICS_CUSTOM_RANGE_CANCEL}
+                  </Button>
+                </Box>
+              </Box>
+              {customRangeError && (
+                <Typography variant="caption" color="error">
+                  {customRangeError}
                 </Typography>
-                <TextField
-                  type="date"
-                  size="small"
-                  value={customEnd}
-                  onChange={(e) => onCustomEndChange(e.target.value)}
-                  sx={{ minWidth: 160, maxWidth: "100%" }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Calendar size={16} />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-              </Box>
-              <Box sx={{ display: "flex", gap: 1 }}>
-                <Button
-                  size="small"
-                  variant="contained"
-                  color="warning"
-                  onClick={onApplyCustom}
-                  disabled={!customStart || !customEnd}
-                >
-                  {USAGE_METRICS_CUSTOM_RANGE_APPLY}
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="inherit"
-                  onClick={onCancelCustom}
-                >
-                  {USAGE_METRICS_CUSTOM_RANGE_CANCEL}
-                </Button>
-              </Box>
+              )}
             </Box>
           )}
         </Box>

@@ -57,6 +57,14 @@ export const USAGE_METRICS_CUSTOM_RANGE_TO = "to";
 
 export const USAGE_METRICS_CUSTOM_RANGE_PLACEHOLDER = "Select custom range";
 
+// Backend metrics/usage-count search endpoints reject ranges longer than 1 year.
+export const USAGE_METRICS_CUSTOM_RANGE_MAX_DAYS = 366;
+
+export const USAGE_METRICS_CUSTOM_RANGE_INVALID_ORDER =
+  "End date must be on or after the start date.";
+
+export const USAGE_METRICS_CUSTOM_RANGE_TOO_LONG = `Custom range can span at most ${USAGE_METRICS_CUSTOM_RANGE_MAX_DAYS} days.`;
+
 export const USAGE_METRICS_OVERVIEW_ERROR =
   "Failed to load usage overview data. Please try again.";
 
@@ -70,6 +78,9 @@ export const USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT =
   "No products found for this deployment.";
 
 export const USAGE_METRICS_NO_INSTANCE_DATA = "No instance data available.";
+
+export const USAGE_METRICS_PRODUCT_DATA_UNAVAILABLE =
+  "Usage data is not available for this product";
 
 export const USAGE_METRICS_STAT_ENVIRONMENTS = "Environments";
 
