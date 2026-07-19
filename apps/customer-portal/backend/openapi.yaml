@@ -5135,6 +5135,29 @@ components:
           $ref: '#/components/schemas/Date'
         endDate:
           $ref: '#/components/schemas/Date'
+    CountTypeAggregation:
+      required:
+      - aggregation
+      - min
+      - max
+      - avg
+      type: object
+      properties:
+        aggregation:
+          type: string
+          description: Aggregation function applied for this count type (e.g. sum, max)
+        min:
+          type: number
+          format: double
+          description: Minimum aggregated value across the range
+        max:
+          type: number
+          format: double
+          description: Maximum aggregated value across the range
+        avg:
+          type: number
+          format: double
+          description: Average aggregated value across the range
     DeployedProductMetricsUsageCountsSummary:
       required:
       - dateRange
@@ -5157,7 +5180,7 @@ components:
           type: object
           description: Count types aggregated over the range
           additionalProperties:
-            type: integer
+            $ref: '#/components/schemas/CountTypeAggregation'
     DeployedProductMetricsUsageCountsResponse:
       required:
       - product
