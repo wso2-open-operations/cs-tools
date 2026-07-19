@@ -30,7 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ChevronDown, Code, Monitor, Package, Server } from "@wso2/oxygen-ui-icons-react";
 import EmptyState from "@components/empty-state/EmptyState";
-import { LineChart } from "@wso2/oxygen-ui-charts-react";
+import { LineChart, XAxis, YAxis } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
 import { useEffect, useMemo, useRef } from "react";
 import {
@@ -56,7 +56,10 @@ import { usePostDeploymentProductsSearchAll } from "@features/project-details/ap
 import usePostDeploymentProductMetricsSearch from "@features/project-details/api/usePostDeploymentProductMetricsSearch";
 import usePostDeploymentProductUsageCountsSearch from "@features/project-details/api/usePostDeploymentProductUsageCountsSearch";
 import useGetDeployedProductInstancesInfinite from "@features/project-details/api/useGetDeployedProductInstancesInfinite";
-import { computeSeriesSummary, formatUsageMetricCount } from "@features/project-details/utils/usageMetrics";
+import {
+  computeSeriesSummary,
+  formatUsageMetricCount,
+} from "@features/project-details/utils/usageMetrics";
 import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
 import type {
   MetricPillProps,
@@ -76,9 +79,12 @@ const ZERO_SUMMARY: CurrMinMaxAvg = { curr: 0, avg: 0, min: 0, max: 0 };
 // list to ~5 visible rows before it becomes internally scrollable.
 const INSTANCE_ROW_HEIGHT = 64;
 
-/** Short period label (MM-DD) for chart x-axes. */
+/** Short period label ("Jul 19") for chart x-axes. */
 function formatPeriodLabel(date: string): string {
-  return date.slice(5);
+  return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 // ─── Curr/Avg/Min/Max metric block ────────────────────────────────────────────
@@ -466,7 +472,7 @@ function ProductAccordionRow({
                   key={trend.key}
                   size={{
                     xs: 12,
-                    lg: chartTrends.length === 1 ? 12 : chartTrends.length === 3 ? 4 : 6,
+                    lg: chartTrends.length === 1 ? 12 : 4,
                   }}
                 >
                   <Card sx={{ p: 2, borderRadius: 0 }}>
@@ -481,9 +487,8 @@ function ProductAccordionRow({
                         width="100%"
                         margin={USAGE_LINE_CHART_MARGIN}
                         accessibilityLayer={false}
-                        xAxis={{
-                          interval: Math.max(0, Math.ceil(trend.data.length / 6) - 1),
-                        }}
+                        xAxis={{ show: false }}
+                        yAxis={{ show: false }}
                         legend={{ show: false }}
                         grid={{ show: true, strokeDasharray: "3 3" }}
                         lines={[
@@ -495,7 +500,21 @@ function ProductAccordionRow({
                             dot: false,
                           },
                         ]}
-                      />
+                      >
+                        <XAxis
+                          dataKey="name"
+                          tickMargin={8}
+                          interval={Math.max(0, Math.ceil(trend.data.length / 6) - 1)}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis
+                          tickMargin={8}
+                          allowDecimals={false}
+                          domain={[0, (max: number) => Math.max(1, Math.ceil(max * 1.2))]}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value: number) => formatUsageMetricCount(value)}
+                        />
+                      </LineChart>
                     </UsageChartSurface>
                   </Card>
                 </Grid>
