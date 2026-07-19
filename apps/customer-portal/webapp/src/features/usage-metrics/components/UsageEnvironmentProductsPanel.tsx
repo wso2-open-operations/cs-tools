@@ -197,8 +197,21 @@ function ProductAccordionRow({
       .map((key) => {
         const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
         const stat = countTypes[key];
-        const value =
-          stat[stat.aggregation as "min" | "max" | "avg"] ?? stat.max ?? 0;
+        let value: number;
+        switch (stat.aggregation) {
+          case "min":
+            value = stat.min;
+            break;
+          case "avg":
+            value = stat.avg;
+            break;
+          case "max":
+          default:
+            // "sum" and any other undocumented aggregations aren't captured as a
+            // discrete stat field, so fall back to max as the most representative value.
+            value = stat.max ?? 0;
+            break;
+        }
         return { label: cfg.title, value: formatUsageMetricCount(value) };
       });
   }, [countTypes, metricKeys]);
@@ -316,11 +329,6 @@ function ProductAccordionRow({
                   ? `${product.name} ${product.version}`
                   : (product.name || product.version)}
               </Typography>
-              {product.version && (
-                <Typography variant="caption" color="text.secondary">
-                  v{product.version}
-                </Typography>
-              )}
             </Box>
           </Box>
 
