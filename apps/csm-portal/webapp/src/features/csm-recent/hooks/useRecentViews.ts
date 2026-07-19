@@ -15,6 +15,8 @@
 // under the License.
 
 import { useCallback, useEffect, useState } from "react";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import type { QuickCaseHit } from "@features/csm-cases/api/useQuickCaseSearch";
 
 export type RecentViewKind =
   | "case"
@@ -52,12 +54,69 @@ export interface RecentView {
    * ordinary history entries.
    */
   pinned?: boolean;
+  /**
+   * Severity/status/ownership snapshot for `kind: "case"` entries, captured
+   * at record time — lets the quick-nav palette render Pinned/Recent cases
+   * as the same rich card a live case search hit gets, without re-fetching.
+   * Absent for non-case kinds and for entries recorded before this field
+   * existed.
+   */
+  caseHit?: Omit<QuickCaseHit, "id">;
 }
 
-const STORAGE_KEY = "csm.recentViews.v1";
+/**
+ * Base for the per-user storage key (see {@link currentStorageKey}). Kept
+ * distinct from the old flat key of the same literal value only for the
+ * one-time {@link clearLegacyUnscopedKey} cleanup below — every read/write
+ * always goes through the suffixed key.
+ */
+const STORAGE_KEY_BASE = "csm.recentViews.v1";
 /** Recency cap for UNPINNED entries only — pinned entries are always kept. */
 const MAX_ENTRIES = 12;
 const STORAGE_EVENT = "csm:recent-views-changed";
+
+/**
+ * The signed-in user's stable id (ID token `sub` claim), or `null` before
+ * it's resolved. Every read/write is scoped under this so a different
+ * engineer signing in on the same browser never sees a previous user's
+ * recent/pinned cases — see {@link useSyncActiveUserKey}. Scoped to this
+ * tab's JS runtime; each tab resolves it independently.
+ */
+let activeUserKey: string | null = null;
+
+function currentStorageKey(): string {
+  return `${STORAGE_KEY_BASE}.${activeUserKey ?? "pending"}`;
+}
+
+let legacyKeyCleared = false;
+/** One-time removal of the old, unscoped key from before per-user scoping existed. */
+function clearLegacyUnscopedKey(): void {
+  if (legacyKeyCleared) return;
+  legacyKeyCleared = true;
+  try {
+    localStorage.removeItem(STORAGE_KEY_BASE);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Wipe the active user's bucket (including pinned entries) on an explicit
+// sign-out. Registered once at module load, not tied to any component, so
+// it fires reliably regardless of where in the tree sign-out is triggered.
+// "app:signing-out" is dispatched ONLY by the manual "Sign out" action
+// (UserProfile.tsx) and the idle-timeout auto sign-out (IdleTimeoutProvider.tsx)
+// — never by a silent re-auth/token-refresh — so this never clears data out
+// from under a user who is still signed in.
+if (typeof window !== "undefined") {
+  window.addEventListener("app:signing-out", () => {
+    try {
+      localStorage.removeItem(currentStorageKey());
+    } catch {
+      /* ignore */
+    }
+    window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
+  });
+}
 
 /**
  * Enforce the recency cap on unpinned entries while keeping every pinned entry,
@@ -78,9 +137,9 @@ function capUnpinned(entries: RecentView[]): RecentView[] {
   return kept;
 }
 
-function readStorage(): RecentView[] {
+function readStorageKey(key: string): RecentView[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -102,9 +161,45 @@ function readStorage(): RecentView[] {
   }
 }
 
+function readStorage(): RecentView[] {
+  return readStorageKey(currentStorageKey());
+}
+
+/**
+ * Folds any views recorded before identity resolved (the shared "pending"
+ * bucket — see {@link currentStorageKey}) into the now-resolved user's own
+ * bucket, then clears "pending". Without this, that slice of history would
+ * both vanish from the user's own Recents (reads move to the new bucket)
+ * and stay behind in "pending" where the next pre-resolution window — even
+ * a different user's — could read it, defeating the point of scoping.
+ */
+function migratePendingBucket(userKey: string): void {
+  try {
+    const pendingKey = `${STORAGE_KEY_BASE}.pending`;
+    const pending = readStorageKey(pendingKey);
+    if (pending.length === 0) {
+      localStorage.removeItem(pendingKey);
+      return;
+    }
+    const targetKey = `${STORAGE_KEY_BASE}.${userKey}`;
+    const target = readStorageKey(targetKey);
+    // Entries already scoped to this user win on conflict.
+    const merged = capUnpinned([
+      ...target,
+      ...pending.filter(
+        (p) => !target.some((t) => t.kind === p.kind && t.id === p.id),
+      ),
+    ]);
+    localStorage.setItem(targetKey, JSON.stringify(merged));
+    localStorage.removeItem(pendingKey);
+  } catch {
+    /* ignore */
+  }
+}
+
 function writeStorage(entries: RecentView[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    localStorage.setItem(currentStorageKey(), JSON.stringify(entries));
     // Notify other listeners in the same tab — storage events only fire
     // across tabs, so we dispatch a CustomEvent for in-tab subscribers.
     window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
@@ -113,8 +208,53 @@ function writeStorage(entries: RecentView[]): void {
   }
 }
 
+/**
+ * Resolves THIS component instance's view of the signed-in user's stable id
+ * (ID token `sub` claim) and syncs it into the shared `activeUserKey`, so
+ * `currentStorageKey()` resolves to that user's bucket. `activeUserKey` is a
+ * plain module variable — scoped to this tab's JS runtime, not shared across
+ * browser tabs — so every hook below calls this itself rather than trusting
+ * that some *other* component elsewhere in the tree already resolved it
+ * first. Without that, a component mounted before whichever one owned the
+ * sync (or the very first component in a freshly opened tab) could read the
+ * still-`null`/"pending" bucket indefinitely, with the real data sitting
+ * untouched under the correct per-user key.
+ */
+function useSyncActiveUserKey(): void {
+  const sub = useIdTokenClaims()?.sub;
+
+  useEffect(() => {
+    clearLegacyUnscopedKey();
+  }, []);
+
+  useEffect(() => {
+    // Fold in anything recorded during this session's own pre-resolution
+    // window before switching the active bucket over.
+    if (sub && activeUserKey === null) {
+      migratePendingBucket(sub);
+    }
+    activeUserKey = sub ?? null;
+    // Let every `useRecentViews()` instance in this tab — including ones
+    // that resolved their own `sub` earlier and are just listening — pick up
+    // the now-current bucket immediately, rather than waiting for the next
+    // unrelated write to trigger a re-read.
+    window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
+  }, [sub]);
+}
+
+/**
+ * Kept as a separate export so a component can make the sync-on-mount
+ * ordering explicit (e.g. near the app root) — but every hook below already
+ * calls {@link useSyncActiveUserKey} itself, so mounting this isn't required
+ * for correctness.
+ */
+export function useSyncRecentViewsIdentity(): void {
+  useSyncActiveUserKey();
+}
+
 /** Read-only access to the recent-views list. */
 export function useRecentViews(): RecentView[] {
+  useSyncActiveUserKey();
   const [entries, setEntries] = useState<RecentView[]>(() => readStorage());
 
   useEffect(() => {
@@ -137,6 +277,7 @@ export function useRecentViews(): RecentView[] {
 export function useRecordRecentView(): (
   entry: Omit<RecentView, "visitedAt" | "pinned">,
 ) => void {
+  useSyncActiveUserKey();
   return useCallback((entry: Omit<RecentView, "visitedAt" | "pinned">) => {
     const now = new Date().toISOString();
     const current = readStorage();
