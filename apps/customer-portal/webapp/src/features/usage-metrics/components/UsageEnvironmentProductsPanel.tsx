@@ -301,7 +301,6 @@ function ProductAccordionRow({
 
   const chartTrends = useMemo(
     () => [
-      ...countTrends,
       {
         key: "CORE_USAGE",
         title: CORE_CHART_CONFIG.title,
@@ -309,6 +308,7 @@ function ProductAccordionRow({
         stroke: CORE_CHART_CONFIG.stroke,
         data: coreTrend,
       },
+      ...countTrends,
     ],
     [countTrends, coreTrend],
   );
