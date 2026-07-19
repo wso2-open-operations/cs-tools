@@ -74,6 +74,8 @@ export default function useGetDeployedProductInstancesInfinite(
       return response.json() as Promise<InstancesResponse>;
     },
     enabled: !!deployedProductId && isSignedIn && !isAuthLoading,
-    staleTime: 0,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }

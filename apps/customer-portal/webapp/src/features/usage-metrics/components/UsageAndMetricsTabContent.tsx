@@ -31,6 +31,7 @@ import {
   resolveUsagePresetDateRange,
 } from "@features/usage-metrics/utils/usageMetricsTab";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
+import { getUsageOverviewAccentForTypeId } from "@features/usage-metrics/utils/usageMetricsAccent";
 
 /**
  * Usage & Metrics area: time range, inner environment tabs, overview and product drill-downs.
@@ -72,6 +73,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
           id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
           label: dep.name,
           icon: Server,
+          iconColor: getUsageOverviewAccentForTypeId(dep.type.id).iconColor,
           instanceCount: dep.instanceCount ?? 0,
           productCount: dep.productCount ?? 0,
         })),

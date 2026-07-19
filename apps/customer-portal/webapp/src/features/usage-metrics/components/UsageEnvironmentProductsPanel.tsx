@@ -46,9 +46,9 @@ import {
   USAGE_METRICS_STAT_LABEL_MIN,
   USAGE_METRICS_STAT_LABEL_MAX,
   USAGE_METRICS_UNKNOWN_LABEL,
-  USAGE_METRICS_INSTANCE_OS_LABEL,
-  USAGE_METRICS_INSTANCE_JAVA_VERSION_LABEL,
-  USAGE_METRICS_INSTANCE_U2_LEVEL_LABEL,
+  USAGE_METRICS_INSTANCE_OS,
+  USAGE_METRICS_INSTANCE_JAVA,
+  USAGE_METRICS_INSTANCE_U2,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
 import type { InstanceItem } from "@features/project-details/types/usage";
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
@@ -454,7 +454,7 @@ function ProductAccordionRow({
           borderRadius: 0,
         }}
       >
-        {isLoading ? (
+        {isLoading || instancesLoading ? (
           <Skeleton variant="rounded" height={200} />
         ) : instances.length === 0 && chartTrends.every((t) => t.data.length === 0) ? (
           <Typography variant="body2" color="text.secondary">
@@ -598,17 +598,17 @@ function InstanceRow({ instance }: { instance: InstanceItem }): JSX.Element {
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
         <MetricPill
           icon={<Monitor size={16} color={colors.grey?.[400]} />}
-          label={USAGE_METRICS_INSTANCE_OS_LABEL}
+          label={USAGE_METRICS_INSTANCE_OS}
           value={os}
         />
         <MetricPill
           icon={<Code size={16} color={colors.grey?.[400]} />}
-          label={USAGE_METRICS_INSTANCE_JAVA_VERSION_LABEL}
+          label={USAGE_METRICS_INSTANCE_JAVA}
           value={jdkVersion}
         />
         <MetricPill
           icon={<Package size={16} color={colors.grey?.[400]} />}
-          label={USAGE_METRICS_INSTANCE_U2_LEVEL_LABEL}
+          label={USAGE_METRICS_INSTANCE_U2}
           value={u2Level}
         />
       </Box>
