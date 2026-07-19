@@ -21,6 +21,7 @@ import {
   Alert,
   Box,
   Card,
+  CircularProgress,
   Grid,
   Skeleton,
   Typography,
@@ -353,7 +354,9 @@ function ProductAccordionRow({
               gap: 5,
             }}
           >
-            {!isLoading && !hasChartData ? (
+            {isLoading ? (
+              <CircularProgress size={20} sx={{ color: a.iconColor }} />
+            ) : !hasChartData ? (
               <Typography
                 variant="body2"
                 color="text.secondary"
