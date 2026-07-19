@@ -519,6 +519,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
         : data.subject,
       subtitle: `${data.customer} · ${data.projectName}`,
       href: detailPath,
+      // Snapshot of the fields QuickNavCaseCard needs, so Pinned/Recent
+      // entries for this case render the same rich card a live search hit
+      // does, without the palette re-fetching it.
+      caseHit: {
+        caseNumber: data.caseNumber,
+        wso2CaseId: data.wso2CaseId,
+        subject: data.subject,
+        severity: data.severity,
+        state: data.state,
+        workState: data.workState,
+        caseType: data.caseType,
+        updatedOn: data.updatedAt,
+        assigneeName: data.assignee !== "Unassigned" ? data.assignee : undefined,
+      },
     });
   }, [data, recordView]);
 

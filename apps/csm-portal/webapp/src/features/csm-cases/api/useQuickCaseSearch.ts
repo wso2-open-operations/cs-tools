@@ -17,10 +17,17 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { severityFromPriority } from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
+  BeCaseType,
 } from "@api/backend/types";
+import type {
+  CaseState,
+  CaseWorkState,
+  Severity,
+} from "@features/csm-dashboard/types/abtDashboard";
 
 /** Don't fire a search until the user has typed something searchable. */
 export const QUICK_CASE_MIN_QUERY_LEN = 2;
@@ -29,15 +36,23 @@ export const QUICK_CASE_MIN_QUERY_LEN = 2;
 const QUICK_CASE_LIMIT = 8;
 
 /**
- * One hit from the global-search case lookup. Carries only what the palette
- * needs: the UUID `id` for the `/cases/:id` link and the human-readable
- * identity/subject for display.
+ * One hit from the global-search case lookup. Carries the UUID `id` (for the
+ * `/cases/:id` link), the human-readable identity/subject, and enough of the
+ * case's severity/status/ownership for the palette to render a result card
+ * matching the case list's visual language.
  */
 export interface QuickCaseHit {
   id: string;
   caseNumber?: string;
   wso2CaseId?: string;
   subject: string;
+  severity: Severity;
+  state: CaseState;
+  workState?: CaseWorkState | null;
+  caseType?: BeCaseType;
+  updatedOn?: string;
+  createdOn?: string;
+  assigneeName?: string;
 }
 
 /**
@@ -70,6 +85,13 @@ export function useQuickCaseSearch(
         caseNumber: c.number,
         wso2CaseId: c.internalId,
         subject: c.subject ?? "(no subject)",
+        severity: severityFromPriority(c.severity),
+        state: (c.state ?? "open") as CaseState,
+        workState: c.workState,
+        caseType: c.type,
+        updatedOn: c.updatedOn,
+        createdOn: c.createdOn,
+        assigneeName: c.assignedEngineer?.name,
       }));
     },
     enabled: q.length >= QUICK_CASE_MIN_QUERY_LEN,

@@ -42,8 +42,10 @@ describe("useRecentViews + useRecordRecentView", () => {
   });
 
   it("drops persisted entries with an unknown kind", () => {
+    // No identity has been synced in this test (`useSyncRecentViewsIdentity`
+    // isn't mounted), so reads/writes fall back to the "pending" bucket.
     localStorage.setItem(
-      "csm.recentViews.v1",
+      "csm.recentViews.v1.pending",
       JSON.stringify([
         { kind: "case", id: "1", title: "Case 1", href: "/cases/1", visitedAt: "t" },
         { kind: "bogus", id: "2", title: "X", href: "/x", visitedAt: "t" },

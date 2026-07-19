@@ -15,6 +15,8 @@
 // under the License.
 
 import { useCallback, useEffect, useState } from "react";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import type { QuickCaseHit } from "@features/csm-cases/api/useQuickCaseSearch";
 
 export type RecentViewKind =
   | "case"
@@ -52,12 +54,68 @@ export interface RecentView {
    * ordinary history entries.
    */
   pinned?: boolean;
+  /**
+   * Severity/status/ownership snapshot for `kind: "case"` entries, captured
+   * at record time — lets the quick-nav palette render Pinned/Recent cases
+   * as the same rich card a live case search hit gets, without re-fetching.
+   * Absent for non-case kinds and for entries recorded before this field
+   * existed.
+   */
+  caseHit?: Omit<QuickCaseHit, "id">;
 }
 
-const STORAGE_KEY = "csm.recentViews.v1";
+/**
+ * Base for the per-user storage key (see {@link currentStorageKey}). Kept
+ * distinct from the old flat key of the same literal value only for the
+ * one-time {@link clearLegacyUnscopedKey} cleanup below — every read/write
+ * always goes through the suffixed key.
+ */
+const STORAGE_KEY_BASE = "csm.recentViews.v1";
 /** Recency cap for UNPINNED entries only — pinned entries are always kept. */
 const MAX_ENTRIES = 12;
 const STORAGE_EVENT = "csm:recent-views-changed";
+
+/**
+ * The signed-in user's stable id (ID token `sub` claim), or `null` before
+ * it's resolved. Every read/write is scoped under this so a different
+ * engineer signing in on the same browser never sees a previous user's
+ * recent/pinned cases — see {@link useSyncRecentViewsIdentity}.
+ */
+let activeUserKey: string | null = null;
+
+function currentStorageKey(): string {
+  return `${STORAGE_KEY_BASE}.${activeUserKey ?? "pending"}`;
+}
+
+let legacyKeyCleared = false;
+/** One-time removal of the old, unscoped key from before per-user scoping existed. */
+function clearLegacyUnscopedKey(): void {
+  if (legacyKeyCleared) return;
+  legacyKeyCleared = true;
+  try {
+    localStorage.removeItem(STORAGE_KEY_BASE);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Wipe the active user's bucket (including pinned entries) on an explicit
+// sign-out. Registered once at module load, not tied to any component, so
+// it fires reliably regardless of where in the tree sign-out is triggered.
+// "app:signing-out" is dispatched ONLY by the manual "Sign out" action
+// (UserProfile.tsx) and the idle-timeout auto sign-out (IdleTimeoutProvider.tsx)
+// — never by a silent re-auth/token-refresh — so this never clears data out
+// from under a user who is still signed in.
+if (typeof window !== "undefined") {
+  window.addEventListener("app:signing-out", () => {
+    try {
+      localStorage.removeItem(currentStorageKey());
+    } catch {
+      /* ignore */
+    }
+    window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
+  });
+}
 
 /**
  * Enforce the recency cap on unpinned entries while keeping every pinned entry,
@@ -80,7 +138,7 @@ function capUnpinned(entries: RecentView[]): RecentView[] {
 
 function readStorage(): RecentView[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(currentStorageKey());
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -104,7 +162,7 @@ function readStorage(): RecentView[] {
 
 function writeStorage(entries: RecentView[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    localStorage.setItem(currentStorageKey(), JSON.stringify(entries));
     // Notify other listeners in the same tab — storage events only fire
     // across tabs, so we dispatch a CustomEvent for in-tab subscribers.
     window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
@@ -128,6 +186,31 @@ export function useRecentViews(): RecentView[] {
   }, []);
 
   return entries;
+}
+
+/**
+ * Resolves the signed-in user's stable id (ID token `sub` claim) and scopes
+ * all recent-views reads/writes to it, so a different engineer signing in on
+ * the same browser profile never sees a previous user's recent/pinned cases.
+ * Mount once near the app root (e.g. `AppLayout`) — every `useRecentViews`/
+ * `useRecordRecentView`/`toggleRecentViewPin`/`clearRecentViews` call site
+ * reads whichever bucket this last resolved to, with no changes needed at
+ * those call sites.
+ */
+export function useSyncRecentViewsIdentity(): void {
+  const sub = useIdTokenClaims()?.sub;
+
+  useEffect(() => {
+    clearLegacyUnscopedKey();
+  }, []);
+
+  useEffect(() => {
+    activeUserKey = sub ?? null;
+    // Let already-mounted `useRecentViews()` instances pick up the
+    // now-current bucket immediately, rather than waiting for the next
+    // unrelated write to trigger a re-read.
+    window.dispatchEvent(new CustomEvent(STORAGE_EVENT));
+  }, [sub]);
 }
 
 /**
