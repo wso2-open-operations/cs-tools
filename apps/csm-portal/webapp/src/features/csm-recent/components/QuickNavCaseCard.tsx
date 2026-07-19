@@ -82,7 +82,7 @@ export default function QuickNavCaseCard({
             sx={{ fontWeight: 600 }}
           />
         )}
-        {hit.caseType && (
+        {hit.caseType && CASE_TYPE_LABEL[hit.caseType] && (
           <Chip
             size="small"
             variant="outlined"

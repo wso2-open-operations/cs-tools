@@ -17,7 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
-import { severityFromPriority } from "@api/backend/mappers";
+import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
@@ -86,7 +86,7 @@ export function useQuickCaseSearch(
         wso2CaseId: c.internalId,
         subject: c.subject ?? "(no subject)",
         severity: severityFromPriority(c.severity),
-        state: (c.state ?? "open") as CaseState,
+        state: uiStateFromBe(c.state),
         workState: c.workState,
         caseType: c.type,
         updatedOn: c.updatedOn,
