@@ -27,13 +27,7 @@ import {
   alpha,
   colors,
 } from "@wso2/oxygen-ui";
-import {
-  ChevronDown,
-  Code2,
-  Monitor,
-  Package,
-  Server,
-} from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, Package, Server } from "@wso2/oxygen-ui-icons-react";
 import EmptyState from "@components/empty-state/EmptyState";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
@@ -41,9 +35,6 @@ import { useMemo } from "react";
 import {
   USAGE_LINE_CHART_MARGIN,
   USAGE_METRICS_ENVIRONMENT_PRODUCTS_ERROR,
-  USAGE_METRICS_INSTANCE_OS,
-  USAGE_METRICS_INSTANCE_JAVA,
-  USAGE_METRICS_INSTANCE_U2,
   USAGE_METRICS_NO_INSTANCE_DATA,
   USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT,
   USAGE_METRICS_PRODUCT_INSTANCES_SECTION,
@@ -52,159 +43,31 @@ import {
   USAGE_METRICS_STAT_LABEL_AVG,
   USAGE_METRICS_STAT_LABEL_MIN,
   USAGE_METRICS_STAT_LABEL_MAX,
+  USAGE_METRICS_UNKNOWN_LABEL,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
-import usePostDeploymentInstancesUsagesSearch from "@features/project-details/api/usePostDeploymentInstancesUsagesSearch";
-import usePostDeploymentInstancesMetricsSearch from "@features/project-details/api/usePostDeploymentInstancesMetricsSearch";
 import { usePostDeploymentProductsSearchAll } from "@features/project-details/api/usePostDeploymentProductsSearch";
-import type { CurrMinMaxAvg, UsageProductInstanceRow } from "@features/project-details/types/usage";
+import usePostDeploymentProductMetricsSearch from "@features/project-details/api/usePostDeploymentProductMetricsSearch";
+import usePostDeploymentProductUsageCountsSearch from "@features/project-details/api/usePostDeploymentProductUsageCountsSearch";
+import { computeSeriesSummary, formatUsageMetricCount } from "@features/project-details/utils/usageMetrics";
+import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
 import type {
   MetricPillProps,
-  ProductAccordionRowProps,
-  ProductExpandedViewProps,
   UsageEnvironmentProductsPanelProps,
 } from "@features/usage-metrics/types/usageMetrics";
 import { getUsageEnvironmentPanelAccent } from "@features/usage-metrics/utils/usageMetricsAccent";
-import { deriveUsageEnvironmentProducts } from "@features/usage-metrics/utils/usageMetricsEnvironmentProducts";
+import {
+  CORE_CHART_CONFIG,
+  METRIC_CHART_CONFIG,
+  METRIC_CHART_CONFIG_FALLBACK,
+  getProductMetricKeys,
+} from "@features/usage-metrics/utils/usageMetricsProductClassifier";
 
-// ─── Per-product expanded view ────────────────────────────────────────────────
+const ZERO_SUMMARY: CurrMinMaxAvg = { curr: 0, avg: 0, min: 0, max: 0 };
 
-function ProductExpandedView({ product }: ProductExpandedViewProps): JSX.Element {
-  const instances = product.instances;
-
-  if (!instances || instances.length === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        {USAGE_METRICS_NO_INSTANCE_DATA}
-      </Typography>
-    );
-  }
-
-  const chartGridSize =
-    product.chartTrends.length === 1 ? 12
-    : product.chartTrends.length === 3 ? 4
-    : 6;
-
-  return (
-    <>
-      <Grid
-        container
-        spacing={2}
-        sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
-      >
-        {product.chartTrends.map((trend) => (
-          <Grid key={trend.title} size={{ xs: 12, lg: chartGridSize }}>
-            <Card sx={{ p: 2, borderRadius: 0 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
-                {trend.title}
-              </Typography>
-              <UsageChartSurface minHeight={200}>
-                <LineChart
-                  data={trend.data}
-                  xAxisDataKey="name"
-                  height={200}
-                  width="100%"
-                  margin={USAGE_LINE_CHART_MARGIN}
-                  accessibilityLayer={false}
-                  xAxis={{ interval: Math.max(0, Math.ceil(trend.data.length / 6) - 1) }}
-                  legend={{ show: false }}
-                  grid={{ show: true, strokeDasharray: "3 3" }}
-                  lines={[
-                    {
-                      dataKey: "value",
-                      name: trend.title,
-                      stroke: trend.stroke,
-                      strokeWidth: 2.5,
-                      dot: false,
-                    },
-                  ]}
-                />
-              </UsageChartSurface>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-
-      <Box sx={{ mt: 2 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
-          {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({instances.length})
-        </Typography>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          {instances.map((inst) => (
-            <InstanceRow key={inst.id} instance={inst} />
-          ))}
-        </Box>
-      </Box>
-    </>
-  );
-}
-
-// ─── Flat instance row ────────────────────────────────────────────────────────
-
-function InstanceRow({
-  instance,
-}: {
-  instance: UsageProductInstanceRow;
-}): JSX.Element {
-  const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
-
-  return (
-    <Box
-      sx={{
-        px: 2,
-        py: 1.5,
-        display: "flex",
-        flexDirection: { xs: "column", lg: "row" },
-        alignItems: { xs: "stretch", lg: "center" },
-        justifyContent: "space-between",
-        gap: 2,
-        border: "1px solid",
-        borderColor: "divider",
-        bgcolor: wellBg,
-      }}
-    >
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 1.5,
-          minWidth: { lg: 200 },
-        }}
-      >
-        <Server size={18} color={colors.grey?.[500]} />
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          {instance.hostName}
-        </Typography>
-      </Box>
-      <Box
-        sx={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 5,
-          alignItems: "center",
-          justifyContent: { xs: "flex-start", lg: "flex-end" },
-          flex: 1,
-          minWidth: 0,
-        }}
-      >
-        <MetricPill
-          icon={<Monitor size={16} color={colors.grey?.[400]} />}
-          label={USAGE_METRICS_INSTANCE_OS}
-          value={instance.os}
-        />
-        <MetricPill
-          icon={<Code2 size={16} color={colors.grey?.[400]} />}
-          label={USAGE_METRICS_INSTANCE_JAVA}
-          value={instance.javaVersion}
-        />
-        <MetricPill
-          icon={<Package size={16} color={colors.grey?.[400]} />}
-          label={USAGE_METRICS_INSTANCE_U2}
-          value={instance.u2Level}
-        />
-      </Box>
-    </Box>
-  );
+/** Short period label (MM-DD) for chart x-axes. */
+function formatPeriodLabel(date: string): string {
+  return date.slice(5);
 }
 
 // ─── Curr/Avg/Min/Max metric block ────────────────────────────────────────────
@@ -217,9 +80,9 @@ function CurrMinMaxBlock({
   summary: CurrMinMaxAvg;
 }): JSX.Element {
   const cols = [
-    { l: USAGE_METRICS_STAT_LABEL_AVG, v: summary.avg, highlight: false },
-    { l: USAGE_METRICS_STAT_LABEL_MIN, v: summary.min, highlight: false },
-    { l: USAGE_METRICS_STAT_LABEL_MAX, v: summary.max, highlight: false },
+    { l: USAGE_METRICS_STAT_LABEL_AVG, v: summary.avg },
+    { l: USAGE_METRICS_STAT_LABEL_MIN, v: summary.min },
+    { l: USAGE_METRICS_STAT_LABEL_MAX, v: summary.max },
   ];
 
   return (
@@ -231,7 +94,7 @@ function CurrMinMaxBlock({
         {label}
       </Typography>
       <Box sx={{ display: "flex", gap: 2 }}>
-        {cols.map(({ l, v, highlight }) => (
+        {cols.map(({ l, v }) => (
           <Box key={l} sx={{ textAlign: "left" }}>
             <Typography
               variant="caption"
@@ -241,13 +104,7 @@ function CurrMinMaxBlock({
             >
               {l}
             </Typography>
-            <Typography
-              variant="body1"
-              sx={{
-                fontWeight: 700,
-                color: highlight ? "primary.main" : "text.primary",
-              }}
-            >
+            <Typography variant="body1" sx={{ fontWeight: 700 }}>
               {v}
             </Typography>
           </Box>
@@ -257,15 +114,143 @@ function CurrMinMaxBlock({
   );
 }
 
-// ─── Product accordion row ────────────────────────────────────────────────────
+function MetricPill({ icon, label, value }: MetricPillProps): JSX.Element {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+      {icon}
+      <Box>
+        <Typography variant="caption" color="text.secondary">
+          {label}
+        </Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {value}
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
+
+// ─── Per-product accordion row (fetches its own metrics + usage counts) ──────
+
+type ProductRowMeta = {
+  id: string;
+  name: string;
+  version: string;
+};
 
 function ProductAccordionRow({
   product,
   deploymentId,
+  dateRange,
   expanded,
   onToggle,
-}: ProductAccordionRowProps): JSX.Element {
+}: {
+  product: ProductRowMeta;
+  deploymentId: string;
+  dateRange: { startDate: string; endDate: string };
+  expanded: boolean;
+  onToggle: () => void;
+}): JSX.Element {
   const a = getUsageEnvironmentPanelAccent(deploymentId);
+
+  const payload = useMemo(
+    () => ({
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+    }),
+    [dateRange],
+  );
+
+  const { data: metricsData, isLoading: metricsLoading } =
+    usePostDeploymentProductMetricsSearch(deploymentId, product.id, payload);
+  const { data: countsData, isLoading: countsLoading } =
+    usePostDeploymentProductUsageCountsSearch(deploymentId, product.id, payload);
+
+  const isLoading = metricsLoading || countsLoading;
+
+  const metricKeys = useMemo(
+    () => getProductMetricKeys(product.name, product.version),
+    [product.name, product.version],
+  );
+
+  const coreSummary = useMemo((): CurrMinMaxAvg => {
+    if (!metricsData) return ZERO_SUMMARY;
+    return {
+      curr: 0,
+      avg: metricsData.summary.avgCores,
+      min: metricsData.summary.minCores,
+      max: metricsData.summary.maxCores,
+    };
+  }, [metricsData]);
+
+  const instanceSummary = useMemo((): CurrMinMaxAvg => {
+    if (!metricsData?.chartData?.length) return ZERO_SUMMARY;
+    return computeSeriesSummary(metricsData.chartData.map((d) => d.instanceCount));
+  }, [metricsData]);
+
+  const countTypes = countsData?.summary?.countTypes;
+
+  const summaryStats = useMemo(() => {
+    if (!countTypes) return [];
+    return metricKeys
+      .filter((key) => countTypes[key] != null)
+      .map((key) => {
+        const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
+        const stat = countTypes[key];
+        const value =
+          stat[stat.aggregation as "min" | "max" | "avg"] ?? stat.max ?? 0;
+        return { label: cfg.title, value: formatUsageMetricCount(value) };
+      });
+  }, [countTypes, metricKeys]);
+
+  const coreTrend = useMemo(() => {
+    const sorted = [...(metricsData?.chartData ?? [])].sort((x, y) =>
+      x.date.localeCompare(y.date),
+    );
+    return sorted.map((d) => ({ name: formatPeriodLabel(d.date), value: d.avgCores }));
+  }, [metricsData]);
+
+  const countTrends = useMemo(() => {
+    const sortedCharts = [...(countsData?.chartData ?? [])].sort((x, y) =>
+      x.date.localeCompare(y.date),
+    );
+    return metricKeys
+      .filter((key) => countTypes?.[key] != null)
+      .map((key) => {
+        const cfg = METRIC_CHART_CONFIG[key] ?? METRIC_CHART_CONFIG_FALLBACK;
+        return {
+          key,
+          title: cfg.title,
+          caption: cfg.caption,
+          stroke: cfg.stroke,
+          data: sortedCharts.map((point) => ({
+            name: formatPeriodLabel(point.date),
+            value: point.counts[key]?.value ?? 0,
+          })),
+        };
+      });
+  }, [countsData, countTypes, metricKeys]);
+
+  const chartTrends = useMemo(
+    () => [
+      ...countTrends,
+      {
+        key: "CORE_USAGE",
+        title: CORE_CHART_CONFIG.title,
+        caption: CORE_CHART_CONFIG.caption,
+        stroke: CORE_CHART_CONFIG.stroke,
+        data: coreTrend,
+      },
+    ],
+    [countTrends, coreTrend],
+  );
+
+  const latestInstances = useMemo(() => {
+    const sorted = [...(metricsData?.chartData ?? [])].sort((x, y) =>
+      y.date.localeCompare(x.date),
+    );
+    return sorted[0]?.instances ?? [];
+  }, [metricsData]);
 
   return (
     <Accordion
@@ -350,7 +335,7 @@ function ProductAccordionRow({
               gap: 5,
             }}
           >
-            {product.summaryStats.map((stat) => (
+            {summaryStats.map((stat) => (
               <Box key={stat.label}>
                 <Typography
                   variant="caption"
@@ -367,11 +352,11 @@ function ProductAccordionRow({
             ))}
             <CurrMinMaxBlock
               label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
-              summary={product.instanceSummary}
+              summary={instanceSummary}
             />
             <CurrMinMaxBlock
               label={USAGE_METRICS_PRODUCT_CORE_METRICS}
-              summary={product.coreSummary}
+              summary={coreSummary}
             />
           </Box>
         </Box>
@@ -386,27 +371,115 @@ function ProductAccordionRow({
           borderRadius: 0,
         }}
       >
-        <ProductExpandedView product={product} />
+        {isLoading ? (
+          <Skeleton variant="rounded" height={200} />
+        ) : latestInstances.length === 0 && chartTrends.every((t) => t.data.length === 0) ? (
+          <Typography variant="body2" color="text.secondary">
+            {USAGE_METRICS_NO_INSTANCE_DATA}
+          </Typography>
+        ) : (
+          <>
+            <Grid
+              container
+              spacing={2}
+              sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+            >
+              {chartTrends.map((trend) => (
+                <Grid
+                  key={trend.key}
+                  size={{
+                    xs: 12,
+                    lg: chartTrends.length === 1 ? 12 : chartTrends.length === 3 ? 4 : 6,
+                  }}
+                >
+                  <Card sx={{ p: 2, borderRadius: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
+                      {trend.title}
+                    </Typography>
+                    <UsageChartSurface minHeight={200}>
+                      <LineChart
+                        data={trend.data}
+                        xAxisDataKey="name"
+                        height={200}
+                        width="100%"
+                        margin={USAGE_LINE_CHART_MARGIN}
+                        accessibilityLayer={false}
+                        xAxis={{
+                          interval: Math.max(0, Math.ceil(trend.data.length / 6) - 1),
+                        }}
+                        legend={{ show: false }}
+                        grid={{ show: true, strokeDasharray: "3 3" }}
+                        lines={[
+                          {
+                            dataKey: "value",
+                            name: trend.title,
+                            stroke: trend.stroke,
+                            strokeWidth: 2.5,
+                            dot: false,
+                          },
+                        ]}
+                      />
+                    </UsageChartSurface>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+
+            {latestInstances.length > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
+                  {USAGE_METRICS_PRODUCT_INSTANCES_SECTION} ({latestInstances.length})
+                </Typography>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  {latestInstances.map((inst) => (
+                    <InstanceRow key={inst.id} name={inst.name} cores={inst.cores} />
+                  ))}
+                </Box>
+              </Box>
+            )}
+          </>
+        )}
       </AccordionDetails>
     </Accordion>
   );
 }
 
-function MetricPill({ icon, label, value }: MetricPillProps): JSX.Element {
+// ─── Flat instance row ────────────────────────────────────────────────────────
+
+function InstanceRow({ name, cores }: { name: string; cores: number }): JSX.Element {
+  const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
+
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-      {icon}
-      <Box>
-        <Typography variant="caption" color="text.secondary">
-          {label}
-        </Typography>
+    <Box
+      sx={{
+        px: 2,
+        py: 1.5,
+        display: "flex",
+        flexDirection: { xs: "column", lg: "row" },
+        alignItems: { xs: "stretch", lg: "center" },
+        justifyContent: "space-between",
+        gap: 2,
+        border: "1px solid",
+        borderColor: "divider",
+        bgcolor: wellBg,
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+        <Server size={18} color={colors.grey?.[500]} />
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          {value}
+          {name}
         </Typography>
       </Box>
+      <MetricPill
+        icon={<Package size={16} color={colors.grey?.[400]} />}
+        label={USAGE_METRICS_PRODUCT_CORE_METRICS}
+        value={String(cores)}
+      />
     </Box>
   );
 }
+
+// ─── Main panel ─────────────────────────────────────────────────────────────────
 
 export default function UsageEnvironmentProductsPanel({
   deploymentId,
@@ -414,42 +487,21 @@ export default function UsageEnvironmentProductsPanel({
   expandedProductIds,
   onToggleProduct,
 }: UsageEnvironmentProductsPanelProps): JSX.Element {
-  const metricsPayload = useMemo(
-    () => ({
-      filters: { startDate: dateRange.startDate, endDate: dateRange.endDate },
-    }),
-    [dateRange],
-  );
-
   const {
     data: deployedProducts,
-    isLoading: productsLoading,
-    isError: productsError,
+    isLoading,
+    isError,
   } = usePostDeploymentProductsSearchAll(deploymentId);
 
-  const {
-    data: usagesData,
-    isLoading: usagesLoading,
-    isError: usagesError,
-  } = usePostDeploymentInstancesUsagesSearch(deploymentId, metricsPayload);
-
-  const {
-    data: metricsData,
-    isLoading: metricsLoading,
-    isError: metricsError,
-  } = usePostDeploymentInstancesMetricsSearch(deploymentId, metricsPayload);
-
-  const isLoading = productsLoading || usagesLoading || metricsLoading;
-  const isError = productsError || usagesError || metricsError;
-
-  const products = useMemo(() => {
-    if (!deployedProducts || !usagesData || !metricsData) return [];
-    return deriveUsageEnvironmentProducts(
-      deployedProducts,
-      usagesData.usages,
-      metricsData.metrics,
-    );
-  }, [deployedProducts, usagesData, metricsData]);
+  const products = useMemo((): ProductRowMeta[] => {
+    if (!deployedProducts) return [];
+    return deployedProducts.map((p) => ({
+      id: p.id,
+      name: p.product?.label ?? USAGE_METRICS_UNKNOWN_LABEL,
+      version:
+        typeof p.version === "string" ? p.version : (p.version?.label ?? ""),
+    }));
+  }, [deployedProducts]);
 
   if (isError) {
     return (
@@ -537,6 +589,7 @@ export default function UsageEnvironmentProductsPanel({
           key={product.id}
           product={product}
           deploymentId={deploymentId}
+          dateRange={dateRange}
           expanded={expandedProductIds.has(product.id)}
           onToggle={() => onToggleProduct(product.id)}
         />

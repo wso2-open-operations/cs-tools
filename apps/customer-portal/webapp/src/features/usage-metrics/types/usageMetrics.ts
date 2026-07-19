@@ -18,7 +18,6 @@ import type { ReactNode } from "react";
 import type { UsageAggregatedMetricDefinition } from "@features/project-details/types/usage";
 import type {
   DataSource,
-  UsageEnvironmentProduct,
   UsageTimeRange,
   MetricTypeSummary,
 } from "@features/project-details/types/usage";
@@ -150,17 +149,6 @@ export type EnvironmentBreakdownAccordionProps = {
   expanded: boolean;
   onToggle: () => void;
   dateRange: UsageDateRangeIso;
-};
-
-export type ProductExpandedViewProps = {
-  product: UsageEnvironmentProduct;
-};
-
-export type ProductAccordionRowProps = {
-  product: UsageEnvironmentProduct;
-  deploymentId: string;
-  expanded: boolean;
-  onToggle: () => void;
 };
 
 export type MetricPillProps = {
