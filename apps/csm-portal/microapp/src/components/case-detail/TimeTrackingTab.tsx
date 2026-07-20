@@ -143,7 +143,10 @@ export function TimeTrackingTab({ caseId, caseNumber, projectId, projectName }: 
           isSubmitting={isSubmitting}
           error={error}
           onClose={() => {
-            if (!isSubmitting) setLogTimeOpen(false);
+            if (!isSubmitting) {
+              setLogTimeOpen(false);
+              setError(null);
+            }
           }}
           onSubmit={handleSubmit}
         />
