@@ -55,6 +55,33 @@ const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_RESULTS_DROPDOWN_MIN_WIDTH_PX = 320;
 const SEARCH_RESULTS_DROPDOWN_VIEWPORT_PADDING_PX = 16;
 
+// Strips whitespace, underscores, and hyphens for label comparison.
+function normalizeTypeLabel(val: string): string {
+  return val.toLowerCase().replace(/[\s_-]+/g, "").trim();
+}
+
+/**
+ * Resolves the in-app path for a case search result based on its type label.
+ * Mirrors the route mapping in globalSearchNavigation.ts.
+ */
+function getCaseSearchResultPath(projectId: string, caseItem: CaseListItem): string {
+  const typeLabel = normalizeTypeLabel(caseItem.type?.label ?? "");
+
+  if (typeLabel === "announcement") {
+    return `/projects/${projectId}/announcements/${caseItem.id}`;
+  }
+  if (typeLabel === "engagement") {
+    return `/projects/${projectId}/engagements/${caseItem.id}`;
+  }
+  if (typeLabel === "servicerequest") {
+    return `/projects/${projectId}/operations/service-requests/${caseItem.id}`;
+  }
+  if (typeLabel === "securityreportanalysis") {
+    return `/projects/${projectId}/security-center/security-report-analysis/${caseItem.id}`;
+  }
+  return `/projects/${projectId}/support/cases/${caseItem.id}`;
+}
+
 /**
  * Resolves dropdown size and position from the search field anchor rect.
  * Width matches the search bar when wide; uses a minimum width when the input is narrow.
@@ -189,9 +216,7 @@ export default function SearchBar({
   const handleCaseClick = useCallback(
     (caseItem: CaseListItem) => {
       if (effectiveProjectId) {
-        navigate(
-          `/projects/${effectiveProjectId}/support/cases/${caseItem.id}`,
-        );
+        navigate(getCaseSearchResultPath(effectiveProjectId, caseItem));
         setSearchValue("");
         setIsDropdownOpen(false);
       }
@@ -253,8 +278,6 @@ export default function SearchBar({
         window.removeEventListener("scroll", updateRect, true);
         window.removeEventListener("resize", updateRect);
       };
-    } else {
-      setDropdownRect(null);
     }
   }, [showDropdown]);
 
