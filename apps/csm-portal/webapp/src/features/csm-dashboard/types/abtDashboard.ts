@@ -42,12 +42,6 @@ export type SlaClockType = "ack" | "first_response" | "resolution";
 
 export type DashboardScope = "my_abt" | "all_customers";
 
-export interface CsmDashboardEngineer {
-  name: string;
-  email: string;
-  abtName: string;
-}
-
 export interface CsmQueueCase {
   id: string;
   caseNumber: string;
@@ -106,15 +100,6 @@ export interface CsmRecentActivity {
   who: string;
   whenAt: string;
   summary: string;
-}
-
-export interface CsmAbtDashboardData {
-  engineer: CsmDashboardEngineer;
-  scope: DashboardScope;
-  queue: CsmQueueSummary;
-  slaAtRisk: CsmSlaAtRiskCase[];
-  customers: CsmCustomerSummary[];
-  recentActivity: CsmRecentActivity[];
 }
 
 // Multi-dashboard switcher — mirrors ServiceNow Performance Analytics where
