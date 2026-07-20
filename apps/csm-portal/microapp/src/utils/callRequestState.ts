@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CallRequestStateKey } from "@src/types";
+import type { CallRequestStateKey, CaseSeverity } from "@src/types";
 
 /** Human-readable label for each call request state key. */
 export const CALL_REQUEST_STATE_LABEL: Record<CallRequestStateKey, string> = {
@@ -108,3 +108,38 @@ export const CALL_REQUEST_ACTION_LABEL: Record<CallRequestAgentAction, string> =
   sendNotes: "Send call notes",
   cancel: "Cancel",
 };
+
+/**
+ * Minimum lead time (minutes) a proposed call time must be in the future,
+ * keyed by case severity. ServiceNow enforces this server-side (SN
+ * CallRequestUtils._PRIORITY_TIME_OFFSETS, keyed by SN priority id) and
+ * rejects a too-soon utcTimes entry with a plain 400 that the CSM backend
+ * then genericizes to "Invalid request payload." — mirrored here (same
+ * table the webapp's CreateCallRequestDialog uses) so the dialog fails
+ * with a clear message instead of round-tripping to that generic 400.
+ * If the SN offsets change, this table must change with them.
+ */
+export const CALL_REQUEST_LEAD_TIME_MINUTES_BY_SEVERITY: Record<CaseSeverity, number> = {
+  catastrophic: 15,
+  critical: 30,
+  high: 60,
+  medium: 90,
+  low: 120,
+};
+
+/** Used when the case's severity isn't known — the SN default offset. */
+export const DEFAULT_CALL_REQUEST_LEAD_TIME_MINUTES = 300;
+
+/** Minimum lead time (minutes) for a case of the given severity (or the conservative default). */
+export function callRequestLeadTimeMinutes(severity: CaseSeverity | null | undefined): number {
+  return severity ? CALL_REQUEST_LEAD_TIME_MINUTES_BY_SEVERITY[severity] : DEFAULT_CALL_REQUEST_LEAD_TIME_MINUTES;
+}
+
+/** Human-readable lead time, e.g. 300 -> "5 hours", 90 -> "90 minutes". */
+export function formatCallRequestLeadTime(minutes: number): string {
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${minutes} minutes`;
+}

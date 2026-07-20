@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMutation, useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { callRequests } from "@src/services/callRequests";
-import type { CallRequest, CallRequestUpdateInput } from "@src/types";
+import type { CallRequest, CallRequestUpdateInput, CaseSeverity } from "@src/types";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { ErrorState } from "@components/support/ErrorState";
 import { formatDate } from "@utils/dateTime";
@@ -37,23 +37,25 @@ import {
   CALL_REQUEST_ACTION_LABEL,
   CALL_REQUEST_AGENT_ACTIONS,
   CALL_REQUEST_STATE_COLOR,
+  callRequestLeadTimeMinutes,
+  formatCallRequestLeadTime,
   resolveCallRequestStateKey,
   type CallRequestAgentAction,
 } from "@utils/callRequestState";
 
 const { LocalizationProvider, DateTimePicker } = DatePickers;
 
-export function CallRequestsTab({ caseId }: { caseId: string }) {
+export function CallRequestsTab({ caseId, severity }: { caseId: string; severity: CaseSeverity | null }) {
   return (
     <CallRequestsTabErrorBoundary>
       <Suspense fallback={<CallRequestsTabSkeleton />}>
-        <CallRequestsTabContent caseId={caseId} />
+        <CallRequestsTabContent caseId={caseId} severity={severity} />
       </Suspense>
     </CallRequestsTabErrorBoundary>
   );
 }
 
-function CallRequestsTabContent({ caseId }: { caseId: string }) {
+function CallRequestsTabContent({ caseId, severity }: { caseId: string; severity: CaseSeverity | null }) {
   const queryClient = useQueryClient();
   const { data: requests } = useSuspenseQuery(callRequests.forCase(caseId));
   const [createOpen, setCreateOpen] = useState(false);
@@ -156,6 +158,7 @@ function CallRequestsTabContent({ caseId }: { caseId: string }) {
       {createOpen && (
         <CreateCallRequestDialog
           caseId={caseId}
+          severity={severity}
           onClose={() => setCreateOpen(false)}
           onCreated={() => {
             setCreateOpen(false);
@@ -277,10 +280,12 @@ function CallRequestRow({
 
 function CreateCallRequestDialog({
   caseId,
+  severity,
   onClose,
   onCreated,
 }: {
   caseId: string;
+  severity: CaseSeverity | null;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -294,9 +299,16 @@ function CreateCallRequestDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ServiceNow rejects a preferred time that's too soon, with a plain 400 the
+  // backend genericizes to "Invalid request payload." — pre-validate the same
+  // lead-time rule the webapp does so this fails in the dialog instead.
+  const leadMinutes = callRequestLeadTimeMinutes(severity);
+  const minAllowedTime = new Date(Date.now() + leadMinutes * 60_000);
+  const isTimeValid = preferredTime !== null && preferredTime.getTime() >= minAllowedTime.getTime();
+
   const durationMinutes = Number(durationInput);
   const isDurationValid = durationInput.trim().length > 0 && Number.isFinite(durationMinutes) && durationMinutes > 0;
-  const canSubmit = reason.trim().length > 0 && preferredTime !== null && isDurationValid && !isSubmitting;
+  const canSubmit = reason.trim().length > 0 && isTimeValid && isDurationValid && !isSubmitting;
 
   const handleSubmit = () => {
     if (!canSubmit || !preferredTime) return;
@@ -339,7 +351,15 @@ function CreateCallRequestDialog({
           label="Preferred time"
           value={preferredTime}
           onChange={setPreferredTime}
-          slotProps={{ textField: { size: "small", fullWidth: true } }}
+          minDateTime={minAllowedTime}
+          slotProps={{
+            textField: {
+              size: "small",
+              fullWidth: true,
+              error: preferredTime !== null && !isTimeValid,
+              helperText: `Must be at least ${formatCallRequestLeadTime(leadMinutes)} from now.`,
+            },
+          }}
         />
       </LocalizationProvider>
 

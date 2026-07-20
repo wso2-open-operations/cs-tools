@@ -428,7 +428,7 @@ function CaseDetailContent({ id }: { id: string }) {
         />
       )}
 
-      {activeTab === "call-requests" && <CallRequestsTab caseId={id} />}
+      {activeTab === "call-requests" && <CallRequestsTab caseId={id} severity={caseDetail.severity} />}
 
       {resolutionTarget && (
         <ResolutionDialog
