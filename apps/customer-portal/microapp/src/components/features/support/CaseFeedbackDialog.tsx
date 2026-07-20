@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type ComponentProps } from "react";
 import {
   Alert,
   Box,
@@ -39,6 +39,14 @@ import type { CaseFeedbackInput } from "@src/types";
 
 const COMMENT_MAX_LENGTH = 1000;
 const EMOJI_SIZE = 40;
+
+// Hoisted so it keeps a stable identity across renders — an inline arrow
+// function here would be redefined on every keystroke in the comment field,
+// making MUI treat it as a new Paper component and remount the dialog
+// contents (dropping focus) each time.
+function DialogPaper(props: ComponentProps<typeof Card>) {
+  return <Card component={Stack} {...props} />;
+}
 
 interface CaseFeedbackDialogProps {
   open: boolean;
@@ -121,7 +129,7 @@ export function CaseFeedbackDialog({ open, caseId, onClose, onSubmitted }: CaseF
       onClose={handleClose}
       fullWidth
       aria-labelledby="case-feedback-dialog-title"
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 2, gap: 2, m: 2 } } }}
     >
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
