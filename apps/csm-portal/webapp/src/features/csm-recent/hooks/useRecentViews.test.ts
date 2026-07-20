@@ -87,10 +87,26 @@ describe("useRecentViews + useRecordRecentView", () => {
     );
 
     const stored = reader.result.current[0];
-    expect(stored.title).toBe("Case 1 alert(1)");
+    // DOMPurify drops a <script> element's content along with its tags,
+    // not just the tag markup.
+    expect(stored.title).toBe("Case 1 ");
     expect(stored.subtitle).toBe("Acme Corp");
     expect(stored.caseHit?.subject).toBe("Urgent");
     expect(stored.caseHit?.assigneeName).toBe("Jane Doe");
+  });
+
+  it("preserves plain text with angle brackets that aren't HTML tags", () => {
+    const reader = renderHook(() => useRecentViews());
+    const recorder = renderHook(() => useRecordRecentView());
+
+    act(() =>
+      recorder.result.current({
+        ...entry("1"),
+        title: "Error when x < y > z",
+      }),
+    );
+
+    expect(reader.result.current[0].title).toBe("Error when x < y > z");
   });
 
   it("de-dupes by kind+id and bumps the entry to the top", () => {
