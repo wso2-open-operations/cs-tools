@@ -36,3 +36,5 @@ export * from "./timecard.dto";
 export * from "./timecard.model";
 export * from "./changeRequest.dto";
 export * from "./changeRequest.model";
+export * from "./updates.dto";
+export * from "./updates.model";
