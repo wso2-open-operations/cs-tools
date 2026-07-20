@@ -82,6 +82,7 @@ export default function CaseDetailsContent({
   const isSecurityReportAnalysisRoute = location.pathname.includes(
     "security-report-analysis",
   );
+  const isOperationsRoute = location.pathname.includes("/operations/");
 
   const statusLabel = data?.status?.label;
   const severityLabel = data?.severity?.label;
@@ -125,7 +126,7 @@ export default function CaseDetailsContent({
 
   const callsQuery = useGetCallRequests(
     resolvedProjectId,
-    caseId,
+    isOperationsRoute ? "" : caseId,
     callRequestStateKeys,
   );
   const callCount =
@@ -153,7 +154,8 @@ export default function CaseDetailsContent({
     statusLabel != null &&
     CALL_SCHEDULABLE_CASE_STATUSES.includes(statusLabel as CaseStatus);
 
-  const hideCallsTab = isSecurityReportAnalysis || !isCallSchedulingAllowed;
+  const hideCallsTab =
+    isSecurityReportAnalysis || isOperationsRoute || !isCallSchedulingAllowed;
   const hideKnowledgeBaseTab =
     isSecurityReportAnalysis || isEngagementRoute || isServiceRequest;
   const hideRelatedChangeRequestsTab =
