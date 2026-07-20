@@ -15,7 +15,16 @@
 // under the License.
 
 import type { ChipProps } from "@wso2/oxygen-ui";
-import type { CsmTimeCard, CsmTimeSheet, Project, TimeCardState, TimeSheetState } from "@src/types";
+import type {
+  ActivityBreakdown,
+  ActivityKey,
+  CsmTimeCard,
+  CsmTimeSheet,
+  IssueComplexity,
+  Project,
+  TimeCardState,
+  TimeSheetState,
+} from "@src/types";
 
 /** A selectable engineer for the (client-side) engineer filter — derived from
  * the cards currently loaded, since there's no engineer-search endpoint. */
@@ -218,4 +227,103 @@ export function groupCardsByUserIntoSheets(cards: CsmTimeCard[]): CsmTimeSheet[]
   return [...byUser.entries()].flatMap(([userId, userCards]) =>
     groupIntoSheets(userCards, userId, userCards[0]?.userName ?? "—"),
   );
+}
+
+// --- Log-time (create) form support --------------------------------------
+// Ported from the webapp's timeCardConstants.ts + timeCardTotals.ts, merged
+// into this file's single-utils-file convention rather than split across
+// separate constants/ and utils/ modules.
+
+/** A labelled activity row in the time-breakdown editor (log-time form only). */
+export interface ActivityBucket {
+  key: ActivityKey;
+  label: string;
+}
+
+/** The five fixed activity categories, in display order (ISSU-009). */
+export const ACTIVITY_BUCKETS: ActivityBucket[] = [
+  { key: "analysisDebugging", label: "Analysis and debugging" },
+  { key: "reproduce", label: "Reproduce" },
+  { key: "settingUp", label: "Setting up" },
+  { key: "providingSolution", label: "Providing solution" },
+  { key: "answering", label: "Answering" },
+];
+
+const ACTIVITY_KEYS: ActivityKey[] = ACTIVITY_BUCKETS.map((b) => b.key);
+
+/** Issue-complexity options (the ServiceNow "Issue Complexity" field). Write-only. */
+export const ISSUE_COMPLEXITY_OPTIONS: readonly IssueComplexity[] = ["N/A", "Low", "Medium", "High"];
+export const DEFAULT_ISSUE_COMPLEXITY: IssueComplexity = "N/A";
+
+/** Whether logged time is billable to the customer by default. Most support work is
+ * billable; the engineer can flip it per card. */
+export const DEFAULT_BILLABLE = true;
+
+/** Character cap mirroring the ServiceNow work-log field. */
+export const WORK_LOG_MAX = 4000;
+
+/** A hard sanity ceiling — nobody logs more than a full day in one bucket or
+ * in total, not a business-hours rule. Shared by the draft validator and the
+ * activity inputs' own `max` attribute. */
+export const MAX_MINUTES_PER_DAY = 1440;
+
+/** A fresh breakdown with every activity at zero minutes. */
+export function emptyBreakdown(): ActivityBreakdown {
+  return {
+    analysisDebugging: 0,
+    reproduce: 0,
+    settingUp: 0,
+    providingSolution: 0,
+    answering: 0,
+  };
+}
+
+/** Total whole minutes across all activity buckets. */
+export function totalMinutes(breakdown: ActivityBreakdown): number {
+  return ACTIVITY_KEYS.reduce((sum, key) => sum + (breakdown[key] || 0), 0);
+}
+
+/** True when at least one activity bucket has logged time. */
+export function hasLoggedTime(breakdown: ActivityBreakdown): boolean {
+  return ACTIVITY_KEYS.some((key) => (breakdown[key] || 0) > 0);
+}
+
+/** Field-level validation errors for the log dialog, keyed by field name. */
+export interface TimeCardDraftErrors {
+  date?: string;
+  minutes?: string;
+  workLogComment?: string;
+  approver?: string;
+}
+
+export interface TimeCardDraft {
+  date: string;
+  breakdown: ActivityBreakdown;
+  workLogComment: string;
+  approverId?: string;
+}
+
+/**
+ * Validate a log-time draft. Returns an errors object; an empty object means the
+ * draft is submittable. Mirrors the ServiceNow required fields (Date, Task —
+ * preset from the case, Work Log Comment, Approver) plus a "log some time" rule.
+ */
+export function timeCardDraftErrors(draft: TimeCardDraft): TimeCardDraftErrors {
+  const errors: TimeCardDraftErrors = {};
+  if (!draft.date) errors.date = "Pick a date.";
+  if (!hasLoggedTime(draft.breakdown)) {
+    errors.minutes = "Log time against at least one activity.";
+  } else if (
+    ACTIVITY_KEYS.some((key) => (draft.breakdown[key] || 0) > MAX_MINUTES_PER_DAY) ||
+    totalMinutes(draft.breakdown) > MAX_MINUTES_PER_DAY
+  ) {
+    errors.minutes = `Logged time can't exceed ${MAX_MINUTES_PER_DAY} minutes (24h) in a day.`;
+  }
+  if (!draft.workLogComment.trim()) {
+    errors.workLogComment = "Add a work log comment.";
+  } else if (draft.workLogComment.length > WORK_LOG_MAX) {
+    errors.workLogComment = `Comment must be ${WORK_LOG_MAX} characters or fewer.`;
+  }
+  if (!draft.approverId) errors.approver = "Choose an approver.";
+  return errors;
 }

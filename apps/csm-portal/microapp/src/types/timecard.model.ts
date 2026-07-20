@@ -75,6 +75,39 @@ export interface TimeCardDecisionInput {
   leadComment?: string;
 }
 
+// The five fixed activity categories a time card's minutes are broken down
+// into (the Time Management requirement, ISSU-009). Write-only: the backend
+// accepts these on create but never returns them on read.
+export type ActivityKey = "analysisDebugging" | "reproduce" | "settingUp" | "providingSolution" | "answering";
+
+export type ActivityBreakdown = Record<ActivityKey, number>;
+
+// The ServiceNow "Issue Complexity" field. Write-only, like the activity breakdown.
+export type IssueComplexity = "N/A" | "Low" | "Medium" | "High";
+
+// An approver candidate picked from the search box — just enough to render a
+// chip and submit the id.
+export interface TimeCardApprover {
+  id: string;
+  name: string;
+}
+
+// Draft state submitted by LogTimeCardDialog. `caseNumber`/`projectName` are
+// carried through only for the dialog's own header text, not sent on the wire.
+export interface CreateTimeCardInput {
+  caseId: string;
+  caseNumber: string;
+  projectId: string;
+  projectName: string;
+  /** ISO 8601 date (YYYY-MM-DD). */
+  date: string;
+  breakdown: ActivityBreakdown;
+  billable: boolean;
+  workLogComment: string;
+  issueComplexity: IssueComplexity;
+  approver: TimeCardApprover;
+}
+
 // Map the backend's `TimeCardView` to the portal's `CsmTimeCard`. `totalTime`
 // is already whole minutes on the wire, which is also the unit shown — a direct
 // passthrough, no conversion.

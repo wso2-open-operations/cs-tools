@@ -95,3 +95,23 @@ export interface BeTimeCardMutationResponse {
   message?: string;
   timeCard: BeTimeCardView;
 }
+
+// Create payload — mirrors the webapp's BeCreateTimeCardPayload exactly. The
+// backend never echoes these fields back on read (see BeTimeCardView's own
+// comment), so there's nothing to diff against; every field is sent as-is.
+export interface BeCreateTimeCardPayload {
+  caseId: string;
+  projectId: string;
+  /** ISO 8601 date (YYYY-MM-DD). */
+  date: string;
+  /** Eligible approvers (approver_list). Must be non-empty. */
+  approverIds: string[];
+  isBillable?: boolean;
+  issueComplexity?: string;
+  workLogComment?: string;
+  timeAnalyzing?: number;
+  timeSettingUp?: number;
+  timeReproducingDebugging?: number;
+  timeProvidingSolution?: number;
+  timePatching?: number;
+}

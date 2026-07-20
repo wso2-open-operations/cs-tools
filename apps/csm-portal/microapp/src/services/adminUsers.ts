@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { USERS_SEARCH_ENDPOINT } from "@config/endpoints";
-import type { UserSearchFiltersDto, UserSearchPayloadDto, UserSearchResponseDto } from "@src/types";
+import type { AdminUserRole, UserSearchFiltersDto, UserSearchPayloadDto, UserSearchResponseDto } from "@src/types";
 import { toAdminUser, type AdminUser } from "@src/types";
 import apiClient from "./apiClient";
 
@@ -39,6 +39,11 @@ const searchUsers = async (payload: UserSearchPayloadDto = {}): Promise<AdminUse
 
 const ADMIN_USERS_PAGE_LIMIT = 20;
 
+// Eligible time-card approvers — mirrors the webapp's INTERNAL_USER_ROLES
+// (csmUsers.ts). A customer account can't approve internal time cards.
+const APPROVER_ROLES: AdminUserRole[] = ["internal", "agent", "admin"];
+const APPROVER_SEARCH_LIMIT = 6;
+
 export const adminUsers = {
   // Mirrors the webapp's useSearchUsers.ts (POST /users/search), paged via infinite scroll —
   // the mobile equivalent of CsmUsersPage's TablePagination.
@@ -53,5 +58,19 @@ export const adminUsers = {
         }),
       initialPageParam: 0,
       getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
+    }),
+
+  // One-shot type-ahead search for a single-pick field (LogTimeCardDialog's
+  // approver picker) — mirrors projects.ts's `search`, not the paged `infinite`
+  // list above. Scoped to internal accounts only.
+  search: (searchQuery: string) =>
+    queryOptions({
+      queryKey: ["admin-users", "search", searchQuery],
+      queryFn: () =>
+        searchUsers({
+          filters: { searchQuery, roles: APPROVER_ROLES, active: true },
+          pagination: { offset: 0, limit: APPROVER_SEARCH_LIMIT },
+        }),
+      enabled: searchQuery.trim().length > 0,
     }),
 };
