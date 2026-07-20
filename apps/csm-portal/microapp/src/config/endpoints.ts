@@ -48,3 +48,6 @@ export const ATTACHMENTS_SEARCH_ENDPOINT = "/attachments/search";
 export const TIME_CARDS_ENDPOINT = "/time-cards";
 export const TIME_CARDS_SEARCH_ENDPOINT = "/time-cards/search";
 export const TIME_CARD_ENDPOINT = (id: string) => `/time-cards/${id}`;
+
+export const PRODUCT_UPDATE_LEVELS_ENDPOINT = "/updates/product-update-levels";
+export const UPDATE_LEVELS_SEARCH_ENDPOINT = "/updates/levels/search";
