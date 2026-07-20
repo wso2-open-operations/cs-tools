@@ -17,36 +17,12 @@
 import { useState } from "react";
 import { Card, IconButton, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ThumbsDown, ThumbsUp } from "@wso2/oxygen-ui-icons-react";
-import { LOCAL_STORAGE_CONVERSATION_FEEDBACK_KEY_PREFIX } from "@config/constants";
 
-type Feedback = "up" | "down";
-
-interface ConversationFeedbackProps {
-  conversationId: string;
-}
-
-function storageKey(conversationId: string): string {
-  return `${LOCAL_STORAGE_CONVERSATION_FEEDBACK_KEY_PREFIX}${conversationId}`;
-}
-
-function readStoredFeedback(conversationId: string): Feedback | undefined {
-  const value = localStorage.getItem(storageKey(conversationId));
-  return value === "up" || value === "down" ? value : undefined;
-}
-
-export function ConversationFeedback({ conversationId }: ConversationFeedbackProps) {
+export function ConversationFeedback() {
   const theme = useTheme();
-  const [feedback, setFeedback] = useState<Feedback | undefined>(() => readStoredFeedback(conversationId));
+  const [feedback, setFeedback] = useState<"up" | "down" | undefined>(undefined);
   const up = feedback === "up";
   const down = feedback === "down";
-  // Once given, feedback is final: locking mirrors a real submission instead of a toggle.
-  const isLocked = feedback !== undefined;
-
-  const submit = (value: Feedback) => {
-    if (isLocked) return;
-    setFeedback(value);
-    localStorage.setItem(storageKey(conversationId), value);
-  };
 
   return (
     <Card component={Stack} direction="row" justifyContent="space-between" p={1.5}>
@@ -55,30 +31,22 @@ export function ConversationFeedback({ conversationId }: ConversationFeedbackPro
           Was this conversation helpful?
         </Typography>
         <Typography variant="subtitle2" color="text.secondary">
-          {isLocked ? "Thanks for your feedback!" : "Your feedback helps us improve Novera"}
+          Your feedback helps us improve Novera
         </Typography>
       </Stack>
       <Stack direction="row">
         <IconButton
           aria-label="Mark conversation as helpful"
-          onClick={() => submit("up")}
-          disabled={isLocked}
-          sx={{
-            color: up ? "primary.main" : "text.secondary",
-            "&.Mui-disabled": { color: up ? "primary.main" : "text.disabled" },
-          }}
+          onClick={() => setFeedback("up")}
+          sx={{ color: up ? "primary.main" : "text.secondary" }}
           disableRipple
         >
           <ThumbsUp size={pxToRem(18)} fill={up ? theme.palette.primary.main : "none"} />
         </IconButton>
         <IconButton
           aria-label="Mark conversation as not helpful"
-          onClick={() => submit("down")}
-          disabled={isLocked}
-          sx={{
-            color: down ? "primary.main" : "text.secondary",
-            "&.Mui-disabled": { color: down ? "primary.main" : "text.disabled" },
-          }}
+          onClick={() => setFeedback("down")}
+          sx={{ color: down ? "primary.main" : "text.secondary" }}
           disableRipple
         >
           <ThumbsDown size={pxToRem(18)} fill={down ? theme.palette.primary.main : "none"} />

@@ -169,7 +169,7 @@ export default function ChatDetailPage() {
             </Stack>
           )}
         </SectionCard>
-        {id && <ConversationFeedback conversationId={id} />}
+        <ConversationFeedback />
       </Stack>
       <div ref={bottomRef} />
 
