@@ -45,7 +45,10 @@ const EMOJI_SIZE = 40;
 // making MUI treat it as a new Paper component and remount the dialog
 // contents (dropping focus) each time.
 function DialogPaper(props: ComponentProps<typeof Card>) {
-  return <Card component={Stack} {...props} />;
+  // elevation={0} disables MUI's dark-mode elevation overlay (a translucent
+  // white gradient blended over the background for elevation > 0), which
+  // otherwise makes the dialog read as slightly see-through in dark mode.
+  return <Card component={Stack} elevation={0} {...props} />;
 }
 
 interface CaseFeedbackDialogProps {
@@ -130,7 +133,17 @@ export function CaseFeedbackDialog({ open, caseId, onClose, onSubmitted }: CaseF
       fullWidth
       aria-labelledby="case-feedback-dialog-title"
       slots={{ paper: DialogPaper }}
-      slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 2, gap: 2, m: 2 } } }}
+      slotProps={{
+        paper: {
+          // MuiDialog.styleOverrides.paper sets opacity: 0.7 + a backdrop
+          // blur theme-wide (an intentional "frosted glass" look for most
+          // dialogs). background.paper is also itself a translucent
+          // "acrylic" color (#000000b8) in this theme, not a solid one —
+          // opt this text-heavy form out of both and use the solid
+          // background.default instead so it reads as fully opaque.
+          sx: { bgcolor: "background.default", opacity: 1, backdropFilter: "none", p: 2, gap: 2, m: 2 },
+        },
+      }}
     >
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
         <Stack gap={0.25}>
