@@ -17,7 +17,6 @@ import { type JSX } from "react";
 import {
   Box,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -41,9 +40,9 @@ export interface PiiWarningDialogProps {
 
 const TITLE = "Sensitive Information Detected";
 const DESCRIPTION =
-  "We found information in your message that's usually private, like ID " +
-  "numbers or passwords. Anyone with access to this ticket will be able to " +
-  "see it. If it's not needed to resolve your issue, we recommend removing it.";
+  "Information that's usually private, like ID numbers or passwords, was " +
+  "found in your message. It will be visible to anyone with access to this " +
+  "ticket. If it isn't needed to resolve your issue, removing it is recommended.";
 
 export default function PiiWarningDialog({
   open,
@@ -71,9 +70,26 @@ export default function PiiWarningDialog({
             <Typography variant="subtitle2" sx={{ mb: 1 }}>
               Detected:
             </Typography>
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-              {detectedLabels.map((label) => (
-                <Chip key={label} label={label} color="warning" size="small" />
+            <Stack
+              component="ol"
+              spacing={0.5}
+              sx={{ m: 0, pl: 0, listStyle: "none" }}
+            >
+              {detectedLabels.map((label, index) => (
+                <Box
+                  component="li"
+                  key={label}
+                  sx={{ display: "flex", alignItems: "baseline", gap: 1 }}
+                >
+                  <Typography
+                    variant="body2"
+                    color="warning.main"
+                    sx={{ fontWeight: 600, minWidth: 16, textAlign: "right" }}
+                  >
+                    {index + 1}.
+                  </Typography>
+                  <Typography variant="body2">{label}</Typography>
+                </Box>
               ))}
             </Stack>
           </>

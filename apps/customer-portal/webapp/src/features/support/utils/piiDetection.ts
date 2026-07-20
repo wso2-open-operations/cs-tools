@@ -185,8 +185,13 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     type: PiiType.PHONE,
     label: "Phone number",
     // International/local numbers, 9-15 digits with common separators.
+    // Upper bound follows E.164 (max 15 digits) so long generic numbers —
+    // order IDs, timestamps, reference codes — aren't mis-flagged as phones.
     regex: /(?:\+?\d[\d ().-]{7,}\d)/g,
-    validate: (match) => match.replace(/\D/g, "").length >= 9,
+    validate: (match) => {
+      const digitCount = match.replace(/\D/g, "").length;
+      return digitCount >= 9 && digitCount <= 15;
+    },
   },
 ];
 

@@ -86,6 +86,11 @@ describe("piiDetection", () => {
       const matches = detectPii("There are 42 open cases");
       expect(matches.some((m) => m.type === PiiType.PHONE)).toBe(false);
     });
+
+    it("does not flag a long generic number (>15 digits) as a phone", () => {
+      const matches = detectPii("Reference 20260415123456789012 was logged");
+      expect(matches.some((m) => m.type === PiiType.PHONE)).toBe(false);
+    });
   });
 
   describe("detectPii - IBAN", () => {
