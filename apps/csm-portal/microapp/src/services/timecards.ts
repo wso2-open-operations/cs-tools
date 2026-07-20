@@ -18,6 +18,7 @@
 // by the real csm-portal-backend endpoints:
 //
 //   POST  /time-cards/search   my sheets / all / approval queue (paged, client-grouped into weeks)
+//   POST  /time-cards          create (already `submitted` — no draft step)
 //   PATCH /time-cards/{id}     approve / reject a card
 //
 // The backend has no "sheet" concept and no bulk endpoint — weekly sheets are a
@@ -29,14 +30,16 @@
 // flattened, then grouped into weekly sheets in one pass — so a week that spans a
 // page boundary stays a single sheet, rather than being split per page.
 
-import { infiniteQueryOptions, type InfiniteData } from "@tanstack/react-query";
-import { TIME_CARDS_SEARCH_ENDPOINT, TIME_CARD_ENDPOINT } from "@config/endpoints";
+import { infiniteQueryOptions, queryOptions, type InfiniteData } from "@tanstack/react-query";
+import { TIME_CARDS_ENDPOINT, TIME_CARDS_SEARCH_ENDPOINT, TIME_CARD_ENDPOINT } from "@config/endpoints";
 import type {
+  BeCreateTimeCardPayload,
   BeSearchTimeCardsPayload,
   BeSearchTimeCardsResponse,
   BeTimeCardMutationResponse,
   BeTimeCardState,
   BeUpdateTimeCardPayload,
+  CreateTimeCardInput,
   CsmTimeCard,
   CsmTimeSheet,
   TimeCardDecisionInput,
@@ -112,6 +115,26 @@ async function searchTimeCardsPage(filters: TimeCardSearchFilters, offset: numbe
   return { cards, total: data.total, nextOffset, hasMore: raw.length > 0 && nextOffset < data.total };
 }
 
+// A case's time cards from the first TIME_CARD_MAX_PAGE_LIMIT cards in its
+// project, plus whether that one page fell short of the project's full
+// `total` — some of the case's cards may not have been fetched if so. No
+// pagination UI (a single case logging more than a page's worth of time is
+// not expected). Mirrors the webapp's useCaseTimeCards: `caseId` itself is
+// non-functional as a search filter (see the interface note above), so this
+// scopes to the case's own project instead and filters client-side.
+export interface CaseTimeCardsResult {
+  cards: CsmTimeCard[];
+  truncated: boolean;
+}
+
+async function fetchCaseTimeCards(caseId: string, projectId: string): Promise<CaseTimeCardsResult> {
+  const { cards, total } = await searchTimeCardsPage({ projectIds: [projectId] }, 0);
+  return {
+    cards: cards.filter((c) => c.caseId === caseId),
+    truncated: cards.length < total,
+  };
+}
+
 // Flatten every loaded page's cards, derive the client-filter option lists from
 // them, apply the client-side work-item / engineer filters, then group what's
 // left once. `group` builds the weekly sheets appropriately for the tab (own
@@ -161,6 +184,29 @@ async function decideCard(decision: TimeCardDecisionInput): Promise<CsmTimeCard>
     TIME_CARD_ENDPOINT(encodeURIComponent(decision.cardId)),
     payload,
   );
+  return toTimeCard(data.timeCard);
+}
+
+// Create a time card on the signed-in engineer's behalf. The card is created
+// already `submitted` — the backend has no draft/pending step.
+async function createCard(input: CreateTimeCardInput): Promise<CsmTimeCard> {
+  const payload: BeCreateTimeCardPayload = {
+    caseId: input.caseId,
+    projectId: input.projectId,
+    date: input.date,
+    approverIds: [input.approver.id],
+    isBillable: input.billable,
+    issueComplexity: input.issueComplexity,
+    workLogComment: input.workLogComment,
+    // Whole minutes on the wire — the form already collects minutes
+    // directly, so this is a defensive round only, not a unit conversion.
+    timeAnalyzing: Math.round(input.breakdown.analysisDebugging),
+    timeSettingUp: Math.round(input.breakdown.settingUp),
+    timeReproducingDebugging: Math.round(input.breakdown.reproduce),
+    timeProvidingSolution: Math.round(input.breakdown.providingSolution),
+    timePatching: Math.round(input.breakdown.answering),
+  };
+  const { data } = await apiClient.post<BeTimeCardMutationResponse>(TIME_CARDS_ENDPOINT, payload);
   return toTimeCard(data.timeCard);
 }
 
@@ -245,4 +291,18 @@ export const timecards = {
     }),
 
   decide: decideCard,
+  create: createCard,
+
+  // A single case's logged time cards (Time Tracking tab). See fetchCaseTimeCards
+  // for the projectIds-scoped + client-filtered workaround this relies on.
+  forCase: (caseId: string | undefined, projectId: string | undefined) =>
+    queryOptions({
+      queryKey: ["timecards", "case", caseId ?? "", projectId ?? ""],
+      queryFn: () =>
+        caseId && projectId
+          ? fetchCaseTimeCards(caseId, projectId)
+          : Promise.resolve<CaseTimeCardsResult>({ cards: [], truncated: false }),
+      enabled: !!caseId && !!projectId,
+      staleTime: 5_000,
+    }),
 };
