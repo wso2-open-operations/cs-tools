@@ -41,6 +41,10 @@ export interface CallRequestViewDto {
   updatedOn: string | null;
   state: CallRequestStateDto | null;
   cancellationReason: string | null;
+  /** Agent (or team) assigned to run the call, once scheduled. */
+  assignee: string | null;
+  /** Call notes recorded after the call concludes. */
+  notes: string | null;
 }
 
 export interface SearchCallRequestsPayloadDto {
