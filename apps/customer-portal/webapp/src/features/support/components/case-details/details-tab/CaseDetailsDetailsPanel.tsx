@@ -21,6 +21,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  Divider,
   Stack,
   TextField,
   Typography,
@@ -590,39 +591,43 @@ export default function CaseDetailsDetailsPanel({
           title="Customer Feedback"
           icon={<MessageSquare size={20} aria-hidden />}
         >
-          <Stack direction="row" spacing={2} alignItems="flex-start">
-            <Box
-              component="img"
-              src={feedback.emoji.selectedImage}
-              alt={feedback.emoji.name}
-              sx={{ width: 40, height: 40, objectFit: "contain", flexShrink: 0 }}
-            />
-            <Box sx={{ flex: 1 }}>
-              <Typography {...valueSx} sx={{ fontWeight: 600 }}>
+          <Stack spacing={1.5}>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Box
+                component="img"
+                src={feedback.emoji.selectedImage}
+                alt={feedback.emoji.name}
+                sx={{ width: 40, height: 40, objectFit: "contain", flexShrink: 0 }}
+              />
+              <Typography variant="body1" color="text.primary" sx={{ fontWeight: 600 }}>
                 {feedback.emoji.name}
               </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                {formatUtcToLocal(feedback.createdOn)}
-              </Typography>
-              {feedback.chips && feedback.chips.length > 0 && (
-                <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mb: feedback.additionalComment ? 1.5 : 0 }}>
-                  {feedback.chips.map((chip) => (
-                    <Chip
-                      key={chip}
-                      label={chip}
-                      size="small"
-                      variant="outlined"
-                      sx={{ fontSize: "0.75rem" }}
-                    />
-                  ))}
-                </Stack>
-              )}
-              {feedback.additionalComment && (
-                <Typography {...valueSx} sx={{ whiteSpace: "pre-wrap" }}>
-                  {feedback.additionalComment}
+            </Stack>
+            {feedback.chips && feedback.chips.length > 0 && (
+              <Stack direction="row" flexWrap="wrap" gap={1} sx={{ ml: 7 }}>
+                {feedback.chips.map((chip) => (
+                  <Chip
+                    key={chip}
+                    label={chip}
+                    size="small"
+                    variant="outlined"
+                    sx={{ fontSize: "0.75rem" }}
+                  />
+                ))}
+              </Stack>
+            )}
+            {feedback.additionalComment && (
+              <Typography {...valueSx} sx={{ whiteSpace: "pre-wrap", ml: 7 }}>
+                <Typography component="span" color="text.secondary" sx={{ fontWeight: 500 }}>
+                  Details:{" "}
                 </Typography>
-              )}
-            </Box>
+                {feedback.additionalComment}
+              </Typography>
+            )}
+            <Divider sx={{ my: 0.5 }} />
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+              Submitted by {feedback.createdBy} on {formatUtcToLocal(feedback.createdOn)}
+            </Typography>
           </Stack>
         </CaseDetailsCard>
       )}

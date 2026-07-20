@@ -33,6 +33,7 @@ export enum PiiType {
   ACCESS_TOKEN = "ACCESS_TOKEN",
   JWT = "JWT",
   PASSWORD = "PASSWORD",
+  OTP = "OTP",
   // Classic personal data.
   CREDIT_CARD = "CREDIT_CARD",
   DANISH_CPR = "DANISH_CPR",
@@ -236,14 +237,30 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     regex: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
   },
   {
-    // A password/secret assigned in a config or log line, e.g.
+    // One-time passcodes / verification codes sent for login or MFA, e.g.
+    // "your OTP is 483920", "verification code: 719283", "2FA code 552011".
+    // Same shape as PASSWORD (keyword + filler + separator + digit-bearing
+    // value) but kept as a distinct type/label since these are short-lived
+    // codes rather than long-term credentials. Checked before PASSWORD so
+    // phrases like "one time password 918273" resolve as OTP rather than
+    // being shadowed by the broader "password" match.
+    type: PiiType.OTP,
+    label: "One-time passcode",
+    regex:
+      /\b(?:otp|one[\s-]?time[\s-]?(?:passcode|password|code|pin)|verification[\s-]?code|security[\s-]?code|confirmation[\s-]?code|access[\s-]?code|auth(?:entication)?[\s-]?code|login[\s-]?code|2fa[\s-]?code|mfa[\s-]?code)\b(?:\s+[A-Za-z][A-Za-z'-]*){0,6}\s*[:=-]?\s*["']?(?=[^\s"'<>{}]*\d)[^\s"'<>{}]{3,}["']?/gi,
+  },
+  {
+    // A password/secret assigned in a config/log line or stated in prose, e.g.
     // password="s3cret", clientSecret: abc123, api_key=xxxx, pass: hunter2,
-    // AccountKey=... (Azure). The keyword must be followed by ':' or '=' and a
-    // value, so prose like "forgot their password" is not flagged.
+    // AccountKey=... (Azure), "my password is admin123", "password 3221211sdts",
+    // "check the password below - 879338". The keyword may be followed by up to
+    // three filler words (is/was/below/for/etc.) and/or a ':'/'='/'-' separator
+    // before the value. The value is required to contain a digit so plain prose
+    // like "reset your password soon" or "forgot their password" isn't flagged.
     type: PiiType.PASSWORD,
     label: "Password or secret",
     regex:
-      /\b(?:passphrase|password|passwd|pwd|pass|pin|secret|credential|token|bearer|client[_-]?secret|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|shared[_-]?access[_-]?signature|auth[_-]?token)\b\s*[:=]\s*["']?[^\s"'<>{}]{4,}["']?/gi,
+      /\b(?:passphrase|password|passwd|pwd|pass|pin|secret|credential|token|bearer|client[_-]?secret|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|shared[_-]?access[_-]?signature|auth[_-]?token)\b(?:\s+[A-Za-z][A-Za-z'-]*){0,6}\s*[:=-]?\s*["']?(?=[^\s"'<>{}]*\d)[^\s"'<>{}]{3,}["']?/gi,
   },
   {
     type: PiiType.CREDIT_CARD,
