@@ -18,7 +18,6 @@ import { Suspense, useState, type ReactNode } from "react";
 import {
   AdapterDateFns,
   Button,
-  Card,
   Chip,
   DatePickers,
   Dialog,
@@ -30,6 +29,7 @@ import {
 import { useMutation, useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { callRequests } from "@src/services/callRequests";
 import type { CallRequest, CallRequestUpdateInput, CaseSeverity } from "@src/types";
+import { DialogPaper } from "@components/common/DialogPaper";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { ErrorState } from "@components/support/ErrorState";
 import { formatDate } from "@utils/dateTime";
@@ -329,7 +329,7 @@ function CreateCallRequestDialog({
     <Dialog
       open
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>
@@ -441,7 +441,7 @@ function ScheduleCallDialog({
     <Dialog
       open={!!callRequest}
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>
@@ -528,7 +528,7 @@ function RejectCallDialog({
     <Dialog
       open={!!callRequest}
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>
@@ -598,7 +598,7 @@ function CancelCallDialog({
     <Dialog
       open={!!callRequest}
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>
@@ -689,7 +689,7 @@ function SendCallNotesDialog({
     <Dialog
       open={!!callRequest}
       onClose={onClose}
-      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slots={{ paper: DialogPaper }}
       slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
     >
       <Typography variant="h6" fontWeight={650}>
