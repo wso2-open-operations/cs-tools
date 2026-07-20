@@ -154,13 +154,12 @@ const getFeedback = async (id: string): Promise<CaseFeedback | null> => {
 };
 
 const submitFeedback = async (id: string, body: CaseFeedbackInput): Promise<CaseFeedbackResponseDto> => {
-  return (
-    await apiClient.post<CaseFeedbackResponseDto>(CASE_FEEDBACK_ENDPOINT(id), {
-      emojiId: body.emojiId,
-      chipIds: body.chipIds,
-      additionalComment: body.additionalComment,
-    })
-  ).data;
+  const response = await apiClient.post<CaseFeedbackResponseDto>(CASE_FEEDBACK_ENDPOINT(id), {
+    emojiId: body.emojiId,
+    chipIds: body.chipIds,
+    additionalComment: body.additionalComment,
+  });
+  return response.data;
 };
 
 /* Mappers */
