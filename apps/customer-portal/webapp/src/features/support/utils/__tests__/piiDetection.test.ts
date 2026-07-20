@@ -56,17 +56,22 @@ describe("piiDetection", () => {
 
   describe("detectPii - Danish CPR", () => {
     it("detects a CPR number with hyphen", () => {
-      const matches = detectPii("My CPR is 010203-1234");
+      const matches = detectPii("My CPR is 010203-0001");
       expect(matches.some((m) => m.type === PiiType.DANISH_CPR)).toBe(true);
     });
 
     it("detects a CPR number without hyphen", () => {
-      const matches = detectPii("CPR 0102031234 on file");
+      const matches = detectPii("CPR 0102030001 on file");
       expect(matches.some((m) => m.type === PiiType.DANISH_CPR)).toBe(true);
     });
 
     it("does not flag an invalid day/month", () => {
       const matches = detectPii("Ticket 991399-1234 raised");
+      expect(matches.some((m) => m.type === PiiType.DANISH_CPR)).toBe(false);
+    });
+
+    it("does not flag a date-shaped order ref that fails the mod-11 check", () => {
+      const matches = detectPii("Order 100200-3004 was created");
       expect(matches.some((m) => m.type === PiiType.DANISH_CPR)).toBe(false);
     });
   });
@@ -86,12 +91,42 @@ describe("piiDetection", () => {
       const matches = detectPii("There are 42 open cases");
       expect(matches.some((m) => m.type === PiiType.PHONE)).toBe(false);
     });
+
+    it("does not flag a long generic number (>15 digits) as a phone", () => {
+      const matches = detectPii("Reference 20260415123456789012 was logged");
+      expect(matches.some((m) => m.type === PiiType.PHONE)).toBe(false);
+    });
+
+    it("does not flag an IPv4 address as a phone", () => {
+      const matches = detectPii("Client connected from 192.168.1.100 at startup");
+      expect(matches.some((m) => m.type === PiiType.PHONE)).toBe(false);
+    });
+
+    it("does not flag a unix timestamp or bare id as a phone", () => {
+      expect(
+        detectPii("event at 1737382920 UTC").some((m) => m.type === PiiType.PHONE),
+      ).toBe(false);
+      expect(
+        detectPii("Order 1002003004 refunded").some((m) => m.type === PiiType.PHONE),
+      ).toBe(false);
+    });
+
+    it("still detects a formatted phone number with grouping", () => {
+      expect(
+        detectPii("call (415) 555-2671").some((m) => m.type === PiiType.PHONE),
+      ).toBe(true);
+    });
   });
 
   describe("detectPii - IBAN", () => {
     it("detects an IBAN", () => {
       const matches = detectPii("Transfer to DK5000400440116243 today");
       expect(matches.some((m) => m.type === PiiType.IBAN)).toBe(true);
+    });
+
+    it("does not flag a two-letter-prefixed code that fails the mod-97 check", () => {
+      const matches = detectPii("part number GB01ACME00012345678 shipped");
+      expect(matches.some((m) => m.type === PiiType.IBAN)).toBe(false);
     });
   });
 
@@ -161,12 +196,60 @@ describe("piiDetection", () => {
       );
       expect(matches.some((m) => m.type === PiiType.PASSWORD)).toBe(true);
     });
+
+    it("detects Anthropic, OpenAI and Google OAuth tokens", () => {
+      expect(
+        detectPii("ANTHROPIC_API_KEY=sk-ant-api03-AbC123dEf456GhI789xyz").some(
+          (m) => m.type === PiiType.ACCESS_TOKEN,
+        ),
+      ).toBe(true);
+      expect(
+        detectPii("OPENAI_API_KEY=sk-proj-AbC123dEf456GhI789jkl012mno").some(
+          (m) => m.type === PiiType.ACCESS_TOKEN,
+        ),
+      ).toBe(true);
+      expect(
+        detectPii("token ya29.a0Af_longvalueherexyz12345").some(
+          (m) => m.type === PiiType.ACCESS_TOKEN,
+        ),
+      ).toBe(true);
+    });
+
+    it("detects an opaque Authorization header token", () => {
+      const matches = detectPii("Authorization: Bearer abc123def456ghi789jkl");
+      expect(matches.some((m) => m.type === PiiType.ACCESS_TOKEN)).toBe(true);
+    });
   });
 
   describe("detectPii - national identifiers", () => {
     it("detects a UK National Insurance number", () => {
-      const matches = detectPii("My NINO is QQ 12 34 56 C");
+      const matches = detectPii("My NINO is AB 12 34 56 C");
       expect(matches.some((m) => m.type === PiiType.UK_NINO)).toBe(true);
+    });
+
+    it("does not flag a NINO with an administratively invalid prefix", () => {
+      // "QQ" is HMRC's reserved test prefix; "BG" is never allocated.
+      expect(
+        detectPii("code QQ 12 34 56 C").some((m) => m.type === PiiType.UK_NINO),
+      ).toBe(false);
+      expect(
+        detectPii("code BG 12 34 56 C").some((m) => m.type === PiiType.UK_NINO),
+      ).toBe(false);
+    });
+
+    it("does not flag an SSN with an invalid area number", () => {
+      expect(
+        detectPii("id 000-45-6789").some((m) => m.type === PiiType.NATIONAL_ID),
+      ).toBe(false);
+      expect(
+        detectPii("id 666-45-6789").some((m) => m.type === PiiType.NATIONAL_ID),
+      ).toBe(false);
+    });
+
+    it("detects a valid SSN", () => {
+      expect(
+        detectPii("ssn 123-45-6789").some((m) => m.type === PiiType.NATIONAL_ID),
+      ).toBe(true);
     });
 
     it("detects a passport number when labelled", () => {
