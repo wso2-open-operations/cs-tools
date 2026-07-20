@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import axios from "axios";
 import apiClient from "@src/services/apiClient";
 import { infiniteQueryOptions, mutationOptions, queryOptions, skipToken } from "@tanstack/react-query";
 import type {
@@ -41,6 +42,10 @@ import type {
   AttachmentDto,
   Pagination,
   CreateAttachmentRequestDto,
+  CaseFeedback,
+  CaseFeedbackInput,
+  CaseFeedbackDto,
+  CaseFeedbackResponseDto,
 } from "@src/types";
 
 import {
@@ -49,6 +54,7 @@ import {
   CASE_CLASSIFICATION_ENDPOINT,
   CASE_COMMENTS_ENDPOINT,
   CASE_DETAILS_ENDPOINT,
+  CASE_FEEDBACK_ENDPOINT,
   CASE_STATS_ENDPOINT,
   CREATE_CASE_ENDPOINT,
   PROJECT_CASES_ENDPOINT,
@@ -137,6 +143,25 @@ const createAttachment = async (id: string, body: CreateAttachmentRequestDto): P
   await apiClient.post<CommentDto>(CASE_ATTACHMENTS_ENDPOINT(id), body);
 };
 
+const getFeedback = async (id: string): Promise<CaseFeedback | null> => {
+  try {
+    const response = (await apiClient.get<CaseFeedbackDto>(CASE_FEEDBACK_ENDPOINT(id))).data;
+    return toCaseFeedback(response);
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) return null;
+    throw error;
+  }
+};
+
+const submitFeedback = async (id: string, body: CaseFeedbackInput): Promise<CaseFeedbackResponseDto> => {
+  const response = await apiClient.post<CaseFeedbackResponseDto>(CASE_FEEDBACK_ENDPOINT(id), {
+    emojiId: body.emojiId,
+    chipIds: body.chipIds,
+    additionalComment: body.additionalComment,
+  });
+  return response.data;
+};
+
 /* Mappers */
 export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
   return {
@@ -194,6 +219,19 @@ export function toComment(dto: CommentDto): Comment {
       createdOn: new Date(attachment.createdOn.replace(" ", "T")),
       createdBy: attachment.createdBy,
     })),
+  };
+}
+
+export function toCaseFeedback(dto: CaseFeedbackDto): CaseFeedback {
+  return {
+    id: dto.id,
+    emojiId: dto.emoji.id,
+    emojiName: dto.emoji.name,
+    emojiImage: dto.emoji.selectedImage,
+    chips: dto.chips ?? undefined,
+    additionalComment: dto.additionalComment ?? undefined,
+    createdOn: new Date(dto.createdOn.replace(" ", "T")),
+    createdBy: dto.createdBy,
   };
 }
 
@@ -276,4 +314,11 @@ export const cases = {
     mutationFn: ({ caseId, ...body }: CreateAttachmentRequestDto & { caseId: string }) =>
       createAttachment(caseId, body),
   }),
+
+  feedback: (id: string) => queryOptions({ queryKey: ["case-feedback", id], queryFn: () => getFeedback(id) }),
+
+  submitFeedback: (id: string) =>
+    mutationOptions({
+      mutationFn: (body: CaseFeedbackInput) => submitFeedback(id, body),
+    }),
 };

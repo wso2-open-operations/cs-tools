@@ -16,6 +16,22 @@
 
 import type { EntityReference } from "./case.dto";
 
+export interface FeedbackEmojiChipDto {
+  id: string;
+  name: string;
+  value: string;
+}
+
+export interface FeedbackEmojiDto {
+  id: string;
+  name: string;
+  value: string;
+  unselectedImage: string;
+  selectedImage: string;
+  chips: FeedbackEmojiChipDto[];
+}
+
 export interface MetadataDto {
   timeZones: EntityReference[];
+  feedbackEmojies: FeedbackEmojiDto[];
 }

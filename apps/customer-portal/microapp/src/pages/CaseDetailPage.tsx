@@ -16,7 +16,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUpRight, CheckIcon, CircleX, Image, Paperclip, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Box, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
   InfoField,
@@ -25,7 +25,7 @@ import {
   StickyCommentBar,
   type MenuOptionProps,
 } from "@components/features/detail";
-import { PriorityChip, StatusChip } from "@components/features/support";
+import { CaseFeedbackDialog, PriorityChip, StatusChip } from "@components/features/support";
 import { AttachmentPreviewDialog, RichText, SectionCard } from "@components/shared";
 import { useLayout } from "@context/layout";
 import { cases } from "@src/services/cases";
@@ -94,6 +94,19 @@ export default function CaseDetailPage() {
   const solutionProposedStateKey = CASE_STATE_IDS.SOLUTION_PROPOSED;
   const awaitingInfoStateKey = CASE_STATE_IDS.AWAITING_INFO;
 
+  const isClosed = data?.statusId !== undefined && Number(data.statusId) === closedStateKey;
+
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const { data: feedback, isLoading: isFeedbackLoading } = useQuery({
+    ...cases.feedback(id!),
+    enabled: Boolean(id) && isClosed,
+  });
+
+  const handleFeedbackSubmitted = () => {
+    notify.success("Thanks for your feedback!");
+    queryClient.invalidateQueries({ queryKey: cases.feedback(id!).queryKey });
+  };
+
   const menuOptions = data
     ? getCaseMenuOptions(data.statusId, {
         stateKeys: {
@@ -104,11 +117,11 @@ export default function CaseDetailPage() {
         },
         onResolve: () => {
           if (closedStateKey === undefined) return;
-          editCaseMutation.mutate({ stateKey: closedStateKey });
+          editCaseMutation.mutate({ stateKey: closedStateKey }, { onSuccess: () => setFeedbackDialogOpen(true) });
         },
         onAcceptSolution: () => {
           if (closedStateKey === undefined) return;
-          editCaseMutation.mutate({ stateKey: closedStateKey });
+          editCaseMutation.mutate({ stateKey: closedStateKey }, { onSuccess: () => setFeedbackDialogOpen(true) });
         },
         onRejectSolution: () => {
           if (waitingOnWso2StateKey === undefined) return;
@@ -271,6 +284,41 @@ export default function CaseDetailPage() {
             </Typography>
           )}
         </SectionCard>
+        {isClosed && (
+          <SectionCard title="Feedback">
+            {isFeedbackLoading ? (
+              <Skeleton variant="rounded" height={48} />
+            ) : feedback ? (
+              <Stack direction="row" gap={1.5} alignItems="center">
+                <Box
+                  component="img"
+                  src={feedback.emojiImage}
+                  alt={feedback.emojiName}
+                  sx={{ width: 32, height: 32, flexShrink: 0 }}
+                />
+                <Stack gap={0.25} flex={1} minWidth={0}>
+                  <Typography variant="subtitle2" fontWeight="medium">
+                    {feedback.emojiName}
+                  </Typography>
+                  {feedback.additionalComment && (
+                    <Typography variant="body2" color="text.secondary">
+                      {feedback.additionalComment}
+                    </Typography>
+                  )}
+                </Stack>
+              </Stack>
+            ) : (
+              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
+                <Typography variant="body2" color="text.secondary">
+                  Let us know how we did on this case.
+                </Typography>
+                <Button variant="outlined" size="small" onClick={() => setFeedbackDialogOpen(true)}>
+                  Give Feedback
+                </Button>
+              </Stack>
+            )}
+          </SectionCard>
+        )}
         <SectionCard title="Activity Timeline">
           <Stack gap={2} pt={1}>
             {comments ? (
@@ -304,6 +352,13 @@ export default function CaseDetailPage() {
         open={Boolean(previewAttachment)}
         attachment={previewAttachment}
         onClose={handlePreviewClose}
+      />
+
+      <CaseFeedbackDialog
+        open={feedbackDialogOpen}
+        caseId={id!}
+        onClose={() => setFeedbackDialogOpen(false)}
+        onSubmitted={handleFeedbackSubmitted}
       />
 
       <div ref={bottomRef} />

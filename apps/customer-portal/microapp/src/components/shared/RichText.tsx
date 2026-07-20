@@ -38,6 +38,7 @@ export const RichTextBase = styled(Box)(({ theme }) => ({
     fontSize: pxToRem(12),
     fontFamily: "monospace",
     overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
     whiteSpace: "pre-wrap",
     backgroundColor: theme.palette.background.default,
     color: theme.palette.text.primary,

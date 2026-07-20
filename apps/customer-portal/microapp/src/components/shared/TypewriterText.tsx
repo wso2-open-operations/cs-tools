@@ -45,7 +45,7 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
         components={{
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           table: ({ node, ...props }) => (
-            <div style={{ overflowX: "auto", marginTop: 10 }}>
+            <div style={{ overflowX: "auto", marginTop: 10, WebkitOverflowScrolling: "touch" }}>
               <table
                 style={{
                   width: "max-content",
