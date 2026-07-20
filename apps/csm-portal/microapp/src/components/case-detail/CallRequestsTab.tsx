@@ -27,12 +27,19 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { callRequests } from "@src/services/callRequests";
-import type { CallRequest } from "@src/types";
+import type { CallRequest, CallRequestUpdateInput } from "@src/types";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
 import { ErrorState } from "@components/support/ErrorState";
 import { formatDate } from "@utils/dateTime";
+import {
+  CALL_REQUEST_ACTION_LABEL,
+  CALL_REQUEST_AGENT_ACTIONS,
+  CALL_REQUEST_STATE_COLOR,
+  resolveCallRequestStateKey,
+  type CallRequestAgentAction,
+} from "@utils/callRequestState";
 
 const { LocalizationProvider, DateTimePicker } = DatePickers;
 
@@ -51,6 +58,83 @@ function CallRequestsTabContent({ caseId }: { caseId: string }) {
   const { data: requests } = useSuspenseQuery(callRequests.forCase(caseId));
   const [createOpen, setCreateOpen] = useState(false);
 
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ["case", caseId, "call-requests"] });
+
+  const updateMutation = useMutation({
+    mutationFn: (input: CallRequestUpdateInput) => callRequests.update(input),
+  });
+
+  // Only one action dialog is ever open at a time, driven by which action was clicked on a row.
+  const [scheduleTarget, setScheduleTarget] = useState<CallRequest | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<CallRequest | null>(null);
+  const [notesTarget, setNotesTarget] = useState<CallRequest | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<CallRequest | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const isReschedule = resolveCallRequestStateKey(scheduleTarget?.state) === "scheduled";
+
+  const handleAction = (action: CallRequestAgentAction, cr: CallRequest) => {
+    setActionError(null);
+    switch (action) {
+      case "schedule":
+      case "reschedule":
+        setScheduleTarget(cr);
+        break;
+      case "reject":
+        setRejectTarget(cr);
+        break;
+      case "sendNotes":
+        setNotesTarget(cr);
+        break;
+      case "cancel":
+        setCancelTarget(cr);
+        break;
+    }
+  };
+
+  const runUpdate = (input: CallRequestUpdateInput, onDone: () => void) => {
+    setActionError(null);
+    updateMutation.mutate(input, {
+      onSuccess: () => {
+        onDone();
+        invalidate();
+      },
+      onError: () => setActionError("Could not update the call request. Please try again."),
+    });
+  };
+
+  const handleSchedule = (input: { meetingDate: string; durationInMinutes: number; assignee?: string }) => {
+    if (!scheduleTarget) return;
+    runUpdate({ caseId, callRequestId: scheduleTarget.id, state: "scheduled", ...input }, () =>
+      setScheduleTarget(null),
+    );
+  };
+
+  const handleReject = (reason?: string) => {
+    if (!rejectTarget) return;
+    runUpdate({ caseId, callRequestId: rejectTarget.id, state: "wso2_rejected", cancellationReason: reason }, () =>
+      setRejectTarget(null),
+    );
+  };
+
+  const handleCancel = (cancellationReason: string) => {
+    if (!cancelTarget) return;
+    runUpdate({ caseId, callRequestId: cancelTarget.id, state: "canceled", cancellationReason }, () =>
+      setCancelTarget(null),
+    );
+  };
+
+  const handleSendNotes = (input: {
+    notes: string;
+    plan?: string;
+    attendees?: string;
+    actionItems?: string;
+    actualDurationMin?: number;
+  }) => {
+    if (!notesTarget) return;
+    runUpdate({ caseId, callRequestId: notesTarget.id, state: "concluded", ...input }, () => setNotesTarget(null));
+  };
+
   return (
     <Stack gap={2}>
       <Button variant="contained" size="small" onClick={() => setCreateOpen(true)} sx={{ alignSelf: "start" }}>
@@ -64,7 +148,7 @@ function CallRequestsTabContent({ caseId }: { caseId: string }) {
       ) : (
         <Stack gap={1}>
           {requests.map((cr) => (
-            <CallRequestRow key={cr.id} callRequest={cr} />
+            <CallRequestRow key={cr.id} callRequest={cr} onAction={handleAction} />
           ))}
         </Stack>
       )}
@@ -75,22 +159,80 @@ function CallRequestsTabContent({ caseId }: { caseId: string }) {
           onClose={() => setCreateOpen(false)}
           onCreated={() => {
             setCreateOpen(false);
-            void queryClient.invalidateQueries({ queryKey: ["case", caseId, "call-requests"] });
+            invalidate();
           }}
         />
       )}
+
+      <ScheduleCallDialog
+        callRequest={scheduleTarget}
+        isReschedule={isReschedule}
+        submitting={updateMutation.isPending}
+        error={actionError}
+        onClose={() => {
+          setScheduleTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={handleSchedule}
+      />
+
+      <RejectCallDialog
+        callRequest={rejectTarget}
+        submitting={updateMutation.isPending}
+        error={actionError}
+        onClose={() => {
+          setRejectTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={handleReject}
+      />
+
+      <CancelCallDialog
+        callRequest={cancelTarget}
+        submitting={updateMutation.isPending}
+        error={actionError}
+        onClose={() => {
+          setCancelTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={handleCancel}
+      />
+
+      <SendCallNotesDialog
+        callRequest={notesTarget}
+        submitting={updateMutation.isPending}
+        error={actionError}
+        onClose={() => {
+          setNotesTarget(null);
+          setActionError(null);
+        }}
+        onSubmit={handleSendNotes}
+      />
     </Stack>
   );
 }
 
-function CallRequestRow({ callRequest }: { callRequest: CallRequest }) {
+function CallRequestRow({
+  callRequest,
+  onAction,
+}: {
+  callRequest: CallRequest;
+  onAction: (action: CallRequestAgentAction, cr: CallRequest) => void;
+}) {
+  const stateKey = resolveCallRequestStateKey(callRequest.state);
+  const actions = stateKey ? CALL_REQUEST_AGENT_ACTIONS[stateKey] : [];
+
   return (
     <Stack gap={0.5} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
         <Typography variant="body2" fontWeight={500} noWrap sx={{ minWidth: 0 }}>
           {callRequest.number}
         </Typography>
-        <Chip size="small" label={callRequest.stateLabel} />
+        <Chip
+          size="small"
+          label={callRequest.stateLabel}
+          color={stateKey ? CALL_REQUEST_STATE_COLOR[stateKey] : "default"}
+        />
       </Stack>
       <Typography variant="body2" color="text.primary">
         {callRequest.reason}
@@ -99,10 +241,35 @@ function CallRequestRow({ callRequest }: { callRequest: CallRequest }) {
         {callRequest.durationMin} min
         {callRequest.scheduleTime ? ` · Scheduled ${formatDate(callRequest.scheduleTime)}` : ""}
       </Typography>
+      {callRequest.assignee && (
+        <Typography variant="caption" color="text.secondary">
+          Assignee: {callRequest.assignee}
+        </Typography>
+      )}
       {callRequest.meetingLink && (
         <Typography variant="caption" color="primary.main" noWrap>
           {callRequest.meetingLink}
         </Typography>
+      )}
+      {callRequest.notes && (
+        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "pre-line" }}>
+          Notes: {callRequest.notes}
+        </Typography>
+      )}
+      {actions.length > 0 && (
+        <Stack direction="row" gap={1} flexWrap="wrap" pt={0.5}>
+          {actions.map((action) => (
+            <Button
+              key={action}
+              size="small"
+              variant="outlined"
+              color={action === "reject" || action === "cancel" ? "error" : "primary"}
+              onClick={() => onAction(action, callRequest)}
+            >
+              {CALL_REQUEST_ACTION_LABEL[action]}
+            </Button>
+          ))}
+        </Stack>
       )}
     </Stack>
   );
@@ -199,6 +366,387 @@ function CreateCallRequestDialog({
         </Button>
         <Button variant="contained" disabled={!canSubmit} onClick={handleSubmit}>
           Send
+        </Button>
+      </Stack>
+    </Dialog>
+  );
+}
+
+function ScheduleCallDialog({
+  callRequest,
+  isReschedule,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  callRequest: CallRequest | null;
+  isReschedule: boolean;
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (input: { meetingDate: string; durationInMinutes: number; assignee?: string }) => void;
+}) {
+  const [meetingTime, setMeetingTime] = useState<Date | null>(null);
+  const [durationInput, setDurationInput] = useState("30");
+  const [assignee, setAssignee] = useState("");
+
+  // Reset local state whenever the target call request changes (render-time state
+  // adjustment, not an effect — matches the pattern already used in CreateCallRequestDialog's
+  // sibling dialogs on the webapp).
+  const [prevTargetId, setPrevTargetId] = useState(callRequest?.id);
+  if (callRequest?.id !== prevTargetId) {
+    setPrevTargetId(callRequest?.id);
+    setMeetingTime(null);
+    setDurationInput(callRequest?.durationMin ? String(callRequest.durationMin) : "30");
+    setAssignee(callRequest?.assignee ?? "");
+  }
+
+  const durationMinutes = Number(durationInput);
+  const isDurationValid = durationInput.trim().length > 0 && Number.isFinite(durationMinutes) && durationMinutes > 0;
+  const canSubmit = meetingTime !== null && isDurationValid && !submitting;
+
+  const handleSubmit = () => {
+    if (!canSubmit || !meetingTime) return;
+    onSubmit({
+      meetingDate: meetingTime.toISOString(),
+      durationInMinutes: durationMinutes,
+      ...(assignee.trim() ? { assignee: assignee.trim() } : {}),
+    });
+  };
+
+  const preferredTimes = callRequest?.preferredTimes ?? [];
+
+  return (
+    <Dialog
+      open={!!callRequest}
+      onClose={onClose}
+      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
+    >
+      <Typography variant="h6" fontWeight={650}>
+        {isReschedule ? "Reschedule call" : "Schedule call"}
+      </Typography>
+
+      {preferredTimes.length > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          Customer's preferred times: {preferredTimes.map((t) => formatDate(new Date(t))).join(", ")}
+        </Typography>
+      )}
+
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
+        <DateTimePicker
+          label="Meeting time"
+          value={meetingTime}
+          onChange={setMeetingTime}
+          disabled={submitting}
+          slotProps={{ textField: { size: "small", fullWidth: true } }}
+        />
+      </LocalizationProvider>
+
+      <TextField
+        label="Duration (minutes)"
+        type="number"
+        size="small"
+        fullWidth
+        value={durationInput}
+        onChange={(e) => setDurationInput(e.target.value)}
+        disabled={submitting}
+        error={durationInput.trim().length > 0 && !isDurationValid}
+        slotProps={{ htmlInput: { min: 1 } }}
+      />
+
+      <TextField
+        label="Assignee (optional)"
+        placeholder="engineer@example.com"
+        size="small"
+        fullWidth
+        value={assignee}
+        onChange={(e) => setAssignee(e.target.value)}
+        disabled={submitting}
+      />
+
+      {error && (
+        <Typography variant="caption" color="error.main">
+          {error}
+        </Typography>
+      )}
+
+      <Stack direction="row" justifyContent="end" gap={1}>
+        <Button variant="outlined" onClick={onClose} disabled={submitting}>
+          Cancel
+        </Button>
+        <Button variant="contained" disabled={!canSubmit} onClick={handleSubmit}>
+          {isReschedule ? "Reschedule" : "Schedule"}
+        </Button>
+      </Stack>
+    </Dialog>
+  );
+}
+
+function RejectCallDialog({
+  callRequest,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  callRequest: CallRequest | null;
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (reason?: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [prevTargetId, setPrevTargetId] = useState(callRequest?.id);
+  if (callRequest?.id !== prevTargetId) {
+    setPrevTargetId(callRequest?.id);
+    setReason("");
+  }
+
+  return (
+    <Dialog
+      open={!!callRequest}
+      onClose={onClose}
+      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
+    >
+      <Typography variant="h6" fontWeight={650}>
+        Reject call request
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        This declines the request on behalf of the team. The customer will see it as rejected.
+      </Typography>
+
+      <TextField
+        label="Reason (optional)"
+        multiline
+        minRows={2}
+        fullWidth
+        size="small"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        disabled={submitting}
+      />
+
+      {error && (
+        <Typography variant="caption" color="error.main">
+          {error}
+        </Typography>
+      )}
+
+      <Stack direction="row" justifyContent="end" gap={1}>
+        <Button variant="outlined" onClick={onClose} disabled={submitting}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          color="error"
+          disabled={submitting}
+          onClick={() => onSubmit(reason.trim() ? reason.trim() : undefined)}
+        >
+          Reject
+        </Button>
+      </Stack>
+    </Dialog>
+  );
+}
+
+function CancelCallDialog({
+  callRequest,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  callRequest: CallRequest | null;
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (cancellationReason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [prevTargetId, setPrevTargetId] = useState(callRequest?.id);
+  if (callRequest?.id !== prevTargetId) {
+    setPrevTargetId(callRequest?.id);
+    setReason("");
+  }
+
+  const canSubmit = reason.trim().length > 0 && !submitting;
+
+  return (
+    <Dialog
+      open={!!callRequest}
+      onClose={onClose}
+      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
+    >
+      <Typography variant="h6" fontWeight={650}>
+        Cancel call request
+      </Typography>
+
+      <TextField
+        label="Cancellation reason"
+        multiline
+        minRows={2}
+        fullWidth
+        size="small"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        disabled={submitting}
+      />
+
+      {error && (
+        <Typography variant="caption" color="error.main">
+          {error}
+        </Typography>
+      )}
+
+      <Stack direction="row" justifyContent="end" gap={1}>
+        <Button variant="outlined" onClick={onClose} disabled={submitting}>
+          Back
+        </Button>
+        <Button variant="contained" color="error" disabled={!canSubmit} onClick={() => onSubmit(reason.trim())}>
+          Cancel request
+        </Button>
+      </Stack>
+    </Dialog>
+  );
+}
+
+function SendCallNotesDialog({
+  callRequest,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  callRequest: CallRequest | null;
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (input: {
+    notes: string;
+    plan?: string;
+    attendees?: string;
+    actionItems?: string;
+    actualDurationMin?: number;
+  }) => void;
+}) {
+  const [notes, setNotes] = useState("");
+  const [actionItems, setActionItems] = useState("");
+  const [plan, setPlan] = useState("");
+  const [attendees, setAttendees] = useState("");
+  const [actualDurationInput, setActualDurationInput] = useState("");
+
+  const [prevTargetId, setPrevTargetId] = useState(callRequest?.id);
+  if (callRequest?.id !== prevTargetId) {
+    setPrevTargetId(callRequest?.id);
+    setNotes("");
+    setActionItems("");
+    setPlan("");
+    setAttendees("");
+    setActualDurationInput(callRequest?.durationMin ? String(callRequest.durationMin) : "");
+  }
+
+  const actualDurationMin = actualDurationInput.trim() === "" ? undefined : Number(actualDurationInput);
+  const isDurationValid =
+    actualDurationMin === undefined || (Number.isFinite(actualDurationMin) && actualDurationMin > 0);
+  const canSubmit = notes.trim().length > 0 && isDurationValid && !submitting;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    onSubmit({
+      notes: notes.trim(),
+      ...(plan.trim() ? { plan: plan.trim() } : {}),
+      ...(attendees.trim() ? { attendees: attendees.trim() } : {}),
+      ...(actionItems.trim() ? { actionItems: actionItems.trim() } : {}),
+      ...(actualDurationMin !== undefined ? { actualDurationMin } : {}),
+    });
+  };
+
+  return (
+    <Dialog
+      open={!!callRequest}
+      onClose={onClose}
+      slots={{ paper: (props) => <Card component={Stack} {...props} /> }}
+      slotProps={{ paper: { sx: { bgcolor: "background.paper", p: 1.5, gap: 2, m: 2 } } }}
+    >
+      <Typography variant="h6" fontWeight={650}>
+        Send call notes
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        Submitting notes concludes this call request.
+      </Typography>
+
+      <TextField
+        label="Notes"
+        multiline
+        minRows={3}
+        fullWidth
+        size="small"
+        placeholder="Summary of what was discussed..."
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        disabled={submitting}
+      />
+
+      <TextField
+        label="Action items (optional)"
+        multiline
+        minRows={2}
+        fullWidth
+        size="small"
+        value={actionItems}
+        onChange={(e) => setActionItems(e.target.value)}
+        disabled={submitting}
+      />
+
+      <TextField
+        label="Plan (optional)"
+        multiline
+        minRows={2}
+        fullWidth
+        size="small"
+        value={plan}
+        onChange={(e) => setPlan(e.target.value)}
+        disabled={submitting}
+      />
+
+      <TextField
+        label="Attendees (optional)"
+        placeholder="Comma-separated names or emails"
+        fullWidth
+        size="small"
+        value={attendees}
+        onChange={(e) => setAttendees(e.target.value)}
+        disabled={submitting}
+      />
+
+      <TextField
+        label="Actual duration (minutes, optional)"
+        type="number"
+        fullWidth
+        size="small"
+        value={actualDurationInput}
+        onChange={(e) => setActualDurationInput(e.target.value)}
+        disabled={submitting}
+        error={actualDurationInput.trim().length > 0 && !isDurationValid}
+        slotProps={{ htmlInput: { min: 1 } }}
+      />
+
+      {error && (
+        <Typography variant="caption" color="error.main">
+          {error}
+        </Typography>
+      )}
+
+      <Stack direction="row" justifyContent="end" gap={1}>
+        <Button variant="outlined" onClick={onClose} disabled={submitting}>
+          Cancel
+        </Button>
+        <Button variant="contained" disabled={!canSubmit} onClick={handleSubmit}>
+          Send notes
         </Button>
       </Stack>
     </Dialog>
