@@ -262,6 +262,11 @@ export const DEFAULT_BILLABLE = true;
 /** Character cap mirroring the ServiceNow work-log field. */
 export const WORK_LOG_MAX = 4000;
 
+/** A hard sanity ceiling — nobody logs more than a full day in one bucket or
+ * in total, not a business-hours rule. Shared by the draft validator and the
+ * activity inputs' own `max` attribute. */
+export const MAX_MINUTES_PER_DAY = 1440;
+
 /** A fresh breakdown with every activity at zero minutes. */
 export function emptyBreakdown(): ActivityBreakdown {
   return {
@@ -308,6 +313,11 @@ export function timeCardDraftErrors(draft: TimeCardDraft): TimeCardDraftErrors {
   if (!draft.date) errors.date = "Pick a date.";
   if (!hasLoggedTime(draft.breakdown)) {
     errors.minutes = "Log time against at least one activity.";
+  } else if (
+    ACTIVITY_KEYS.some((key) => (draft.breakdown[key] || 0) > MAX_MINUTES_PER_DAY) ||
+    totalMinutes(draft.breakdown) > MAX_MINUTES_PER_DAY
+  ) {
+    errors.minutes = `Logged time can't exceed ${MAX_MINUTES_PER_DAY} minutes (24h) in a day.`;
   }
   if (!draft.workLogComment.trim()) {
     errors.workLogComment = "Add a work log comment.";
