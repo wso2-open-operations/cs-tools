@@ -57,3 +57,20 @@ export interface Attachment {
   createdOn: Date;
   createdBy: string;
 }
+
+export interface CaseFeedback {
+  id: string;
+  emojiId: string;
+  emojiName: string;
+  emojiImage: string;
+  chips?: string[];
+  additionalComment?: string;
+  createdOn: Date;
+  createdBy: string;
+}
+
+export interface CaseFeedbackInput {
+  emojiId: string;
+  chipIds?: string[];
+  additionalComment?: string;
+}
