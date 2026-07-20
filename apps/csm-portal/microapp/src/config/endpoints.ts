@@ -30,6 +30,8 @@ export const CASE_COMMENTS_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/comme
 export const CASE_COMMENTS_ENDPOINT = (id: string) => `/cases/${id}/comments`;
 export const CASE_CALL_REQUESTS_ENDPOINT = (id: string) => `/cases/${id}/call-requests`;
 export const CASE_CALL_REQUESTS_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/call-requests/search`;
+export const CASE_CALL_REQUEST_ENDPOINT = (caseId: string, callRequestId: string) =>
+  `/cases/${caseId}/call-requests/${callRequestId}`;
 export const CASE_ACTIVITIES_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/activities/search`;
 
 export const SLAS_SEARCH_ENDPOINT = "/slas/search";

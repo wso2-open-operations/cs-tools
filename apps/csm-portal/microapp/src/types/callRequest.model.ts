@@ -14,8 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CallRequestViewDto } from "./callRequest.dto";
+import type { CallRequestStateKeyDto, CallRequestViewDto } from "./callRequest.dto";
 import { parseBackendTimestamp, parseOptionalBackendTimestamp } from "@utils/dateTime";
+
+export type CallRequestStateKey = CallRequestStateKeyDto;
 
 export interface CallRequest {
   id: string;
@@ -28,6 +30,22 @@ export interface CallRequest {
   createdOn: Date;
   stateLabel: string;
   cancellationReason: string | null;
+}
+
+export interface CallRequestUpdateInput {
+  caseId: string;
+  callRequestId: string;
+  state: CallRequestStateKey;
+  cancellationReason?: string;
+  utcTimes?: string[];
+  durationInMinutes?: number;
+  meetingDate?: string;
+  assignee?: string;
+  notes?: string;
+  plan?: string;
+  attendees?: string;
+  actionItems?: string;
+  actualDurationMin?: number;
 }
 
 export function toCallRequest(dto: CallRequestViewDto): CallRequest {
