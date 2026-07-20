@@ -237,6 +237,19 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     regex: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
   },
   {
+    // One-time passcodes / verification codes sent for login or MFA, e.g.
+    // "your OTP is 483920", "verification code: 719283", "2FA code 552011".
+    // Same shape as PASSWORD (keyword + filler + separator + digit-bearing
+    // value) but kept as a distinct type/label since these are short-lived
+    // codes rather than long-term credentials. Checked before PASSWORD so
+    // phrases like "one time password 918273" resolve as OTP rather than
+    // being shadowed by the broader "password" match.
+    type: PiiType.OTP,
+    label: "One-time passcode",
+    regex:
+      /\b(?:otp|one[\s-]?time[\s-]?(?:passcode|password|code|pin)|verification[\s-]?code|security[\s-]?code|confirmation[\s-]?code|access[\s-]?code|auth(?:entication)?[\s-]?code|login[\s-]?code|2fa[\s-]?code|mfa[\s-]?code)\b(?:\s+[A-Za-z][A-Za-z'-]*){0,6}\s*[:=-]?\s*["']?(?=[^\s"'<>{}]*\d)[^\s"'<>{}]{3,}["']?/gi,
+  },
+  {
     // A password/secret assigned in a config/log line or stated in prose, e.g.
     // password="s3cret", clientSecret: abc123, api_key=xxxx, pass: hunter2,
     // AccountKey=... (Azure), "my password is admin123", "password 3221211sdts",
@@ -248,17 +261,6 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     label: "Password or secret",
     regex:
       /\b(?:passphrase|password|passwd|pwd|pass|pin|secret|credential|token|bearer|client[_-]?secret|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|shared[_-]?access[_-]?signature|auth[_-]?token)\b(?:\s+[A-Za-z][A-Za-z'-]*){0,6}\s*[:=-]?\s*["']?(?=[^\s"'<>{}]*\d)[^\s"'<>{}]{3,}["']?/gi,
-  },
-  {
-    // One-time passcodes / verification codes sent for login or MFA, e.g.
-    // "your OTP is 483920", "verification code: 719283", "2FA code 552011".
-    // Same shape as PASSWORD (keyword + filler + separator + digit-bearing
-    // value) but kept as a distinct type/label since these are short-lived
-    // codes rather than long-term credentials.
-    type: PiiType.OTP,
-    label: "One-time passcode",
-    regex:
-      /\b(?:otp|one[\s-]?time[\s-]?(?:passcode|password|code|pin)|verification[\s-]?code|security[\s-]?code|confirmation[\s-]?code|access[\s-]?code|auth(?:entication)?[\s-]?code|login[\s-]?code|2fa[\s-]?code|mfa[\s-]?code)\b(?:\s+[A-Za-z][A-Za-z'-]*){0,6}\s*[:=-]?\s*["']?(?=[^\s"'<>{}]*\d)[^\s"'<>{}]{3,}["']?/gi,
   },
   {
     type: PiiType.CREDIT_CARD,
