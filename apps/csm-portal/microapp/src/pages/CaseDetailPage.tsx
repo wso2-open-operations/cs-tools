@@ -406,8 +406,8 @@ function CaseDetailContent({ id }: { id: string }) {
         <TimeTrackingTab
           caseId={id}
           caseNumber={caseDetail.number}
-          projectId={caseDetail.project.id}
-          projectName={caseDetail.project.name}
+          projectId={caseDetail.project?.id ?? ""}
+          projectName={caseDetail.project?.name ?? ""}
         />
       )}
 
