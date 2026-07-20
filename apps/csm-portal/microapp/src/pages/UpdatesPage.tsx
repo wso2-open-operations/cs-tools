@@ -372,7 +372,7 @@ function UpdateDescriptionBlock({ desc }: { desc: UpdateDescription }) {
         Update number: {desc.updateNumber}
       </Typography>
 
-      {desc.description && <UpdateSection title="Description" content={desc.description} />}
+      {isMeaningful(desc.description) && <UpdateSection title="Description" content={desc.description!} />}
       {isMeaningful(desc.instructions) && <UpdateSection title="Instructions" content={desc.instructions!} />}
       <FileList title="Bug fixes" items={desc.bugFixes} />
       <FileList title="Files added" items={desc.filesAdded} />
