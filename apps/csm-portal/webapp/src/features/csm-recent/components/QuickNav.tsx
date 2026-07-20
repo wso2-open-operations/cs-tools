@@ -67,6 +67,10 @@ export default function QuickNav(): JSX.Element | null {
   const { isSignedIn } = useAsgardeo();
   const navigate = useNavTransition();
   const recents = useRecentViews();
+  // Shrink the closed trigger (not the open palette) once something is
+  // pinned, so PinnedTabs — which shares the header's flexible middle slot —
+  // has room to actually show the pinned chips instead of getting squeezed.
+  const hasPinned = recents.some((e) => e.pinned);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -245,7 +249,9 @@ export default function QuickNav(): JSX.Element | null {
           alignItems: "center",
           gap: 1,
           height: 36,
-          width: { xs: 40, sm: 340, md: 460, lg: 600 },
+          width: hasPinned
+            ? { xs: 40, sm: 260, md: 340, lg: 420 }
+            : { xs: 40, sm: 340, md: 460, lg: 600 },
           px: { xs: 0, sm: 1.25 },
           justifyContent: { xs: "center", sm: "flex-start" },
           borderRadius: 1,

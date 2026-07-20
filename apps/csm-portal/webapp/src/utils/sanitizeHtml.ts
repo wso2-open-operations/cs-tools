@@ -33,5 +33,18 @@ export function sanitizeRichTextHtml(html: string): string {
 
 /** True when an HTML string has no visible content (e.g. `<p></p>`, `&nbsp;`). */
 export function isBlankHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
+  return stripHtmlTags(html).replace(/&nbsp;/g, " ").trim().length === 0;
+}
+
+/**
+ * Strip HTML tags from free text that's meant to be rendered as plain text
+ * (e.g. a case subject stored for later display), not treated as HTML.
+ * Unlike {@link sanitizeRichTextHtml} (which sanitizes-but-keeps safe HTML
+ * for `dangerouslySetInnerHTML`), this removes tag-like markup outright —
+ * appropriate before persisting a plain-text label so a stray `<script>`
+ * a customer typed into a case subject can't do anything if a future
+ * change ever renders it somewhere less safe than JSX text interpolation.
+ */
+export function stripHtmlTags(text: string): string {
+  return text.replace(/<[^>]*>/g, "");
 }
