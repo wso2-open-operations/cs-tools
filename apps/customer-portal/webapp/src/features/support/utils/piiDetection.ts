@@ -92,6 +92,100 @@ export const passesLuhn = (value: string): boolean => {
 };
 
 /**
+ * IBAN mod-97 checksum (ISO 13616). Filters two-letter-prefixed codes — product
+ * SKUs, container numbers, hashes — that merely look like an IBAN.
+ */
+export const passesIbanCheck = (value: string): boolean => {
+  const s = value.replace(/\s/g, "").toUpperCase();
+  if (s.length < 15 || s.length > 34) {
+    return false;
+  }
+  // Move the 4-char country/check prefix to the end, then map letters to
+  // numbers (A=10 … Z=35) and take the running remainder mod 97.
+  const rearranged = s.slice(4) + s.slice(0, 4);
+  const numeric = rearranged.replace(/[A-Z]/g, (c) =>
+    (c.charCodeAt(0) - 55).toString()
+  );
+  let remainder = 0;
+  for (const ch of numeric) {
+    remainder = (remainder * 10 + Number(ch)) % 97;
+  }
+  return remainder === 1;
+};
+
+/**
+ * Danish CPR modulus-11 check. NOTE: only CPR numbers issued before 2007 carry
+ * a valid mod-11 digit; the check was abandoned afterwards, so this rejects some
+ * genuine (post-2007) CPRs. That trade-off is acceptable here: the goal is to
+ * stop date-shaped order/reference numbers from being flagged, and CPR is a rare
+ * category in a technical support tool.
+ */
+export const passesDanishCpr = (value: string): boolean => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 10) {
+    return false;
+  }
+  const weights = [4, 3, 2, 7, 6, 5, 4, 3, 2, 1];
+  let sum = 0;
+  for (let i = 0; i < 10; i += 1) {
+    sum += (digits.charCodeAt(i) - 48) * weights[i];
+  }
+  return sum % 11 === 0;
+};
+
+/** US SSN area/group/serial numbers that are never issued. */
+const isValidSsn = (value: string): boolean => {
+  const [area, group, serial] = value.split("-").map(Number);
+  if (area === 0 || area === 666 || area >= 900) {
+    return false;
+  }
+  return group !== 0 && serial !== 0;
+};
+
+// UK NINO prefixes that are administratively invalid.
+const INVALID_NINO_PREFIXES = new Set(["BG", "GB", "NK", "KN", "TN", "ZZ"]);
+
+/**
+ * UK National Insurance number structural rules: the first letter cannot be
+ * D, F, I, Q, U or V; the second cannot be D, F, I, O, Q, U or V; and a handful
+ * of two-letter prefixes are never allocated.
+ */
+const isValidNino = (value: string): boolean => {
+  const prefix = value.replace(/\s/g, "").toUpperCase().slice(0, 2);
+  if (!/[ABCEGHJ-PRSTW-Z]/.test(prefix[0])) {
+    return false;
+  }
+  if (!/[ABCEGHJ-NPRSTW-Z]/.test(prefix[1])) {
+    return false;
+  }
+  return !INVALID_NINO_PREFIXES.has(prefix);
+};
+
+/**
+ * Phone-number shape check. A bare run of digits (timestamps, order IDs, PIDs)
+ * is NOT treated as a phone number: we require either an explicit country-code
+ * prefix ("+…") or grouping separators where every group is phone-sized (≤4
+ * digits). This is what keeps IP addresses and long reference numbers from being
+ * flagged. The regex already drops "." so dotted-quads never reach here.
+ */
+const isPhoneShaped = (match: string): boolean => {
+  const digitCount = match.replace(/\D/g, "").length;
+  if (digitCount < 9 || digitCount > 15) {
+    return false;
+  }
+  // A string in the exact SSN mask (3-2-4) has already been considered — and
+  // rejected — by the higher-priority SSN rule; don't relabel it as a phone.
+  if (/^\d{3}-\d{2}-\d{4}$/.test(match.trim())) {
+    return false;
+  }
+  if (match.trimStart().startsWith("+")) {
+    return true;
+  }
+  const groups = match.split(/\D+/).filter(Boolean);
+  return groups.length >= 2 && groups.every((group) => group.length <= 4);
+};
+
+/**
  * Detection patterns. Kept as a single exported config so the rule set can be
  * tuned (added to / relaxed) as false-positive feedback comes in.
  *
@@ -115,11 +209,25 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     regex: /\b(?:jdbc:)?[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@[^\s/]+/g,
   },
   {
-    // Well-known service/cloud access tokens with distinctive prefixes.
+    // Well-known service/cloud access tokens with distinctive prefixes:
+    // AWS, GitHub, Slack (incl. xoxe- refresh), Google API key + OAuth (ya29.),
+    // Stripe, npm, OpenAI (sk-/sk-proj-), Anthropic (sk-ant-), Twilio
+    // (AC…/SK… SIDs), SendGrid (SG.…). Note the hyphenated OpenAI/Anthropic
+    // prefixes are distinct from Stripe's underscore form.
     type: PiiType.ACCESS_TOKEN,
     label: "API key or access token",
     regex:
-      /\b(?:AKIA[0-9A-Z]{16}|gh[posru]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|npm_[A-Za-z0-9]{36})\b/g,
+      /\b(?:AKIA[0-9A-Z]{16}|gh[posru]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[baprse]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|ya29\.[A-Za-z0-9_-]{20,}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|npm_[A-Za-z0-9]{36}|AC[a-f0-9]{32}|SK[a-f0-9]{32}|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43})\b/g,
+  },
+  {
+    // Authorization header captured from a pasted request/log, e.g.
+    // "Authorization: Bearer <opaque>" or "Authorization: Basic <base64>".
+    // The (?!eyJ) guard leaves Bearer JWTs to the dedicated JWT rule so they
+    // keep their more specific label; this covers opaque tokens.
+    type: PiiType.ACCESS_TOKEN,
+    label: "API key or access token",
+    regex:
+      /\bAuthorization\s*:\s*(?:Bearer|Basic)\s+(?!eyJ)[A-Za-z0-9._~+/=-]{8,}/gi,
   },
   {
     // JSON Web Tokens (header.payload.signature, base64url).
@@ -135,7 +243,7 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     type: PiiType.PASSWORD,
     label: "Password or secret",
     regex:
-      /\b(?:passphrase|password|passwd|pwd|pass|pin|secret|credential|token|bearer|client[_-]?secret|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|auth[_-]?token)\b\s*[:=]\s*["']?[^\s"'<>{}]{4,}["']?/gi,
+      /\b(?:passphrase|password|passwd|pwd|pass|pin|secret|credential|token|bearer|client[_-]?secret|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|shared[_-]?access[_-]?signature|auth[_-]?token)\b\s*[:=]\s*["']?[^\s"'<>{}]{4,}["']?/gi,
   },
   {
     type: PiiType.CREDIT_CARD,
@@ -148,24 +256,28 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     type: PiiType.IBAN,
     label: "IBAN",
     regex: /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g,
+    validate: passesIbanCheck,
   },
   {
     type: PiiType.DANISH_CPR,
     label: "Danish CPR number",
     // DDMMYY-XXXX (optionally without the hyphen).
     regex: /\b(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])\d{2}-?\d{4}\b/g,
+    validate: passesDanishCpr,
   },
   {
     type: PiiType.NATIONAL_ID,
     label: "National ID / SSN",
     // US SSN style: 3-2-4 with separators.
     regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+    validate: isValidSsn,
   },
   {
     // UK National Insurance number: 2 letters, 6 digits, 1 suffix letter.
     type: PiiType.UK_NINO,
     label: "UK National Insurance number",
     regex: /\b[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]\b/g,
+    validate: isValidNino,
   },
   {
     // Passport number — only when the word "passport" is present, since a bare
@@ -184,14 +296,12 @@ export const PII_PATTERNS: readonly PiiPattern[] = [
     // (card, IBAN, CPR, SSN) win any overlap.
     type: PiiType.PHONE,
     label: "Phone number",
-    // International/local numbers, 9-15 digits with common separators.
-    // Upper bound follows E.164 (max 15 digits) so long generic numbers —
-    // order IDs, timestamps, reference codes — aren't mis-flagged as phones.
-    regex: /(?:\+?\d[\d ().-]{7,}\d)/g,
-    validate: (match) => {
-      const digitCount = match.replace(/\D/g, "").length;
-      return digitCount >= 9 && digitCount <= 15;
-    },
+    // International/local numbers with common grouping separators. "." is
+    // deliberately excluded so dotted-quad IPs and version strings never match;
+    // {@link isPhoneShaped} then enforces a "+"-prefix or phone-sized grouping
+    // so bare digit runs (timestamps, order IDs) aren't flagged.
+    regex: /(?:\+?\d[\d ()-]{7,}\d)/g,
+    validate: isPhoneShaped,
   },
 ];
 
