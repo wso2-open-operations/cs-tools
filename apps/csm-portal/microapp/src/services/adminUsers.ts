@@ -71,5 +71,6 @@ export const adminUsers = {
           filters: { searchQuery, roles: APPROVER_ROLES, active: true },
           pagination: { offset: 0, limit: APPROVER_SEARCH_LIMIT },
         }),
+      enabled: searchQuery.trim().length > 0,
     }),
 };
