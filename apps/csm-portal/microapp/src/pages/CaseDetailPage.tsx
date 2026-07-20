@@ -402,7 +402,14 @@ function CaseDetailContent({ id }: { id: string }) {
 
       {activeTab === "attachments" && <AttachmentsTab caseId={id} />}
 
-      {activeTab === "time" && <TimeTrackingTab caseNumber={caseDetail.number} />}
+      {activeTab === "time" && (
+        <TimeTrackingTab
+          caseId={id}
+          caseNumber={caseDetail.number}
+          projectId={caseDetail.project.id}
+          projectName={caseDetail.project.name}
+        />
+      )}
 
       {activeTab === "call-requests" && <CallRequestsTab caseId={id} />}
 
