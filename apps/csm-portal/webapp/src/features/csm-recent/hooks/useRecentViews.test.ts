@@ -66,6 +66,49 @@ describe("useRecentViews + useRecordRecentView", () => {
     expect(reader.result.current[0].visitedAt).toBeTruthy();
   });
 
+  it("strips HTML tags from title/subtitle/caseHit text before storing", () => {
+    const reader = renderHook(() => useRecentViews());
+    const recorder = renderHook(() => useRecordRecentView());
+
+    act(() =>
+      recorder.result.current({
+        kind: "case",
+        id: "1",
+        title: "<b>Case</b> 1 <script>alert(1)</script>",
+        subtitle: "Acme <i>Corp</i>",
+        href: "/cases/1",
+        caseHit: {
+          subject: "<img src=x onerror=alert(1)>Urgent",
+          severity: "S3",
+          state: "open",
+          assigneeName: "<b>Jane</b> Doe",
+        },
+      }),
+    );
+
+    const stored = reader.result.current[0];
+    // DOMPurify drops a <script> element's content along with its tags,
+    // not just the tag markup.
+    expect(stored.title).toBe("Case 1 ");
+    expect(stored.subtitle).toBe("Acme Corp");
+    expect(stored.caseHit?.subject).toBe("Urgent");
+    expect(stored.caseHit?.assigneeName).toBe("Jane Doe");
+  });
+
+  it("preserves plain text with angle brackets that aren't HTML tags", () => {
+    const reader = renderHook(() => useRecentViews());
+    const recorder = renderHook(() => useRecordRecentView());
+
+    act(() =>
+      recorder.result.current({
+        ...entry("1"),
+        title: "Error when x < y > z",
+      }),
+    );
+
+    expect(reader.result.current[0].title).toBe("Error when x < y > z");
+  });
+
   it("de-dupes by kind+id and bumps the entry to the top", () => {
     const reader = renderHook(() => useRecentViews());
     const recorder = renderHook(() => useRecordRecentView());

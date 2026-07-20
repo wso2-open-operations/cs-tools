@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import { stripHtmlTags } from "@utils/sanitizeHtml";
 import type { QuickCaseHit } from "@features/csm-cases/api/useQuickCaseSearch";
 
 export type RecentViewKind =
@@ -318,17 +319,36 @@ export function useRecordRecentView(): (
   useSyncActiveUserKey();
   return useCallback((entry: Omit<RecentView, "visitedAt" | "pinned">) => {
     const now = new Date().toISOString();
+    // Title/subtitle/case-hit text ultimately come from backend/customer
+    // free text (case subject, account/project name, assignee name) — not
+    // sanitized before render (JSX text interpolation already escapes it
+    // safely), but strip tag-like markup before it's persisted so it can't
+    // do anything if a future change ever renders it somewhere less safe.
+    const sanitized: Omit<RecentView, "visitedAt" | "pinned"> = {
+      ...entry,
+      title: stripHtmlTags(entry.title),
+      subtitle: entry.subtitle ? stripHtmlTags(entry.subtitle) : entry.subtitle,
+      caseHit: entry.caseHit
+        ? {
+            ...entry.caseHit,
+            subject: stripHtmlTags(entry.caseHit.subject),
+            assigneeName: entry.caseHit.assigneeName
+              ? stripHtmlTags(entry.caseHit.assigneeName)
+              : entry.caseHit.assigneeName,
+          }
+        : entry.caseHit,
+    };
     const current = readStorage();
     const existing = current.find(
-      (e) => e.kind === entry.kind && e.id === entry.id,
+      (e) => e.kind === sanitized.kind && e.id === sanitized.id,
     );
     const filtered = current.filter(
-      (e) => !(e.kind === entry.kind && e.id === entry.id),
+      (e) => !(e.kind === sanitized.kind && e.id === sanitized.id),
     );
     // Re-visiting an entry must preserve its pinned state — a pin is not lost
     // just because the case was opened again.
     const next: RecentView[] = capUnpinned([
-      { ...entry, visitedAt: now, pinned: existing?.pinned },
+      { ...sanitized, visitedAt: now, pinned: existing?.pinned },
       ...filtered,
     ]);
     writeStorage(next);
