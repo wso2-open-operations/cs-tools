@@ -50,6 +50,7 @@ import {
   DEFAULT_BILLABLE,
   DEFAULT_ISSUE_COMPLEXITY,
   ISSUE_COMPLEXITY_OPTIONS,
+  MAX_MINUTES_PER_DAY,
   WORK_LOG_MAX,
   emptyBreakdown,
   timeCardDraftErrors,
@@ -229,9 +230,14 @@ export function LogTimeCardDialog({
                   type="number"
                   size="small"
                   value={Number.isFinite(breakdown[b.key]) ? breakdown[b.key] : 0}
-                  onChange={(e) => setActivity(b.key, Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                  onChange={(e) =>
+                    setActivity(
+                      b.key,
+                      Math.min(MAX_MINUTES_PER_DAY, Math.max(0, Math.round(Number(e.target.value) || 0))),
+                    )
+                  }
                   onBlur={() => touch("minutes")}
-                  slotProps={{ htmlInput: { min: 0, step: 1, "aria-label": b.label } }}
+                  slotProps={{ htmlInput: { min: 0, max: MAX_MINUTES_PER_DAY, step: 1, "aria-label": b.label } }}
                   sx={{ width: 96 }}
                 />
               </Stack>
@@ -327,7 +333,7 @@ export function LogTimeCardDialog({
         <Button color="inherit" onClick={onClose} disabled={isSubmitting}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={handleSubmit} disabled={isSubmitting || (touched.size > 0 && !isValid)}>
+        <Button variant="contained" onClick={handleSubmit} disabled={isSubmitting}>
           {isSubmitting ? "Submitting…" : "Submit for review"}
         </Button>
       </DialogActions>
