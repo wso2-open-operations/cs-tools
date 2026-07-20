@@ -50,16 +50,16 @@ export interface CsmNavItem {
  * the Quick-nav palette's "Pages" section, and "Pin this page" title/kind
  * derivation — so a new page only has to be added here once.
  *
- * Dashboard, Support, Updates and Time cards are the shipped sections; the rest
- * are flagged `wip` so a deployment can disable them via
- * `CSM_PORTAL_DISABLE_WIP_FEATURES` until they are ready.
+ * Dashboard, Support, Updates, Time cards, Engagements and Security Center are
+ * the shipped sections; the rest are flagged `wip` so a deployment can disable
+ * them via `CSM_PORTAL_DISABLE_WIP_FEATURES` until they are ready.
  */
 export const CSM_NAV_ITEMS: CsmNavItem[] = [
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn },
   { id: "support", label: "Support", path: "/cases", icon: Headset },
   { id: "operations", label: "Operations", path: "/operations", icon: Cog, wip: true },
-  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase, wip: true },
-  { id: "security-center", label: "Security Center", path: "/security-center", icon: Shield, wip: true },
+  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase },
+  { id: "security-center", label: "Security Center", path: "/security-center", icon: Shield },
   { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
   { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock },
   { id: "announcements", label: "Announcements", path: "/announcements", icon: Megaphone },
