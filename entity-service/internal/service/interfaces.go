@@ -334,7 +334,7 @@ type TaskService interface {
 	// SearchCaseTasks returns a paginated list of tasks for the case identified by
 	// caseID. A ValidationError is returned for invalid input (e.g. malformed UUID);
 	// an UnauthorizedError is returned when x-user-id-token is absent.
-	SearchCaseTasks(ctx context.Context, caseID string, limit, offset int) (domain.SearchCaseTasksResponse, error)
+	SearchCaseTasks(ctx context.Context, caseID string, req domain.SearchCaseTasksRequest) (domain.SearchCaseTasksResponse, error)
 	// GetTask returns the full detail of a single task by its UUID.
 	// A NotFoundError is returned if the task does not exist.
 	GetTask(ctx context.Context, id string) (domain.TaskDetail, error)

@@ -2368,7 +2368,7 @@ type TaskSlaDetail struct {
 }
 
 // TaskSummary is a single task record in a case's task list, returned by
-// GET /cases/{id}/tasks.
+// POST /cases/{id}/tasks/search.
 //
 // State is deliberately a plain *string, not a closed Go enum/const-validated
 // type: ServiceNow's task state choice-list carries raw values beyond the
@@ -2386,7 +2386,12 @@ type TaskSummary struct {
 	UpdatedOn  string     `json:"updatedOn"`
 }
 
-// SearchCaseTasksResponse is the response for GET /cases/{id}/tasks.
+// SearchCaseTasksRequest is the request body for POST /cases/{id}/tasks/search.
+type SearchCaseTasksRequest struct {
+	Pagination Pagination `json:"pagination"`
+}
+
+// SearchCaseTasksResponse is the response for POST /cases/{id}/tasks/search.
 type SearchCaseTasksResponse struct {
 	Tasks  []TaskSummary `json:"tasks"`
 	Total  int           `json:"total"`

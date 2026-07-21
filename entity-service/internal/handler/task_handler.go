@@ -19,9 +19,8 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
@@ -35,39 +34,16 @@ func NewTaskHandler(svc service.TaskService) *TaskHandler {
 	return &TaskHandler{svc: svc}
 }
 
-// parsePaginationQuery parses the limit/offset query params of r, defaulting
-// either to 0 (letting the service layer apply its own default) when absent.
-// Returns false and writes a 400 response if a supplied value is not an integer.
-func parsePaginationQuery(w http.ResponseWriter, r *http.Request) (limit int, offset int, ok bool) {
-	if v := r.URL.Query().Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			apierror.WriteJSON(w, http.StatusBadRequest, "limit must be an integer")
-			return 0, 0, false
-		}
-		limit = n
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			apierror.WriteJSON(w, http.StatusBadRequest, "offset must be an integer")
-			return 0, 0, false
-		}
-		offset = n
-	}
-	return limit, offset, true
-}
-
-// SearchCaseTasks handles GET /cases/{id}/tasks.
+// SearchCaseTasks handles POST /cases/{id}/tasks/search.
 func (h *TaskHandler) SearchCaseTasks(w http.ResponseWriter, r *http.Request) {
 	caseID := r.PathValue("id")
 
-	limit, offset, ok := parsePaginationQuery(w, r)
-	if !ok {
+	var req domain.SearchCaseTasksRequest
+	if !decodeRequest(w, r, &req) {
 		return
 	}
 
-	resp, err := h.svc.SearchCaseTasks(r.Context(), caseID, limit, offset)
+	resp, err := h.svc.SearchCaseTasks(r.Context(), caseID, req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -44,12 +43,17 @@ type snTask struct {
 	UpdatedOn  *string           `json:"updatedOn"`
 }
 
-// snCaseTasksResponse mirrors the Choreo GET /cases/{id}/tasks response.
+// snCaseTasksResponse mirrors the Choreo POST /cases/{id}/tasks/search response.
 type snCaseTasksResponse struct {
 	Tasks  []snTask `json:"tasks"`
 	Total  int      `json:"total"`
 	Offset int      `json:"offset"`
 	Limit  int      `json:"limit"`
+}
+
+// snCaseTasksSearchPayload is the Choreo POST /cases/{id}/tasks/search request body.
+type snCaseTasksSearchPayload struct {
+	Pagination snProjectPagination `json:"pagination"`
 }
 
 // snProductRef is a named product reference embedded in a task detail record.
@@ -105,7 +109,7 @@ func NewServiceNowTaskService(client *integrationservice.Client) TaskService {
 	return &snTaskService{client: client}
 }
 
-func (s *snTaskService) SearchCaseTasks(ctx context.Context, caseID string, limit, offset int) (domain.SearchCaseTasksResponse, error) {
+func (s *snTaskService) SearchCaseTasks(ctx context.Context, caseID string, req domain.SearchCaseTasksRequest) (domain.SearchCaseTasksResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
 		return domain.SearchCaseTasksResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
@@ -115,17 +119,16 @@ func (s *snTaskService) SearchCaseTasks(ctx context.Context, caseID string, limi
 		return domain.SearchCaseTasksResponse{}, err
 	}
 
-	pagination := domain.Pagination{Limit: limit, Offset: offset}
-	if err := normalizePagination(&pagination); err != nil {
+	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCaseTasksResponse{}, err
 	}
 
-	query := url.Values{}
-	query.Set("limit", fmt.Sprintf("%d", pagination.Limit))
-	query.Set("offset", fmt.Sprintf("%d", pagination.Offset))
+	payload := snCaseTasksSearchPayload{
+		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
 
-	path := "/cases/" + uuidToSysid(caseID) + "/tasks?" + query.Encode()
-	raw, err := s.client.Get(ctx, path, token)
+	path := "/cases/" + uuidToSysid(caseID) + "/tasks/search"
+	raw, err := s.client.Post(ctx, path, token, payload)
 	if err != nil {
 		return domain.SearchCaseTasksResponse{}, err
 	}

@@ -326,7 +326,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 
 	if taskHandler != nil {
-		mux.HandleFunc("GET /cases/{id}/tasks", taskHandler.SearchCaseTasks)
+		mux.HandleFunc("POST /cases/{id}/tasks/search", taskHandler.SearchCaseTasks)
 		mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
 	}
 
