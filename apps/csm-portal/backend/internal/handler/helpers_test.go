@@ -281,8 +281,9 @@ func (m *mockEntityUserClient) SearchUsers(ctx context.Context, body []byte) ([]
 // ----- mock entity account client -----
 
 type mockEntityAccountClient struct {
-	getAccountFn     func(ctx context.Context, id string) ([]byte, error)
-	searchAccountsFn func(ctx context.Context, body []byte) ([]byte, error)
+	getAccountFn            func(ctx context.Context, id string) ([]byte, error)
+	searchAccountsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchAccountContactsFn func(ctx context.Context, accountID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityAccountClient) GetAccount(ctx context.Context, id string) ([]byte, error) {
@@ -299,11 +300,19 @@ func (m *mockEntityAccountClient) SearchAccounts(ctx context.Context, body []byt
 	return []byte(`{}`), nil
 }
 
+func (m *mockEntityAccountClient) SearchAccountContacts(ctx context.Context, accountID string, body []byte) ([]byte, error) {
+	if m.searchAccountContactsFn != nil {
+		return m.searchAccountContactsFn(ctx, accountID, body)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity project client -----
 
 type mockEntityProjectClient struct {
-	getProjectFn     func(ctx context.Context, id string) ([]byte, error)
-	searchProjectsFn func(ctx context.Context, body []byte) ([]byte, error)
+	getProjectFn            func(ctx context.Context, id string) ([]byte, error)
+	searchProjectsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchProjectContactsFn func(ctx context.Context, projectID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityProjectClient) GetProject(ctx context.Context, id string) ([]byte, error) {
@@ -316,6 +325,13 @@ func (m *mockEntityProjectClient) GetProject(ctx context.Context, id string) ([]
 func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchProjectsFn != nil {
 		return m.searchProjectsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityProjectClient) SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error) {
+	if m.searchProjectContactsFn != nil {
+		return m.searchProjectContactsFn(ctx, projectID, body)
 	}
 	return []byte(`{}`), nil
 }

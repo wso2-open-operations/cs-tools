@@ -333,6 +333,28 @@ type ProjectAccountRef struct {
 	KbReferencesEnabled bool       `json:"kbReferencesEnabled"`
 }
 
+// ProjectClosureFields groups the ServiceNow-only closure-tracking fields
+// shared by ProjectDetailsView and ProjectView, so the two don't drift when a
+// closure field is added or renamed. Embedded anonymously; encoding/json
+// promotes its fields to the parent's JSON object, so the wire shape is
+// unaffected.
+type ProjectClosureFields struct {
+	// ClosureState is the project's closure/access state (ServiceNow data source only).
+	ClosureState *string `json:"closureState"`
+	// EndDateClosureState reflects the closure state driven by the project's end date
+	// (ServiceNow data source only).
+	EndDateClosureState *string `json:"endDateClosureState"`
+	// InvoiceDueDateClosureState reflects the closure state driven by the invoice due
+	// date (ServiceNow data source only).
+	InvoiceDueDateClosureState *string `json:"invoiceDueDateClosureState"`
+	// ComplianceViolationClosureState reflects the closure state driven by a compliance
+	// violation (ServiceNow data source only).
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+	// ComplianceViolationDate is the date a compliance violation was recorded, if any
+	// (ServiceNow data source only).
+	ComplianceViolationDate *string `json:"complianceViolationDate"`
+}
+
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
 // It embeds the linked account and uses createdOn/updatedOn for consistency
 // with the ProjectView search result.
@@ -347,6 +369,40 @@ type ProjectDetailsView struct {
 	EndDate          time.Time         `json:"endDate"`
 	CreatedOn        time.Time         `json:"createdOn"`
 	UpdatedOn        time.Time         `json:"updatedOn"`
+	ProjectClosureFields
+}
+
+// ProjectUpdateRequest is the input for PATCH /projects/{id} (ServiceNow data
+// source only — no Postgres equivalent). All fields are optional; at least
+// one must be provided. Note: ClosureState itself is not settable — it is
+// derived automatically from the three closure sub-state fields below by an
+// SN business rule, so setting one of those and re-fetching the project is
+// how a caller observes the resulting overall status.
+type ProjectUpdateRequest struct {
+	HasAgent                        *bool   `json:"hasAgent,omitempty"`
+	HasKbReferences                 *bool   `json:"hasKbReferences,omitempty"`
+	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
+	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
+}
+
+// ProjectUpdateResponse is the result of a project update operation
+// (ServiceNow data source only).
+type ProjectUpdateResponse struct {
+	Message string              `json:"message"`
+	Project ProjectUpdateResult `json:"project"`
+}
+
+// ProjectUpdateResult is the updated project's metadata, including the
+// closure state as recomputed by ServiceNow after the update.
+type ProjectUpdateResult struct {
+	ID                              string    `json:"id"`
+	UpdatedBy                       string    `json:"updatedBy"`
+	UpdatedOn                       time.Time `json:"updatedOn"`
+	ClosureState                    *string   `json:"closureState"`
+	EndDateClosureState             *string   `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string   `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string   `json:"complianceViolationClosureState"`
 }
 
 // SearchProjectsRequest is the input for a project search operation.
@@ -354,6 +410,19 @@ type ProjectDetailsView struct {
 type SearchProjectsRequest struct {
 	Pagination  Pagination `json:"pagination"`
 	SearchQuery string     `json:"searchQuery"`
+	// ClosureStatus filters by closure status (ServiceNow data source only).
+	ClosureStatus string `json:"closureStatus"`
+	// EndDateFrom filters projects with an end date on or after this date
+	// (yyyy-MM-dd, ServiceNow data source only).
+	EndDateFrom string `json:"endDateFrom"`
+	// EndDateTo filters projects with an end date on or before this date
+	// (yyyy-MM-dd, ServiceNow data source only).
+	EndDateTo string `json:"endDateTo"`
+	// SortBy is the field to sort results by. Currently only "endDate" is
+	// meaningful (ServiceNow data source only).
+	SortBy string `json:"sortBy"`
+	// SortOrder is the sort direction ("asc" or "desc", ServiceNow data source only).
+	SortOrder string `json:"sortOrder"`
 }
 
 // ProjectView is the unified search result shape returned for all data sources.
@@ -365,6 +434,7 @@ type ProjectView struct {
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
 	CreatedOn        time.Time        `json:"createdOn"`
+	ProjectClosureFields
 }
 
 // SearchProjectsResponse is the paginated result of a project search.
@@ -1637,6 +1707,59 @@ type CatalogItemVariable struct {
 // GET /catalogs/{catalogId}/items/{catalogItemId}/variables.
 type GetCatalogItemVariablesResponse struct {
 	Variables []CatalogItemVariable `json:"variables"`
+}
+
+// SearchContactsFilters holds the optional filter criteria for a contact search.
+type SearchContactsFilters struct {
+	SearchQuery string `json:"searchQuery"`
+}
+
+// ProjectContact is a contact associated with a project. Supported by the
+// ServiceNow data source only; there is no Postgres equivalent.
+type ProjectContact struct {
+	Name                 string   `json:"name"`
+	Email                string   `json:"email"`
+	RegistrationState    string   `json:"registrationState"`
+	NotificationsEnabled bool     `json:"notificationsEnabled"`
+	Roles                []string `json:"roles"`
+}
+
+// SearchProjectContactsRequest is the input for POST /projects/{id}/contacts/search.
+// Filters and Pagination are both optional.
+type SearchProjectContactsRequest struct {
+	Filters    SearchContactsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchProjectContactsResponse is the paginated result of a project contact search.
+type SearchProjectContactsResponse struct {
+	Contacts []ProjectContact `json:"contacts"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
+}
+
+// AccountContact is a contact associated with an account. Supported by the
+// ServiceNow data source only; there is no Postgres equivalent.
+type AccountContact struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	IsPrimary bool   `json:"isPrimary"`
+}
+
+// SearchAccountContactsRequest is the input for POST /accounts/{id}/contacts/search.
+// Filters and Pagination are both optional.
+type SearchAccountContactsRequest struct {
+	Filters    SearchContactsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchAccountContactsResponse is the paginated result of an account contact search.
+type SearchAccountContactsResponse struct {
+	Contacts []AccountContact `json:"contacts"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
 }
 
 // PatchChangeRequestRequest is the request body for PATCH /change-requests/{id}.
