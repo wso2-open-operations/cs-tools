@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { queryOptions } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 import {
   CASE_CALL_REQUEST_ENDPOINT,
   CASE_CALL_REQUESTS_ENDPOINT,
@@ -78,6 +78,13 @@ export const callRequests = {
     queryOptions({
       queryKey: ["case", caseId, "call-requests"],
       queryFn: () => getCallRequests(caseId),
+      // CallRequestsTab reads this via useSuspenseQuery. Without
+      // placeholderData, an update's post-mutation invalidateQueries
+      // re-suspends the tab back to its skeleton on every refetch instead of
+      // just swapping the list in place once the new data lands — same
+      // network time as the webapp's plain useQuery, but it visibly blanks
+      // out first, reading as slower even though it isn't.
+      placeholderData: keepPreviousData,
     }),
   create: createCallRequest,
   update: updateCallRequest,
