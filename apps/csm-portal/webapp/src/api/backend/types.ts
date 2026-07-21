@@ -1363,7 +1363,7 @@ export interface BeTaskDetail {
   environment: string | null;
   environmentLabel: string | null;
   product: BeEntityRef | null;
-  parentCase: BeCaseNumberRef;
+  parentCase: BeCaseNumberRef | null;
   createdOn: string;
   updatedOn: string;
 }
@@ -1975,10 +1975,10 @@ export interface BeProblemDetail {
   causeNotes?: string | null;
   fixNotes?: string | null;
   workaround?: string | null;
-  resolvedAt?: string | null;
+  resolvedOn?: string | null;
   resolvedBy?: BeEntityRef | null;
-  openedAt?: string | null;
-  closedAt?: string | null;
+  openedOn?: string | null;
+  closedOn?: string | null;
 }
 
 // ---------------------------------------------------------------------------

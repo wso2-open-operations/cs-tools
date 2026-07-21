@@ -139,7 +139,7 @@ export function TaskDetailDialog({ taskId, onClose }: TaskDetailDialogProps): JS
             >
               <DetailCell label="Parent case">
                 <Typography variant="body2">
-                  {task.parentCase.number ?? task.parentCase.id}
+                  {task.parentCase?.number ?? task.parentCase?.id ?? "—"}
                 </Typography>
               </DetailCell>
               <DetailCell label="Assigned to">
