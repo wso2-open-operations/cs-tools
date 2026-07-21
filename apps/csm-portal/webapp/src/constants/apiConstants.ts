@@ -56,6 +56,8 @@ export const ApiQueryKeys = {
   PRODUCT_VULNERABILITIES_SEARCH: "product-vulnerabilities-search",
   PRODUCT_VULNERABILITIES_META: "product-vulnerabilities-meta",
   CASE_CALL_REQUESTS: "case-call-requests",
+  CASE_TASKS: "case-tasks",
+  TASK_DETAILS: "task-details",
   PROJECT_CONTACTS: "project-contacts",
   TIME_TRACKING_DETAILS: "time-tracking-details",
   TIME_CARDS_SEARCH: "time-cards-search",

@@ -207,6 +207,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		snUserHandler = handler.NewSNUserHandler(service.NewServiceNowUserService(serviceNowIntegrationServiceClient))
 	}
 
+	var taskHandler *handler.TaskHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		taskHandler = handler.NewTaskHandler(service.NewServiceNowTaskService(serviceNowIntegrationServiceClient))
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
@@ -319,6 +324,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	if taskSlaHandler != nil {
 		mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 		mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
+	}
+
+	if taskHandler != nil {
+		mux.HandleFunc("POST /cases/{id}/tasks/search", taskHandler.SearchCaseTasks)
+		mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
 	}
 
 	if incidentHandler != nil {

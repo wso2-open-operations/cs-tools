@@ -2645,6 +2645,126 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{caseId}/tasks/search:
+    post:
+      summary: Search tasks for a case, paginated (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is and the response is returned verbatim.
+      operationId: searchCaseTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        description: Case task search payload.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseTaskSearchPayload'
+      responses:
+        "200":
+          description: Paginated list of tasks for the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSearchResponse'
+        "400":
+          description: Bad request (invalid UUID or request body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /tasks/{id}:
+    get:
+      summary: Get a single task by ID (ServiceNow data source only).
+      operationId: getTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID.
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /catalogs/{catalogId}/items/{catalogItemId}/variables:
     get:
       summary: Get variables (form fields) for a catalog item (ServiceNow data source only).
@@ -5785,6 +5905,86 @@ components:
             approvedOn:
               type: string
               nullable: true
+
+    TaskSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: Current workflow state (e.g. "open", "in_progress", "closed")
+        dueDate:
+          type: string
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        updatedOn:
+          type: string
+
+    TaskSearchResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSummary'
+        total:
+          type: integer
+          description: Total number of matching tasks
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CaseTaskSearchPayload:
+      type: object
+      nullable: true
+      description: >
+        Payload for paginating the tasks of a case. The case ID is taken from
+        the URL path. The payload is forwarded to the integration service as-is.
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    TaskDetail:
+      allOf:
+        - $ref: '#/components/schemas/TaskSummary'
+        - type: object
+          properties:
+            visibleToCustomer:
+              type: boolean
+            requestType:
+              type: string
+              nullable: true
+            requestTypeLabel:
+              type: string
+              nullable: true
+            environment:
+              type: string
+              nullable: true
+            environmentLabel:
+              type: string
+              nullable: true
+            product:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            parentCase:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            createdOn:
+              type: string
 
     ChangeRequestApprover:
       type: object

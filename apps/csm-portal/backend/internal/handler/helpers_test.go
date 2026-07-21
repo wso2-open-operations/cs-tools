@@ -635,3 +635,24 @@ func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
 }
+
+// ----- mock entity task client -----
+
+type mockEntityTaskClient struct {
+	searchCaseTasksFn func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	getTaskFn         func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityTaskClient) SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.searchCaseTasksFn != nil {
+		return m.searchCaseTasksFn(ctx, caseID, body)
+	}
+	return []byte(`{"tasks":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityTaskClient) GetTask(ctx context.Context, id string) ([]byte, error) {
+	if m.getTaskFn != nil {
+		return m.getTaskFn(ctx, id)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
+}

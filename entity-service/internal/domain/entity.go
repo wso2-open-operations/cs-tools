@@ -2413,6 +2413,64 @@ type TaskSlaDetail struct {
 	Schedule                  *TaskSlaScheduleRef      `json:"schedule"`
 }
 
+// TaskSummary is a single task record in a case's task list, returned by
+// POST /cases/{id}/tasks/search.
+//
+// State is deliberately a plain *string, not a closed Go enum/const-validated
+// type: ServiceNow's task state choice-list carries raw values beyond the
+// well-known ones (e.g. an undocumented raw "0" has been observed live, which
+// the Ballerina layer maps to "OTHER"). A closed enum would fail deserialization
+// or drop data the moment SN returns a value we haven't enumerated. Known
+// values as currently mapped by the upstream integration: "OPEN", "CLOSED",
+// "OTHER" (fallback for any unmapped raw value), or nil if state is unset.
+type TaskSummary struct {
+	ID         string     `json:"id"`
+	Subject    string     `json:"subject"`
+	State      *string    `json:"state"`
+	DueDate    *string    `json:"dueDate"`
+	AssignedTo *EntityRef `json:"assignedTo"`
+	UpdatedOn  string     `json:"updatedOn"`
+}
+
+// SearchCaseTasksRequest is the request body for POST /cases/{id}/tasks/search.
+type SearchCaseTasksRequest struct {
+	Pagination Pagination `json:"pagination"`
+}
+
+// SearchCaseTasksResponse is the response for POST /cases/{id}/tasks/search.
+type SearchCaseTasksResponse struct {
+	Tasks  []TaskSummary `json:"tasks"`
+	Total  int           `json:"total"`
+	Offset int           `json:"offset"`
+	Limit  int           `json:"limit"`
+}
+
+// TaskDetail is the full task record returned by GET /tasks/{id}.
+//
+// RequestType/RequestTypeLabel and Environment/EnvironmentLabel follow the same
+// plain-*string rule as TaskSummary.State above: these are ServiceNow choice-list
+// fields (raw key + resolved label) and must not be modeled as closed enums for
+// the same reason — an unmapped raw value must degrade to nil, not break the
+// response. Known RequestType values are SN-configuration-dependent (e.g. "1"
+// observed live for "Log Extraction"); Environment is currently unobserved live
+// (nil) but follows the identical key/label shape.
+type TaskDetail struct {
+	ID                string         `json:"id"`
+	Subject           string         `json:"subject"`
+	State             *string        `json:"state"`
+	DueDate           *string        `json:"dueDate"`
+	VisibleToCustomer bool           `json:"visibleToCustomer"`
+	AssignedTo        *EntityRef     `json:"assignedTo"`
+	RequestType       *string        `json:"requestType"`
+	RequestTypeLabel  *string        `json:"requestTypeLabel"`
+	Environment       *string        `json:"environment"`
+	EnvironmentLabel  *string        `json:"environmentLabel"`
+	Product           *EntityRef     `json:"product"`
+	ParentCase        *CaseNumberRef `json:"parentCase"`
+	CreatedOn         string         `json:"createdOn"`
+	UpdatedOn         string         `json:"updatedOn"`
+}
+
 // IncidentPriority represents the priority level of an incident.
 type IncidentPriority string
 

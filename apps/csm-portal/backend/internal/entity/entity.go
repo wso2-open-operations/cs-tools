@@ -372,3 +372,15 @@ func (c *Client) SearchTaskSlas(ctx context.Context, body []byte) ([]byte, error
 func (c *Client) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/slas/%s", url.PathEscape(id)), nil)
 }
+
+// SearchCaseTasks calls POST /cases/{caseId}/tasks/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/tasks/search", url.PathEscape(caseID)), body)
+}
+
+// GetTask calls GET /tasks/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) GetTask(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/tasks/%s", url.PathEscape(id)), nil)
+}
