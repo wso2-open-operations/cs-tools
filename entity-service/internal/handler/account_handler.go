@@ -98,3 +98,30 @@ func (h *SNAccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(account)
 }
+
+// AccountContactHandler handles HTTP requests for account contacts, backed by
+// the ServiceNow data source only.
+type AccountContactHandler struct {
+	svc service.AccountContactService
+}
+
+// NewAccountContactHandler constructs an AccountContactHandler with the given service.
+func NewAccountContactHandler(svc service.AccountContactService) *AccountContactHandler {
+	return &AccountContactHandler{svc: svc}
+}
+
+// SearchAccountContacts handles POST /accounts/{id}/contacts/search.
+func (h *AccountContactHandler) SearchAccountContacts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req domain.SearchAccountContactsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchAccountContacts(r.Context(), id, req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

@@ -96,6 +96,12 @@ func (c *Client) SearchAccounts(ctx context.Context, body []byte) ([]byte, error
 	return c.do(ctx, http.MethodPost, "/accounts/search", body)
 }
 
+// SearchAccountContacts calls POST /accounts/{id}/contacts/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchAccountContacts(ctx context.Context, accountID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/accounts/%s/contacts/search", url.PathEscape(accountID)), body)
+}
+
 // GetProject calls GET /projects/{id} on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) GetProject(ctx context.Context, id string) ([]byte, error) {
@@ -106,6 +112,12 @@ func (c *Client) GetProject(ctx context.Context, id string) ([]byte, error) {
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/projects/search", body)
+}
+
+// SearchProjectContacts calls POST /projects/{id}/contacts/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/projects/%s/contacts/search", url.PathEscape(projectID)), body)
 }
 
 // SearchProducts calls POST /products/search on the entity service.

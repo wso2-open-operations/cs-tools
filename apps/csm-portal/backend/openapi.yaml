@@ -838,6 +838,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /accounts/{id}/contacts/search:
+    post:
+      summary: Search contacts on an account.
+      description: >
+        Returns a paginated list of contacts associated with the account. The
+        request body is forwarded to the integration service as-is and the
+        response is returned verbatim.
+      operationId: postAccountsIdContactsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the account.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Account contact search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountContactSearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountContactSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /projects/{id}:
     get:
       summary: Get a project by ID.
@@ -905,6 +966,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProjectSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /projects/{id}/contacts/search:
+    post:
+      summary: Search contacts on a project.
+      description: >
+        Returns a paginated list of contacts associated with the project. The
+        request body is forwarded to the integration service as-is and the
+        response is returned verbatim.
+      operationId: postProjectsIdContactsSearch
+      parameters:
+        - name: id
+          in: path
+          description: ID of the project.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Project contact search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectContactSearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContactSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -4274,6 +4389,45 @@ components:
         hasMore:
           type: boolean
 
+    AccountContactSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive)
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    AccountContactSearchResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              isPrimary:
+                type: boolean
+        offset:
+          type: integer
+        limit:
+          type: integer
+        totalRecords:
+          type: integer
+          description: Total number of matching contacts
+
     Account:
       type: object
       properties:
@@ -4463,6 +4617,51 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    ProjectContactSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive)
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    ProjectContactSearchResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              registrationState:
+                type: string
+              notificationsEnabled:
+                type: boolean
+              roles:
+                type: array
+                items:
+                  type: string
+        offset:
+          type: integer
+        limit:
+          type: integer
+        totalRecords:
+          type: integer
+          description: Total number of matching contacts
 
     Project:
       type: object

@@ -61,3 +61,57 @@ func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(project)
 }
+
+// ProjectUpdateHandler handles the project update endpoint, backed by the
+// ServiceNow data source only.
+type ProjectUpdateHandler struct {
+	svc service.ProjectUpdateService
+}
+
+// NewProjectUpdateHandler constructs a ProjectUpdateHandler with the given service.
+func NewProjectUpdateHandler(svc service.ProjectUpdateService) *ProjectUpdateHandler {
+	return &ProjectUpdateHandler{svc: svc}
+}
+
+// UpdateProject handles PATCH /projects/{id}.
+func (h *ProjectUpdateHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req domain.ProjectUpdateRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.UpdateProject(r.Context(), id, req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// ProjectContactHandler handles HTTP requests for project contacts, backed by
+// the ServiceNow data source only.
+type ProjectContactHandler struct {
+	svc service.ProjectContactService
+}
+
+// NewProjectContactHandler constructs a ProjectContactHandler with the given service.
+func NewProjectContactHandler(svc service.ProjectContactService) *ProjectContactHandler {
+	return &ProjectContactHandler{svc: svc}
+}
+
+// SearchProjectContacts handles POST /projects/{id}/contacts/search.
+func (h *ProjectContactHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req domain.SearchProjectContactsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchProjectContacts(r.Context(), id, req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

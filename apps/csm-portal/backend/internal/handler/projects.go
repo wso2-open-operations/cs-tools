@@ -30,6 +30,7 @@ import (
 type entityProjectClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
+	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
 }
 
 // ProjectHandler handles HTTP requests for project operations, delegating to the
@@ -101,5 +102,47 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// TODO: Unmarshal result and filter to only the fields required by the frontend.
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchProjectContacts handles POST /projects/{id}/contacts/search.
+// The endpoint is path-scoped, so the request body is capped and forwarded to the
+// entity service as-is (no fields are injected) and the response is returned verbatim.
+func (h *ProjectHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if len(body) > 0 && !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchProjectContacts(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchProjectContacts failed", "userID", user.UserID, "projectID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to search project contacts.")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }

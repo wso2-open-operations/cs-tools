@@ -80,6 +80,34 @@ type ProjectService interface {
 	GetProjectByID(ctx context.Context, id string) (domain.ProjectDetailsView, error)
 }
 
+// ProjectUpdateService defines the write operations available on a project.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ProjectUpdateService interface {
+	// UpdateProject applies the given field changes to the project identified by
+	// id. A ValidationError is returned for a malformed UUID or an empty request;
+	// a NotFoundError if no project matches; an UnauthorizedError when
+	// x-user-id-token is absent or the caller lacks the required SN role.
+	UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error)
+}
+
+// ProjectContactService defines the operations available on project contacts.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ProjectContactService interface {
+	// SearchProjectContacts returns a paginated list of contacts associated with
+	// the project identified by projectID. An UnauthorizedError is returned when
+	// x-user-id-token is absent.
+	SearchProjectContacts(ctx context.Context, projectID string, req domain.SearchProjectContactsRequest) (domain.SearchProjectContactsResponse, error)
+}
+
+// AccountContactService defines the operations available on account contacts.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type AccountContactService interface {
+	// SearchAccountContacts returns a paginated list of contacts associated with
+	// the account identified by accountID. An UnauthorizedError is returned when
+	// x-user-id-token is absent.
+	SearchAccountContacts(ctx context.Context, accountID string, req domain.SearchAccountContactsRequest) (domain.SearchAccountContactsResponse, error)
+}
+
 // ProductService defines the operations available on the product entity.
 type ProductService interface {
 	// SearchProducts returns a paginated list of products that match the filters

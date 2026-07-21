@@ -44,6 +44,13 @@ type snProject struct {
 	Key       string        `json:"key"`
 	Type      snProjectType `json:"type"`
 	CreatedOn string        `json:"createdOn"`
+	// Closure-related fields below are ServiceNow specific; there is no
+	// Postgres equivalent.
+	ClosureState                    *string `json:"closureState"`
+	EndDateClosureState             *string `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+	ComplianceViolationDate         *string `json:"complianceViolationDate"`
 }
 
 type snProjectType struct {
@@ -57,7 +64,12 @@ type snSearchProjectsPayload struct {
 }
 
 type snProjectFilters struct {
-	SearchQuery string `json:"searchQuery,omitempty"`
+	SearchQuery   string `json:"searchQuery,omitempty"`
+	ClosureStatus string `json:"closureStatus,omitempty"`
+	EndDateFrom   string `json:"endDateFrom,omitempty"`
+	EndDateTo     string `json:"endDateTo,omitempty"`
+	SortBy        string `json:"sortBy,omitempty"`
+	SortOrder     string `json:"sortOrder,omitempty"`
 }
 
 type snProjectPagination struct {
@@ -99,7 +111,14 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 	}
 
 	payload := snSearchProjectsPayload{
-		Filters:    snProjectFilters{SearchQuery: req.SearchQuery},
+		Filters: snProjectFilters{
+			SearchQuery:   req.SearchQuery,
+			ClosureStatus: req.ClosureStatus,
+			EndDateFrom:   req.EndDateFrom,
+			EndDateTo:     req.EndDateTo,
+			SortBy:        req.SortBy,
+			SortOrder:     req.SortOrder,
+		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	raw, err := s.client.Post(ctx, "/projects/search", token, payload)
@@ -123,11 +142,16 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: project %q: %w", p.ID, err)
 		}
 		views = append(views, domain.ProjectView{
-			ID:               sysidToUUID(p.ID),
-			Name:             p.Name,
-			Key:              p.Key,
-			SubscriptionType: subType,
-			CreatedOn:        createdOn,
+			ID:                              sysidToUUID(p.ID),
+			Name:                            p.Name,
+			Key:                             p.Key,
+			SubscriptionType:                subType,
+			CreatedOn:                       createdOn,
+			ClosureState:                    p.ClosureState,
+			EndDateClosureState:             p.EndDateClosureState,
+			InvoiceDueDateClosureState:      p.InvoiceDueDateClosureState,
+			ComplianceViolationClosureState: p.ComplianceViolationClosureState,
+			ComplianceViolationDate:         p.ComplianceViolationDate,
 		})
 	}
 
@@ -152,6 +176,13 @@ type snProjectDetailsResponse struct {
 	EndDate   string           `json:"endDate"`
 	Type      snProjectType    `json:"type"`
 	Account   snProjectAccount `json:"account"`
+	// Closure-related fields below are ServiceNow specific; there is no
+	// Postgres equivalent.
+	ClosureState                    *string `json:"closureState"`
+	EndDateClosureState             *string `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+	ComplianceViolationDate         *string `json:"complianceViolationDate"`
 }
 
 type snProjectAccount struct {
@@ -211,15 +242,20 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 	}
 
 	return domain.ProjectDetailsView{
-		ID:               sysidToUUID(sn.ID),
-		SfID:             sn.SfID,
-		Name:             sn.Name,
-		Key:              sn.Key,
-		SubscriptionType: subType,
-		StartDate:        startDate,
-		EndDate:          endDate,
-		CreatedOn:        createdOn,
-		UpdatedOn:        createdOn,
+		ID:                              sysidToUUID(sn.ID),
+		SfID:                            sn.SfID,
+		Name:                            sn.Name,
+		Key:                             sn.Key,
+		SubscriptionType:                subType,
+		StartDate:                       startDate,
+		EndDate:                         endDate,
+		CreatedOn:                       createdOn,
+		UpdatedOn:                       createdOn,
+		ClosureState:                    sn.ClosureState,
+		EndDateClosureState:             sn.EndDateClosureState,
+		InvoiceDueDateClosureState:      sn.InvoiceDueDateClosureState,
+		ComplianceViolationClosureState: sn.ComplianceViolationClosureState,
+		ComplianceViolationDate:         sn.ComplianceViolationDate,
 		Account: domain.ProjectAccountRef{
 			ID:                  sysidToUUID(sn.Account.ID),
 			Name:                sn.Account.Name,
@@ -228,6 +264,91 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 			Region:              sn.Account.Region,
 			AgentEnabled:        sn.Account.HasAgent,
 			KbReferencesEnabled: sn.Account.HasKbReferences,
+		},
+	}, nil
+}
+
+// snProjectUpdatePayload is the Choreo PATCH /projects/{id} request body.
+type snProjectUpdatePayload struct {
+	HasAgent                        *bool   `json:"hasAgent,omitempty"`
+	HasKbReferences                 *bool   `json:"hasKbReferences,omitempty"`
+	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
+	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
+}
+
+// snProjectUpdateResponse mirrors the Choreo PATCH /projects/{id} response.
+type snProjectUpdateResponse struct {
+	Message string                `json:"message"`
+	Project snProjectUpdateResult `json:"project"`
+}
+
+type snProjectUpdateResult struct {
+	ID                              string  `json:"id"`
+	UpdatedBy                       string  `json:"updatedBy"`
+	UpdatedOn                       string  `json:"updatedOn"`
+	ClosureState                    *string `json:"closureState"`
+	EndDateClosureState             *string `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+}
+
+type snProjectUpdateService struct {
+	client *integrationservice.Client
+}
+
+// NewServiceNowProjectUpdateService constructs a ProjectUpdateService backed by the Choreo API.
+func NewServiceNowProjectUpdateService(client *integrationservice.Client) ProjectUpdateService {
+	return &snProjectUpdateService{client: client}
+}
+
+// UpdateProject implements ProjectUpdateService by calling the Choreo PATCH
+// /projects/{id} endpoint. Note: the overall closure state is not directly
+// settable — SN derives it from the three closure sub-state fields via a
+// business rule, so the response reflects whatever it recomputed to.
+func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error) {
+	if req.HasAgent == nil && req.HasKbReferences == nil && req.EndDateClosureState == nil &&
+		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil {
+		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.ProjectUpdateResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snProjectUpdatePayload{
+		HasAgent:                        req.HasAgent,
+		HasKbReferences:                 req.HasKbReferences,
+		EndDateClosureState:             req.EndDateClosureState,
+		InvoiceDueDateClosureState:      req.InvoiceDueDateClosureState,
+		ComplianceViolationClosureState: req.ComplianceViolationClosureState,
+	}
+	raw, err := s.client.Patch(ctx, "/projects/"+uuidToSysid(id), token, payload)
+	if err != nil {
+		return domain.ProjectUpdateResponse{}, err
+	}
+
+	var sn snProjectUpdateResponse
+	if err := json.Unmarshal(raw, &sn); err != nil {
+		return domain.ProjectUpdateResponse{}, fmt.Errorf("sn projects: parse update response: %w", err)
+	}
+
+	updatedOn, err := time.Parse(snCreatedOnLayout, sn.Project.UpdatedOn)
+	if err != nil {
+		return domain.ProjectUpdateResponse{}, fmt.Errorf("sn projects: parse updatedOn %q: %w", sn.Project.UpdatedOn, err)
+	}
+
+	return domain.ProjectUpdateResponse{
+		Message: sn.Message,
+		Project: domain.ProjectUpdateResult{
+			ID:                              sysidToUUID(sn.Project.ID),
+			UpdatedBy:                       sn.Project.UpdatedBy,
+			UpdatedOn:                       updatedOn,
+			ClosureState:                    sn.Project.ClosureState,
+			EndDateClosureState:             sn.Project.EndDateClosureState,
+			InvoiceDueDateClosureState:      sn.Project.InvoiceDueDateClosureState,
+			ComplianceViolationClosureState: sn.Project.ComplianceViolationClosureState,
 		},
 	}, nil
 }
@@ -254,4 +375,92 @@ func snTypeNameToSubscriptionType(name string) (domain.SubscriptionType, error) 
 		return "", fmt.Errorf("unknown subscription type %q from ServiceNow", name)
 	}
 	return st, nil
+}
+
+// snContactSearchPayload is the Choreo POST /{resource}/{id}/contacts/search request
+// body. It is shared by both the project-contacts and account-contacts endpoints.
+type snContactSearchPayload struct {
+	Filters    snContactFilters    `json:"filters,omitempty"`
+	Pagination snProjectPagination `json:"pagination"`
+}
+
+type snContactFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// snProjectContactsResponse mirrors the Choreo POST /projects/{id}/contacts/search response.
+type snProjectContactsResponse struct {
+	Contacts     []snProjectContact `json:"contacts"`
+	TotalRecords int                `json:"totalRecords"`
+	Offset       int                `json:"offset"`
+	Limit        int                `json:"limit"`
+}
+
+type snProjectContact struct {
+	Name                 string   `json:"name"`
+	Email                string   `json:"email"`
+	RegistrationState    string   `json:"registrationState"`
+	NotificationsEnabled bool     `json:"notificationsEnabled"`
+	Roles                []string `json:"roles"`
+}
+
+type snProjectContactService struct {
+	client *integrationservice.Client
+}
+
+// NewServiceNowProjectContactService constructs a ProjectContactService backed by the Choreo API.
+func NewServiceNowProjectContactService(client *integrationservice.Client) ProjectContactService {
+	return &snProjectContactService{client: client}
+}
+
+// SearchProjectContacts implements ProjectContactService. Supported by the ServiceNow
+// data source only; there is no Postgres fallback.
+func (s *snProjectContactService) SearchProjectContacts(ctx context.Context, projectID string, req domain.SearchProjectContactsRequest) (domain.SearchProjectContactsResponse, error) {
+	if err := validateUUIDs("id", []string{projectID}); err != nil {
+		return domain.SearchProjectContactsResponse{}, err
+	}
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchProjectContactsResponse{}, err
+	}
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
+		return domain.SearchProjectContactsResponse{}, err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.SearchProjectContactsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snContactSearchPayload{
+		Filters:    snContactFilters{SearchQuery: req.Filters.SearchQuery},
+		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
+
+	raw, err := s.client.Post(ctx, "/projects/"+uuidToSysid(projectID)+"/contacts/search", token, payload)
+	if err != nil {
+		return domain.SearchProjectContactsResponse{}, err
+	}
+
+	var snResp snProjectContactsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.SearchProjectContactsResponse{}, fmt.Errorf("sn project contacts: parse response: %w", err)
+	}
+
+	contacts := make([]domain.ProjectContact, 0, len(snResp.Contacts))
+	for _, c := range snResp.Contacts {
+		contacts = append(contacts, domain.ProjectContact{
+			Name:                 c.Name,
+			Email:                c.Email,
+			RegistrationState:    c.RegistrationState,
+			NotificationsEnabled: c.NotificationsEnabled,
+			Roles:                c.Roles,
+		})
+	}
+
+	return domain.SearchProjectContactsResponse{
+		Contacts: contacts,
+		Total:    snResp.TotalRecords,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+	}, nil
 }

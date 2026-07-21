@@ -232,3 +232,76 @@ func snAccountToDetail(a snAccount) domain.SNAccountDetail {
 		UpdatedOn:        a.UpdatedOn,
 	}
 }
+
+// snAccountContactsResponse mirrors the Choreo POST /accounts/{id}/contacts/search response.
+type snAccountContactsResponse struct {
+	Contacts     []snAccountContact `json:"contacts"`
+	TotalRecords int                `json:"totalRecords"`
+	Offset       int                `json:"offset"`
+	Limit        int                `json:"limit"`
+}
+
+type snAccountContact struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	IsPrimary bool   `json:"isPrimary"`
+}
+
+type snAccountContactService struct {
+	client *integrationservice.Client
+}
+
+// NewServiceNowAccountContactService constructs an AccountContactService backed by the Choreo API.
+func NewServiceNowAccountContactService(client *integrationservice.Client) AccountContactService {
+	return &snAccountContactService{client: client}
+}
+
+// SearchAccountContacts implements AccountContactService. Supported by the ServiceNow
+// data source only; there is no Postgres fallback.
+func (s *snAccountContactService) SearchAccountContacts(ctx context.Context, accountID string, req domain.SearchAccountContactsRequest) (domain.SearchAccountContactsResponse, error) {
+	if err := validateUUIDs("id", []string{accountID}); err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.SearchAccountContactsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snContactSearchPayload{
+		Filters:    snContactFilters{SearchQuery: req.Filters.SearchQuery},
+		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
+
+	raw, err := s.client.Post(ctx, "/accounts/"+uuidToSysid(accountID)+"/contacts/search", token, payload)
+	if err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+
+	var snResp snAccountContactsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.SearchAccountContactsResponse{}, fmt.Errorf("sn account contacts: parse response: %w", err)
+	}
+
+	contacts := make([]domain.AccountContact, 0, len(snResp.Contacts))
+	for _, c := range snResp.Contacts {
+		contacts = append(contacts, domain.AccountContact{
+			Name:      c.Name,
+			Email:     c.Email,
+			IsPrimary: c.IsPrimary,
+		})
+	}
+
+	return domain.SearchAccountContactsResponse{
+		Contacts: contacts,
+		Total:    snResp.TotalRecords,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+	}, nil
+}

@@ -55,6 +55,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		snAccountHandler = handler.NewSNAccountHandler(service.NewServiceNowAccountService(serviceNowIntegrationServiceClient))
 	}
 
+	var accountContactHandler *handler.AccountContactHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		accountContactHandler = handler.NewAccountContactHandler(service.NewServiceNowAccountContactService(serviceNowIntegrationServiceClient))
+	}
+
 	projectRepo := repository.NewProjectRepository(db)
 	pgProjectSvc := service.NewProjectService(projectRepo)
 	var activeProjectSvc service.ProjectService
@@ -64,6 +69,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		activeProjectSvc = pgProjectSvc
 	}
 	projectHandler := handler.NewProjectHandler(activeProjectSvc)
+
+	var projectContactHandler *handler.ProjectContactHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		projectContactHandler = handler.NewProjectContactHandler(service.NewServiceNowProjectContactService(serviceNowIntegrationServiceClient))
+	}
+
+	var projectUpdateHandler *handler.ProjectUpdateHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		projectUpdateHandler = handler.NewProjectUpdateHandler(service.NewServiceNowProjectUpdateService(serviceNowIntegrationServiceClient))
+	}
 
 	productRepo := repository.NewProductRepository(db)
 	productSvc := service.NewProductService(productRepo)
@@ -209,8 +224,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
 		mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	}
+	if accountContactHandler != nil {
+		mux.HandleFunc("POST /accounts/{id}/contacts/search", accountContactHandler.SearchAccountContacts)
+	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	if projectContactHandler != nil {
+		mux.HandleFunc("POST /projects/{id}/contacts/search", projectContactHandler.SearchProjectContacts)
+	}
+	if projectUpdateHandler != nil {
+		mux.HandleFunc("PATCH /projects/{id}", projectUpdateHandler.UpdateProject)
+	}
 	if snProductHandler != nil {
 		mux.HandleFunc("POST /products/search", snProductHandler.SearchProducts)
 	} else {
