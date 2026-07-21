@@ -31,6 +31,7 @@ import { callRequests } from "@src/services/callRequests";
 import type { CallRequest, CallRequestUpdateInput, CaseSeverity } from "@src/types";
 import { DialogPaper } from "@components/common/DialogPaper";
 import { ErrorBoundary } from "@components/common/ErrorBoundary";
+import { openUrl } from "@components/microapp-bridge";
 import { ErrorState } from "@components/support/ErrorState";
 import { formatDate } from "@utils/dateTime";
 import {
@@ -250,7 +251,13 @@ function CallRequestRow({
         </Typography>
       )}
       {callRequest.meetingLink && (
-        <Typography variant="caption" color="primary.main" noWrap>
+        <Typography
+          variant="caption"
+          color="primary.main"
+          noWrap
+          onClick={() => openUrl({ url: callRequest.meetingLink as string, presentationStyle: "fullScreen" })}
+          sx={{ cursor: "pointer" }}
+        >
           {callRequest.meetingLink}
         </Typography>
       )}
