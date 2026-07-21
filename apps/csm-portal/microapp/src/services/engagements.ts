@@ -48,8 +48,11 @@ async function searchEngagements(filters: EngagementFilters, offset: number): Pr
       types: ["engagement"],
       ...(q ? { searchQuery: q } : {}),
       ...(filters.states.length ? { states: filters.states } : {}),
+      ...(filters.workStates.length ? { workStates: filters.workStates } : {}),
       ...(filters.projects.length ? { projectIds: filters.projects.map((p) => p.id) } : {}),
       ...(filters.engagementTypes.length ? { engagementTypes: filters.engagementTypes } : {}),
+      ...(filters.assignees.length ? { assignedUserIds: filters.assignees.map((a) => a.id) } : {}),
+      ...(filters.productNames.length ? { productNames: filters.productNames } : {}),
     },
   };
   const { data } = await apiClient.post<CaseSearchResponseDto>(CASES_SEARCH_ENDPOINT, payload);
