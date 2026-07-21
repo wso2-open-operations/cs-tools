@@ -1242,6 +1242,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /change-requests/{id}/approvals:
+    get:
+      summary: Get the approval stages for a change request (ServiceNow data source only).
+      operationId: getChangeRequestApprovals
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The change request's approval stages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestApprovals'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Change request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /catalogs/search:
     post:
       summary: Search service catalogs by deployed product (ServiceNow data source only).
@@ -4214,6 +4257,51 @@ components:
             approvedOn:
               type: string
               nullable: true
+
+    ChangeRequestApprover:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          description: >-
+            Approver response status. Open string set (e.g. APPROVED, NOT_REQUIRED,
+            REQUESTED, REJECTED, CANCELLED, NO_CONSENSUS); not a fixed enum.
+        respondedOn:
+          type: string
+          nullable: true
+
+    ChangeRequestApproval:
+      type: object
+      properties:
+        stage:
+          type: string
+          description: Approval stage name (e.g. Assess, Authorize, Customer Approval).
+        approverType:
+          type: string
+          enum: [STATIC_GROUP, DYNAMIC_CONTACT]
+        approverName:
+          type: string
+          description: Group name (STATIC_GROUP) or the per-CR customer contact's name (DYNAMIC_CONTACT).
+        status:
+          type: string
+          enum: [APPROVED, REJECTED, PENDING]
+        approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestApprover'
+
+    ChangeRequestApprovals:
+      type: object
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestApproval'
 
     Variable:
       type: object

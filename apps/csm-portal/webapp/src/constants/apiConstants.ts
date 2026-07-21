@@ -67,6 +67,7 @@ export const ApiQueryKeys = {
   UPDATE_LEVELS_SEARCH: "update-levels-search",
   CHANGE_REQUESTS: "change-requests",
   CHANGE_REQUEST_DETAILS: "change-request-details",
+  CHANGE_REQUEST_APPROVALS: "change-request-approvals",
   CHANGE_REQUEST_COMMENTS: "change-request-comments",
   CHANGE_REQUEST_STATS: "change-request-stats",
   INCIDENTS: "incidents",

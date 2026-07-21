@@ -216,6 +216,12 @@ func (c *Client) PatchChangeRequest(ctx context.Context, id string, body []byte)
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/change-requests/%s", url.PathEscape(id)), body)
 }
 
+// GetChangeRequestApprovals calls GET /change-requests/{id}/approvals on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/change-requests/%s/approvals", url.PathEscape(id)), nil)
+}
+
 // SearchTimeCards calls POST /time-cards/search on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {

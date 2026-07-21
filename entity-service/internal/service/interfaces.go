@@ -262,6 +262,10 @@ type ChangeRequestService interface {
 
 	// PatchChangeRequest updates mutable fields on a change request identified by UUID.
 	PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error)
+
+	// GetChangeRequestApprovals returns the approval stages and per-approver status
+	// for a single change request identified by UUID.
+	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
 }
 
 // TimeCardService defines the operations available on the time-cards entity.
