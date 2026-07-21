@@ -109,12 +109,27 @@ function CaseDetailContent({ id }: { id: string }) {
   const { data: currentUserId } = useSuspenseQuery(currentUser.id());
   const currentUserEmail = useUserStore((s) => s.user?.email);
 
+  // Announcements are cases of type "announcement" — read-only, and the
+  // SLA/time-tracking/call-request tabs don't apply. Mirrors the webapp's
+  // CsmCaseDetailPage, minus its route-based check: this page is always
+  // reached via /cases/:id regardless of case type, so the loaded case's own
+  // type is the only signal needed.
+  const isAnnouncement = caseDetail.type === "announcement";
+
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [resolutionTarget, setResolutionTarget] = useState<"closed" | "solution_proposed" | null>(null);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
   const [pauseConflict, setPauseConflict] = useState<MyOngoingCase[] | null>(null);
+
+  const visibleTabDefs = isAnnouncement
+    ? TAB_DEFS.filter((tab) => tab.id !== "sla" && tab.id !== "time" && tab.id !== "call-requests")
+    : TAB_DEFS;
+  // If a case turns out to be an announcement (only knowable once caseDetail
+  // loads) while a tab hidden for announcements is active, fall back to
+  // Activities rather than rendering a tab no longer in the visible list.
+  const effectiveTab = visibleTabDefs.some((tab) => tab.id === activeTab) ? activeTab : "activities";
 
   const invalidateCase = (): void => {
     void queryClient.invalidateQueries({ queryKey: ["case", id] });
@@ -367,6 +382,7 @@ function CaseDetailContent({ id }: { id: string }) {
       <CaseSummarySection
         caseDetail={caseDetail}
         currentUserId={currentUserId}
+        isAnnouncement={isAnnouncement}
         isMutating={isMutating}
         mutationError={mutationError}
         onTransition={handleTransition}
@@ -375,34 +391,35 @@ function CaseDetailContent({ id }: { id: string }) {
         onChangeSeverity={handleSeveritySubmit}
       />
 
-      <Tabs value={activeTab} variant="scrollable" onChange={(_, value: CaseTabId) => setActiveTab(value)}>
-        {TAB_DEFS.map((tab) => (
+      <Tabs value={effectiveTab} variant="scrollable" onChange={(_, value: CaseTabId) => setActiveTab(value)}>
+        {visibleTabDefs.map((tab) => (
           <Tab key={tab.id} value={tab.id} label={tab.label} />
         ))}
       </Tabs>
 
-      {activeTab === "activities" && (
+      {effectiveTab === "activities" && (
         <CaseCommentsSection
           caseId={id}
           comments={comments}
           caseState={caseDetail.state}
           workState={caseDetail.workState}
           isPostingComment={isPostingComment}
+          isAnnouncement={isAnnouncement}
           onSubmitComment={handleCommentSubmit}
         />
       )}
 
-      {activeTab === "details" && (
+      {effectiveTab === "details" && (
         <Stack gap={2}>
           <CaseMetadataSection caseDetail={caseDetail} />
         </Stack>
       )}
 
-      {activeTab === "sla" && <SlaTab caseId={id} />}
+      {effectiveTab === "sla" && <SlaTab caseId={id} />}
 
-      {activeTab === "attachments" && <AttachmentsTab caseId={id} />}
+      {effectiveTab === "attachments" && <AttachmentsTab caseId={id} />}
 
-      {activeTab === "time" && (
+      {effectiveTab === "time" && (
         <TimeTrackingTab
           caseId={id}
           caseNumber={caseDetail.number}
@@ -436,6 +453,7 @@ function CaseDetailContent({ id }: { id: string }) {
 function CaseSummarySection({
   caseDetail,
   currentUserId,
+  isAnnouncement,
   isMutating,
   mutationError,
   onTransition,
@@ -445,6 +463,7 @@ function CaseSummarySection({
 }: {
   caseDetail: CaseDetail;
   currentUserId: string | null;
+  isAnnouncement: boolean;
   isMutating: boolean;
   mutationError: string | null;
   onTransition: (target: CaseState) => void;
@@ -453,7 +472,7 @@ function CaseSummarySection({
   onChangeSeverity: (next: CaseSeverity) => void;
 }) {
   const { icon: Icon, color } = TYPE_CONFIG[caseDetail.type ?? "case"] ?? TYPE_CONFIG.case;
-  const canChangeSeverity = caseDetail.severity && caseDetail.state !== "closed";
+  const canChangeSeverity = !isAnnouncement && caseDetail.severity && caseDetail.state !== "closed";
 
   return (
     <Stack gap={1.5}>
@@ -468,16 +487,19 @@ function CaseSummarySection({
 
         <Typography variant="h6">{caseDetail.subject}</Typography>
 
-        <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
-          <StatusChip state={caseDetail.state} />
-          {/* Only "case"-type items carry a severity; service requests/security reports/etc. don't. */}
-          {caseDetail.severity && <SeverityChip severity={caseDetail.severity} />}
-        </Stack>
+        {/* Announcements are read-only and carry no meaningful state/severity of their own. */}
+        {!isAnnouncement && (
+          <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
+            <StatusChip state={caseDetail.state} />
+            {/* Only "case"-type items carry a severity; service requests/security reports/etc. don't. */}
+            {caseDetail.severity && <SeverityChip severity={caseDetail.severity} />}
+          </Stack>
+        )}
       </Stack>
 
       {/* Actions live in their own row, visually separated from the identity block above so the
        * primary "what can I do" affordance isn't read as part of the case's own metadata. */}
-      {(caseDetail.nextStates.length > 0 || canChangeSeverity) && (
+      {!isAnnouncement && (caseDetail.nextStates.length > 0 || canChangeSeverity) && (
         <Stack
           direction="row"
           gap={1}
@@ -639,6 +661,7 @@ function CaseCommentsSection({
   caseState,
   workState,
   isPostingComment,
+  isAnnouncement,
   onSubmitComment,
 }: {
   caseId: string;
@@ -646,6 +669,7 @@ function CaseCommentsSection({
   caseState: CaseState;
   workState: CaseWorkState;
   isPostingComment: boolean;
+  isAnnouncement: boolean;
   onSubmitComment: (fields: {
     type: CaseCommentType;
     content: string;
@@ -654,14 +678,19 @@ function CaseCommentsSection({
 }) {
   return (
     <Stack gap={1.5}>
-      <CommentComposer
-        caseState={caseState}
-        workState={workState}
-        isSubmitting={isPostingComment}
-        onSubmit={onSubmitComment}
-      />
+      {/* Announcements are read-only — no commenting. */}
+      {!isAnnouncement && (
+        <>
+          <CommentComposer
+            caseState={caseState}
+            workState={workState}
+            isSubmitting={isPostingComment}
+            onSubmit={onSubmitComment}
+          />
 
-      <Divider />
+          <Divider />
+        </>
+      )}
 
       <CaseActivitiesTab caseId={caseId} comments={comments} />
     </Stack>
