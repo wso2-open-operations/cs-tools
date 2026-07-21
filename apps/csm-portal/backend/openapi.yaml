@@ -3027,6 +3027,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /problems/{id}:
+    get:
+      summary: Get a single problem by ID (ServiceNow data source only).
+      operationId: getProblem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the problem.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems/search:
     post:
       summary: Search problems (ServiceNow data source only).
@@ -6987,3 +7037,70 @@ components:
           type: integer
         offset:
           type: integer
+
+    IdNumberRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+
+    ProblemDetail:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            state:
+              type: string
+              nullable: true
+              description: Current workflow state (e.g. "new", "assess", "resolved", "closed")
+            priority:
+              type: string
+              nullable: true
+            category:
+              type: string
+              nullable: true
+            subcategory:
+              type: string
+              nullable: true
+            originCase:
+              $ref: '#/components/schemas/CaseNumberRef'
+            primaryIncident:
+              $ref: '#/components/schemas/IdNumberRef'
+            linkedIncidents:
+              type: array
+              nullable: true
+              items:
+                $ref: '#/components/schemas/IdNumberRef'
+            linkedChangeRequest:
+              $ref: '#/components/schemas/IdNumberRef'
+            assignedTo:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            resolutionCode:
+              type: string
+              nullable: true
+            causeNotes:
+              type: string
+              nullable: true
+            fixNotes:
+              type: string
+              nullable: true
+            workaround:
+              type: string
+              nullable: true
+            resolvedAt:
+              type: string
+              nullable: true
+            resolvedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            openedAt:
+              type: string
+              nullable: true
+            closedAt:
+              type: string
+              nullable: true

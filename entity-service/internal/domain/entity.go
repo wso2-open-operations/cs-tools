@@ -2685,6 +2685,35 @@ type SearchProblemsResponse struct {
 	Limit    int                 `json:"limit"`
 }
 
+// ProblemDetail is the full detail representation returned by GET /problems/{id}.
+//
+// State and ResolutionCode are plain, unvalidated passthrough strings from the
+// data source rather than closed enums. Known State values at the time of writing:
+// NEW | ASSESS | ROOT_CAUSE_ANALYSIS | FIX_IN_PROGRESS | RESOLVED | CLOSED. Do not
+// add strict validation against this list — it is not guaranteed exhaustive.
+type ProblemDetail struct {
+	ID                  *string         `json:"id"`
+	Number              *string         `json:"number"`
+	Subject             *string         `json:"subject"`
+	State               *string         `json:"state"`
+	Priority            *string         `json:"priority"`
+	Category            *string         `json:"category"`
+	Subcategory         *string         `json:"subcategory"`
+	OriginCase          *CaseNumberRef  `json:"originCase"`
+	PrimaryIncident     *CaseNumberRef  `json:"primaryIncident"`
+	LinkedIncidents     []CaseNumberRef `json:"linkedIncidents"`
+	LinkedChangeRequest *CaseNumberRef  `json:"linkedChangeRequest"`
+	AssignedTo          *EntityRef      `json:"assignedTo"`
+	ResolutionCode      *string         `json:"resolutionCode"`
+	CauseNotes          *string         `json:"causeNotes"`
+	FixNotes            *string         `json:"fixNotes"`
+	Workaround          *string         `json:"workaround"`
+	ResolvedAt          *string         `json:"resolvedAt"`
+	ResolvedBy          *EntityRef      `json:"resolvedBy"`
+	OpenedAt            *string         `json:"openedAt"`
+	ClosedAt            *string         `json:"closedAt"`
+}
+
 // ConversationState represents the state of a conversation.
 type ConversationState string
 

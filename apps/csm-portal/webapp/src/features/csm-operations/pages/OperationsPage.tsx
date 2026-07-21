@@ -21,14 +21,20 @@ import {  useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
+import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import { useNavTransition } from "@hooks/useNavTransition";
 
-type OperationsTabId = "service_requests" | "change_requests" | "incidents";
+type OperationsTabId =
+  | "service_requests"
+  | "change_requests"
+  | "incidents"
+  | "problems";
 
 const TAB_IDS: readonly OperationsTabId[] = [
   "service_requests",
   "change_requests",
   "incidents",
+  "problems",
 ];
 
 /**
@@ -57,7 +63,7 @@ export default function OperationsPage(): JSX.Element {
       <Box>
         <Typography variant="h5">Operations</Typography>
         <Typography variant="body2" color="text.secondary">
-          Service requests, change requests, and incidents across customers.
+          Service requests, change requests, incidents, and problems across customers.
         </Typography>
       </Box>
 
@@ -69,6 +75,7 @@ export default function OperationsPage(): JSX.Element {
           <Tab value="service_requests" label="Service requests" />
           <Tab value="change_requests" label="Change requests" />
           <Tab value="incidents" label="Incidents" />
+          <Tab value="problems" label="Problem management" />
         </Tabs>
       </Box>
 
@@ -95,6 +102,8 @@ export default function OperationsPage(): JSX.Element {
       {activeTab === "change_requests" && <ChangeRequestsTab />}
 
       {activeTab === "incidents" && <IncidentsTab />}
+
+      {activeTab === "problems" && <ProblemsTab />}
     </Box>
   );
 }

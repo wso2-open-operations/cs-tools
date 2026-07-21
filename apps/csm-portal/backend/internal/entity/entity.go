@@ -162,6 +162,12 @@ func (c *Client) SearchProblems(ctx context.Context, body []byte) ([]byte, error
 	return c.do(ctx, http.MethodPost, "/problems/search", body)
 }
 
+// GetProblem calls GET /problems/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) GetProblem(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/problems/%s", url.PathEscape(id)), nil)
+}
+
 // PostDeployment calls POST /deployments on the entity service to create a new deployment.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) PostDeployment(ctx context.Context, body []byte) ([]byte, error) {

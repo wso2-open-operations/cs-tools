@@ -24,6 +24,89 @@ import (
 	"testing"
 )
 
+const testProblemID = "aaaaaaaa-bbbb-cccc-dddd-ffffffffffff"
+
+func TestGetProblem(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := httptest.NewRequest(http.MethodGet, "/problems/"+testProblemID, nil)
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.GetProblem(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/problems/not-a-uuid", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.GetProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty id", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/problems/", nil))
+		w := httptest.NewRecorder()
+		h.GetProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards id to upstream and returns 200", func(t *testing.T) {
+		var capturedID string
+		client := &mockEntityProblemClient{
+			getProblemFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"id":"` + testProblemID + `","number":"PRB0001","state":"assess"}`), nil
+			},
+		}
+		h := NewProblemHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/problems/"+testProblemID, nil))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.GetProblem(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != testProblemID {
+			t.Errorf("upstream received id %q, want %q", capturedID, testProblemID)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["number"] != "PRB0001" {
+			t.Errorf("response number = %v, want PRB0001", resp["number"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to retrieve problem.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProblemClient{
+					getProblemFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProblemHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/problems/"+testProblemID, nil))
+				r.SetPathValue("id", testProblemID)
+				w := httptest.NewRecorder()
+				h.GetProblem(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchProblems(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewProblemHandler(&mockEntityProblemClient{})
