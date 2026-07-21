@@ -151,7 +151,6 @@ export default function ProblemsTab(): JSX.Element {
                       }
                     }}
                     tabIndex={0}
-                    role="button"
                     aria-label={`View problem ${problem.number || problem.id}`}
                     sx={{ cursor: "pointer" }}
                   >
