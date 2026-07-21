@@ -40,6 +40,7 @@ export const CHANGE_REQUESTS_SEARCH_ENDPOINT = "/change-requests/search";
 export const CHANGE_REQUEST_ENDPOINT = (id: string) => `/change-requests/${id}`;
 
 export const PROJECTS_SEARCH_ENDPOINT = "/projects/search";
+export const PRODUCTS_SEARCH_ENDPOINT = "/products/search";
 export const DEPLOYMENTS_SEARCH_ENDPOINT = "/deployments/search";
 export const DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT = (deploymentId: string) =>
   `/deployments/${deploymentId}/products/search`;
