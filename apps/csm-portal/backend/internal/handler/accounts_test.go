@@ -248,7 +248,7 @@ func TestSearchAccountContacts(t *testing.T) {
 			searchAccountContactsFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
 				capturedAccountID = id
 				capturedBody = body
-				return []byte(`{"contacts":[{"name":"Jane Doe","isPrimary":true}],"totalRecords":1,"limit":20,"offset":0}`), nil
+				return []byte(`{"contacts":[{"name":"Jane Doe","isPrimary":true}],"total":1,"limit":20,"offset":0}`), nil
 			},
 		}
 		h := NewAccountHandler(client)
@@ -268,8 +268,8 @@ func TestSearchAccountContacts(t *testing.T) {
 		}
 
 		resp := decodeJSON[map[string]any](t, w)
-		if resp["totalRecords"] != float64(1) {
-			t.Errorf("totalRecords = %v, want 1", resp["totalRecords"])
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
 		}
 	})
 

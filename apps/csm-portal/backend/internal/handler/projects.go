@@ -116,8 +116,8 @@ func (h *ProjectHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Re
 	}
 
 	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
 

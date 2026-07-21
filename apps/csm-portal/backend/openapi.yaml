@@ -1002,10 +1002,11 @@ paths:
       parameters:
         - name: id
           in: path
-          description: ID of the project.
+          description: UUID of the project.
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         description: Project contact search payload
         content:
@@ -1028,6 +1029,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -4424,7 +4431,7 @@ components:
           type: integer
         limit:
           type: integer
-        totalRecords:
+        total:
           type: integer
           description: Total number of matching contacts
 
@@ -4659,7 +4666,7 @@ components:
           type: integer
         limit:
           type: integer
-        totalRecords:
+        total:
           type: integer
           description: Total number of matching contacts
 

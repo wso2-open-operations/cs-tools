@@ -38,19 +38,24 @@ type snProjectsResponse struct {
 	Limit        int         `json:"limit"`
 }
 
+// snProjectClosureFields groups the closure-related fields shared by
+// snProject and snProjectDetailsResponse; ServiceNow specific, no Postgres
+// equivalent. Embedded anonymously; JSON field names are unaffected.
+type snProjectClosureFields struct {
+	ClosureState                    *string `json:"closureState"`
+	EndDateClosureState             *string `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+	ComplianceViolationDate         *string `json:"complianceViolationDate"`
+}
+
 type snProject struct {
 	ID        string        `json:"id"`
 	Name      string        `json:"name"`
 	Key       string        `json:"key"`
 	Type      snProjectType `json:"type"`
 	CreatedOn string        `json:"createdOn"`
-	// Closure-related fields below are ServiceNow specific; there is no
-	// Postgres equivalent.
-	ClosureState                    *string `json:"closureState"`
-	EndDateClosureState             *string `json:"endDateClosureState"`
-	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
-	ComplianceViolationDate         *string `json:"complianceViolationDate"`
+	snProjectClosureFields
 }
 
 type snProjectType struct {
@@ -104,6 +109,9 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 	if err := validateSearchQuery(req.SearchQuery); err != nil {
 		return domain.SearchProjectsResponse{}, err
 	}
+	if err := validateProjectSearchFilters(req); err != nil {
+		return domain.SearchProjectsResponse{}, err
+	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
@@ -142,16 +150,18 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: project %q: %w", p.ID, err)
 		}
 		views = append(views, domain.ProjectView{
-			ID:                              sysidToUUID(p.ID),
-			Name:                            p.Name,
-			Key:                             p.Key,
-			SubscriptionType:                subType,
-			CreatedOn:                       createdOn,
-			ClosureState:                    p.ClosureState,
-			EndDateClosureState:             p.EndDateClosureState,
-			InvoiceDueDateClosureState:      p.InvoiceDueDateClosureState,
-			ComplianceViolationClosureState: p.ComplianceViolationClosureState,
-			ComplianceViolationDate:         p.ComplianceViolationDate,
+			ID:               sysidToUUID(p.ID),
+			Name:             p.Name,
+			Key:              p.Key,
+			SubscriptionType: subType,
+			CreatedOn:        createdOn,
+			ProjectClosureFields: domain.ProjectClosureFields{
+				ClosureState:                    p.ClosureState,
+				EndDateClosureState:             p.EndDateClosureState,
+				InvoiceDueDateClosureState:      p.InvoiceDueDateClosureState,
+				ComplianceViolationClosureState: p.ComplianceViolationClosureState,
+				ComplianceViolationDate:         p.ComplianceViolationDate,
+			},
 		})
 	}
 
@@ -176,13 +186,7 @@ type snProjectDetailsResponse struct {
 	EndDate   string           `json:"endDate"`
 	Type      snProjectType    `json:"type"`
 	Account   snProjectAccount `json:"account"`
-	// Closure-related fields below are ServiceNow specific; there is no
-	// Postgres equivalent.
-	ClosureState                    *string `json:"closureState"`
-	EndDateClosureState             *string `json:"endDateClosureState"`
-	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
-	ComplianceViolationDate         *string `json:"complianceViolationDate"`
+	snProjectClosureFields
 }
 
 type snProjectAccount struct {
@@ -242,20 +246,22 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 	}
 
 	return domain.ProjectDetailsView{
-		ID:                              sysidToUUID(sn.ID),
-		SfID:                            sn.SfID,
-		Name:                            sn.Name,
-		Key:                             sn.Key,
-		SubscriptionType:                subType,
-		StartDate:                       startDate,
-		EndDate:                         endDate,
-		CreatedOn:                       createdOn,
-		UpdatedOn:                       createdOn,
-		ClosureState:                    sn.ClosureState,
-		EndDateClosureState:             sn.EndDateClosureState,
-		InvoiceDueDateClosureState:      sn.InvoiceDueDateClosureState,
-		ComplianceViolationClosureState: sn.ComplianceViolationClosureState,
-		ComplianceViolationDate:         sn.ComplianceViolationDate,
+		ID:               sysidToUUID(sn.ID),
+		SfID:             sn.SfID,
+		Name:             sn.Name,
+		Key:              sn.Key,
+		SubscriptionType: subType,
+		StartDate:        startDate,
+		EndDate:          endDate,
+		CreatedOn:        createdOn,
+		UpdatedOn:        createdOn,
+		ProjectClosureFields: domain.ProjectClosureFields{
+			ClosureState:                    sn.ClosureState,
+			EndDateClosureState:             sn.EndDateClosureState,
+			InvoiceDueDateClosureState:      sn.InvoiceDueDateClosureState,
+			ComplianceViolationClosureState: sn.ComplianceViolationClosureState,
+			ComplianceViolationDate:         sn.ComplianceViolationDate,
+		},
 		Account: domain.ProjectAccountRef{
 			ID:                  sysidToUUID(sn.Account.ID),
 			Name:                sn.Account.Name,
@@ -306,6 +312,15 @@ func NewServiceNowProjectUpdateService(client *integrationservice.Client) Projec
 // /projects/{id} endpoint. Note: the overall closure state is not directly
 // settable — SN derives it from the three closure sub-state fields via a
 // business rule, so the response reflects whatever it recomputed to.
+//
+// Deliberately no enum validation on EndDateClosureState/InvoiceDueDateClosureState/
+// ComplianceViolationClosureState (unlike ClosureStatus in SearchProjects):
+// unlike the overall status, which this service's own business rule computes
+// from a fixed 3-value set, these sub-states are set by an evolving SN Flow
+// Designer process whose full value set isn't known here — live data has
+// already shown values ("Pending Notified") beyond the small set observed
+// during development. A validXxx map here would risk rejecting legitimate
+// values the ACP automation needs to write.
 func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error) {
 	if req.HasAgent == nil && req.HasKbReferences == nil && req.EndDateClosureState == nil &&
 		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil {
@@ -351,6 +366,52 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 			ComplianceViolationClosureState: sn.Project.ComplianceViolationClosureState,
 		},
 	}, nil
+}
+
+// validClosureStatuses is the set of values the "Update WSO2 Closure State"
+// SN business rule ever computes for the overall closure state — the only
+// three literal strings that rule's branches assign. Safe to enforce here
+// because we own that rule's logic, unlike the closure *sub-state* fields
+// (see updateProject), whose value set is set by an evolving SN Flow
+// Designer process and isn't fully known.
+var validClosureStatuses = map[string]struct{}{
+	"Open":       {},
+	"Suspended":  {},
+	"Restricted": {},
+}
+
+// validSortOrders is the set of accepted SortOrder values.
+var validSortOrders = map[string]struct{}{
+	"":     {}, // unset defaults to the service's own default ordering
+	"asc":  {},
+	"desc": {},
+}
+
+// validateProjectSearchFilters rejects unknown closureStatus/sortBy/sortOrder
+// values and malformed end-date filters before they reach ServiceNow.
+func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
+	if req.ClosureStatus != "" {
+		if _, ok := validClosureStatuses[req.ClosureStatus]; !ok {
+			return &apierror.ValidationError{Msg: "closureStatus must be one of: Open, Suspended, Restricted"}
+		}
+	}
+	if req.SortBy != "" && req.SortBy != "endDate" {
+		return &apierror.ValidationError{Msg: `sortBy must be "endDate" if provided`}
+	}
+	if _, ok := validSortOrders[req.SortOrder]; !ok {
+		return &apierror.ValidationError{Msg: `sortOrder must be "asc" or "desc" if provided`}
+	}
+	if req.EndDateFrom != "" {
+		if _, err := time.Parse(snDateLayout, req.EndDateFrom); err != nil {
+			return &apierror.ValidationError{Msg: "endDateFrom must be a valid date (yyyy-MM-dd)"}
+		}
+	}
+	if req.EndDateTo != "" {
+		if _, err := time.Parse(snDateLayout, req.EndDateTo); err != nil {
+			return &apierror.ValidationError{Msg: "endDateTo must be a valid date (yyyy-MM-dd)"}
+		}
+	}
+	return nil
 }
 
 // validSubscriptionTypes is the set of known SubscriptionType enum values.

@@ -333,20 +333,12 @@ type ProjectAccountRef struct {
 	KbReferencesEnabled bool       `json:"kbReferencesEnabled"`
 }
 
-// ProjectDetailsView is the enriched response shape for GET /projects/{id}.
-// It embeds the linked account and uses createdOn/updatedOn for consistency
-// with the ProjectView search result.
-type ProjectDetailsView struct {
-	ID               string            `json:"id"`
-	Account          ProjectAccountRef `json:"account"`
-	SfID             string            `json:"sfId"`
-	Name             string            `json:"name"`
-	Key              string            `json:"key"`
-	SubscriptionType SubscriptionType  `json:"subscriptionType"`
-	StartDate        time.Time         `json:"startDate"`
-	EndDate          time.Time         `json:"endDate"`
-	CreatedOn        time.Time         `json:"createdOn"`
-	UpdatedOn        time.Time         `json:"updatedOn"`
+// ProjectClosureFields groups the ServiceNow-only closure-tracking fields
+// shared by ProjectDetailsView and ProjectView, so the two don't drift when a
+// closure field is added or renamed. Embedded anonymously; encoding/json
+// promotes its fields to the parent's JSON object, so the wire shape is
+// unaffected.
+type ProjectClosureFields struct {
 	// ClosureState is the project's closure/access state (ServiceNow data source only).
 	ClosureState *string `json:"closureState"`
 	// EndDateClosureState reflects the closure state driven by the project's end date
@@ -361,6 +353,23 @@ type ProjectDetailsView struct {
 	// ComplianceViolationDate is the date a compliance violation was recorded, if any
 	// (ServiceNow data source only).
 	ComplianceViolationDate *string `json:"complianceViolationDate"`
+}
+
+// ProjectDetailsView is the enriched response shape for GET /projects/{id}.
+// It embeds the linked account and uses createdOn/updatedOn for consistency
+// with the ProjectView search result.
+type ProjectDetailsView struct {
+	ID               string            `json:"id"`
+	Account          ProjectAccountRef `json:"account"`
+	SfID             string            `json:"sfId"`
+	Name             string            `json:"name"`
+	Key              string            `json:"key"`
+	SubscriptionType SubscriptionType  `json:"subscriptionType"`
+	StartDate        time.Time         `json:"startDate"`
+	EndDate          time.Time         `json:"endDate"`
+	CreatedOn        time.Time         `json:"createdOn"`
+	UpdatedOn        time.Time         `json:"updatedOn"`
+	ProjectClosureFields
 }
 
 // ProjectUpdateRequest is the input for PATCH /projects/{id} (ServiceNow data
@@ -425,20 +434,7 @@ type ProjectView struct {
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
 	CreatedOn        time.Time        `json:"createdOn"`
-	// ClosureState is the project's closure/access state (ServiceNow data source only).
-	ClosureState *string `json:"closureState"`
-	// EndDateClosureState reflects the closure state driven by the project's end date
-	// (ServiceNow data source only).
-	EndDateClosureState *string `json:"endDateClosureState"`
-	// InvoiceDueDateClosureState reflects the closure state driven by the invoice due
-	// date (ServiceNow data source only).
-	InvoiceDueDateClosureState *string `json:"invoiceDueDateClosureState"`
-	// ComplianceViolationClosureState reflects the closure state driven by a compliance
-	// violation (ServiceNow data source only).
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
-	// ComplianceViolationDate is the date a compliance violation was recorded, if any
-	// (ServiceNow data source only).
-	ComplianceViolationDate *string `json:"complianceViolationDate"`
+	ProjectClosureFields
 }
 
 // SearchProjectsResponse is the paginated result of a project search.
