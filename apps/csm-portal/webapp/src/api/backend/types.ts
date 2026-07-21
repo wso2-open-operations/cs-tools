@@ -1313,6 +1313,57 @@ export interface BeUpdateCallRequestResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Tasks — a lightweight, case-scoped to-do item (distinct from call requests
+// and change requests: no multi-stage lifecycle). Only 2 real live `state`
+// values are seen in this org's data (`OPEN`/`CLOSED`); `OTHER` is a genuine
+// fallback for undocumented raw values and must be handled, not treated as
+// unreachable. `dueDate` is sparsely populated (~13% of records) — render its
+// absence as a normal, expected case rather than a broken layout.
+// ---------------------------------------------------------------------------
+
+export type BeTaskState = "OPEN" | "CLOSED" | "OTHER";
+
+/** A task list item returned by `GET /cases/{caseId}/tasks`. */
+export interface BeTaskSummary {
+  id: string;
+  subject: string;
+  state: BeTaskState | null;
+  dueDate: string | null;
+  assignedTo: BeEntityRef | null;
+  updatedOn: string;
+}
+
+/** `GET /cases/{caseId}/tasks?limit=&offset=` response. */
+export interface BeListCaseTasksResponse {
+  tasks: BeTaskSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+/**
+ * `GET /tasks/{id}` response. `visibleToCustomer` is confirmed `false` on
+ * every sampled record for this org — it is shown as a plain fact, never used
+ * to drive conditional UI.
+ */
+export interface BeTaskDetail {
+  id: string;
+  subject: string;
+  state: BeTaskState | null;
+  dueDate: string | null;
+  visibleToCustomer: boolean;
+  assignedTo: BeEntityRef | null;
+  requestType: string | null;
+  requestTypeLabel: string | null;
+  environment: string | null;
+  environmentLabel: string | null;
+  product: BeEntityRef | null;
+  parentCase: BeCaseNumberRef;
+  createdOn: string;
+  updatedOn: string;
+}
+
+// ---------------------------------------------------------------------------
 // Change requests (managed-cloud; ServiceNow data source only)
 // ---------------------------------------------------------------------------
 

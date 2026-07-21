@@ -33,6 +33,7 @@ import {
 import {
   Activity,
   ArrowLeft,
+  CheckSquare,
   Clock,
   Layers,
   Link as LinkIcon,
@@ -91,6 +92,8 @@ import {
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
 import { useGetCsmCaseCallRequests } from "@features/csm-cases/api/useCsmCaseCallRequests";
+import { TasksWidget } from "@features/csm-cases/components/TasksWidget";
+import { useGetCaseTasks } from "@features/csm-cases/api/useGetCaseTasks";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { CaseSlaTable } from "@features/csm-cases/components/CaseSlaTable";
@@ -216,7 +219,8 @@ type CaseTabId =
   | "sla"
   | "attachments"
   | "time"
-  | "call-requests";
+  | "call-requests"
+  | "tasks";
 
 /**
  * Walk the parent chain to find the nearest vertically-scrollable element.
@@ -250,6 +254,7 @@ const TAB_DEFS: Array<{
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
+  { id: "tasks", label: "Tasks", icon: <CheckSquare size={16} /> },
 ];
 
 export default function CsmCaseDetailPage(): JSX.Element {
@@ -328,6 +333,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isAnnouncement ? undefined : caseId,
   );
   const { data: callRequests } = useGetCsmCaseCallRequests(
+    isAnnouncement ? undefined : caseId,
+  );
+  const { data: caseTasks } = useGetCaseTasks(
     isAnnouncement ? undefined : caseId,
   );
   // Live deployment lookup for the Details tab's "Deployment info" widget —
@@ -430,7 +438,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // above rather than an effect, to avoid an extra render pass.
   if (
     isAnnouncement &&
-    (activeTab === "sla" || activeTab === "time" || activeTab === "call-requests")
+    (activeTab === "sla" ||
+      activeTab === "time" ||
+      activeTab === "call-requests" ||
+      activeTab === "tasks")
   ) {
     setActiveTab("activities");
   }
@@ -1259,7 +1270,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
           {TAB_DEFS.filter(
             (t) =>
               !isAnnouncement ||
-              (t.id !== "sla" && t.id !== "time" && t.id !== "call-requests"),
+              (t.id !== "sla" &&
+                t.id !== "time" &&
+                t.id !== "call-requests" &&
+                t.id !== "tasks"),
           ).map((t) => {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
@@ -1271,7 +1285,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                     ? c.timeLogs.length
                     : t.id === "call-requests"
                       ? callRequests?.length
-                      : undefined;
+                      : t.id === "tasks"
+                        ? caseTasks?.total
+                        : undefined;
             return (
               <Tab
                 key={t.id}
@@ -1546,6 +1562,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onAutoOpenCreateHandled={() => setAutoOpenCallCreate(false)}
             isClosed={isClosed}
           />
+        </Box>
+      )}
+
+      {activeTab === "tasks" && caseId && (
+        <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
+          <TasksWidget caseId={caseId} />
         </Box>
       )}
 

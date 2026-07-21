@@ -328,6 +328,18 @@ type TaskSlaService interface {
 	GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error)
 }
 
+// TaskService defines the operations available on the tasks entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type TaskService interface {
+	// SearchCaseTasks returns a paginated list of tasks for the case identified by
+	// caseID. A ValidationError is returned for invalid input (e.g. malformed UUID);
+	// an UnauthorizedError is returned when x-user-id-token is absent.
+	SearchCaseTasks(ctx context.Context, caseID string, limit, offset int) (domain.SearchCaseTasksResponse, error)
+	// GetTask returns the full detail of a single task by its UUID.
+	// A NotFoundError is returned if the task does not exist.
+	GetTask(ctx context.Context, id string) (domain.TaskDetail, error)
+}
+
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ProductVulnerabilityService interface {

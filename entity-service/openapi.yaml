@@ -1794,6 +1794,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/tasks:
+    get:
+      summary: List tasks for a case (ServiceNow data source only).
+      operationId: searchCaseTasks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Tasks for the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCaseTasksResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tasks/{id}:
+    get:
+      summary: Get a task by ID (ServiceNow data source only).
+      operationId: getTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The task record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /comments/search:
     post:
       summary: Search comments by reference entity (ServiceNow data source only).
@@ -5679,6 +5775,93 @@ components:
         schedule:
           $ref: '#/components/schemas/TaskSlaScheduleRef'
           nullable: true
+
+    TaskSummary:
+      type: object
+      required: [id, subject, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        state:
+          type: string
+          nullable: true
+          description: >
+            Plain string, not a closed enum. Known values: OPEN, CLOSED, OTHER
+            (fallback for any unmapped raw ServiceNow value), or null.
+        dueDate:
+          type: string
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        updatedOn:
+          type: string
+
+    SearchCaseTasksResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSummary'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    TaskDetail:
+      type: object
+      required: [id, subject, visibleToCustomer, createdOn, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        state:
+          type: string
+          nullable: true
+          description: >
+            Plain string, not a closed enum. Known values: OPEN, CLOSED, OTHER
+            (fallback for any unmapped raw ServiceNow value), or null.
+        dueDate:
+          type: string
+          nullable: true
+        visibleToCustomer:
+          type: boolean
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        requestType:
+          type: string
+          nullable: true
+          description: >
+            Raw ServiceNow choice-list key. Plain string, not a closed enum,
+            since the set of valid keys is SN-configuration-dependent.
+        requestTypeLabel:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          nullable: true
+        environmentLabel:
+          type: string
+          nullable: true
+        product:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        parentCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
 
     SearchIncidentsRequest:
       type: object

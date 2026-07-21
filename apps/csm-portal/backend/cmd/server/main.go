@@ -64,6 +64,7 @@ func main() {
 	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
 	conversationHandler := handler.NewConversationHandler(entityClient)
 	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
+	taskHandler := handler.NewTaskHandler(entityClient)
 	incidentHandler := handler.NewIncidentHandler(entityClient)
 	problemHandler := handler.NewProblemHandler(entityClient)
 
@@ -152,6 +153,8 @@ func main() {
 	mux.HandleFunc("POST /conversations/search", conversationHandler.SearchConversations)
 	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
+	mux.HandleFunc("GET /cases/{caseId}/tasks", taskHandler.GetCaseTasks)
+	mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
 	mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)

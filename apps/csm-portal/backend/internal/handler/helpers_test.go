@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -616,6 +617,27 @@ func (m *mockEntityTaskSlaClient) SearchTaskSlas(ctx context.Context, body []byt
 func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
 	if m.getTaskSlaFn != nil {
 		return m.getTaskSlaFn(ctx, id)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
+}
+
+// ----- mock entity task client -----
+
+type mockEntityTaskClient struct {
+	searchCaseTasksFn func(ctx context.Context, caseID string, query url.Values) ([]byte, error)
+	getTaskFn         func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityTaskClient) SearchCaseTasks(ctx context.Context, caseID string, query url.Values) ([]byte, error) {
+	if m.searchCaseTasksFn != nil {
+		return m.searchCaseTasksFn(ctx, caseID, query)
+	}
+	return []byte(`{"tasks":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityTaskClient) GetTask(ctx context.Context, id string) ([]byte, error) {
+	if m.getTaskFn != nil {
+		return m.getTaskFn(ctx, id)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
 }
