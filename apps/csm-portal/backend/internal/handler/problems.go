@@ -30,6 +30,7 @@ import (
 // entityProblemClient abstracts the entity service problem operations used by ProblemHandler.
 type entityProblemClient interface {
 	SearchProblems(ctx context.Context, body []byte) ([]byte, error)
+	GetProblem(ctx context.Context, id string) ([]byte, error)
 }
 
 // ProblemHandler handles HTTP requests for problem operations, delegating to the
@@ -72,6 +73,30 @@ func (h *ProblemHandler) SearchProblems(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProblems failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to search problems.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetProblem handles GET /problems/{id}.
+func (h *ProblemHandler) GetProblem(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetProblem(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProblem failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve problem.")
 		return
 	}
 

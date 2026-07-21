@@ -398,6 +398,7 @@ func (m *mockEntityIncidentClient) PatchIncident(ctx context.Context, id string,
 
 type mockEntityProblemClient struct {
 	searchProblemsFn func(ctx context.Context, body []byte) ([]byte, error)
+	getProblemFn     func(ctx context.Context, id string) ([]byte, error)
 }
 
 func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
@@ -407,13 +408,21 @@ func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byt
 	return []byte(`{}`), nil
 }
 
+func (m *mockEntityProblemClient) GetProblem(ctx context.Context, id string) ([]byte, error) {
+	if m.getProblemFn != nil {
+		return m.getProblemFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity change request client -----
 
 type mockEntityChangeRequestClient struct {
-	createChangeRequestFn  func(ctx context.Context, body []byte) ([]byte, error)
-	searchChangeRequestsFn func(ctx context.Context, body []byte) ([]byte, error)
-	getChangeRequestFn     func(ctx context.Context, id string) ([]byte, error)
-	patchChangeRequestFn   func(ctx context.Context, id string, body []byte) ([]byte, error)
+	createChangeRequestFn       func(ctx context.Context, body []byte) ([]byte, error)
+	searchChangeRequestsFn      func(ctx context.Context, body []byte) ([]byte, error)
+	getChangeRequestFn          func(ctx context.Context, id string) ([]byte, error)
+	patchChangeRequestFn        func(ctx context.Context, id string, body []byte) ([]byte, error)
+	getChangeRequestApprovalsFn func(ctx context.Context, id string) ([]byte, error)
 }
 
 func (m *mockEntityChangeRequestClient) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
@@ -442,6 +451,13 @@ func (m *mockEntityChangeRequestClient) PatchChangeRequest(ctx context.Context, 
 		return m.patchChangeRequestFn(ctx, id, body)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","updatedOn":"2026-01-01T00:00:00Z","updatedBy":"user@example.com"}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error) {
+	if m.getChangeRequestApprovalsFn != nil {
+		return m.getChangeRequestApprovalsFn(ctx, id)
+	}
+	return []byte(`{"approvals":[]}`), nil
 }
 
 // ----- mock entity IT service client -----

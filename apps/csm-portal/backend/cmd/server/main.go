@@ -136,6 +136,7 @@ func main() {
 	mux.HandleFunc("PATCH /deployments/{deploymentId}/products/{productId}", deploymentHandler.PatchDeployedProduct)
 	mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
 	mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
+	mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
 	mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
@@ -159,6 +160,7 @@ func main() {
 	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
 	mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)
 	mux.HandleFunc("PATCH /incidents/{id}", incidentHandler.PatchIncident)
+	mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
 	mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
 
 	addr := envOrDefault("PORT", ":8080")

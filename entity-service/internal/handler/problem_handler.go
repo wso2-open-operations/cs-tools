@@ -49,3 +49,15 @@ func (h *ProblemHandler) SearchProblems(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// GetProblem handles GET /problems/{id}.
+func (h *ProblemHandler) GetProblem(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	result, err := h.svc.GetProblem(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}

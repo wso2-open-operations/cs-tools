@@ -30,6 +30,7 @@ import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useGetChangeRequest } from "@features/csm-operations/api/useGetChangeRequest";
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
+import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
 import {
   changeRequestImpactColor,
@@ -276,6 +277,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           </MetaCell>
         </Box>
       </Card>
+
+      <ChangeRequestApprovals id={cr.id} />
 
       {[
         cr.description,

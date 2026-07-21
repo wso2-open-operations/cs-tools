@@ -1955,6 +1955,52 @@ type ChangeRequest struct {
 	ApprovedOn          *string    `json:"approvedOn"`
 }
 
+// ChangeRequestApproverType is a string enum for the kind of approver assigned to an
+// approval stage: a static ServiceNow group, or the change request's dynamic customer contact.
+type ChangeRequestApproverType string
+
+const (
+	ChangeRequestApproverTypeStaticGroup    ChangeRequestApproverType = "STATIC_GROUP"
+	ChangeRequestApproverTypeDynamicContact ChangeRequestApproverType = "DYNAMIC_CONTACT"
+)
+
+// ChangeRequestApprovalStatus is a string enum for the overall status of an approval stage.
+type ChangeRequestApprovalStatus string
+
+const (
+	ChangeRequestApprovalStatusApproved ChangeRequestApprovalStatus = "APPROVED"
+	ChangeRequestApprovalStatusRejected ChangeRequestApprovalStatus = "REJECTED"
+	ChangeRequestApprovalStatusPending  ChangeRequestApprovalStatus = "PENDING"
+)
+
+// ChangeRequestApprover is a single approver's response within an approval stage.
+// Status is an open string set (e.g. APPROVED, NOT_REQUIRED, REQUESTED, REJECTED,
+// CANCELLED, NO_CONSENSUS, or an unrecognized value uppercased) rather than a fixed
+// enum, so it is passed through as-is rather than validated against a closed list.
+type ChangeRequestApprover struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	RespondedOn *string `json:"respondedOn"`
+}
+
+// ChangeRequestApproval represents a single approval stage (e.g. Assess, Authorize,
+// Customer Approval) on a change request, along with the individual approvers within
+// that stage. A change request may have zero to several stages depending on its
+// current state.
+type ChangeRequestApproval struct {
+	Stage        string                      `json:"stage"`
+	ApproverType ChangeRequestApproverType   `json:"approverType"`
+	ApproverName string                      `json:"approverName"`
+	Status       ChangeRequestApprovalStatus `json:"status"`
+	Approvers    []ChangeRequestApprover     `json:"approvers"`
+}
+
+// ChangeRequestApprovals is the response for GET /change-requests/{id}/approvals.
+type ChangeRequestApprovals struct {
+	Approvals []ChangeRequestApproval `json:"approvals"`
+}
+
 // VulnerabilityPriority is a string enum for the priority (severity) of a product vulnerability.
 type VulnerabilityPriority string
 
@@ -2741,6 +2787,35 @@ type SearchProblemsResponse struct {
 	Total    int                 `json:"total"`
 	Offset   int                 `json:"offset"`
 	Limit    int                 `json:"limit"`
+}
+
+// ProblemDetail is the full detail representation returned by GET /problems/{id}.
+//
+// State and ResolutionCode are plain, unvalidated passthrough strings from the
+// data source rather than closed enums. Known State values at the time of writing:
+// NEW | ASSESS | ROOT_CAUSE_ANALYSIS | FIX_IN_PROGRESS | RESOLVED | CLOSED. Do not
+// add strict validation against this list — it is not guaranteed exhaustive.
+type ProblemDetail struct {
+	ID                  *string         `json:"id"`
+	Number              *string         `json:"number"`
+	Subject             *string         `json:"subject"`
+	State               *string         `json:"state"`
+	Priority            *string         `json:"priority"`
+	Category            *string         `json:"category"`
+	Subcategory         *string         `json:"subcategory"`
+	OriginCase          *CaseNumberRef  `json:"originCase"`
+	PrimaryIncident     *CaseNumberRef  `json:"primaryIncident"`
+	LinkedIncidents     []CaseNumberRef `json:"linkedIncidents"`
+	LinkedChangeRequest *CaseNumberRef  `json:"linkedChangeRequest"`
+	AssignedTo          *EntityRef      `json:"assignedTo"`
+	ResolutionCode      *string         `json:"resolutionCode"`
+	CauseNotes          *string         `json:"causeNotes"`
+	FixNotes            *string         `json:"fixNotes"`
+	Workaround          *string         `json:"workaround"`
+	ResolvedAt          *string         `json:"resolvedAt"`
+	ResolvedBy          *EntityRef      `json:"resolvedBy"`
+	OpenedAt            *string         `json:"openedAt"`
+	ClosedAt            *string         `json:"closedAt"`
 }
 
 // ConversationState represents the state of a conversation.

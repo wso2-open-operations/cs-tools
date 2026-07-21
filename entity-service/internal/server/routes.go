@@ -282,6 +282,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 		mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
+		mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
 	}
 
 	if timeCardHandler != nil {
@@ -339,6 +340,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	if problemHandler != nil {
 		mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
+		mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
 	}
 
 	if conversationHandler != nil {

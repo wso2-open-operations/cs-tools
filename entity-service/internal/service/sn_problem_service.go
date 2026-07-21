@@ -108,3 +108,107 @@ func (s *snProblemService) SearchProblems(ctx context.Context, req domain.Search
 		Offset:   req.Pagination.Offset,
 	}, nil
 }
+
+// snProblemEntityRef is a compact id+number reference used for the problem's
+// origin case / primary incident / linked incidents / linked change request.
+type snProblemEntityRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+}
+
+// snProblemUserRef is a compact id+name reference used for assignedTo/resolvedBy.
+type snProblemUserRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// snProblemDetailResponse mirrors the Choreo GET /problems/{id} response.
+type snProblemDetailResponse struct {
+	ID                  string               `json:"id"`
+	Number              string               `json:"number"`
+	Subject             string               `json:"subject"`
+	State               *string              `json:"state"`
+	Priority            *string              `json:"priority"`
+	Category            *string              `json:"category"`
+	Subcategory         *string              `json:"subcategory"`
+	OriginCase          *snProblemEntityRef  `json:"originCase"`
+	PrimaryIncident     *snProblemEntityRef  `json:"primaryIncident"`
+	LinkedIncidents     []snProblemEntityRef `json:"linkedIncidents"`
+	LinkedChangeRequest *snProblemEntityRef  `json:"linkedChangeRequest"`
+	AssignedTo          *snProblemUserRef    `json:"assignedTo"`
+	ResolutionCode      *string              `json:"resolutionCode"`
+	CauseNotes          *string              `json:"causeNotes"`
+	FixNotes            *string              `json:"fixNotes"`
+	Workaround          *string              `json:"workaround"`
+	ResolvedAt          *string              `json:"resolvedAt"`
+	ResolvedBy          *snProblemUserRef    `json:"resolvedBy"`
+	OpenedAt            *string              `json:"openedAt"`
+	ClosedAt            *string              `json:"closedAt"`
+}
+
+// GetProblem implements ProblemService for the ServiceNow data source.
+func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.ProblemDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ProblemDetail{}, err
+	}
+
+	raw, err := s.client.Get(ctx, "/problems/"+uuidToSysid(id), token)
+	if err != nil {
+		return domain.ProblemDetail{}, err
+	}
+
+	var p snProblemDetailResponse
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return domain.ProblemDetail{}, fmt.Errorf("sn get problem: parse response: %w", err)
+	}
+
+	problemID := sysidToUUID(p.ID)
+	number := p.Number
+	subject := p.Subject
+
+	view := domain.ProblemDetail{
+		ID:             &problemID,
+		Number:         &number,
+		Subject:        &subject,
+		State:          p.State,
+		Priority:       p.Priority,
+		Category:       p.Category,
+		Subcategory:    p.Subcategory,
+		ResolutionCode: p.ResolutionCode,
+		CauseNotes:     p.CauseNotes,
+		FixNotes:       p.FixNotes,
+		Workaround:     p.Workaround,
+		ResolvedAt:     p.ResolvedAt,
+		OpenedAt:       p.OpenedAt,
+		ClosedAt:       p.ClosedAt,
+	}
+	if p.OriginCase != nil {
+		view.OriginCase = &domain.CaseNumberRef{ID: sysidToUUID(p.OriginCase.ID), Number: p.OriginCase.Number}
+	}
+	if p.PrimaryIncident != nil {
+		view.PrimaryIncident = &domain.CaseNumberRef{ID: sysidToUUID(p.PrimaryIncident.ID), Number: p.PrimaryIncident.Number}
+	}
+	if len(p.LinkedIncidents) > 0 {
+		linked := make([]domain.CaseNumberRef, 0, len(p.LinkedIncidents))
+		for _, li := range p.LinkedIncidents {
+			linked = append(linked, domain.CaseNumberRef{ID: sysidToUUID(li.ID), Number: li.Number})
+		}
+		view.LinkedIncidents = linked
+	}
+	if p.LinkedChangeRequest != nil {
+		view.LinkedChangeRequest = &domain.CaseNumberRef{ID: sysidToUUID(p.LinkedChangeRequest.ID), Number: p.LinkedChangeRequest.Number}
+	}
+	if p.AssignedTo != nil {
+		view.AssignedTo = &domain.EntityRef{ID: sysidToUUID(p.AssignedTo.ID), Name: p.AssignedTo.Name}
+	}
+	if p.ResolvedBy != nil {
+		view.ResolvedBy = &domain.EntityRef{ID: sysidToUUID(p.ResolvedBy.ID), Name: p.ResolvedBy.Name}
+	}
+
+	return view, nil
+}

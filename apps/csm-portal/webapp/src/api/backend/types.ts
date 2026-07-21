@@ -1452,6 +1452,40 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   approvedOn?: string | null;
 }
 
+/** An approval stage seen on a change request, e.g. Assess, Authorize. */
+export type BeChangeRequestApprovalStage = "Assess" | "Authorize" | "Customer Approval";
+
+/** Who a change-request approval stage is assigned to. */
+export type BeChangeRequestApproverType = "STATIC_GROUP" | "DYNAMIC_CONTACT";
+
+/**
+ * An individual approver's response within an approval stage
+ * (`GET /change-requests/{id}/approvals`). `status` is an open, backend-passthrough
+ * string (seen live: `APPROVED`, `NOT_REQUIRED`, `REQUESTED`; also possible:
+ * `REJECTED`, `CANCELLED`, `NO_CONSENSUS`, or an unrecognized value) — the backend
+ * does not validate/whitelist it, so render with a fallback rather than a closed union.
+ */
+export interface BeChangeRequestApprover {
+  id: string;
+  name?: string | null;
+  status: string;
+  respondedOn?: string | null;
+}
+
+/** One approval stage on a change request, with its individual approvers. */
+export interface BeChangeRequestApproval {
+  stage: string;
+  approverType: BeChangeRequestApproverType | string;
+  approverName?: string | null;
+  status: string;
+  approvers: BeChangeRequestApprover[];
+}
+
+/** `GET /change-requests/{id}/approvals` response. */
+export interface BeChangeRequestApprovalsView {
+  approvals: BeChangeRequestApproval[];
+}
+
 /**
  * `POST /change-requests` body (ServiceNow data source only). `subject` is
  * the only required field; every ID field (`serviceId`, `serviceOfferingId`,
@@ -1851,6 +1885,100 @@ export interface BeIncidentSearchResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ---------------------------------------------------------------------------
+// Problems (SRE-owned; ServiceNow data source only). Enum casing mirrors
+// incidents (UPPER_SNAKE_CASE on the wire), not change requests.
+// ---------------------------------------------------------------------------
+
+export type BeProblemState =
+  | "NEW"
+  | "ASSESS"
+  | "ROOT_CAUSE_ANALYSIS"
+  | "FIX_IN_PROGRESS"
+  | "RESOLVED"
+  | "CLOSED";
+
+/**
+ * A reference to another record embedded within a problem. Deliberately
+ * generic (id + number only, no record-type discriminant): the backend does
+ * not tag these with a type, and `originCase` in particular can point at
+ * either a Case or an Incident depending on the underlying data despite its
+ * name. Render as a plain, non-navigable reference unless the caller
+ * independently knows the target record type and has a route for it.
+ */
+export interface BeProblemRef {
+  id: string;
+  number?: string;
+}
+
+/**
+ * List-item shape for `POST /problems/search`. Minimal by design — unlike
+ * change requests/incidents, the search view does not embed state, priority,
+ * or any other field beyond id/number/subject; only `GET /problems/{id}`
+ * does (see {@link BeProblemDetail}).
+ */
+export interface BeProblemSearchView {
+  id: string;
+  number?: string;
+  subject?: string;
+}
+
+export interface BeProblemSearchFilters {
+  searchQuery?: string;
+  /**
+   * Filter by state. Not confirmed live against the backend at the time this
+   * was written — the search response itself doesn't echo `state` — so if
+   * the backend rejects or silently ignores this filter, drop it here and
+   * from `ProblemsTab`'s payload, and remove the state control from
+   * `ProblemsFilterBar`.
+   */
+  states?: BeProblemState[];
+}
+
+export interface BeProblemSearchPayload {
+  filters?: BeProblemSearchFilters;
+  pagination?: BePagination;
+}
+
+/** Note: mirrors the change-request/incident search responses — no `hasMore`. */
+export interface BeProblemSearchResponse {
+  problems: BeProblemSearchView[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * `GET /problems/{id}` response. `originCase` / `primaryIncident` /
+ * `linkedChangeRequest` are singular refs (each may reference a different
+ * record type — see {@link BeProblemRef}); `linkedIncidents` is a genuine
+ * one-to-many and must be rendered as a list, not a single value.
+ */
+export interface BeProblemDetail {
+  id: string;
+  number?: string;
+  subject?: string;
+  state?: BeProblemState;
+  priority?: string | null;
+  /** May be null/empty on many records — render blank gracefully, not as an awkward empty field. */
+  category?: string | null;
+  subcategory?: string | null;
+  /** Despite the name, may reference an Incident rather than a Case. */
+  originCase?: BeProblemRef | null;
+  primaryIncident?: BeProblemRef | null;
+  linkedIncidents?: BeProblemRef[];
+  linkedChangeRequest?: BeProblemRef | null;
+  assignedTo?: BeEntityRef | null;
+  resolutionCode?: string | null;
+  causeNotes?: string | null;
+  fixNotes?: string | null;
+  workaround?: string | null;
+  resolvedAt?: string | null;
+  resolvedBy?: BeEntityRef | null;
+  openedAt?: string | null;
+  closedAt?: string | null;
 }
 
 // ---------------------------------------------------------------------------

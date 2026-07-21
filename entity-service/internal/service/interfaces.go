@@ -262,6 +262,10 @@ type ChangeRequestService interface {
 
 	// PatchChangeRequest updates mutable fields on a change request identified by UUID.
 	PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error)
+
+	// GetChangeRequestApprovals returns the approval stages and per-approver status
+	// for a single change request identified by UUID.
+	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
 }
 
 // TimeCardService defines the operations available on the time-cards entity.
@@ -377,6 +381,10 @@ type ProblemService interface {
 	// SearchProblems returns a paginated list of problems filtered by optional search query.
 	// A ValidationError is returned for invalid input.
 	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
+
+	// GetProblem returns the full detail of a single problem by its UUID.
+	// A NotFoundError is returned if the problem does not exist.
+	GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error)
 }
 
 // ConversationService defines the operations available on the conversations entity.

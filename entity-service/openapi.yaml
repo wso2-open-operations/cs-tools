@@ -1242,6 +1242,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /change-requests/{id}/approvals:
+    get:
+      summary: Get the approval stages for a change request (ServiceNow data source only).
+      operationId: getChangeRequestApprovals
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The change request's approval stages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestApprovals'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Change request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /catalogs/search:
     post:
       summary: Search service catalogs by deployed product (ServiceNow data source only).
@@ -2116,6 +2159,49 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /problems/{id}:
+    get:
+      summary: Get a single problem by ID (ServiceNow data source only).
+      operationId: getProblem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The problem detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Problem not found.
           content:
             application/json:
               schema:
@@ -4307,6 +4393,51 @@ components:
               type: string
               nullable: true
 
+    ChangeRequestApprover:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          description: >-
+            Approver response status. Open string set (e.g. APPROVED, NOT_REQUIRED,
+            REQUESTED, REJECTED, CANCELLED, NO_CONSENSUS); not a fixed enum.
+        respondedOn:
+          type: string
+          nullable: true
+
+    ChangeRequestApproval:
+      type: object
+      properties:
+        stage:
+          type: string
+          description: Approval stage name (e.g. Assess, Authorize, Customer Approval).
+        approverType:
+          type: string
+          enum: [STATIC_GROUP, DYNAMIC_CONTACT]
+        approverName:
+          type: string
+          description: Group name (STATIC_GROUP) or the per-CR customer contact's name (DYNAMIC_CONTACT).
+        status:
+          type: string
+          enum: [APPROVED, REJECTED, PENDING]
+        approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestApprover'
+
+    ChangeRequestApprovals:
+      type: object
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestApproval'
+
     Variable:
       type: object
       required: [id, value]
@@ -6333,6 +6464,75 @@ components:
           type: integer
         limit:
           type: integer
+
+    ProblemDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: >
+            Passthrough value from the data source, not a closed enum. Known values at
+            the time of writing: NEW, ASSESS, ROOT_CAUSE_ANALYSIS, FIX_IN_PROGRESS,
+            RESOLVED, CLOSED.
+        priority:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        subcategory:
+          type: string
+          nullable: true
+        originCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        primaryIncident:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        linkedIncidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseNumberRef'
+        linkedChangeRequest:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        resolutionCode:
+          type: string
+          nullable: true
+        causeNotes:
+          type: string
+          nullable: true
+        fixNotes:
+          type: string
+          nullable: true
+        workaround:
+          type: string
+          nullable: true
+        resolvedAt:
+          type: string
+          nullable: true
+        resolvedBy:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        openedAt:
+          type: string
+          nullable: true
+        closedAt:
+          type: string
+          nullable: true
 
     SearchConversationsRequest:
       type: object
