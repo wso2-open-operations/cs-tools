@@ -35,7 +35,7 @@ import { useQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
 import { adminUsers } from "@src/services/adminUsers";
 import { products } from "@src/services/products";
-import type { CaseState, CaseWorkState, EngagementType, Project } from "@src/types";
+import type { Project } from "@src/types";
 import { ALL_WORK_STATES, FILTERABLE_STATES, STATE_LABELS, WORK_STATE_LABEL } from "@components/support/config";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
 import {
@@ -50,18 +50,7 @@ import {
 // over the dialog reads as see-through — force the opaque `background.default`.
 const OPAQUE_POPUP = { sx: { backgroundColor: "background.default", backgroundImage: "none" } };
 
-function toggleState(list: CaseState[], value: CaseState): CaseState[] {
-  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-}
-
-function toggleWorkState(
-  list: NonNullable<CaseWorkState>[],
-  value: NonNullable<CaseWorkState>,
-): NonNullable<CaseWorkState>[] {
-  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-}
-
-function toggleEngagementType(list: EngagementType[], value: EngagementType): EngagementType[] {
+function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
@@ -218,7 +207,7 @@ export function EngagementFiltersSheet({ open, onClose, filters, onApply }: Enga
                     variant={isSelected ? "filled" : "outlined"}
                     color={isSelected ? "primary" : "default"}
                     onClick={() => {
-                      const states = toggleState(draft.states, state);
+                      const states = toggle(draft.states, state);
                       // Work sub-state only applies to work_in_progress cases, so drop any
                       // selected work states when that state leaves the filter — keeps a
                       // stale, inert work-state selection from lingering.
@@ -247,7 +236,7 @@ export function EngagementFiltersSheet({ open, onClose, filters, onApply }: Enga
                     variant={isSelected ? "filled" : "outlined"}
                     color={isSelected ? "primary" : "default"}
                     disabled={!workInProgressSelected}
-                    onClick={() => setDraft({ ...draft, workStates: toggleWorkState(draft.workStates, workState) })}
+                    onClick={() => setDraft({ ...draft, workStates: toggle(draft.workStates, workState) })}
                   />
                 );
                 // Disabled MUI chips don't fire pointer events, so the tooltip needs a
@@ -276,9 +265,7 @@ export function EngagementFiltersSheet({ open, onClose, filters, onApply }: Enga
                     aria-pressed={isSelected}
                     variant={isSelected ? "filled" : "outlined"}
                     color={isSelected ? "primary" : "default"}
-                    onClick={() =>
-                      setDraft({ ...draft, engagementTypes: toggleEngagementType(draft.engagementTypes, type) })
-                    }
+                    onClick={() => setDraft({ ...draft, engagementTypes: toggle(draft.engagementTypes, type) })}
                   />
                 );
               })}
