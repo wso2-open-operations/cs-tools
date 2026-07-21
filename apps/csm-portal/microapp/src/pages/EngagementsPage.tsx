@@ -14,9 +14,122 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { ComingSoonPage } from "@components/common/ComingSoonPage";
+import { useEffect, useRef, useState } from "react";
+import { Badge, Box, IconButton, Stack, Typography } from "@wso2/oxygen-ui";
+import { SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { engagements } from "@src/services/engagements";
+import { useDebouncedValue } from "@utils/useDebouncedValue";
+import { countActiveEngagementFilters, EMPTY_ENGAGEMENT_FILTERS, type EngagementFilters } from "@utils/engagements";
+import { SearchBar } from "@components/support/SearchBar";
+import { EmptyState } from "@components/support/EmptyState";
+import { ErrorState } from "@components/support/ErrorState";
+import { CaseCard, CaseCardSkeleton } from "@components/support/CaseCard";
+import { EngagementFiltersSheet } from "@components/engagements/EngagementFiltersSheet";
 
-// The webapp also marks Engagements as wip:true (apps/csm-portal/webapp/src/config/csmNavItems.ts).
+// Cross-customer engagements list (engagements are cases of type "engagement"),
+// mirroring the webapp's CsmEngagementsPage — a CsmIssuesView locked to
+// `caseTypes: ["engagement"]` with the engagement-type sub-filter shown and
+// severity hidden. Search + State + Engagement type + Project filters,
+// infinite-scrolled newest-updated first. Read-only for this pass, same as
+// AnnouncementsPage — creating an engagement isn't in scope here.
 export default function EngagementsPage() {
-  return <ComingSoonPage title="Engagements" description="Engagement tracking is still under construction." />;
+  const [filters, setFilters] = useState<EngagementFilters>(EMPTY_ENGAGEMENT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
+  const activeFilterCount = countActiveEngagementFilters(filters);
+
+  // Search is debounced into the query so typing doesn't refetch every keystroke.
+  const { data, isLoading, isError, refetch, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery(
+    engagements.infinite({ ...filters, search: debouncedSearch }),
+  );
+
+  const items = data?.pages.flatMap((p) => p.items) ?? [];
+  const total = data?.pages[0]?.total ?? items.length;
+
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  return (
+    <Stack gap={2}>
+      <Box>
+        <Typography variant="h5">Engagements</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Ongoing engagements across projects.
+        </Typography>
+      </Box>
+
+      <Stack direction="row" gap={1} alignItems="center">
+        <SearchBar
+          value={filters.search}
+          onChange={(value) => setFilters((prev) => ({ ...prev, search: value }))}
+          placeholder="Search by number or subject…"
+        />
+        <Badge badgeContent={activeFilterCount} color="primary" invisible={activeFilterCount === 0}>
+          <IconButton aria-label="Filters" onClick={() => setFiltersOpen(true)}>
+            <SlidersHorizontal size={18} />
+          </IconButton>
+        </Badge>
+      </Stack>
+
+      {isLoading ? (
+        <ListSkeleton />
+      ) : isError ? (
+        <ErrorState onRetry={() => void refetch()} />
+      ) : items.length === 0 ? (
+        <EmptyState message="No engagements found." />
+      ) : (
+        <Stack gap={1.5}>
+          <Typography variant="caption" color="text.secondary">
+            {items.length} of {total}
+          </Typography>
+
+          {items.map((item) => (
+            <CaseCard key={item.id} item={item} />
+          ))}
+
+          {/* IntersectionObserver can miss a zero-height target, so give the sentinel 1px to observe. */}
+          <div ref={sentinelRef} style={{ height: 1 }} />
+
+          {isFetchingNextPage && <CaseCardSkeleton />}
+          {!hasNextPage && (
+            <Typography variant="body2" color="text.secondary" textAlign="center" py={1}>
+              You're all caught up!
+            </Typography>
+          )}
+        </Stack>
+      )}
+
+      <EngagementFiltersSheet
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        filters={filters}
+        onApply={setFilters}
+      />
+    </Stack>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <Stack gap={1.5}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <CaseCardSkeleton key={i} />
+      ))}
+    </Stack>
+  );
 }
