@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -74,9 +73,6 @@ func (s *snITServiceService) SearchITServices(ctx context.Context, req domain.Se
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchITServicesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var filters snITServiceFilters
 	if req.Filters != nil {

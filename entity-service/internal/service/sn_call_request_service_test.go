@@ -56,12 +56,6 @@ func TestSNCallRequestService_UpdateCallRequest_Validation(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "missing token",
-			ctx:     context.Background(),
-			req:     domain.UpdateCallRequestRequest{ID: validID, State: domain.CallRequestStateScheduled},
-			wantErr: &apierror.UnauthorizedError{},
-		},
-		{
 			name:    "invalid id format",
 			ctx:     contextWithUserIDToken("token"),
 			req:     domain.UpdateCallRequestRequest{ID: "not-a-uuid", State: domain.CallRequestStateScheduled},

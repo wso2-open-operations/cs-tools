@@ -159,9 +159,6 @@ func (s *snUserService) SearchUsers(ctx context.Context, req domain.SearchUsersR
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchSNUsersResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	roles := make([]string, len(req.Filters.Roles))
 	for i, r := range req.Filters.Roles {
@@ -228,9 +225,6 @@ func (s *snUserService) SearchUsers(ctx context.Context, req domain.SearchUsersR
 
 func (s *snUserService) GetMe(ctx context.Context) (domain.GetUserMeResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.GetUserMeResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/users/me", token)
 	if err != nil {
@@ -259,9 +253,6 @@ func (s *snUserService) GetMe(ctx context.Context) (domain.GetUserMeResponse, er
 
 func (s *snUserService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.PatchUserMeResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if req.TimeZone == "" {
 		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "timeZone is required"}

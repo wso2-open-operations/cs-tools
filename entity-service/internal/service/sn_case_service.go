@@ -367,9 +367,6 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	snType, ok := snCaseTypeMap[req.Type]
 	if !ok {
@@ -481,9 +478,6 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 
 func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CaseView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/cases/"+uuidToSysid(id), token)
 	if err != nil {
@@ -628,9 +622,6 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateCaseCommentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	snType := snCommentTypeMap[req.Type]
 
@@ -714,9 +705,6 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCaseCommentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snSearchCommentsPayload{
 		ReferenceID:   uuidToSysid(req.CaseID),
@@ -791,7 +779,7 @@ type snUpdateCasePayload struct {
 	WorkStateKey   *int     `json:"workStateKey,omitempty"`
 	WatchList      []string `json:"watchList,omitempty"`
 	AssigneeEmail  *string  `json:"assigneeEmail,omitempty"`
-	ResolutionCode *int    `json:"resolutionCode,omitempty"`
+	ResolutionCode *int     `json:"resolutionCode,omitempty"`
 	Cause          *string  `json:"cause,omitempty"`
 	CloseNotes     *string  `json:"closeNotes,omitempty"`
 }
@@ -890,13 +878,13 @@ var snWorkStateIDMap = map[domain.CaseWorkState]int{
 type snUpdateCaseResponse struct {
 	Message string `json:"message"`
 	Case    struct {
-		ID             string       `json:"id"`
-		UpdatedOn      string       `json:"updatedOn"`
-		UpdatedBy      string       `json:"updatedBy"`
-		State          *snCaseState `json:"state"`
-		Severity       *snCaseLabel `json:"severity"`
-		WorkState      *snCaseLabel `json:"workState"`
-		WatchList      []struct {
+		ID        string       `json:"id"`
+		UpdatedOn string       `json:"updatedOn"`
+		UpdatedBy string       `json:"updatedBy"`
+		State     *snCaseState `json:"state"`
+		Severity  *snCaseLabel `json:"severity"`
+		WorkState *snCaseLabel `json:"workState"`
+		WatchList []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
 			Name     string `json:"name"`
@@ -953,9 +941,6 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.UpdateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snUpdateCasePayload{}
 	if req.State != nil {
@@ -1151,9 +1136,6 @@ func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.Cre
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.CreateAttachmentResponse{}, err
@@ -1237,9 +1219,6 @@ func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.Se
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchAttachmentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
@@ -1337,9 +1316,6 @@ func (s *snCaseService) SearchCaseActivities(ctx context.Context, req domain.Sea
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCaseActivitiesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{req.CaseID}); err != nil {
 		return domain.SearchCaseActivitiesResponse{}, err
@@ -1422,9 +1398,6 @@ func (s *snCaseService) SearchCaseActivities(ctx context.Context, req domain.Sea
 
 func (s *snCaseService) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return nil, "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	resp, err := s.client.GetBinary(ctx, "/attachments/"+uuidToSysid(attachmentID)+"/content", token)
 	if err != nil {
@@ -1436,9 +1409,6 @@ func (s *snCaseService) GetCaseAttachmentContent(ctx context.Context, attachment
 
 func (s *snCaseService) DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.DeleteAttachmentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Delete(ctx, "/attachments/"+uuidToSysid(req.AttachmentID), token)
 	if err != nil {
@@ -1487,9 +1457,6 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCasesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snCaseSort
 	if req.SortBy.Field != "" {

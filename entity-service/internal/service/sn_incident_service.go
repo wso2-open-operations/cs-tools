@@ -190,9 +190,6 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchIncidentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snIncidentSort
 	if req.SortBy.Field != "" {
@@ -532,9 +529,6 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateIncidentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snCreateIncidentPayload{
 		CallerID:           uuidToSysid(req.CallerID),
@@ -729,9 +723,6 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.IncidentView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/incidents/"+uuidToSysid(id), token)
 	if err != nil {
@@ -951,9 +942,6 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.UpdateIncidentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snUpdateIncidentPayload{
 		Subject:            req.Subject,

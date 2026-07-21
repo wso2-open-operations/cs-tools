@@ -51,9 +51,6 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCommentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snSearchCommentsPayload{
 		ReferenceID:   uuidToSysid(req.ReferenceID),

@@ -133,9 +133,6 @@ func (s *snDeployedProductService) CreateDeployedProduct(ctx context.Context, re
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateDeployedProductResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snCreateDeployedProductPayload{
 		ProjectID:    uuidToSysid(req.ProjectID),
@@ -195,9 +192,6 @@ func (s *snDeployedProductService) UpdateDeployedProduct(ctx context.Context, re
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.UpdateDeployedProductResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	// When deploymentId is provided, verify the product belongs to that deployment
 	// before mutating it to prevent cross-deployment modification (IDOR).
@@ -277,9 +271,6 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchDeployedProductsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snDeployedProductSearchPayload{
 		Filters:    snDeployedProductFilters{DeploymentIDs: uuidsToSysids(req.DeploymentIDs)},

@@ -157,9 +157,6 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchConversationsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snConversationSort
 	if req.SortBy.Field != "" {

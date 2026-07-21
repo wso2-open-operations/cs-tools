@@ -88,9 +88,6 @@ func (s *snCatalogService) SearchCatalogs(ctx context.Context, req domain.Search
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCatalogsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snSearchCatalogsPayload{
 		DeployedProductID: uuidToSysid(req.DeployedProductID),
@@ -146,9 +143,6 @@ func (s *snCatalogService) GetCatalogItemVariables(ctx context.Context, catalogI
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.GetCatalogItemVariablesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	path := "/catalogs/" + uuidToSysid(catalogID) + "/items/" + uuidToSysid(catalogItemID) + "/variables"
 	raw, err := s.client.Get(ctx, path, token)

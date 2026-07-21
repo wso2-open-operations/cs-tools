@@ -151,7 +151,9 @@ func (c *Client) Get(ctx context.Context, path string, userIDToken string) (json
 		return nil, fmt.Errorf("snclient: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("x-user-id-token", userIDToken)
+	if userIDToken != "" {
+		req.Header.Set("x-user-id-token", userIDToken)
+	}
 
 	return c.do(req, path)
 }
@@ -176,7 +178,9 @@ func (c *Client) GetBinary(ctx context.Context, path string, userIDToken string)
 		return BinaryResponse{}, fmt.Errorf("snclient: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("x-user-id-token", userIDToken)
+	if userIDToken != "" {
+		req.Header.Set("x-user-id-token", userIDToken)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -236,7 +240,9 @@ func (c *Client) Patch(ctx context.Context, path string, userIDToken string, pay
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("x-user-id-token", userIDToken)
+	if userIDToken != "" {
+		req.Header.Set("x-user-id-token", userIDToken)
+	}
 
 	return c.do(req, path)
 }
@@ -255,7 +261,9 @@ func (c *Client) Delete(ctx context.Context, path string, userIDToken string) (j
 		return nil, fmt.Errorf("snclient: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("x-user-id-token", userIDToken)
+	if userIDToken != "" {
+		req.Header.Set("x-user-id-token", userIDToken)
+	}
 
 	return c.do(req, path)
 }
@@ -280,7 +288,9 @@ func (c *Client) Post(ctx context.Context, path string, userIDToken string, payl
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("x-user-id-token", userIDToken)
+	if userIDToken != "" {
+		req.Header.Set("x-user-id-token", userIDToken)
+	}
 
 	return c.do(req, path)
 }
