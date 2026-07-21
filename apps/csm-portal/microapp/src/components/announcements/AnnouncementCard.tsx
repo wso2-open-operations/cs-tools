@@ -15,16 +15,23 @@
 // under the License.
 
 import { Card, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import { Link } from "react-router-dom";
 import type { CaseSummary } from "@src/types";
 import { fromNow } from "@utils/dateTime";
 import { AnnouncementStateChip } from "./AnnouncementStateChip";
 
-// Read-only announcement card (not tappable — mirrors the webapp's read-only
-// list). Announcements are cases of type "announcement", so `item` is a
-// `CaseSummary`; only the fields the list shows are rendered.
+// Announcements are cases of type "announcement", so `item` is a
+// `CaseSummary`; only the fields the list shows are rendered. Taps through to
+// the shared case detail page (/cases/:id), same as the webapp's
+// CsmCaseDetailPage reuse — it renders a read-only view for this case type.
 export function AnnouncementCard({ item }: { item: CaseSummary }) {
   return (
-    <Card variant="outlined" sx={{ p: 2 }}>
+    <Card
+      component={Link}
+      to={`/cases/${item.id}`}
+      variant="outlined"
+      sx={{ p: 2, textDecoration: "none", display: "block" }}
+    >
       <Stack gap={1}>
         <Stack direction="row" alignItems="flex-start" justifyContent="space-between" gap={1}>
           <Typography variant="subtitle2" noWrap sx={{ minWidth: 0 }}>
