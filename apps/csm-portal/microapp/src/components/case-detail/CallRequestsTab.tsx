@@ -467,6 +467,7 @@ function ScheduleCallDialog({
           value={meetingTime}
           onChange={setMeetingTime}
           disabled={submitting}
+          minDateTime={new Date()}
           slotProps={{ textField: { size: "small", fullWidth: true } }}
         />
       </LocalizationProvider>
