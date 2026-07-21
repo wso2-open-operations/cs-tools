@@ -53,12 +53,17 @@ async function searchAnnouncements(filters: AnnouncementFilters, offset: number)
     },
   };
   const { data } = await apiClient.post<CaseSearchResponseDto>(CASES_SEARCH_ENDPOINT, payload);
+  const items = data.cases.map(toCaseSummary);
   return {
-    items: data.cases.map(toCaseSummary),
+    items,
     total: data.total,
     offset: data.offset,
     limit: data.limit,
-    hasMore: data.hasMore,
+    // Some data sources omit hasMore from the search envelope (see cases.ts's
+    // getAllCases and adminUsers.ts's searchUsers, which hit the same quirk);
+    // derive it from offset/total when that happens instead of treating a
+    // missing/false field as "no more pages" after the first 20.
+    hasMore: data.hasMore ?? data.offset + items.length < data.total,
   };
 }
 
