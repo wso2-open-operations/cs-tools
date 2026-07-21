@@ -91,6 +91,8 @@ export interface CaseSearchFiltersDto {
   workStates?: NonNullable<CaseWorkState>[];
   /** Filter by engagement type; only applies when `types` includes `"engagement"`. */
   engagementTypes?: EngagementType[];
+  /** Product family names (e.g. "API Manager"); matches all versions of each. */
+  productNames?: string[];
 }
 
 export interface CaseSearchPayloadDto {
