@@ -66,10 +66,11 @@ async function searchEngagements(filters: EngagementFilters, offset: number): Pr
     // getAllCases and adminUsers.ts's searchUsers, which hit the same quirk);
     // derive it from offset/total when that happens instead of treating a
     // missing/false field as "no more pages" after the first page. Also require
-    // a non-empty page: an empty page with a stale/inconsistent total should
-    // never report hasMore, or the infinite query would keep requesting
-    // further pages forever.
-    hasMore: data.hasMore ?? (data.offset + items.length < data.total && items.length > 0),
+    // a non-empty page — even when the backend *does* send an explicit
+    // hasMore: true — since an empty page with a stale/inconsistent total
+    // should never report hasMore, or the infinite query would keep
+    // requesting further pages forever.
+    hasMore: items.length > 0 && (data.hasMore ?? data.offset + items.length < data.total),
   };
 }
 
