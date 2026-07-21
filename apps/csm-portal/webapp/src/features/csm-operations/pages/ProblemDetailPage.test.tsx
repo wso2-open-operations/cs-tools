@@ -56,10 +56,10 @@ const BASE_PROBLEM: BeProblemDetail = {
   causeNotes: "Root cause was a bad config push.",
   fixNotes: "Rolled back the config.",
   workaround: "Restart the pod.",
-  resolvedAt: "2026-01-01T00:00:00Z",
+  resolvedOn: "2026-01-01T00:00:00Z",
   resolvedBy: { id: "user-1", name: "Jane Doe" },
-  openedAt: "2025-12-01T00:00:00Z",
-  closedAt: "2026-01-02T00:00:00Z",
+  openedOn: "2025-12-01T00:00:00Z",
+  closedOn: "2026-01-02T00:00:00Z",
 };
 
 function mockQueryResult(
@@ -98,7 +98,7 @@ describe("ProblemDetailPage", () => {
     render(<ProblemDetailPage />);
     expect(screen.getByText("Intermittent 502s on the gateway")).toBeInTheDocument();
     expect(screen.getByText("PRB0040157")).toBeInTheDocument();
-    // "Closed" also appears as the (unrelated) label of the closedAt
+    // "Closed" also appears as the (unrelated) label of the closedOn
     // MetaCell, so scope the assertion to the state Chip specifically.
     expect(screen.getByText("Closed", { selector: ".MuiChip-label" })).toBeInTheDocument();
   });

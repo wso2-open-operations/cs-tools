@@ -6501,6 +6501,7 @@ components:
           nullable: true
         linkedIncidents:
           type: array
+          nullable: true
           items:
             $ref: '#/components/schemas/CaseNumberRef'
         linkedChangeRequest:
@@ -6521,16 +6522,16 @@ components:
         workaround:
           type: string
           nullable: true
-        resolvedAt:
+        resolvedOn:
           type: string
           nullable: true
         resolvedBy:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
-        openedAt:
+        openedOn:
           type: string
           nullable: true
-        closedAt:
+        closedOn:
           type: string
           nullable: true
 
