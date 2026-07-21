@@ -14,11 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { queryOptions } from "@tanstack/react-query";
-import { CASE_CALL_REQUESTS_ENDPOINT, CASE_CALL_REQUESTS_SEARCH_ENDPOINT } from "@config/endpoints";
+import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import {
+  CASE_CALL_REQUEST_ENDPOINT,
+  CASE_CALL_REQUESTS_ENDPOINT,
+  CASE_CALL_REQUESTS_SEARCH_ENDPOINT,
+} from "@config/endpoints";
 import type {
+  CallRequestUpdateInput,
   CreateCallRequestPayloadDto,
   CreateCallRequestResponseDto,
+  UpdateCallRequestPayloadDto,
+  UpdateCallRequestResponseDto,
   SearchCallRequestsResponseDto,
 } from "@src/types";
 import { toCallRequest, type CallRequest } from "@src/types";
@@ -40,11 +47,45 @@ const createCallRequest = async (
   return data;
 };
 
+// Agent-side lifecycle actions on a call request (schedule, reject, cancel,
+// send notes, or reschedule a request back to the customer) — all funnel
+// through this one state-transition PATCH, same as the webapp's
+// usePatchCsmCaseCallRequest. Which optional fields matter depends on the
+// target `state`; see UpdateCallRequestPayloadDto.
+const updateCallRequest = async (input: CallRequestUpdateInput): Promise<UpdateCallRequestResponseDto> => {
+  const payload: UpdateCallRequestPayloadDto = {
+    state: input.state,
+    cancellationReason: input.cancellationReason,
+    utcTimes: input.utcTimes,
+    durationInMinutes: input.durationInMinutes,
+    meetingDate: input.meetingDate,
+    assignee: input.assignee,
+    notes: input.notes,
+    plan: input.plan,
+    attendees: input.attendees,
+    actionItems: input.actionItems,
+    actualDurationMin: input.actualDurationMin,
+  };
+  const { data } = await apiClient.patch<UpdateCallRequestResponseDto>(
+    CASE_CALL_REQUEST_ENDPOINT(input.caseId, input.callRequestId),
+    payload,
+  );
+  return data;
+};
+
 export const callRequests = {
   forCase: (caseId: string) =>
     queryOptions({
       queryKey: ["case", caseId, "call-requests"],
       queryFn: () => getCallRequests(caseId),
+      // CallRequestsTab reads this via useSuspenseQuery. Without
+      // placeholderData, an update's post-mutation invalidateQueries
+      // re-suspends the tab back to its skeleton on every refetch instead of
+      // just swapping the list in place once the new data lands — same
+      // network time as the webapp's plain useQuery, but it visibly blanks
+      // out first, reading as slower even though it isn't.
+      placeholderData: keepPreviousData,
     }),
   create: createCallRequest,
+  update: updateCallRequest,
 };

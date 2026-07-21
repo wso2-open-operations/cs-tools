@@ -41,6 +41,10 @@ export interface CallRequestViewDto {
   updatedOn: string | null;
   state: CallRequestStateDto | null;
   cancellationReason: string | null;
+  /** Agent (or team) assigned to run the call, once scheduled. */
+  assignee: string | null;
+  /** Call notes recorded after the call concludes. */
+  notes: string | null;
 }
 
 export interface SearchCallRequestsPayloadDto {
@@ -74,5 +78,57 @@ export interface CreateCallRequestResponseDto {
     createdOn: string;
     createdBy: string;
     state: CallRequestStateDto;
+  };
+}
+
+// The 8 state keys PATCH /cases/{caseId}/call-requests/{callRequestId} accepts
+// as `state`, selecting which of the optional fields below apply:
+//  - "scheduled" (agent schedule/reschedule): meetingDate + durationInMinutes
+//    required, assignee optional.
+//  - "wso2_rejected" (agent reject) / "canceled": cancellationReason optional.
+//  - "concluded" (agent send notes): notes required, plan/attendees/
+//    actionItems/actualDurationMin optional.
+//  - "pending_on_wso2" (reschedule request back to the customer): utcTimes +
+//    durationInMinutes.
+export type CallRequestStateKeyDto =
+  | "pending_on_customer"
+  | "pending_on_wso2"
+  | "scheduled"
+  | "customer_rejected"
+  | "wso2_rejected"
+  | "canceled"
+  | "notes_pending"
+  | "concluded";
+
+export interface UpdateCallRequestPayloadDto {
+  state: CallRequestStateKeyDto;
+  /** Reject/cancellation reason for "wso2_rejected"/"canceled". */
+  cancellationReason?: string;
+  /** Updated preferred UTC datetimes; used for "pending_on_wso2". */
+  utcTimes?: string[];
+  /** Updated duration in minutes (min 1); used for "pending_on_wso2"/"scheduled". */
+  durationInMinutes?: number;
+  /** UTC datetime the call is scheduled for; required for "scheduled". */
+  meetingDate?: string;
+  /** Agent (or team) assigned to run the call; used for "scheduled". */
+  assignee?: string;
+  /** Call notes; required for "concluded". */
+  notes?: string;
+  /** Follow-up plan; used for "concluded". */
+  plan?: string;
+  /** Attendee list; used for "concluded". */
+  attendees?: string;
+  /** Action items; used for "concluded". */
+  actionItems?: string;
+  /** Actual call duration in minutes; used for "concluded". */
+  actualDurationMin?: number;
+}
+
+export interface UpdateCallRequestResponseDto {
+  message?: string;
+  callRequest?: {
+    id: string;
+    updatedOn?: string;
+    updatedBy?: string;
   };
 }
