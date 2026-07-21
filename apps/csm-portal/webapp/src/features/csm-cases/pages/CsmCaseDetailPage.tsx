@@ -93,7 +93,7 @@ import {
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
 import { useGetCsmCaseCallRequests } from "@features/csm-cases/api/useCsmCaseCallRequests";
 import { TasksWidget } from "@features/csm-cases/components/TasksWidget";
-import { useGetCaseTasks } from "@features/csm-cases/api/useGetCaseTasks";
+import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { CaseSlaTable } from "@features/csm-cases/components/CaseSlaTable";
@@ -335,7 +335,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const { data: callRequests } = useGetCsmCaseCallRequests(
     isAnnouncement ? undefined : caseId,
   );
-  const { data: caseTasks } = useGetCaseTasks(
+  const { data: caseTasks } = useSearchCaseTasks(
     isAnnouncement ? undefined : caseId,
   );
   // Live deployment lookup for the Details tab's "Deployment info" widget —

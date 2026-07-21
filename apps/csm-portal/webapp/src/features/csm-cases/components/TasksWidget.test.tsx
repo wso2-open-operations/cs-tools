@@ -19,28 +19,28 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { TasksWidget } from "@features/csm-cases/components/TasksWidget";
 import type { BeListCaseTasksResponse, BeTaskDetail } from "@api/backend/types";
-import { useGetCaseTasks } from "@features/csm-cases/api/useGetCaseTasks";
+import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { useGetTask } from "@features/csm-cases/api/useGetTask";
 
-vi.mock("@features/csm-cases/api/useGetCaseTasks", () => ({
-  useGetCaseTasks: vi.fn(),
+vi.mock("@features/csm-cases/api/useSearchCaseTasks", () => ({
+  useSearchCaseTasks: vi.fn(),
 }));
 vi.mock("@features/csm-cases/api/useGetTask", () => ({
   useGetTask: vi.fn(),
 }));
 
-const mockedUseGetCaseTasks = vi.mocked(useGetCaseTasks);
+const mockedUseSearchCaseTasks = vi.mocked(useSearchCaseTasks);
 const mockedUseGetTask = vi.mocked(useGetTask);
 
-function mockListResult(overrides: Partial<ReturnType<typeof useGetCaseTasks>>): void {
-  mockedUseGetCaseTasks.mockReturnValue({
+function mockListResult(overrides: Partial<ReturnType<typeof useSearchCaseTasks>>): void {
+  mockedUseSearchCaseTasks.mockReturnValue({
     data: null,
     isLoading: false,
     isError: false,
     isFetching: false,
     refetch: vi.fn(),
     ...overrides,
-  } as unknown as ReturnType<typeof useGetCaseTasks>);
+  } as unknown as ReturnType<typeof useSearchCaseTasks>);
 }
 
 function mockDetailResult(overrides: Partial<ReturnType<typeof useGetTask>>): void {
@@ -64,7 +64,7 @@ const TASK_ROW = {
 
 describe("TasksWidget", () => {
   beforeEach(() => {
-    mockedUseGetCaseTasks.mockReset();
+    mockedUseSearchCaseTasks.mockReset();
     mockedUseGetTask.mockReset();
     mockDetailResult({});
   });

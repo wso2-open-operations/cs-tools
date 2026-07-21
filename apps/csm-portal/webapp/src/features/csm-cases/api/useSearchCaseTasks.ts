@@ -17,7 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
-import type { BeListCaseTasksResponse } from "@api/backend/types";
+import type { BeCaseTasksSearchPayload, BeListCaseTasksResponse } from "@api/backend/types";
 
 /**
  * Page size for the case-scoped tasks list. Tasks are a lightweight sub-item
@@ -28,11 +28,11 @@ import type { BeListCaseTasksResponse } from "@api/backend/types";
 const CASE_TASKS_PAGE_LIMIT = 20;
 
 /**
- * Lists the tasks attached to a case via `GET /cases/{caseId}/tasks`.
+ * Lists the tasks attached to a case via `POST /cases/{caseId}/tasks/search`.
  * Only runs while `caseId` is set, so callers that mount this hook
  * conditionally (e.g. only while the Tasks tab is active) get lazy fetching.
  */
-export function useGetCaseTasks(
+export function useSearchCaseTasks(
   caseId: string | undefined,
 ): UseQueryResult<BeListCaseTasksResponse | null, Error> {
   const api = useBackendApi();
@@ -41,8 +41,9 @@ export function useGetCaseTasks(
     queryKey: [ApiQueryKeys.CASE_TASKS, caseId ?? ""],
     queryFn: async (): Promise<BeListCaseTasksResponse | null> => {
       if (!caseId) return null;
-      return api.get<BeListCaseTasksResponse>(
-        `/cases/${encodeURIComponent(caseId)}/tasks?limit=${CASE_TASKS_PAGE_LIMIT}&offset=0`,
+      return api.post<BeCaseTasksSearchPayload, BeListCaseTasksResponse>(
+        `/cases/${encodeURIComponent(caseId)}/tasks/search`,
+        { pagination: { limit: CASE_TASKS_PAGE_LIMIT, offset: 0 } },
       );
     },
     enabled: !!caseId,

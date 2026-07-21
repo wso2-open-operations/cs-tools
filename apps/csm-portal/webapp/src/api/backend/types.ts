@@ -1323,7 +1323,7 @@ export interface BeUpdateCallRequestResponse {
 
 export type BeTaskState = "OPEN" | "CLOSED" | "OTHER";
 
-/** A task list item returned by `GET /cases/{caseId}/tasks`. */
+/** A task list item returned by `POST /cases/{caseId}/tasks/search`. */
 export interface BeTaskSummary {
   id: string;
   subject: string;
@@ -1333,7 +1333,12 @@ export interface BeTaskSummary {
   updatedOn: string;
 }
 
-/** `GET /cases/{caseId}/tasks?limit=&offset=` response. */
+/** `POST /cases/{caseId}/tasks/search` request payload. */
+export interface BeCaseTasksSearchPayload {
+  pagination?: BePagination;
+}
+
+/** `POST /cases/{caseId}/tasks/search` response. */
 export interface BeListCaseTasksResponse {
   tasks: BeTaskSummary[];
   total: number;

@@ -31,7 +31,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ListChecks, RefreshCw } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
-import { useGetCaseTasks } from "@features/csm-cases/api/useGetCaseTasks";
+import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { taskStateColor, taskStateLabel } from "@features/csm-cases/utils/taskState";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import RelativeTime from "@components/RelativeTime";
@@ -50,7 +50,7 @@ interface TasksWidgetProps {
  * small read-only detail dialog rather than a full separate detail page.
  */
 export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
-  const { data, isLoading, isError, isFetching, refetch } = useGetCaseTasks(caseId);
+  const { data, isLoading, isError, isFetching, refetch } = useSearchCaseTasks(caseId);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const tasks = data?.tasks ?? [];
