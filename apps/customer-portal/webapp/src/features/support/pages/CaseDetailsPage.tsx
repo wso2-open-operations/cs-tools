@@ -20,7 +20,12 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@features/support/api/useGetCaseDetails";
 import CaseDetailsContent from "@case-details-details/CaseDetailsContent";
-import { isSecurityReportAnalysisType } from "@features/support/utils/support";
+import {
+  isAnnouncementType,
+  isEngagementType,
+  isSecurityReportAnalysisType,
+  isServiceRequestType,
+} from "@features/support/utils/support";
 import { SecurityTabId } from "@features/security/types/security";
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
 
@@ -49,9 +54,53 @@ export default function CaseDetailsPage(): JSX.Element {
     "security-report-analysis",
   );
 
+  // Announcements and Service Requests have their own dedicated pages; Engagement and
+  // Security Report Analysis cases have dedicated routes too, though they share this same
+  // component. Redirect when a case is loaded on a route that doesn't match its actual type.
+  const isAnnouncement = isAnnouncementType(data?.type);
+  const isMisroutedEngagement = isEngagementType(data?.type) && !isEngagementRoute;
+  const isMisroutedSecurityReportAnalysis =
+    isSecurityReportAnalysisType(data?.type) && !isSecurityReportAnalysisRoute;
+  const isServiceRequest = isServiceRequestType(data?.type);
+  const isMisrouted =
+    isAnnouncement ||
+    isMisroutedEngagement ||
+    isMisroutedSecurityReportAnalysis ||
+    isServiceRequest;
+
+  useEffect(() => {
+    if (!projectId || !caseId) return;
+    if (isAnnouncement) {
+      navigate(`/projects/${projectId}/announcements/${caseId}`, {
+        replace: true,
+      });
+    } else if (isMisroutedEngagement) {
+      navigate(`/projects/${projectId}/engagements/${caseId}`, {
+        replace: true,
+      });
+    } else if (isMisroutedSecurityReportAnalysis) {
+      navigate(
+        `/projects/${projectId}/security-center/security-report-analysis/${caseId}`,
+        { replace: true },
+      );
+    } else if (isServiceRequest) {
+      navigate(`/projects/${projectId}/operations/service-requests/${caseId}`, {
+        replace: true,
+      });
+    }
+  }, [
+    isAnnouncement,
+    isMisroutedEngagement,
+    isMisroutedSecurityReportAnalysis,
+    isServiceRequest,
+    projectId,
+    caseId,
+    navigate,
+  ]);
+
   // Show skeletons immediately when no data (avoid "-" flash on refresh) and when loading/refetching.
   const showSkeletons =
-    isLoading || (data === undefined && !isError);
+    isLoading || (data === undefined && !isError) || isMisrouted;
 
   useEffect(() => {
     if (showSkeletons) {
