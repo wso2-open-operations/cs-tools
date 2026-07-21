@@ -1363,7 +1363,7 @@ export interface BeTaskDetail {
   environment: string | null;
   environmentLabel: string | null;
   product: BeEntityRef | null;
-  parentCase: BeCaseNumberRef;
+  parentCase: BeCaseNumberRef | null;
   createdOn: string;
   updatedOn: string;
 }

@@ -158,4 +158,38 @@ describe("TasksWidget", () => {
     expect(screen.getByText("Log Extraction")).toBeInTheDocument();
     expect(screen.getByText("CS0440062")).toBeInTheDocument();
   });
+
+  it("renders a dash instead of crashing when the task detail has no parent case", () => {
+    const list: BeListCaseTasksResponse = {
+      tasks: [TASK_ROW],
+      total: 1,
+      offset: 0,
+      limit: 20,
+    };
+    mockListResult({ data: list });
+    const detail: BeTaskDetail = {
+      id: "task-1",
+      subject: TASK_ROW.subject,
+      state: "OPEN",
+      dueDate: null,
+      visibleToCustomer: false,
+      assignedTo: TASK_ROW.assignedTo,
+      requestType: "1",
+      requestTypeLabel: "Log Extraction",
+      environment: null,
+      environmentLabel: null,
+      product: null,
+      // ServiceNow can omit the parent-case lookup; this must not throw.
+      parentCase: null,
+      createdOn: "2026-07-01T00:00:00Z",
+      updatedOn: "2026-07-15T10:00:00Z",
+    };
+    mockDetailResult({ data: detail });
+
+    render(<TasksWidget caseId="case-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /view task/i }));
+
+    expect(screen.getByText("Task details")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
 });
