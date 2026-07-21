@@ -113,6 +113,14 @@ function detailFromBeCase(
     audit: [],
     attachments: [],
     isWatching: false,
+    resolution:
+      c.resolutionCode || c.cause || c.resolutionNotes
+        ? {
+            resolutionCode: c.resolutionCode ?? undefined,
+            cause: c.cause ?? undefined,
+            notes: c.resolutionNotes ?? undefined,
+          }
+        : undefined,
   };
 }
 

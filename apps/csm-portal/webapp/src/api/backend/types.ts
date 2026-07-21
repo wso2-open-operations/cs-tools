@@ -114,21 +114,30 @@ export type BeCaseResolutionCode =
 
 /** Root-cause category for a closed or solution-proposed case. Same gating as {@link BeCaseResolutionCode}. */
 export type BeCaseCause =
-  | "USER_MISUNDERSTANDING_CONCEPTS"
-  | "USER_MISUNDERSTANDING_DOCUMENTATION"
-  | "USER_NOT_FOLLOWING_DOCUMENTATION"
-  | "USER_MISTAKE"
-  | "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
-  | "SOLUTION_PROBLEMATIC_CODE"
-  | "APPLICATION_BUG"
-  | "APPLICATION_MISLEADING_UX_UI"
-  | "APPLICATION_LIMITATION"
-  | "APPLICATION_MISSING_FEATURE"
-  | "APPLICATION_DOCUMENTATION_GAP"
-  | "APPLICATION_DOCUMENTATION_ERROR"
-  | "INFRASTRUCTURE_CUSTOMERS_SIDE"
-  | "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
-  | "INFRASTRUCTURE_SAAS_SIDE_OTHER"
+  | "SOLUTION_ARCHITECTURE"
+  | "DEPLOYMENT_ARCHITECTURE"
+  | "USER_ERROR_CONFIGURATION"
+  | "USER_ERROR_PRODUCT_CONCEPT"
+  | "USER_ERROR_RUNTIME"
+  | "USER_ERROR_RECOMMENDATION_BEST_PRACTICES"
+  | "CUSTOMIZATION_LIMITATION"
+  | "CUSTOMIZATION_BUG"
+  | "DOCUMENTATION_GAP"
+  | "DOCUMENTATION_ERROR"
+  | "PRODUCT_LIMITATION"
+  | "PRODUCT_BUG"
+  | "PRODUCT_REGRESSION"
+  | "PRODUCT_MIGRATION"
+  | "INFRASTRUCTURE_DATABASE"
+  | "INFRASTRUCTURE_OS"
+  | "INFRASTRUCTURE_NETWORK"
+  | "INFRASTRUCTURE_JDK"
+  | "INFRASTRUCTURE_LDAP"
+  | "INFRASTRUCTURE_LOAD_BALANCER"
+  | "INFRASTRUCTURE_IAAS"
+  | "INFRASTRUCTURE_EXTERNAL_PRODUCT"
+  | "INFRASTRUCTURE_PROXY"
+  | "INFRASTRUCTURE_OTHER"
   | "UNKNOWN";
 
 export type BeCaseSortField = "createdOn" | "updatedOn" | "severity" | "state";
@@ -255,6 +264,14 @@ export interface BeCaseView {
   createdOn?: string;
   updatedOn?: string;
   closedOn?: string | null;
+  /** Timestamp when the case was resolved. Populated for resolved/closed cases; null otherwise. */
+  resolvedOn?: string | null;
+  /** Resolution code from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
+  resolutionCode?: BeCaseResolutionCode | null;
+  /** Root-cause category from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
+  cause?: BeCaseCause | null;
+  /** Free-text resolution/close notes from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
+  resolutionNotes?: string | null;
 }
 
 export interface BeCaseCreatePayload {

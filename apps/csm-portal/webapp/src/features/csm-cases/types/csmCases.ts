@@ -20,7 +20,12 @@ import type {
   Severity,
   SlaClockType,
 } from "@features/csm-dashboard/types/abtDashboard";
-import type { BeCaseIssueType, BeCaseType } from "@api/backend/types";
+import type {
+  BeCaseCause,
+  BeCaseIssueType,
+  BeCaseResolutionCode,
+  BeCaseType,
+} from "@api/backend/types";
 
 export interface CsmCaseRow {
   /**
@@ -413,4 +418,13 @@ export interface CsmCaseDetail extends CsmCaseRow {
   attachments: CaseAttachment[];
   /** Whether the current user is watching this case (controls Watch toggle). */
   isWatching: boolean;
+  /**
+   * Post Resolution Activity from a prior close/propose-solution, when set —
+   * used to prefill {@link ResolutionDialog} instead of reopening it blank.
+   */
+  resolution?: {
+    resolutionCode?: BeCaseResolutionCode;
+    cause?: BeCaseCause;
+    notes?: string;
+  };
 }

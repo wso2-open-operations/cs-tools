@@ -31,14 +31,25 @@ import { useState, type JSX } from "react";
 import type { BeCaseCause, BeCaseResolutionCode } from "@api/backend/types";
 import {
   CASE_CAUSES,
+  CASE_CAUSE_LABELS,
   RESOLUTION_CODES,
-  humanizeResolutionEnum,
+  RESOLUTION_CODE_LABELS,
 } from "@features/csm-cases/utils/caseResolution";
 
 interface ResolutionDialogProps {
   /** Which lifecycle transition this dialog is confirming. */
   kind: "close" | "propose_solution";
   isSubmitting: boolean;
+  /**
+   * Values from a prior close/propose-solution on this case, when the
+   * backend has them (e.g. a case reopened after a previous resolution).
+   * Prefills the fields instead of opening blank.
+   */
+  initial?: {
+    resolutionCode?: BeCaseResolutionCode;
+    cause?: BeCaseCause;
+    closeNotes?: string;
+  };
   onClose: () => void;
   onSubmit: (fields: {
     resolutionCode: BeCaseResolutionCode;
@@ -75,12 +86,15 @@ const COPY: Record<
 export default function ResolutionDialog({
   kind,
   isSubmitting,
+  initial,
   onClose,
   onSubmit,
 }: ResolutionDialogProps): JSX.Element {
-  const [resolutionCode, setResolutionCode] = useState<BeCaseResolutionCode | "">("");
-  const [cause, setCause] = useState<BeCaseCause | "">("");
-  const [closeNotes, setCloseNotes] = useState("");
+  const [resolutionCode, setResolutionCode] = useState<BeCaseResolutionCode | "">(
+    initial?.resolutionCode ?? "",
+  );
+  const [cause, setCause] = useState<BeCaseCause | "">(initial?.cause ?? "");
+  const [closeNotes, setCloseNotes] = useState(initial?.closeNotes ?? "");
   const copy = COPY[kind];
   const canSubmit = !!resolutionCode && !!cause && !isSubmitting;
 
@@ -107,7 +121,7 @@ export default function ResolutionDialog({
           >
             {RESOLUTION_CODES.map((code) => (
               <MenuItem key={code} value={code}>
-                {humanizeResolutionEnum(code)}
+                {RESOLUTION_CODE_LABELS[code]}
               </MenuItem>
             ))}
           </Select>
@@ -123,7 +137,7 @@ export default function ResolutionDialog({
           >
             {CASE_CAUSES.map((c) => (
               <MenuItem key={c} value={c}>
-                {humanizeResolutionEnum(c)}
+                {CASE_CAUSE_LABELS[c]}
               </MenuItem>
             ))}
           </Select>
