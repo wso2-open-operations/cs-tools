@@ -72,6 +72,8 @@ export const ApiQueryKeys = {
   CHANGE_REQUEST_STATS: "change-request-stats",
   INCIDENTS: "incidents",
   INCIDENT_DETAILS: "incident-details",
+  PROBLEMS: "problems",
+  PROBLEM_DETAILS: "problem-details",
   GROUPS_SEARCH: "groups-search",
   IT_SERVICES_SEARCH: "it-services-search",
   SERVICE_OFFERINGS_SEARCH: "service-offerings-search",

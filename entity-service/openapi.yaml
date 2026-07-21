@@ -2078,6 +2078,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /problems/{id}:
+    get:
+      summary: Get a single problem by ID (ServiceNow data source only).
+      operationId: getProblem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The problem detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Problem not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /conversations/search:
     post:
       summary: Search conversations (ServiceNow data source only).
@@ -6226,6 +6269,75 @@ components:
           type: integer
         limit:
           type: integer
+
+    ProblemDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: >
+            Passthrough value from the data source, not a closed enum. Known values at
+            the time of writing: NEW, ASSESS, ROOT_CAUSE_ANALYSIS, FIX_IN_PROGRESS,
+            RESOLVED, CLOSED.
+        priority:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        subcategory:
+          type: string
+          nullable: true
+        originCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        primaryIncident:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        linkedIncidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseNumberRef'
+        linkedChangeRequest:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        resolutionCode:
+          type: string
+          nullable: true
+        causeNotes:
+          type: string
+          nullable: true
+        fixNotes:
+          type: string
+          nullable: true
+        workaround:
+          type: string
+          nullable: true
+        resolvedAt:
+          type: string
+          nullable: true
+        resolvedBy:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        openedAt:
+          type: string
+          nullable: true
+        closedAt:
+          type: string
+          nullable: true
 
     SearchConversationsRequest:
       type: object

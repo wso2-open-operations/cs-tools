@@ -369,6 +369,10 @@ type ProblemService interface {
 	// SearchProblems returns a paginated list of problems filtered by optional search query.
 	// A ValidationError is returned for invalid input.
 	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
+
+	// GetProblem returns the full detail of a single problem by its UUID.
+	// A NotFoundError is returned if the problem does not exist.
+	GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error)
 }
 
 // ConversationService defines the operations available on the conversations entity.
