@@ -72,7 +72,7 @@ export default function CaseDetailPage() {
   const isSendingComment = mutation.status !== "idle" && mutation.isPending && isCommentsRefetching;
 
   const handleSend = () => {
-    if (!comment.trim()) return;
+    if (!comment.trim() || isClosed) return;
 
     mutation.mutate({
       content: comment,
@@ -195,7 +195,7 @@ export default function CaseDetailPage() {
 
   return (
     <>
-      <Stack gap={2} mb={10}>
+      <Stack gap={2} mb={isClosed ? 2 : 10}>
         <Typography ref={ref} variant="h5" fontWeight="medium">
           {data?.title}
         </Typography>
@@ -339,13 +339,15 @@ export default function CaseDetailPage() {
           </Stack>
         </SectionCard>
       </Stack>
-      <StickyCommentBar
-        placeholder="Add Comment"
-        value={comment}
-        onChange={setComment}
-        onSend={handleSend}
-        loading={isSendingComment}
-      />
+      {!isClosed && (
+        <StickyCommentBar
+          placeholder="Add Comment"
+          value={comment}
+          onChange={setComment}
+          onSend={handleSend}
+          loading={isSendingComment}
+        />
+      )}
 
       <AttachmentPreviewDialog
         key={previewAttachment?.id}
