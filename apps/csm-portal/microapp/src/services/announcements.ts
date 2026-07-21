@@ -62,8 +62,11 @@ async function searchAnnouncements(filters: AnnouncementFilters, offset: number)
     // Some data sources omit hasMore from the search envelope (see cases.ts's
     // getAllCases and adminUsers.ts's searchUsers, which hit the same quirk);
     // derive it from offset/total when that happens instead of treating a
-    // missing/false field as "no more pages" after the first 20.
-    hasMore: data.hasMore ?? data.offset + items.length < data.total,
+    // missing/false field as "no more pages" after the first 20. Also require
+    // a non-empty page: an empty page with a stale/inconsistent total should
+    // never report hasMore, or the infinite query would keep requesting
+    // further pages forever.
+    hasMore: data.hasMore ?? (data.offset + items.length < data.total && items.length > 0),
   };
 }
 
