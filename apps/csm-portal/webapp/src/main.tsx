@@ -53,9 +53,11 @@ if (typeof window !== "undefined") {
 // fetching one 404s to the SPA fallback (text/html), which Vite reports as
 // `vite:preloadError` (and plain `import()` calls reject the same way). Reload
 // once to pick up the new build — guarded by a session flag so a genuinely
-// broken deployment doesn't reload-loop the tab forever.
+// broken deployment doesn't reload-loop the tab forever. The guard is re-armed
+// a while after a clean mount (below) so a tab that lives across *multiple*
+// deploys still gets one auto-reload per deploy instead of only its first.
+const RELOAD_GUARD_KEY = "csm_chunk_reload_once";
 if (typeof window !== "undefined") {
-  const RELOAD_GUARD_KEY = "csm_chunk_reload_once";
   const reloadForNewBuild = (): void => {
     let alreadyReloaded = false;
     try {
@@ -88,3 +90,18 @@ createRoot(document.getElementById("root")!).render(
     <AppWithConfig />
   </React.StrictMode>,
 );
+
+// Clear the reload guard once the tab has stayed up long enough to prove this
+// mount is healthy (not the same failure looping). Without this, the guard —
+// set once and never cleared — would only ever auto-recover the *first*
+// stale-chunk failure a tab hits; every later one (e.g. after a subsequent
+// deploy, hours or days into the same tab session) would silently do nothing.
+if (typeof window !== "undefined") {
+  setTimeout(() => {
+    try {
+      window.sessionStorage.removeItem(RELOAD_GUARD_KEY);
+    } catch {
+      /* sessionStorage may be unavailable; nothing to clear. */
+    }
+  }, 10_000);
+}

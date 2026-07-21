@@ -17,7 +17,6 @@
 import {
   Box,
   Button,
-  Chip,
   FormControl,
   MenuItem,
   Select,
@@ -27,7 +26,6 @@ import {
 import type { JSX } from "react";
 import {
   DASHBOARD_OPTIONS,
-  type CsmDashboardEngineer,
   type DashboardKey,
   type DashboardScope,
 } from "@features/csm-dashboard/types/abtDashboard";
@@ -43,21 +41,17 @@ const ABT_SCOPING_ENABLED = false;
 const DASHBOARD_SWITCHER_ENABLED = false;
 
 interface AbtDashboardHeaderProps {
-  engineer?: CsmDashboardEngineer;
   scope: DashboardScope;
   onScopeChange: (scope: DashboardScope) => void;
   dashboardKey: DashboardKey;
   onDashboardChange: (key: DashboardKey) => void;
-  isError?: boolean;
 }
 
 export default function AbtDashboardHeader({
-  engineer,
   scope,
   onScopeChange,
   dashboardKey,
   onDashboardChange,
-  isError,
 }: AbtDashboardHeaderProps): JSX.Element {
   const currentOption = DASHBOARD_OPTIONS.find((o) => o.key === dashboardKey);
   const showScopeButtons = currentOption?.scopeBased ?? false;
@@ -74,25 +68,9 @@ export default function AbtDashboardHeader({
     >
       <Box>
         <Typography variant="h5">Dashboard</Typography>
-        <Box
-          sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            {engineer
-              ? engineer.name
-              : isError
-                ? "Engineer overview"
-                : "Loading engineer…"}
-          </Typography>
-          {engineer?.abtName && (
-            <Chip
-              size="small"
-              label={engineer.abtName}
-              variant="outlined"
-              color="primary"
-            />
-          )}
-        </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Engineer overview
+        </Typography>
       </Box>
       <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
         {showScopeButtons && (
