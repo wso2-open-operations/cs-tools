@@ -1396,6 +1396,40 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   approvedOn?: string | null;
 }
 
+/** An approval stage seen on a change request, e.g. Assess, Authorize. */
+export type BeChangeRequestApprovalStage = "Assess" | "Authorize" | "Customer Approval";
+
+/** Who a change-request approval stage is assigned to. */
+export type BeChangeRequestApproverType = "STATIC_GROUP" | "DYNAMIC_CONTACT";
+
+/**
+ * An individual approver's response within an approval stage
+ * (`GET /change-requests/{id}/approvals`). `status` is an open, backend-passthrough
+ * string (seen live: `APPROVED`, `NOT_REQUIRED`, `REQUESTED`; also possible:
+ * `REJECTED`, `CANCELLED`, `NO_CONSENSUS`, or an unrecognized value) — the backend
+ * does not validate/whitelist it, so render with a fallback rather than a closed union.
+ */
+export interface BeChangeRequestApprover {
+  id: string;
+  name?: string | null;
+  status: string;
+  respondedOn?: string | null;
+}
+
+/** One approval stage on a change request, with its individual approvers. */
+export interface BeChangeRequestApproval {
+  stage: string;
+  approverType: BeChangeRequestApproverType | string;
+  approverName?: string | null;
+  status: string;
+  approvers: BeChangeRequestApprover[];
+}
+
+/** `GET /change-requests/{id}/approvals` response. */
+export interface BeChangeRequestApprovalsView {
+  approvals: BeChangeRequestApproval[];
+}
+
 /**
  * `POST /change-requests` body (ServiceNow data source only). `subject` is
  * the only required field; every ID field (`serviceId`, `serviceOfferingId`,

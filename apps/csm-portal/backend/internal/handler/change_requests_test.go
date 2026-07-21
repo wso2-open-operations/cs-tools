@@ -180,6 +180,88 @@ func TestGetChangeRequest(t *testing.T) {
 	})
 }
 
+func TestGetChangeRequestApprovals(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID+"/approvals", nil)
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.GetChangeRequestApprovals(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/not-a-uuid/approvals", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.GetChangeRequestApprovals(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty id", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests//approvals", nil))
+		w := httptest.NewRecorder()
+		h.GetChangeRequestApprovals(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards id to upstream and returns 200", func(t *testing.T) {
+		var capturedID string
+		client := &mockEntityChangeRequestClient{
+			getChangeRequestApprovalsFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"approvals":[{"stage":"Assess","approverType":"STATIC_GROUP","approverName":"Devops Approval","status":"APPROVED","approvers":[{"id":"11111111-1111-1111-1111-111111111111","name":"Thenuka Keerthibandara","status":"APPROVED","respondedOn":"2026-07-08 06:02:56"}]}]}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID+"/approvals", nil))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.GetChangeRequestApprovals(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != testCRID {
+			t.Errorf("upstream received id %q, want %q", capturedID, testCRID)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		approvals, ok := resp["approvals"].([]any)
+		if !ok || len(approvals) != 1 {
+			t.Fatalf("approvals = %v, want 1 entry", resp["approvals"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to retrieve change request approvals.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityChangeRequestClient{
+					getChangeRequestApprovalsFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewChangeRequestHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID+"/approvals", nil))
+				r.SetPathValue("id", testCRID)
+				w := httptest.NewRecorder()
+				h.GetChangeRequestApprovals(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchChangeRequests(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
@@ -257,4 +339,3 @@ func TestSearchChangeRequests(t *testing.T) {
 		}
 	})
 }
-

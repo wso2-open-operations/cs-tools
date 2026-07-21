@@ -805,6 +805,71 @@ func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string
 	return mapSNChangeRequestDetailToView(cr), nil
 }
 
+// snChangeRequestApprovalsResponse mirrors the Choreo GET /change-requests/{id}/approvals response.
+type snChangeRequestApprovalsResponse struct {
+	Approvals []snChangeRequestApproval `json:"approvals"`
+}
+
+type snChangeRequestApproval struct {
+	Stage        string                    `json:"stage"`
+	ApproverType string                    `json:"approverType"`
+	ApproverName string                    `json:"approverName"`
+	Status       string                    `json:"status"`
+	Approvers    []snChangeRequestApprover `json:"approvers"`
+}
+
+type snChangeRequestApprover struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	RespondedOn *string `json:"respondedOn"`
+}
+
+// GetChangeRequestApprovals returns the approval stages and per-approver status for a
+// single change request identified by UUID.
+func (s *snChangeRequestService) GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.ChangeRequestApprovals{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ChangeRequestApprovals{}, err
+	}
+
+	raw, err := s.client.Get(ctx, "/change-requests/"+uuidToSysid(id)+"/approvals", token)
+	if err != nil {
+		return domain.ChangeRequestApprovals{}, err
+	}
+
+	var snResp snChangeRequestApprovalsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.ChangeRequestApprovals{}, fmt.Errorf("sn get change request approvals: parse response: %w", err)
+	}
+
+	approvals := make([]domain.ChangeRequestApproval, 0, len(snResp.Approvals))
+	for _, a := range snResp.Approvals {
+		approvers := make([]domain.ChangeRequestApprover, 0, len(a.Approvers))
+		for _, ap := range a.Approvers {
+			approvers = append(approvers, domain.ChangeRequestApprover{
+				ID:          sysidToUUID(ap.ID),
+				Name:        ap.Name,
+				Status:      ap.Status,
+				RespondedOn: ap.RespondedOn,
+			})
+		}
+		approvals = append(approvals, domain.ChangeRequestApproval{
+			Stage:        a.Stage,
+			ApproverType: domain.ChangeRequestApproverType(a.ApproverType),
+			ApproverName: a.ApproverName,
+			Status:       domain.ChangeRequestApprovalStatus(a.Status),
+			Approvers:    approvers,
+		})
+	}
+
+	return domain.ChangeRequestApprovals{Approvals: approvals}, nil
+}
+
 // mapSNChangeRequestDetailToView maps a Choreo change-request detail payload to the domain view,
 // shared by GetChangeRequest and PatchChangeRequest.
 func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeRequest {

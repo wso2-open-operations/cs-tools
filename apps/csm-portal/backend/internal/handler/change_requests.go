@@ -33,6 +33,7 @@ type entityChangeRequestClient interface {
 	SearchChangeRequests(ctx context.Context, body []byte) ([]byte, error)
 	GetChangeRequest(ctx context.Context, id string) ([]byte, error)
 	PatchChangeRequest(ctx context.Context, id string, body []byte) ([]byte, error)
+	GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -139,6 +140,30 @@ func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.R
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve change request.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetChangeRequestApprovals handles GET /change-requests/{id}/approvals.
+func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetChangeRequestApprovals(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve change request approvals.")
 		return
 	}
 
