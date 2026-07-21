@@ -153,7 +153,7 @@ func main() {
 	mux.HandleFunc("POST /conversations/search", conversationHandler.SearchConversations)
 	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
-	mux.HandleFunc("GET /cases/{caseId}/tasks", taskHandler.GetCaseTasks)
+	mux.HandleFunc("POST /cases/{caseId}/tasks/search", taskHandler.SearchCaseTasks)
 	mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)

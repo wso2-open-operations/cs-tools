@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -624,13 +623,13 @@ func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]
 // ----- mock entity task client -----
 
 type mockEntityTaskClient struct {
-	searchCaseTasksFn func(ctx context.Context, caseID string, query url.Values) ([]byte, error)
+	searchCaseTasksFn func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	getTaskFn         func(ctx context.Context, id string) ([]byte, error)
 }
 
-func (m *mockEntityTaskClient) SearchCaseTasks(ctx context.Context, caseID string, query url.Values) ([]byte, error) {
+func (m *mockEntityTaskClient) SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error) {
 	if m.searchCaseTasksFn != nil {
-		return m.searchCaseTasksFn(ctx, caseID, query)
+		return m.searchCaseTasksFn(ctx, caseID, body)
 	}
 	return []byte(`{"tasks":[],"total":0,"limit":20,"offset":0}`), nil
 }

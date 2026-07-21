@@ -2593,10 +2593,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /cases/{caseId}/tasks:
-    get:
-      summary: List tasks for a case, paginated (ServiceNow data source only).
-      operationId: getCaseTasks
+  /cases/{caseId}/tasks/search:
+    post:
+      summary: Search tasks for a case, paginated (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is and the response is returned verbatim.
+      operationId: searchCaseTasks
       security:
         - bearerAuth: []
       parameters:
@@ -2607,23 +2610,13 @@ paths:
             type: string
             format: uuid
           description: Case UUID.
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
-          description: Maximum number of tasks to return.
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-          description: Number of tasks to skip before returning results.
+      requestBody:
+        description: Case task search payload.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseTaskSearchPayload'
       responses:
         "200":
           description: Paginated list of tasks for the case.
@@ -2632,7 +2625,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskSearchResponse'
         "400":
-          description: Bad request (invalid UUID or query parameter).
+          description: Bad request (invalid UUID or request body).
           content:
             application/json:
               schema:
@@ -2651,6 +2644,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
           content:
             application/json:
               schema:
@@ -5841,6 +5840,21 @@ components:
           type: integer
         offset:
           type: integer
+
+    CaseTaskSearchPayload:
+      type: object
+      nullable: true
+      description: >
+        Payload for paginating the tasks of a case. The case ID is taken from
+        the URL path. The payload is forwarded to the integration service as-is.
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
 
     TaskDetail:
       allOf:

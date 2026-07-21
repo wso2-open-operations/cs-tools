@@ -20,20 +20,20 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"strings"
 	"testing"
 )
 
 const testTaskCaseID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 const testTaskID = "11111111-1111-1111-1111-111111111111"
 
-func TestGetCaseTasks(t *testing.T) {
+func TestSearchCaseTasks(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewTaskHandler(&mockEntityTaskClient{})
-		r := httptest.NewRequest(http.MethodGet, "/cases/"+testTaskCaseID+"/tasks", nil)
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks/search", strings.NewReader(`{}`))
 		r.SetPathValue("caseId", testTaskCaseID)
 		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
+		h.SearchCaseTasks(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
 		assertErrorMessage(t, w, ErrMsgUnauthorized)
 		assertContentType(t, w, "application/json")
@@ -41,10 +41,10 @@ func TestGetCaseTasks(t *testing.T) {
 
 	t.Run("rejects malformed case UUID", func(t *testing.T) {
 		h := NewTaskHandler(&mockEntityTaskClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/not-a-uuid/tasks", nil))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/tasks/search", strings.NewReader(`{}`)))
 		r.SetPathValue("caseId", "not-a-uuid")
 		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
+		h.SearchCaseTasks(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
 		assertErrorMessage(t, w, ErrMsgInvalidUUID)
 		assertContentType(t, w, "application/json")
@@ -52,47 +52,52 @@ func TestGetCaseTasks(t *testing.T) {
 
 	t.Run("rejects empty case id", func(t *testing.T) {
 		h := NewTaskHandler(&mockEntityTaskClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases//tasks", nil))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//tasks/search", strings.NewReader(`{}`)))
 		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
+		h.SearchCaseTasks(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
 		assertErrorMessage(t, w, ErrMsgInvalidUUID)
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("rejects invalid limit", func(t *testing.T) {
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewTaskHandler(&mockEntityTaskClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testTaskCaseID+"/tasks?limit=0", nil))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
 		r.SetPathValue("caseId", testTaskCaseID)
 		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
-		assertStatus(t, w, http.StatusBadRequest)
+		h.SearchCaseTasks(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("rejects invalid offset", func(t *testing.T) {
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewTaskHandler(&mockEntityTaskClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testTaskCaseID+"/tasks?offset=-1", nil))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks/search", strings.NewReader(`not-json`)))
 		r.SetPathValue("caseId", testTaskCaseID)
 		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
+		h.SearchCaseTasks(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("forwards case id and pagination query to upstream, defaults applied", func(t *testing.T) {
+	t.Run("forwards case id and body verbatim to upstream", func(t *testing.T) {
 		var capturedCaseID string
-		var capturedQuery url.Values
+		var capturedBody []byte
+		reqBody := `{"pagination":{"limit":20,"offset":0}}`
 		client := &mockEntityTaskClient{
-			searchCaseTasksFn: func(_ context.Context, caseID string, query url.Values) ([]byte, error) {
+			searchCaseTasksFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
 				capturedCaseID = caseID
-				capturedQuery = query
+				capturedBody = body
 				return []byte(`{"tasks":[{"id":"` + testTaskID + `"}],"total":1,"limit":20,"offset":0}`), nil
 			},
 		}
 		h := NewTaskHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testTaskCaseID+"/tasks", nil))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks/search", strings.NewReader(reqBody)))
 		r.SetPathValue("caseId", testTaskCaseID)
 		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
+		h.SearchCaseTasks(w, r)
 
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
@@ -100,38 +105,12 @@ func TestGetCaseTasks(t *testing.T) {
 		if capturedCaseID != testTaskCaseID {
 			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, testTaskCaseID)
 		}
-		if capturedQuery.Get("limit") != "20" {
-			t.Errorf("limit = %q, want 20", capturedQuery.Get("limit"))
-		}
-		if capturedQuery.Get("offset") != "0" {
-			t.Errorf("offset = %q, want 0", capturedQuery.Get("offset"))
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
 		}
 		resp := decodeJSON[map[string]any](t, w)
 		if resp["total"] != float64(1) {
 			t.Errorf("total = %v, want 1", resp["total"])
-		}
-	})
-
-	t.Run("forwards custom limit and offset", func(t *testing.T) {
-		var capturedQuery url.Values
-		client := &mockEntityTaskClient{
-			searchCaseTasksFn: func(_ context.Context, _ string, query url.Values) ([]byte, error) {
-				capturedQuery = query
-				return []byte(`{"tasks":[],"total":0,"limit":5,"offset":10}`), nil
-			},
-		}
-		h := NewTaskHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testTaskCaseID+"/tasks?limit=5&offset=10", nil))
-		r.SetPathValue("caseId", testTaskCaseID)
-		w := httptest.NewRecorder()
-		h.GetCaseTasks(w, r)
-
-		assertStatus(t, w, http.StatusOK)
-		if capturedQuery.Get("limit") != "5" {
-			t.Errorf("limit = %q, want 5", capturedQuery.Get("limit"))
-		}
-		if capturedQuery.Get("offset") != "10" {
-			t.Errorf("offset = %q, want 10", capturedQuery.Get("offset"))
 		}
 	})
 
@@ -140,15 +119,15 @@ func TestGetCaseTasks(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityTaskClient{
-					searchCaseTasksFn: func(_ context.Context, _ string, _ url.Values) ([]byte, error) {
+					searchCaseTasksFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
 				}
 				h := NewTaskHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testTaskCaseID+"/tasks", nil))
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks/search", strings.NewReader(`{}`)))
 				r.SetPathValue("caseId", testTaskCaseID)
 				w := httptest.NewRecorder()
-				h.GetCaseTasks(w, r)
+				h.SearchCaseTasks(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

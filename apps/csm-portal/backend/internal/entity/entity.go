@@ -361,15 +361,10 @@ func (c *Client) GetTaskSla(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/slas/%s", url.PathEscape(id)), nil)
 }
 
-// SearchCaseTasks calls GET /cases/{caseId}/tasks on the entity service, forwarding
-// the given query parameters (e.g. limit, offset) unchanged.
+// SearchCaseTasks calls POST /cases/{caseId}/tasks/search on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
-func (c *Client) SearchCaseTasks(ctx context.Context, caseID string, query url.Values) ([]byte, error) {
-	path := fmt.Sprintf("/cases/%s/tasks", url.PathEscape(caseID))
-	if len(query) > 0 {
-		path += "?" + query.Encode()
-	}
-	return c.do(ctx, http.MethodGet, path, nil)
+func (c *Client) SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/tasks/search", url.PathEscape(caseID)), body)
 }
 
 // GetTask calls GET /tasks/{id} on the entity service.

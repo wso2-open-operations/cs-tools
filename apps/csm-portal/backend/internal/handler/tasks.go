@@ -18,22 +18,17 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"strconv"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
-const (
-	defaultTaskLimit = 20
-	maxTaskLimit     = 100
-)
-
 // entityTaskClient abstracts the entity service task operations.
 type entityTaskClient interface {
-	SearchCaseTasks(ctx context.Context, caseID string, query url.Values) ([]byte, error)
+	SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	GetTask(ctx context.Context, id string) ([]byte, error)
 }
 
@@ -47,8 +42,10 @@ func NewTaskHandler(entity entityTaskClient) *TaskHandler {
 	return &TaskHandler{entity: entity}
 }
 
-// GetCaseTasks handles GET /cases/{caseId}/tasks.
-func (h *TaskHandler) GetCaseTasks(w http.ResponseWriter, r *http.Request) {
+// SearchCaseTasks handles POST /cases/{caseId}/tasks/search.
+// The endpoint is path-scoped, so the request body (e.g. {"pagination":{"limit":...,"offset":...}})
+// is capped and forwarded to the entity service as-is, and the response is returned verbatim.
+func (h *TaskHandler) SearchCaseTasks(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
@@ -61,31 +58,23 @@ func (h *TaskHandler) GetCaseTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := r.URL.Query()
-	limit := defaultTaskLimit
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > maxTaskLimit {
-			writeError(w, http.StatusBadRequest, "limit must be an integer between 1 and 100")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
 			return
 		}
-		limit = n
-	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
-			return
-		}
-		offset = n
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
 	}
 
-	forward := url.Values{}
-	forward.Set("limit", strconv.Itoa(limit))
-	forward.Set("offset", strconv.Itoa(offset))
+	if len(body) > 0 && !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
 
-	result, err := h.entity.SearchCaseTasks(r.Context(), caseID, forward)
+	result, err := h.entity.SearchCaseTasks(r.Context(), caseID, body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseTasks failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve case tasks.")
