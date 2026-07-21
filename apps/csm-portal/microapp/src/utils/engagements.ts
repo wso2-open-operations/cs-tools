@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CaseState, EngagementType, Project } from "@src/types";
+import type { CaseState, CaseWorkState, EngagementType, Project } from "@src/types";
 
 // Mirrors the webapp's ALL_ENGAGEMENT_TYPES/ENGAGEMENT_TYPE_LABEL
 // (apps/csm-portal/webapp/src/features/csm-cases/components/CasesFilterBar.tsx).
@@ -34,24 +34,39 @@ export const ENGAGEMENT_TYPE_LABEL: Record<EngagementType, string> = {
   onboarding: "Onboarding",
 };
 
+/** Lightweight assignee ref for the filter chip — mirrors how `projects` stores a
+ * display-ready `Project[]` rather than bare ids. */
+export interface EngagementAssignee {
+  id: string;
+  name: string;
+}
+
 // UI-facing engagement filters. `search` matches subject/number (server-side
-// `searchQuery`); `states` → server-side `states`; `projects` → server-side
-// `projectIds`; `engagementTypes` → server-side `engagementTypes`. All empty by
-// default, so the list shows every state/type across all projects. (No severity —
-// engagements carry none, same as the webapp's CsmIssuesView locks it out for any
-// non-"case" type.)
+// `searchQuery`); `states` → server-side `states`; `workStates` → server-side
+// `workStates` (only meaningful while `states` includes "work_in_progress");
+// `projects` → server-side `projectIds`; `engagementTypes` → server-side
+// `engagementTypes`; `assignees` → server-side `assignedUserIds`; `productNames`
+// → server-side `productNames`. All empty by default, so the list shows every
+// state/type across all projects. (No severity — engagements carry none, same
+// as the webapp's CsmIssuesView locks it out for any non-"case" type.)
 export interface EngagementFilters {
   search: string;
   states: CaseState[];
+  workStates: NonNullable<CaseWorkState>[];
   projects: Project[];
   engagementTypes: EngagementType[];
+  assignees: EngagementAssignee[];
+  productNames: string[];
 }
 
 export const EMPTY_ENGAGEMENT_FILTERS: EngagementFilters = {
   search: "",
   states: [],
+  workStates: [],
   projects: [],
   engagementTypes: [],
+  assignees: [],
+  productNames: [],
 };
 
 /** Active filter groups — drives the "Filters (n)" badge. Search is excluded (it
@@ -59,7 +74,10 @@ export const EMPTY_ENGAGEMENT_FILTERS: EngagementFilters = {
 export function countActiveEngagementFilters(filters: EngagementFilters): number {
   let count = 0;
   if (filters.states.length > 0) count += 1;
+  if (filters.workStates.length > 0) count += 1;
   if (filters.projects.length > 0) count += 1;
   if (filters.engagementTypes.length > 0) count += 1;
+  if (filters.assignees.length > 0) count += 1;
+  if (filters.productNames.length > 0) count += 1;
   return count;
 }
