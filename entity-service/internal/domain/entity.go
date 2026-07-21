@@ -773,26 +773,38 @@ const (
 	CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness CaseResolutionCode = "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS"
 )
 
-// CaseCause enumerates the root-cause categories for a resolved case.
+// CaseCause enumerates the root-cause categories for a resolved case, one per
+// entry in the backing data source's real "cause" choice list (verified
+// against the live picklist; the previous 16-value set was a fabricated
+// taxonomy that didn't correspond to any real choice in that list).
 type CaseCause string
 
 const (
-	CaseCauseUserMisunderstandingConcepts      CaseCause = "USER_MISUNDERSTANDING_CONCEPTS"
-	CaseCauseUserMisunderstandingDocumentation CaseCause = "USER_MISUNDERSTANDING_DOCUMENTATION"
-	CaseCauseUserNotFollowingDocumentation     CaseCause = "USER_NOT_FOLLOWING_DOCUMENTATION"
-	CaseCauseUserMistake                       CaseCause = "USER_MISTAKE"
-	CaseCauseSolutionProblematicArchitecture   CaseCause = "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
-	CaseCauseSolutionProblematicCode           CaseCause = "SOLUTION_PROBLEMATIC_CODE"
-	CaseCauseApplicationBug                    CaseCause = "APPLICATION_BUG"
-	CaseCauseApplicationMisleadingUXUI         CaseCause = "APPLICATION_MISLEADING_UX_UI"
-	CaseCauseApplicationLimitation             CaseCause = "APPLICATION_LIMITATION"
-	CaseCauseApplicationMissingFeature         CaseCause = "APPLICATION_MISSING_FEATURE"
-	CaseCauseApplicationDocumentationGap       CaseCause = "APPLICATION_DOCUMENTATION_GAP"
-	CaseCauseApplicationDocumentationError     CaseCause = "APPLICATION_DOCUMENTATION_ERROR"
-	CaseCauseInfrastructureCustomerSide        CaseCause = "INFRASTRUCTURE_CUSTOMERS_SIDE"
-	CaseCauseInfrastructureSaaSNotEnough       CaseCause = "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
-	CaseCauseInfrastructureSaaSother           CaseCause = "INFRASTRUCTURE_SAAS_SIDE_OTHER"
-	CaseCauseUnknown                           CaseCause = "UNKNOWN"
+	CaseCauseSolutionArchitecture          CaseCause = "SOLUTION_ARCHITECTURE"
+	CaseCauseDeploymentArchitecture        CaseCause = "DEPLOYMENT_ARCHITECTURE"
+	CaseCauseUserErrorConfiguration        CaseCause = "USER_ERROR_CONFIGURATION"
+	CaseCauseUserErrorProductConcept       CaseCause = "USER_ERROR_PRODUCT_CONCEPT"
+	CaseCauseUserErrorRuntime              CaseCause = "USER_ERROR_RUNTIME"
+	CaseCauseUserErrorRecommendation       CaseCause = "USER_ERROR_RECOMMENDATION_BEST_PRACTICES"
+	CaseCauseCustomizationLimitation       CaseCause = "CUSTOMIZATION_LIMITATION"
+	CaseCauseCustomizationBug              CaseCause = "CUSTOMIZATION_BUG"
+	CaseCauseDocumentationGap              CaseCause = "DOCUMENTATION_GAP"
+	CaseCauseDocumentationError            CaseCause = "DOCUMENTATION_ERROR"
+	CaseCauseProductLimitation             CaseCause = "PRODUCT_LIMITATION"
+	CaseCauseProductBug                    CaseCause = "PRODUCT_BUG"
+	CaseCauseProductRegression             CaseCause = "PRODUCT_REGRESSION"
+	CaseCauseProductMigration              CaseCause = "PRODUCT_MIGRATION"
+	CaseCauseInfrastructureDatabase        CaseCause = "INFRASTRUCTURE_DATABASE"
+	CaseCauseInfrastructureOS              CaseCause = "INFRASTRUCTURE_OS"
+	CaseCauseInfrastructureNetwork         CaseCause = "INFRASTRUCTURE_NETWORK"
+	CaseCauseInfrastructureJDK             CaseCause = "INFRASTRUCTURE_JDK"
+	CaseCauseInfrastructureLDAP            CaseCause = "INFRASTRUCTURE_LDAP"
+	CaseCauseInfrastructureLoadBalancer    CaseCause = "INFRASTRUCTURE_LOAD_BALANCER"
+	CaseCauseInfrastructureIAAS            CaseCause = "INFRASTRUCTURE_IAAS"
+	CaseCauseInfrastructureExternalProduct CaseCause = "INFRASTRUCTURE_EXTERNAL_PRODUCT"
+	CaseCauseInfrastructureProxy           CaseCause = "INFRASTRUCTURE_PROXY"
+	CaseCauseInfrastructureOther           CaseCause = "INFRASTRUCTURE_OTHER"
+	CaseCauseUnknown                       CaseCause = "UNKNOWN"
 )
 
 // EngagementType classifies the type of an engagement case.

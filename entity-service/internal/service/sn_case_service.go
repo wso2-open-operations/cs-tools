@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -583,7 +584,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		}
 	}
 	if c.Cause != nil {
-		if cause, ok := snCauseLabelToEnum[c.Cause.Label]; ok {
+		if cause, ok := snCauseByID[c.Cause.ID]; ok {
 			cv.Cause = &cause
 		}
 	}
@@ -832,35 +833,53 @@ var snResolutionCodeByID = func() map[string]domain.CaseResolutionCode {
 	return m
 }()
 
-// snCauseLabelToEnum maps ServiceNow cause label strings to domain CaseCause enums.
-var snCauseLabelToEnum map[string]domain.CaseCause
-
-// snCauseLabel maps domain CaseCause enums to the ServiceNow cause label strings.
-var snCauseLabel = map[domain.CaseCause]string{
-	domain.CaseCauseUserMisunderstandingConcepts:      "User - Misunderstanding concepts",
-	domain.CaseCauseUserMisunderstandingDocumentation: "User - Misunderstanding documentation",
-	domain.CaseCauseUserNotFollowingDocumentation:     "User - Not following documentation",
-	domain.CaseCauseUserMistake:                       "User - Mistake",
-	domain.CaseCauseSolutionProblematicArchitecture:   "Solution - Problematic solution architecture",
-	domain.CaseCauseSolutionProblematicCode:           "Solution - Problematic code",
-	domain.CaseCauseApplicationBug:                    "Application - Bug",
-	domain.CaseCauseApplicationMisleadingUXUI:         "Application - Misleading UX / UI",
-	domain.CaseCauseApplicationLimitation:             "Application - Limitation",
-	domain.CaseCauseApplicationMissingFeature:         "Application - Missing feature",
-	domain.CaseCauseApplicationDocumentationGap:       "Application - Documentation gap",
-	domain.CaseCauseApplicationDocumentationError:     "Application - Documentation error",
-	domain.CaseCauseInfrastructureCustomerSide:        "Infrastructure - Customer's side",
-	domain.CaseCauseInfrastructureSaaSNotEnough:       "Infrastructure - SaaS side - Not enough ...",
-	domain.CaseCauseInfrastructureSaaSother:           "Infrastructure - SaaS side - Other",
-	domain.CaseCauseUnknown:                           "Unknown",
+// snCauseKey maps domain CaseCause enums to the ServiceNow integer choice
+// values for sn_customerservice_case.cause on the PROD tenant (wso2),
+// verified via sys_choice. Unlike resolution codes' scattered keys, prod's
+// cause choice list happens to number sequentially 1-25 in picklist order.
+//
+// The DEV tenant (wso2sndev) configures this same field with the label text
+// as its stored value instead of an integer — a real cross-tenant
+// inconsistency, not a bug in this mapping. This map targets prod, the only
+// tenant live customer traffic reaches; DEV-tenant testing of the cause
+// field will not round-trip correctly against this mapping.
+var snCauseKey = map[domain.CaseCause]int{
+	domain.CaseCauseSolutionArchitecture:          1,
+	domain.CaseCauseDeploymentArchitecture:        2,
+	domain.CaseCauseUserErrorConfiguration:        3,
+	domain.CaseCauseUserErrorProductConcept:       4,
+	domain.CaseCauseUserErrorRuntime:              5,
+	domain.CaseCauseUserErrorRecommendation:       6,
+	domain.CaseCauseCustomizationLimitation:       7,
+	domain.CaseCauseCustomizationBug:              8,
+	domain.CaseCauseDocumentationGap:              9,
+	domain.CaseCauseDocumentationError:            10,
+	domain.CaseCauseProductLimitation:             11,
+	domain.CaseCauseProductBug:                    12,
+	domain.CaseCauseProductRegression:             13,
+	domain.CaseCauseProductMigration:              14,
+	domain.CaseCauseInfrastructureDatabase:        15,
+	domain.CaseCauseInfrastructureOS:              16,
+	domain.CaseCauseInfrastructureNetwork:         17,
+	domain.CaseCauseInfrastructureJDK:             18,
+	domain.CaseCauseInfrastructureLDAP:            19,
+	domain.CaseCauseInfrastructureLoadBalancer:    20,
+	domain.CaseCauseInfrastructureIAAS:            21,
+	domain.CaseCauseInfrastructureExternalProduct: 22,
+	domain.CaseCauseInfrastructureProxy:           23,
+	domain.CaseCauseInfrastructureOther:           24,
+	domain.CaseCauseUnknown:                       25,
 }
 
-func init() {
-	snCauseLabelToEnum = make(map[string]domain.CaseCause, len(snCauseLabel))
-	for k, v := range snCauseLabel {
-		snCauseLabelToEnum[v] = k
+// snCauseByID maps ServiceNow cause choice-value strings (the SN "cause"
+// field's id, e.g. "12") to domain CaseCause enums.
+var snCauseByID = func() map[string]domain.CaseCause {
+	m := make(map[string]domain.CaseCause, len(snCauseKey))
+	for k, v := range snCauseKey {
+		m[strconv.Itoa(v)] = k
 	}
-}
+	return m
+}()
 
 // snWorkStateIDMap maps domain CaseWorkState enums to SN numeric work state IDs.
 var snWorkStateIDMap = map[domain.CaseWorkState]int{
@@ -959,11 +978,12 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			payload.ResolutionCode = &key
 		}
 		if req.Cause != nil {
-			label, ok := snCauseLabel[*req.Cause]
+			key, ok := snCauseKey[*req.Cause]
 			if !ok {
 				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "cause contains invalid value: " + string(*req.Cause)}
 			}
-			payload.Cause = &label
+			val := strconv.Itoa(key)
+			payload.Cause = &val
 		}
 		payload.CloseNotes = req.CloseNotes
 	}
@@ -1052,7 +1072,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 	}
 	if snResp.Case.Cause != nil {
-		if c, ok := snCauseLabelToEnum[snResp.Case.Cause.Label]; ok {
+		if c, ok := snCauseByID[snResp.Case.Cause.ID]; ok {
 			resp.Case.Cause = &c
 		}
 	}
