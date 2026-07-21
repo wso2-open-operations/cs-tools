@@ -2812,10 +2812,10 @@ type ProblemDetail struct {
 	CauseNotes          *string         `json:"causeNotes"`
 	FixNotes            *string         `json:"fixNotes"`
 	Workaround          *string         `json:"workaround"`
-	ResolvedAt          *string         `json:"resolvedAt"`
+	ResolvedOn          *string         `json:"resolvedOn"`
 	ResolvedBy          *EntityRef      `json:"resolvedBy"`
-	OpenedAt            *string         `json:"openedAt"`
-	ClosedAt            *string         `json:"closedAt"`
+	OpenedOn            *string         `json:"openedOn"`
+	ClosedOn            *string         `json:"closedOn"`
 }
 
 // ConversationState represents the state of a conversation.

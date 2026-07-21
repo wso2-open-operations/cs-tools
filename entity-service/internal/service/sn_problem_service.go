@@ -140,10 +140,10 @@ type snProblemDetailResponse struct {
 	CauseNotes          *string              `json:"causeNotes"`
 	FixNotes            *string              `json:"fixNotes"`
 	Workaround          *string              `json:"workaround"`
-	ResolvedAt          *string              `json:"resolvedAt"`
+	ResolvedOn          *string              `json:"resolvedOn"`
 	ResolvedBy          *snProblemUserRef    `json:"resolvedBy"`
-	OpenedAt            *string              `json:"openedAt"`
-	ClosedAt            *string              `json:"closedAt"`
+	OpenedOn            *string              `json:"openedOn"`
+	ClosedOn            *string              `json:"closedOn"`
 }
 
 // GetProblem implements ProblemService for the ServiceNow data source.
@@ -183,9 +183,9 @@ func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.Pr
 		CauseNotes:     p.CauseNotes,
 		FixNotes:       p.FixNotes,
 		Workaround:     p.Workaround,
-		ResolvedAt:     p.ResolvedAt,
-		OpenedAt:       p.OpenedAt,
-		ClosedAt:       p.ClosedAt,
+		ResolvedOn:     p.ResolvedOn,
+		OpenedOn:       p.OpenedOn,
+		ClosedOn:       p.ClosedOn,
 	}
 	if p.OriginCase != nil {
 		view.OriginCase = &domain.CaseNumberRef{ID: sysidToUUID(p.OriginCase.ID), Number: p.OriginCase.Number}

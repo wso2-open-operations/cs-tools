@@ -159,7 +159,7 @@ export default function ProblemDetailPage(): JSX.Element {
     problem.causeNotes ||
     problem.fixNotes ||
     problem.workaround ||
-    problem.resolvedAt ||
+    problem.resolvedOn ||
     problem.resolvedBy
   );
 
@@ -207,10 +207,10 @@ export default function ProblemDetailPage(): JSX.Element {
           </MetaCell>
           <MetaCell label="Assigned to"><RefText value={problem.assignedTo} /></MetaCell>
           <MetaCell label="Opened">
-            <Typography variant="body2">{formatDateTime(problem.openedAt)}</Typography>
+            <Typography variant="body2">{formatDateTime(problem.openedOn)}</Typography>
           </MetaCell>
           <MetaCell label="Closed">
-            <Typography variant="body2">{formatDateTime(problem.closedAt)}</Typography>
+            <Typography variant="body2">{formatDateTime(problem.closedOn)}</Typography>
           </MetaCell>
         </Box>
       </Card>
@@ -285,7 +285,7 @@ export default function ProblemDetailPage(): JSX.Element {
             </MetaCell>
             <MetaCell label="Resolved by"><RefText value={problem.resolvedBy} /></MetaCell>
             <MetaCell label="Resolved">
-              <Typography variant="body2">{formatDateTime(problem.resolvedAt)}</Typography>
+              <Typography variant="body2">{formatDateTime(problem.resolvedOn)}</Typography>
             </MetaCell>
           </Box>
           {problem.causeNotes && (
