@@ -137,11 +137,22 @@ export default function ProblemsTab(): JSX.Element {
                   </TableCell>
                 </TableRow>
               ) : (
-                problems.map((problem) => (
+                problems.map((problem) => {
+                  const detailPath = `/operations/problems/${problem.id}`;
+                  return (
                   <TableRow
                     key={problem.id}
                     hover
-                    onClick={() => navigate(`/operations/problems/${problem.id}`)}
+                    onClick={() => navigate(detailPath)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        navigate(detailPath);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View problem ${problem.number || problem.id}`}
                     sx={{ cursor: "pointer" }}
                   >
                     <TableCell>{problem.number || "—"}</TableCell>
@@ -151,7 +162,8 @@ export default function ProblemsTab(): JSX.Element {
                       </Typography>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
