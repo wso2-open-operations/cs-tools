@@ -38,10 +38,10 @@ describe("ResolutionDialog", () => {
     );
     expect(screen.getByRole("button", { name: /close case/i })).toBeDisabled();
 
-    chooseOption("resolution-code-label", /solved fixed by support guidance provided/i);
+    chooseOption("resolution-code-label", /solved.*fixed by support\/guidance provided/i);
     expect(screen.getByRole("button", { name: /close case/i })).toBeDisabled();
 
-    chooseOption("case-cause-label", /application bug/i);
+    chooseOption("case-cause-label", /product\/bug/i);
     expect(screen.getByRole("button", { name: /close case/i })).not.toBeDisabled();
   });
 
@@ -60,6 +60,36 @@ describe("ResolutionDialog", () => {
     fireEvent.change(screen.getByLabelText(/close notes/i), {
       target: { value: "Root-caused and verified with the customer." },
     });
+    fireEvent.click(screen.getByRole("button", { name: /propose solution/i }));
+    expect(onSubmit).toHaveBeenCalledWith({
+      resolutionCode: "SOLVED_BY_CUSTOMER",
+      cause: "UNKNOWN",
+      closeNotes: "Root-caused and verified with the customer.",
+    });
+  });
+
+  it("prefills fields from a prior resolution and submits unchanged", () => {
+    const onSubmit = vi.fn();
+    render(
+      <ResolutionDialog
+        kind="propose_solution"
+        isSubmitting={false}
+        initial={{
+          resolutionCode: "SOLVED_BY_CUSTOMER",
+          cause: "UNKNOWN",
+          closeNotes: "Root-caused and verified with the customer.",
+        }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /propose solution/i }),
+    ).not.toBeDisabled();
+    expect(screen.getByLabelText(/close notes/i)).toHaveValue(
+      "Root-caused and verified with the customer.",
+    );
+
     fireEvent.click(screen.getByRole("button", { name: /propose solution/i }));
     expect(onSubmit).toHaveBeenCalledWith({
       resolutionCode: "SOLVED_BY_CUSTOMER",

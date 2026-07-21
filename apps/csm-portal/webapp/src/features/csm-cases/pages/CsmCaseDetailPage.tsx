@@ -1563,6 +1563,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <ResolutionDialog
           kind={resolutionDialog.kind}
           isSubmitting={patchCase.isPending}
+          initial={
+            data?.resolution
+              ? {
+                  resolutionCode: data.resolution.resolutionCode,
+                  cause: data.resolution.cause,
+                  closeNotes: data.resolution.notes,
+                }
+              : undefined
+          }
           onClose={() => setResolutionDialog(null)}
           onSubmit={onResolutionSubmit}
         />
