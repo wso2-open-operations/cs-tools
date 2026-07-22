@@ -14,14 +14,84 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, TextField, Typography } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Button,
+  Card,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  TextField,
+  Typography,
+} from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { usePostProblem } from "@features/csm-operations/api/usePostProblem";
-import type { BeCreateProblemPayload } from "@api/backend/types";
+import { useSearchCasesForSelect } from "@features/csm-operations/api/useSearchCasesForSelect";
+import { useSearchIncidentsForSelect } from "@features/csm-operations/api/useSearchIncidentsForSelect";
+import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import type {
+  BeCaseSearchView,
+  BeCreateProblemPayload,
+  BeIncident,
+} from "@api/backend/types";
+
+const UNSET = "";
+const SELECT_PLACEHOLDER = "-- Select --";
+
+// Live SN choice-list values for problem.category / problem.subcategory
+// (confirmed via sys_choice against wso2sndev), hardcoded here since there is
+// no metadata endpoint for problem categories/subcategories the way there is
+// for cases. Subcategory is dependent on category — see
+// PROBLEM_SUBCATEGORY_OPTIONS_BY_CATEGORY below.
+const PROBLEM_CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "software", label: "Software" },
+  { value: "hardware", label: "Hardware" },
+  { value: "network", label: "Network" },
+  { value: "database", label: "Database" },
+];
+
+const PROBLEM_SUBCATEGORY_OPTIONS_BY_CATEGORY: Record<
+  string,
+  Array<{ value: string; label: string }>
+> = {
+  hardware: [
+    { value: "cpu", label: "CPU" },
+    { value: "monitor", label: "Monitor" },
+    { value: "disk", label: "Disk" },
+    { value: "mouse", label: "Mouse" },
+    { value: "keyboard", label: "Keyboard" },
+    { value: "memory", label: "Memory" },
+  ],
+  database: [
+    { value: "sql server", label: "MS SQL Server" },
+    { value: "db2", label: "DB2" },
+    { value: "oracle", label: "Oracle" },
+  ],
+  network: [
+    { value: "vpn", label: "VPN" },
+    { value: "dhcp", label: "DHCP" },
+    { value: "wireless", label: "Wireless" },
+    { value: "dns", label: "DNS" },
+    { value: "ip address", label: "IP Address" },
+  ],
+  software: [
+    { value: "email", label: "Email" },
+    { value: "os", label: "Operating System" },
+  ],
+};
+
+function caseSearchLabel(c: BeCaseSearchView): string {
+  return [c.number, c.subject].filter(Boolean).join(" — ") || c.id;
+}
+
+function incidentSearchLabel(i: BeIncident): string {
+  return [i.number, i.subject].filter(Boolean).join(" — ") || i.id || "";
+}
 
 const OPERATIONS_PROBLEMS_PATH = "/operations?tab=problems";
 
@@ -29,9 +99,7 @@ const OPERATIONS_PROBLEMS_PATH = "/operations?tab=problems";
  * Create-problem form against `POST /problems` (ServiceNow data source only).
  * `subject` is the only required field. There is no Priority field — priority
  * is not settable on create (SN computes/defaults it server-side, confirmed
- * by live testing) — and there's no metadata source yet for a Category /
- * Subcategory picker, so both are plain text inputs, same as the "advanced
- * linking" ID fields on `CreateIncidentPage`.
+ * by live testing).
  */
 export default function CreateProblemPage(): JSX.Element {
   const navigate = useNavigate();
@@ -39,11 +107,25 @@ export default function CreateProblemPage(): JSX.Element {
   const postProblem = usePostProblem();
 
   const [subject, setSubject] = useState("");
-  const [category, setCategory] = useState("");
-  const [subcategory, setSubcategory] = useState("");
+  const [category, setCategory] = useState<string>(UNSET);
+  const [subcategory, setSubcategory] = useState<string>(UNSET);
   const [originCaseId, setOriginCaseId] = useState("");
   const [primaryIncidentId, setPrimaryIncidentId] = useState("");
   const [touched, setTouched] = useState(false);
+
+  const subcategoryOptions = category
+    ? (PROBLEM_SUBCATEGORY_OPTIONS_BY_CATEGORY[category] ?? [])
+    : [];
+
+  const handleCategoryChange = (next: string): void => {
+    setCategory(next);
+    // Drop the subcategory if it no longer belongs to the newly selected
+    // category rather than leaving a stale, no-longer-valid pairing.
+    const stillValid = (PROBLEM_SUBCATEGORY_OPTIONS_BY_CATEGORY[next] ?? []).some(
+      (o) => o.value === subcategory,
+    );
+    if (!stillValid) setSubcategory(UNSET);
+  };
 
   const isSubjectValid = subject.trim().length > 0;
   const canSubmit = isSubjectValid && !postProblem.isPending;
@@ -55,10 +137,10 @@ export default function CreateProblemPage(): JSX.Element {
     }
 
     const payload: BeCreateProblemPayload = { subject: subject.trim() };
-    if (category.trim()) payload.category = category.trim();
-    if (subcategory.trim()) payload.subcategory = subcategory.trim();
-    if (originCaseId.trim()) payload.originCaseId = originCaseId.trim();
-    if (primaryIncidentId.trim()) payload.primaryIncidentId = primaryIncidentId.trim();
+    if (category) payload.category = category;
+    if (subcategory) payload.subcategory = subcategory;
+    if (originCaseId) payload.originCaseId = originCaseId;
+    if (primaryIncidentId) payload.primaryIncidentId = primaryIncidentId;
 
     postProblem.mutate(payload, {
       onSuccess: (created) => navigate(`/operations/problems/${created.id}`),
@@ -106,42 +188,96 @@ export default function CreateProblemPage(): JSX.Element {
           />
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-            <TextField
-              label="Category"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
+            <FormControl
+              fullWidth
+              size="small"
               disabled={postProblem.isPending}
               sx={{ flex: "1 1 220px" }}
-            />
-            <TextField
-              label="Subcategory"
-              value={subcategory}
-              onChange={(e) => setSubcategory(e.target.value)}
-              disabled={postProblem.isPending}
+            >
+              <InputLabel id="problem-category-label" shrink>
+                Category
+              </InputLabel>
+              <Select
+                labelId="problem-category-label"
+                label="Category"
+                value={category}
+                displayEmpty
+                onChange={(e) => handleCategoryChange(String(e.target.value))}
+              >
+                <MenuItem value={UNSET}>
+                  <Typography component="span" color="text.secondary">
+                    {SELECT_PLACEHOLDER}
+                  </Typography>
+                </MenuItem>
+                {PROBLEM_CATEGORY_OPTIONS.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl
+              fullWidth
+              size="small"
+              disabled={postProblem.isPending || subcategoryOptions.length === 0}
               sx={{ flex: "1 1 220px" }}
-            />
+            >
+              <InputLabel id="problem-subcategory-label" shrink>
+                Subcategory
+              </InputLabel>
+              <Select
+                labelId="problem-subcategory-label"
+                label="Subcategory"
+                value={subcategory}
+                displayEmpty
+                onChange={(e) => setSubcategory(String(e.target.value))}
+              >
+                <MenuItem value={UNSET}>
+                  <Typography component="span" color="text.secondary">
+                    {SELECT_PLACEHOLDER}
+                  </Typography>
+                </MenuItem>
+                {subcategoryOptions.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
 
           <Typography variant="caption" color="text.secondary">
-            Advanced linking (portal UUIDs — no lookup available for these yet)
+            Advanced linking
           </Typography>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-            <TextField
-              label="Origin case ID"
-              size="small"
-              value={originCaseId}
-              onChange={(e) => setOriginCaseId(e.target.value)}
-              disabled={postProblem.isPending}
-              sx={{ flex: "1 1 220px" }}
-            />
-            <TextField
-              label="Primary incident ID"
-              size="small"
-              value={primaryIncidentId}
-              onChange={(e) => setPrimaryIncidentId(e.target.value)}
-              disabled={postProblem.isPending}
-              sx={{ flex: "1 1 220px" }}
-            />
+            <Box sx={{ flex: "1 1 220px" }}>
+              <AsyncEntitySelect<BeCaseSearchView>
+                id="problem-origin-case"
+                label="Origin case"
+                placeholder="Search cases…"
+                value={originCaseId}
+                onChange={setOriginCaseId}
+                disabled={postProblem.isPending}
+                useSearch={useSearchCasesForSelect}
+                getId={(c) => c.id}
+                getLabel={caseSearchLabel}
+              />
+            </Box>
+            <Box sx={{ flex: "1 1 220px" }}>
+              <AsyncEntitySelect<BeIncident>
+                id="problem-primary-incident"
+                label="Primary incident"
+                placeholder="Search incidents…"
+                value={primaryIncidentId}
+                onChange={setPrimaryIncidentId}
+                disabled={postProblem.isPending}
+                useSearch={useSearchIncidentsForSelect}
+                // useSearchIncidentsForSelect only returns incidents that
+                // have an id (server-populated), so this is never null here.
+                getId={(i) => i.id!}
+                getLabel={incidentSearchLabel}
+              />
+            </Box>
           </Box>
         </Box>
 

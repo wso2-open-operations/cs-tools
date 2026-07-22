@@ -51,6 +51,24 @@ vi.mock("@api/backend/client", () => ({
     }
   },
 }));
+// The Origin case / Primary incident pickers are a generic AsyncEntitySelect
+// (a full type-ahead Autocomplete backed by a search hook) — out of scope to
+// drive through its real search/dropdown interaction here, so it's stubbed
+// as a plain labeled input that reports its id straight through onChange,
+// same as the plain TextFields it replaced from the page's point of view.
+vi.mock("@components/AsyncEntitySelect", () => ({
+  default: ({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: string;
+    onChange: (next: string) => void;
+  }) => (
+    <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
+  ),
+}));
 
 // Imported after the mocks above so the module picks them up.
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
@@ -81,13 +99,32 @@ describe("CreateProblemPage", () => {
     fireEvent.change(screen.getByLabelText(/subject/i), {
       target: { value: "  Recurring gateway 502s  " },
     });
-    fireEvent.change(screen.getByLabelText(/^category$/i), {
-      target: { value: "software" },
-    });
+    // Category is a dependent Select — open it and pick an option rather
+    // than firing a raw change event on a text input.
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^category$/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Software" }));
     fireEvent.click(screen.getByRole("button", { name: /create problem/i }));
     expect(postProblemMutateMock).toHaveBeenCalledWith(
       { subject: "Recurring gateway 502s", category: "software" },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it("narrows Subcategory to the selected Category and clears a stale selection", () => {
+    render(<CreateProblemPage />);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^category$/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Hardware" }));
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^subcategory$/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Memory" }));
+    expect(screen.getByRole("combobox", { name: /^subcategory$/i })).toHaveTextContent("Memory");
+
+    // Switching Category to one whose option list doesn't include "Memory"
+    // must drop the now-invalid Subcategory selection.
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^category$/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Software" }));
+    expect(screen.getByRole("combobox", { name: /^subcategory$/i })).toHaveTextContent(
+      "-- Select --",
     );
   });
 
@@ -96,10 +133,10 @@ describe("CreateProblemPage", () => {
     fireEvent.change(screen.getByLabelText(/subject/i), {
       target: { value: "Recurring gateway 502s" },
     });
-    fireEvent.change(screen.getByLabelText(/origin case id/i), {
+    fireEvent.change(screen.getByLabelText(/origin case/i), {
       target: { value: "case-123" },
     });
-    fireEvent.change(screen.getByLabelText(/primary incident id/i), {
+    fireEvent.change(screen.getByLabelText(/primary incident/i), {
       target: { value: "inc-456" },
     });
     fireEvent.click(screen.getByRole("button", { name: /create problem/i }));
