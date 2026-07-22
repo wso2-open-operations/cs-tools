@@ -65,7 +65,7 @@ A Ballerina REST service that aggregates and exposes customer data from multiple
 
 ### CSM Integration Service (`operations/csm-integration-service/`)
 
-A Go REST service that exposes customer account and project data to third-party (M2M) consumers, backed by the Entity Service.
+A Go REST service that exposes customer data to third-party (M2M) consumers, backed by the Entity Service.
 
 | Layer | Technology |
 |-------|------------|
