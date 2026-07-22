@@ -31,32 +31,44 @@ func TestGetProject(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.GetProject(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
-		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := httptest.NewRequest(http.MethodGet, "/projects/proj-42", nil)
+		r.SetPathValue("id", "proj-42")
+		w := httptest.NewRecorder()
+		h.GetProject(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
 		assertContentType(t, w, "application/json")
 	})
 
 	t.Run("passes ID to upstream and returns 200 with response", func(t *testing.T) {
+		const projectID = "11111111-1111-1111-1111-111111111111"
 		var capturedID string
 		client := &mockEntityProjectClient{
 			getProjectFn: func(_ context.Context, id string) ([]byte, error) {
 				capturedID = id
-				return []byte(`{"id":"proj-42","name":"platform"}`), nil
+				return []byte(`{"id":"` + projectID + `","name":"platform"}`), nil
 			},
 		}
 		h := NewProjectHandler(client)
-		r := httptest.NewRequest(http.MethodGet, "/projects/proj-42", nil)
-		r.SetPathValue("id", "proj-42")
+		r := httptest.NewRequest(http.MethodGet, "/projects/"+projectID, nil)
+		r.SetPathValue("id", projectID)
 		w := httptest.NewRecorder()
 		h.GetProject(w, r)
 
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
-		if capturedID != "proj-42" {
-			t.Errorf("upstream received id %q, want %q", capturedID, "proj-42")
+		if capturedID != projectID {
+			t.Errorf("upstream received id %q, want %q", capturedID, projectID)
 		}
 		resp := decodeJSON[map[string]any](t, w)
-		if resp["id"] != "proj-42" {
-			t.Errorf("response id = %v, want proj-42", resp["id"])
+		if resp["id"] != projectID {
+			t.Errorf("response id = %v, want %v", resp["id"], projectID)
 		}
 	})
 
@@ -70,8 +82,8 @@ func TestGetProject(t *testing.T) {
 					},
 				}
 				h := NewProjectHandler(client)
-				r := httptest.NewRequest(http.MethodGet, "/projects/proj-1", nil)
-				r.SetPathValue("id", "proj-1")
+				r := httptest.NewRequest(http.MethodGet, "/projects/11111111-1111-1111-1111-111111111111", nil)
+				r.SetPathValue("id", "11111111-1111-1111-1111-111111111111")
 				w := httptest.NewRecorder()
 				h.GetProject(w, r)
 				assertStatus(t, w, tc.wantCode)
