@@ -160,6 +160,63 @@ func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.Pr
 		return domain.ProblemDetail{}, fmt.Errorf("sn get problem: parse response: %w", err)
 	}
 
+	return mapSNProblemDetailToView(p), nil
+}
+
+// snCreateProblemPayload is the Choreo POST /problems request body.
+type snCreateProblemPayload struct {
+	Subject           string  `json:"subject"`
+	Category          *string `json:"category,omitempty"`
+	Subcategory       *string `json:"subcategory,omitempty"`
+	OriginCaseID      *string `json:"originCaseId,omitempty"`
+	PrimaryIncidentID *string `json:"primaryIncidentId,omitempty"`
+}
+
+// CreateProblem implements ProblemService for the ServiceNow data source.
+func (s *snProblemService) CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	uuidFields := map[string]string{}
+	if req.OriginCaseID != nil {
+		uuidFields["originCaseId"] = *req.OriginCaseID
+	}
+	if req.PrimaryIncidentID != nil {
+		uuidFields["primaryIncidentId"] = *req.PrimaryIncidentID
+	}
+	for field, val := range uuidFields {
+		if err := validateUUIDs(field, []string{val}); err != nil {
+			return domain.ProblemDetail{}, err
+		}
+	}
+
+	payload := snCreateProblemPayload{
+		Subject:     req.Subject,
+		Category:    req.Category,
+		Subcategory: req.Subcategory,
+	}
+	if req.OriginCaseID != nil {
+		payload.OriginCaseID = strPtr(uuidToSysid(*req.OriginCaseID))
+	}
+	if req.PrimaryIncidentID != nil {
+		payload.PrimaryIncidentID = strPtr(uuidToSysid(*req.PrimaryIncidentID))
+	}
+
+	raw, err := s.client.Post(ctx, "/problems", token, payload)
+	if err != nil {
+		return domain.ProblemDetail{}, err
+	}
+
+	var p snProblemDetailResponse
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return domain.ProblemDetail{}, fmt.Errorf("sn create problem: parse response: %w", err)
+	}
+
+	return mapSNProblemDetailToView(p), nil
+}
+
+// mapSNProblemDetailToView maps a Choreo problem detail payload to the domain view,
+// shared by GetProblem and CreateProblem.
+func mapSNProblemDetailToView(p snProblemDetailResponse) domain.ProblemDetail {
 	problemID := sysidToUUID(p.ID)
 	number := p.Number
 	subject := p.Subject
@@ -203,5 +260,5 @@ func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.Pr
 		view.ResolvedBy = &domain.EntityRef{ID: sysidToUUID(p.ResolvedBy.ID), Name: p.ResolvedBy.Name}
 	}
 
-	return view, nil
+	return view
 }

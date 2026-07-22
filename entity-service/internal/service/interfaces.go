@@ -375,6 +375,10 @@ type ProblemService interface {
 	// GetProblem returns the full detail of a single problem by its UUID.
 	// A NotFoundError is returned if the problem does not exist.
 	GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error)
+
+	// CreateProblem creates a new problem. Subject and OriginCaseID are required.
+	// Supported by the ServiceNow data source only.
+	CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error)
 }
 
 // ConversationService defines the operations available on the conversations entity.

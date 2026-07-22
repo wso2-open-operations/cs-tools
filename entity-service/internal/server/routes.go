@@ -339,6 +339,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 
 	if problemHandler != nil {
+		mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
 		mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
 		mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
 	}
