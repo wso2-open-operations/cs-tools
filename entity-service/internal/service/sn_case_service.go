@@ -40,33 +40,34 @@ type snCasesResponse struct {
 }
 
 type snCase struct {
-	ID               string                 `json:"id"`
-	InternalID       string                 `json:"internalId"`
-	Number           string                 `json:"number"`
-	Title            string                 `json:"title"`
-	Description      string                 `json:"description"`
-	CreatedOn        string                 `json:"createdOn"`
-	UpdatedOn        *string                `json:"updatedOn"`
-	CreatedBy        string                 `json:"createdBy"`
-	Project          snCaseEntityRef        `json:"project"`
-	Deployment       snCaseEntityRef        `json:"deployment"`
-	DeployedProduct  snCaseDeployedProduct  `json:"deployedProduct"`
-	Product          *snCaseEntityRef       `json:"product"`
-	State            *snCaseState           `json:"state"`
-	WorkState        *snCaseLabel           `json:"workState"`
-	Severity         *snCaseLabel           `json:"severity"`
-	IssueType        *snCaseIssueType       `json:"issueType"`
-	EngagementType   *snCaseLabel           `json:"engagementType"`
-	CaseType         *snCaseEntityRef       `json:"caseType"`
-	Catalog          *snCaseEntityRef       `json:"catalog"`
-	CatalogItem      *snCaseEntityRef       `json:"catalogItem"`
-	AssignedTeam     *snCaseEntityRef       `json:"assignedTeam"`
-	Conversation     *snCaseEntityRef       `json:"conversation"`
-	AssignedEngineer *snAssignedEngineerRef `json:"assignedEngineer"`
-	ParentCase       *snCaseRef             `json:"parentCase"`
-	RelatedCase      *snCaseRef             `json:"relatedCase"`
-	Account          *snCaseAccount         `json:"account"`
-	ResolutionCode   *struct {
+	ID                    string                      `json:"id"`
+	InternalID            string                      `json:"internalId"`
+	Number                string                      `json:"number"`
+	Title                 string                      `json:"title"`
+	Description           string                      `json:"description"`
+	CreatedOn             string                      `json:"createdOn"`
+	UpdatedOn             *string                     `json:"updatedOn"`
+	CreatedBy             string                      `json:"createdBy"`
+	Project               snCaseEntityRef             `json:"project"`
+	Deployment            snCaseEntityRef             `json:"deployment"`
+	DeployedProduct       snCaseDeployedProduct       `json:"deployedProduct"`
+	Product               *snCaseEntityRef            `json:"product"`
+	State                 *snCaseState                `json:"state"`
+	WorkState             *snCaseLabel                `json:"workState"`
+	Severity              *snCaseLabel                `json:"severity"`
+	IssueType             *snCaseIssueType            `json:"issueType"`
+	EngagementType        *snCaseLabel                `json:"engagementType"`
+	CaseType              *snCaseEntityRef            `json:"caseType"`
+	Catalog               *snCaseEntityRef            `json:"catalog"`
+	CatalogItem           *snCaseEntityRef            `json:"catalogItem"`
+	AssignedTeam          *snCaseEntityRef            `json:"assignedTeam"`
+	Conversation          *snCaseEntityRef            `json:"conversation"`
+	AssignedEngineer      *snAssignedEngineerRef      `json:"assignedEngineer"`
+	ParentCase            *snCaseRef                  `json:"parentCase"`
+	RelatedCase           *snCaseRef                  `json:"relatedCase"`
+	Account               *snCaseAccount              `json:"account"`
+	LinkedServiceRequests []snLinkedServiceRequestRef `json:"linkedServiceRequests"`
+	ResolutionCode        *struct {
 		ID    json.Number `json:"id"`
 		Label string      `json:"label"`
 	} `json:"resolutionCode"`
@@ -92,6 +93,12 @@ type snCaseDeployedProduct struct {
 type snCaseRef struct {
 	ID     string `json:"id"`
 	Number string `json:"number"`
+}
+
+type snLinkedServiceRequestRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	Name   string `json:"name"`
 }
 
 type snAssignedEngineerRef struct {
@@ -572,6 +579,13 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if c.Account != nil {
 		cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
 	}
+	if len(c.LinkedServiceRequests) > 0 {
+		lsr := make([]domain.LinkedServiceRequestRef, 0, len(c.LinkedServiceRequests))
+		for _, r := range c.LinkedServiceRequests {
+			lsr = append(lsr, domain.LinkedServiceRequestRef{ID: sysidToUUID(r.ID), Number: r.Number, Name: r.Name})
+		}
+		cv.LinkedServiceRequests = lsr
+	}
 	if c.ResolutionCode != nil {
 		if rc, ok := snResolutionCodeByID[c.ResolutionCode.ID.String()]; ok {
 			cv.ResolutionCode = &rc
@@ -782,6 +796,7 @@ type snUpdateCasePayload struct {
 	ResolutionCode *int     `json:"resolutionCode,omitempty"`
 	Cause          *string  `json:"cause,omitempty"`
 	CloseNotes     *string  `json:"closeNotes,omitempty"`
+	ParentID       *string  `json:"parentId,omitempty"`
 }
 
 // snResolutionStates are the state keys that allow resolution fields.
@@ -902,8 +917,9 @@ type snUpdateCaseResponse struct {
 			ID    string `json:"id"`
 			Label string `json:"label"`
 		} `json:"cause"`
-		CloseNotes *string `json:"closeNotes"`
-		ResolvedOn *string `json:"resolvedOn"`
+		CloseNotes *string    `json:"closeNotes"`
+		ResolvedOn *string    `json:"resolvedOn"`
+		ParentCase *snCaseRef `json:"parentCase"`
 	} `json:"case"`
 }
 
@@ -930,11 +946,14 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.AssigneeEmail != nil {
 		fieldCount++
 	}
+	if req.ParentID != nil {
+		fieldCount++
+	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, severity, workState, watchList, or assigneeEmail must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, severity, workState, watchList, assigneeEmail, or parentId must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, workState, watchList, or assigneeEmail may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, workState, watchList, assigneeEmail, or parentId may be provided per request"}
 	}
 	if hasResolutionFields && req.State == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is also provided"}
@@ -997,6 +1016,10 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 	if req.AssigneeEmail != nil {
 		payload.AssigneeEmail = req.AssigneeEmail
+	}
+	if req.ParentID != nil {
+		sysid := uuidToSysid(*req.ParentID)
+		payload.ParentID = &sysid
 	}
 
 	raw, err := s.client.Patch(ctx, "/cases/"+uuidToSysid(req.ID), token, payload)
@@ -1062,6 +1085,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 	}
 	resp.Case.CloseNotes = snResp.Case.CloseNotes
+	if snResp.Case.ParentCase != nil {
+		resp.Case.ParentCase = &domain.CaseNumberRef{ID: sysidToUUID(snResp.Case.ParentCase.ID), Number: snResp.Case.ParentCase.Number}
+	}
 	if snResp.Case.ResolvedOn != nil {
 		resolvedOn, err := time.Parse(snCreatedOnLayout, *snResp.Case.ResolvedOn)
 		if err != nil {
@@ -1185,6 +1211,7 @@ var validReferenceTypes = map[domain.ReferenceType]struct{}{
 	domain.ReferenceTypeConversation:  {},
 	domain.ReferenceTypeChangeRequest: {},
 	domain.ReferenceTypeDeployment:    {},
+	domain.ReferenceTypeIncident:      {},
 }
 
 type snSearchAttachmentsPayload struct {

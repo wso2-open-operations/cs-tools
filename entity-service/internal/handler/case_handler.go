@@ -31,18 +31,18 @@ import (
 // to prevent a stored-XSS attack via a crafted upstream Content-Type (e.g. text/html).
 // All responses also carry Content-Disposition: attachment.
 var safeAttachmentTypes = map[string]bool{
-	"image/png":  true,
-	"image/jpeg": true,
-	"image/gif":  true,
-	"image/webp": true,
-	"application/pdf":          true,
-	"text/plain":               true,
-	"application/zip":          true,
+	"image/png":                    true,
+	"image/jpeg":                   true,
+	"image/gif":                    true,
+	"image/webp":                   true,
+	"application/pdf":              true,
+	"text/plain":                   true,
+	"application/zip":              true,
 	"application/x-zip-compressed": true,
-	"application/msword":       true,
+	"application/msword":           true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 	"application/vnd.ms-excel": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
 }
 
 // CaseHandler handles HTTP requests for the case resource.

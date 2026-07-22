@@ -675,40 +675,41 @@ var snIncidentUrgencyLabelMap = map[int]string{
 
 // snGetIncidentResponse mirrors the Choreo GET /incidents/{id} response.
 type snGetIncidentResponse struct {
-	ID                 *string                   `json:"id"`
-	Number             *string                   `json:"number"`
-	OpenedOn           *string                   `json:"openedOn"`
-	Subject            *string                   `json:"subject"`
-	Caller             *snIncidentEntityRef      `json:"caller"`
-	Priority           *snIncidentIntLabel       `json:"priority"`
-	State              *snIncidentIntLabel       `json:"state"`
-	Category           *snIncidentStrLabel       `json:"category"`
-	Subcategory        *snIncidentStrLabel       `json:"subcategory"`
-	Parent             *snIncidentEntityRef      `json:"parent"`
-	ParentIncident     *snIncidentEntityRef      `json:"parentIncident"`
-	AssignmentGroup    *snIncidentEntityRef      `json:"assignmentGroup"`
-	AssignedTo         *snIncidentEntityRef      `json:"assignedTo"`
-	Service            *snIncidentEntityRef      `json:"service"`
-	ServiceOffering    *snIncidentEntityRef      `json:"serviceOffering"`
-	ConfigurationItem  *snIncidentEntityRef      `json:"configurationItem"`
-	ContactType        *snIncidentStrLabel       `json:"contactType"`
-	Impact             *snIncidentIntLabel       `json:"impact"`
-	Urgency            *snIncidentIntLabel       `json:"urgency"`
-	ChangeRequest      *snIncidentEntityRef      `json:"changeRequest"`
-	Problem            *snIncidentEntityRef      `json:"problem"`
-	CausedBy           *snIncidentEntityRef      `json:"causedBy"`
-	AdditionalComments *string                   `json:"additionalComments"`
-	WorkNotes          *string                   `json:"workNotes"`
-	WatchList          []snIncidentWatchListItem `json:"watchList"`
-	CreatedOn          string                    `json:"createdOn"`
-	CreatedBy          string                    `json:"createdBy"`
-	UpdatedOn          string                    `json:"updatedOn"`
-	UpdatedBy          string                    `json:"updatedBy"`
-	ResolutionCode     *snIncidentStrLabel       `json:"resolutionCode"`
-	ResolutionNotes    *string                   `json:"resolutionNotes"`
-	ResolvedBy         *string                   `json:"resolvedBy"`
-	ResolvedOn         *string                   `json:"resolved"`
-	IncidentReport     *string                   `json:"incidentReport"`
+	ID                    *string                     `json:"id"`
+	Number                *string                     `json:"number"`
+	OpenedOn              *string                     `json:"openedOn"`
+	Subject               *string                     `json:"subject"`
+	Caller                *snIncidentEntityRef        `json:"caller"`
+	Priority              *snIncidentIntLabel         `json:"priority"`
+	State                 *snIncidentIntLabel         `json:"state"`
+	Category              *snIncidentStrLabel         `json:"category"`
+	Subcategory           *snIncidentStrLabel         `json:"subcategory"`
+	Parent                *snIncidentEntityRef        `json:"parent"`
+	ParentIncident        *snIncidentEntityRef        `json:"parentIncident"`
+	AssignmentGroup       *snIncidentEntityRef        `json:"assignmentGroup"`
+	AssignedTo            *snIncidentEntityRef        `json:"assignedTo"`
+	Service               *snIncidentEntityRef        `json:"service"`
+	ServiceOffering       *snIncidentEntityRef        `json:"serviceOffering"`
+	ConfigurationItem     *snIncidentEntityRef        `json:"configurationItem"`
+	ContactType           *snIncidentStrLabel         `json:"contactType"`
+	Impact                *snIncidentIntLabel         `json:"impact"`
+	Urgency               *snIncidentIntLabel         `json:"urgency"`
+	ChangeRequest         *snIncidentEntityRef        `json:"changeRequest"`
+	Problem               *snIncidentEntityRef        `json:"problem"`
+	CausedBy              *snIncidentEntityRef        `json:"causedBy"`
+	AdditionalComments    *string                     `json:"additionalComments"`
+	WorkNotes             *string                     `json:"workNotes"`
+	WatchList             []snIncidentWatchListItem   `json:"watchList"`
+	CreatedOn             string                      `json:"createdOn"`
+	CreatedBy             string                      `json:"createdBy"`
+	UpdatedOn             string                      `json:"updatedOn"`
+	UpdatedBy             string                      `json:"updatedBy"`
+	ResolutionCode        *snIncidentStrLabel         `json:"resolutionCode"`
+	ResolutionNotes       *string                     `json:"resolutionNotes"`
+	ResolvedBy            *string                     `json:"resolvedBy"`
+	ResolvedOn            *string                     `json:"resolved"`
+	IncidentReport        *string                     `json:"incidentReport"`
+	LinkedServiceRequests []snLinkedServiceRequestRef `json:"linkedServiceRequests"`
 }
 
 type snIncidentWatchListItem struct {
@@ -842,6 +843,14 @@ func mapSNIncidentToView(sn snGetIncidentResponse) domain.IncidentView {
 		})
 	}
 	view.WatchList = watchList
+
+	if len(sn.LinkedServiceRequests) > 0 {
+		lsr := make([]domain.LinkedServiceRequestRef, 0, len(sn.LinkedServiceRequests))
+		for _, r := range sn.LinkedServiceRequests {
+			lsr = append(lsr, domain.LinkedServiceRequestRef{ID: sysidToUUID(r.ID), Number: r.Number, Name: r.Name})
+		}
+		view.LinkedServiceRequests = lsr
+	}
 
 	return view
 }

@@ -958,6 +958,15 @@ type CaseNumberRef struct {
 	Number string `json:"number"`
 }
 
+// LinkedServiceRequestRef is a compact reference to a service-request case linked to
+// another case or incident as its parent (the reverse of ParentID: a case or incident
+// pointed to as parent by one or more service-request cases).
+type LinkedServiceRequestRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	Name   string `json:"name"`
+}
+
 // AccountRef is a compact reference to an account.
 type AccountRef struct {
 	ID   string `json:"id"`
@@ -1013,6 +1022,9 @@ type CaseView struct {
 	ParentCase             *CaseNumberRef       `json:"parentCase"`
 	RelatedCase            *CaseNumberRef       `json:"relatedCase"`
 	AccountDetails         *AccountRef          `json:"account"`
+	// LinkedServiceRequests lists any service-request cases whose parent points to this
+	// case. Populated on every case detail response, not just high-severity cases.
+	LinkedServiceRequests []LinkedServiceRequestRef `json:"linkedServiceRequests"`
 	// Resolution fields — populated only for resolved/closed ServiceNow cases.
 	ResolvedOn      *time.Time          `json:"resolvedOn"`
 	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
@@ -1089,8 +1101,9 @@ type SearchCasesResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// Exactly one of State, Severity, WorkState, WatchList, or AssigneeEmail must be provided.
-// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
+// Exactly one of State, Severity, WorkState, WatchList, AssigneeEmail, or ParentID must be
+// provided. WatchList, AssigneeEmail, and ParentID are only supported for the ServiceNow
+// data source.
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
 type UpdateCaseRequest struct {
@@ -1103,6 +1116,10 @@ type UpdateCaseRequest struct {
 	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
 	Cause          *CaseCause          `json:"cause"`
 	CloseNotes     *string             `json:"closeNotes"`
+	// ParentID links this case (typically a service request) to another task-derived
+	// record (case, incident, change request, or problem) as its parent. Platform UUID,
+	// converted to the backing data source's internal id before dispatch.
+	ParentID *string `json:"parentId"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -1131,6 +1148,7 @@ type UpdatedCase struct {
 	Cause          *CaseCause           `json:"cause,omitempty"`
 	CloseNotes     *string              `json:"closeNotes,omitempty"`
 	ResolvedOn     *time.Time           `json:"resolvedOn,omitempty"`
+	ParentCase     *CaseNumberRef       `json:"parentCase,omitempty"`
 }
 
 // WatchListUser is a compact user reference within the watch list.
@@ -1244,6 +1262,21 @@ type CaseCommentDetail struct {
 	ID        string    `json:"id"`
 	CreatedOn time.Time `json:"createdOn"`
 	CreatedBy string    `json:"createdBy"`
+}
+
+// CreateCommentRequest is the input for creating a comment on any supported reference
+// entity (case, conversation, change_request, deployment, incident).
+type CreateCommentRequest struct {
+	ReferenceID   string        `json:"referenceId"`
+	ReferenceType ReferenceType `json:"referenceType"`
+	Type          CommentType   `json:"type"`
+	Content       string        `json:"content"`
+}
+
+// CreateCommentResponse is the response for POST /comments.
+type CreateCommentResponse struct {
+	Message string            `json:"message"`
+	Comment CaseCommentDetail `json:"comment"`
 }
 
 // SearchCaseCommentsRequest is the input for listing comments on a case.
@@ -1456,6 +1489,7 @@ const (
 	ReferenceTypeConversation  ReferenceType = "conversation"
 	ReferenceTypeChangeRequest ReferenceType = "change_request"
 	ReferenceTypeDeployment    ReferenceType = "deployment"
+	ReferenceTypeIncident      ReferenceType = "incident"
 )
 
 // SearchAttachmentsRequest is the input for POST /attachments/search.
@@ -2754,10 +2788,13 @@ type IncidentView struct {
 	AdditionalComments *string                 `json:"additionalComments"`
 	WorkNotes          *string                 `json:"workNotes"`
 	WatchList          []IncidentWatchListItem `json:"watchList"`
-	CreatedOn          string                  `json:"createdOn"`
-	CreatedBy          string                  `json:"createdBy"`
-	UpdatedOn          string                  `json:"updatedOn"`
-	UpdatedBy          string                  `json:"updatedBy"`
+	// LinkedServiceRequests lists any service-request cases whose parent points to this
+	// incident.
+	LinkedServiceRequests []LinkedServiceRequestRef `json:"linkedServiceRequests"`
+	CreatedOn             string                    `json:"createdOn"`
+	CreatedBy             string                    `json:"createdBy"`
+	UpdatedOn             string                    `json:"updatedOn"`
+	UpdatedBy             string                    `json:"updatedBy"`
 	// Resolution fields — populated only for resolved/closed ServiceNow incidents.
 	ResolutionCode  *string `json:"resolutionCode"`
 	ResolutionNotes *string `json:"resolutionNotes"`
