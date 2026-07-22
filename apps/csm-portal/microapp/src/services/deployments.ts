@@ -16,7 +16,12 @@
 
 import { queryOptions } from "@tanstack/react-query";
 import { DEPLOYMENTS_SEARCH_ENDPOINT, DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT } from "@config/endpoints";
-import type { DeploymentSearchResponseDto, DeployedProductSearchResponseDto } from "@src/types";
+import type {
+  DeploymentDto,
+  DeploymentSearchResponseDto,
+  DeployedProductSearchItemDto,
+  DeployedProductSearchResponseDto,
+} from "@src/types";
 import {
   toDeploymentOption,
   toDeployedProductOption,
@@ -52,22 +57,35 @@ const searchDeployedProducts = async (deploymentId: string): Promise<DeployedPro
 };
 
 // Richer variants of the two searches above, for the Customers > Project > Deployments tab
-// (read-only browsing) rather than the case-create cascading picker. Same requests, same bounded
-// page size — only the mapper (and so the cached shape) differs, hence the separate query keys.
+// (read-only browsing) rather than the case-create cascading picker. Unlike those, these fetch
+// every page rather than just the first — a project's deployments (or a deployment's products)
+// can exceed SEARCH_PAGE_LIMIT, and this tab has no pagination/infinite-scroll UI of its own, so
+// the query itself has to return the complete list. Loop terminates on a short page (fewer rows
+// than requested), same technique as services/products.ts's fetchProductNames.
 const listDeployments = async (projectId: string): Promise<Deployment[]> => {
-  const { data } = await apiClient.post<DeploymentSearchResponseDto>(DEPLOYMENTS_SEARCH_ENDPOINT, {
-    pagination: { offset: 0, limit: SEARCH_PAGE_LIMIT },
-    projectIds: [projectId],
-  });
-  return data.deployments.map(toDeployment);
+  const all: DeploymentDto[] = [];
+  for (let offset = 0; ; offset += SEARCH_PAGE_LIMIT) {
+    const { data } = await apiClient.post<DeploymentSearchResponseDto>(DEPLOYMENTS_SEARCH_ENDPOINT, {
+      pagination: { offset, limit: SEARCH_PAGE_LIMIT },
+      projectIds: [projectId],
+    });
+    all.push(...data.deployments);
+    if (data.deployments.length < SEARCH_PAGE_LIMIT) break;
+  }
+  return all.map(toDeployment);
 };
 
 const listDeployedProducts = async (deploymentId: string): Promise<DeployedProduct[]> => {
-  const { data } = await apiClient.post<DeployedProductSearchResponseDto>(
-    DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT(deploymentId),
-    { pagination: { offset: 0, limit: SEARCH_PAGE_LIMIT } },
-  );
-  return data.deployedProducts.map(toDeployedProduct);
+  const all: DeployedProductSearchItemDto[] = [];
+  for (let offset = 0; ; offset += SEARCH_PAGE_LIMIT) {
+    const { data } = await apiClient.post<DeployedProductSearchResponseDto>(
+      DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT(deploymentId),
+      { pagination: { offset, limit: SEARCH_PAGE_LIMIT } },
+    );
+    all.push(...data.deployedProducts);
+    if (data.deployedProducts.length < SEARCH_PAGE_LIMIT) break;
+  }
+  return all.map(toDeployedProduct);
 };
 
 export const deployments = {
