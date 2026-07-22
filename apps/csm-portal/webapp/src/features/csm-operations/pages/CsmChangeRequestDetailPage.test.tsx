@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -81,6 +81,7 @@ describe("CsmChangeRequestDetailPage", () => {
   it("renders a dash for the linked case when there is no case reference", () => {
     mockQueryResult({ data: { ...BASE_CR, case: null } });
     render(<CsmChangeRequestDetailPage />);
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    const linkedCaseCell = screen.getByText("Linked case").parentElement!;
+    expect(within(linkedCaseCell).getByText("—")).toBeInTheDocument();
   });
 });
