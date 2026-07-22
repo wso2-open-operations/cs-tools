@@ -49,12 +49,13 @@ func (s *projectService) SearchProjects(ctx context.Context, req domain.SearchPr
 
 	views := make([]domain.ProjectView, len(projects))
 	for i, p := range projects {
+		endDate := p.EndDate
 		views[i] = domain.ProjectView{
 			ID:               p.ID,
 			Name:             p.Name,
 			Key:              p.Key,
 			SubscriptionType: p.SubscriptionType,
-			EndDate:          p.EndDate,
+			EndDate:          &endDate,
 			CreatedOn:        p.CreatedOn,
 		}
 	}

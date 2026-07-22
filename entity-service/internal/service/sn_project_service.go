@@ -150,12 +150,13 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 		if err != nil {
 			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: project %q: %w", p.ID, err)
 		}
-		var endDate time.Time
+		var endDate *time.Time
 		if p.EndDate != "" {
-			endDate, err = time.Parse(snDateLayout, p.EndDate)
+			parsed, err := time.Parse(snDateLayout, p.EndDate)
 			if err != nil {
 				return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: parse endDate %q: %w", p.EndDate, err)
 			}
+			endDate = &parsed
 		}
 		views = append(views, domain.ProjectView{
 			ID:               sysidToUUID(p.ID),
