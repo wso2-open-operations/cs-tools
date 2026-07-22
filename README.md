@@ -63,7 +63,7 @@ See the [Entity Service README](./entity-service/README.md) for full setup and u
 
 A Ballerina REST service that aggregates and exposes customer data from multiple backend systems. Provides endpoints for contact lookup, deployment search, and deployed product queries. Includes an in-memory cache layer to reduce upstream load.
 
-### CSM Integration Service (`operations/csm-integration-service/`)
+### CSM Integration Service (`integrations/csm-integration-service/`)
 
 A Go REST service that exposes customer data to third-party (M2M) consumers, backed by the Entity Service.
 
@@ -73,7 +73,7 @@ A Go REST service that exposes customer data to third-party (M2M) consumers, bac
 | Framework | `net/http` (standard library) |
 | Upstream | Entity Service (OAuth2 client credentials) |
 
-See the [CSM Integration Service README](./operations/csm-integration-service/README.md) for full setup and usage documentation.
+See the [CSM Integration Service README](./integrations/csm-integration-service/README.md) for full setup and usage documentation.
 
 ## GitHub Actions
 

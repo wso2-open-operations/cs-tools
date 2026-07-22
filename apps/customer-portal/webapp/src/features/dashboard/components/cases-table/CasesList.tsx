@@ -163,7 +163,7 @@ const CasesList = ({
                           <Box>
                             <Typography variant="body2" color="text.primary">
                               {formatBackendTimestampForDisplay(
-                                row.updatedOn ?? row.createdOn,
+                                row.updatedOn,
                                 {
                                   month: "short",
                                   day: "numeric",
@@ -176,7 +176,7 @@ const CasesList = ({
                               color="text.secondary"
                             >
                               {formatBackendTimestampForDisplay(
-                                row.updatedOn ?? row.createdOn,
+                                row.updatedOn,
                                 {
                                   hour: "numeric",
                                   minute: "2-digit",

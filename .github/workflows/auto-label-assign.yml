@@ -55,6 +55,7 @@ jobs:
               { label: 'Platform/Microapp',   test: f => /^apps\/[^/]+\/microapp\//.test(f) },
               { label: 'Platform/Web',        test: f => /^apps\/[^/]+\/webapp\//.test(f) },
               { label: 'Entity Service',      test: f => f.startsWith('entity-service/') },
+              { label: 'Op/CSM Integration Service',      test: f => f.startsWith('integrations/csm-integration-service/') },
             ];
 
             const labelsToApply = fileRules
