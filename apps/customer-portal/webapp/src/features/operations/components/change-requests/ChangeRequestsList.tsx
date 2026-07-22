@@ -319,7 +319,7 @@ export default function ChangeRequestsList({
                     </Typography>
                   </Box>
                 )}
-                {(item.updatedOn ?? item.createdOn) && (
+                {item.updatedOn && (
                   <Box
                     sx={{
                       display: "flex",
@@ -331,11 +331,11 @@ export default function ChangeRequestsList({
                       {CHANGE_REQUESTS_LIST_UPDATED_PREFIX}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {formatDateTime(item.updatedOn ?? item.createdOn)}
+                      {formatDateTime(item.updatedOn)}
                     </Typography>
                   </Box>
                 )}
-                {(item.updatedOn ?? item.createdOn) && (item.startDate || item.endDate) && (
+                {item.updatedOn && (item.startDate || item.endDate) && (
                   <Typography variant="body2" color="text.disabled">
                     |
                   </Typography>
