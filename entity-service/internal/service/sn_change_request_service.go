@@ -268,9 +268,6 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchChangeRequestsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snCRSort
 	if req.SortBy.Field != "" {
@@ -516,9 +513,6 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snCreateChangeRequestPayload{
 		Subject:            req.Subject,
@@ -642,9 +636,6 @@ type snPatchChangeRequestResponse struct {
 
 func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.PatchChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.PatchChangeRequestResponse{}, err
@@ -784,9 +775,6 @@ type snChangeRequestDetail struct {
 
 func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ChangeRequest{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ChangeRequest{}, err
@@ -829,9 +817,6 @@ type snChangeRequestApprover struct {
 // single change request identified by UUID.
 func (s *snChangeRequestService) GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ChangeRequestApprovals{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ChangeRequestApprovals{}, err

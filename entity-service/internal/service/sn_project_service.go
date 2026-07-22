@@ -114,9 +114,6 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchProjectsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snSearchProjectsPayload{
 		Filters: snProjectFilters{
@@ -202,9 +199,6 @@ type snProjectAccount struct {
 // GetProjectByID implements ProjectService by calling the Choreo GET /projects/{id} endpoint.
 func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domain.ProjectDetailsView, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ProjectDetailsView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/projects/"+uuidToSysid(id), token)
 	if err != nil {
@@ -328,9 +322,6 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ProjectUpdateResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snProjectUpdatePayload{
 		HasAgent:                        req.HasAgent,
@@ -488,9 +479,6 @@ func (s *snProjectContactService) SearchProjectContacts(ctx context.Context, pro
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchProjectContactsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snContactSearchPayload{
 		Filters:    snContactFilters{SearchQuery: req.Filters.SearchQuery},

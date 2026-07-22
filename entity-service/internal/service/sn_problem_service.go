@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -69,9 +68,6 @@ func (s *snProblemService) SearchProblems(ctx context.Context, req domain.Search
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchProblemsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snProblemSearchPayload{
 		Filters:    snProblemFilters{SearchQuery: req.Filters.SearchQuery},
@@ -149,9 +145,6 @@ type snProblemDetailResponse struct {
 // GetProblem implements ProblemService for the ServiceNow data source.
 func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ProblemDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ProblemDetail{}, err

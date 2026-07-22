@@ -201,9 +201,6 @@ func NewServiceNowCallRequestService(client *integrationservice.Client) CallRequ
 // CreateCallRequest implements CallRequestService.
 func (s *snCallRequestService) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateCallRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if req.CaseID == "" {
 		return domain.CreateCallRequestResponse{}, &apierror.ValidationError{Msg: "caseId is required"}
@@ -253,9 +250,6 @@ func (s *snCallRequestService) SearchCallRequests(ctx context.Context, req domai
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCallRequestsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if req.CaseID == "" {
 		return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "caseId is required"}
@@ -329,9 +323,6 @@ func (s *snCallRequestService) SearchCallRequests(ctx context.Context, req domai
 // UpdateCallRequest implements CallRequestService.
 func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.UpdateCallRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCallRequestResponse{}, err

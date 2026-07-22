@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -95,9 +94,6 @@ func (s *snAccountService) SearchAccounts(ctx context.Context, req domain.Search
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchSNAccountsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snAccountSearchPayload{
 		Filters: snAccountFilters{
@@ -139,9 +135,6 @@ func (s *snAccountService) GetAccountByID(ctx context.Context, id string) (domai
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SNAccountDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/accounts/"+uuidToSysid(id), token)
 	if err != nil {
@@ -270,9 +263,6 @@ func (s *snAccountContactService) SearchAccountContacts(ctx context.Context, acc
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchAccountContactsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snContactSearchPayload{
 		Filters:    snContactFilters{SearchQuery: req.Filters.SearchQuery},

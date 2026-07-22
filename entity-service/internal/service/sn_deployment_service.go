@@ -59,8 +59,8 @@ type snDeployType struct {
 
 // snDeploymentSearchPayload is the Choreo POST /deployments/search request body.
 type snDeploymentSearchPayload struct {
-	Filters    snDeploymentFilters    `json:"filters"`
-	Pagination snProjectPagination    `json:"pagination"`
+	Filters    snDeploymentFilters `json:"filters"`
+	Pagination snProjectPagination `json:"pagination"`
 }
 
 type snDeploymentFilters struct {
@@ -87,9 +87,6 @@ func (s *snDeploymentService) SearchDeployments(ctx context.Context, req domain.
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchDeploymentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snDeploymentSearchPayload{
 		Filters: snDeploymentFilters{
@@ -181,9 +178,6 @@ func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.C
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateDeploymentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snCreateDeploymentPayload{
 		ProjectID:   uuidToSysid(req.ProjectID),
@@ -259,9 +253,6 @@ func (s *snDeploymentService) UpdateDeployment(ctx context.Context, req domain.U
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.UpdateDeploymentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snUpdateDeploymentPayload{
 		Name:   req.Name,

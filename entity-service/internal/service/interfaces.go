@@ -41,10 +41,8 @@ type SNUserService interface {
 	// error indicates an infrastructure failure.
 	SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchSNUsersResponse, error)
 	// GetMe returns the profile of the currently authenticated user from ServiceNow.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	GetMe(ctx context.Context) (domain.GetUserMeResponse, error)
 	// PatchMe updates mutable fields on the currently authenticated user in ServiceNow.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error)
 }
 
@@ -62,10 +60,9 @@ type AccountService interface {
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
-	// filters in req. An UnauthorizedError is returned when x-user-id-token is absent.
+	// filters in req.
 	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchSNAccountsResponse, error)
 	// GetAccountByID returns the full account detail for the given UUID.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	GetAccountByID(ctx context.Context, id string) (domain.SNAccountDetail, error)
 }
 
@@ -85,8 +82,8 @@ type ProjectService interface {
 type ProjectUpdateService interface {
 	// UpdateProject applies the given field changes to the project identified by
 	// id. A ValidationError is returned for a malformed UUID or an empty request;
-	// a NotFoundError if no project matches; an UnauthorizedError when
-	// x-user-id-token is absent or the caller lacks the required SN role.
+	// a NotFoundError if no project matches; an UnauthorizedError if the caller
+	// lacks the required SN role.
 	UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error)
 }
 
@@ -94,8 +91,7 @@ type ProjectUpdateService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ProjectContactService interface {
 	// SearchProjectContacts returns a paginated list of contacts associated with
-	// the project identified by projectID. An UnauthorizedError is returned when
-	// x-user-id-token is absent.
+	// the project identified by projectID.
 	SearchProjectContacts(ctx context.Context, projectID string, req domain.SearchProjectContactsRequest) (domain.SearchProjectContactsResponse, error)
 }
 
@@ -103,8 +99,7 @@ type ProjectContactService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type AccountContactService interface {
 	// SearchAccountContacts returns a paginated list of contacts associated with
-	// the account identified by accountID. An UnauthorizedError is returned when
-	// x-user-id-token is absent.
+	// the account identified by accountID.
 	SearchAccountContacts(ctx context.Context, accountID string, req domain.SearchAccountContactsRequest) (domain.SearchAccountContactsResponse, error)
 }
 
@@ -119,7 +114,7 @@ type ProductService interface {
 // SNProductService defines the product operations backed by the ServiceNow data source.
 type SNProductService interface {
 	// SearchProducts returns a paginated list of ServiceNow products matching the
-	// search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	// search query.
 	SearchProducts(ctx context.Context, req domain.SearchProductsRequest) (domain.SearchSNProductsResponse, error)
 }
 
@@ -284,7 +279,7 @@ type TimeCardService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ConfigurationItemService interface {
 	// SearchConfigurationItems returns a paginated list of CMDB configuration items filtered by
-	// optional search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	// optional search query.
 	SearchConfigurationItems(ctx context.Context, req domain.SearchConfigurationItemsRequest) (domain.SearchConfigurationItemsResponse, error)
 }
 
@@ -292,7 +287,6 @@ type ConfigurationItemService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type GroupService interface {
 	// SearchGroups returns a paginated list of groups filtered by optional search query.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchGroups(ctx context.Context, req domain.SearchGroupsRequest) (domain.SearchGroupsResponse, error)
 }
 
@@ -300,7 +294,7 @@ type GroupService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ServiceOfferingService interface {
 	// SearchServiceOfferings returns a paginated list of service offerings filtered by
-	// optional service IDs. An UnauthorizedError is returned when x-user-id-token is absent.
+	// optional service IDs.
 	SearchServiceOfferings(ctx context.Context, req domain.SearchServiceOfferingsRequest) (domain.SearchServiceOfferingsResponse, error)
 }
 
@@ -308,7 +302,6 @@ type ServiceOfferingService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ITServiceService interface {
 	// SearchITServices returns a paginated list of CMDB services from ServiceNow.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchITServices(ctx context.Context, req domain.SearchITServicesRequest) (domain.SearchITServicesResponse, error)
 }
 
@@ -317,7 +310,6 @@ type ITServiceService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type CommentService interface {
 	// SearchComments returns a paginated list of comments for the given reference entity.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
 }
 
@@ -325,7 +317,6 @@ type CommentService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type TaskSlaService interface {
 	// SearchTaskSlas returns a paginated list of task SLA records filtered by optional task IDs.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchTaskSlas(ctx context.Context, req domain.SearchTaskSlasRequest) (domain.SearchTaskSlasResponse, error)
 	// GetTaskSla returns the full detail of a single task SLA record by its UUID.
 	// A NotFoundError is returned if the record does not exist.
@@ -336,8 +327,7 @@ type TaskSlaService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type TaskService interface {
 	// SearchCaseTasks returns a paginated list of tasks for the case identified by
-	// caseID. A ValidationError is returned for invalid input (e.g. malformed UUID);
-	// an UnauthorizedError is returned when x-user-id-token is absent.
+	// caseID. A ValidationError is returned for invalid input (e.g. malformed UUID).
 	SearchCaseTasks(ctx context.Context, caseID string, req domain.SearchCaseTasksRequest) (domain.SearchCaseTasksResponse, error)
 	// GetTask returns the full detail of a single task by its UUID.
 	// A NotFoundError is returned if the task does not exist.

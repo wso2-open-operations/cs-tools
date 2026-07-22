@@ -76,9 +76,6 @@ func NewServiceNowCaseGithubIssueService(client *integrationservice.Client) Case
 // CreateCaseGithubIssue implements CaseGithubIssueService.
 func (s *snCaseGithubIssueService) CreateCaseGithubIssue(ctx context.Context, req domain.CreateCaseGithubIssueRequest) (domain.CreateCaseGithubIssueResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateCaseGithubIssueResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if req.CaseID == "" {
 		return domain.CreateCaseGithubIssueResponse{}, &apierror.ValidationError{Msg: "case ID is required"}

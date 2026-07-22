@@ -199,9 +199,6 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchTimeCardsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snTimeCardSort
 	if req.SortBy.Field != "" {
@@ -369,9 +366,6 @@ func nonNegativeMinutes(field string, v int) error {
 
 func (s *snTimeCardService) CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.TimeCardMutationResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if req.CaseID == "" {
 		return domain.TimeCardMutationResponse{}, &apierror.ValidationError{Msg: "caseId is required"}
@@ -432,9 +426,6 @@ func (s *snTimeCardService) CreateTimeCard(ctx context.Context, req domain.Creat
 
 func (s *snTimeCardService) UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.TimeCardMutationResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.TimeCardMutationResponse{}, err
 	}

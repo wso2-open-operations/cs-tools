@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -111,9 +110,6 @@ func NewServiceNowTaskService(client *integrationservice.Client) TaskService {
 
 func (s *snTaskService) SearchCaseTasks(ctx context.Context, caseID string, req domain.SearchCaseTasksRequest) (domain.SearchCaseTasksResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCaseTasksResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{caseID}); err != nil {
 		return domain.SearchCaseTasksResponse{}, err
@@ -165,9 +161,6 @@ func (s *snTaskService) SearchCaseTasks(ctx context.Context, caseID string, req 
 
 func (s *snTaskService) GetTask(ctx context.Context, id string) (domain.TaskDetail, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.TaskDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.TaskDetail{}, err
