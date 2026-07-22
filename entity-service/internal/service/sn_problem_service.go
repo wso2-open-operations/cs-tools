@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -185,6 +187,10 @@ type snCreateProblemPayload struct {
 // CreateProblem implements ProblemService for the ServiceNow data source.
 func (s *snProblemService) CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
+
+	if strings.TrimSpace(req.Subject) == "" {
+		return domain.ProblemDetail{}, &apierror.ValidationError{Msg: "subject cannot be empty"}
+	}
 
 	uuidFields := map[string]string{}
 	if req.OriginCaseID != nil {
