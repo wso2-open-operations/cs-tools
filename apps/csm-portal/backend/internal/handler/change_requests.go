@@ -34,6 +34,8 @@ type entityChangeRequestClient interface {
 	GetChangeRequest(ctx context.Context, id string) ([]byte, error)
 	PatchChangeRequest(ctx context.Context, id string, body []byte) ([]byte, error)
 	GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error)
+	CreateComment(ctx context.Context, body []byte) ([]byte, error)
+	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -164,6 +166,110 @@ func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, 
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve change request approvals.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateChangeRequestComment handles POST /change-requests/{id}/comments.
+// Injects referenceId and referenceType into the payload and forwards to the entity
+// service's reference-generic POST /comments.
+func (h *ChangeRequestHandler) CreateChangeRequestComment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if _, err := h.entity.GetChangeRequest(r.Context(), id); err != nil {
+		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed during comment guard", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to create change request comment.")
+		return
+	}
+
+	newBody, err := injectReferenceFields(body, id, "change_request")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.CreateComment(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to create change request comment.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// SearchChangeRequestComments handles POST /change-requests/{id}/comments/search.
+// Injects referenceId and referenceType into the payload and forwards to the entity
+// service's reference-generic POST /comments/search.
+func (h *ChangeRequestHandler) SearchChangeRequestComments(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	newBody, err := injectReferenceFields(body, id, "change_request")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.SearchComments(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to search change request comments.")
 		return
 	}
 

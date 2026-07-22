@@ -355,6 +355,14 @@ func (c *Client) SearchComments(ctx context.Context, body []byte) ([]byte, error
 	return c.do(ctx, http.MethodPost, "/comments/search", body)
 }
 
+// CreateComment calls POST /comments on the entity service — the reference-generic
+// comment-create path used for reference types other than case (e.g. change request,
+// incident), which have no dedicated create-comment route of their own.
+// The body must be a JSON-encoded CreateCommentRequest (referenceId, referenceType, type, content).
+func (c *Client) CreateComment(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/comments", body)
+}
+
 // SearchConversations calls POST /conversations/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchConversations(ctx context.Context, body []byte) ([]byte, error) {
