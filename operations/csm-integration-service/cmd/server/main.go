@@ -62,7 +62,7 @@ func main() {
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
 
-	addr := envOrDefault("PORT", ":8080")
+	addr := ":" + envOrDefault("PORT", "8080")
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
