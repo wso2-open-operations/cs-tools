@@ -16,6 +16,8 @@
 
 export type CaseType = "case" | "service_request" | "security_report_analysis" | "engagement" | "announcement";
 
+export type EngagementType = "migration" | "consultancy" | "new_feature_improvement" | "follow_up" | "onboarding";
+
 export type CaseSeverity = "catastrophic" | "critical" | "high" | "medium" | "low";
 
 export type CaseState =
@@ -87,6 +89,10 @@ export interface CaseSearchFiltersDto {
   assignedUserIds?: string[];
   createdByMe?: boolean;
   workStates?: NonNullable<CaseWorkState>[];
+  /** Filter by engagement type; only applies when `types` includes `"engagement"`. */
+  engagementTypes?: EngagementType[];
+  /** Product family names (e.g. "API Manager"); matches all versions of each. */
+  productNames?: string[];
 }
 
 export interface CaseSearchPayloadDto {
