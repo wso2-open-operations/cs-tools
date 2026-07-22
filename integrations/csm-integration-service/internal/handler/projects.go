@@ -29,6 +29,7 @@ type entityProjectClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
+	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // ProjectHandler handles HTTP requests for project operations, delegating to the
@@ -120,6 +121,45 @@ func (h *ProjectHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProjectContacts failed", "projectID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search project contacts.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// UpdateProject handles PATCH /projects/{id}. This is a ServiceNow-data-source-only
+// entity-service operation (used by the Account Closure Process automation to write
+// closure-state fields on a project) — a caller with no forwarded x-user-id-token
+// gets a mapped 401. The request body is forwarded verbatim; the entity service
+// enforces its own "at least one field" business rule and 400s otherwise, so this
+// handler does not re-validate that.
+func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateProject(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "projectID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update project.")
 		return
 	}
 

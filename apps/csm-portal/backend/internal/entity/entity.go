@@ -120,6 +120,12 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/projects/%s/contacts/search", url.PathEscape(projectID)), body)
 }
 
+// UpdateProject calls PATCH /projects/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
+}
+
 // SearchProducts calls POST /products/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchProducts(ctx context.Context, body []byte) ([]byte, error) {

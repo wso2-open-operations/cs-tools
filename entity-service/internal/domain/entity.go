@@ -353,6 +353,13 @@ type ProjectClosureFields struct {
 	// ComplianceViolationDate is the date a compliance violation was recorded, if any
 	// (ServiceNow data source only).
 	ComplianceViolationDate *string `json:"complianceViolationDate"`
+	// AcpLastNoticeWindow is the last Account Closure Process (ACP) notice window
+	// the automation sent an email for (e.g. "90", "60", "30", "15", "7", "0" days),
+	// used by that job to avoid re-sending the same notice on its next daily run.
+	// Unlike the other fields in this struct, it is not derived by any SN business
+	// rule — the ACP job writes it directly to record its own progress (ServiceNow
+	// data source only).
+	AcpLastNoticeWindow *string `json:"acpLastNoticeWindow"`
 }
 
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
@@ -384,6 +391,7 @@ type ProjectUpdateRequest struct {
 	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
 	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
 	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
+	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -403,6 +411,7 @@ type ProjectUpdateResult struct {
 	EndDateClosureState             *string   `json:"endDateClosureState"`
 	InvoiceDueDateClosureState      *string   `json:"invoiceDueDateClosureState"`
 	ComplianceViolationClosureState *string   `json:"complianceViolationClosureState"`
+	AcpLastNoticeWindow             *string   `json:"acpLastNoticeWindow"`
 }
 
 // SearchProjectsRequest is the input for a project search operation.

@@ -196,6 +196,69 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+    patch:
+      summary: Update closure-state fields or hasAgent/hasKbReferences toggles on a project.
+      description: >
+        ServiceNow-data-source only. Used by the Account Closure Process (ACP)
+        automation to write closure-state fields on a project. The request body
+        is forwarded to the entity service verbatim — at least one field is
+        required, and the entity service enforces that (400 if none is set). This
+        operation requires a forwarded end-user identity token
+        (`x-user-id-token`); a caller with only M2M credentials receives a 401.
+      operationId: updateProject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      requestBody:
+        description: Closure-state fields to update. At least one is required.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        "200":
+          description: The project was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/search:
     post:
       summary: Search projects.
@@ -518,3 +581,59 @@ components:
           type: integer
         total:
           type: integer
+
+    ProjectUpdateRequest:
+      type: object
+      description: >
+        All fields are optional individually, but at least one is required —
+        enforced by the entity service, which 400s if none is set.
+      properties:
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        endDateClosureState:
+          type: string
+        invoiceDueDateClosureState:
+          type: string
+        complianceViolationClosureState:
+          type: string
+        acpLastNoticeWindow:
+          type: string
+          description: >
+            Last ACP (Account Closure Process) notice window the automation sent an
+            email for. Must be one of "90", "60", "30", "15", "7", "0".
+
+    ProjectUpdateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        closureState:
+          type: string
+          nullable: true
+        endDateClosureState:
+          type: string
+          nullable: true
+        invoiceDueDateClosureState:
+          type: string
+          nullable: true
+        complianceViolationClosureState:
+          type: string
+          nullable: true
+        acpLastNoticeWindow:
+          type: string
+          nullable: true
+
+    ProjectUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        project:
+          $ref: '#/components/schemas/ProjectUpdateResult'
