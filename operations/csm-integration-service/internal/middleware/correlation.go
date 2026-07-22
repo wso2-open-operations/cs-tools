@@ -62,11 +62,12 @@ func CorrelationID(next http.Handler) http.Handler {
 	})
 }
 
-// ensureCorrelationIDPrefix returns id with the "cis-" prefix applied, unless it
-// already carries the prefix.
+// ensureCorrelationIDPrefix returns id with exactly one "cis-" prefix, stripping
+// any repeated occurrences first — e.g. a caller-supplied ID of "cis-cis-foo"
+// normalizes to "cis-foo", not left as-is with two prefixes.
 func ensureCorrelationIDPrefix(id string) string {
-	if strings.HasPrefix(id, correlationIDPrefix) {
-		return id
+	for strings.HasPrefix(id, correlationIDPrefix) {
+		id = strings.TrimPrefix(id, correlationIDPrefix)
 	}
 	return correlationIDPrefix + id
 }
