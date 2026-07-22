@@ -27,16 +27,23 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ChevronDown, ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import { Check, ChevronDown, ChevronRight, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useGetChangeRequestApprovals } from "@features/csm-operations/api/useGetChangeRequestApprovals";
+import { useDecideChangeRequestApproval } from "@features/csm-operations/api/useDecideChangeRequestApproval";
 import {
   approvalStatusColor,
   approvalStatusLabel,
 } from "@features/csm-operations/utils/changeRequests";
-import type { BeChangeRequestApproval, BeChangeRequestApprover } from "@api/backend/types";
+import type {
+  BeChangeRequestApproval,
+  BeChangeRequestApprovalDecision,
+  BeChangeRequestApprover,
+} from "@api/backend/types";
 
 function formatDateTime(value?: string | null): string {
   return (
@@ -56,8 +63,32 @@ function isNotRequired(status: string): boolean {
   return status.trim().toUpperCase() === "NOT_REQUIRED";
 }
 
-function ApproverRow({ approver }: { approver: BeChangeRequestApprover }): JSX.Element {
+/** Whether this approver row is the current user's own pending ("REQUESTED") approval. */
+function isMyPendingApproval(approver: BeChangeRequestApprover, currentUserId?: string): boolean {
+  return (
+    !!currentUserId &&
+    approver.id === currentUserId &&
+    approver.status.trim().toUpperCase() === "REQUESTED"
+  );
+}
+
+interface DecideHandlers {
+  onDecide: (decision: BeChangeRequestApprovalDecision) => void;
+  isDeciding: boolean;
+}
+
+function ApproverRow({
+  approver,
+  currentUserId,
+  decide,
+}: {
+  approver: BeChangeRequestApprover;
+  currentUserId?: string;
+  decide?: DecideHandlers;
+}): JSX.Element {
   const name = approver.name?.trim();
+  const canDecide = !!decide && isMyPendingApproval(approver, currentUserId);
+
   return (
     <Box
       sx={{
@@ -85,9 +116,34 @@ function ApproverRow({ approver }: { approver: BeChangeRequestApprover }): JSX.E
         color={approvalStatusColor(approver.status)}
         label={approvalStatusLabel(approver.status)}
       />
-      <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
-        {approver.respondedOn ? formatDateTime(approver.respondedOn) : "—"}
-      </Typography>
+      {canDecide ? (
+        <Box sx={{ display: "flex", gap: 1, ml: "auto" }}>
+          <Button
+            size="small"
+            variant="outlined"
+            color="success"
+            startIcon={<Check size={14} />}
+            disabled={decide.isDeciding}
+            onClick={() => decide.onDecide("approved")}
+          >
+            Approve
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<X size={14} />}
+            disabled={decide.isDeciding}
+            onClick={() => decide.onDecide("rejected")}
+          >
+            Reject
+          </Button>
+        </Box>
+      ) : (
+        <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+          {approver.respondedOn ? formatDateTime(approver.respondedOn) : "—"}
+        </Typography>
+      )}
     </Box>
   );
 }
@@ -95,9 +151,13 @@ function ApproverRow({ approver }: { approver: BeChangeRequestApprover }): JSX.E
 function ApprovalStage({
   approval,
   displayStage,
+  currentUserId,
+  decide,
 }: {
   approval: BeChangeRequestApproval;
   displayStage: string;
+  currentUserId?: string;
+  decide?: DecideHandlers;
 }): JSX.Element {
   const [notRequiredExpanded, setNotRequiredExpanded] = useState(false);
   const notableApprovers = approval.approvers.filter((approver) => !isNotRequired(approver.status));
@@ -129,7 +189,12 @@ function ApprovalStage({
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             {notableApprovers.map((approver) => (
-              <ApproverRow key={approver.id} approver={approver} />
+              <ApproverRow
+                key={approver.id}
+                approver={approver}
+                currentUserId={currentUserId}
+                decide={decide}
+              />
             ))}
             {notRequiredApprovers.length > 0 && (
               <Box>
@@ -149,7 +214,12 @@ function ApprovalStage({
                 {notRequiredExpanded && (
                   <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mt: 0.5 }}>
                     {notRequiredApprovers.map((approver) => (
-                      <ApproverRow key={approver.id} approver={approver} />
+                      <ApproverRow
+                        key={approver.id}
+                        approver={approver}
+                        currentUserId={currentUserId}
+                        decide={decide}
+                      />
                     ))}
                   </Box>
                 )}
@@ -196,6 +266,28 @@ function computeDisplayStages(approvals: BeChangeRequestApproval[]): string[] {
  */
 export default function ChangeRequestApprovals({ id }: { id: string | undefined }): JSX.Element | null {
   const { data, isLoading, isError, error } = useGetChangeRequestApprovals(id);
+  const { user } = useCurrentUser();
+  const { showError } = useErrorBanner();
+  const decideApproval = useDecideChangeRequestApproval();
+
+  const decide: DecideHandlers | undefined = id
+    ? {
+        isDeciding: decideApproval.isPending,
+        onDecide: (decision) =>
+          decideApproval.mutate(
+            { id, decision },
+            {
+              onError: (err) =>
+                showError(
+                  decision === "approved"
+                    ? "Could not approve the change request."
+                    : "Could not reject the change request.",
+                  err,
+                ),
+            },
+          ),
+      }
+    : undefined;
 
   if (isLoading) {
     return (
@@ -238,7 +330,12 @@ export default function ChangeRequestApprovals({ id }: { id: string | undefined 
         {approvals.map((approval, index) => (
           <Box key={`${approval.stage}-${index}`}>
             {index > 0 && <Divider />}
-            <ApprovalStage approval={approval} displayStage={displayStages[index]} />
+            <ApprovalStage
+              approval={approval}
+              displayStage={displayStages[index]}
+              currentUserId={user?.id}
+              decide={decide}
+            />
           </Box>
         ))}
       </Box>

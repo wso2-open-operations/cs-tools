@@ -15,12 +15,16 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeChangeRequestApprovalsView } from "@api/backend/types";
 
 const useGetChangeRequestApprovalsMock = vi.fn();
+const useCurrentUserMock = vi.fn();
+const useDecideChangeRequestApprovalMock = vi.fn();
+const showErrorMock = vi.fn();
+const decideMutateMock = vi.fn();
 
 // The backend client reads runtime config (`CSM_PORTAL_BACKEND_BASE_URL`) at
 // module load, which isn't present under vitest. QueryErrorState imports
@@ -28,14 +32,26 @@ const useGetChangeRequestApprovalsMock = vi.fn();
 // CsmAnnouncementsPage.test.tsx).
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {},
-  useBackendApi: () => ({ get: vi.fn() }),
+  useBackendApi: () => ({ get: vi.fn(), post: vi.fn() }),
 }));
 
 vi.mock("@features/csm-operations/api/useGetChangeRequestApprovals", () => ({
   useGetChangeRequestApprovals: () => useGetChangeRequestApprovalsMock(),
 }));
 
-// Imported after the mock above so the module picks it up.
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => useCurrentUserMock(),
+}));
+
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({
+  useErrorBanner: () => ({ showError: showErrorMock }),
+}));
+
+vi.mock("@features/csm-operations/api/useDecideChangeRequestApproval", () => ({
+  useDecideChangeRequestApproval: () => useDecideChangeRequestApprovalMock(),
+}));
+
+// Imported after the mocks above so the modules pick them up.
 import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
 
 function mockQueryResult(
@@ -50,7 +66,28 @@ function mockQueryResult(
   });
 }
 
+function mockCurrentUser(id?: string): void {
+  useCurrentUserMock.mockReturnValue({
+    user: id ? { id } : undefined,
+    isLoading: false,
+    isError: false,
+  });
+}
+
+function mockDecideMutation(overrides: { isPending?: boolean } = {}): void {
+  useDecideChangeRequestApprovalMock.mockReturnValue({
+    mutate: decideMutateMock,
+    isPending: overrides.isPending ?? false,
+  });
+}
+
 describe("ChangeRequestApprovals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCurrentUser(undefined);
+    mockDecideMutation();
+  });
+
   it("collapses NOT_REQUIRED approvers behind a default-collapsed disclosure, sorted after notable ones", () => {
     mockQueryResult({
       data: {
@@ -142,5 +179,109 @@ describe("ChangeRequestApprovals", () => {
 
     expect(screen.getByText("Unnamed approver")).toBeInTheDocument();
     expect(screen.queryByText("Unknown approver")).not.toBeInTheDocument();
+  });
+
+  describe("approval decision action", () => {
+    const approvalsWithMyPending = {
+      approvals: [
+        {
+          stage: "Authorize",
+          approverType: "STATIC_GROUP" as const,
+          approverName: "Devops Approval",
+          status: "REQUESTED",
+          approvers: [
+            { id: "me-id", name: "Current User", status: "REQUESTED" },
+            { id: "other-id", name: "Other Approver", status: "REQUESTED" },
+          ],
+        },
+      ],
+    };
+
+    it("shows Approve/Reject only on the current user's own pending approval row", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Authorize"));
+
+      expect(screen.getByText("Current User")).toBeInTheDocument();
+      expect(screen.getByText("Other Approver")).toBeInTheDocument();
+      expect(screen.getAllByText("Approve")).toHaveLength(1);
+      expect(screen.getAllByText("Reject")).toHaveLength(1);
+    });
+
+    it("hides Approve/Reject when no user is signed in", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser(undefined);
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Authorize"));
+
+      expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+      expect(screen.queryByText("Reject")).not.toBeInTheDocument();
+    });
+
+    it("hides Approve/Reject when the current user has no pending approval on this CR", () => {
+      mockQueryResult({
+        data: {
+          approvals: [
+            {
+              stage: "Authorize",
+              approverType: "STATIC_GROUP",
+              approverName: "Devops Approval",
+              status: "APPROVED",
+              approvers: [{ id: "me-id", name: "Current User", status: "APPROVED" }],
+            },
+          ],
+        },
+      });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Authorize"));
+
+      expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+      expect(screen.queryByText("Reject")).not.toBeInTheDocument();
+    });
+
+    it("submits the decision with the CR id when Approve is clicked", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Authorize"));
+      fireEvent.click(screen.getByText("Approve"));
+
+      expect(decideMutateMock).toHaveBeenCalledWith(
+        { id: "chg-1", decision: "approved" },
+        expect.objectContaining({ onError: expect.any(Function) }),
+      );
+    });
+
+    it("submits the decision with the CR id when Reject is clicked", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Authorize"));
+      fireEvent.click(screen.getByText("Reject"));
+
+      expect(decideMutateMock).toHaveBeenCalledWith(
+        { id: "chg-1", decision: "rejected" },
+        expect.objectContaining({ onError: expect.any(Function) }),
+      );
+    });
+
+    it("disables Approve/Reject while a decision is in flight", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      mockDecideMutation({ isPending: true });
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Authorize"));
+
+      expect(screen.getByText("Approve").closest("button")).toBeDisabled();
+      expect(screen.getByText("Reject").closest("button")).toBeDisabled();
+    });
   });
 });

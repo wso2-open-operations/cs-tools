@@ -1486,6 +1486,20 @@ export interface BeChangeRequestApprovalsView {
   approvals: BeChangeRequestApproval[];
 }
 
+/** Caller's decision on their own pending change-request approval. */
+export type BeChangeRequestApprovalDecision = "approved" | "rejected";
+
+/** `POST /change-requests/{id}/approvals/decision` request body. */
+export interface BeChangeRequestApprovalDecisionPayload {
+  decision: BeChangeRequestApprovalDecision;
+}
+
+/** `POST /change-requests/{id}/approvals/decision` response. */
+export interface BeChangeRequestApprovalDecisionResponse {
+  id: string;
+  state: string;
+}
+
 /**
  * `POST /change-requests` body (ServiceNow data source only). `subject` is
  * the only required field; every ID field (`serviceId`, `serviceOfferingId`,
