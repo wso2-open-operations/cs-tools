@@ -418,11 +418,12 @@ func (m *mockEntityProblemClient) GetProblem(ctx context.Context, id string) ([]
 // ----- mock entity change request client -----
 
 type mockEntityChangeRequestClient struct {
-	createChangeRequestFn       func(ctx context.Context, body []byte) ([]byte, error)
-	searchChangeRequestsFn      func(ctx context.Context, body []byte) ([]byte, error)
-	getChangeRequestFn          func(ctx context.Context, id string) ([]byte, error)
-	patchChangeRequestFn        func(ctx context.Context, id string, body []byte) ([]byte, error)
-	getChangeRequestApprovalsFn func(ctx context.Context, id string) ([]byte, error)
+	createChangeRequestFn         func(ctx context.Context, body []byte) ([]byte, error)
+	searchChangeRequestsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	getChangeRequestFn            func(ctx context.Context, id string) ([]byte, error)
+	patchChangeRequestFn          func(ctx context.Context, id string, body []byte) ([]byte, error)
+	getChangeRequestApprovalsFn   func(ctx context.Context, id string) ([]byte, error)
+	decideChangeRequestApprovalFn func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityChangeRequestClient) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
@@ -458,6 +459,13 @@ func (m *mockEntityChangeRequestClient) GetChangeRequestApprovals(ctx context.Co
 		return m.getChangeRequestApprovalsFn(ctx, id)
 	}
 	return []byte(`{"approvals":[]}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.decideChangeRequestApprovalFn != nil {
+		return m.decideChangeRequestApprovalFn(ctx, id, body)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"approved"}`), nil
 }
 
 // ----- mock entity IT service client -----

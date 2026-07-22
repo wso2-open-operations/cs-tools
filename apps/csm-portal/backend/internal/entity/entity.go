@@ -228,6 +228,13 @@ func (c *Client) GetChangeRequestApprovals(ctx context.Context, id string) ([]by
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/change-requests/%s/approvals", url.PathEscape(id)), nil)
 }
 
+// DecideChangeRequestApproval calls POST /change-requests/{id}/approvals/decision on the
+// entity service to submit the caller's decision on their own pending approval.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/change-requests/%s/approvals/decision", url.PathEscape(id)), body)
+}
+
 // SearchTimeCards calls POST /time-cards/search on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {
