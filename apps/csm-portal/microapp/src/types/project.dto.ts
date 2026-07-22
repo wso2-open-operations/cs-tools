@@ -27,8 +27,18 @@ export type ProjectSubscriptionType =
 
 export interface ProjectDto {
   id: string;
+  accountId?: string;
+  sfId?: string;
   name: string;
+  // openapi.yaml documents this field as `projectKey`, but the live search
+  // endpoint actually returns `key` — verified in practice, matching the
+  // webapp's own csmProjects.ts, which carries the same correction.
+  key?: string;
   subscriptionType: ProjectSubscriptionType;
+  startDate?: string;
+  endDate?: string;
+  createdOn?: string;
+  updatedOn?: string;
 }
 
 export interface ProjectSearchPayloadDto {
@@ -42,4 +52,33 @@ export interface ProjectSearchResponseDto {
   limit: number;
   offset: number;
   hasMore: boolean;
+}
+
+/** Parent-account reference embedded in GET /projects/{id} — the entity
+ * service JOINs the account, so the project detail view gets the account
+ * name (and a few account facts) with no extra call. `tier` is a free-form
+ * label here (e.g. "Enterprise"), not the lowercase AccountTier enum. */
+export interface ProjectAccountRefDto {
+  id: string;
+  name: string;
+  activationDate?: string | null;
+  tier?: string;
+  region?: string | null;
+  agentEnabled?: boolean;
+  kbReferencesEnabled?: boolean;
+}
+
+/** GET /projects/{id} — enriched single-project shape, distinct from the
+ * search-result row: embeds the parent `account` instead of a bare `accountId`. */
+export interface ProjectDetailDto {
+  id: string;
+  sfId?: string;
+  name: string;
+  key?: string;
+  subscriptionType: ProjectSubscriptionType;
+  startDate?: string;
+  endDate?: string;
+  createdOn?: string;
+  updatedOn?: string;
+  account?: ProjectAccountRefDto;
 }

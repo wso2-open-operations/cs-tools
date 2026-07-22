@@ -16,6 +16,8 @@
 
 export * from "./case.dto";
 export * from "./case.model";
+export * from "./account.dto";
+export * from "./account.model";
 export * from "./activity.dto";
 export * from "./activity.model";
 export * from "./attachment.dto";

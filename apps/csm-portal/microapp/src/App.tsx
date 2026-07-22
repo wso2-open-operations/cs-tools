@@ -32,6 +32,9 @@ import TimeCardsPage from "@pages/TimeCardsPage";
 import SecurityCenterPage from "@pages/SecurityCenterPage";
 import UpdatesPage from "@pages/UpdatesPage";
 import EngagementsPage from "@pages/EngagementsPage";
+import CustomersPage from "@pages/CustomersPage";
+import AccountDetailPage from "@pages/AccountDetailPage";
+import ProjectDetailPage from "@pages/ProjectDetailPage";
 import SettingsPage from "@pages/SettingsPage";
 import ProfilePage from "@pages/ProfilePage";
 
@@ -73,6 +76,9 @@ export default function App() {
           <Route path="/more/security-center" element={<SecurityCenterPage />} />
           <Route path="/more/updates" element={<UpdatesPage />} />
           <Route path="/more/engagements" element={<EngagementsPage />} />
+          <Route path="/more/customers" element={<CustomersPage />} />
+          <Route path="/more/customers/accounts/:id" element={<AccountDetailPage />} />
+          <Route path="/more/customers/projects/:id" element={<ProjectDetailPage />} />
           <Route path="/more/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
