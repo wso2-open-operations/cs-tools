@@ -19,14 +19,16 @@ import {
   AccordionDetails,
   AccordionSummary,
   Box,
+  Button,
   Card,
   Chip,
   Divider,
   Skeleton,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { ChevronDown, ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import { useState, type JSX } from "react";
 import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useGetChangeRequestApprovals } from "@features/csm-operations/api/useGetChangeRequestApprovals";
@@ -34,7 +36,7 @@ import {
   approvalStatusColor,
   approvalStatusLabel,
 } from "@features/csm-operations/utils/changeRequests";
-import type { BeChangeRequestApproval } from "@api/backend/types";
+import type { BeChangeRequestApproval, BeChangeRequestApprover } from "@api/backend/types";
 
 function formatDateTime(value?: string | null): string {
   return (
@@ -50,13 +52,63 @@ function approverDisplayName(approval: BeChangeRequestApproval): string {
   return approval.approverName || (approval.approverType === "DYNAMIC_CONTACT" ? "Customer contact" : "Approval group");
 }
 
-function ApprovalStage({ approval }: { approval: BeChangeRequestApproval }): JSX.Element {
+function isNotRequired(status: string): boolean {
+  return status.trim().toUpperCase() === "NOT_REQUIRED";
+}
+
+function ApproverRow({ approver }: { approver: BeChangeRequestApprover }): JSX.Element {
+  const name = approver.name?.trim();
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 1.5,
+        flexWrap: "wrap",
+        py: 0.5,
+      }}
+    >
+      {name ? (
+        <Typography variant="body2" sx={{ minWidth: 200 }}>
+          {name}
+        </Typography>
+      ) : (
+        <Tooltip title={`ID: ${approver.id}`} placement="top">
+          <Typography variant="body2" color="text.secondary" sx={{ minWidth: 200 }}>
+            Unnamed approver
+          </Typography>
+        </Tooltip>
+      )}
+      <Chip
+        size="small"
+        variant="outlined"
+        color={approvalStatusColor(approver.status)}
+        label={approvalStatusLabel(approver.status)}
+      />
+      <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+        {approver.respondedOn ? formatDateTime(approver.respondedOn) : "—"}
+      </Typography>
+    </Box>
+  );
+}
+
+function ApprovalStage({
+  approval,
+  displayStage,
+}: {
+  approval: BeChangeRequestApproval;
+  displayStage: string;
+}): JSX.Element {
+  const [notRequiredExpanded, setNotRequiredExpanded] = useState(false);
+  const notableApprovers = approval.approvers.filter((approver) => !isNotRequired(approver.status));
+  const notRequiredApprovers = approval.approvers.filter((approver) => isNotRequired(approver.status));
+
   return (
     <Accordion disableGutters sx={{ "&:before": { display: "none" } }}>
       <AccordionSummary expandIcon={<ChevronDown size={16} />}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap", minWidth: 0 }}>
           <Typography variant="body2" fontWeight={600} sx={{ minWidth: 100 }}>
-            {approval.stage}
+            {displayStage}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {approverDisplayName(approval)}
@@ -76,36 +128,62 @@ function ApprovalStage({ approval }: { approval: BeChangeRequestApproval }): JSX
           </Typography>
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {approval.approvers.map((approver) => (
-              <Box
-                key={approver.id}
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1.5,
-                  flexWrap: "wrap",
-                  py: 0.5,
-                }}
-              >
-                <Typography variant="body2" sx={{ minWidth: 200 }}>
-                  {approver.name || "Unknown approver"}
-                </Typography>
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  color={approvalStatusColor(approver.status)}
-                  label={approvalStatusLabel(approver.status)}
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
-                  {approver.respondedOn ? formatDateTime(approver.respondedOn) : "—"}
-                </Typography>
-              </Box>
+            {notableApprovers.map((approver) => (
+              <ApproverRow key={approver.id} approver={approver} />
             ))}
+            {notRequiredApprovers.length > 0 && (
+              <Box>
+                <Button
+                  size="small"
+                  variant="text"
+                  color="inherit"
+                  onClick={() => setNotRequiredExpanded((prev) => !prev)}
+                  aria-expanded={notRequiredExpanded}
+                  startIcon={
+                    notRequiredExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+                  }
+                  sx={{ color: "text.secondary", textTransform: "none" }}
+                >
+                  {notRequiredApprovers.length} not required
+                </Button>
+                {notRequiredExpanded && (
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mt: 0.5 }}>
+                    {notRequiredApprovers.map((approver) => (
+                      <ApproverRow key={approver.id} approver={approver} />
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            )}
           </Box>
         )}
       </AccordionDetails>
     </Accordion>
   );
+}
+
+/**
+ * Appends an "(N of M)" suffix, in encounter order, to any stage label that
+ * repeats (case-insensitively) across the approvals list — so a genuine
+ * duplicate stage (e.g. a data issue upstream) reads as an explained repeat
+ * instead of a visually-identical, unexplained duplicate. Single-occurrence
+ * stages are left unchanged.
+ */
+function computeDisplayStages(approvals: BeChangeRequestApproval[]): string[] {
+  const totalByKey = new Map<string, number>();
+  for (const approval of approvals) {
+    const key = approval.stage.trim().toLowerCase();
+    totalByKey.set(key, (totalByKey.get(key) ?? 0) + 1);
+  }
+  const seenByKey = new Map<string, number>();
+  return approvals.map((approval) => {
+    const key = approval.stage.trim().toLowerCase();
+    const total = totalByKey.get(key) ?? 1;
+    if (total <= 1) return approval.stage;
+    const seen = (seenByKey.get(key) ?? 0) + 1;
+    seenByKey.set(key, seen);
+    return `${approval.stage} (${seen} of ${total})`;
+  });
 }
 
 /**
@@ -151,6 +229,8 @@ export default function ChangeRequestApprovals({ id }: { id: string | undefined 
     );
   }
 
+  const displayStages = computeDisplayStages(approvals);
+
   return (
     <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
       <Typography variant="subtitle2">Approvals</Typography>
@@ -158,7 +238,7 @@ export default function ChangeRequestApprovals({ id }: { id: string | undefined 
         {approvals.map((approval, index) => (
           <Box key={`${approval.stage}-${index}`}>
             {index > 0 && <Divider />}
-            <ApprovalStage approval={approval} />
+            <ApprovalStage approval={approval} displayStage={displayStages[index]} />
           </Box>
         ))}
       </Box>

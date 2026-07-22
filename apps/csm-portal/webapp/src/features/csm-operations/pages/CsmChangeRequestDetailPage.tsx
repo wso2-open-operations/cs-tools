@@ -32,6 +32,7 @@ import { useGetChangeRequest } from "@features/csm-operations/api/useGetChangeRe
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
 import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
+import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import {
   changeRequestImpactColor,
   changeRequestImpactLabel,
@@ -229,7 +230,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           <MetaCell label="Type">
             <Typography variant="body2">{cr.type || "—"}</Typography>
           </MetaCell>
-          <MetaCell label="Linked case"><RefText value={cr.case} /></MetaCell>
+          <MetaCell label="Linked case"><EntityRefLink value={cr.case} routeBase="/cases" /></MetaCell>
           <MetaCell label="Deployment"><RefText value={cr.deployment} /></MetaCell>
           <MetaCell label="Deployed product"><RefText value={cr.deployedProduct} /></MetaCell>
           <MetaCell label="Product"><RefText value={cr.product} /></MetaCell>
