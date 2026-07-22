@@ -19,6 +19,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -94,4 +95,20 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, fallbackMsg)
+}
+
+// summarizeErr returns a short, log-safe description of err: the upstream status
+// code for a typed *apierror.Error (never its Body, which may carry upstream
+// response data not meant for logs), or a bounded prefix of err.Error() otherwise.
+func summarizeErr(err error) string {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("upstream status %d", apiErr.StatusCode)
+	}
+	const maxLen = 200
+	msg := err.Error()
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	return msg
 }

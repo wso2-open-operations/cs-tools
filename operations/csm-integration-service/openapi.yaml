@@ -197,7 +197,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
     patch:
-      summary: Update closure-state fields on a project.
+      summary: Update closure-state fields or hasAgent/hasKbReferences toggles on a project.
       description: >
         ServiceNow-data-source only. Used by the Account Closure Process (ACP)
         automation to write closure-state fields on a project. The request body
@@ -242,6 +242,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
           content:
             application/json:
               schema:

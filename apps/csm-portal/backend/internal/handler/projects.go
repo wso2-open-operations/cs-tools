@@ -186,7 +186,7 @@ func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.UpdateProject(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "userID", user.UserID, "projectID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update project.")
 		return
 	}
