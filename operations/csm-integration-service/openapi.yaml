@@ -50,6 +50,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: NotFound
           content:
@@ -85,6 +91,12 @@ paths:
                 $ref: '#/components/schemas/AccountSearchResponse'
         "400":
           description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
           content:
             application/json:
               schema:
@@ -127,6 +139,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
           content:
@@ -144,6 +162,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
         - $ref: '#/components/parameters/UserIDTokenHeader'
       responses:
         "200":
@@ -154,6 +173,12 @@ paths:
                 $ref: '#/components/schemas/Project'
         "400":
           description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
           content:
             application/json:
               schema:
@@ -197,6 +222,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
           content:
@@ -231,6 +262,12 @@ paths:
                 $ref: '#/components/schemas/ProjectContactSearchResponse'
         "400":
           description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
           content:
             application/json:
               schema:
