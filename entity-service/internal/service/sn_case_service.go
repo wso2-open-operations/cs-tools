@@ -1018,6 +1018,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		payload.AssigneeEmail = req.AssigneeEmail
 	}
 	if req.ParentID != nil {
+		if err := validateUUIDs("parentId", []string{*req.ParentID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
 		sysid := uuidToSysid(*req.ParentID)
 		payload.ParentID = &sysid
 	}

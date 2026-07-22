@@ -432,6 +432,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setGithubIssueResult(null);
     setPendingDelete(null);
     setPauseConflict(null);
+    setLinkParentDialogOpen(false);
+    setParentIdInput("");
   }
 
   // isAnnouncement can only be confirmed once `data` loads (see its
@@ -1553,7 +1555,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
         </Box>
       )}
 
-      <Dialog open={linkParentDialogOpen} onClose={() => setLinkParentDialogOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={linkParentDialogOpen}
+        onClose={() => {
+          setLinkParentDialogOpen(false);
+          setParentIdInput("");
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Link to a parent record</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 1 }}>
           <Typography variant="body2" color="text.secondary">
@@ -1572,7 +1582,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setLinkParentDialogOpen(false)} disabled={patchCase.isPending}>
+          <Button
+            onClick={() => {
+              setLinkParentDialogOpen(false);
+              setParentIdInput("");
+            }}
+            disabled={patchCase.isPending}
+          >
             Cancel
           </Button>
           <Button

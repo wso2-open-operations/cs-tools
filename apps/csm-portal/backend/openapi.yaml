@@ -339,7 +339,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CaseCommentCreatePayload'
+              $ref: '#/components/schemas/SnCommentCreatePayload'
         required: true
       responses:
         "201":
@@ -347,7 +347,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseComment'
+                $ref: '#/components/schemas/CreateCommentResponse'
         "400":
           description: BadRequest
           content:
@@ -423,6 +423,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "413":
           description: RequestEntityTooLarge
           content:
@@ -453,7 +459,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CaseCommentCreatePayload'
+              $ref: '#/components/schemas/SnCommentCreatePayload'
         required: true
       responses:
         "201":
@@ -461,7 +467,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseComment'
+                $ref: '#/components/schemas/CreateCommentResponse'
         "400":
           description: BadRequest
           content:
@@ -533,6 +539,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -5601,6 +5613,42 @@ components:
         content:
           type: string
           description: Comment text
+
+    SnCommentCreatePayload:
+      type: object
+      required:
+        - type
+        - content
+      properties:
+        type:
+          type: string
+          enum: [work_note, comment]
+          description: >
+            work_note is restricted to internal users. activity is not offered here --
+            it is not supported for ServiceNow-backed comment creation (change request,
+            incident).
+        content:
+          type: string
+          description: Comment text
+
+    CommentCreateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    CreateCommentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        comment:
+          $ref: '#/components/schemas/CommentCreateResult'
 
     CaseComment:
       type: object
