@@ -24,6 +24,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormHelperText,
   InputLabel,
   MenuItem,
   Select,
@@ -303,6 +304,7 @@ export default function EditIncidentDialog({
           </MenuItem>
         ))}
       </Select>
+      {opts?.helperText && <FormHelperText>{opts.helperText}</FormHelperText>}
     </FormControl>
   );
 
