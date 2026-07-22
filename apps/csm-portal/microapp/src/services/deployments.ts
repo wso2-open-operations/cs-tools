@@ -20,12 +20,20 @@ import type { DeploymentSearchResponseDto, DeployedProductSearchResponseDto } fr
 import {
   toDeploymentOption,
   toDeployedProductOption,
+  toDeployment,
+  toDeployedProduct,
   type DeploymentOption,
   type DeployedProductOption,
+  type Deployment,
+  type DeployedProduct,
 } from "@src/types";
 import apiClient from "./apiClient";
 
-const SEARCH_PAGE_LIMIT = 100;
+// openapi.yaml declares both endpoints' pagination.limit maximum as 100, but the live upstream
+// entity service actually rejects 100 with a 400 — the same documented discrepancy
+// services/cases.ts's COMMENTS_PAGE_LIMIT and services/products.ts's PRODUCTS_PAGE_LIMIT already
+// caught for their own endpoints; match that real, working value instead of the doc.
+const SEARCH_PAGE_LIMIT = 50;
 
 const searchDeployments = async (projectId: string): Promise<DeploymentOption[]> => {
   const { data } = await apiClient.post<DeploymentSearchResponseDto>(DEPLOYMENTS_SEARCH_ENDPOINT, {
@@ -43,6 +51,25 @@ const searchDeployedProducts = async (deploymentId: string): Promise<DeployedPro
   return data.deployedProducts.map(toDeployedProductOption);
 };
 
+// Richer variants of the two searches above, for the Customers > Project > Deployments tab
+// (read-only browsing) rather than the case-create cascading picker. Same requests, same bounded
+// page size — only the mapper (and so the cached shape) differs, hence the separate query keys.
+const listDeployments = async (projectId: string): Promise<Deployment[]> => {
+  const { data } = await apiClient.post<DeploymentSearchResponseDto>(DEPLOYMENTS_SEARCH_ENDPOINT, {
+    pagination: { offset: 0, limit: SEARCH_PAGE_LIMIT },
+    projectIds: [projectId],
+  });
+  return data.deployments.map(toDeployment);
+};
+
+const listDeployedProducts = async (deploymentId: string): Promise<DeployedProduct[]> => {
+  const { data } = await apiClient.post<DeployedProductSearchResponseDto>(
+    DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT(deploymentId),
+    { pagination: { offset: 0, limit: SEARCH_PAGE_LIMIT } },
+  );
+  return data.deployedProducts.map(toDeployedProduct);
+};
+
 export const deployments = {
   byProject: (projectId: string) =>
     queryOptions({
@@ -55,6 +82,20 @@ export const deployments = {
     queryOptions({
       queryKey: ["deployment-products", deploymentId],
       queryFn: () => searchDeployedProducts(deploymentId),
+      enabled: !!deploymentId,
+    }),
+
+  list: (projectId: string) =>
+    queryOptions({
+      queryKey: ["deployments", "list", projectId],
+      queryFn: () => listDeployments(projectId),
+      enabled: !!projectId,
+    }),
+
+  productsList: (deploymentId: string) =>
+    queryOptions({
+      queryKey: ["deployment-products", "list", deploymentId],
+      queryFn: () => listDeployedProducts(deploymentId),
       enabled: !!deploymentId,
     }),
 };
