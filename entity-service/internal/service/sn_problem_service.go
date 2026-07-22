@@ -216,12 +216,19 @@ func (s *snProblemService) CreateProblem(ctx context.Context, req domain.CreateP
 		return domain.ProblemDetail{}, err
 	}
 
-	var p snProblemDetailResponse
-	if err := json.Unmarshal(raw, &p); err != nil {
+	var resp snCreateProblemResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
 		return domain.ProblemDetail{}, fmt.Errorf("sn create problem: parse response: %w", err)
 	}
 
-	return mapSNProblemDetailToView(p), nil
+	return mapSNProblemDetailToView(resp.Problem), nil
+}
+
+// snCreateProblemResponse mirrors the Choreo POST /problems response, which wraps
+// the created problem's detail payload in a message envelope.
+type snCreateProblemResponse struct {
+	Message string                  `json:"message"`
+	Problem snProblemDetailResponse `json:"problem"`
 }
 
 // mapSNProblemDetailToView maps a Choreo problem detail payload to the domain view,
