@@ -14,13 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Card, Chip, Stack, Typography } from "@wso2/oxygen-ui";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { accounts } from "@src/services/accounts";
 import type { Account } from "@src/types";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
+import { useInfiniteScrollSentinel } from "@utils/useInfiniteScrollSentinel";
 import { formatDateOnly } from "@utils/customers";
 import { SearchBar } from "@components/support/SearchBar";
 import { EmptyState } from "@components/support/EmptyState";
@@ -85,22 +86,7 @@ export function AccountsTab() {
   const items = data?.pages.flatMap((p) => p.items) ?? [];
   const total = data?.pages[0]?.total ?? items.length;
 
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
-          void fetchNextPage();
-        }
-      },
-      { threshold: 0.1 },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const sentinelRef = useInfiniteScrollSentinel({ hasNextPage, isFetchingNextPage, fetchNextPage });
 
   return (
     <Stack gap={2}>

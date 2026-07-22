@@ -14,11 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Stack, Typography } from "@wso2/oxygen-ui";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
+import { useInfiniteScrollSentinel } from "@utils/useInfiniteScrollSentinel";
 import { SearchBar } from "@components/support/SearchBar";
 import { EmptyState } from "@components/support/EmptyState";
 import { ErrorState } from "@components/support/ErrorState";
@@ -42,22 +43,7 @@ export function ProjectIssuesTab({ projectId }: { projectId: string }) {
 
   const items = data?.pages.flatMap((p) => p.items) ?? [];
 
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
-          void fetchNextPage();
-        }
-      },
-      { threshold: 0.1 },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const sentinelRef = useInfiniteScrollSentinel({ hasNextPage, isFetchingNextPage, fetchNextPage });
 
   return (
     <Stack gap={2}>
