@@ -598,6 +598,11 @@ components:
           type: string
         complianceViolationClosureState:
           type: string
+        acpLastNoticeWindow:
+          type: string
+          description: >
+            Last ACP (Account Closure Process) notice window the automation sent an
+            email for. Must be one of "90", "60", "30", "15", "7", "0".
 
     ProjectUpdateResult:
       type: object
@@ -619,6 +624,9 @@ components:
           type: string
           nullable: true
         complianceViolationClosureState:
+          type: string
+          nullable: true
+        acpLastNoticeWindow:
           type: string
           nullable: true
 
