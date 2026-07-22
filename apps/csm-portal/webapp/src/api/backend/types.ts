@@ -1925,25 +1925,27 @@ export interface BeProblemRef {
 }
 
 /**
- * List-item shape for `POST /problems/search`. Minimal by design — unlike
- * change requests/incidents, the search view does not embed state, priority,
- * or any other field beyond id/number/subject; only `GET /problems/{id}`
- * does (see {@link BeProblemDetail}).
+ * List-item shape for `POST /problems/search`. Includes `state` plus the
+ * assignment refs alongside id/number/subject; full record detail (priority,
+ * category, resolution fields, etc.) is still only on `GET /problems/{id}`
+ * (see {@link BeProblemDetail}).
  */
 export interface BeProblemSearchView {
   id: string;
   number?: string;
   subject?: string;
+  state?: BeProblemState;
+  assignmentGroup?: BeEntityRef | null;
+  assignedTo?: BeEntityRef | null;
 }
 
 export interface BeProblemSearchFilters {
   searchQuery?: string;
   /**
    * Filter by state. Not confirmed live against the backend at the time this
-   * was written — the search response itself doesn't echo `state` — so if
-   * the backend rejects or silently ignores this filter, drop it here and
-   * from `ProblemsTab`'s payload, and remove the state control from
-   * `ProblemsFilterBar`.
+   * was written, so if the backend rejects or silently ignores this filter,
+   * drop it here and from `ProblemsTab`'s payload, and remove the state
+   * control from `ProblemsFilterBar`.
    */
   states?: BeProblemState[];
 }

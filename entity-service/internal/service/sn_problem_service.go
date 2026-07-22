@@ -35,9 +35,12 @@ type snProblemsResponse struct {
 }
 
 type snProblem struct {
-	ID      *string `json:"id"`
-	Number  *string `json:"number"`
-	Subject *string `json:"subject"`
+	ID              *string           `json:"id"`
+	Number          *string           `json:"number"`
+	Subject         *string           `json:"subject"`
+	State           *string           `json:"state"`
+	AssignmentGroup *snProblemUserRef `json:"assignmentGroup"`
+	AssignedTo      *snProblemUserRef `json:"assignedTo"`
 }
 
 // snProblemSearchPayload is the Choreo POST /problems/search request body.
@@ -89,10 +92,17 @@ func (s *snProblemService) SearchProblems(ctx context.Context, req domain.Search
 		view := domain.SearchProblemView{
 			Subject: p.Subject,
 			Number:  p.Number,
+			State:   p.State,
 		}
 		if p.ID != nil && *p.ID != "" {
 			id := sysidToUUID(*p.ID)
 			view.ID = &id
+		}
+		if p.AssignmentGroup != nil {
+			view.AssignmentGroup = &domain.EntityRef{ID: sysidToUUID(p.AssignmentGroup.ID), Name: p.AssignmentGroup.Name}
+		}
+		if p.AssignedTo != nil {
+			view.AssignedTo = &domain.EntityRef{ID: sysidToUUID(p.AssignedTo.ID), Name: p.AssignedTo.Name}
 		}
 		views = append(views, view)
 	}

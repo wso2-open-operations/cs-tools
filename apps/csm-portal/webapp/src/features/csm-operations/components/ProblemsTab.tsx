@@ -17,6 +17,7 @@
 import {
   Box,
   Button,
+  Chip,
   LinearProgress,
   Skeleton,
   Table,
@@ -36,6 +37,8 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProblems } from "@features/csm-operations/api/useSearchProblems";
 import {
   DEFAULT_PROBLEM_FILTERS,
+  problemStateColor,
+  problemStateLabel,
   type ProblemFilters,
 } from "@features/csm-operations/utils/problems";
 import ProblemsFilterBar from "@features/csm-operations/components/ProblemsFilterBar";
@@ -46,9 +49,7 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
 /**
  * Problems listing for the Operations → Problem management tab. Searches
  * `POST /problems/search` with server-side pagination, free-text search, and
- * a state filter. Unlike change requests/incidents, the search view is
- * minimal (id/number/subject only — no `state`), so the table can't show a
- * State column even though the filter can still be applied server-side.
+ * a state filter.
  */
 export default function ProblemsTab(): JSX.Element {
   const navigate = useNavTransition();
@@ -123,6 +124,9 @@ export default function ProblemsTab(): JSX.Element {
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Number</TableCell>
                 <TableCell>Subject</TableCell>
+                <TableCell>State</TableCell>
+                <TableCell>Assignment group</TableCell>
+                <TableCell>Assigned to</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -131,11 +135,14 @@ export default function ProblemsTab(): JSX.Element {
                   <TableRow key={i}>
                     <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={90} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={2} align="center">
+                  <TableCell colSpan={5} align="center">
                     <QueryErrorState
                       message={`Failed to load problems: ${error instanceof Error ? error.message : "unknown error"}`}
                       error={error}
@@ -144,7 +151,7 @@ export default function ProblemsTab(): JSX.Element {
                 </TableRow>
               ) : problems.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={2} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No problems found.
                     </Typography>
@@ -174,6 +181,20 @@ export default function ProblemsTab(): JSX.Element {
                         {problem.subject || "—"}
                       </Typography>
                     </TableCell>
+                    <TableCell>
+                      {problem.state ? (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          color={problemStateColor(problem.state)}
+                          label={problemStateLabel(problem.state)}
+                        />
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>{problem.assignmentGroup?.name || "—"}</TableCell>
+                    <TableCell>{problem.assignedTo?.name || "—"}</TableCell>
                   </TableRow>
                   );
                 })

@@ -7518,6 +7518,16 @@ components:
         subject:
           type: string
           nullable: true
+        state:
+          type: string
+          nullable: true
+          description: Current workflow state (e.g. "new", "assess", "resolved", "closed")
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
 
     CreateProblemPayload:
       type: object
@@ -7566,10 +7576,6 @@ components:
         - $ref: '#/components/schemas/Problem'
         - type: object
           properties:
-            state:
-              type: string
-              nullable: true
-              description: Current workflow state (e.g. "new", "assess", "resolved", "closed")
             priority:
               type: string
               nullable: true
@@ -7590,9 +7596,6 @@ components:
                 $ref: '#/components/schemas/IdNumberRef'
             linkedChangeRequest:
               $ref: '#/components/schemas/IdNumberRef'
-            assignedTo:
-              $ref: '#/components/schemas/EntityRef'
-              nullable: true
             resolutionCode:
               type: string
               nullable: true

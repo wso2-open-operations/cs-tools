@@ -2790,9 +2790,12 @@ type SearchProblemsRequest struct {
 
 // SearchProblemView is the problem representation returned in search results.
 type SearchProblemView struct {
-	ID      *string `json:"id"`
-	Number  *string `json:"number"`
-	Subject *string `json:"subject"`
+	ID              *string    `json:"id"`
+	Number          *string    `json:"number"`
+	Subject         *string    `json:"subject"`
+	State           *string    `json:"state"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
 }
 
 // SearchProblemsResponse is the paginated result of a problem search.
