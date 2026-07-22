@@ -100,7 +100,7 @@ Copy `.env.example` to `.env` and fill in the values:
 
 | Variable | Description |
 |---|---|
-| `PORT` | Server listen address (default `:8080`) |
+| `PORT` | Server listen port (default `8080`) |
 
 ## Project Structure
 
