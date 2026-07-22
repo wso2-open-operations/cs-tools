@@ -136,6 +136,8 @@ public type Case record {|
     string number;
     # Created date and time
     string createdOn;
+    # Updated date and time
+    string updatedOn;
     # Created by (User email)
     string createdBy;
     # Case title
