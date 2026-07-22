@@ -92,12 +92,12 @@ export default function AccountDetailPage() {
             />
           </MetaRow>
           <Divider />
-          <MetaRow label="Owner ID">
-            <MetaValue mono>{a.ownerId || "—"}</MetaValue>
+          <MetaRow label="Account owner">
+            <MetaValue>{a.ownerName || a.ownerId || "—"}</MetaValue>
           </MetaRow>
           <Divider />
-          <MetaRow label="Technical owner ID">
-            <MetaValue mono>{a.technicalOwnerId || "—"}</MetaValue>
+          <MetaRow label="Technical owner">
+            <MetaValue>{a.technicalOwnerName || a.technicalOwnerId || "—"}</MetaValue>
           </MetaRow>
           <Divider />
           <MetaRow label="Created">
