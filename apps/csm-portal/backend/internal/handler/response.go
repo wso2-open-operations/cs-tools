@@ -99,16 +99,14 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 
 // summarizeErr returns a short, log-safe description of err: the upstream status
 // code for a typed *apierror.Error (never its Body, which may carry upstream
-// response data not meant for logs), or a bounded prefix of err.Error() otherwise.
+// response data not meant for logs), or a fixed generic message otherwise — an
+// unrecognized error can come from the underlying HTTP client (e.g. a
+// net/url.Error), which stringifies with the full request URL including query
+// parameters, so its raw text is not safe to log verbatim.
 func summarizeErr(err error) string {
 	var apiErr *apierror.Error
 	if errors.As(err, &apiErr) {
 		return fmt.Sprintf("upstream status %d", apiErr.StatusCode)
 	}
-	const maxLen = 200
-	msg := err.Error()
-	if len(msg) > maxLen {
-		msg = msg[:maxLen]
-	}
-	return msg
+	return "upstream request failed"
 }
