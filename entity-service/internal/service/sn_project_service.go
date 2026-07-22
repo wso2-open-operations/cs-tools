@@ -54,6 +54,7 @@ type snProject struct {
 	Name      string        `json:"name"`
 	Key       string        `json:"key"`
 	Type      snProjectType `json:"type"`
+	EndDate   string        `json:"endDate"`
 	CreatedOn string        `json:"createdOn"`
 	snProjectClosureFields
 }
@@ -146,11 +147,20 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 		if err != nil {
 			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: project %q: %w", p.ID, err)
 		}
+		var endDate *time.Time
+		if p.EndDate != "" {
+			parsed, err := time.Parse(snDateLayout, p.EndDate)
+			if err != nil {
+				return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: parse endDate %q: %w", p.EndDate, err)
+			}
+			endDate = &parsed
+		}
 		views = append(views, domain.ProjectView{
 			ID:               sysidToUUID(p.ID),
 			Name:             p.Name,
 			Key:              p.Key,
 			SubscriptionType: subType,
+			EndDate:          endDate,
 			CreatedOn:        createdOn,
 			ProjectClosureFields: domain.ProjectClosureFields{
 				ClosureState:                    p.ClosureState,

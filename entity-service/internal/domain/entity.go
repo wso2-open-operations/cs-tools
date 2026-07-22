@@ -433,7 +433,10 @@ type ProjectView struct {
 	Name             string           `json:"name"`
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
-	CreatedOn        time.Time        `json:"createdOn"`
+	// EndDate is nil when the backing data source has no end date recorded
+	// for this project (e.g. ServiceNow leaves it blank).
+	EndDate   *time.Time `json:"endDate"`
+	CreatedOn time.Time  `json:"createdOn"`
 	ProjectClosureFields
 }
 

@@ -2682,6 +2682,21 @@ components:
         updatedOn:
           type: string
           format: date-time
+        closureState:
+          type: string
+          nullable: true
+        endDateClosureState:
+          type: string
+          nullable: true
+        invoiceDueDateClosureState:
+          type: string
+          nullable: true
+        complianceViolationClosureState:
+          type: string
+          nullable: true
+        complianceViolationDate:
+          type: string
+          nullable: true
 
     ProjectView:
       type: object
@@ -2704,9 +2719,28 @@ components:
             - platformer_subscription
             - cloud_support
             - professional_services
+        endDate:
+          type: string
+          format: date-time
+          nullable: true
         createdOn:
           type: string
           format: date-time
+        closureState:
+          type: string
+          nullable: true
+        endDateClosureState:
+          type: string
+          nullable: true
+        invoiceDueDateClosureState:
+          type: string
+          nullable: true
+        complianceViolationClosureState:
+          type: string
+          nullable: true
+        complianceViolationDate:
+          type: string
+          nullable: true
 
     SearchProjectsResponse:
       type: object
