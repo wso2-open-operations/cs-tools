@@ -36,3 +36,49 @@ export function toDeployedProductOption(dto: DeployedProductSearchItemDto): Depl
   const version = dto.version?.name ?? "";
   return { id: dto.id, label: version ? `${name} ${version}` : name };
 }
+
+/** Richer shape for the Customers > Project > Deployments list — a superset of
+ * {@link DeploymentOption} (which stays deliberately minimal for the case-create picker). */
+export interface Deployment {
+  id: string;
+  name: string;
+  type: DeploymentType;
+  description: string | null;
+  createdOn: string | null;
+  updatedOn: string | null;
+}
+
+export function toDeployment(dto: DeploymentDto): Deployment {
+  return {
+    id: dto.id,
+    name: dto.name,
+    type: dto.type,
+    description: dto.description ?? null,
+    createdOn: dto.createdOn ?? null,
+    updatedOn: dto.updatedOn ?? null,
+  };
+}
+
+/** Richer shape for a deployment's Deployed Products list — a superset of
+ * {@link DeployedProductOption} (which stays deliberately minimal for the case-create picker). */
+export interface DeployedProduct {
+  id: string;
+  productName: string;
+  versionName: string | null;
+  supportEoLDate: string | null;
+  cores: string | null;
+  tps: string | null;
+  category: string | null;
+}
+
+export function toDeployedProduct(dto: DeployedProductSearchItemDto): DeployedProduct {
+  return {
+    id: dto.id,
+    productName: dto.product?.name || dto.product?.id || "—",
+    versionName: dto.version?.name ?? null,
+    supportEoLDate: dto.version?.supportEoLDate ?? null,
+    cores: dto.cores ?? null,
+    tps: dto.tps ?? null,
+    category: dto.category ?? null,
+  };
+}

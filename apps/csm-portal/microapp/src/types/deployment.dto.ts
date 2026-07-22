@@ -21,6 +21,9 @@ export interface DeploymentDto {
   projectId: string;
   name: string;
   type: DeploymentType;
+  description?: string;
+  createdOn?: string;
+  updatedOn?: string;
 }
 
 export interface DeploymentSearchPayloadDto {
@@ -43,6 +46,10 @@ export interface DeployedProductEntityRefDto {
   name: string;
 }
 
+export interface DeployedProductVersionRefDto extends DeployedProductEntityRefDto {
+  supportEoLDate?: string | null;
+}
+
 // The search response embeds the resolved product + version objects (not just their raw ids —
 // unlike what the OpenAPI doc's DeployedProduct schema documents), so the human-readable label
 // can be built straight from this without a second lookup, matching the webapp's
@@ -50,7 +57,14 @@ export interface DeployedProductEntityRefDto {
 export interface DeployedProductSearchItemDto {
   id: string;
   product?: DeployedProductEntityRefDto;
-  version?: DeployedProductEntityRefDto | null;
+  version?: DeployedProductVersionRefDto | null;
+  // SN-only sizing fields; the entity service returns them as strings (and always null for the
+  // Postgres data source) — mirrors the webapp's BeDeployedProduct.
+  cores?: string | null;
+  tps?: string | null;
+  category?: string | null;
+  createdOn?: string;
+  updatedOn?: string;
 }
 
 export interface DeployedProductSearchPayloadDto {
