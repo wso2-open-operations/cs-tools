@@ -97,6 +97,30 @@ func TestCorrelationID_PreservesAlreadyPrefixedIncoming(t *testing.T) {
 	}
 }
 
+func TestCorrelationID_NormalizesRepeatedPrefix(t *testing.T) {
+	t.Parallel()
+
+	const incomingID = "cis-cis-cis-repeated-id-789"
+	const wantID = "cis-repeated-id-789"
+	var gotFromContext string
+	handler := middleware.CorrelationID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotFromContext = middleware.CorrelationIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-CSM-Correlation-ID", incomingID)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if echoed := w.Header().Get("X-CSM-Correlation-ID"); echoed != wantID {
+		t.Errorf("echoed X-CSM-Correlation-ID = %q, want normalized to exactly one prefix %q", echoed, wantID)
+	}
+	if gotFromContext != wantID {
+		t.Errorf("CorrelationIDFromContext() = %q, want %q", gotFromContext, wantID)
+	}
+}
+
 func TestCorrelationID_GeneratesDistinctIDs(t *testing.T) {
 	t.Parallel()
 
