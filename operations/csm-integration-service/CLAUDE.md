@@ -14,6 +14,15 @@ Manager gateway, which owns the inbound trust boundary (subscription + client
 credentials) before a request ever reaches this app. Do not add inbound JWT/Bearer
 validation here without confirming that assumption no longer holds.
 
+**This is not the same claim as "this service never returns 401/403."** `mapUpstreamError`
+(`internal/handler/response.go`) maps an upstream 401/403 straight through to the
+caller — confirmed in practice: entity-service's ServiceNow-backed operations
+reject a request with no forwarded `x-user-id-token` with a 401, and that status
+propagates here unchanged. "No app-level auth" means this service performs no
+authentication check of its own; it does not mean 401/403 can't happen. Any
+endpoint that can reach a ServiceNow-backed entity-service operation must document
+401 in `openapi.yaml`.
+
 ## Optional `x-user-id-token` pass-through
 
 This service's own identity to entity-service is always M2M — it never
@@ -102,8 +111,9 @@ make build   # runs tests then compiles ./cmd/server
    failure → write response. No auth check — see "Why no Auth middleware" above
 4. **Route** (`cmd/server/main.go`) — register using Go 1.22 method-prefixed
    patterns: `"POST /accounts/{id}/contacts/search"`
-5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/404/500 responses
-   (no 401/403 — there's no app-level auth to produce them)
+5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/404/500 responses,
+   plus 401 if the operation can reach a ServiceNow-backed entity-service
+   operation (see below)
 6. **Tests** — add a handler test following `accounts_test.go`/`projects_test.go`'s
    shape (empty/invalid path param, body-too-large, invalid JSON, success
    passthrough, `upstreamErrors` table); extend the mock in `helpers_test.go` to
