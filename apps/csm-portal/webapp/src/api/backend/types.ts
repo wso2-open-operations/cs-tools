@@ -1450,6 +1450,14 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   hasCustomerReviewed?: boolean;
   approvedBy?: BeEntityRef | null;
   approvedOn?: string | null;
+  /**
+   * Backend-supplied legal transitions out of the CR's current state, mirroring
+   * `nextStates` on a case (`CaseActionBar.tsx`) — render one action per entry
+   * rather than hardcoding a `state === 'new'` check. Intentionally narrow today:
+   * the only transition modeled so far is New -> Assess, so this is only ever
+   * `["assess"]` or `[]`.
+   */
+  legalNextStates?: string[];
 }
 
 /** An approval stage seen on a change request, e.g. Assess, Authorize. */
@@ -1622,12 +1630,15 @@ export interface BeConfigurationItemSearchResponse {
 /**
  * `PATCH /change-requests/{id}` body (ServiceNow data source only). At least
  * one field is required by the BE (`minProperties: 1`). `plannedStartOn` is a
- * `YYYY-MM-DD HH:MM:SS` string.
+ * `YYYY-MM-DD HH:MM:SS` string. `requestApproval` is mutually exclusive with
+ * the other fields here — it drives the New -> Assess transition (see
+ * `legalNextStates` on {@link BeChangeRequestDetail}) rather than editing a value.
  */
 export interface BePatchChangeRequestPayload {
   plannedStartOn?: string;
   isCustomerApproved?: boolean;
   isCustomerReviewed?: boolean;
+  requestApproval?: true;
 }
 
 /** `PATCH /change-requests/{id}` response — the touched identifiers. */
@@ -1979,6 +1990,20 @@ export interface BeProblemDetail {
   resolvedBy?: BeEntityRef | null;
   openedOn?: string | null;
   closedOn?: string | null;
+}
+
+/**
+ * `POST /problems` body (ServiceNow data source only). `subject` is the only
+ * required field. There is no `priority` field — priority is not settable on
+ * create (SN computes/defaults it server-side, confirmed by live testing), so
+ * it's deliberately omitted here and from the create form.
+ */
+export interface BeCreateProblemPayload {
+  subject: string;
+  category?: string;
+  subcategory?: string;
+  originCaseId?: string;
+  primaryIncidentId?: string;
 }
 
 // ---------------------------------------------------------------------------

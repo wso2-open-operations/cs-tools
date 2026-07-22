@@ -16,6 +16,7 @@
 
 import {
   Box,
+  Button,
   LinearProgress,
   Skeleton,
   Table,
@@ -27,6 +28,7 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
+import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
@@ -89,6 +91,18 @@ export default function ProblemsTab(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="contained"
+          color="primary"
+          size="small"
+          startIcon={<Plus size={16} />}
+          onClick={() => navigate("/operations/problems/new")}
+        >
+          Create problem
+        </Button>
+      </Box>
+
       <ProblemsFilterBar
         filters={filters}
         onChange={handleFiltersChange}
