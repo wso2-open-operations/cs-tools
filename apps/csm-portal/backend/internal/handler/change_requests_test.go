@@ -317,6 +317,50 @@ func TestDecideChangeRequestApproval(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects unknown fields", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(`{"decision":"approved","comment":"lgtm"}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.DecideChangeRequestApproval(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects trailing data after the JSON value", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(`{"decision":"approved"}{"decision":"rejected"}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.DecideChangeRequestApproval(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects a decision value outside approved/rejected", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(`{"decision":"maybe"}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.DecideChangeRequestApproval(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects an empty decision value", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(`{}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.DecideChangeRequestApproval(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
 		const reqPayload = `{"decision":"approved"}`
 		var capturedID string

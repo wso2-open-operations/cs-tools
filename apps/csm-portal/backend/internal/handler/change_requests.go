@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,13 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
+
+// changeRequestApprovalDecisionPayload is the strict shape accepted by
+// DecideChangeRequestApproval: exactly one field, and Decision must be
+// "approved" or "rejected".
+type changeRequestApprovalDecisionPayload struct {
+	Decision string `json:"decision"`
+}
 
 // entityChangeRequestClient abstracts the entity service change-request operations.
 type entityChangeRequestClient interface {
@@ -199,7 +207,14 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 		return
 	}
 
-	if !json.Valid(body) {
+	var payload changeRequestApprovalDecisionPayload
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || decoder.More() {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if payload.Decision != "approved" && payload.Decision != "rejected" {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
