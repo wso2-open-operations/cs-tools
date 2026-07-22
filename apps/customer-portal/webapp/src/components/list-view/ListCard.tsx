@@ -213,7 +213,7 @@ export default function ListCard({
               color="text.secondary"
               sx={{ lineHeight: 1, overflowWrap: "anywhere" }}
             >
-              Updated {formatDateTime(caseItem.updatedOn ?? caseItem.createdOn) || "--"}
+              Updated {formatDateTime(caseItem.updatedOn) || "--"}
             </Typography>
           </Box>
           {caseItem.createdBy && (

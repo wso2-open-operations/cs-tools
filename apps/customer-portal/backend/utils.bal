@@ -100,6 +100,7 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             number: case.number,
             title: case.title,
             createdOn: case.createdOn,
+            updatedOn: case.updatedOn,
             createdBy: case.createdBy,
             description: case.description,
             duration: case.duration,
