@@ -17,9 +17,9 @@
 import { Stack, Typography, type TypographyProps } from "@wso2/oxygen-ui";
 import type { ReactNode } from "react";
 
-/** One "label / value" row in an Account/Project overview card — the mobile
- * equivalent of the webapp's grid-cell MetaCell (a single narrow column reads
- * better as stacked rows than as a multi-column grid). */
+/** One "label / value" row in an overview/detail card (Accounts, Projects, Deployments,
+ * Vulnerabilities, ...) — the mobile equivalent of the webapp's grid-cell MetaCell (a single
+ * narrow column reads better as stacked rows than as a multi-column grid). */
 export function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={2}>

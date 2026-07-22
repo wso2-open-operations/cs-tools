@@ -19,7 +19,7 @@ import { X } from "@wso2/oxygen-ui-icons-react";
 import type { Deployment } from "@src/types";
 import { formatDateOnly, formatEnumLabel } from "@utils/customers";
 import { DialogPaper } from "@components/common/DialogPaper";
-import { MetaRow, MetaValue } from "@components/customers/MetaRow";
+import { MetaRow, MetaValue } from "@components/common/MetaRow";
 import { DeployedProductsList } from "@components/customers/DeployedProductsList";
 
 interface DeploymentDetailDialogProps {

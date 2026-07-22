@@ -20,7 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, Chip, Divider, Skeleton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { projects } from "@src/services/projects";
 import { formatDateOnly, formatEnumLabel } from "@utils/customers";
-import { MetaRow, MetaValue } from "@components/customers/MetaRow";
+import { MetaRow, MetaValue } from "@components/common/MetaRow";
 import { ProjectIssuesTab } from "@components/customers/ProjectIssuesTab";
 import { DeploymentsTab } from "@components/customers/DeploymentsTab";
 import { ErrorState } from "@components/support/ErrorState";
