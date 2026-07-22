@@ -55,7 +55,7 @@ func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetAccount(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetAccount failed", "accountID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetAccount failed", "accountID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve account.")
 		return
 	}
@@ -83,7 +83,7 @@ func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.entity.SearchAccounts(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAccounts failed", "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchAccounts failed", "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search accounts.")
 		return
 	}
@@ -119,7 +119,7 @@ func (h *AccountHandler) SearchAccountContacts(w http.ResponseWriter, r *http.Re
 
 	result, err := h.entity.SearchAccountContacts(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAccountContacts failed", "accountID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchAccountContacts failed", "accountID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search account contacts.")
 		return
 	}
