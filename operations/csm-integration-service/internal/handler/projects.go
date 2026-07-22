@@ -47,14 +47,14 @@ func NewProjectHandler(entity entityProjectClient) *ProjectHandler {
 // GetProject handles GET /projects/{id}.
 func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
 
 	result, err := h.entity.GetProject(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetProject failed", "projectID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetProject failed", "projectID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve project.")
 		return
 	}
@@ -82,7 +82,7 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.entity.SearchProjects(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search projects.")
 		return
 	}
@@ -118,7 +118,7 @@ func (h *ProjectHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Re
 
 	result, err := h.entity.SearchProjectContacts(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchProjectContacts failed", "projectID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchProjectContacts failed", "projectID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search project contacts.")
 		return
 	}
