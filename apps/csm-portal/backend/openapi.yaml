@@ -3434,7 +3434,15 @@ components:
       additionalProperties: false
       description: >
         Any combination of fields may be supplied; at least one is required.
-        Omitted fields are left unchanged.
+        Omitted fields are left unchanged. isCustomerApproved, isCustomerReviewed,
+        and requestApproval are mutually exclusive: at most one may be set.
+      allOf:
+        - not:
+            required: [isCustomerApproved, isCustomerReviewed]
+        - not:
+            required: [isCustomerApproved, requestApproval]
+        - not:
+            required: [isCustomerReviewed, requestApproval]
       properties:
         title:
           type: string

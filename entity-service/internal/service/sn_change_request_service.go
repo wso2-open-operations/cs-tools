@@ -652,6 +652,20 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 
+	exclusiveApprovalFields := 0
+	if req.IsCustomerApproved != nil {
+		exclusiveApprovalFields++
+	}
+	if req.IsCustomerReviewed != nil {
+		exclusiveApprovalFields++
+	}
+	if req.RequestApproval != nil {
+		exclusiveApprovalFields++
+	}
+	if exclusiveApprovalFields > 1 {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "isCustomerApproved, isCustomerReviewed, and requestApproval are mutually exclusive"}
+	}
+
 	if req.Title != nil && *req.Title == "" {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "title cannot be empty"}
 	}
