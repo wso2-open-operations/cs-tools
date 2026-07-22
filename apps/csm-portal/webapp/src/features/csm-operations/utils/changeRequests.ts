@@ -82,6 +82,20 @@ export function changeRequestStateColor(state?: string | null): ChipColor {
   return STATE_COLOR[state as BeChangeRequestState] ?? "default";
 }
 
+/**
+ * Human-readable reason a comment cannot be posted on this change request right
+ * now, or `null` when it can. Change requests don't share the case work-state
+ * model — the only gate is terminal state.
+ */
+export function changeRequestCommentGateReason(
+  state?: string | null,
+): string | null {
+  if (state === "closed" || state === "canceled") {
+    return "Comments are disabled on a closed or canceled change request.";
+  }
+  return null;
+}
+
 export function changeRequestImpactLabel(impact?: string | null): string {
   if (!impact) return "—";
   return IMPACT_LABEL[impact as BeChangeRequestImpact] ?? humanize(impact);

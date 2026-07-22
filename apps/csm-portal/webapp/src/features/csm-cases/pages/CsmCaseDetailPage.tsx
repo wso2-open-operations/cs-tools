@@ -28,6 +28,7 @@ import {
   Skeleton,
   Tab,
   Tabs,
+  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -373,6 +374,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [metaCollapsed, setMetaCollapsed] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [linkParentDialogOpen, setLinkParentDialogOpen] = useState(false);
+  const [parentIdInput, setParentIdInput] = useState("");
   // ISSU-026: closing or proposing a solution opens this instead of PATCHing
   // immediately — it collects the Post Resolution Activity and doubles as
   // the confirmation step for these two customer-notifying transitions.
@@ -1515,8 +1518,84 @@ export default function CsmCaseDetailPage(): JSX.Element {
               !!c.productContext.deploymentId && isProjectDeploymentsLoading
             }
           />
+          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Typography variant="subtitle2">Linked service requests</Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<LinkIcon size={14} />}
+                onClick={() => setLinkParentDialogOpen(true)}
+              >
+                Link to parent
+              </Button>
+            </Box>
+            {c.linkedServiceRequests && c.linkedServiceRequests.length > 0 ? (
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                {c.linkedServiceRequests.map((sr) => (
+                  <Chip
+                    key={sr.id}
+                    size="small"
+                    variant="outlined"
+                    clickable
+                    label={`${sr.number} — ${sr.name}`}
+                    onClick={() => navigate(`/cases/${encodeURIComponent(sr.id)}`)}
+                    sx={{ fontWeight: 600 }}
+                  />
+                ))}
+              </Box>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No service requests linked to this case.
+              </Typography>
+            )}
+          </Card>
         </Box>
       )}
+
+      <Dialog open={linkParentDialogOpen} onClose={() => setLinkParentDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Link to a parent record</DialogTitle>
+        <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Sets this case's parent — e.g. linking a service-request case back
+            to the case or incident that spawned it. Requires the bypass role;
+            linking to a closed/inactive record may silently have no effect.
+          </Typography>
+          <TextField
+            label="Parent case / incident / change request ID"
+            value={parentIdInput}
+            onChange={(e) => setParentIdInput(e.target.value)}
+            placeholder="UUID"
+            fullWidth
+            size="small"
+            autoFocus
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLinkParentDialogOpen(false)} disabled={patchCase.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={!parentIdInput.trim() || patchCase.isPending}
+            onClick={() => {
+              patchCase.mutate(
+                { parentId: parentIdInput.trim() },
+                {
+                  onSuccess: () => {
+                    setLinkParentDialogOpen(false);
+                    setParentIdInput("");
+                  },
+                  onError: (err) =>
+                    showError("Could not link this case to that parent.", err),
+                },
+              );
+            }}
+          >
+            {patchCase.isPending ? "Linking…" : "Link"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {activeTab === "sla" &&
         caseId && <CaseSlaTable caseId={caseId} />}

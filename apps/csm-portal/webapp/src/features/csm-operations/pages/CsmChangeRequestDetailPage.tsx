@@ -22,22 +22,36 @@ import {
   Skeleton,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Check, Pencil, X } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ReactNode, useState } from "react";
+import { ArrowLeft, Check, MessageSquarePlus, Pencil, X } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type ReactNode, useCallback, useMemo, useState } from "react";
 import {  useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useGetChangeRequest } from "@features/csm-operations/api/useGetChangeRequest";
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
+import {
+  useGetCsmChangeRequestComments,
+  usePostCsmChangeRequestComment,
+} from "@features/csm-operations/api/useCsmChangeRequestComments";
 import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
 import {
+  changeRequestCommentGateReason,
   changeRequestImpactColor,
   changeRequestImpactLabel,
   changeRequestStateColor,
   changeRequestStateLabel,
 } from "@features/csm-operations/utils/changeRequests";
+import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { AttachmentsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
+import {
+  useGetCsmCaseAttachments,
+  usePostCsmCaseAttachment,
+  useDownloadCsmCaseAttachment,
+} from "@features/csm-cases/api/useCsmCaseAttachments";
 import type { BeEntityRef } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 
@@ -124,6 +138,38 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const patchCr = usePatchChangeRequest();
   const [editOpen, setEditOpen] = useState(false);
+  const engineerName = useEngineerDisplayName();
+
+  const { data: comments } = useGetCsmChangeRequestComments(id);
+  const postComment = usePostCsmChangeRequestComment();
+  const { data: attachments } = useGetCsmCaseAttachments(id, "change_request");
+  const postAttachment = usePostCsmCaseAttachment();
+  const downloadAttachment = useDownloadCsmCaseAttachment();
+  const [composerOpen, setComposerOpen] = useState(false);
+
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+
+  const onUploadAttachment = useCallback(
+    (file: File) => {
+      if (!id) return;
+      postAttachment.mutate({
+        caseId: id,
+        file,
+        uploadedBy: engineerName,
+        referenceType: "change_request",
+      });
+    },
+    [id, engineerName, postAttachment],
+  );
+
+  const onDownloadAttachment = useCallback(
+    (attachment: (typeof attachmentList)[number]) => {
+      void downloadAttachment(attachment).catch((err) =>
+        showError(`Could not download ${attachment.filename}.`, err),
+      );
+    },
+    [downloadAttachment, showError],
+  );
 
   const back = (): void => {
     navigate(OPERATIONS_CR_PATH);
@@ -300,6 +346,83 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           <PlanSection title="Test plan" html={cr.testPlan} />
         </Card>
       )}
+
+      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+        <Typography variant="subtitle2">Comments</Typography>
+        {composerOpen ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Typography variant="subtitle2">Reply</Typography>
+              <Button
+                size="small"
+                variant="text"
+                color="inherit"
+                onClick={() => setComposerOpen(false)}
+              >
+                Cancel
+              </Button>
+            </Box>
+            <CsmCaseCommentInput
+              disabled={!id}
+              publicCommentDisabledReason={changeRequestCommentGateReason(cr.state)}
+              autoFocus
+              onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                if (!id) return;
+                const hasText =
+                  bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
+                if (hasText) {
+                  await postComment.mutateAsync({
+                    changeRequestId: id,
+                    bodyHtml,
+                    internal,
+                  });
+                }
+                for (const { file, name } of commentAttachments) {
+                  await postAttachment.mutateAsync({
+                    caseId: id,
+                    file,
+                    name,
+                    uploadedBy: engineerName,
+                    referenceType: "change_request",
+                  });
+                }
+                setComposerOpen(false);
+              }}
+            />
+          </Box>
+        ) : (
+          <Button
+            fullWidth
+            variant="outlined"
+            color="inherit"
+            startIcon={<MessageSquarePlus size={18} />}
+            onClick={() => setComposerOpen(true)}
+            sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5, px: 2 }}
+          >
+            Add a comment…
+          </Button>
+        )}
+        <CaseActivitiesFeed
+          comments={comments ?? []}
+          audit={[]}
+          attachments={[]}
+        />
+      </Card>
+
+      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+        <Typography variant="subtitle2">Attachments</Typography>
+        <AttachmentsWidget
+          attachments={attachmentList}
+          uploading={postAttachment.isPending}
+          uploadError={
+            postAttachment.isError
+              ? (postAttachment.error?.message ?? "Could not upload the attachment.")
+              : null
+          }
+          onUpload={onUploadAttachment}
+          onDownload={onDownloadAttachment}
+        />
+      </Card>
 
       {editOpen && (
         <EditChangeRequestDialog

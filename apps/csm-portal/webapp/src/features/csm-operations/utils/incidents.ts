@@ -73,6 +73,20 @@ export function incidentStateColor(state?: string | null): ChipColor {
   return STATE_COLOR[state as BeIncidentState] ?? "default";
 }
 
+/**
+ * Human-readable reason a comment cannot be posted on this incident right now,
+ * or `null` when it can. Unlike the case comment gate, incidents don't share
+ * the work-in-progress/ongoing model — the only gate is terminal state.
+ */
+export function incidentCommentGateReason(
+  state?: string | null,
+): string | null {
+  if (state === "CLOSED" || state === "CANCELLED") {
+    return "Comments are disabled on a closed or cancelled incident.";
+  }
+  return null;
+}
+
 export function incidentPriorityLabel(priority?: string | null): string {
   if (!priority) return "—";
   return PRIORITY_LABEL[priority as BeIncidentPriority] ?? humanize(priority);

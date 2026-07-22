@@ -15,21 +15,35 @@
 // under the License.
 
 import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, Pencil } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ReactNode, useState } from "react";
+import { ArrowLeft, MessageSquarePlus, Pencil } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type ReactNode, useCallback, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useGetIncident } from "@features/csm-operations/api/useGetIncident";
 import { usePatchIncident } from "@features/csm-operations/api/usePatchIncident";
+import {
+  useGetCsmIncidentComments,
+  usePostCsmIncidentComment,
+} from "@features/csm-operations/api/useCsmIncidentComments";
 import EditIncidentDialog from "@features/csm-operations/components/EditIncidentDialog";
 import {
+  incidentCommentGateReason,
   incidentPriorityColor,
   incidentPriorityLabel,
   incidentStateColor,
   incidentStateLabel,
 } from "@features/csm-operations/utils/incidents";
+import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { AttachmentsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
+import {
+  useGetCsmCaseAttachments,
+  usePostCsmCaseAttachment,
+  useDownloadCsmCaseAttachment,
+} from "@features/csm-cases/api/useCsmCaseAttachments";
 import type { BeEntityRef, BeIncidentDetail, BeUpdateIncidentPayload } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 
@@ -106,6 +120,38 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const patchIncident = usePatchIncident();
   const [editOpen, setEditOpen] = useState(false);
+  const engineerName = useEngineerDisplayName();
+
+  const { data: comments } = useGetCsmIncidentComments(id);
+  const postComment = usePostCsmIncidentComment();
+  const { data: attachments } = useGetCsmCaseAttachments(id, "incident");
+  const postAttachment = usePostCsmCaseAttachment();
+  const downloadAttachment = useDownloadCsmCaseAttachment();
+  const [composerOpen, setComposerOpen] = useState(false);
+
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+
+  const onUploadAttachment = useCallback(
+    (file: File) => {
+      if (!id) return;
+      postAttachment.mutate({
+        caseId: id,
+        file,
+        uploadedBy: engineerName,
+        referenceType: "incident",
+      });
+    },
+    [id, engineerName, postAttachment],
+  );
+
+  const onDownloadAttachment = useCallback(
+    (attachment: (typeof attachmentList)[number]) => {
+      void downloadAttachment(attachment).catch((err) =>
+        showError(`Could not download ${attachment.filename}.`, err),
+      );
+    },
+    [downloadAttachment, showError],
+  );
 
   const back = (): void => {
     navigate(OPERATIONS_INCIDENTS_PATH);
@@ -293,6 +339,102 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           </Box>
         </Card>
       )}
+
+      {incident.linkedServiceRequests && incident.linkedServiceRequests.length > 0 && (
+        <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+          <Typography variant="subtitle2">Linked service requests</Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+            {incident.linkedServiceRequests.map((sr) => (
+              <Chip
+                key={sr.id}
+                size="small"
+                variant="outlined"
+                clickable
+                label={`${sr.number} — ${sr.name}`}
+                onClick={() => navigate(`/cases/${encodeURIComponent(sr.id)}`)}
+                sx={{ fontWeight: 600 }}
+              />
+            ))}
+          </Box>
+        </Card>
+      )}
+
+      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+        <Typography variant="subtitle2">Comments</Typography>
+        {composerOpen ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Typography variant="subtitle2">Reply</Typography>
+              <Button
+                size="small"
+                variant="text"
+                color="inherit"
+                onClick={() => setComposerOpen(false)}
+              >
+                Cancel
+              </Button>
+            </Box>
+            <CsmCaseCommentInput
+              disabled={!id}
+              publicCommentDisabledReason={incidentCommentGateReason(incident.state)}
+              autoFocus
+              onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                if (!id) return;
+                const hasText =
+                  bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
+                if (hasText) {
+                  await postComment.mutateAsync({
+                    incidentId: id,
+                    bodyHtml,
+                    internal,
+                  });
+                }
+                for (const { file, name } of commentAttachments) {
+                  await postAttachment.mutateAsync({
+                    caseId: id,
+                    file,
+                    name,
+                    uploadedBy: engineerName,
+                    referenceType: "incident",
+                  });
+                }
+                setComposerOpen(false);
+              }}
+            />
+          </Box>
+        ) : (
+          <Button
+            fullWidth
+            variant="outlined"
+            color="inherit"
+            startIcon={<MessageSquarePlus size={18} />}
+            onClick={() => setComposerOpen(true)}
+            sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5, px: 2 }}
+          >
+            Add a comment…
+          </Button>
+        )}
+        <CaseActivitiesFeed
+          comments={comments ?? []}
+          audit={[]}
+          attachments={[]}
+        />
+      </Card>
+
+      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+        <Typography variant="subtitle2">Attachments</Typography>
+        <AttachmentsWidget
+          attachments={attachmentList}
+          uploading={postAttachment.isPending}
+          uploadError={
+            postAttachment.isError
+              ? (postAttachment.error?.message ?? "Could not upload the attachment.")
+              : null
+          }
+          onUpload={onUploadAttachment}
+          onDownload={onDownloadAttachment}
+        />
+      </Card>
 
       {editOpen && (
         <EditIncidentDialog
