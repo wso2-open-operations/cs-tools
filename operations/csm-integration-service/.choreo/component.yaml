@@ -1,0 +1,12 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: csm-integration-service-api
+    displayName: CSM Integration Service API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: openapi.yaml
