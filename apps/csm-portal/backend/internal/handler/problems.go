@@ -17,12 +17,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
@@ -32,6 +34,43 @@ type entityProblemClient interface {
 	SearchProblems(ctx context.Context, body []byte) ([]byte, error)
 	GetProblem(ctx context.Context, id string) ([]byte, error)
 	CreateProblem(ctx context.Context, body []byte) ([]byte, error)
+}
+
+// createProblemRequest mirrors the enum/format-constrained fields of the documented
+// CreateProblemPayload schema. It is decoded only to validate those fields at the
+// boundary; the original raw body is still forwarded to the entity service unchanged.
+type createProblemRequest struct {
+	Subject           string `json:"subject"`
+	Category          string `json:"category"`
+	Subcategory       string `json:"subcategory"`
+	OriginCaseID      string `json:"originCaseId"`
+	PrimaryIncidentID string `json:"primaryIncidentId"`
+}
+
+// validateCreateProblemBody checks that the body decodes as a JSON object with no
+// unknown fields, that the required subject is present and non-blank, and that any
+// optional UUID-formatted linking fields are well-formed, so obviously invalid
+// requests are rejected before reaching the entity service.
+func validateCreateProblemBody(body []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	var req createProblemRequest
+	if err := dec.Decode(&req); err != nil {
+		return false
+	}
+	if dec.More() {
+		return false
+	}
+	if strings.TrimSpace(req.Subject) == "" {
+		return false
+	}
+	if req.OriginCaseID != "" && !uuidRe.MatchString(req.OriginCaseID) {
+		return false
+	}
+	if req.PrimaryIncidentID != "" && !uuidRe.MatchString(req.PrimaryIncidentID) {
+		return false
+	}
+	return true
 }
 
 // ProblemHandler handles HTTP requests for problem operations, delegating to the
@@ -101,6 +140,11 @@ func (h *ProblemHandler) CreateProblem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if !validateCreateProblemBody(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
