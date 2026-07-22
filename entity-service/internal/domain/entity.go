@@ -433,6 +433,7 @@ type ProjectView struct {
 	Name             string           `json:"name"`
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
+	EndDate          time.Time        `json:"endDate"`
 	CreatedOn        time.Time        `json:"createdOn"`
 	ProjectClosureFields
 }

@@ -54,6 +54,7 @@ func (s *projectService) SearchProjects(ctx context.Context, req domain.SearchPr
 			Name:             p.Name,
 			Key:              p.Key,
 			SubscriptionType: p.SubscriptionType,
+			EndDate:          p.EndDate,
 			CreatedOn:        p.CreatedOn,
 		}
 	}
