@@ -49,7 +49,11 @@ import {
   userLabel,
 } from "@features/csm-operations/utils/incidentFormOptions";
 import { computeIncidentPriority } from "@features/csm-operations/utils/incidentPriorityMatrix";
-import { INCIDENT_STATES, incidentStateLabel } from "@features/csm-operations/utils/incidents";
+import {
+  INCIDENT_STATES,
+  getLegalNextIncidentStates,
+  incidentStateLabel,
+} from "@features/csm-operations/utils/incidents";
 import type {
   BeIncidentCategory,
   BeIncidentContactType,
@@ -219,6 +223,18 @@ export default function EditIncidentDialog({
     }
     return base;
   }, [state.category, initial.category, initial.subcategory]);
+  // Restrict the State select to the incident's *current, committed* state
+  // (initial.state, not the in-progress edit) plus its legal next states —
+  // gated on where the incident actually is, not on whatever the user has
+  // tentatively picked. CLOSED/CANCELLED are terminal (legal-next list is
+  // just the state itself), which renders as a disabled, single-option
+  // select — same "nothing to do here" convention as other read-only
+  // controls in this dialog (e.g. the disabled Subcategory before a
+  // Category is picked).
+  const legalStates = initial.state ? getLegalNextIncidentStates(initial.state) : INCIDENT_STATES;
+  const isStateTerminal = legalStates.length <= 1;
+  const stateOptions = legalStates.map((s) => ({ value: s, label: incidentStateLabel(s) }));
+
   const priority = computeIncidentPriority(state.impact || "", state.urgency || "");
 
   const patch = useMemo(() => buildPatch(initial, state), [initial, state]);
@@ -335,7 +351,13 @@ export default function EditIncidentDialog({
                 "State",
                 state.state,
                 (v) => set("state", v as BeIncidentState | ""),
-                INCIDENT_STATES.map((s) => ({ value: s, label: incidentStateLabel(s) })),
+                stateOptions,
+                {
+                  disabled: isStateTerminal,
+                  helperText: isStateTerminal
+                    ? `${incidentStateLabel(initial.state)} is a terminal state — it can no longer be changed.`
+                    : undefined,
+                },
               )}
             </Box>
           </Box>
