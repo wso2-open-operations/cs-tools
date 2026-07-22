@@ -65,7 +65,7 @@ A Ballerina REST service that aggregates and exposes customer data from multiple
 
 ### CSM Integration Service (`operations/csm-integration-service/`)
 
-A Go REST service exposing account/project search and their Contacts sub-resource to third-party (M2M) consumers, backed by the Entity Service. Fronted entirely by Choreo's API Manager gateway (subscription + client-credentials auth) — the service itself performs no inbound authentication of its own.
+A Go REST service that exposes customer account and project data to third-party (M2M) consumers, backed by the Entity Service.
 
 | Layer | Technology |
 |-------|------------|
