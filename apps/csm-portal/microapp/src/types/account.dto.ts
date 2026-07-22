@@ -16,8 +16,23 @@
 
 export type AccountTier = "basic" | "enterprise";
 
+/** A resolved `{id, name}` reference, as returned for ServiceNow-sourced accounts —
+ * mirrors the webapp's own AccountOwnerRef (csm-accounts/types/csmAccounts.ts). */
+export interface AccountOwnerRefDto {
+  id: string;
+  name?: string | null;
+}
+
 // Same shape for both a search-result row and GET /accounts/{id} — unlike
 // Project, Account has no separate enriched detail shape.
+//
+// GET /accounts/{id} and POST /accounts/search return one of two shapes depending on the
+// account's data source: PG-native accounts send bare `ownerId`/`technicalOwnerId` strings and
+// `agentEnabled`/`kbReferencesEnabled` booleans, while ServiceNow-sourced accounts send resolved
+// `owner`/`technicalOwner` {id, name} references and `hasAgent`/`hasKbReferences` instead — none
+// of which openapi.yaml's Account schema documents. Confirmed live (a ServiceNow account's
+// response carries `owner: {id, name}` with no bare `ownerId` at all) — same class of
+// doc-vs-reality gap already caught for this endpoint on the webapp side.
 export interface AccountDto {
   id: string;
   sfId: string;
@@ -26,10 +41,14 @@ export interface AccountDto {
   region?: string | null;
   activationDate: string;
   deactivationDate?: string | null;
-  ownerId: string;
+  ownerId?: string | null;
+  owner?: AccountOwnerRefDto | null;
   technicalOwnerId?: string | null;
-  agentEnabled: boolean;
-  kbReferencesEnabled: boolean;
+  technicalOwner?: AccountOwnerRefDto | null;
+  agentEnabled?: boolean;
+  hasAgent?: boolean;
+  kbReferencesEnabled?: boolean;
+  hasKbReferences?: boolean;
   createdOn: string;
   updatedOn: string;
 }

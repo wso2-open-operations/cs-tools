@@ -24,14 +24,21 @@ export interface Account {
   region: string | null;
   activationDate: string;
   deactivationDate: string | null;
-  ownerId: string;
+  ownerId: string | null;
+  /** Resolved display name for the owner, when the source is ServiceNow. Falls back to
+   * `ownerId` in the UI when this is null (a PG-native account). */
+  ownerName: string | null;
   technicalOwnerId: string | null;
+  technicalOwnerName: string | null;
   agentEnabled: boolean;
   kbReferencesEnabled: boolean;
   createdOn: string;
   updatedOn: string;
 }
 
+// Resolves the PG-native-vs-ServiceNow-sourced dual shape once here (see AccountDto's own
+// comment), so nothing downstream has to know about ownerId-vs-owner / agentEnabled-vs-hasAgent —
+// callers just get a plain Account.
 export function toAccount(dto: AccountDto): Account {
   return {
     id: dto.id,
@@ -41,10 +48,12 @@ export function toAccount(dto: AccountDto): Account {
     region: dto.region ?? null,
     activationDate: dto.activationDate,
     deactivationDate: dto.deactivationDate ?? null,
-    ownerId: dto.ownerId,
-    technicalOwnerId: dto.technicalOwnerId ?? null,
-    agentEnabled: dto.agentEnabled,
-    kbReferencesEnabled: dto.kbReferencesEnabled,
+    ownerId: dto.owner?.id ?? dto.ownerId ?? null,
+    ownerName: dto.owner?.name ?? null,
+    technicalOwnerId: dto.technicalOwner?.id ?? dto.technicalOwnerId ?? null,
+    technicalOwnerName: dto.technicalOwner?.name ?? null,
+    agentEnabled: dto.hasAgent ?? dto.agentEnabled ?? false,
+    kbReferencesEnabled: dto.hasKbReferences ?? dto.kbReferencesEnabled ?? false,
     createdOn: dto.createdOn,
     updatedOn: dto.updatedOn,
   };
