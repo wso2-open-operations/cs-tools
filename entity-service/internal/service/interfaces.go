@@ -376,7 +376,7 @@ type ProblemService interface {
 	// A NotFoundError is returned if the problem does not exist.
 	GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error)
 
-	// CreateProblem creates a new problem. Subject and OriginCaseID are required.
+	// CreateProblem creates a new problem. Subject is required; OriginCaseID is optional.
 	// Supported by the ServiceNow data source only.
 	CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error)
 }
