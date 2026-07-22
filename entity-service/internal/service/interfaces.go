@@ -261,6 +261,11 @@ type ChangeRequestService interface {
 	// GetChangeRequestApprovals returns the approval stages and per-approver status
 	// for a single change request identified by UUID.
 	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
+
+	// DecideChangeRequestApproval submits the caller's decision ("approved" or
+	// "rejected") on their own pending approval for a change request identified
+	// by UUID. Supported by the ServiceNow data source only.
+	DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error)
 }
 
 // TimeCardService defines the operations available on the time-cards entity.

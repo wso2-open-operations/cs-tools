@@ -2004,6 +2004,23 @@ type ChangeRequestApprovals struct {
 	Approvals []ChangeRequestApproval `json:"approvals"`
 }
 
+// ChangeRequestApprovalDecisionRequest is the request body for
+// POST /change-requests/{id}/approvals/decision.
+type ChangeRequestApprovalDecisionRequest struct {
+	// Decision is the caller's decision on their own pending approval
+	// ("approved" or "rejected").
+	Decision string `json:"decision"`
+}
+
+// ChangeRequestApprovalDecisionResponse is the response for
+// POST /change-requests/{id}/approvals/decision.
+type ChangeRequestApprovalDecisionResponse struct {
+	// ID is the UUID of the approval record that was decided.
+	ID string `json:"id"`
+	// State is the resulting state of the approval ("approved" or "rejected").
+	State string `json:"state"`
+}
+
 // VulnerabilityPriority is a string enum for the priority (severity) of a product vulnerability.
 type VulnerabilityPriority string
 

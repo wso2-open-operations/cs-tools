@@ -283,6 +283,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 		mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
 		mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
+		mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
 	}
 
 	if timeCardHandler != nil {
