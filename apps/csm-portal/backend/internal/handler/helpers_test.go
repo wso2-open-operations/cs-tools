@@ -399,6 +399,7 @@ func (m *mockEntityIncidentClient) PatchIncident(ctx context.Context, id string,
 type mockEntityProblemClient struct {
 	searchProblemsFn func(ctx context.Context, body []byte) ([]byte, error)
 	getProblemFn     func(ctx context.Context, id string) ([]byte, error)
+	createProblemFn  func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
@@ -411,6 +412,13 @@ func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byt
 func (m *mockEntityProblemClient) GetProblem(ctx context.Context, id string) ([]byte, error) {
 	if m.getProblemFn != nil {
 		return m.getProblemFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityProblemClient) CreateProblem(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createProblemFn != nil {
+		return m.createProblemFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }

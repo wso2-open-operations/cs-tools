@@ -3199,6 +3199,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /problems:
+    post:
+      summary: Create a new problem (ServiceNow data source only).
+      operationId: postProblems
+      security:
+        - bearerAuth: []
+      requestBody:
+        description: Problem create payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProblemPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems/{id}:
     get:
       summary: Get a single problem by ID (ServiceNow data source only).
@@ -3370,6 +3421,22 @@ components:
           type: string
         testPlan:
           type: string
+        isCustomerApproved:
+          type: boolean
+          description: >-
+            Records the customer's approval decision on the change request.
+            Mutually exclusive with isCustomerReviewed and requestApproval.
+        isCustomerReviewed:
+          type: boolean
+          description: >-
+            Records the customer's post-implementation review decision.
+            Mutually exclusive with isCustomerApproved and requestApproval.
+        requestApproval:
+          type: boolean
+          description: >-
+            Transitions the change request from New to Assess and requests
+            approval. Mutually exclusive with isCustomerApproved and
+            isCustomerReviewed.
 
     PatchChangeRequestResponse:
       type: object
@@ -5905,6 +5972,13 @@ components:
             approvedOn:
               type: string
               nullable: true
+            legalNextStates:
+              type: array
+              items:
+                type: string
+              description: >-
+                States the change request can legally transition to from its
+                current state, given its type and workflow position.
 
     TaskSummary:
       type: object
@@ -7319,6 +7393,23 @@ components:
         subject:
           type: string
           nullable: true
+
+    CreateProblemPayload:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+        category:
+          type: string
+        subcategory:
+          type: string
+        originCaseId:
+          type: string
+          format: uuid
+        primaryIncidentId:
+          type: string
+          format: uuid
 
     ProblemSearchResponse:
       type: object

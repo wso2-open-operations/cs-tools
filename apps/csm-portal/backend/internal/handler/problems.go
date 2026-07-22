@@ -31,6 +31,7 @@ import (
 type entityProblemClient interface {
 	SearchProblems(ctx context.Context, body []byte) ([]byte, error)
 	GetProblem(ctx context.Context, id string) ([]byte, error)
+	CreateProblem(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // ProblemHandler handles HTTP requests for problem operations, delegating to the
@@ -77,6 +78,41 @@ func (h *ProblemHandler) SearchProblems(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateProblem handles POST /problems.
+func (h *ProblemHandler) CreateProblem(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.CreateProblem(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateProblem failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to create problem.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // GetProblem handles GET /problems/{id}.

@@ -162,6 +162,12 @@ func (c *Client) SearchProblems(ctx context.Context, body []byte) ([]byte, error
 	return c.do(ctx, http.MethodPost, "/problems/search", body)
 }
 
+// CreateProblem calls POST /problems on the entity service to create a new problem.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) CreateProblem(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/problems", body)
+}
+
 // GetProblem calls GET /problems/{id} on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) GetProblem(ctx context.Context, id string) ([]byte, error) {
