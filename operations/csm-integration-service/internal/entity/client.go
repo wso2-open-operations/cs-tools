@@ -138,18 +138,18 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		const maxErrBody = 256
+		excerpt, err := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+		if err != nil {
+			return nil, fmt.Errorf("entity: read error response body: %w", err)
+		}
+		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
+	}
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("entity: read response body: %w", err)
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		const maxErrBody = 256
-		excerpt := respBody
-		if len(excerpt) > maxErrBody {
-			excerpt = excerpt[:maxErrBody]
-		}
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 	}
 
 	return respBody, nil
