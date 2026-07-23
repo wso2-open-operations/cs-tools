@@ -16,14 +16,24 @@
 
 import { Avatar, Box, Chip, Paper, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
 import { pickAccessibleText } from "@utils/contrastText";
-import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { sanitizeRichTextHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
+import { useDarkMode } from "@utils/useDarkMode";
 import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
+import {
+  convertCodeTagsToHtml,
+  hasDisplayableContent,
+  hasSingleCodeWrapper,
+  linkifyBareUrls,
+  stripAllCodeBlocks,
+  stripCodeWrapper,
+  stripCustomerCommentAddedLabel,
+} from "@features/csm-cases/utils/commentContent";
 import type {
   CsmCaseComment,
   CsmCommentAuthorRole,
@@ -31,6 +41,20 @@ import type {
 
 interface CsmCaseCommentBubbleProps {
   comment: CsmCaseComment;
+  /** Opens the fullscreen image preview for an inline `<img>` in the comment body. */
+  onImageClick?: (src: string) => void;
+}
+
+const SAFE_PROTOCOLS = ["http:", "https:"];
+
+function isSafeHref(href: string | undefined): href is string {
+  if (!href || typeof href !== "string") return false;
+  try {
+    const parsed = new URL(href, "https://invalid.invalid");
+    return SAFE_PROTOCOLS.includes(parsed.protocol);
+  } catch {
+    return false;
+  }
 }
 
 const ROLE_LABEL: Record<CsmCommentAuthorRole, string> = {
@@ -52,22 +76,116 @@ const ROLE_COLOR: Record<
 
 export default function CsmCaseCommentBubble({
   comment,
-}: CsmCaseCommentBubbleProps): JSX.Element {
+  onImageClick,
+}: CsmCaseCommentBubbleProps): JSX.Element | null {
   const theme = useTheme();
+  const isDarkMode = useDarkMode();
+  const contentRef = useRef<HTMLDivElement>(null);
   const isBot = comment.authorRole === "chatbot";
   // A chatbot (Novera) message body is Markdown; render it to HTML first. Every
-  // other comment body is already rich-text HTML. Both go through the same
-  // sanitiser before injection.
+  // other comment body is already rich-text HTML and goes through the same
+  // code-wrapper/label-stripping pipeline the customer portal uses, since bot
+  // replies never carry ServiceNow's [code] wrapper tags or the "Customer
+  // comment added" label.
+  const preprocessed = useMemo(() => {
+    if (isBot) return markdownToHtml(comment.bodyHtml);
+    const raw = comment.bodyHtml ?? "";
+    const isFullCodeWrap = hasSingleCodeWrapper(raw);
+    const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
+    const afterCode = isFullCodeWrap
+      ? stripCodeWrapper(raw)
+      : codeBlockCount > 1
+        ? stripAllCodeBlocks(raw)
+        : convertCodeTagsToHtml(raw);
+    return stripCustomerCommentAddedLabel(afterCode);
+  }, [comment.bodyHtml, isBot]);
+  const darkModeHtml = isDarkMode
+    ? stripLightModeInlineStyles(preprocessed)
+    : preprocessed;
   const safeHtml = useMemo(
-    () =>
-      sanitizeRichTextHtml(
-        isBot ? markdownToHtml(comment.bodyHtml) : comment.bodyHtml,
-      ),
-    [comment.bodyHtml, isBot],
+    () => sanitizeRichTextHtml(darkModeHtml),
+    [darkModeHtml],
   );
   const { resolvedHtml, isLoading: isImagesLoading } =
     useResolvedInlineImageHtml(safeHtml);
+  // Applied last, on the already-resolved/sanitized HTML — no re-sanitize.
+  const renderHtml = useMemo(
+    () => linkifyBareUrls(resolvedHtml),
+    [resolvedHtml],
+  );
+
+  const setImageA11yAttributes = useCallback((root: HTMLDivElement) => {
+    root.querySelectorAll("img").forEach((image) => {
+      image.setAttribute("tabindex", "0");
+      image.setAttribute("role", "button");
+      image.setAttribute("aria-label", "Open image preview");
+    });
+  }, []);
+
+  const setAnchorAttributes = useCallback((root: HTMLDivElement) => {
+    root.querySelectorAll("a").forEach((anchor) => {
+      const href = anchor.getAttribute("href") ?? "";
+      if (!isSafeHref(href)) return;
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    });
+  }, []);
+
+  const handleClick = useCallback(
+    (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "IMG" && target instanceof HTMLImageElement) {
+        const src = target.src || target.getAttribute("src");
+        if (src && onImageClick) {
+          e.preventDefault();
+          onImageClick(src);
+        }
+      }
+    },
+    [onImageClick],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target instanceof HTMLImageElement &&
+        (e.key === "Enter" || e.key === " ")
+      ) {
+        const src = target.src || target.getAttribute("src");
+        if (src && onImageClick) {
+          e.preventDefault();
+          onImageClick(src);
+        }
+      }
+    },
+    [onImageClick],
+  );
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    setImageA11yAttributes(el);
+    setAnchorAttributes(el);
+    el.addEventListener("click", handleClick);
+    el.addEventListener("keydown", handleKeyDown);
+    return () => {
+      el.removeEventListener("click", handleClick);
+      el.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [
+    handleClick,
+    handleKeyDown,
+    setImageA11yAttributes,
+    setAnchorAttributes,
+    renderHtml,
+  ]);
+
   const isSystem = comment.authorRole === "system";
+
+  if (!hasDisplayableContent(comment)) {
+    return null;
+  }
 
   if (isSystem) {
     return (
@@ -88,6 +206,7 @@ export default function CsmCaseCommentBubble({
           <Skeleton variant="text" width="40%" sx={{ flex: 1 }} />
         ) : (
           <Box
+            ref={contentRef}
             sx={{
               flex: 1,
               minWidth: 0,
@@ -97,7 +216,7 @@ export default function CsmCaseCommentBubble({
               "& a": { color: "primary.main" },
               ...{ "& *": { fontSize: "0.875rem" } },
             }}
-            dangerouslySetInnerHTML={{ __html: resolvedHtml }}
+            dangerouslySetInnerHTML={{ __html: renderHtml }}
           />
         )}
         <Typography variant="caption" color="text.secondary">
@@ -194,7 +313,8 @@ export default function CsmCaseCommentBubble({
               fontSize: "0.85em",
             },
             "& a": { color: "primary.main" },
-            "& img": { maxWidth: "100%" },
+            "& img": { maxWidth: "100%", cursor: onImageClick ? "pointer" : "default" },
+            "& br": { display: "block", content: '""', mt: 0.5 },
             "& blockquote": {
               borderLeft: 3,
               borderColor: "divider",
@@ -209,7 +329,13 @@ export default function CsmCaseCommentBubble({
             // wraps each in `.md-table-wrap`, which scrolls horizontally while
             // the table keeps its native display (preserving a11y table roles).
             "& .md-table-wrap": { overflowX: "auto", maxWidth: "100%", my: 0.75 },
+            // Raw (non-markdown) `<table>` elements from backend HTML aren't
+            // wrapped in `.md-table-wrap`, so give the table itself the same
+            // horizontal-scroll behavior directly.
             "& table": {
+              display: "block",
+              overflowX: "auto",
+              maxWidth: "100%",
               width: "max-content",
               minWidth: "100%",
               borderCollapse: "collapse",
@@ -227,7 +353,7 @@ export default function CsmCaseCommentBubble({
           {isImagesLoading ? (
             <Skeleton variant="rounded" width="100%" height={120} />
           ) : (
-            <Box dangerouslySetInnerHTML={{ __html: resolvedHtml }} />
+            <Box ref={contentRef} dangerouslySetInnerHTML={{ __html: renderHtml }} />
           )}
         </Box>
       </Paper>
