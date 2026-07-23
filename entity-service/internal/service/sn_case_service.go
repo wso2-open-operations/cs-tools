@@ -77,6 +77,31 @@ type snCase struct {
 	} `json:"cause"`
 	ResolutionNotes *string `json:"resolutionNotes"`
 	ResolvedOn      *string `json:"resolvedOn"`
+	// WatchList carries the watchers on the case (four SN glide_lists collapsed into one
+	// list by Ballerina). Confirmed present on the Choreo GET /cases/{id} response
+	// (CaseResponse.watchList in digiops-cs modules/servicenow/types.bal).
+	WatchList []snWatchListUser `json:"watchList"`
+	// AutoclosureStep/AutoclosureStateTime surface ServiceNow's real staged auto-closure
+	// sequence (u_autoclosure_step / u_autoclosure_state_time), confirmed live against a
+	// held case on wso2sndev (see EntityLayerSpec-2026-07-23.md item 6). Ballerina's
+	// Case/CaseResponse carry matching autoclosureStep/autoclosureStateTime fields (added
+	// on the ballerina-case-field-additions branch, not yet merged to digiops-cs main --
+	// the closest field on main today, hasAutoClosed, means something different: case has
+	// already been auto-closed, not "where the case sits in the auto-closure sequence").
+	AutoclosureStep *string `json:"autoclosureStep"`
+	// AutoclosureStateTime is when the auto-closure sequence next advances (e.g. the
+	// "eligible again after" date for a held case).
+	AutoclosureStateTime *string `json:"autoclosureStateTime"`
+}
+
+// snWatchListUser mirrors the watch-list user shape ServiceNow/Ballerina returns on both
+// the case detail read (CaseResponse.watchList) and the update-case response
+// (snUpdateCaseResponse.Case.WatchList below).
+type snWatchListUser struct {
+	ID       string  `json:"id"`
+	UserName string  `json:"userName"`
+	Name     *string `json:"name"`
+	Email    *string `json:"email"`
 }
 
 type snCaseEntityRef struct {
@@ -111,6 +136,13 @@ type snCaseAccount struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// CreTeam and SreTeam resolve the account's CRE/SRE group refs. Per the project
+	// owner's resolution, SN's u_integration_cs_team maps to CreTeam and u_sre_team maps
+	// to SreTeam -- both refs to sys_user_group. Ballerina's Case/CaseResponse.account
+	// gained matching fields on ballerina-case-field-additions, not yet merged to
+	// digiops-cs main.
+	CreTeam *snCaseEntityRef `json:"creTeam"`
+	SreTeam *snCaseEntityRef `json:"sreTeam"`
 }
 
 type snCaseState struct {
@@ -578,6 +610,18 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	}
 	if c.Account != nil {
 		cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
+		// CRE/SRE team (see snCaseAccount.CreTeam/SreTeam doc comment) pass through once
+		// Ballerina's matching fields land on digiops-cs main; until then these are nil.
+		if c.Account.CreTeam != nil {
+			if id := sysidToUUID(c.Account.CreTeam.ID); id != "" {
+				cv.AccountDetails.CreTeam = &domain.EntityRef{ID: id, Name: c.Account.CreTeam.Name}
+			}
+		}
+		if c.Account.SreTeam != nil {
+			if id := sysidToUUID(c.Account.SreTeam.ID); id != "" {
+				cv.AccountDetails.SreTeam = &domain.EntityRef{ID: id, Name: c.Account.SreTeam.Name}
+			}
+		}
 	}
 	if len(c.LinkedServiceRequests) > 0 {
 		lsr := make([]domain.LinkedServiceRequestRef, 0, len(c.LinkedServiceRequests))
@@ -603,6 +647,30 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 			return domain.CaseView{}, fmt.Errorf("sn get case: parse resolvedOn %q: %w", *c.ResolvedOn, err)
 		}
 		cv.ResolvedOn = &resolvedOn
+	}
+	if len(c.WatchList) > 0 {
+		wl := make([]domain.WatchListUser, 0, len(c.WatchList))
+		for _, u := range c.WatchList {
+			wlu := domain.WatchListUser{ID: sysidToUUID(u.ID), UserName: u.UserName}
+			if u.Name != nil {
+				wlu.Name = *u.Name
+			}
+			if u.Email != nil {
+				wlu.Email = *u.Email
+			}
+			wl = append(wl, wlu)
+		}
+		cv.WatchList = wl
+	}
+	// AutoclosureStep/AutoclosureStateTime pass through once Ballerina's matching fields
+	// (see snCase field doc comments) land on digiops-cs main; until then these are nil.
+	cv.AutoclosureStep = c.AutoclosureStep
+	if c.AutoclosureStateTime != nil && *c.AutoclosureStateTime != "" {
+		autoclosureStateTime, err := time.Parse(snCreatedOnLayout, *c.AutoclosureStateTime)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse autoclosureStateTime %q: %w", *c.AutoclosureStateTime, err)
+		}
+		cv.AutoclosureStateTime = &autoclosureStateTime
 	}
 
 	return cv, nil
@@ -796,7 +864,28 @@ type snUpdateCasePayload struct {
 	ResolutionCode *int     `json:"resolutionCode,omitempty"`
 	Cause          *string  `json:"cause,omitempty"`
 	CloseNotes     *string  `json:"closeNotes,omitempty"`
-	ParentID       *string  `json:"parentId,omitempty"`
+	// ParentID writes the native task.parent field. Confirmed already supported by
+	// digiops-cs (servicenow:CaseUpdatePayload.parentId + validateCaseUpdatePayload in
+	// utils.bal already validate it as an exactly-one-field option) -- fully wired.
+	ParentID *string `json:"parentId,omitempty"`
+	// RelatedCaseID writes the looser, non-hierarchical u_related_case cross-link.
+	// servicenow:CaseUpdatePayload's relatedCaseId field + validateCaseUpdatePayload
+	// support (ballerina-case-field-additions branch, not yet merged to digiops-cs main).
+	RelatedCaseID *string `json:"relatedCaseId,omitempty"`
+	// AutocloseHoldUntil places the case on hold in ServiceNow's staged auto-closure
+	// sequence, internally setting u_autoclosure_step = ON_HOLD and
+	// u_autoclosure_state_time = this date together. Matching field on
+	// servicenow:CaseUpdatePayload added on ballerina-case-field-additions, not yet
+	// merged to digiops-cs main.
+	AutocloseHoldUntil *string `json:"autocloseHoldUntil,omitempty"`
+	// Title/Description/DeploymentID/DeployedProductID as PATCH-time fields (previously
+	// servicenow:CaseUpdatePayload only supported these at create time, via
+	// CaseCreatePayload) -- added on ballerina-case-field-additions, not yet merged to
+	// digiops-cs main.
+	Title             *string `json:"title,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	DeploymentID      *string `json:"deploymentId,omitempty"`
+	DeployedProductID *string `json:"deployedProductId,omitempty"`
 }
 
 // snResolutionStates are the state keys that allow resolution fields.
@@ -949,11 +1038,31 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.ParentID != nil {
 		fieldCount++
 	}
+	if req.RelatedCaseID != nil {
+		fieldCount++
+	}
+	if req.AutocloseHoldUntil != nil {
+		fieldCount++
+	}
+	if req.Subject != nil {
+		fieldCount++
+	}
+	if req.Description != nil {
+		fieldCount++
+	}
+	if req.DeploymentID != nil {
+		fieldCount++
+	}
+	if req.DeployedProductID != nil {
+		fieldCount++
+	}
+	const fieldList = "state, severity, workState, watchList, assigneeEmail, parentId, relatedCaseId, " +
+		"autocloseHoldUntil, subject, description, deploymentId, or deployedProductId"
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, severity, workState, watchList, assigneeEmail, or parentId must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of " + fieldList + " must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, workState, watchList, assigneeEmail, or parentId may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of " + fieldList + " may be provided per request"}
 	}
 	if hasResolutionFields && req.State == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is also provided"}
@@ -1023,6 +1132,43 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 		sysid := uuidToSysid(*req.ParentID)
 		payload.ParentID = &sysid
+	}
+	if req.RelatedCaseID != nil {
+		if err := validateUUIDs("relatedCaseId", []string{*req.RelatedCaseID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.RelatedCaseID)
+		payload.RelatedCaseID = &sysid
+	}
+	if req.AutocloseHoldUntil != nil {
+		holdUntil := req.AutocloseHoldUntil.Format(snCreatedOnLayout)
+		payload.AutocloseHoldUntil = &holdUntil
+	}
+	if req.Subject != nil {
+		if *req.Subject == "" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "subject cannot be empty"}
+		}
+		payload.Title = req.Subject
+	}
+	if req.Description != nil {
+		if *req.Description == "" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "description cannot be empty"}
+		}
+		payload.Description = req.Description
+	}
+	if req.DeploymentID != nil {
+		if err := validateUUIDs("deploymentId", []string{*req.DeploymentID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.DeploymentID)
+		payload.DeploymentID = &sysid
+	}
+	if req.DeployedProductID != nil {
+		if err := validateUUIDs("deployedProductId", []string{*req.DeployedProductID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.DeployedProductID)
+		payload.DeployedProductID = &sysid
 	}
 
 	raw, err := s.client.Patch(ctx, "/cases/"+uuidToSysid(req.ID), token, payload)
