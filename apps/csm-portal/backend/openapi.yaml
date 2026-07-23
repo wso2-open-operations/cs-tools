@@ -130,7 +130,8 @@ paths:
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
         `workState`, `watchList`, `assigneeEmail`, `parentId`, `subject`, `description`,
-        `deploymentId`, `deployedProductId`, `relatedCaseId`, `autocloseHoldUntil`, or `fixEta`.
+        `deploymentId`, `deployedProductId`, `relatedCaseId`, `autocloseHoldUntil`, `fixEta`,
+        `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`.
         `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when
         the ServiceNow data source is active.
       operationId: patchCasesId
@@ -2244,6 +2245,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /tags/search:
+    get:
+      summary: Search existing free-text tags by label (ServiceNow data source only).
+      description: >
+        Forwards the q and limit query parameters to the integration service as-is and
+        returns the matching tags.
+      operationId: searchTags
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Free-text search query matched against tag labels.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of tags to return.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Matching tags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tag'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
@@ -4303,8 +4360,9 @@ components:
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
         `subject`, `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`,
-        `autocloseHoldUntil`, or `fixEta` must be provided. `watchList`, `assigneeEmail`,
-        `parentId`, and `autocloseHoldUntil` are supported only for the ServiceNow data source.
+        `autocloseHoldUntil`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`
+        must be provided. `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are
+        supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
       oneOf:
@@ -4321,6 +4379,9 @@ components:
         - required: [relatedCaseId]
         - required: [autocloseHoldUntil]
         - required: [fixEta]
+        - required: [bestCaseFixEta]
+        - required: [mostLikelyFixEta]
+        - required: [worstCaseFixEta]
       properties:
         state:
           type: string
@@ -4401,6 +4462,21 @@ components:
           description: >
             Sets the customer-facing fix-commitment date/time for the case. This is the only
             fix-ETA field exposed by this API; internal-only estimates are not surfaced.
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sets the best-case fix-commitment date/time estimate for the case.
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sets the most-likely fix-commitment date/time estimate for the case.
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sets the worst-case fix-commitment date/time estimate for the case.
 
     UpdateCaseResponse:
       type: object
@@ -5120,6 +5196,21 @@ components:
           description: >-
             The single customer-facing fix-commitment date/time for the case. This is the
             only fix-ETA field exposed by this API; internal-only estimates are not surfaced.
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Best-case fix-commitment date/time estimate for the case.
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most-likely fix-commitment date/time estimate for the case.
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Worst-case fix-commitment date/time estimate for the case.
         tags:
           type: array
           nullable: true
