@@ -28,8 +28,9 @@ const TABS: { id: SecurityCenterTabId; label: string }[] = [
 
 // Mirrors the webapp's CsmSecurityCenterPage: Security reports (cases of type
 // "security_report_analysis") | Vulnerabilities (a separate, non-case-backed
-// entity). Read-only for this pass — "New security report" is deliberately
-// deferred, same call Engagements/Operations already made.
+// entity). "New security report" lives behind SecurityReportsTab's own Fab
+// (see NewSecurityReportPage.tsx) — Vulnerabilities stays read-only, there's no
+// create flow for that entity in either app.
 export default function SecurityCenterPage() {
   const [activeTab, setActiveTab] = useState<SecurityCenterTabId>("security_reports");
 
