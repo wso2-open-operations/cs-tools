@@ -422,11 +422,19 @@ export interface CsmCaseDetail extends CsmCaseRow {
   /** When the auto-closure sequence next advances (ServiceNow only). Read-only. */
   autoclosureStateTime?: string;
   /**
-   * The single customer-facing fix-commitment date/time for the case; `null`/
-   * absent when not set. Distinct from the backend-computed SLA clocks shown
-   * in {@link CaseSla} — this is a settable commitment, not a derived clock.
+   * The customer-facing fix-commitment date/time for the case; `null`/absent
+   * when not set. Distinct from the backend-computed SLA clocks shown in
+   * {@link CaseSla} — this is a settable commitment, not a derived clock. Also
+   * distinct from the three internal-only estimates below, which are never
+   * shared with the customer.
    */
   fixEta?: string | null;
+  /** Internal-only best-case fix estimate; `null`/absent when not set. */
+  bestCaseFixEta?: string | null;
+  /** Internal-only most-likely fix estimate; `null`/absent when not set. */
+  mostLikelyFixEta?: string | null;
+  /** Internal-only worst-case fix estimate; `null`/absent when not set. */
+  worstCaseFixEta?: string | null;
   /** Display name of the person who opened the case. */
   createdBy?: string;
   /** Email of the creator — used to tell a WSO2 engineer from a customer. */

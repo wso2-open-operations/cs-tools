@@ -291,15 +291,6 @@ export default function CaseMetaBand({
               </Typography>
             </Cell>
           )}
-          {!isAnnouncement && (
-            <Cell label="Watchers">
-              <Typography variant="body2" noWrap>
-                {c.watchers.length > 0
-                  ? c.watchers.map((w) => w.name).join(", ")
-                  : "None"}
-              </Typography>
-            </Cell>
-          )}
           <Cell label="Project" maxWidth={isAnnouncement ? 240 : undefined}>
             {c.projectId ? (
               <LinkText to={`/customers/projects/${c.projectId}`}>
@@ -359,12 +350,32 @@ export default function CaseMetaBand({
                   )}
                 </Typography>
               </Cell>
-              {c.fixEta && (
-                <Cell label="Fix ETA">
-                  <Typography variant="body2" noWrap>
-                    {formatAbsoluteForUser(c.fixEta) ?? "—"}
-                  </Typography>
-                </Cell>
+              {(c.fixEta ||
+                c.bestCaseFixEta ||
+                c.mostLikelyFixEta ||
+                c.worstCaseFixEta) && (
+                <>
+                  <Cell label="Fix ETA">
+                    <Typography variant="body2" noWrap>
+                      {formatAbsoluteForUser(c.fixEta) ?? "—"}
+                    </Typography>
+                  </Cell>
+                  <Cell label="Best case fix ETA">
+                    <Typography variant="body2" noWrap>
+                      {formatAbsoluteForUser(c.bestCaseFixEta) ?? "—"}
+                    </Typography>
+                  </Cell>
+                  <Cell label="Most likely fix ETA">
+                    <Typography variant="body2" noWrap>
+                      {formatAbsoluteForUser(c.mostLikelyFixEta) ?? "—"}
+                    </Typography>
+                  </Cell>
+                  <Cell label="Worst case fix ETA">
+                    <Typography variant="body2" noWrap>
+                      {formatAbsoluteForUser(c.worstCaseFixEta) ?? "—"}
+                    </Typography>
+                  </Cell>
+                </>
               )}
             </>
           )}

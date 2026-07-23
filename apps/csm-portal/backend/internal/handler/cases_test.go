@@ -2095,3 +2095,344 @@ func TestSearchCasesForwardsTagsFilter(t *testing.T) {
 		t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
 	}
 }
+
+func TestPatchCaseBestCaseFixEta(t *testing.T) {
+	// bestCaseFixEta is a pure pass-through single-field PATCH variant, same shape as
+	// the existing fixEta test. It does not trip the state/workState peek, so
+	// patchCaseFn is invoked directly with the raw body and the upstream response
+	// passes through unchanged.
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const reqBody = `{"bestCaseFixEta":"2026-08-01T00:00:00Z"}`
+	const upstream = `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","bestCaseFixEta":"2026-08-01T00:00:00Z"}}`
+
+	var capturedBody []byte
+	client := &mockEntityCaseClient{
+		patchCaseFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+			capturedBody = body
+			return []byte(upstream), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+	r.SetPathValue("id", testCaseID)
+	w := httptest.NewRecorder()
+	h.PatchCase(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+	assertContentType(t, w, "application/json")
+
+	if string(capturedBody) != reqBody {
+		t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+	}
+
+	var wrapper struct {
+		Case struct {
+			BestCaseFixEta string `json:"bestCaseFixEta"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
+		t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
+	}
+	if wrapper.Case.BestCaseFixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("case.bestCaseFixEta = %q, want %q", wrapper.Case.BestCaseFixEta, "2026-08-01T00:00:00Z")
+	}
+}
+
+func TestPatchCaseMostLikelyFixEta(t *testing.T) {
+	// mostLikelyFixEta is a pure pass-through single-field PATCH variant, same
+	// shape as the existing fixEta test.
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const reqBody = `{"mostLikelyFixEta":"2026-08-01T00:00:00Z"}`
+	const upstream = `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","mostLikelyFixEta":"2026-08-01T00:00:00Z"}}`
+
+	var capturedBody []byte
+	client := &mockEntityCaseClient{
+		patchCaseFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+			capturedBody = body
+			return []byte(upstream), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+	r.SetPathValue("id", testCaseID)
+	w := httptest.NewRecorder()
+	h.PatchCase(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+	assertContentType(t, w, "application/json")
+
+	if string(capturedBody) != reqBody {
+		t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+	}
+
+	var wrapper struct {
+		Case struct {
+			MostLikelyFixEta string `json:"mostLikelyFixEta"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
+		t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
+	}
+	if wrapper.Case.MostLikelyFixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("case.mostLikelyFixEta = %q, want %q", wrapper.Case.MostLikelyFixEta, "2026-08-01T00:00:00Z")
+	}
+}
+
+func TestPatchCaseWorstCaseFixEta(t *testing.T) {
+	// worstCaseFixEta is a pure pass-through single-field PATCH variant, same
+	// shape as the existing fixEta test.
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const reqBody = `{"worstCaseFixEta":"2026-08-01T00:00:00Z"}`
+	const upstream = `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","worstCaseFixEta":"2026-08-01T00:00:00Z"}}`
+
+	var capturedBody []byte
+	client := &mockEntityCaseClient{
+		patchCaseFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+			capturedBody = body
+			return []byte(upstream), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+	r.SetPathValue("id", testCaseID)
+	w := httptest.NewRecorder()
+	h.PatchCase(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+	assertContentType(t, w, "application/json")
+
+	if string(capturedBody) != reqBody {
+		t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+	}
+
+	var wrapper struct {
+		Case struct {
+			WorstCaseFixEta string `json:"worstCaseFixEta"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
+		t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
+	}
+	if wrapper.Case.WorstCaseFixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("case.worstCaseFixEta = %q, want %q", wrapper.Case.WorstCaseFixEta, "2026-08-01T00:00:00Z")
+	}
+}
+
+func TestGetCasePassesThroughNewFixEtaFields(t *testing.T) {
+	// bestCaseFixEta, mostLikelyFixEta, and worstCaseFixEta are additive
+	// entity-response fields with zero BFF handling — GetCase's injectNextStates
+	// merge must not drop or alter them, matching the existing fixEta coverage.
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const upstreamBody = `{
+		"id":"` + testCaseID + `",
+		"state":"open",
+		"bestCaseFixEta":"2026-07-28T00:00:00Z",
+		"mostLikelyFixEta":"2026-08-01T00:00:00Z",
+		"worstCaseFixEta":"2026-08-15T00:00:00Z"
+	}`
+	client := &mockEntityCaseClient{
+		getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+			return []byte(upstreamBody), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+	r.SetPathValue("id", testCaseID)
+	w := httptest.NewRecorder()
+	h.GetCase(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+
+	type resp struct {
+		BestCaseFixEta   string `json:"bestCaseFixEta"`
+		MostLikelyFixEta string `json:"mostLikelyFixEta"`
+		WorstCaseFixEta  string `json:"worstCaseFixEta"`
+	}
+	got := decodeJSON[resp](t, w)
+
+	if got.BestCaseFixEta != "2026-07-28T00:00:00Z" {
+		t.Errorf("bestCaseFixEta = %q, want 2026-07-28T00:00:00Z", got.BestCaseFixEta)
+	}
+	if got.MostLikelyFixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("mostLikelyFixEta = %q, want 2026-08-01T00:00:00Z", got.MostLikelyFixEta)
+	}
+	if got.WorstCaseFixEta != "2026-08-15T00:00:00Z" {
+		t.Errorf("worstCaseFixEta = %q, want 2026-08-15T00:00:00Z", got.WorstCaseFixEta)
+	}
+}
+
+func TestSearchCasesPassesThroughNewFixEtaFields(t *testing.T) {
+	// Item: the 3 new fix-ETA fields flow through SearchCases's response verbatim,
+	// same zero-BFF-handling pattern as fixEta/tags on GetCase.
+	const upstream = `{"cases":[{"id":"11111111-1111-1111-1111-111111111111","bestCaseFixEta":"2026-07-28T00:00:00Z","mostLikelyFixEta":"2026-08-01T00:00:00Z","worstCaseFixEta":"2026-08-15T00:00:00Z"}],"total":1}`
+	client := &mockEntityCaseClient{
+		searchCasesFn: func(_ context.Context, _ []byte) ([]byte, error) {
+			return []byte(upstream), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(`{}`)))
+	w := httptest.NewRecorder()
+	h.SearchCases(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+
+	type resp struct {
+		Cases []struct {
+			BestCaseFixEta   string `json:"bestCaseFixEta"`
+			MostLikelyFixEta string `json:"mostLikelyFixEta"`
+			WorstCaseFixEta  string `json:"worstCaseFixEta"`
+		} `json:"cases"`
+	}
+	got := decodeJSON[resp](t, w)
+	if len(got.Cases) != 1 {
+		t.Fatalf("cases = %+v, want 1 entry", got.Cases)
+	}
+	if got.Cases[0].BestCaseFixEta != "2026-07-28T00:00:00Z" {
+		t.Errorf("bestCaseFixEta = %q, want 2026-07-28T00:00:00Z", got.Cases[0].BestCaseFixEta)
+	}
+	if got.Cases[0].MostLikelyFixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("mostLikelyFixEta = %q, want 2026-08-01T00:00:00Z", got.Cases[0].MostLikelyFixEta)
+	}
+	if got.Cases[0].WorstCaseFixEta != "2026-08-15T00:00:00Z" {
+		t.Errorf("worstCaseFixEta = %q, want 2026-08-15T00:00:00Z", got.Cases[0].WorstCaseFixEta)
+	}
+}
+
+func TestSearchTags(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=10", nil)
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects a non-numeric limit", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=abc", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects a limit above the documented maximum", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=101", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("accepts a limit of exactly 100", func(t *testing.T) {
+		var capturedLimit int
+		client := &mockEntityCaseClient{
+			searchTagsFn: func(_ context.Context, _ string, limit int) ([]byte, error) {
+				capturedLimit = limit
+				return []byte(`{"tags":[]}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=100", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if capturedLimit != 100 {
+			t.Errorf("upstream received limit %d, want 100", capturedLimit)
+		}
+	})
+
+	t.Run("forwards q and limit verbatim, returns 200 with matching tags", func(t *testing.T) {
+		var capturedQuery string
+		var capturedLimit int
+		client := &mockEntityCaseClient{
+			searchTagsFn: func(_ context.Context, query string, limit int) ([]byte, error) {
+				capturedQuery = query
+				capturedLimit = limit
+				return []byte(`{"tags":[{"id":"22222222-2222-2222-2222-222222222222","label":"micro-gw","color":null}]}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=10", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedQuery != "micro" {
+			t.Errorf("upstream received q %q, want %q", capturedQuery, "micro")
+		}
+		if capturedLimit != 10 {
+			t.Errorf("upstream received limit %d, want %d", capturedLimit, 10)
+		}
+
+		var body struct {
+			Tags []struct {
+				ID    string  `json:"id"`
+				Label string  `json:"label"`
+				Color *string `json:"color"`
+			} `json:"tags"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
+		}
+		if len(body.Tags) != 1 || body.Tags[0].Label != "micro-gw" {
+			t.Errorf("tags = %+v, want a single micro-gw entry", body.Tags)
+		}
+	})
+
+	t.Run("works with no query parameters", func(t *testing.T) {
+		var capturedQuery string
+		var capturedLimit int
+		var called bool
+		client := &mockEntityCaseClient{
+			searchTagsFn: func(_ context.Context, query string, limit int) ([]byte, error) {
+				called = true
+				capturedQuery = query
+				capturedLimit = limit
+				return []byte(`{"tags":[]}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		if !called {
+			t.Fatal("expected entity SearchTags to be called")
+		}
+		if capturedQuery != "" {
+			t.Errorf("upstream received q %q, want empty", capturedQuery)
+		}
+		if capturedLimit != 0 {
+			t.Errorf("upstream received limit %d, want 0", capturedLimit)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to search tags.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					searchTagsFn: func(_ context.Context, _ string, _ int) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro", nil))
+				w := httptest.NewRecorder()
+				h.SearchTags(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

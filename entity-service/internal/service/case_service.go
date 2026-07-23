@@ -466,3 +466,7 @@ func (s *caseService) AddCaseTag(_ context.Context, _, _ string) (domain.Tag, er
 func (s *caseService) RemoveCaseTag(_ context.Context, _, _ string) error {
 	return &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
 }
+
+func (s *caseService) SearchTags(_ context.Context, _ string, _ int) ([]domain.Tag, error) {
+	return nil, &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
+}

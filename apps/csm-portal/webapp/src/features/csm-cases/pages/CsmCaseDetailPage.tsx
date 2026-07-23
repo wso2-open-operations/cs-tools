@@ -42,6 +42,7 @@ import {
   Paperclip,
   PauseCircle,
   Phone,
+  Users,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
@@ -107,6 +108,7 @@ import {
   CustomerContextWidget,
   ProductContextWidget,
   TagsWidget,
+  WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
 import { useGetCsmCaseCallRequests } from "@features/csm-cases/api/useCsmCaseCallRequests";
@@ -120,8 +122,12 @@ import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCards
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
-import { isBlankHtml, sanitizeDescriptionHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
 import { formatAbsoluteForUser } from "@utils/dateTime";
+import {
+  isBlankHtml,
+  sanitizeDescriptionHtml,
+  stripLightModeInlineStyles,
+} from "@utils/sanitizeHtml";
 import { useDarkMode } from "@utils/useDarkMode";
 import {
   publicCommentGateReason,
@@ -237,6 +243,7 @@ const SECONDARY_TOAST: Record<string, string> = {
 type CaseTabId =
   | "activities"
   | "details"
+  | "related"
   | "sla"
   | "attachments"
   | "time"
@@ -271,6 +278,7 @@ const TAB_DEFS: Array<{
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
+  { id: "related", label: "Related", icon: <Users size={16} /> },
   { id: "sla", label: "SLAs", icon: <Clock size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
@@ -281,7 +289,6 @@ const TAB_DEFS: Array<{
 export default function CsmCaseDetailPage(): JSX.Element {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavTransition();
-  const isDarkMode = useDarkMode();
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
   const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
@@ -393,6 +400,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     claims?.email?.split("@")[0] ||
     "Unknown engineer";
   const { showError } = useErrorBanner();
+  const isDarkMode = useDarkMode();
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
   const [metaCollapsed, setMetaCollapsed] = useState(false);
@@ -477,7 +485,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // above rather than an effect, to avoid an extra render pass.
   if (
     isAnnouncement &&
-    (activeTab === "sla" ||
+    (activeTab === "related" ||
+      activeTab === "sla" ||
       activeTab === "time" ||
       activeTab === "call-requests" ||
       activeTab === "tasks")
@@ -1565,12 +1574,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
           {TAB_DEFS.filter(
             (t) =>
               !isAnnouncement ||
-              (t.id !== "sla" &&
+              (t.id !== "related" &&
+                t.id !== "sla" &&
                 t.id !== "time" &&
                 t.id !== "call-requests" &&
                 t.id !== "tasks"),
           ).map((t) => {
-            // Counts shown only where the tab IS the list (unambiguous).
+            // Counts shown only where the tab IS the list (unambiguous). Not
+            // shown for "related" — it combines two lists (watchers + child
+            // cases), so a single count would be misleading.
             const count =
               t.id === "sla"
                 ? slaList?.count
@@ -1798,14 +1810,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
               </MetaCell>
             </Box>
           </Card>
-          {!isBlankHtml(c.description) && (
+          {/* The case description is not passively re-displayed here — it
+              already renders as the opening entry in the Activities tab's
+              feed (see the note near `safeComments` above). Editing it is
+              still available via the action bar's "Edit case details…" item
+              (EditCaseDetailsDialog), which is the only place the description
+              is shown for editing.
+
+              Exception: if comments/search failed, safeComments is empty and
+              the description never renders anywhere — fall back to a
+              read-only card here so the description isn't invisible whenever
+              the activity feed is unavailable. */}
+          {isCommentsError && !isBlankHtml(c.description) && (
             <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Typography variant="subtitle2">Description</Typography>
-              {/* `comments/search` already returns the description as the
-                  opening activity-feed entry (see the note near
-                  `safeComments` above), so the same text may appear here and
-                  as the first entry in the Activity tab — that's expected,
-                  not a bug. */}
               <Box
                 sx={{
                   typography: "body2",
@@ -1873,6 +1891,29 @@ export default function CsmCaseDetailPage(): JSX.Element {
               </Typography>
             )}
           </Card>
+        </Box>
+      )}
+
+      {activeTab === "related" && (
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "1fr",
+              md: "repeat(2, minmax(0, 1fr))",
+            },
+            alignItems: "start",
+          }}
+        >
+          {/* Watchers list — moved off the (single-line) overview Cell so a
+              long watch list has room to wrap as chips. "Manage watchers…" in
+              the action bar opens the same WatchersDialog regardless of which
+              tab is active; this button is a convenience shortcut to it. */}
+          <WatchersWidget
+            watchers={c.watchers}
+            onManage={() => setWatchersOpen(true)}
+          />
           <ChildCasesWidget caseId={c.id} />
         </Box>
       )}

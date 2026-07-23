@@ -102,6 +102,7 @@ type mockEntityCaseClient struct {
 	createCaseGithubIssueFn    func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	addCaseTagFn               func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	removeCaseTagFn            func(ctx context.Context, caseID, tagID string) ([]byte, error)
+	searchTagsFn               func(ctx context.Context, query string, limit int) ([]byte, error)
 }
 
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
@@ -221,6 +222,13 @@ func (m *mockEntityCaseClient) RemoveCaseTag(ctx context.Context, caseID, tagID 
 		return m.removeCaseTagFn(ctx, caseID, tagID)
 	}
 	return nil, nil
+}
+
+func (m *mockEntityCaseClient) SearchTags(ctx context.Context, query string, limit int) ([]byte, error) {
+	if m.searchTagsFn != nil {
+		return m.searchTagsFn(ctx, query, limit)
+	}
+	return []byte(`{"tags":[]}`), nil
 }
 
 // ----- mock updates client -----

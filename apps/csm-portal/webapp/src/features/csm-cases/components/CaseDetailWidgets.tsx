@@ -54,6 +54,7 @@ import type {
   CaseProductContext,
   CaseTag,
   CaseTimeLogEntry,
+  CaseWatcher,
 } from "@features/csm-cases/types/csmCases";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
 import {
@@ -338,6 +339,51 @@ export function TagsWidget({
               variant="outlined"
               onDelete={onRemove ? () => onRemove(t) : undefined}
               disabled={removingId === t.id}
+            />
+          ))}
+        </Box>
+      )}
+    </WidgetCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Watchers
+// ---------------------------------------------------------------------------
+
+export function WatchersWidget({
+  watchers,
+  onManage,
+}: {
+  watchers: CaseWatcher[];
+  /** Opens the "Manage watchers" dialog (`WatchersDialog`). Omit to hide the action. */
+  onManage?: () => void;
+}): JSX.Element {
+  return (
+    <WidgetCard
+      title="Watchers"
+      icon={<Users size={16} />}
+      action={
+        onManage ? (
+          <Button size="small" variant="text" onClick={onManage}>
+            Manage watchers
+          </Button>
+        ) : undefined
+      }
+    >
+      {watchers.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No one is watching this case.
+        </Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+          {watchers.map((w) => (
+            <Chip
+              key={w.id}
+              size="small"
+              variant="outlined"
+              icon={<User size={14} />}
+              label={w.isMe ? `${w.name} (you)` : w.name}
             />
           ))}
         </Box>

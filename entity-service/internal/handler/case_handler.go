@@ -20,8 +20,10 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -258,4 +260,28 @@ func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SearchTags handles GET /tags/search?q={query}&limit={limit}. Not scoped to a single case; used
+// for FE autocomplete when attaching a tag.
+func (h *CaseHandler) SearchTags(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeServiceError(w, r, &apierror.ValidationError{Msg: "limit must be a non-negative integer"})
+			return
+		}
+		limit = parsed
+	}
+
+	tags, err := h.svc.SearchTags(r.Context(), query, limit)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string][]domain.Tag{"tags": tags})
 }

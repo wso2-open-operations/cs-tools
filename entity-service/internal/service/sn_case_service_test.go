@@ -62,7 +62,7 @@ func sysid32(r byte) string {
 }
 
 var (
-	testWLCaseSysid    = sysid32('a')
+	testWLCaseSysid  = sysid32('a')
 	testProjectSysid = sysid32('b')
 	testWatcherSysid = sysid32('c')
 	testAccountSysid = sysid32('d')
@@ -413,9 +413,9 @@ func jsonEqual(got, want any) bool {
 const (
 	testCaseUUID  = "11111111-1111-1111-1111-111111111111"
 	testCaseSysid = "11111111111111111111111111111111"
-	testTagUUID         = "22222222-2222-2222-2222-222222222222"
-	testTagSysid        = "22222222222222222222222222222222"
-	testTaskSysid       = "33333333333333333333333333333333"
+	testTagUUID   = "22222222-2222-2222-2222-222222222222"
+	testTagSysid  = "22222222222222222222222222222222"
+	testTaskSysid = "33333333333333333333333333333333"
 )
 
 // --- UpdateCase: field-count union (including the new fixEta variant) ---
@@ -662,5 +662,261 @@ func TestSNCaseService_RemoveCaseTag_Success(t *testing.T) {
 	}
 	if !deleteCalled {
 		t.Fatalf("expected DELETE /cases/{id}/tags/{tagId} to be called")
+	}
+}
+
+// --- Internal-only fix-ETA estimates: best/most-likely/worst case ---
+
+func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t *testing.T) {
+	svc := NewServiceNowCaseService(nil, nil)
+	closed := domain.CaseStateClosed
+	fixEta := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	bestCase := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	mostLikely := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+	worstCase := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		req  domain.UpdateCaseRequest
+	}{
+		{
+			name: "state and bestCaseFixEta both provided",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, State: &closed, BestCaseFixEta: &bestCase},
+		},
+		{
+			name: "fixEta and mostLikelyFixEta both provided",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, FixEta: &fixEta, MostLikelyFixEta: &mostLikely},
+		},
+		{
+			name: "bestCaseFixEta and worstCaseFixEta both provided",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &bestCase, WorstCaseFixEta: &worstCase},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req)
+			if _, ok := err.(*apierror.ValidationError); !ok {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+func TestSNCaseService_UpdateCase_InternalFixEtaVariants_EachIndependentlySettable(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     func(t time.Time) domain.UpdateCaseRequest
+		bodyKey string
+	}{
+		{
+			name: "bestCaseFixEta",
+			req: func(t time.Time) domain.UpdateCaseRequest {
+				return domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &t}
+			},
+			bodyKey: "bestCaseFixEta",
+		},
+		{
+			name: "mostLikelyFixEta",
+			req: func(t time.Time) domain.UpdateCaseRequest {
+				return domain.UpdateCaseRequest{ID: testCaseUUID, MostLikelyFixEta: &t}
+			},
+			bodyKey: "mostLikelyFixEta",
+		},
+		{
+			name: "worstCaseFixEta",
+			req: func(t time.Time) domain.UpdateCaseRequest {
+				return domain.UpdateCaseRequest{ID: testCaseUUID, WorstCaseFixEta: &t}
+			},
+			bodyKey: "worstCaseFixEta",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			mux := http.NewServeMux()
+			mux.HandleFunc("/cases/"+testCaseSysid, func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				_ = json.NewEncoder(w).Encode(map[string]any{"message": "ok", "case": map[string]any{"id": testCaseSysid, "updatedOn": "2026-01-01 00:00:00"}})
+			})
+
+			client := newTestSNClient(t, mux)
+			svc := NewServiceNowCaseService(client, nil)
+
+			value := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+			_, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req(value))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			got, _ := gotBody[tt.bodyKey].(string)
+			want := "2026-03-01 12:00:00"
+			if got != want {
+				t.Fatalf("%s sent = %q, want %q", tt.bodyKey, got, want)
+			}
+		})
+	}
+}
+
+func TestSNCaseService_GetCaseByID_MapsInternalFixEtaFields(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cases/"+testCaseSysid, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": testCaseSysid, "internalId": "INT-1", "number": "CS0001",
+			"title": "t", "description": "d",
+			"createdOn": "2026-01-01 00:00:00", "createdBy": "a@example.com",
+			"project":          map[string]any{"id": "", "name": ""},
+			"deployment":       map[string]any{"id": "", "name": ""},
+			"deployedProduct":  map[string]any{"id": "", "name": "", "version": ""},
+			"bestCaseFixEta":   "2026-02-10 00:00:00",
+			"mostLikelyFixEta": "2026-02-15 00:00:00",
+			"worstCaseFixEta":  "2026-02-20 00:00:00",
+		})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), testCaseUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantBestCase := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
+	if cv.BestCaseFixEta == nil || !cv.BestCaseFixEta.Equal(wantBestCase) {
+		t.Fatalf("BestCaseFixEta = %v, want %v", cv.BestCaseFixEta, wantBestCase)
+	}
+	wantMostLikely := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	if cv.MostLikelyFixEta == nil || !cv.MostLikelyFixEta.Equal(wantMostLikely) {
+		t.Fatalf("MostLikelyFixEta = %v, want %v", cv.MostLikelyFixEta, wantMostLikely)
+	}
+	wantWorstCase := time.Date(2026, 2, 20, 0, 0, 0, 0, time.UTC)
+	if cv.WorstCaseFixEta == nil || !cv.WorstCaseFixEta.Equal(wantWorstCase) {
+		t.Fatalf("WorstCaseFixEta = %v, want %v", cv.WorstCaseFixEta, wantWorstCase)
+	}
+}
+
+func TestSNCaseService_UpdateCase_EchoesInternalFixEtaFieldsBack(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cases/"+testCaseSysid, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": "ok",
+			"case": map[string]any{
+				"id": testCaseSysid, "updatedOn": "2026-01-01 00:00:00",
+				"bestCaseFixEta":   "2026-02-10 00:00:00",
+				"mostLikelyFixEta": "2026-02-15 00:00:00",
+				"worstCaseFixEta":  "2026-02-20 00:00:00",
+			},
+		})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	bestCase := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
+	resp, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &bestCase})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantBestCase := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
+	if resp.Case.BestCaseFixEta == nil || !resp.Case.BestCaseFixEta.Equal(wantBestCase) {
+		t.Fatalf("BestCaseFixEta = %v, want %v", resp.Case.BestCaseFixEta, wantBestCase)
+	}
+	wantMostLikely := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	if resp.Case.MostLikelyFixEta == nil || !resp.Case.MostLikelyFixEta.Equal(wantMostLikely) {
+		t.Fatalf("MostLikelyFixEta = %v, want %v", resp.Case.MostLikelyFixEta, wantMostLikely)
+	}
+	wantWorstCase := time.Date(2026, 2, 20, 0, 0, 0, 0, time.UTC)
+	if resp.Case.WorstCaseFixEta == nil || !resp.Case.WorstCaseFixEta.Equal(wantWorstCase) {
+		t.Fatalf("WorstCaseFixEta = %v, want %v", resp.Case.WorstCaseFixEta, wantWorstCase)
+	}
+}
+
+// --- SearchTags ---
+
+func TestSNCaseService_SearchTags_Success(t *testing.T) {
+	var gotQuery string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tags/search", func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("q")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tags": []map[string]any{
+				{"id": testTagSysid, "label": "micro-gw", "color": "#f97316"},
+			},
+		})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	tags, err := svc.SearchTags(contextWithUserIDToken("token"), "micro", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotQuery != "micro" {
+		t.Fatalf("q sent = %q, want micro", gotQuery)
+	}
+	if len(tags) != 1 {
+		t.Fatalf("expected 1 tag, got %d", len(tags))
+	}
+	if tags[0].ID != testTagUUID {
+		t.Fatalf("tag.ID = %q, want %q", tags[0].ID, testTagUUID)
+	}
+	if tags[0].Label != "micro-gw" {
+		t.Fatalf("tag.Label = %q, want micro-gw", tags[0].Label)
+	}
+	if tags[0].Color == nil || *tags[0].Color != "#f97316" {
+		t.Fatalf("tag.Color = %v, want #f97316", tags[0].Color)
+	}
+}
+
+func TestSNCaseService_SearchTags_ForwardsLimit(t *testing.T) {
+	var gotLimit string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tags/search", func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		_ = json.NewEncoder(w).Encode(map[string]any{"tags": []map[string]any{}})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	if _, err := svc.SearchTags(contextWithUserIDToken("token"), "micro", 5); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotLimit != "5" {
+		t.Fatalf("limit sent = %q, want 5", gotLimit)
+	}
+}
+
+func TestSNCaseService_SearchTags_EmptyQuery(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tags/search", func(w http.ResponseWriter, r *http.Request) {
+		if q := r.URL.Query().Get("q"); q != "" {
+			t.Fatalf("expected no q param, got %q", q)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"tags": []map[string]any{}})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	tags, err := svc.SearchTags(contextWithUserIDToken("token"), "", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tags) != 0 {
+		t.Fatalf("expected 0 tags, got %d", len(tags))
+	}
+}
+
+func TestCaseService_SearchTags_ServiceUnavailable(t *testing.T) {
+	svc := &caseService{}
+
+	if _, err := svc.SearchTags(contextWithUserIDToken("token"), "micro", 0); err == nil {
+		t.Fatalf("expected error")
+	} else if _, ok := err.(*apierror.ServiceUnavailableError); !ok {
+		t.Fatalf("expected *apierror.ServiceUnavailableError, got %T: %v", err, err)
 	}
 }

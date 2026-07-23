@@ -23,6 +23,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Typography,
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
@@ -35,91 +36,181 @@ import {
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
 
+/** One of the four independent fix-ETA fields this dialog can set. */
+export type FixEtaField =
+  | "fixEta"
+  | "bestCaseFixEta"
+  | "mostLikelyFixEta"
+  | "worstCaseFixEta";
+
 interface SetFixEtaDialogProps {
-  /** Current fix-ETA, if any (ISO), shown as the picker's initial value. */
+  /** Current customer-facing fix-commitment date/time, if any (ISO). */
   currentFixEta?: string | null;
-  /** True while a PATCH is in flight; disables the actions. */
+  /** Current internal-only best-case estimate, if any (ISO). */
+  currentBestCaseFixEta?: string | null;
+  /** Current internal-only most-likely estimate, if any (ISO). */
+  currentMostLikelyFixEta?: string | null;
+  /** Current internal-only worst-case estimate, if any (ISO). */
+  currentWorstCaseFixEta?: string | null;
+  /** True while any of the four PATCHes is in flight; disables every field's Save. */
   isSaving: boolean;
   onClose: () => void;
-  /** Apply the new fix-ETA (`PATCH { fixEta }`), as a UTC ISO string. */
-  onSave: (fixEtaIso: string) => void;
+  /** Apply one field's new value (`PATCH { [field]: valueIso }`), as a UTC ISO string. */
+  onSave: (field: FixEtaField, valueIso: string) => void;
+}
+
+const FIELD_LABEL: Record<FixEtaField, string> = {
+  fixEta: "Fix ETA",
+  bestCaseFixEta: "Best case",
+  mostLikelyFixEta: "Most likely",
+  worstCaseFixEta: "Worst case",
+};
+
+interface FixEtaFieldRowProps {
+  field: FixEtaField;
+  currentValue?: string | null;
+  timeZone: string;
+  isSaving: boolean;
+  onSave: (field: FixEtaField, valueIso: string) => void;
 }
 
 /**
- * Set the case's single customer-facing fix-commitment date/time
- * (`fixEta` on `PATCH /cases/{id}`). Single-value date/time shape, modeled on
- * {@link SetAutocloseHoldDialog} but with a date **and** time component (like
- * {@link ScheduleCallDialog}'s custom-time picker) since a fix commitment is
- * a specific moment, not an end-of-day date. ServiceNow-source only; the
- * caller surfaces a rejection on another source.
+ * One independently-saved date/time field. Each row owns its own draft value
+ * and Save action — the four fields are unrelated PATCH variants (see
+ * `BeCaseUpdatePayload`), so saving one never requires the others to be filled.
+ */
+function FixEtaFieldRow({
+  field,
+  currentValue,
+  timeZone,
+  isSaving,
+  onSave,
+}: FixEtaFieldRowProps): JSX.Element {
+  const [value, setValue] = useState<string>(
+    currentValue ? formatDateTimeLocal(new Date(currentValue)) : "",
+  );
+  const parsed = parseDateTimeLocal(value);
+  const canSubmit = !!parsed;
+
+  const handleSave = (): void => {
+    if (!canSubmit) return;
+    const iso = zonedInputToUtcIso(value, timeZone);
+    if (!iso) return;
+    onSave(field, iso);
+  };
+
+  return (
+    <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
+        <DateTimePicker
+          label={`${FIELD_LABEL[field]} (${timeZone})`}
+          value={parsed}
+          onChange={(next) =>
+            setValue(
+              next instanceof Date && !Number.isNaN(next.getTime())
+                ? formatDateTimeLocal(next)
+                : "",
+            )
+          }
+          disabled={isSaving}
+          slotProps={{
+            textField: { fullWidth: true, size: "small" },
+            field: { clearable: true },
+          }}
+        />
+      </LocalizationProvider>
+      <Button
+        variant="outlined"
+        size="small"
+        disabled={!canSubmit || isSaving}
+        loading={isSaving}
+        onClick={handleSave}
+        sx={{ flexShrink: 0, mt: 0.25 }}
+      >
+        Save
+      </Button>
+    </Box>
+  );
+}
+
+/**
+ * Set the case's four independent fix-ETA fields: the single customer-facing
+ * commitment (`fixEta` on `PATCH /cases/{id}`) plus three internal-only
+ * estimates (`bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta`) never
+ * shared with the customer. Each field is its own single-field PATCH variant
+ * (see `BeCaseUpdatePayload`), so every row saves independently — filling in
+ * one estimate never requires the others. ServiceNow-source only for
+ * `fixEta`; the caller surfaces a rejection on another source.
  */
 export default function SetFixEtaDialog({
   currentFixEta,
+  currentBestCaseFixEta,
+  currentMostLikelyFixEta,
+  currentWorstCaseFixEta,
   isSaving,
   onClose,
   onSave,
 }: SetFixEtaDialogProps): JSX.Element {
   const timeZone = resolveDisplayTimeZone();
-  const [value, setValue] = useState<string>(
-    currentFixEta ? formatDateTimeLocal(new Date(currentFixEta)) : "",
-  );
-
-  const parsed = parseDateTimeLocal(value);
-  const canSubmit = !!parsed;
-
-  const handleSubmit = (): void => {
-    if (!canSubmit) return;
-    const iso = zonedInputToUtcIso(value, timeZone);
-    if (!iso) return;
-    onSave(iso);
-  };
 
   return (
-    <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Set fix ETA</DialogTitle>
       <DialogContent>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 0.5 }}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           <Typography variant="body2" color="text.secondary">
-            Sets the customer-facing fix-commitment date/time for this case.
-            This is the only fix-ETA field the platform exposes — it is
-            distinct from the backend-computed SLA clocks shown on the SLAs
-            tab.
+            Each field below is saved independently — you don't need to fill
+            in every estimate to save one.
           </Typography>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DateTimePicker
-              label={`Fix ETA (${timeZone})`}
-              value={parsed}
-              onChange={(next) =>
-                setValue(
-                  next instanceof Date && !Number.isNaN(next.getTime())
-                    ? formatDateTimeLocal(next)
-                    : "",
-                )
-              }
-              disabled={isSaving}
-              slotProps={{
-                textField: {
-                  fullWidth: true,
-                  required: true,
-                  size: "small",
-                },
-                field: { clearable: true },
-              }}
+
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+            <Typography variant="caption" color="text.secondary">
+              Customer-facing fix-commitment date/time. Shared with the
+              customer — distinct from the backend-computed SLA clocks shown
+              on the SLAs tab.
+            </Typography>
+            <FixEtaFieldRow
+              field="fixEta"
+              currentValue={currentFixEta}
+              timeZone={timeZone}
+              isSaving={isSaving}
+              onSave={onSave}
             />
-          </LocalizationProvider>
+          </Box>
+
+          <Divider />
+
+          <Typography variant="subtitle2">Internal-only estimates</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: -1.5 }}>
+            Never shared with the customer.
+          </Typography>
+
+          <FixEtaFieldRow
+            field="bestCaseFixEta"
+            currentValue={currentBestCaseFixEta}
+            timeZone={timeZone}
+            isSaving={isSaving}
+            onSave={onSave}
+          />
+          <FixEtaFieldRow
+            field="mostLikelyFixEta"
+            currentValue={currentMostLikelyFixEta}
+            timeZone={timeZone}
+            isSaving={isSaving}
+            onSave={onSave}
+          />
+          <FixEtaFieldRow
+            field="worstCaseFixEta"
+            currentValue={currentWorstCaseFixEta}
+            timeZone={timeZone}
+            isSaving={isSaving}
+            onSave={onSave}
+          />
         </Box>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={isSaving}>
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          disabled={!canSubmit || isSaving}
-          loading={isSaving}
-          onClick={handleSubmit}
-        >
-          Save
+          Close
         </Button>
       </DialogActions>
     </Dialog>

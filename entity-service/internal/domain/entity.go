@@ -1056,10 +1056,17 @@ type CaseView struct {
 	// "eligible again after" date for a held case). Read-only (ServiceNow data source only).
 	AutoclosureStateTime *time.Time `json:"autoclosureStateTime,omitempty"`
 	// FixEta is the single customer-facing fix-commitment date/time
-	// (ServiceNow u_fix_eta_shared). Per project-owner decision, this is the only
-	// fix-ETA field exposed by this API; the three internal-only estimates
-	// (best/worst/most-likely case) are deliberately not surfaced anywhere.
+	// (ServiceNow u_fix_eta_shared).
 	FixEta *time.Time `json:"fixEta"`
+	// BestCaseFixEta is the internal-only best-case fix-commitment date
+	// (ServiceNow u_best_case_fix_eta). CSM-engineer-facing only.
+	BestCaseFixEta *time.Time `json:"bestCaseFixEta"`
+	// MostLikelyFixEta is the internal-only most-likely fix-commitment date
+	// (ServiceNow u_most_likely_fix_eta). CSM-engineer-facing only.
+	MostLikelyFixEta *time.Time `json:"mostLikelyFixEta"`
+	// WorstCaseFixEta is the internal-only worst-case fix-commitment date
+	// (ServiceNow u_worst_case_fix_eta). CSM-engineer-facing only.
+	WorstCaseFixEta *time.Time `json:"worstCaseFixEta"`
 	// Tags are the free-text labels attached to the case via ServiceNow's generic
 	// platform label/label_entry mechanism (not a case-specific column).
 	//
@@ -1158,10 +1165,11 @@ type SearchCasesResponse struct {
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
 // Exactly one of State, Severity, WorkState, WatchList, AssigneeEmail, ParentID, RelatedCaseID,
-// AutocloseHoldUntil, Subject, Description, DeploymentID, DeployedProductID, or FixEta must be
-// provided.
+// AutocloseHoldUntil, Subject, Description, DeploymentID, DeployedProductID, FixEta,
+// BestCaseFixEta, MostLikelyFixEta, or WorstCaseFixEta must be provided.
 // WatchList, AssigneeEmail, ParentID, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
-// DeploymentID, DeployedProductID, and FixEta are only supported for the ServiceNow data source.
+// DeploymentID, DeployedProductID, FixEta, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta
+// are only supported for the ServiceNow data source.
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
 type UpdateCaseRequest struct {
@@ -1205,6 +1213,18 @@ type UpdateCaseRequest struct {
 	// u_fix_eta_shared). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists yet
 	// for this field — see snUpdateCasePayload.FixEta in sn_case_service.go.
 	FixEta *time.Time `json:"fixEta"`
+	// BestCaseFixEta sets the internal-only best-case fix-commitment date (ServiceNow
+	// u_best_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists
+	// yet for this field — see snUpdateCasePayload.BestCaseFixEta in sn_case_service.go.
+	BestCaseFixEta *time.Time `json:"bestCaseFixEta"`
+	// MostLikelyFixEta sets the internal-only most-likely fix-commitment date (ServiceNow
+	// u_most_likely_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support
+	// exists yet for this field — see snUpdateCasePayload.MostLikelyFixEta in sn_case_service.go.
+	MostLikelyFixEta *time.Time `json:"mostLikelyFixEta"`
+	// WorstCaseFixEta sets the internal-only worst-case fix-commitment date (ServiceNow
+	// u_worst_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists
+	// yet for this field — see snUpdateCasePayload.WorstCaseFixEta in sn_case_service.go.
+	WorstCaseFixEta *time.Time `json:"worstCaseFixEta"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -1238,6 +1258,21 @@ type UpdatedCase struct {
 	// (u_fix_eta_shared) back on a successful PATCH. Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
 	// UpdateCaseRequest.FixEta doc comment; always nil until Ballerina supports the write.
 	FixEta *time.Time `json:"fixEta,omitempty"`
+	// BestCaseFixEta echoes the updated internal-only best-case fix-commitment date
+	// (u_best_case_fix_eta) back on a successful PATCH. Ballerina support added on
+	// ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.BestCaseFixEta doc comment; always nil until Ballerina supports the write.
+	BestCaseFixEta *time.Time `json:"bestCaseFixEta,omitempty"`
+	// MostLikelyFixEta echoes the updated internal-only most-likely fix-commitment date
+	// (u_most_likely_fix_eta) back on a successful PATCH. Ballerina support added on
+	// ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.MostLikelyFixEta doc comment; always nil until Ballerina supports the write.
+	MostLikelyFixEta *time.Time `json:"mostLikelyFixEta,omitempty"`
+	// WorstCaseFixEta echoes the updated internal-only worst-case fix-commitment date
+	// (u_worst_case_fix_eta) back on a successful PATCH. Ballerina support added on
+	// ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.WorstCaseFixEta doc comment; always nil until Ballerina supports the write.
+	WorstCaseFixEta *time.Time `json:"worstCaseFixEta,omitempty"`
 }
 
 // WatchListUser is a compact user reference within the watch list.

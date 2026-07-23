@@ -575,8 +575,10 @@ paths:
       summary: Update a support case.
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
-        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
-        only when the ServiceNow data source is active.
+        `workState`, `watchList`, `assigneeEmail`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`,
+        or `worstCaseFixEta`. `watchList`, `assigneeEmail`, `fixEta`, `bestCaseFixEta`,
+        `mostLikelyFixEta`, and `worstCaseFixEta` are supported only when the ServiceNow data
+        source is active.
       operationId: patchCase
       parameters:
         - name: id
@@ -746,6 +748,55 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tags/search:
+    get:
+      summary: Search existing case tags, not scoped to any single case.
+      description: |
+        Returns tags whose label matches the free-text query, for use in FE autocomplete when
+        attaching a tag to a case. An empty/omitted `q` returns all known tags.
+        Only supported for the ServiceNow data source.
+      operationId: searchTags
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Free-text label query. Omit or leave empty to return all known tags.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+          description: Maximum number of tags to return.
+      responses:
+        "200":
+          description: Tags matching the query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchTagsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Case tags are only supported for the ServiceNow data source.
           content:
             application/json:
               schema:
@@ -3522,8 +3573,10 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
-        `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `fixEta`,
+        `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta` must be provided.
+        `watchList`, `assigneeEmail`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`, and
+        `worstCaseFixEta` are supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
       oneOf:
@@ -3532,6 +3585,10 @@ components:
         - required: [workState]
         - required: [watchList]
         - required: [assigneeEmail]
+        - required: [fixEta]
+        - required: [bestCaseFixEta]
+        - required: [mostLikelyFixEta]
+        - required: [worstCaseFixEta]
       properties:
         state:
           type: string
@@ -3609,6 +3666,28 @@ components:
         closeNotes:
           type: string
           description: Close notes. Only allowed when state is closed or solution_proposed.
+        fixEta:
+          type: string
+          format: date-time
+          description: The single customer-facing fix-commitment date/time (ServiceNow only).
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          description: >-
+            Internal-only best-case fix-commitment date, visible to CSM engineers only
+            (ServiceNow only).
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          description: >-
+            Internal-only most-likely fix-commitment date, visible to CSM engineers only
+            (ServiceNow only).
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          description: >-
+            Internal-only worst-case fix-commitment date, visible to CSM engineers only
+            (ServiceNow only).
 
     UpdateCaseResponse:
       type: object
@@ -3712,6 +3791,34 @@ components:
           format: date-time
           nullable: true
           description: Timestamp when the case was resolved, present when state is closed or solution_proposed.
+        fixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Echoes the updated customer-facing fix-commitment date/time back, present when
+            fixEta was the field updated.
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Echoes the updated internal-only best-case fix-commitment date back, present when
+            bestCaseFixEta was the field updated.
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Echoes the updated internal-only most-likely fix-commitment date back, present when
+            mostLikelyFixEta was the field updated.
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Echoes the updated internal-only worst-case fix-commitment date back, present when
+            worstCaseFixEta was the field updated.
 
     CaseLabelRef:
       type: object
@@ -3723,6 +3830,30 @@ components:
         label:
           type: string
           description: Human-readable label for the choice-list value.
+
+    Tag:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          description: Free-text label attached to a case.
+        color:
+          type: string
+          nullable: true
+          description: Optional display color for the label; null if the label carries none.
+
+    SearchTagsResponse:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
 
     WatchListUser:
       type: object
@@ -4177,6 +4308,34 @@ components:
           type: string
           nullable: true
           description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
+        fixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            The single customer-facing fix-commitment date/time. Populated for ServiceNow
+            cases; null otherwise.
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Internal-only best-case fix-commitment date, visible to CSM engineers only.
+            Populated for ServiceNow cases; null otherwise.
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Internal-only most-likely fix-commitment date, visible to CSM engineers only.
+            Populated for ServiceNow cases; null otherwise.
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Internal-only worst-case fix-commitment date, visible to CSM engineers only.
+            Populated for ServiceNow cases; null otherwise.
 
     CaseSearchView:
       type: object
