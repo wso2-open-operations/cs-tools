@@ -84,6 +84,8 @@ type entityCaseClient interface {
 	SearchCallRequests(ctx context.Context, body []byte) ([]byte, error)
 	PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 	CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	AddCaseTag(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	RemoveCaseTag(ctx context.Context, caseID, tagID string) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -546,6 +548,77 @@ func (h *CaseHandler) DeleteCaseAttachment(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// AddCaseTag handles POST /cases/{id}/tags.
+// Raw pass-through — free-text tag creation is validated at the entity layer.
+func (h *CaseHandler) AddCaseTag(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.AddCaseTag(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AddCaseTag failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to add case tag.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// RemoveCaseTag handles DELETE /cases/{id}/tags/{tagId}.
+// The entity service returns 204 No Content on success; forwarded as-is with no body.
+func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	tagID := r.PathValue("tagId")
+	if tagID == "" || !uuidRe.MatchString(tagID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if _, err := h.entity.RemoveCaseTag(r.Context(), caseID, tagID); err != nil {
+		slog.ErrorContext(r.Context(), "entity RemoveCaseTag failed", "userID", user.UserID, "caseID", caseID, "tagID", tagID, "err", err)
+		mapUpstreamError(w, err, "Failed to remove case tag.")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // PatchCase handles PATCH /cases/{id}.

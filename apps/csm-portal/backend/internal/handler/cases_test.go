@@ -1507,3 +1507,296 @@ func TestCreateCaseGithubIssue(t *testing.T) {
 		}
 	})
 }
+
+func TestAddCaseTag(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/tags", strings.NewReader(`{"label":"micro-gw"}`))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.AddCaseTag(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed case UUID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/tags", strings.NewReader(`{"label":"micro-gw"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.AddCaseTag(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/tags", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.AddCaseTag(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/tags", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.AddCaseTag(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards case id and body verbatim, returns 201", func(t *testing.T) {
+		const reqBody = `{"label":"micro-gw"}`
+		var capturedCaseID string
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			addCaseTagFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedCaseID = id
+				capturedBody = body
+				return []byte(`{"id":"22222222-2222-2222-2222-222222222222","label":"micro-gw","color":null}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/tags", strings.NewReader(reqBody)))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.AddCaseTag(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+		if capturedCaseID != caseID {
+			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, caseID)
+		}
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to add case tag.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					addCaseTagFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/tags", strings.NewReader(`{"label":"micro-gw"}`)))
+				r.SetPathValue("id", caseID)
+				w := httptest.NewRecorder()
+				h.AddCaseTag(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestRemoveCaseTag(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
+	const tagID = "22222222-2222-2222-2222-222222222222"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodDelete, "/cases/"+caseID+"/tags/"+tagID, nil)
+		r.SetPathValue("id", caseID)
+		r.SetPathValue("tagId", tagID)
+		w := httptest.NewRecorder()
+		h.RemoveCaseTag(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed case UUID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodDelete, "/cases/not-a-uuid/tags/"+tagID, nil))
+		r.SetPathValue("id", "not-a-uuid")
+		r.SetPathValue("tagId", tagID)
+		w := httptest.NewRecorder()
+		h.RemoveCaseTag(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed tag UUID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodDelete, "/cases/"+caseID+"/tags/not-a-uuid", nil))
+		r.SetPathValue("id", caseID)
+		r.SetPathValue("tagId", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.RemoveCaseTag(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards case id and tag id to upstream, returns 204 with no body", func(t *testing.T) {
+		var capturedCaseID, capturedTagID string
+		client := &mockEntityCaseClient{
+			removeCaseTagFn: func(_ context.Context, cID, tID string) ([]byte, error) {
+				capturedCaseID = cID
+				capturedTagID = tID
+				return nil, nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodDelete, "/cases/"+caseID+"/tags/"+tagID, nil))
+		r.SetPathValue("id", caseID)
+		r.SetPathValue("tagId", tagID)
+		w := httptest.NewRecorder()
+		h.RemoveCaseTag(w, r)
+
+		assertStatus(t, w, http.StatusNoContent)
+		if capturedCaseID != caseID {
+			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, caseID)
+		}
+		if capturedTagID != tagID {
+			t.Errorf("upstream received tagID %q, want %q", capturedTagID, tagID)
+		}
+		if w.Body.Len() != 0 {
+			t.Errorf("body = %q, want empty for 204", w.Body.String())
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to remove case tag.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					removeCaseTagFn: func(_ context.Context, _, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodDelete, "/cases/"+caseID+"/tags/"+tagID, nil))
+				r.SetPathValue("id", caseID)
+				r.SetPathValue("tagId", tagID)
+				w := httptest.NewRecorder()
+				h.RemoveCaseTag(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestPatchCaseFixEta(t *testing.T) {
+	// Item 3: fixEta is a pure pass-through single-field PATCH variant. It does not
+	// trip the state/workState peek, so patchCaseFn is invoked directly with the raw
+	// body and the upstream response passes through unchanged.
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const reqBody = `{"fixEta":"2026-08-01T00:00:00Z"}`
+	const upstream = `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","fixEta":"2026-08-01T00:00:00Z"}}`
+
+	var capturedBody []byte
+	client := &mockEntityCaseClient{
+		patchCaseFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+			capturedBody = body
+			return []byte(upstream), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+	r.SetPathValue("id", testCaseID)
+	w := httptest.NewRecorder()
+	h.PatchCase(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+	assertContentType(t, w, "application/json")
+
+	if string(capturedBody) != reqBody {
+		t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+	}
+
+	var wrapper struct {
+		Case struct {
+			FixEta string `json:"fixEta"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
+		t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
+	}
+	if wrapper.Case.FixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("case.fixEta = %q, want %q", wrapper.Case.FixEta, "2026-08-01T00:00:00Z")
+	}
+}
+
+func TestGetCasePassesThroughFixEtaAndTags(t *testing.T) {
+	// Item 3 (read) + item 8 (read): fixEta and tags are additive entity-response
+	// fields with zero BFF handling — GetCase's injectNextStates merge must not drop
+	// or alter them.
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const upstreamBody = `{
+		"id":"` + testCaseID + `",
+		"state":"open",
+		"fixEta":"2026-08-01T00:00:00Z",
+		"tags":[{"id":"33333333-3333-3333-3333-333333333333","label":"micro-gw","color":"#FF6600"}]
+	}`
+	client := &mockEntityCaseClient{
+		getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+			return []byte(upstreamBody), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+	r.SetPathValue("id", testCaseID)
+	w := httptest.NewRecorder()
+	h.GetCase(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+
+	type tag struct {
+		ID    string  `json:"id"`
+		Label string  `json:"label"`
+		Color *string `json:"color"`
+	}
+	type resp struct {
+		FixEta string `json:"fixEta"`
+		Tags   []tag  `json:"tags"`
+	}
+	got := decodeJSON[resp](t, w)
+
+	if got.FixEta != "2026-08-01T00:00:00Z" {
+		t.Errorf("fixEta = %q, want 2026-08-01T00:00:00Z", got.FixEta)
+	}
+	if len(got.Tags) != 1 || got.Tags[0].Label != "micro-gw" || got.Tags[0].Color == nil || *got.Tags[0].Color != "#FF6600" {
+		t.Errorf("tags = %+v, want a single micro-gw/#FF6600 entry", got.Tags)
+	}
+}
+
+func TestSearchCasesForwardsTagsFilter(t *testing.T) {
+	// Item 8: the tags search filter is forwarded through SearchCases verbatim —
+	// zero BFF handling.
+	var capturedBody []byte
+	client := &mockEntityCaseClient{
+		searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
+			capturedBody = body
+			return []byte(`{"cases":[],"total":0}`), nil
+		},
+	}
+	h := NewCaseHandler(client)
+	const reqBody = `{"filters":{"tags":["micro-gw","ws-policy"]}}`
+	r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
+	w := httptest.NewRecorder()
+	h.SearchCases(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+	if string(capturedBody) != reqBody {
+		t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+	}
+}

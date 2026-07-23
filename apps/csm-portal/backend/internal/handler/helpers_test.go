@@ -100,6 +100,8 @@ type mockEntityCaseClient struct {
 	searchCallRequestsFn       func(ctx context.Context, body []byte) ([]byte, error)
 	patchCallRequestFn         func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 	createCaseGithubIssueFn    func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	addCaseTagFn               func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	removeCaseTagFn            func(ctx context.Context, caseID, tagID string) ([]byte, error)
 }
 
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
@@ -205,6 +207,20 @@ func (m *mockEntityCaseClient) CreateCaseGithubIssue(ctx context.Context, caseID
 		return m.createCaseGithubIssueFn(ctx, caseID, body)
 	}
 	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) AddCaseTag(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.addCaseTagFn != nil {
+		return m.addCaseTagFn(ctx, caseID, body)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","label":"micro-gw","color":null}`), nil
+}
+
+func (m *mockEntityCaseClient) RemoveCaseTag(ctx context.Context, caseID, tagID string) ([]byte, error) {
+	if m.removeCaseTagFn != nil {
+		return m.removeCaseTagFn(ctx, caseID, tagID)
+	}
+	return nil, nil
 }
 
 // ----- mock updates client -----
@@ -697,6 +713,8 @@ func (m *mockEntityTaskSlaClient) GetTaskSla(ctx context.Context, id string) ([]
 type mockEntityTaskClient struct {
 	searchCaseTasksFn func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	getTaskFn         func(ctx context.Context, id string) ([]byte, error)
+	createCaseTaskFn  func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	updateTaskFn      func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityTaskClient) SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error) {
@@ -709,6 +727,20 @@ func (m *mockEntityTaskClient) SearchCaseTasks(ctx context.Context, caseID strin
 func (m *mockEntityTaskClient) GetTask(ctx context.Context, id string) ([]byte, error) {
 	if m.getTaskFn != nil {
 		return m.getTaskFn(ctx, id)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
+}
+
+func (m *mockEntityTaskClient) CreateCaseTask(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.createCaseTaskFn != nil {
+		return m.createCaseTaskFn(ctx, caseID, body)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
+}
+
+func (m *mockEntityTaskClient) UpdateTask(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.updateTaskFn != nil {
+		return m.updateTaskFn(ctx, id, body)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
 }
