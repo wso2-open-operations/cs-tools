@@ -27,3 +27,5 @@ replay_pid*
 .DS_Store
 target
 Config.toml
+
+apps/utilscli/utilscli

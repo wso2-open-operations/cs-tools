@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Utils CLI — Terminal native developer toolbox</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+    body { max-width: 900px; margin: 0 auto; padding: 56px 24px; line-height: 1.55; }
+    h1 { font-size: clamp(2.4rem, 8vw, 4.5rem); margin: 0; }
+    h2 { margin-top: 3rem; font-size: 1.35rem; }
+    .tagline { color: #8b949e; font-size: 1.2rem; margin: .25rem 0 2rem; }
+    code, pre { font: .9rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    pre { overflow-x: auto; padding: 18px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; }
+    .screenshot { margin: 2rem 0 0; }
+    .screenshot img { display: block; width: 100%; height: auto; border: 1px solid #30363d; border-radius: 10px; background: #161b22; }
+    .screenshot figcaption { margin-top: .65rem; color: #8b949e; font-size: .9rem; }
+    .tool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(255px, 1fr)); gap: 12px; }
+    .tool { position: relative; padding: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; }
+    .tool h3 { margin: 0; font: 600 1rem ui-monospace, SFMono-Regular, Menlo, monospace; color: #79c0ff; }
+    .tool p { min-height: 3.1em; margin: .55rem 0; color: #c9d1d9; }
+    .tool > code { display: block; overflow-x: auto; padding-right: 50px; color: #a5d6ff; white-space: nowrap; }
+    .copy-command { position: absolute; right: 12px; bottom: 12px; padding: 3px 7px; border: 1px solid #484f58; border-radius: 6px; background: #21262d; color: #e6edf3; cursor: pointer; font: .75rem ui-sans-serif, system-ui, sans-serif; opacity: 0; transition: opacity .15s ease, background .15s ease; }
+    .tool:hover .copy-command, .tool:focus-within .copy-command { opacity: 1; }
+    .copy-command:hover { background: #30363d; }
+    .install-command { position: relative; }
+    .install-command .copy-command { top: 10px; right: 10px; bottom: auto; padding: 4px 8px; font-size: 1rem; opacity: 1; }
+    .note { padding: 14px 16px; border-left: 3px solid #58a6ff; background: #161b22; border-radius: 0 8px 8px 0; }
+    .shortcut-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; padding: 0; list-style: none; }
+    .shortcut-grid li { padding: 12px 14px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; }
+    kbd { display: inline-block; margin-right: .35rem; padding: .1rem .4rem; border: 1px solid #484f58; border-bottom-width: 2px; border-radius: 5px; background: #21262d; color: #e6edf3; font: .82rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .command-search { width: 100%; box-sizing: border-box; margin: 0 0 1rem; padding: .7rem .85rem; border: 1px solid #30363d; border-radius: 8px; background: #161b22; color: #e6edf3; font: inherit; }
+    .command-search:focus { outline: 2px solid #58a6ff; outline-offset: 2px; }
+    .search-status { min-height: 1.55em; margin: -.55rem 0 1rem; color: #8b949e; font-size: .9rem; }
+    a { color: #58a6ff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Utils CLI</h1>
+    <p class="tagline">The terminal-native day-to-day utility toolbox for developers.</p>
+    <p>Encode, decode, format, generate, and inspect common support data without leaving your shell. Just run <code>uc</code> to show the interactive terminal UI, or use individual commands directly when you already know what you need.</p>
+    <figure class="screenshot">
+      <img src="utils-cli.png" alt="Utils CLI terminal UI showing available developer utility commands">
+      <figcaption>The terminal UI opens with <code>uc</code>.</figcaption>
+    </figure>
+  </header>
+
+  <section>
+    <h2>Install</h2>
+    <div class="install-command">
+      <pre><code id="install-script">curl -fsSL https://raw.githubusercontent.com/pavinduLakshan/utilscli/main/install.sh | sh</code></pre>
+      <button class="copy-command" type="button" data-copy-target="install-script" aria-label="Copy install command" title="Copy install command">⧉</button>
+    </div>
+    <p>The installer downloads the correct binary from the latest GitHub release, installs it to <code>~/.local/bin</code>, and adds that location to your shell startup file when needed. Open a new terminal afterwards.</p>
+      <pre><code>uc b64-encode osidosodi
+# b3NpZG9zb2Rp</code></pre>
+  </section>
+
+  <section>
+    <h2>Interactive terminal UI</h2>
+    <p>Run <code>uc</code> without arguments to browse tools, edit input, and inspect output without leaving the terminal. Long results have a scrollable output pane with a visible position indicator.</p>
+    <ul class="shortcut-grid">
+      <li><kbd>↑</kbd><kbd>↓</kbd>Move through the active pane.</li>
+      <li><kbd>Tab</kbd>Switch between tools, input, and output.</li>
+      <li><kbd>Ctrl</kbd>+<kbd>R</kbd>Run the selected tool.</li>
+      <li><kbd>PgUp</kbd><kbd>PgDn</kbd>Scroll long output by a page.</li>
+      <li><kbd>Home</kbd><kbd>End</kbd>Jump to the start or end of active output.</li>
+      <li><kbd>Mouse wheel</kbd>Scroll the output pane.</li>
+      <li><kbd>Ctrl</kbd>+<kbd>Y</kbd>Copy the complete output to the system clipboard.</li>
+      <li><kbd>Esc</kbd>Exit the interactive UI.</li>
+    </ul>
+    <p class="note">After copying, the output pane shows a green <strong>✓ Output copied</strong> confirmation. If there is no output or only terminal clipboard fallback is available, it shows a yellow explanatory message instead.</p>
+  </section>
+
+  <section>
+    <h2>Available commands</h2>
+    <p>Every tool in the terminal UI is also available as an individual command, so workflows can be scripted or run directly from your shell.</p>
+    <input id="command-search" class="command-search" type="search" placeholder="Search commands…" aria-label="Search available commands">
+    <p id="search-status" class="search-status" aria-live="polite"></p>
+    <div id="tool-grid" class="tool-grid">
+      <article class="tool"><h3>b64-encode</h3><p>Encode text as Unicode-safe Base64.</p><code>uc b64-encode "hello"</code></article>
+      <article class="tool"><h3>b64-decode</h3><p>Decode padded or unpadded Base64 text.</p><code>uc b64-decode aGVsbG8</code></article>
+      <article class="tool"><h3>b64url-encode</h3><p>Encode URL-safe Base64 without padding.</p><code>uc b64url-encode "hello"</code></article>
+      <article class="tool"><h3>b64url-decode</h3><p>Decode URL-safe Base64 text.</p><code>uc b64url-decode aGVsbG8</code></article>
+      <article class="tool"><h3>url-encode</h3><p>Percent-encode a URL component using RFC 3986 rules.</p><code>uc url-encode "hello world"</code></article>
+      <article class="tool"><h3>url-decode</h3><p>Decode a percent-encoded URL component.</p><code>uc url-decode hello%20world</code></article>
+      <article class="tool"><h3>html-encode</h3><p>Escape HTML special characters.</p><code>uc html-encode '&lt;a href="/"&gt;'</code></article>
+      <article class="tool"><h3>html-decode</h3><p>Decode common HTML entities.</p><code>uc html-decode '&amp;lt;hello&amp;gt;'</code></article>
+      <article class="tool"><h3>jwt</h3><p>Decode a JWT header and payload without verifying its signature.</p><code>uc jwt '&lt;header&gt;.&lt;payload&gt;.&lt;signature&gt;'</code></article>
+      <article class="tool"><h3>saml</h3><p>Decode Base64 SAML XML, including Redirect-binding deflate.</p><code>uc saml '&lt;base64-saml-message&gt;'</code></article>
+      <article class="tool"><h3>json-pretty</h3><p>Validate and indent JSON.</p><code>uc json-pretty '{"enabled":true}'</code></article>
+      <article class="tool"><h3>json-minify</h3><p>Validate JSON and remove insignificant whitespace.</p><code>uc json-minify '{ "enabled": true }'</code></article>
+      <article class="tool"><h3>xml-pretty</h3><p>Validate and indent XML.</p><code>uc xml-pretty '&lt;root&gt;&lt;item&gt;one&lt;/item&gt;&lt;/root&gt;'</code></article>
+      <article class="tool"><h3>xml-minify</h3><p>Validate XML and remove whitespace-only text nodes.</p><code>uc xml-minify '&lt;root&gt;  &lt;item&gt;one&lt;/item&gt; &lt;/root&gt;'</code></article>
+      <article class="tool"><h3>hash</h3><p>Generate MD5, SHA-1, SHA-256, and SHA-512 hashes.</p><code>uc hash "hello"</code></article>
+      <article class="tool"><h3>uuid</h3><p>Generate a version 4 UUID; supports <code>--count</code> up to 100.</p><code>uc uuid --count 3</code></article>
+      <article class="tool"><h3>password</h3><p>Generate a random password; supports <code>--length</code> and <code>--symbols</code>.</p><code>uc password --length 24 --symbols</code></article>
+      <article class="tool"><h3>timestamp</h3><p>Convert a Unix timestamp or an RFC 3339 date.</p><code>uc timestamp 1710000000</code></article>
+    </div>
+  </section>
+  <script>
+    async function copyCommand(command, button, normalLabel) {
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(command);
+        } else {
+          const input = document.createElement('textarea');
+          input.value = command;
+          document.body.append(input);
+          input.select();
+          document.execCommand('copy');
+          input.remove();
+        }
+        button.textContent = '✓';
+      } catch {
+        button.textContent = '×';
+      }
+      setTimeout(() => { button.textContent = normalLabel; }, 1400);
+    }
+
+    document.querySelectorAll('.tool > code').forEach((example) => {
+      const button = document.createElement('button');
+      button.className = 'copy-command';
+      button.type = 'button';
+      button.textContent = 'Copy';
+      button.setAttribute('aria-label', 'Copy command');
+      button.addEventListener('click', async () => {
+        copyCommand(example.textContent, button, 'Copy');
+      });
+      example.after(button);
+    });
+
+    document.querySelectorAll('[data-copy-target]').forEach((button) => {
+      const target = document.getElementById(button.dataset.copyTarget);
+      button.addEventListener('click', () => copyCommand(target.textContent, button, '⧉'));
+    });
+
+    const commandSearch = document.getElementById('command-search');
+    const tools = [...document.querySelectorAll('#tool-grid .tool')];
+    const searchStatus = document.getElementById('search-status');
+
+    commandSearch.addEventListener('input', () => {
+      const query = commandSearch.value.trim().toLowerCase();
+      let matches = 0;
+
+      tools.forEach((tool) => {
+        const matchesQuery = tool.textContent.toLowerCase().includes(query);
+        tool.hidden = !matchesQuery;
+        if (matchesQuery) matches += 1;
+      });
+
+      searchStatus.textContent = query
+        ? `${matches} command${matches === 1 ? '' : 's'} found`
+        : '';
+    });
+  </script>
+</body>
+</html>
