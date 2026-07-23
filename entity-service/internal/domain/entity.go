@@ -1039,6 +1039,29 @@ type CaseView struct {
 	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
 	Cause           *CaseCause          `json:"cause"`
 	ResolutionNotes *string             `json:"resolutionNotes"`
+	// FixEta is the single customer-facing fix-commitment date/time
+	// (ServiceNow u_fix_eta_shared). Per project-owner decision, this is the only
+	// fix-ETA field exposed by this API; the three internal-only estimates
+	// (best/worst/most-likely case) are deliberately not surfaced anywhere.
+	FixEta *time.Time `json:"fixEta"`
+	// Tags are the free-text labels attached to the case via ServiceNow's generic
+	// platform label/label_entry mechanism (not a case-specific column).
+	//
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina adapter exists yet for SN's generic
+	// label/label_entry tables. Confirmed real tag values exist in production
+	// (e.g. "micro-gw", "ws-policy", "node") but nothing in the current Choreo
+	// GET /cases/{id} contract returns them. This field is always nil until a
+	// Ballerina endpoint surfaces the case's tags.
+	Tags []Tag `json:"tags"`
+}
+
+// Tag is a free-text label attached to a case via ServiceNow's generic
+// label/label_entry mechanism. Color is optional because not every label in SN
+// carries a display color.
+type Tag struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Color *string `json:"color"`
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
@@ -1062,6 +1085,10 @@ type SearchCasesFilters struct {
 	WorkStates       []CaseWorkState  `json:"workStates"`
 	AssignedUserIDs  []string         `json:"assignedUserIds"`
 	ProductNames     []string         `json:"productNames"`
+	// Tags filters cases by attached free-text label. Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same
+	// gap as CaseView.Tags — no Ballerina search-filter support exists yet, so this
+	// filter is accepted here but has no effect until Ballerina wires it through.
+	Tags []string `json:"tags"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
@@ -1129,6 +1156,10 @@ type UpdateCaseRequest struct {
 	// record (case, incident, change request, or problem) as its parent. Platform UUID,
 	// converted to the backing data source's internal id before dispatch.
 	ParentID *string `json:"parentId"`
+	// FixEta sets the customer-facing fix-commitment date/time (ServiceNow
+	// u_fix_eta_shared). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists yet
+	// for this field — see snUpdateCasePayload.FixEta in sn_case_service.go.
+	FixEta *time.Time `json:"fixEta"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -1158,6 +1189,10 @@ type UpdatedCase struct {
 	CloseNotes     *string              `json:"closeNotes,omitempty"`
 	ResolvedOn     *time.Time           `json:"resolvedOn,omitempty"`
 	ParentCase     *CaseNumberRef       `json:"parentCase,omitempty"`
+	// FixEta echoes the updated customer-facing fix-commitment date/time
+	// (u_fix_eta_shared) back on a successful PATCH. Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.FixEta doc comment; always nil until Ballerina supports the write.
+	FixEta *time.Time `json:"fixEta,omitempty"`
 }
 
 // WatchListUser is a compact user reference within the watch list.
@@ -1258,6 +1293,18 @@ type CreateCaseCommentRequest struct {
 	CreatedBy string      `json:"-"`
 	Type      CommentType `json:"type"`
 	Content   string      `json:"content"`
+}
+
+// AddCaseTagRequest is the request body for POST /cases/{id}/tags.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): SN's tagging is the generic platform label/label_entry
+// mechanism (table-agnostic, not a case column), so it needs an entirely new
+// Ballerina/Choreo adapter — nothing in the current contract creates a label on a
+// case. This request/the AddCaseTag service method are implemented so the
+// entity-service side is ready once Ballerina adds the endpoint.
+type AddCaseTagRequest struct {
+	CaseID string `json:"-"`
+	Label  string `json:"label"`
 }
 
 // CreateCaseCommentResponse is the response for creating a new case comment.
@@ -2534,6 +2581,34 @@ type TaskDetail struct {
 	ParentCase        *CaseNumberRef `json:"parentCase"`
 	CreatedOn         string         `json:"createdOn"`
 	UpdatedOn         string         `json:"updatedOn"`
+}
+
+// CreateCaseTaskRequest is the request body for POST /cases/{id}/tasks.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): ServiceNow/Ballerina task support is read-only today
+// (SearchCaseTasks/GetTask only). No Choreo endpoint exists yet to create a
+// sn_customerservice_task record. This request/the CreateCaseTask service method
+// are implemented so the entity-service side is ready the moment Ballerina adds
+// the corresponding endpoint; until then, calling it returns a downstream error.
+type CreateCaseTaskRequest struct {
+	CaseID            string     `json:"-"`
+	Subject           string     `json:"subject"`
+	DueDate           *time.Time `json:"dueDate"`
+	AssignedToEmail   *string    `json:"assignedToEmail"`
+	VisibleToCustomer *bool      `json:"visibleToCustomer"`
+}
+
+// UpdateTaskRequest is the request body for PATCH /tasks/{id}. Exactly one of
+// State, AssignedToEmail, or DueDate must be provided per request, following the
+// same convention as UpdateCaseRequest.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as CreateCaseTaskRequest above — no Choreo
+// write endpoint exists yet for sn_customerservice_task.
+type UpdateTaskRequest struct {
+	ID              string     `json:"-"`
+	State           *string    `json:"state"`
+	AssignedToEmail *string    `json:"assignedToEmail"`
+	DueDate         *time.Time `json:"dueDate"`
 }
 
 // IncidentPriority represents the priority level of an incident.
