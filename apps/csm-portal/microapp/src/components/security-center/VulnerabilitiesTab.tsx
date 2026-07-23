@@ -83,7 +83,7 @@ function VulnerabilityCardSkeleton() {
 // Table/TablePagination (this app's list pages are all infinite-scrolled).
 export function VulnerabilitiesTab() {
   const [filters, setFilters] = useState<VulnerabilityFilters>(EMPTY_VULNERABILITY_FILTERS);
-  const debouncedSearch = useDebouncedValue(filters.search, 300);
+  const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
 
   const { data, isLoading, isError, refetch, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery(
     vulnerabilities.infinite({ ...filters, search: debouncedSearch }),
