@@ -5400,6 +5400,15 @@ components:
         updatedOn:
           type: string
           format: date-time
+        suspensionProcessState:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >
+            Free-form, per-dimension Account Closure Process (ACP) suspension-process
+            state (event type + action results) written by an existing ServiceNow
+            suspension flow. This is opaque JSON passed through as-is — its shape is
+            not defined or validated by this layer.
 
     ProjectUpdatePayload:
       type: object
@@ -5420,11 +5429,15 @@ components:
           type: string
         complianceViolationClosureState:
           type: string
-        acpLastNoticeWindow:
-          type: string
+        suspensionProcessState:
+          type: object
+          additionalProperties: true
+          nullable: true
           description: >
-            Last ACP (Account Closure Process) notice window the automation sent an
-            email for. Must be one of "90", "60", "30", "15", "7", "0".
+            Free-form, per-dimension Account Closure Process (ACP) suspension-process
+            state (event type + action results) written by an existing ServiceNow
+            suspension flow. This is opaque JSON passed through as-is — its shape is
+            not defined or validated by this layer.
 
     ProjectUpdateResponse:
       type: object
@@ -5456,8 +5469,9 @@ components:
             complianceViolationClosureState:
               type: string
               nullable: true
-            acpLastNoticeWindow:
-              type: string
+            suspensionProcessState:
+              type: object
+              additionalProperties: true
               nullable: true
 
     DeploymentCreatePayload:
