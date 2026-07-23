@@ -411,3 +411,27 @@ func (c *Client) SearchCaseTasks(ctx context.Context, caseID string, body []byte
 func (c *Client) GetTask(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/tasks/%s", url.PathEscape(id)), nil)
 }
+
+// CreateCaseTask calls POST /cases/{id}/tasks on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) CreateCaseTask(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/tasks", url.PathEscape(caseID)), body)
+}
+
+// UpdateTask calls PATCH /tasks/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) UpdateTask(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/tasks/%s", url.PathEscape(id)), body)
+}
+
+// AddCaseTag calls POST /cases/{id}/tags on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) AddCaseTag(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/tags", url.PathEscape(caseID)), body)
+}
+
+// RemoveCaseTag calls DELETE /cases/{id}/tags/{tagId} on the entity service.
+// Response is returned as raw JSON (typically empty for a 204 No Content).
+func (c *Client) RemoveCaseTag(ctx context.Context, caseID, tagID string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/cases/%s/tags/%s", url.PathEscape(caseID), url.PathEscape(tagID)), nil)
+}
