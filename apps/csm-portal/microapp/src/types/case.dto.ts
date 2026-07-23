@@ -288,8 +288,8 @@ export type CaseCause =
   | "INFRASTRUCTURE_SAAS_SIDE_OTHER"
   | "UNKNOWN";
 
-// Mirrors the webapp's BeCaseCreatePayload (the "case" type variant only — service_request and
-// security_report_analysis creation aren't in the microapp's scope, see NewCasePage.tsx).
+// Mirrors the webapp's BeCaseCreatePayload (the "case" type variant only — service_request
+// creation isn't in the microapp's scope, see NewCasePage.tsx).
 export interface CaseCreatePayloadDto {
   type: "case";
   projectId: string;
@@ -299,6 +299,20 @@ export interface CaseCreatePayloadDto {
   description: string;
   severity: CaseSeverity;
   issueType: CaseIssueType;
+}
+
+// The "security_report_analysis" type variant — see NewSecurityReportPage.tsx. Unlike the "case"
+// type, attachments are embedded directly in the create payload (raw base64, no `data:` prefix)
+// rather than uploaded separately via POST /attachments after the case exists; the backend
+// requires at least one entry.
+export interface SecurityReportCreatePayloadDto {
+  type: "security_report_analysis";
+  projectId: string;
+  deploymentId: string;
+  deployedProductId: string;
+  subject: string;
+  description: string;
+  attachments: { name: string; file: string }[];
 }
 
 export interface CreatedCaseDto {
