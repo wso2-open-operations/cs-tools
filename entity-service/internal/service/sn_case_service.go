@@ -92,6 +92,12 @@ type snCase struct {
 	// AutoclosureStateTime is when the auto-closure sequence next advances (e.g. the
 	// "eligible again after" date for a held case).
 	AutoclosureStateTime *string `json:"autoclosureStateTime"`
+	// FixEta is the single customer-facing fix-commitment date/time
+	// (u_fix_eta_shared). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina field currently
+	// surfaces this — the Choreo GET /cases/{id} response does not include a
+	// "fixEta" key today, so this always unmarshals to nil. Ask: add a
+	// "fixEta" (glide_date_time) field to servicenow:CaseResponse.
+	FixEta *string `json:"fixEta"`
 }
 
 // snWatchListUser mirrors the watch-list user shape ServiceNow/Ballerina returns on both
@@ -241,6 +247,10 @@ type snCaseFilters struct {
 	WorkStateKeys      []int    `json:"workStateKeys,omitempty"`
 	AssignedUserIDs    []string `json:"assignedUserIds,omitempty"`
 	ProductNames       []string `json:"productNames,omitempty"`
+	// Tags: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see domain.SearchCasesFilters.Tags doc comment.
+	// Forwarded to Choreo so filtering starts working the moment Ballerina adds
+	// support, but the current POST /cases/search contract ignores this field.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // snStateIDMap maps domain CaseState enums to SN numeric state IDs.
@@ -672,6 +682,17 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		}
 		cv.AutoclosureStateTime = &autoclosureStateTime
 	}
+	// FixEta passes through once Ballerina's matching field (see snCase.FixEta doc
+	// comment) lands; until then this is always nil.
+	if c.FixEta != nil && *c.FixEta != "" {
+		fixEta, err := time.Parse(snCreatedOnLayout, *c.FixEta)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse fixEta %q: %w", *c.FixEta, err)
+		}
+		cv.FixEta = &fixEta
+	}
+	// Tags are not populated: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see CaseView.Tags doc comment.
+	// cv.Tags is left nil.
 
 	return cv, nil
 }
@@ -886,6 +907,10 @@ type snUpdateCasePayload struct {
 	Description       *string `json:"description,omitempty"`
 	DeploymentID      *string `json:"deploymentId,omitempty"`
 	DeployedProductID *string `json:"deployedProductId,omitempty"`
+	// FixEta writes the customer-facing fix-commitment date/time (u_fix_eta_shared).
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write field exists yet for this — ask:
+	// add a "fixEta" field to servicenow:CaseUpdatePayload backed by u_fix_eta_shared.
+	FixEta *string `json:"fixEta,omitempty"`
 }
 
 // snResolutionStates are the state keys that allow resolution fields.
@@ -1009,6 +1034,8 @@ type snUpdateCaseResponse struct {
 		CloseNotes *string    `json:"closeNotes"`
 		ResolvedOn *string    `json:"resolvedOn"`
 		ParentCase *snCaseRef `json:"parentCase"`
+		// FixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see snUpdateCasePayload.FixEta doc comment.
+		FixEta *string `json:"fixEta"`
 	} `json:"case"`
 }
 
@@ -1056,8 +1083,11 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.DeployedProductID != nil {
 		fieldCount++
 	}
+	if req.FixEta != nil {
+		fieldCount++
+	}
 	const fieldList = "state, severity, workState, watchList, assigneeEmail, parentId, relatedCaseId, " +
-		"autocloseHoldUntil, subject, description, deploymentId, or deployedProductId"
+		"autocloseHoldUntil, subject, description, deploymentId, deployedProductId, or fixEta"
 	if fieldCount == 0 {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of " + fieldList + " must be provided"}
 	}
@@ -1170,6 +1200,24 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		sysid := uuidToSysid(*req.DeployedProductID)
 		payload.DeployedProductID = &sysid
 	}
+	if req.FixEta != nil {
+		fixEta := formatSNDate(req.FixEta)
+		payload.FixEta = &fixEta
+	}
+
+	// Close-gate: reject closing a case that still has an open, customer-visible task.
+	// This is the authoritative server-side check (item 1's close-gating requirement) --
+	// it only needs the existing read path (task search + task detail), so it is fully
+	// wired even though task writes themselves are still Ballerina-blocked.
+	if payload.StateKey != nil && *payload.StateKey == snStateIDMap[domain.CaseStateClosed] {
+		blocked, err := s.hasOpenVisibleTasks(ctx, uuidToSysid(req.ID), token)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if blocked {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "case cannot be closed while it has an open task visible to the customer"}
+		}
+	}
 
 	raw, err := s.client.Patch(ctx, "/cases/"+uuidToSysid(req.ID), token, payload)
 	if err != nil {
@@ -1243,6 +1291,15 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse resolvedAt %q: %w", *snResp.Case.ResolvedOn, err)
 		}
 		resp.Case.ResolvedOn = &resolvedOn
+	}
+	// FixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see snUpdateCasePayload.FixEta doc comment;
+	// snResp.Case.FixEta is always nil until Ballerina echoes it back.
+	if snResp.Case.FixEta != nil && *snResp.Case.FixEta != "" {
+		fixEta, err := time.Parse(snCreatedOnLayout, *snResp.Case.FixEta)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse fixEta %q: %w", *snResp.Case.FixEta, err)
+		}
+		resp.Case.FixEta = &fixEta
 	}
 
 	return resp, nil
@@ -1678,6 +1735,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			WorkStateKeys:      domainWorkStatesToSNIDs(req.Filters.WorkStates),
 			AssignedUserIDs:    uuidsToSysids(req.Filters.AssignedUserIDs),
 			ProductNames:       req.Filters.ProductNames,
+			Tags:               req.Filters.Tags,
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -1883,4 +1941,123 @@ func snWorkStateLabelToEnum(ws *snCaseLabel) *domain.CaseWorkState {
 	default:
 		return nil
 	}
+}
+
+// hasOpenVisibleTasks reports whether the case identified by caseSysid has any
+// open task that is visible to the customer. Used by the close-gate in
+// UpdateCase (item 1's authoritative "can this case close?" check).
+//
+// SN's case-scoped task listing (snTask/snCaseTasksResponse, see
+// sn_task_service.go) does not carry visibleToCustomer -- only the single-task
+// detail response (snTaskDetail) does. So this walks the non-closed tasks
+// returned by the search and fetches each one's detail to check visibility.
+// Case task counts are small in practice, so a single page (limit 100) is
+// fetched rather than paginating fully; if that assumption stops holding, this
+// should switch to paging until exhausted.
+func (s *snCaseService) hasOpenVisibleTasks(ctx context.Context, caseSysid, token string) (bool, error) {
+	payload := snCaseTasksSearchPayload{Pagination: snProjectPagination{Limit: 100, Offset: 0}}
+
+	raw, err := s.client.Post(ctx, "/cases/"+caseSysid+"/tasks/search", token, payload)
+	if err != nil {
+		return false, err
+	}
+
+	var tasksResp snCaseTasksResponse
+	if err := json.Unmarshal(raw, &tasksResp); err != nil {
+		return false, fmt.Errorf("sn update case: parse case tasks response: %w", err)
+	}
+
+	for _, t := range tasksResp.Tasks {
+		if t.State != nil && *t.State == "CLOSED" {
+			continue
+		}
+
+		detailRaw, err := s.client.Get(ctx, "/tasks/"+t.ID, token)
+		if err != nil {
+			return false, err
+		}
+		var detail snTaskDetail
+		if err := json.Unmarshal(detailRaw, &detail); err != nil {
+			return false, fmt.Errorf("sn update case: parse task detail response: %w", err)
+		}
+		if detail.VisibleToCustomer {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// snAddTagPayload is the Choreo POST /cases/{id}/tags request body.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for this. SN's
+// tagging is the generic platform label/label_entry mechanism (table-agnostic,
+// not a case column), so a new adapter is needed -- ask: add
+// POST /cases/{id}/tags (body: {"label": string}) and
+// DELETE /cases/{id}/tags/{tagId} to servicenow.bal, backed by the sys_label /
+// label_entry tables scoped to reference_table="sn_customerservice_case".
+type snAddTagPayload struct {
+	Label string `json:"label"`
+}
+
+// snTag mirrors the Choreo tag shape (once it exists).
+type snTag struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Color *string `json:"color"`
+}
+
+type snAddTagResponse struct {
+	Message string `json:"message"`
+	Tag     snTag  `json:"tag"`
+}
+
+// AddCaseTag attaches a free-text label to the case identified by caseID.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snAddTagPayload doc comment. This is implemented so
+// the entity-service side is ready the moment Ballerina adds the endpoint;
+// until then, calling it returns a downstream error (no such Choreo route today).
+func (s *snCaseService) AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error) {
+	if err := validateUUIDs("id", []string{caseID}); err != nil {
+		return domain.Tag{}, err
+	}
+	if strings.TrimSpace(label) == "" {
+		return domain.Tag{}, &apierror.ValidationError{Msg: "label is required"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	payload := snAddTagPayload{Label: label}
+	raw, err := s.client.Post(ctx, "/cases/"+uuidToSysid(caseID)+"/tags", token, payload)
+	if err != nil {
+		return domain.Tag{}, err
+	}
+
+	var snResp snAddTagResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.Tag{}, fmt.Errorf("sn add case tag: parse response: %w", err)
+	}
+
+	return domain.Tag{
+		ID:    sysidToUUID(snResp.Tag.ID),
+		Label: snResp.Tag.Label,
+		Color: snResp.Tag.Color,
+	}, nil
+}
+
+// RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snAddTagPayload doc comment (no such Choreo route today).
+func (s *snCaseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) error {
+	if err := validateUUIDs("id", []string{caseID}); err != nil {
+		return err
+	}
+	if err := validateUUIDs("tagId", []string{tagID}); err != nil {
+		return err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	_, err := s.client.Delete(ctx, "/cases/"+uuidToSysid(caseID)+"/tags/"+uuidToSysid(tagID), token)
+	return err
 }
