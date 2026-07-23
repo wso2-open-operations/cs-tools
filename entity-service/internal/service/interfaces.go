@@ -182,9 +182,11 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCase updates the state, severity, watch list, or assignee of a case.
+	// UpdateCase updates the state, severity, watch list, assignee, or fix ETA of a case.
 	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
-	// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
+	// WatchList, AssigneeEmail, and FixEta are only supported for the ServiceNow data source.
+	// Transitioning State to closed is rejected with a ValidationError if the case has any
+	// open task that is visible to the customer (the authoritative case-close gate).
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
 	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
 	// A ValidationError is returned for invalid input.
@@ -204,6 +206,15 @@ type CaseService interface {
 	// DeleteCaseAttachment removes the attachment identified by req.AttachmentID from the case.
 	// A NotFoundError is returned if the attachment does not exist.
 	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
+	// AddCaseTag attaches a free-text label to the case identified by caseID.
+	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty label).
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina adapter exists yet for ServiceNow's generic
+	// label/label_entry mechanism; see AddCaseTagRequest doc comment.
+	AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error)
+	// RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
+	// A NotFoundError is returned if the tag does not exist on the case.
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as AddCaseTag above.
+	RemoveCaseTag(ctx context.Context, caseID, tagID string) error
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
@@ -339,6 +350,16 @@ type TaskService interface {
 	// GetTask returns the full detail of a single task by its UUID.
 	// A NotFoundError is returned if the task does not exist.
 	GetTask(ctx context.Context, id string) (domain.TaskDetail, error)
+	// CreateCaseTask creates a new task on the case identified by caseID.
+	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty subject).
+	// Returns a ServiceUnavailableError until the downstream ballerina-tasks-fixeta-tags
+	// endpoint (not yet merged to digiops-cs main) ships; see CreateCaseTaskRequest doc comment.
+	CreateCaseTask(ctx context.Context, caseID string, req domain.CreateCaseTaskRequest) (domain.TaskDetail, error)
+	// UpdateTask updates exactly one of state, assignedToEmail, or dueDate on the task
+	// identified by taskID. A ValidationError is returned for invalid values, a malformed
+	// UUID, or if zero or more than one field is provided.
+	// Returns a ServiceUnavailableError until the downstream endpoint ships, same as CreateCaseTask above.
+	UpdateTask(ctx context.Context, taskID string, req domain.UpdateTaskRequest) (domain.TaskDetail, error)
 }
 
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.

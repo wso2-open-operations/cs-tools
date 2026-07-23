@@ -63,3 +63,42 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }
+
+// CreateCaseTask handles POST /cases/{id}/tasks.
+func (h *TaskHandler) CreateCaseTask(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+
+	var req domain.CreateCaseTaskRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = caseID
+
+	result, err := h.svc.CreateCaseTask(r.Context(), caseID, req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// UpdateTask handles PATCH /tasks/{id}.
+func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req domain.UpdateTaskRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = id
+
+	result, err := h.svc.UpdateTask(r.Context(), id, req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}

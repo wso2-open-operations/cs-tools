@@ -227,3 +227,35 @@ func (h *CaseHandler) DeleteCaseAttachment(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// AddCaseTag handles POST /cases/{id}/tags.
+func (h *CaseHandler) AddCaseTag(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+
+	var req domain.AddCaseTagRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = caseID
+
+	tag, err := h.svc.AddCaseTag(r.Context(), caseID, req.Label)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(tag)
+}
+
+// RemoveCaseTag handles DELETE /cases/{id}/tags/{tagId}.
+func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+	tagID := r.PathValue("tagId")
+
+	if err := h.svc.RemoveCaseTag(r.Context(), caseID, tagID); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

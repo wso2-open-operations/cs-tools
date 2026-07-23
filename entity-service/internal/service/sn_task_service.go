@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -176,6 +177,14 @@ func (s *snTaskService) GetTask(ctx context.Context, id string) (domain.TaskDeta
 		return domain.TaskDetail{}, fmt.Errorf("sn get task: parse response: %w", err)
 	}
 
+	return snTaskDetailToDomain(t), nil
+}
+
+// snTaskDetailToDomain converts an snTaskDetail (the Choreo GET /tasks/{id}
+// response shape, reused here for the create/update responses) to the domain
+// TaskDetail view. Shared by GetTask, CreateCaseTask, and UpdateTask so all
+// three map the wire shape identically.
+func snTaskDetailToDomain(t snTaskDetail) domain.TaskDetail {
 	detail := domain.TaskDetail{
 		ID:                sysidToUUID(t.ID),
 		State:             t.State,
@@ -213,5 +222,159 @@ func (s *snTaskService) GetTask(ctx context.Context, id string) (domain.TaskDeta
 		detail.ParentCase = ref
 	}
 
-	return detail, nil
+	return detail
+}
+
+// taskWritesUnavailable gates CreateCaseTask/UpdateTask while the downstream
+// Choreo task-write endpoints don't exist yet (tracked on the
+// ballerina-tasks-fixeta-tags branch, not yet merged to digiops-cs main). A
+// deliberate ServiceUnavailableError here -- rather than letting the request
+// reach the downstream client and come back as a generic 404 -- avoids
+// conflating "this operation isn't deployed yet" with "task not found".
+// Flip this to false once the downstream endpoints ship; the send logic below
+// is already wired and ready. A var (not const) so tests can flip it locally
+// to exercise that send logic ahead of the downstream endpoints existing.
+var taskWritesUnavailable = true
+const taskWritesUnavailableMsg = "task creation/update is not yet available: the downstream ServiceNow integration for this operation has not been deployed"
+
+// snCreateTaskPayload is the request body for the (not yet existing) Choreo
+// POST /cases/{id}/tasks endpoint.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): ServiceNow/Ballerina task support is read-only today
+// (TaskSearchPayload/TaskResponse only -- see modules/servicenow/types.bal).
+// No Choreo endpoint exists yet to create a sn_customerservice_task record.
+// Ask: add POST /cases/{id}/tasks (this payload shape) to servicenow.bal,
+// returning a TaskResponse-shaped detail.
+type snCreateTaskPayload struct {
+	Subject           string  `json:"subject"`
+	DueDate           *string `json:"dueDate,omitempty"`
+	AssignedToEmail   *string `json:"assignedToEmail,omitempty"`
+	VisibleToCustomer *bool   `json:"visibleToCustomer,omitempty"`
+}
+
+type snCreateTaskResponse struct {
+	Message string       `json:"message"`
+	Task    snTaskDetail `json:"task"`
+}
+
+// CreateCaseTask creates a new task on the case identified by caseID.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snCreateTaskPayload doc comment. Implemented so the
+// entity-service side is ready the moment Ballerina adds the endpoint; gated
+// with a deliberate ServiceUnavailableError (see taskWritesUnavailableMsg)
+// until then.
+func (s *snTaskService) CreateCaseTask(ctx context.Context, caseID string, req domain.CreateCaseTaskRequest) (domain.TaskDetail, error) {
+	if err := validateUUIDs("id", []string{caseID}); err != nil {
+		return domain.TaskDetail{}, err
+	}
+	if req.Subject == "" {
+		return domain.TaskDetail{}, &apierror.ValidationError{Msg: "subject is required"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	payload := snCreateTaskPayload{
+		Subject:           req.Subject,
+		AssignedToEmail:   req.AssignedToEmail,
+		VisibleToCustomer: req.VisibleToCustomer,
+	}
+	if req.DueDate != nil {
+		dueDate := formatSNDate(req.DueDate)
+		payload.DueDate = &dueDate
+	}
+
+	if taskWritesUnavailable {
+		return domain.TaskDetail{}, &apierror.ServiceUnavailableError{Msg: taskWritesUnavailableMsg}
+	}
+
+	raw, err := s.client.Post(ctx, "/cases/"+uuidToSysid(caseID)+"/tasks", token, payload)
+	if err != nil {
+		return domain.TaskDetail{}, err
+	}
+
+	var snResp snCreateTaskResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.TaskDetail{}, fmt.Errorf("sn create case task: parse response: %w", err)
+	}
+
+	return snTaskDetailToDomain(snResp.Task), nil
+}
+
+// snUpdateTaskPayload is the request body for the (not yet existing) Choreo
+// PATCH /tasks/{id} endpoint. Exactly one of State, AssignedToEmail, or DueDate
+// must be provided per request, following the same convention as
+// snUpdateCasePayload.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as snCreateTaskPayload above. Ask: add
+// PATCH /tasks/{id} (this payload shape) to servicenow.bal, returning a
+// TaskResponse-shaped detail.
+type snUpdateTaskPayload struct {
+	State           *string `json:"state,omitempty"`
+	AssignedToEmail *string `json:"assignedToEmail,omitempty"`
+	DueDate         *string `json:"dueDate,omitempty"`
+}
+
+type snUpdateTaskResponse struct {
+	Message string       `json:"message"`
+	Task    snTaskDetail `json:"task"`
+}
+
+// UpdateTask updates exactly one of state, assignedToEmail, or dueDate on the
+// task identified by taskID.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snUpdateTaskPayload doc comment. Implemented so the
+// entity-service side is ready the moment Ballerina adds the endpoint; gated
+// with a deliberate ServiceUnavailableError (see taskWritesUnavailableMsg)
+// until then.
+func (s *snTaskService) UpdateTask(ctx context.Context, taskID string, req domain.UpdateTaskRequest) (domain.TaskDetail, error) {
+	if err := validateUUIDs("id", []string{taskID}); err != nil {
+		return domain.TaskDetail{}, err
+	}
+
+	fieldCount := 0
+	if req.State != nil {
+		fieldCount++
+	}
+	if req.AssignedToEmail != nil {
+		fieldCount++
+	}
+	if req.DueDate != nil {
+		fieldCount++
+	}
+	if fieldCount == 0 {
+		return domain.TaskDetail{}, &apierror.ValidationError{Msg: "exactly one of state, assignedToEmail, or dueDate must be provided"}
+	}
+	if fieldCount > 1 {
+		return domain.TaskDetail{}, &apierror.ValidationError{Msg: "only one of state, assignedToEmail, or dueDate may be provided per request"}
+	}
+	if req.State != nil && *req.State == "" {
+		return domain.TaskDetail{}, &apierror.ValidationError{Msg: "state cannot be empty"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	payload := snUpdateTaskPayload{
+		State:           req.State,
+		AssignedToEmail: req.AssignedToEmail,
+	}
+	if req.DueDate != nil {
+		dueDate := formatSNDate(req.DueDate)
+		payload.DueDate = &dueDate
+	}
+
+	if taskWritesUnavailable {
+		return domain.TaskDetail{}, &apierror.ServiceUnavailableError{Msg: taskWritesUnavailableMsg}
+	}
+
+	raw, err := s.client.Patch(ctx, "/tasks/"+uuidToSysid(taskID), token, payload)
+	if err != nil {
+		return domain.TaskDetail{}, err
+	}
+
+	var snResp snUpdateTaskResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.TaskDetail{}, fmt.Errorf("sn update task: parse response: %w", err)
+	}
+
+	return snTaskDetailToDomain(snResp.Task), nil
 }
