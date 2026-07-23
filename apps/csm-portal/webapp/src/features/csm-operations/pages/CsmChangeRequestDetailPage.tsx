@@ -22,7 +22,7 @@ import {
   Skeleton,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Check, MessageSquarePlus, Pencil, X } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Check, MessageSquarePlus, Pencil, Send, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode, useCallback, useMemo, useState } from "react";
 import {  useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -37,6 +37,7 @@ import {
 } from "@features/csm-operations/api/useCsmChangeRequestComments";
 import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
+import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import {
   changeRequestCommentGateReason,
   changeRequestImpactColor,
@@ -220,6 +221,21 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   }
 
   const cr = data;
+  // Data-driven, like CaseActionBar's nextStates handling: only "assess" is
+  // ever modeled today (New -> Assess), but this checks membership rather
+  // than hardcoding `cr.state === "new"` so a backend-added transition needs
+  // no FE change to show up.
+  const canRequestApproval = !!cr.legalNextStates?.includes("assess");
+
+  const requestApproval = (): void => {
+    patchCr.mutate(
+      { id: cr.id, patch: { requestApproval: true } },
+      {
+        onError: (err) =>
+          showError("Could not request approval for this change request.", err),
+      },
+    );
+  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
@@ -243,12 +259,25 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               label={`${changeRequestImpactLabel(cr.impact)} impact`}
             />
           )}
+          {canRequestApproval && (
+            <Button
+              variant="contained"
+              color="primary"
+              size="small"
+              startIcon={<Send size={14} />}
+              onClick={requestApproval}
+              loading={patchCr.isPending}
+              sx={{ ml: "auto", flexShrink: 0 }}
+            >
+              Request approval
+            </Button>
+          )}
           <Button
             variant="outlined"
             size="small"
             startIcon={<Pencil size={14} />}
             onClick={() => setEditOpen(true)}
-            sx={{ ml: "auto", flexShrink: 0 }}
+            sx={{ ml: canRequestApproval ? 0 : "auto", flexShrink: 0 }}
           >
             Edit
           </Button>
@@ -275,7 +304,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           <MetaCell label="Type">
             <Typography variant="body2">{cr.type || "—"}</Typography>
           </MetaCell>
-          <MetaCell label="Linked case"><RefText value={cr.case} /></MetaCell>
+          <MetaCell label="Linked case"><EntityRefLink value={cr.case} routeBase="/cases" /></MetaCell>
           <MetaCell label="Deployment"><RefText value={cr.deployment} /></MetaCell>
           <MetaCell label="Deployed product"><RefText value={cr.deployedProduct} /></MetaCell>
           <MetaCell label="Product"><RefText value={cr.product} /></MetaCell>

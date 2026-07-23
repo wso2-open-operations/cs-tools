@@ -29,6 +29,7 @@ import {
   usePostCsmIncidentComment,
 } from "@features/csm-operations/api/useCsmIncidentComments";
 import EditIncidentDialog from "@features/csm-operations/components/EditIncidentDialog";
+import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import {
   incidentCommentGateReason,
   incidentPriorityColor,
@@ -295,9 +296,19 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               },
             }}
           >
-            <MetaCell label="Parent incident"><RefText value={incident.parent} /></MetaCell>
-            <MetaCell label="Change request"><RefText value={incident.changeRequest} /></MetaCell>
-            <MetaCell label="Problem"><RefText value={incident.problem} /></MetaCell>
+            <MetaCell label="Parent incident">
+              <EntityRefLink value={incident.parent} routeBase="/operations/incidents" />
+            </MetaCell>
+            <MetaCell label="Change request">
+              <EntityRefLink value={incident.changeRequest} routeBase="/operations/change-requests" />
+            </MetaCell>
+            <MetaCell label="Problem">
+              <EntityRefLink value={incident.problem} routeBase="/operations/problems" />
+            </MetaCell>
+            {/* "Caused by" has no confirmed target record type (could be a
+                change request, a problem, or something else) — same caveat
+                as Problem.originCase — so it's left as plain text rather
+                than guessing a route. */}
             <MetaCell label="Caused by"><RefText value={incident.causedBy} /></MetaCell>
           </Box>
         </Card>

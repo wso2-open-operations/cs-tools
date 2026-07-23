@@ -120,6 +120,12 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/projects/%s/contacts/search", url.PathEscape(projectID)), body)
 }
 
+// UpdateProject calls PATCH /projects/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
+}
+
 // SearchProducts calls POST /products/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchProducts(ctx context.Context, body []byte) ([]byte, error) {
@@ -160,6 +166,12 @@ func (c *Client) PatchIncident(ctx context.Context, id string, body []byte) ([]b
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/problems/search", body)
+}
+
+// CreateProblem calls POST /problems on the entity service to create a new problem.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) CreateProblem(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/problems", body)
 }
 
 // GetProblem calls GET /problems/{id} on the entity service.
@@ -226,6 +238,13 @@ func (c *Client) PatchChangeRequest(ctx context.Context, id string, body []byte)
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/change-requests/%s/approvals", url.PathEscape(id)), nil)
+}
+
+// DecideChangeRequestApproval calls POST /change-requests/{id}/approvals/decision on the
+// entity service to submit the caller's decision on their own pending approval.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/change-requests/%s/approvals/decision", url.PathEscape(id)), body)
 }
 
 // SearchTimeCards calls POST /time-cards/search on the entity service.

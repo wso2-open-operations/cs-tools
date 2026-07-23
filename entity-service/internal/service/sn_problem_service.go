@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -35,9 +37,12 @@ type snProblemsResponse struct {
 }
 
 type snProblem struct {
-	ID      *string `json:"id"`
-	Number  *string `json:"number"`
-	Subject *string `json:"subject"`
+	ID              *string           `json:"id"`
+	Number          *string           `json:"number"`
+	Subject         *string           `json:"subject"`
+	State           *string           `json:"state"`
+	AssignmentGroup *snProblemUserRef `json:"assignmentGroup"`
+	AssignedTo      *snProblemUserRef `json:"assignedTo"`
 }
 
 // snProblemSearchPayload is the Choreo POST /problems/search request body.
@@ -89,10 +94,17 @@ func (s *snProblemService) SearchProblems(ctx context.Context, req domain.Search
 		view := domain.SearchProblemView{
 			Subject: p.Subject,
 			Number:  p.Number,
+			State:   p.State,
 		}
 		if p.ID != nil && *p.ID != "" {
 			id := sysidToUUID(*p.ID)
 			view.ID = &id
+		}
+		if p.AssignmentGroup != nil {
+			view.AssignmentGroup = &domain.EntityRef{ID: sysidToUUID(p.AssignmentGroup.ID), Name: p.AssignmentGroup.Name}
+		}
+		if p.AssignedTo != nil {
+			view.AssignedTo = &domain.EntityRef{ID: sysidToUUID(p.AssignedTo.ID), Name: p.AssignedTo.Name}
 		}
 		views = append(views, view)
 	}
@@ -160,6 +172,74 @@ func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.Pr
 		return domain.ProblemDetail{}, fmt.Errorf("sn get problem: parse response: %w", err)
 	}
 
+	return mapSNProblemDetailToView(p), nil
+}
+
+// snCreateProblemPayload is the Choreo POST /problems request body.
+type snCreateProblemPayload struct {
+	Subject           string  `json:"subject"`
+	Category          *string `json:"category,omitempty"`
+	Subcategory       *string `json:"subcategory,omitempty"`
+	OriginCaseID      *string `json:"originCaseId,omitempty"`
+	PrimaryIncidentID *string `json:"primaryIncidentId,omitempty"`
+}
+
+// CreateProblem implements ProblemService for the ServiceNow data source.
+func (s *snProblemService) CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	if strings.TrimSpace(req.Subject) == "" {
+		return domain.ProblemDetail{}, &apierror.ValidationError{Msg: "subject cannot be empty"}
+	}
+
+	uuidFields := map[string]string{}
+	if req.OriginCaseID != nil {
+		uuidFields["originCaseId"] = *req.OriginCaseID
+	}
+	if req.PrimaryIncidentID != nil {
+		uuidFields["primaryIncidentId"] = *req.PrimaryIncidentID
+	}
+	for field, val := range uuidFields {
+		if err := validateUUIDs(field, []string{val}); err != nil {
+			return domain.ProblemDetail{}, err
+		}
+	}
+
+	payload := snCreateProblemPayload{
+		Subject:     req.Subject,
+		Category:    req.Category,
+		Subcategory: req.Subcategory,
+	}
+	if req.OriginCaseID != nil {
+		payload.OriginCaseID = strPtr(uuidToSysid(*req.OriginCaseID))
+	}
+	if req.PrimaryIncidentID != nil {
+		payload.PrimaryIncidentID = strPtr(uuidToSysid(*req.PrimaryIncidentID))
+	}
+
+	raw, err := s.client.Post(ctx, "/problems", token, payload)
+	if err != nil {
+		return domain.ProblemDetail{}, err
+	}
+
+	var resp snCreateProblemResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return domain.ProblemDetail{}, fmt.Errorf("sn create problem: parse response: %w", err)
+	}
+
+	return mapSNProblemDetailToView(resp.Problem), nil
+}
+
+// snCreateProblemResponse mirrors the Choreo POST /problems response, which wraps
+// the created problem's detail payload in a message envelope.
+type snCreateProblemResponse struct {
+	Message string                  `json:"message"`
+	Problem snProblemDetailResponse `json:"problem"`
+}
+
+// mapSNProblemDetailToView maps a Choreo problem detail payload to the domain view,
+// shared by GetProblem and CreateProblem.
+func mapSNProblemDetailToView(p snProblemDetailResponse) domain.ProblemDetail {
 	problemID := sysidToUUID(p.ID)
 	number := p.Number
 	subject := p.Subject
@@ -203,5 +283,5 @@ func (s *snProblemService) GetProblem(ctx context.Context, id string) (domain.Pr
 		view.ResolvedBy = &domain.EntityRef{ID: sysidToUUID(p.ResolvedBy.ID), Name: p.ResolvedBy.Name}
 	}
 
-	return view, nil
+	return view
 }

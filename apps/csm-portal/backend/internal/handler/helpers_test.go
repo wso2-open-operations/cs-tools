@@ -313,6 +313,7 @@ type mockEntityProjectClient struct {
 	getProjectFn            func(ctx context.Context, id string) ([]byte, error)
 	searchProjectsFn        func(ctx context.Context, body []byte) ([]byte, error)
 	searchProjectContactsFn func(ctx context.Context, projectID string, body []byte) ([]byte, error)
+	updateProjectFn         func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityProjectClient) GetProject(ctx context.Context, id string) ([]byte, error) {
@@ -332,6 +333,13 @@ func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byt
 func (m *mockEntityProjectClient) SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error) {
 	if m.searchProjectContactsFn != nil {
 		return m.searchProjectContactsFn(ctx, projectID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityProjectClient) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.updateProjectFn != nil {
+		return m.updateProjectFn(ctx, id, body)
 	}
 	return []byte(`{}`), nil
 }
@@ -415,6 +423,7 @@ func (m *mockEntityIncidentClient) SearchComments(ctx context.Context, body []by
 type mockEntityProblemClient struct {
 	searchProblemsFn func(ctx context.Context, body []byte) ([]byte, error)
 	getProblemFn     func(ctx context.Context, id string) ([]byte, error)
+	createProblemFn  func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
@@ -431,16 +440,24 @@ func (m *mockEntityProblemClient) GetProblem(ctx context.Context, id string) ([]
 	return []byte(`{}`), nil
 }
 
+func (m *mockEntityProblemClient) CreateProblem(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createProblemFn != nil {
+		return m.createProblemFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity change request client -----
 
 type mockEntityChangeRequestClient struct {
-	createChangeRequestFn       func(ctx context.Context, body []byte) ([]byte, error)
-	searchChangeRequestsFn      func(ctx context.Context, body []byte) ([]byte, error)
-	getChangeRequestFn          func(ctx context.Context, id string) ([]byte, error)
-	patchChangeRequestFn        func(ctx context.Context, id string, body []byte) ([]byte, error)
-	getChangeRequestApprovalsFn func(ctx context.Context, id string) ([]byte, error)
-	createCommentFn             func(ctx context.Context, body []byte) ([]byte, error)
-	searchCommentsFn            func(ctx context.Context, body []byte) ([]byte, error)
+	createChangeRequestFn         func(ctx context.Context, body []byte) ([]byte, error)
+	searchChangeRequestsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	getChangeRequestFn            func(ctx context.Context, id string) ([]byte, error)
+	patchChangeRequestFn          func(ctx context.Context, id string, body []byte) ([]byte, error)
+	getChangeRequestApprovalsFn   func(ctx context.Context, id string) ([]byte, error)
+	createCommentFn               func(ctx context.Context, body []byte) ([]byte, error)
+	searchCommentsFn              func(ctx context.Context, body []byte) ([]byte, error)
+	decideChangeRequestApprovalFn func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityChangeRequestClient) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
@@ -490,6 +507,13 @@ func (m *mockEntityChangeRequestClient) SearchComments(ctx context.Context, body
 		return m.searchCommentsFn(ctx, body)
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.decideChangeRequestApprovalFn != nil {
+		return m.decideChangeRequestApprovalFn(ctx, id, body)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"approved"}`), nil
 }
 
 // ----- mock entity IT service client -----

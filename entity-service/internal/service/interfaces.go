@@ -261,6 +261,11 @@ type ChangeRequestService interface {
 	// GetChangeRequestApprovals returns the approval stages and per-approver status
 	// for a single change request identified by UUID.
 	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
+
+	// DecideChangeRequestApproval submits the caller's decision ("approved" or
+	// "rejected") on their own pending approval for a change request identified
+	// by UUID. Supported by the ServiceNow data source only.
+	DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error)
 }
 
 // TimeCardService defines the operations available on the time-cards entity.
@@ -377,6 +382,10 @@ type ProblemService interface {
 	// GetProblem returns the full detail of a single problem by its UUID.
 	// A NotFoundError is returned if the problem does not exist.
 	GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error)
+
+	// CreateProblem creates a new problem. Subject is required; OriginCaseID is optional.
+	// Supported by the ServiceNow data source only.
+	CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error)
 }
 
 // ConversationService defines the operations available on the conversations entity.

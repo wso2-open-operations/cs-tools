@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,13 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
+// changeRequestApprovalDecisionPayload is the strict shape accepted by
+// DecideChangeRequestApproval: exactly one field, and Decision must be
+// "approved" or "rejected".
+type changeRequestApprovalDecisionPayload struct {
+	Decision string `json:"decision"`
+}
+
 // entityChangeRequestClient abstracts the entity service change-request operations.
 type entityChangeRequestClient interface {
 	CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error)
@@ -36,6 +44,7 @@ type entityChangeRequestClient interface {
 	GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error)
 	CreateComment(ctx context.Context, body []byte) ([]byte, error)
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
+	DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -270,6 +279,56 @@ func (h *ChangeRequestHandler) SearchChangeRequestComments(w http.ResponseWriter
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamError(w, err, "Failed to search change request comments.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// DecideChangeRequestApproval handles POST /change-requests/{id}/approvals/decision. Any user
+// with access to the change request may attempt a decision; ServiceNow itself enforces that
+// only the caller's own pending approval can be acted on, so this is not a bypass-only endpoint.
+func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	var payload changeRequestApprovalDecisionPayload
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || decoder.More() {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if payload.Decision != "approved" && payload.Decision != "rejected" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.DecideChangeRequestApproval(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity DecideChangeRequestApproval failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to submit change request approval decision.")
 		return
 	}
 
