@@ -30,6 +30,8 @@ import (
 type entityTaskClient interface {
 	SearchCaseTasks(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	GetTask(ctx context.Context, id string) ([]byte, error)
+	CreateCaseTask(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	UpdateTask(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // TaskHandler handles HTTP requests for task operations.
@@ -102,6 +104,95 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetTask failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve task.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateCaseTask handles POST /cases/{caseId}/tasks.
+// Raw pass-through — the entity service enforces field requirements; the
+// response is returned verbatim with a Location header pointing at the new task.
+func (h *TaskHandler) CreateCaseTask(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("caseId")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.CreateCaseTask(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateCaseTask failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to create case task.")
+		return
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(result, &created); err == nil && created.ID != "" {
+		w.Header().Set("Location", "/tasks/"+created.ID)
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// UpdateTask handles PATCH /tasks/{id}.
+// Raw pass-through body — the entity service enforces the exactly-one-field rule.
+func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateTask(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateTask failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to update task.")
 		return
 	}
 

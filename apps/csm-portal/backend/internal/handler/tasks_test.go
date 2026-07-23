@@ -216,3 +216,218 @@ func TestGetTask(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateCaseTask(t *testing.T) {
+	const validPayload = `{"subject":"Investigate outage"}`
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks", strings.NewReader(validPayload))
+		r.SetPathValue("caseId", testTaskCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseTask(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed case UUID", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/tasks", strings.NewReader(validPayload)))
+		r.SetPathValue("caseId", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.CreateCaseTask(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty case id", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//tasks", strings.NewReader(validPayload)))
+		w := httptest.NewRecorder()
+		h.CreateCaseTask(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("caseId", testTaskCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseTask(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks", strings.NewReader(`not-json`)))
+		r.SetPathValue("caseId", testTaskCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseTask(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body verbatim, returns 201 with Location header", func(t *testing.T) {
+		var capturedCaseID string
+		var capturedBody []byte
+		client := &mockEntityTaskClient{
+			createCaseTaskFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
+				capturedCaseID = caseID
+				capturedBody = body
+				return []byte(`{"id":"` + testTaskID + `","subject":"Investigate outage"}`), nil
+			},
+		}
+		h := NewTaskHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks", strings.NewReader(validPayload)))
+		r.SetPathValue("caseId", testTaskCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseTask(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+
+		if capturedCaseID != testTaskCaseID {
+			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, testTaskCaseID)
+		}
+		if string(capturedBody) != validPayload {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), validPayload)
+		}
+		if loc := w.Header().Get("Location"); loc != "/tasks/"+testTaskID {
+			t.Errorf("Location = %q, want %q", loc, "/tasks/"+testTaskID)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create case task.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityTaskClient{
+					createCaseTaskFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewTaskHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testTaskCaseID+"/tasks", strings.NewReader(validPayload)))
+				r.SetPathValue("caseId", testTaskCaseID)
+				w := httptest.NewRecorder()
+				h.CreateCaseTask(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestUpdateTask(t *testing.T) {
+	const validPayload = `{"state":"closed_complete"}`
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/tasks/"+testTaskID, strings.NewReader(validPayload))
+		r.SetPathValue("id", testTaskID)
+		w := httptest.NewRecorder()
+		h.UpdateTask(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/tasks/not-a-uuid", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.UpdateTask(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty id", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/tasks/", strings.NewReader(validPayload)))
+		w := httptest.NewRecorder()
+		h.UpdateTask(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/tasks/"+testTaskID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", testTaskID)
+		w := httptest.NewRecorder()
+		h.UpdateTask(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewTaskHandler(&mockEntityTaskClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/tasks/"+testTaskID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", testTaskID)
+		w := httptest.NewRecorder()
+		h.UpdateTask(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards id and body verbatim to upstream", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityTaskClient{
+			updateTaskFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedID = id
+				capturedBody = body
+				return []byte(`{"id":"` + testTaskID + `","state":"closed_complete"}`), nil
+			},
+		}
+		h := NewTaskHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/tasks/"+testTaskID, strings.NewReader(validPayload)))
+		r.SetPathValue("id", testTaskID)
+		w := httptest.NewRecorder()
+		h.UpdateTask(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != testTaskID {
+			t.Errorf("upstream received id %q, want %q", capturedID, testTaskID)
+		}
+		if string(capturedBody) != validPayload {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), validPayload)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update task.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityTaskClient{
+					updateTaskFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewTaskHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/tasks/"+testTaskID, strings.NewReader(validPayload)))
+				r.SetPathValue("id", testTaskID)
+				w := httptest.NewRecorder()
+				h.UpdateTask(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

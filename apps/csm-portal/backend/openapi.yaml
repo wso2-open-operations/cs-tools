@@ -130,9 +130,9 @@ paths:
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
         `workState`, `watchList`, `assigneeEmail`, `parentId`, `subject`, `description`,
-        `deploymentId`, `deployedProductId`, `relatedCaseId`, or `autocloseHoldUntil`. `watchList`,
-        `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when the
-        ServiceNow data source is active.
+        `deploymentId`, `deployedProductId`, `relatedCaseId`, `autocloseHoldUntil`, or `fixEta`.
+        `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when
+        the ServiceNow data source is active.
       operationId: patchCasesId
       parameters:
         - name: id
@@ -2122,6 +2122,128 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/tags:
+    post:
+      summary: Add a free-text tag to a case (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is.
+      operationId: addCaseTag
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCaseTagPayload'
+      responses:
+        "201":
+          description: Tag added to the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/tags/{tagId}:
+    delete:
+      summary: Remove a tag from a case (ServiceNow data source only).
+      operationId: removeCaseTag
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+        - name: tagId
+          in: path
+          required: true
+          description: UUID of the tag.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Tag removed successfully. No response body.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case or tag not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
@@ -3090,6 +3212,73 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{caseId}/tasks:
+    post:
+      summary: Create a task on a case (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is, which enforces field requirements.
+      operationId: createCaseTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseTaskPayload'
+      responses:
+        "201":
+          description: Task created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request (invalid UUID or request body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /tasks/{id}:
     get:
       summary: Get a single task by ID (ServiceNow data source only).
@@ -3131,6 +3320,72 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update a task (ServiceNow data source only).
+      description: >
+        Updates exactly one field of the task. Provide exactly one of: `state`,
+        `assignedToEmail`, or `dueDate`. The request body is forwarded to the
+        integration service as-is, which enforces the exactly-one-field rule.
+      operationId: updateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskPayload'
+      responses:
+        "200":
+          description: Task updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request (invalid UUID or request body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
           content:
             application/json:
               schema:
@@ -4047,9 +4302,9 @@ components:
       type: object
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
-        `subject`, `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`, or
-        `autocloseHoldUntil` must be provided. `watchList`, `assigneeEmail`, `parentId`, and
-        `autocloseHoldUntil` are supported only for the ServiceNow data source.
+        `subject`, `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`,
+        `autocloseHoldUntil`, or `fixEta` must be provided. `watchList`, `assigneeEmail`,
+        `parentId`, and `autocloseHoldUntil` are supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
       oneOf:
@@ -4065,6 +4320,7 @@ components:
         - required: [deployedProductId]
         - required: [relatedCaseId]
         - required: [autocloseHoldUntil]
+        - required: [fixEta]
       properties:
         state:
           type: string
@@ -4139,6 +4395,12 @@ components:
             until this date, mirroring the real ServiceNow UX (an engineer picks a hold-until
             date). This is the only supported write against that sequence — the raw
             `autoclosureStep` state is not directly settable (ServiceNow only).
+        fixEta:
+          type: string
+          format: date-time
+          description: >
+            Sets the customer-facing fix-commitment date/time for the case. This is the only
+            fix-ETA field exposed by this API; internal-only estimates are not surfaced.
 
     UpdateCaseResponse:
       type: object
@@ -4206,6 +4468,11 @@ components:
         parentCase:
           $ref: '#/components/schemas/CaseNumberRef'
           description: Present when the update set parentId, identifying the case, incident, change request, or problem this case is now linked to as its parent.
+        fixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Echoes the updated customer-facing fix-commitment date/time. Present when the update set fixEta.
 
     CaseResolutionCode:
       type: string
@@ -4283,6 +4550,29 @@ components:
         email:
           type: string
           format: email
+
+    Tag:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          description: Free-text tag label.
+        color:
+          type: string
+          nullable: true
+          description: Display color for the tag, if one is set. null when not set.
+
+    AddCaseTagPayload:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          description: Free-text tag label to attach to the case.
 
     CaseCreatePayload:
       type: object
@@ -4485,6 +4775,11 @@ components:
             Filter to child cases of this case UUID (the hierarchical major-case/child-case
             relationship set via the PATCH `parentId` field). Optional — used to list a case's
             children via the existing search endpoint rather than a dedicated one.
+        tags:
+          type: array
+          items:
+            type: string
+          description: Filter to cases carrying any of these free-text tag labels (optional)
 
     CaseSearchPayload:
       type: object
@@ -4818,6 +5113,19 @@ components:
           description: >-
             Service-request cases whose parent points to this case. Populated on every
             case detail response, not just high-severity cases.
+        fixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            The single customer-facing fix-commitment date/time for the case. This is the
+            only fix-ETA field exposed by this API; internal-only estimates are not surfaced.
+        tags:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Tag'
+          description: Free-text labels attached to the case. null/absent when none are set.
 
     CaseSearchView:
       type: object
@@ -6675,6 +6983,49 @@ components:
               nullable: true
             createdOn:
               type: string
+
+    CreateCaseTaskPayload:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          description: Subject/title of the new task.
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Due date for the task.
+        assignedToEmail:
+          type: string
+          format: email
+          nullable: true
+          description: Email of the engineer to assign the task to.
+        visibleToCustomer:
+          type: boolean
+          nullable: true
+          description: Whether the task is visible to the customer.
+
+    UpdateTaskPayload:
+      type: object
+      description: >
+        Exactly one of `state`, `assignedToEmail`, or `dueDate` must be provided.
+      oneOf:
+        - required: [state]
+        - required: [assignedToEmail]
+        - required: [dueDate]
+      properties:
+        state:
+          type: string
+          description: The new state of the task.
+        assignedToEmail:
+          type: string
+          format: email
+          description: Email of the engineer to assign the task to.
+        dueDate:
+          type: string
+          format: date-time
+          description: New due date for the task.
 
     ChangeRequestApprover:
       type: object
