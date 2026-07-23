@@ -186,6 +186,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /accounts/{id}/contacts/search:
+    post:
+      summary: Search contacts for an account.
+      description: ServiceNow data source only; there is no Postgres equivalent.
+      operationId: searchAccountContacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAccountContactsRequest'
+      responses:
+        "200":
+          description: Contacts matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAccountContactsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Account not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}:
     get:
       summary: Get a project by ID.
@@ -241,6 +285,50 @@ paths:
                 $ref: '#/components/schemas/SearchProjectsResponse'
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/{id}/contacts/search:
+    post:
+      summary: Search contacts for a project.
+      description: ServiceNow data source only; there is no Postgres equivalent.
+      operationId: searchProjectContacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProjectContactsRequest'
+      responses:
+        "200":
+          description: Contacts matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProjectContactsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
           content:
             application/json:
               schema:
@@ -2615,6 +2703,42 @@ components:
         hasMore:
           type: boolean
 
+    SearchAccountContactsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive).
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AccountContact:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        isPrimary:
+          type: boolean
+
+    SearchAccountContactsResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountContact'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
     SearchProjectsRequest:
       type: object
       properties:
@@ -2773,6 +2897,48 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    SearchProjectContactsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive).
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ProjectContact:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        registrationState:
+          type: string
+        notificationsEnabled:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+
+    SearchProjectContactsResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectContact'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
 
     SearchProductsRequest:
       type: object
