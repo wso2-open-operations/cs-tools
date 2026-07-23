@@ -850,7 +850,7 @@ func TestSNCaseService_SearchTags_Success(t *testing.T) {
 	client := newTestSNClient(t, mux)
 	svc := NewServiceNowCaseService(client, nil)
 
-	tags, err := svc.SearchTags(contextWithUserIDToken("token"), "micro")
+	tags, err := svc.SearchTags(contextWithUserIDToken("token"), "micro", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -871,6 +871,25 @@ func TestSNCaseService_SearchTags_Success(t *testing.T) {
 	}
 }
 
+func TestSNCaseService_SearchTags_ForwardsLimit(t *testing.T) {
+	var gotLimit string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tags/search", func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		_ = json.NewEncoder(w).Encode(map[string]any{"tags": []map[string]any{}})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	if _, err := svc.SearchTags(contextWithUserIDToken("token"), "micro", 5); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotLimit != "5" {
+		t.Fatalf("limit sent = %q, want 5", gotLimit)
+	}
+}
+
 func TestSNCaseService_SearchTags_EmptyQuery(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tags/search", func(w http.ResponseWriter, r *http.Request) {
@@ -883,7 +902,7 @@ func TestSNCaseService_SearchTags_EmptyQuery(t *testing.T) {
 	client := newTestSNClient(t, mux)
 	svc := NewServiceNowCaseService(client, nil)
 
-	tags, err := svc.SearchTags(contextWithUserIDToken("token"), "")
+	tags, err := svc.SearchTags(contextWithUserIDToken("token"), "", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -895,7 +914,7 @@ func TestSNCaseService_SearchTags_EmptyQuery(t *testing.T) {
 func TestCaseService_SearchTags_ServiceUnavailable(t *testing.T) {
 	svc := &caseService{}
 
-	if _, err := svc.SearchTags(contextWithUserIDToken("token"), "micro"); err == nil {
+	if _, err := svc.SearchTags(contextWithUserIDToken("token"), "micro", 0); err == nil {
 		t.Fatalf("expected error")
 	} else if _, ok := err.(*apierror.ServiceUnavailableError); !ok {
 		t.Fatalf("expected *apierror.ServiceUnavailableError, got %T: %v", err, err)

@@ -2203,17 +2203,24 @@ type snSearchTagsResponse struct {
 // Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for this.
 // SN's tagging is the generic platform label mechanism (table-agnostic, not a case column), so
 // listing/searching existing labels needs a new adapter -- ask: add
-// GET /tags/search?q={query} (response: {"tags": [{"id", "label", "color"}]}) to servicenow.bal,
-// backed by the sys_label table (optionally scoped to labels used against
+// GET /tags/search?q={query}&limit={limit} (response: {"tags": [{"id", "label", "color"}]}) to
+// servicenow.bal, backed by the sys_label table (optionally scoped to labels used against
 // reference_table="sn_customerservice_case" label_entry rows). This is implemented so the
 // entity-service side is ready the moment Ballerina adds the endpoint; until then, calling it
 // returns a downstream error (no such Choreo route today).
-func (s *snCaseService) SearchTags(ctx context.Context, query string) ([]domain.Tag, error) {
+func (s *snCaseService) SearchTags(ctx context.Context, query string, limit int) ([]domain.Tag, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 
-	path := "/tags/search"
+	q := url.Values{}
 	if query != "" {
-		path += "?q=" + url.QueryEscape(query)
+		q.Set("q", query)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/tags/search"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 
 	raw, err := s.client.Get(ctx, path, token)

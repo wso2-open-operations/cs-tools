@@ -219,9 +219,10 @@ type CaseService interface {
 	RemoveCaseTag(ctx context.Context, caseID, tagID string) error
 	// SearchTags returns the tags (not scoped to any single case) whose label matches query,
 	// for FE autocomplete when attaching a tag to a case. An empty query returns all known tags.
+	// limit caps the number of results (<=0 means use the downstream default).
 	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for a
 	// case-agnostic tag search; see SearchTags in sn_case_service.go for the requested contract.
-	SearchTags(ctx context.Context, query string) ([]domain.Tag, error)
+	SearchTags(ctx context.Context, query string, limit int) ([]domain.Tag, error)
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
