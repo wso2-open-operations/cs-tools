@@ -352,13 +352,13 @@ type TaskService interface {
 	GetTask(ctx context.Context, id string) (domain.TaskDetail, error)
 	// CreateCaseTask creates a new task on the case identified by caseID.
 	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty subject).
-	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet to create a
-	// sn_customerservice_task record; see CreateCaseTaskRequest doc comment.
+	// Returns a ServiceUnavailableError until the downstream ballerina-tasks-fixeta-tags
+	// endpoint (not yet merged to digiops-cs main) ships; see CreateCaseTaskRequest doc comment.
 	CreateCaseTask(ctx context.Context, caseID string, req domain.CreateCaseTaskRequest) (domain.TaskDetail, error)
 	// UpdateTask updates exactly one of state, assignedToEmail, or dueDate on the task
 	// identified by taskID. A ValidationError is returned for invalid values, a malformed
 	// UUID, or if zero or more than one field is provided.
-	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as CreateCaseTask above.
+	// Returns a ServiceUnavailableError until the downstream endpoint ships, same as CreateCaseTask above.
 	UpdateTask(ctx context.Context, taskID string, req domain.UpdateTaskRequest) (domain.TaskDetail, error)
 }
 

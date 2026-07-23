@@ -225,6 +225,18 @@ func snTaskDetailToDomain(t snTaskDetail) domain.TaskDetail {
 	return detail
 }
 
+// taskWritesUnavailable gates CreateCaseTask/UpdateTask while the downstream
+// Choreo task-write endpoints don't exist yet (tracked on the
+// ballerina-tasks-fixeta-tags branch, not yet merged to digiops-cs main). A
+// deliberate ServiceUnavailableError here -- rather than letting the request
+// reach the downstream client and come back as a generic 404 -- avoids
+// conflating "this operation isn't deployed yet" with "task not found".
+// Flip this to false once the downstream endpoints ship; the send logic below
+// is already wired and ready. A var (not const) so tests can flip it locally
+// to exercise that send logic ahead of the downstream endpoints existing.
+var taskWritesUnavailable = true
+const taskWritesUnavailableMsg = "task creation/update is not yet available: the downstream ServiceNow integration for this operation has not been deployed"
+
 // snCreateTaskPayload is the request body for the (not yet existing) Choreo
 // POST /cases/{id}/tasks endpoint.
 //
@@ -248,8 +260,9 @@ type snCreateTaskResponse struct {
 // CreateCaseTask creates a new task on the case identified by caseID.
 //
 // Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snCreateTaskPayload doc comment. Implemented so the
-// entity-service side is ready the moment Ballerina adds the endpoint; until
-// then, calling it returns a downstream error (no such Choreo route today).
+// entity-service side is ready the moment Ballerina adds the endpoint; gated
+// with a deliberate ServiceUnavailableError (see taskWritesUnavailableMsg)
+// until then.
 func (s *snTaskService) CreateCaseTask(ctx context.Context, caseID string, req domain.CreateCaseTaskRequest) (domain.TaskDetail, error) {
 	if err := validateUUIDs("id", []string{caseID}); err != nil {
 		return domain.TaskDetail{}, err
@@ -268,6 +281,10 @@ func (s *snTaskService) CreateCaseTask(ctx context.Context, caseID string, req d
 	if req.DueDate != nil {
 		dueDate := formatSNDate(req.DueDate)
 		payload.DueDate = &dueDate
+	}
+
+	if taskWritesUnavailable {
+		return domain.TaskDetail{}, &apierror.ServiceUnavailableError{Msg: taskWritesUnavailableMsg}
 	}
 
 	raw, err := s.client.Post(ctx, "/cases/"+uuidToSysid(caseID)+"/tasks", token, payload)
@@ -306,8 +323,9 @@ type snUpdateTaskResponse struct {
 // task identified by taskID.
 //
 // Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snUpdateTaskPayload doc comment. Implemented so the
-// entity-service side is ready the moment Ballerina adds the endpoint; until
-// then, calling it returns a downstream error (no such Choreo route today).
+// entity-service side is ready the moment Ballerina adds the endpoint; gated
+// with a deliberate ServiceUnavailableError (see taskWritesUnavailableMsg)
+// until then.
 func (s *snTaskService) UpdateTask(ctx context.Context, taskID string, req domain.UpdateTaskRequest) (domain.TaskDetail, error) {
 	if err := validateUUIDs("id", []string{taskID}); err != nil {
 		return domain.TaskDetail{}, err
@@ -342,6 +360,10 @@ func (s *snTaskService) UpdateTask(ctx context.Context, taskID string, req domai
 	if req.DueDate != nil {
 		dueDate := formatSNDate(req.DueDate)
 		payload.DueDate = &dueDate
+	}
+
+	if taskWritesUnavailable {
+		return domain.TaskDetail{}, &apierror.ServiceUnavailableError{Msg: taskWritesUnavailableMsg}
 	}
 
 	raw, err := s.client.Patch(ctx, "/tasks/"+uuidToSysid(taskID), token, payload)

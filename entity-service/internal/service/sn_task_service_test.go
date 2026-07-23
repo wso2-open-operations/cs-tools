@@ -58,7 +58,21 @@ func TestSNTaskService_CreateCaseTask_Validation(t *testing.T) {
 	}
 }
 
+func TestSNTaskService_CreateCaseTask_GatedUnavailable(t *testing.T) {
+	svc := NewServiceNowTaskService(nil)
+	_, err := svc.CreateCaseTask(contextWithUserIDToken("token"), testCaseUUID, domain.CreateCaseTaskRequest{Subject: "follow up"})
+	if _, ok := err.(*apierror.ServiceUnavailableError); !ok {
+		t.Fatalf("expected *apierror.ServiceUnavailableError while taskWritesUnavailable is true, got %T: %v", err, err)
+	}
+}
+
+// TestSNTaskService_CreateCaseTask_Success exercises the send logic that's
+// ready to go the moment the downstream endpoint ships -- it temporarily
+// disables the taskWritesUnavailable gate to prove that logic still works.
 func TestSNTaskService_CreateCaseTask_Success(t *testing.T) {
+	taskWritesUnavailable = false
+	defer func() { taskWritesUnavailable = true }()
+
 	var gotBody map[string]any
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cases/"+testCaseSysid+"/tasks", func(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +142,22 @@ func TestSNTaskService_UpdateTask_FieldCountValidation(t *testing.T) {
 	}
 }
 
+func TestSNTaskService_UpdateTask_GatedUnavailable(t *testing.T) {
+	svc := NewServiceNowTaskService(nil)
+	state := "CLOSED"
+	_, err := svc.UpdateTask(contextWithUserIDToken("token"), "33333333-3333-3333-3333-333333333333", domain.UpdateTaskRequest{State: &state})
+	if _, ok := err.(*apierror.ServiceUnavailableError); !ok {
+		t.Fatalf("expected *apierror.ServiceUnavailableError while taskWritesUnavailable is true, got %T: %v", err, err)
+	}
+}
+
+// TestSNTaskService_UpdateTask_Success exercises the send logic that's ready
+// to go the moment the downstream endpoint ships -- it temporarily disables
+// the taskWritesUnavailable gate to prove that logic still works.
 func TestSNTaskService_UpdateTask_Success(t *testing.T) {
+	taskWritesUnavailable = false
+	defer func() { taskWritesUnavailable = true }()
+
 	var gotBody map[string]any
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tasks/"+testTaskSysid, func(w http.ResponseWriter, r *http.Request) {
