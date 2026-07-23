@@ -15,11 +15,34 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
+import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
-describe("AddTagDialog — free-text tag creation", () => {
+vi.mock("@features/csm-cases/api/useSearchTags", () => ({
+  useSearchTags: vi.fn(),
+}));
+
+const mockedUseSearchTags = vi.mocked(useSearchTags);
+
+function mockSearchResult(
+  overrides: Partial<ReturnType<typeof useSearchTags>>,
+): void {
+  mockedUseSearchTags.mockReturnValue({
+    data: [],
+    isFetching: false,
+    isError: false,
+    ...overrides,
+  } as unknown as ReturnType<typeof useSearchTags>);
+}
+
+describe("AddTagDialog — search-and-select-or-create tag entry", () => {
+  beforeEach(() => {
+    mockedUseSearchTags.mockReset();
+    mockSearchResult({});
+  });
+
   it("disables Add tag until a label is typed", () => {
     render(
       <AddTagDialog
@@ -32,7 +55,7 @@ describe("AddTagDialog — free-text tag creation", () => {
     expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
   });
 
-  it("submits the trimmed label typed into the free-text field", () => {
+  it("submits the trimmed label typed into the field", () => {
     const onSave = vi.fn();
     render(
       <AddTagDialog
@@ -81,6 +104,30 @@ describe("AddTagDialog — free-text tag creation", () => {
     expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
     expect(screen.getByText(/already has that tag/i)).toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("offers matching existing tags as suggestions, excluding ones already on the case", () => {
+    mockSearchResult({
+      data: [
+        { id: "t1", label: "micro-gw" },
+        { id: "t2", label: "micro-gw-2" },
+        { id: "t3", label: "ws-policy" },
+      ],
+    });
+    render(
+      <AddTagDialog
+        existingLabels={["ws-policy"]}
+        isSaving={false}
+        onClose={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/^tag$/i), {
+      target: { value: "micro" },
+    });
+    expect(screen.getByText("micro-gw")).toBeInTheDocument();
+    expect(screen.getByText("micro-gw-2")).toBeInTheDocument();
+    expect(screen.queryByText("ws-policy")).not.toBeInTheDocument();
   });
 
   it("calls onClose on Cancel without calling onSave", () => {

@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Autocomplete,
   Box,
   Button,
   Dialog,
@@ -24,9 +25,12 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useState, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
 const MAX_TAG_LABEL_LEN = 100;
+const TAG_SEARCH_DEBOUNCE_MS = 300;
 
 interface AddTagDialogProps {
   /** Tags already on the case, so a duplicate label can't be submitted twice. */
@@ -37,11 +41,13 @@ interface AddTagDialogProps {
 }
 
 /**
- * Add a free-text tag to a case (`POST /cases/{id}/tags`). Tags are genuinely
- * free-text on the backing data source (SN's generic label mechanism, e.g.
- * `micro-gw`, `ws-policy`) — a plain text field, not a picker constrained to a
- * closed enum. ServiceNow-source only; the caller surfaces a rejection on
- * another source.
+ * Add a tag to a case (`POST /cases/{id}/tags`). Tags are genuinely free-text
+ * on the backing data source (SN's generic label mechanism, e.g. `micro-gw`,
+ * `ws-policy`) — this is a search-and-select-or-create combobox, not a picker
+ * constrained to a closed enum: it searches existing labels via
+ * `GET /tags/search` as the user types (debounced), and still lets them type a
+ * label with no match to create a genuinely new tag. ServiceNow-source only;
+ * the caller surfaces a rejection on another source.
  */
 export default function AddTagDialog({
   existingLabels,
@@ -50,11 +56,24 @@ export default function AddTagDialog({
   onSave,
 }: AddTagDialogProps): JSX.Element {
   const [label, setLabel] = useState("");
+  const debouncedLabel = useDebouncedValue(label, TAG_SEARCH_DEBOUNCE_MS);
+  const query = debouncedLabel.trim();
+  const { data: matches, isFetching, isError } = useSearchTags(query, true);
+
   const trimmed = label.trim();
   const isDuplicate = existingLabels.some(
     (l) => l.toLowerCase() === trimmed.toLowerCase(),
   );
   const canSubmit = trimmed.length > 0 && !isDuplicate;
+
+  // Suggestions from the search, minus labels already on this case (those
+  // would just be rejected as a duplicate anyway).
+  const options = useMemo(() => {
+    const existing = new Set(existingLabels.map((l) => l.toLowerCase()));
+    return (matches ?? [])
+      .map((t) => t.label)
+      .filter((l) => !existing.has(l.toLowerCase()));
+  }, [matches, existingLabels]);
 
   const handleSubmit = (): void => {
     if (!canSubmit) return;
@@ -66,28 +85,58 @@ export default function AddTagDialog({
       <DialogTitle>Add tag</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <TextField
-            label="Tag"
-            placeholder="e.g. micro-gw, ws-policy"
+          <Autocomplete<string, false, false, true>
+            freeSolo
             size="small"
             fullWidth
-            autoFocus
-            value={label}
-            onChange={(e) => setLabel(e.target.value.slice(0, MAX_TAG_LABEL_LEN))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                handleSubmit();
+            options={options}
+            inputValue={label}
+            loading={isFetching}
+            disabled={isSaving}
+            onInputChange={(_event, value, reason) => {
+              if (reason === "input" || reason === "reset" || reason === "clear") {
+                setLabel(value.slice(0, MAX_TAG_LABEL_LEN));
               }
             }}
-            disabled={isSaving}
-            error={isDuplicate}
-            helperText={
-              isDuplicate ? "This case already has that tag." : undefined
+            noOptionsText={
+              isError
+                ? "Couldn't search existing tags — you can still type a new one."
+                : query
+                  ? "No matching tags — press Enter to create it."
+                  : "Type to search existing tags…"
             }
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Tag"
+                placeholder="e.g. micro-gw, ws-policy"
+                autoFocus
+                error={isDuplicate}
+                helperText={
+                  isDuplicate ? "This case already has that tag." : undefined
+                }
+                onKeyDown={(e) => {
+                  // `params.inputProps.onKeyDown` is the built-in listbox
+                  // navigation handler (arrow keys / Enter-to-select) that
+                  // Autocomplete wires onto the underlying <input>. MUI types
+                  // this TextField's `onKeyDown` against the root div and
+                  // `inputProps.onKeyDown` against the input element, but
+                  // they fire for the same DOM keydown here — cast rather
+                  // than drop the call, so listbox keyboard nav still works.
+                  params.inputProps.onKeyDown?.(
+                    e as unknown as React.KeyboardEvent<HTMLInputElement>,
+                  );
+                  if (e.key === "Enter" && !e.defaultPrevented) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+              />
+            )}
           />
           <Typography variant="caption" color="text.secondary">
-            Tags are free-text — type any label, there's no fixed list.
+            Search existing tags or type a new label — tags are free-text,
+            there's no fixed list.
           </Typography>
         </Box>
       </DialogContent>
