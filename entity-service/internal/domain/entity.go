@@ -981,6 +981,12 @@ type AccountRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// CreTeam is the account's CRE (customer relationship engineering) team, resolved to a
+	// named group reference (ServiceNow data source only).
+	CreTeam *EntityRef `json:"creTeam,omitempty"`
+	// SreTeam is the account's SRE team, resolved to a named group reference (ServiceNow
+	// data source only).
+	SreTeam *EntityRef `json:"sreTeam,omitempty"`
 }
 
 // UserIDEmailRef is a compact user reference carrying only id and email.
@@ -1039,6 +1045,16 @@ type CaseView struct {
 	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
 	Cause           *CaseCause          `json:"cause"`
 	ResolutionNotes *string             `json:"resolutionNotes"`
+	// WatchList is the set of users watching the case (ServiceNow data source only).
+	WatchList []WatchListUser `json:"watchList,omitempty"`
+	// AutoclosureStep indicates where the case sits in ServiceNow's staged auto-closure
+	// sequence: DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT. Read-only —
+	// informational only; the sequence itself is fully owned by ServiceNow's own flows
+	// (ServiceNow data source only).
+	AutoclosureStep *string `json:"autoclosureStep,omitempty"`
+	// AutoclosureStateTime is when the auto-closure sequence next advances (e.g. the
+	// "eligible again after" date for a held case). Read-only (ServiceNow data source only).
+	AutoclosureStateTime *time.Time `json:"autoclosureStateTime,omitempty"`
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
@@ -1110,9 +1126,10 @@ type SearchCasesResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// Exactly one of State, Severity, WorkState, WatchList, AssigneeEmail, or ParentID must be
-// provided. WatchList, AssigneeEmail, and ParentID are only supported for the ServiceNow
-// data source.
+// Exactly one of State, Severity, WorkState, WatchList, AssigneeEmail, ParentID, RelatedCaseID,
+// AutocloseHoldUntil, Subject, Description, DeploymentID, or DeployedProductID must be provided.
+// WatchList, AssigneeEmail, ParentID, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
+// DeploymentID, and DeployedProductID are only supported for the ServiceNow data source.
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
 type UpdateCaseRequest struct {
@@ -1127,8 +1144,31 @@ type UpdateCaseRequest struct {
 	CloseNotes     *string             `json:"closeNotes"`
 	// ParentID links this case (typically a service request) to another task-derived
 	// record (case, incident, change request, or problem) as its parent. Platform UUID,
-	// converted to the backing data source's internal id before dispatch.
+	// converted to the backing data source's internal id before dispatch. This is the
+	// native hierarchical "major case / child case" relationship — subject to the
+	// close-gating rule that rejects closing a case with open children.
 	ParentID *string `json:"parentId"`
+	// RelatedCaseID links this case to another case via a looser, non-hierarchical
+	// cross-link, not subject to any close-gating rule. Platform UUID, converted to the
+	// backing data source's internal id before dispatch (ServiceNow data source only).
+	RelatedCaseID *string `json:"relatedCaseId"`
+	// AutocloseHoldUntil places the case on hold in ServiceNow's staged auto-closure
+	// sequence: internally sets u_autoclosure_step = ON_HOLD and u_autoclosure_state_time
+	// to this date together, mirroring the real UX (an engineer picks a hold-until date).
+	// This is the only supported write against the auto-closure sequence — the raw step
+	// enum is not freely settable (ServiceNow data source only).
+	AutocloseHoldUntil *time.Time `json:"autocloseHoldUntil"`
+	// Subject updates the case's short description/title (ServiceNow data source only).
+	Subject *string `json:"subject"`
+	// Description updates the case's full description (ServiceNow data source only).
+	Description *string `json:"description"`
+	// DeploymentID moves the case to a different deployment. Platform UUID, converted to
+	// the backing data source's internal id before dispatch (ServiceNow data source only).
+	DeploymentID *string `json:"deploymentId"`
+	// DeployedProductID moves the case to a different deployed product. Platform UUID,
+	// converted to the backing data source's internal id before dispatch (ServiceNow data
+	// source only).
+	DeployedProductID *string `json:"deployedProductId"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
