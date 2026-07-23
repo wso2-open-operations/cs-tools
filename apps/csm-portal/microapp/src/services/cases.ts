@@ -27,6 +27,7 @@ import type {
   CaseCommentCreateResponseDto,
   CaseCommentSearchResponseDto,
   CaseCreatePayloadDto,
+  CaseCreateResponseDto,
   CasePatchPayloadDto,
   CaseSearchFiltersDto,
   CaseSearchPayloadDto,
@@ -202,8 +203,8 @@ const getCaseComments = async (id: string): Promise<Comment[]> => {
 };
 
 const createCase = async (payload: CaseCreatePayloadDto | SecurityReportCreatePayloadDto): Promise<CreatedCaseDto> => {
-  const { data } = await apiClient.post<CreatedCaseDto>(CASES_ENDPOINT, payload);
-  return data;
+  const { data } = await apiClient.post<CaseCreateResponseDto>(CASES_ENDPOINT, payload);
+  return data.case;
 };
 
 const patchCase = async (id: string, payload: CasePatchPayloadDto): Promise<UpdateCaseResponseDto> => {

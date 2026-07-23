@@ -318,3 +318,13 @@ export interface SecurityReportCreatePayloadDto {
 export interface CreatedCaseDto {
   id: string;
 }
+
+// POST /cases wraps the created case in a { message, case } envelope rather than returning it
+// flat — confirmed against the webapp's usePostCsmCase.ts (BeCaseCreateResponse/BeCreatedCase),
+// which unwraps res.case for exactly this reason. openapi.yaml's postCases 201 response
+// ($ref: Case) doesn't reflect the envelope; trust the webapp's actual working code over the spec
+// here, same doc-vs-reality gap seen elsewhere in this backend family.
+export interface CaseCreateResponseDto {
+  message?: string;
+  case: CreatedCaseDto;
+}
