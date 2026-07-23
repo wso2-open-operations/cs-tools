@@ -42,12 +42,12 @@ type snProjectsResponse struct {
 // snProject and snProjectDetailsResponse; ServiceNow specific, no Postgres
 // equivalent. Embedded anonymously; JSON field names are unaffected.
 type snProjectClosureFields struct {
-	ClosureState                    *string `json:"closureState"`
-	EndDateClosureState             *string `json:"endDateClosureState"`
-	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
-	ComplianceViolationDate         *string `json:"complianceViolationDate"`
-	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow"`
+	ClosureState                    *string         `json:"closureState"`
+	EndDateClosureState             *string         `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
+	ComplianceViolationDate         *string         `json:"complianceViolationDate"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 }
 
 type snProject struct {
@@ -169,7 +169,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 				InvoiceDueDateClosureState:      p.InvoiceDueDateClosureState,
 				ComplianceViolationClosureState: p.ComplianceViolationClosureState,
 				ComplianceViolationDate:         p.ComplianceViolationDate,
-				AcpLastNoticeWindow:             p.AcpLastNoticeWindow,
+				SuspensionProcessState:          p.SuspensionProcessState,
 			},
 		})
 	}
@@ -267,7 +267,7 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 			InvoiceDueDateClosureState:      sn.InvoiceDueDateClosureState,
 			ComplianceViolationClosureState: sn.ComplianceViolationClosureState,
 			ComplianceViolationDate:         sn.ComplianceViolationDate,
-			AcpLastNoticeWindow:             sn.AcpLastNoticeWindow,
+			SuspensionProcessState:          sn.SuspensionProcessState,
 		},
 		Account: domain.ProjectAccountRef{
 			ID:                  sysidToUUID(sn.Account.ID),
@@ -283,12 +283,12 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 
 // snProjectUpdatePayload is the Choreo PATCH /projects/{id} request body.
 type snProjectUpdatePayload struct {
-	HasAgent                        *bool   `json:"hasAgent,omitempty"`
-	HasKbReferences                 *bool   `json:"hasKbReferences,omitempty"`
-	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
-	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
-	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow,omitempty"`
+	HasAgent                        *bool           `json:"hasAgent,omitempty"`
+	HasKbReferences                 *bool           `json:"hasKbReferences,omitempty"`
+	EndDateClosureState             *string         `json:"endDateClosureState,omitempty"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState,omitempty"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState,omitempty"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState,omitempty"`
 }
 
 // snProjectUpdateResponse mirrors the Choreo PATCH /projects/{id} response.
@@ -298,14 +298,14 @@ type snProjectUpdateResponse struct {
 }
 
 type snProjectUpdateResult struct {
-	ID                              string  `json:"id"`
-	UpdatedBy                       string  `json:"updatedBy"`
-	UpdatedOn                       string  `json:"updatedOn"`
-	ClosureState                    *string `json:"closureState"`
-	EndDateClosureState             *string `json:"endDateClosureState"`
-	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
-	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow"`
+	ID                              string          `json:"id"`
+	UpdatedBy                       string          `json:"updatedBy"`
+	UpdatedOn                       string          `json:"updatedOn"`
+	ClosureState                    *string         `json:"closureState"`
+	EndDateClosureState             *string         `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 }
 
 type snProjectUpdateService struct {
@@ -331,20 +331,15 @@ func NewServiceNowProjectUpdateService(client *integrationservice.Client) Projec
 // during development. A validXxx map here would risk rejecting legitimate
 // values the ACP automation needs to write.
 //
-// AcpLastNoticeWindow, in contrast, IS validated against a fixed set
-// (validAcpNoticeWindows): it has no SN business rule or Flow Designer process
-// behind it at all — the ACP automation is the sole writer, so we fully own
-// its value domain from day one, unlike the sub-states above.
+// SuspensionProcessState is likewise not validated here: it is a free-form JSON
+// object written by an existing, actively-used SN suspension flow, and this
+// service passes it through opaquely without imposing any schema on its
+// contents.
 func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error) {
 	if req.HasAgent == nil && req.HasKbReferences == nil && req.EndDateClosureState == nil &&
 		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil &&
-		req.AcpLastNoticeWindow == nil {
+		req.SuspensionProcessState == nil {
 		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
-	}
-	if req.AcpLastNoticeWindow != nil {
-		if _, ok := validAcpNoticeWindows[*req.AcpLastNoticeWindow]; !ok {
-			return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "acpLastNoticeWindow must be one of: 90, 60, 30, 15, 7, 0"}
-		}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -355,7 +350,7 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		EndDateClosureState:             req.EndDateClosureState,
 		InvoiceDueDateClosureState:      req.InvoiceDueDateClosureState,
 		ComplianceViolationClosureState: req.ComplianceViolationClosureState,
-		AcpLastNoticeWindow:             req.AcpLastNoticeWindow,
+		SuspensionProcessState:          req.SuspensionProcessState,
 	}
 	raw, err := s.client.Patch(ctx, "/projects/"+uuidToSysid(id), token, payload)
 	if err != nil {
@@ -382,7 +377,7 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 			EndDateClosureState:             sn.Project.EndDateClosureState,
 			InvoiceDueDateClosureState:      sn.Project.InvoiceDueDateClosureState,
 			ComplianceViolationClosureState: sn.Project.ComplianceViolationClosureState,
-			AcpLastNoticeWindow:             sn.Project.AcpLastNoticeWindow,
+			SuspensionProcessState:          sn.Project.SuspensionProcessState,
 		},
 	}, nil
 }
@@ -397,19 +392,6 @@ var validClosureStatuses = map[string]struct{}{
 	"Open":       {},
 	"Suspended":  {},
 	"Restricted": {},
-}
-
-// validAcpNoticeWindows is the fixed set of notice-window buckets the ACP
-// automation may record — see the AcpLastNoticeWindow doc comment on
-// UpdateProject for why this field, unlike the other closure sub-states, is
-// safe to validate strictly.
-var validAcpNoticeWindows = map[string]struct{}{
-	"90": {},
-	"60": {},
-	"30": {},
-	"15": {},
-	"7":  {},
-	"0":  {},
 }
 
 // validSortOrders is the set of accepted SortOrder values.

@@ -353,13 +353,13 @@ type ProjectClosureFields struct {
 	// ComplianceViolationDate is the date a compliance violation was recorded, if any
 	// (ServiceNow data source only).
 	ComplianceViolationDate *string `json:"complianceViolationDate"`
-	// AcpLastNoticeWindow is the last Account Closure Process (ACP) notice window
-	// the automation sent an email for (e.g. "90", "60", "30", "15", "7", "0" days),
-	// used by that job to avoid re-sending the same notice on its next daily run.
-	// Unlike the other fields in this struct, it is not derived by any SN business
-	// rule — the ACP job writes it directly to record its own progress (ServiceNow
-	// data source only).
-	AcpLastNoticeWindow *string `json:"acpLastNoticeWindow"`
+	// SuspensionProcessState is a free-form JSON object tracking per-dimension
+	// Account Closure Process (ACP) suspension-process state (event type + action
+	// results, e.g. per the "based_on_subscription_end_date"/"based_on_due_invoices"/
+	// "based_on_compliance" keys an existing SN suspension flow writes). This layer
+	// does not interpret, validate, or impose any schema on its contents — it is
+	// passed through opaquely as written by that SN flow (ServiceNow data source only).
+	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
 }
 
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
@@ -386,12 +386,12 @@ type ProjectDetailsView struct {
 // SN business rule, so setting one of those and re-fetching the project is
 // how a caller observes the resulting overall status.
 type ProjectUpdateRequest struct {
-	HasAgent                        *bool   `json:"hasAgent,omitempty"`
-	HasKbReferences                 *bool   `json:"hasKbReferences,omitempty"`
-	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
-	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
-	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
-	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow,omitempty"`
+	HasAgent                        *bool           `json:"hasAgent,omitempty"`
+	HasKbReferences                 *bool           `json:"hasKbReferences,omitempty"`
+	EndDateClosureState             *string         `json:"endDateClosureState,omitempty"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState,omitempty"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState,omitempty"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -404,14 +404,14 @@ type ProjectUpdateResponse struct {
 // ProjectUpdateResult is the updated project's metadata, including the
 // closure state as recomputed by ServiceNow after the update.
 type ProjectUpdateResult struct {
-	ID                              string    `json:"id"`
-	UpdatedBy                       string    `json:"updatedBy"`
-	UpdatedOn                       time.Time `json:"updatedOn"`
-	ClosureState                    *string   `json:"closureState"`
-	EndDateClosureState             *string   `json:"endDateClosureState"`
-	InvoiceDueDateClosureState      *string   `json:"invoiceDueDateClosureState"`
-	ComplianceViolationClosureState *string   `json:"complianceViolationClosureState"`
-	AcpLastNoticeWindow             *string   `json:"acpLastNoticeWindow"`
+	ID                              string          `json:"id"`
+	UpdatedBy                       string          `json:"updatedBy"`
+	UpdatedOn                       time.Time       `json:"updatedOn"`
+	ClosureState                    *string         `json:"closureState"`
+	EndDateClosureState             *string         `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 }
 
 // SearchProjectsRequest is the input for a project search operation.
