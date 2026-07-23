@@ -60,6 +60,33 @@ export const INCIDENT_PRIORITIES = Object.keys(PRIORITY_LABEL) as BeIncidentPrio
 /** All incident states, for the Edit dialog's State select. */
 export const INCIDENT_STATES = Object.keys(STATE_LABEL) as BeIncidentState[];
 
+/**
+ * Legal forward transitions per state, modeled on the standard ITSM incident
+ * lifecycle. This is a net-new CSM-platform guardrail, not a port of SN
+ * behavior — ServiceNow enforces no old-state -> new-state legality check
+ * for incidents in this org (only role-gating), so there's no SN precedent
+ * to mirror here. `CLOSED` and `CANCELLED` are terminal: no outgoing edges.
+ */
+const STATE_TRANSITIONS: Record<BeIncidentState, BeIncidentState[]> = {
+  NEW: ["IN_PROGRESS", "CANCELLED"],
+  IN_PROGRESS: ["ON_HOLD", "RESOLVED", "CANCELLED"],
+  ON_HOLD: ["IN_PROGRESS", "CANCELLED"],
+  RESOLVED: ["CLOSED", "IN_PROGRESS"],
+  CLOSED: [],
+  CANCELLED: [],
+};
+
+/**
+ * States the Edit dialog's State select should offer for an incident
+ * currently in `current`: `current` itself (so "no change" always stays
+ * selectable) plus its legal next states. Returns just `[current]` for the
+ * two terminal states, which the dialog uses to render the select as
+ * effectively non-actionable for state changes.
+ */
+export function getLegalNextIncidentStates(current: BeIncidentState): BeIncidentState[] {
+  return [current, ...STATE_TRANSITIONS[current]];
+}
+
 function humanize(value: string): string {
   return value.replace(/_/g, " ");
 }

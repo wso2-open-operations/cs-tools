@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -54,6 +54,8 @@ const BASE_CR: BeChangeRequestDetail = {
   id: "chg-1",
   number: "CHG0009988",
   subject: "Upgrade the gateway cluster",
+  case: { id: "case-1", name: "CASE0001234" },
+  createdOn: "2026-01-01T00:00:00Z",
   state: "new",
   type: "normal",
 };
@@ -69,6 +71,27 @@ function mockQueryResult(
     ...overrides,
   });
 }
+
+describe("CsmChangeRequestDetailPage", () => {
+  it("renders the linked case as a clickable reference to the case route", () => {
+    mockQueryResult({ data: BASE_CR });
+    render(<CsmChangeRequestDetailPage />);
+
+    screen
+      .getByText("CASE0001234")
+      .closest('[role="button"]')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/cases/case-1");
+  });
+
+  it("renders a dash for the linked case when there is no case reference", () => {
+    mockQueryResult({ data: { ...BASE_CR, case: null } });
+    render(<CsmChangeRequestDetailPage />);
+    const linkedCaseCell = screen.getByText("Linked case").parentElement!;
+    expect(within(linkedCaseCell).getByText("—")).toBeInTheDocument();
+  });
+});
 
 describe("CsmChangeRequestDetailPage — Request approval (New -> Assess)", () => {
   it("shows the Request approval button when the backend flags 'assess' as a legal next state", () => {

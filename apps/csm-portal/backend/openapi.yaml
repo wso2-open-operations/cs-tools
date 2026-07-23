@@ -2044,6 +2044,75 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /change-requests/{id}/approvals/decision:
+    post:
+      summary: >-
+        Decide the caller's own pending approval on a change request
+        (ServiceNow data source only). ServiceNow enforces that only the
+        caller's own pending approval can be acted on; the change request's
+        own state cascades automatically via ServiceNow's existing business
+        rule.
+      operationId: decideChangeRequestApproval
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the change request.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestApprovalDecisionPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestApprovalDecisionResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests:
     post:
       summary: Create a change request (ServiceNow data source only).
@@ -6237,6 +6306,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChangeRequestApproval'
+
+    ChangeRequestApprovalDecisionPayload:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+          description: Caller's decision on their own pending approval.
+
+    ChangeRequestApprovalDecisionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID of the approval record that was decided.
+        state:
+          type: string
+          description: Resulting state of the approval ("approved" or "rejected").
 
     CaseVariable:
       type: object
