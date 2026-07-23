@@ -182,9 +182,11 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCase updates the state, severity, watch list, assignee, or fix ETA of a case.
+	// UpdateCase updates the state, severity, watch list, assignee, or fix ETA (customer-facing
+	// or internal best-case/most-likely/worst-case) of a case.
 	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
-	// WatchList, AssigneeEmail, and FixEta are only supported for the ServiceNow data source.
+	// WatchList, AssigneeEmail, FixEta, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta are
+	// only supported for the ServiceNow data source.
 	// Transitioning State to closed is rejected with a ValidationError if the case has any
 	// open task that is visible to the customer (the authoritative case-close gate).
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
@@ -215,6 +217,11 @@ type CaseService interface {
 	// A NotFoundError is returned if the tag does not exist on the case.
 	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as AddCaseTag above.
 	RemoveCaseTag(ctx context.Context, caseID, tagID string) error
+	// SearchTags returns the tags (not scoped to any single case) whose label matches query,
+	// for FE autocomplete when attaching a tag to a case. An empty query returns all known tags.
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for a
+	// case-agnostic tag search; see SearchTags in sn_case_service.go for the requested contract.
+	SearchTags(ctx context.Context, query string) ([]domain.Tag, error)
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.

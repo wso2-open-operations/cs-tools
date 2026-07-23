@@ -259,3 +259,18 @@ func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// SearchTags handles GET /tags/search?q={query}. Not scoped to a single case; used for FE
+// autocomplete when attaching a tag. The optional "limit" query parameter is currently accepted
+// but not forwarded (the downstream tag search is not limit-aware yet).
+func (h *CaseHandler) SearchTags(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+
+	tags, err := h.svc.SearchTags(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string][]domain.Tag{"tags": tags})
+}
