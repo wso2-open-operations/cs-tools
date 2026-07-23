@@ -60,3 +60,11 @@ export async function toPendingAttachment(file: File): Promise<PendingAttachment
     file: dataUrl,
   };
 }
+
+/** Strips the "data:<mime>;base64," prefix from a PendingAttachment's data URI, producing the raw
+ * base64 payload the case-create endpoint's embedded `attachments` field wants (security reports
+ * only — every other attachment path uses POST /attachments, which wants the full data URI). */
+export function toRawBase64(dataUrl: string): string {
+  const comma = dataUrl.indexOf(",");
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+}

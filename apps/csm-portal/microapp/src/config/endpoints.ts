@@ -45,6 +45,8 @@ export const ACCOUNT_ENDPOINT = (id: string) => `/accounts/${id}`;
 export const PROJECTS_SEARCH_ENDPOINT = "/projects/search";
 export const PROJECT_ENDPOINT = (id: string) => `/projects/${id}`;
 export const PRODUCTS_SEARCH_ENDPOINT = "/products/search";
+export const PRODUCT_VULNERABILITIES_SEARCH_ENDPOINT = "/products/vulnerabilities/search";
+export const PRODUCT_VULNERABILITY_ENDPOINT = (id: string) => `/products/vulnerabilities/${id}`;
 export const DEPLOYMENTS_SEARCH_ENDPOINT = "/deployments/search";
 export const DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT = (deploymentId: string) =>
   `/deployments/${deploymentId}/products/search`;

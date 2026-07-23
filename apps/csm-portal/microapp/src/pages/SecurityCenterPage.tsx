@@ -14,9 +14,36 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { ComingSoonPage } from "@components/common/ComingSoonPage";
+import { useState } from "react";
+import { Stack, Tab, Tabs } from "@wso2/oxygen-ui";
+import { SecurityReportsTab } from "@components/security-center/SecurityReportsTab";
+import { VulnerabilitiesTab } from "@components/security-center/VulnerabilitiesTab";
 
-// The webapp also marks Security Center as wip:true (apps/csm-portal/webapp/src/config/csmNavItems.ts).
+type SecurityCenterTabId = "security_reports" | "vulnerabilities";
+
+const TABS: { id: SecurityCenterTabId; label: string }[] = [
+  { id: "security_reports", label: "Security reports" },
+  { id: "vulnerabilities", label: "Vulnerabilities" },
+];
+
+// Mirrors the webapp's CsmSecurityCenterPage: Security reports (cases of type
+// "security_report_analysis") | Vulnerabilities (a separate, non-case-backed
+// entity). "New security report" lives behind SecurityReportsTab's own Fab
+// (see NewSecurityReportPage.tsx) — Vulnerabilities stays read-only, there's no
+// create flow for that entity in either app.
 export default function SecurityCenterPage() {
-  return <ComingSoonPage title="Security Center" description="Security report analysis is still under construction." />;
+  const [activeTab, setActiveTab] = useState<SecurityCenterTabId>("security_reports");
+
+  return (
+    <Stack gap={2}>
+      <Tabs variant="scrollable" value={activeTab} onChange={(_, value: SecurityCenterTabId) => setActiveTab(value)}>
+        {TABS.map((tab) => (
+          <Tab key={tab.id} label={tab.label} value={tab.id} disableRipple />
+        ))}
+      </Tabs>
+
+      {activeTab === "security_reports" && <SecurityReportsTab />}
+      {activeTab === "vulnerabilities" && <VulnerabilitiesTab />}
+    </Stack>
+  );
 }

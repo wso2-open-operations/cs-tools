@@ -173,6 +173,9 @@ interface AttachmentsFieldProps {
   /** Per-file size cap. Defaults to the standalone-attachment ceiling; callers with a tighter
    * budget (e.g. inline attachments on a comment) pass MAX_INLINE_ATTACHMENT_SIZE_BYTES. */
   maxSizeBytes?: number;
+  /** Overrides the default "Attachments (optional)" label — e.g. NewSecurityReportPage passes
+   * "Attachments (required)" since the backend rejects a security report with none. */
+  label?: string;
 }
 
 // Mirrors the webapp's shared AttachmentsField
@@ -184,6 +187,7 @@ export function AttachmentsField({
   onChange,
   disabled,
   maxSizeBytes = MAX_ATTACHMENT_SIZE_BYTES,
+  label = "Attachments (optional)",
 }: AttachmentsFieldProps) {
   const { inputRef, error, handleFiles, openPicker } = useAttachmentPicker(onChange, maxSizeBytes);
 
@@ -193,7 +197,7 @@ export function AttachmentsField({
 
       <Stack direction="row" alignItems="center" justifyContent="space-between">
         <Typography variant="body2" fontWeight={500}>
-          Attachments (optional)
+          {label}
         </Typography>
         <Button
           size="small"

@@ -19,7 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, Chip, Divider, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { accounts } from "@src/services/accounts";
 import { formatDateOnly } from "@utils/customers";
-import { MetaRow, MetaValue } from "@components/customers/MetaRow";
+import { MetaRow, MetaValue } from "@components/common/MetaRow";
 import { ErrorState } from "@components/support/ErrorState";
 
 export default function AccountDetailPage() {

@@ -40,3 +40,5 @@ export * from "./changeRequest.dto";
 export * from "./changeRequest.model";
 export * from "./updates.dto";
 export * from "./updates.model";
+export * from "./vulnerability.dto";
+export * from "./vulnerability.model";

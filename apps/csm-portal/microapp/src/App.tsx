@@ -30,11 +30,13 @@ import MorePage from "@pages/MorePage";
 import AnnouncementsPage from "@pages/AnnouncementsPage";
 import TimeCardsPage from "@pages/TimeCardsPage";
 import SecurityCenterPage from "@pages/SecurityCenterPage";
+import NewSecurityReportPage from "@pages/NewSecurityReportPage";
 import UpdatesPage from "@pages/UpdatesPage";
 import EngagementsPage from "@pages/EngagementsPage";
 import CustomersPage from "@pages/CustomersPage";
 import AccountDetailPage from "@pages/AccountDetailPage";
 import ProjectDetailPage from "@pages/ProjectDetailPage";
+import VulnerabilityDetailPage from "@pages/VulnerabilityDetailPage";
 import SettingsPage from "@pages/SettingsPage";
 import ProfilePage from "@pages/ProfilePage";
 
@@ -74,6 +76,8 @@ export default function App() {
           <Route path="/more/announcements" element={<AnnouncementsPage />} />
           <Route path="/more/time-cards" element={<TimeCardsPage />} />
           <Route path="/more/security-center" element={<SecurityCenterPage />} />
+          <Route path="/more/security-center/reports/new" element={<NewSecurityReportPage />} />
+          <Route path="/more/security-center/vulnerabilities/:id" element={<VulnerabilityDetailPage />} />
           <Route path="/more/updates" element={<UpdatesPage />} />
           <Route path="/more/engagements" element={<EngagementsPage />} />
           <Route path="/more/customers" element={<CustomersPage />} />
