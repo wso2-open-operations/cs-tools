@@ -106,6 +106,15 @@ export interface CsmTimeCard {
    * timestamp exists upstream).
    */
   rejectionReason?: string;
+  /**
+   * The engineers eligible to decide this card (SN `approver_list`). Used to
+   * gate the "Review" action: the backend 403s a decision from anyone not
+   * in this list, regardless of team-lead status — the approval queue tab
+   * already scopes server-side (`approverId` filter), but a case's own
+   * "Time tracking" panel shows every submitted card on the case, so it
+   * needs this to know which ones the signed-in lead can actually decide.
+   */
+  approvers?: TimeCardApprover[];
 }
 
 /**

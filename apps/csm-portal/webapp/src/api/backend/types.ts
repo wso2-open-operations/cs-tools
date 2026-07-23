@@ -2157,6 +2157,15 @@ export interface BeTimeCardView {
   rejectionReason?: string | null;
   project?: BeTimeCardRef;
   case?: BeTimeCardCaseRef;
+  /**
+   * The engineers eligible to decide this card (SN `approver_list`). Not in
+   * the BFF's `openapi.yaml` (stale doc — `time-cards` responses are a raw
+   * passthrough of the entity-service's `TimeCardView`, which does return
+   * this), but confirmed present on the wire. Used to gate the "Review"
+   * action in the UI: the backend 403s a decision from anyone not in this
+   * list, regardless of team-lead status.
+   */
+  approvers?: BeTimeCardRef[];
 }
 
 /**

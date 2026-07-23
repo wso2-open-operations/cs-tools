@@ -167,11 +167,16 @@ export default function CaseTimeCardsPanel({
                   <TimeCardStatusChip state={c.state} />
                   {/* Never shown on your own card: the backend 403s a
                    self-decide regardless of approver status, so a card you
-                   submitted yourself can never actually be reviewed by you. */}
+                   submitted yourself can never actually be reviewed by you.
+                   Also gated on being in the card's own approver list — this
+                   panel shows every submitted card on the case, not just
+                   ones assigned to the signed-in lead, and the backend 403s
+                   a decision from anyone not in that list (confirmed live). */}
                   {isTeamLead &&
                     c.state === "submitted" &&
                     !!me.id &&
-                    c.userId !== me.id && (
+                    c.userId !== me.id &&
+                    !!c.approvers?.some((a) => a.id === me.id) && (
                       <Button
                         size="small"
                         variant="outlined"
