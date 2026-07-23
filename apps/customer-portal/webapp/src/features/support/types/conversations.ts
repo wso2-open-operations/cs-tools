@@ -99,6 +99,8 @@ export type AllConversationsListProps = {
   isError?: boolean;
   hasListRefinement?: boolean;
   onConversationClick?: (conversation: Conversation) => void;
+  /** Close (abandon) a resumable chat. When omitted, the close action is hidden. */
+  onCloseConversation?: (conversation: Conversation) => void;
 };
 
 // Item type for select-type user input collection slot option.

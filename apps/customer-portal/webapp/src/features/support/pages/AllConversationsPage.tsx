@@ -28,10 +28,21 @@ import {
   type ChangeEvent,
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
-import { Divider, Stack } from "@wso2/oxygen-ui";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Divider,
+  Stack,
+} from "@wso2/oxygen-ui";
 import { useLoader } from "@context/linear-loader/LoaderContext";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useSearchConversations } from "@features/support/api/useSearchConversations";
+import { useAbandonConversation } from "@features/support/api/useAbandonConversation";
 import type {
   AllConversationsFilterValues,
   Conversation,
@@ -180,6 +191,25 @@ export default function AllConversationsPage(): JSX.Element {
   const conversations = data?.conversations ?? [];
   const totalRecords = data?.totalRecords ?? 0;
 
+  const { showError } = useErrorBanner();
+  const abandonConversation = useAbandonConversation(projectId || "");
+  const [chatToClose, setChatToClose] = useState<Conversation | null>(null);
+
+  const handleCloseConversation = (conv: Conversation) => {
+    setChatToClose(conv);
+  };
+
+  const handleConfirmClose = () => {
+    if (!chatToClose) return;
+    abandonConversation.mutate(chatToClose.id, {
+      onSuccess: () => setChatToClose(null),
+      onError: (error: Error) => {
+        setChatToClose(null);
+        showError(error.message || "Failed to close the chat. Please try again.");
+      },
+    });
+  };
+
   const handleConversationClick = (conv: Conversation) => {
     if (!projectId) return;
 
@@ -318,6 +348,7 @@ export default function AllConversationsPage(): JSX.Element {
         isError={isConversationsError}
         hasListRefinement={listHasRefinement}
         onConversationClick={handleConversationClick}
+        onCloseConversation={handleCloseConversation}
       />
 
       <ListPagination
@@ -327,6 +358,39 @@ export default function AllConversationsPage(): JSX.Element {
         onPageChange={handlePageChange}
         onRowsPerPageChange={handleRowsPerPageChange}
       />
+
+      <Dialog
+        open={chatToClose !== null}
+        onClose={
+          abandonConversation.isPending ? undefined : () => setChatToClose(null)
+        }
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Close this chat?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This chat will be closed and can no longer be resumed. Any case
+            created from it is not affected.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setChatToClose(null)}
+            disabled={abandonConversation.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmClose}
+            disabled={abandonConversation.isPending}
+          >
+            {abandonConversation.isPending ? "Closing…" : "Close chat"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }
