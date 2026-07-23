@@ -134,6 +134,7 @@ export default function CaseActivitiesFeed({
   const [newestFirst, setNewestFirst] = useState(true);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(null);
+  const [fullscreenImageAlt, setFullscreenImageAlt] = useState<string | undefined>(undefined);
 
   const entries: FeedEntry[] = useMemo(() => {
     const out: FeedEntry[] = [];
@@ -264,7 +265,10 @@ export default function CaseActivitiesFeed({
                 <CsmCaseCommentBubble
                   key={`c-${e.comment.id}`}
                   comment={e.comment}
-                  onImageClick={setFullscreenImageSrc}
+                  onImageClick={(src, alt) => {
+                    setFullscreenImageSrc(src);
+                    setFullscreenImageAlt(alt);
+                  }}
                 />
               );
             }
@@ -453,7 +457,11 @@ export default function CaseActivitiesFeed({
       <ImageFullscreenModal
         open={!!fullscreenImageSrc}
         imageSrc={fullscreenImageSrc}
-        onClose={() => setFullscreenImageSrc(null)}
+        imageAlt={fullscreenImageAlt}
+        onClose={() => {
+          setFullscreenImageSrc(null);
+          setFullscreenImageAlt(undefined);
+        }}
       />
     </Box>
   );

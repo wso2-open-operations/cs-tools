@@ -121,7 +121,12 @@ export function stripCustomerCommentAddedLabel(html: string): string {
  */
 export function hasDisplayableContent(comment: CsmCaseComment): boolean {
   const raw = comment.bodyHtml ?? "";
-  const stripped = stripCodeWrapper(raw);
+  const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
+  const stripped = hasSingleCodeWrapper(raw)
+    ? stripCodeWrapper(raw)
+    : codeBlockCount > 1
+      ? stripAllCodeBlocks(raw)
+      : convertCodeTagsToHtml(raw);
   const withoutLabel = stripCustomerCommentAddedLabel(stripped);
   const textOnly = withoutLabel.replace(/<[^>]+>/g, "").trim();
   if (textOnly.length > 0) return true;
@@ -133,8 +138,13 @@ export function hasDisplayableContent(comment: CsmCaseComment): boolean {
  * with clickable anchor tags that open in a new tab.
  */
 export function linkifyBareUrls(html: string): string {
+  // The lookahead is wrapped in `(?=(...))\1` (an atomic-group emulation)
+  // rather than matched directly, because a plain trailing negative lookahead
+  // lets the greedy URL quantifier backtrack to a shorter match that
+  // satisfies the lookahead — silently truncating the linkified URL (e.g.
+  // matching "example.co" instead of "example.com" right before `</a>`).
   return html.replace(
-    /(?<!href=["'])(https?:\/\/[^\s<>"']+)/g,
+    /(?<!href=["'])(?=(https?:\/\/[^\s<>"']+))\1(?!["']?\s*<\/a>)/g,
     '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">$1</a>',
   );
 }

@@ -42,7 +42,7 @@ import type {
 interface CsmCaseCommentBubbleProps {
   comment: CsmCaseComment;
   /** Opens the fullscreen image preview for an inline `<img>` in the comment body. */
-  onImageClick?: (src: string) => void;
+  onImageClick?: (src: string, alt?: string) => void;
 }
 
 const SAFE_PROTOCOLS = ["http:", "https:"];
@@ -114,13 +114,17 @@ export default function CsmCaseCommentBubble({
     [resolvedHtml],
   );
 
-  const setImageA11yAttributes = useCallback((root: HTMLDivElement) => {
-    root.querySelectorAll("img").forEach((image) => {
-      image.setAttribute("tabindex", "0");
-      image.setAttribute("role", "button");
-      image.setAttribute("aria-label", "Open image preview");
-    });
-  }, []);
+  const setImageA11yAttributes = useCallback(
+    (root: HTMLDivElement) => {
+      if (!onImageClick) return;
+      root.querySelectorAll("img").forEach((image) => {
+        image.setAttribute("tabindex", "0");
+        image.setAttribute("role", "button");
+        image.setAttribute("aria-label", "Open image preview");
+      });
+    },
+    [onImageClick],
+  );
 
   const setAnchorAttributes = useCallback((root: HTMLDivElement) => {
     root.querySelectorAll("a").forEach((anchor) => {
@@ -138,7 +142,7 @@ export default function CsmCaseCommentBubble({
         const src = target.src || target.getAttribute("src");
         if (src && onImageClick) {
           e.preventDefault();
-          onImageClick(src);
+          onImageClick(src, target.alt || undefined);
         }
       }
     },
@@ -155,7 +159,7 @@ export default function CsmCaseCommentBubble({
         const src = target.src || target.getAttribute("src");
         if (src && onImageClick) {
           e.preventDefault();
-          onImageClick(src);
+          onImageClick(src, target.alt || undefined);
         }
       }
     },

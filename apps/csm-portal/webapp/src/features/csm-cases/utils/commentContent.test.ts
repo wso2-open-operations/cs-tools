@@ -108,6 +108,14 @@ describe("hasDisplayableContent", () => {
   it("is false for a genuinely empty comment", () => {
     expect(hasDisplayableContent(makeComment("<p></p>"))).toBe(false);
   });
+
+  it("is false for multiple empty/label-only [code] blocks", () => {
+    expect(
+      hasDisplayableContent(
+        makeComment("[code][/code][code]Customer comment added[/code]"),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("linkifyBareUrls", () => {
@@ -121,8 +129,13 @@ describe("linkifyBareUrls", () => {
   it("does not double-wrap a URL already inside an href attribute", () => {
     const input = '<a href="https://example.com">https://example.com</a>';
     const out = linkifyBareUrls(input);
-    // Only the visible text node URL gets wrapped again by design (matches
-    // the customer-portal behavior); the href itself is left untouched.
     expect(out).toContain('href="https://example.com"');
+  });
+
+  it("does not produce a nested anchor when the URL is already an anchor's visible text", () => {
+    const input = '<a href="https://example.com">https://example.com</a>';
+    const out = linkifyBareUrls(input);
+    expect(out).not.toContain('<a href="https://example.com"><a href="https://example.com"');
+    expect((out.match(/<a /g) ?? []).length).toBe(1);
   });
 });

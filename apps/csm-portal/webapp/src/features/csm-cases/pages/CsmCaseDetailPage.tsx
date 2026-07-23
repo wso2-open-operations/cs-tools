@@ -103,7 +103,8 @@ import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCards
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
-import { isBlankHtml, sanitizeDescriptionHtml } from "@utils/sanitizeHtml";
+import { isBlankHtml, sanitizeDescriptionHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
+import { useDarkMode } from "@utils/useDarkMode";
 import {
   publicCommentGateReason,
   WORK_STATE_LABEL,
@@ -262,6 +263,7 @@ const TAB_DEFS: Array<{
 export default function CsmCaseDetailPage(): JSX.Element {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavTransition();
+  const isDarkMode = useDarkMode();
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
   const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
@@ -1525,7 +1527,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   "& p:last-child": { mb: 0 },
                 }}
                 dangerouslySetInnerHTML={{
-                  __html: sanitizeDescriptionHtml(c.description),
+                  __html: sanitizeDescriptionHtml(
+                    isDarkMode
+                      ? stripLightModeInlineStyles(c.description)
+                      : c.description,
+                  ),
                 }}
               />
             </Card>

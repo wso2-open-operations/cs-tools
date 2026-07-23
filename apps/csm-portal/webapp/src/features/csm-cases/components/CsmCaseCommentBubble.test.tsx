@@ -93,7 +93,21 @@ describe("CsmCaseCommentBubble", () => {
     fireEvent.click(img);
     expect(onImageClick).toHaveBeenCalledWith(
       expect.stringContaining("abc123.iix"),
+      "a",
     );
+  });
+
+  it("does not mark inline images as interactive when onImageClick is not provided", () => {
+    render(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml: '<img src="/abc123.iix" alt="a" />',
+        })}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Open image preview" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders a chatbot comment's markdown body as HTML", () => {

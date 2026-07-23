@@ -21,6 +21,7 @@ import type { JSX } from "react";
 interface ImageFullscreenModalProps {
   open: boolean;
   imageSrc: string | null;
+  imageAlt?: string;
   onClose: () => void;
 }
 
@@ -31,6 +32,7 @@ interface ImageFullscreenModalProps {
 export default function ImageFullscreenModal({
   open,
   imageSrc,
+  imageAlt,
   onClose,
 }: ImageFullscreenModalProps): JSX.Element {
   return (
@@ -80,7 +82,7 @@ export default function ImageFullscreenModal({
           <Box
             component="img"
             src={imageSrc}
-            alt="Full size"
+            alt={imageAlt || "Full size"}
             sx={{
               maxWidth: "90vw",
               maxHeight: "90vh",

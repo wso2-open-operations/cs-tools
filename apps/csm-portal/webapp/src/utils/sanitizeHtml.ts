@@ -68,8 +68,8 @@ export function sanitizeDescriptionHtml(html: string): string {
  */
 export function stripLightModeInlineStyles(html: string): string {
   return html.replace(
-    /style\s*=\s*"([^"]*)"/gi,
-    (_match, styleContent: string) => {
+    /style\s*=\s*(["'])([\s\S]*?)\1/gi,
+    (_match, quote: string, styleContent: string) => {
       const declarations = styleContent.split(";");
       const filtered = declarations.filter((decl) => {
         const normalized = decl.toLowerCase().replace(/\s+/g, " ").trim();
@@ -88,7 +88,7 @@ export function stripLightModeInlineStyles(html: string): string {
       });
       const cleaned = filtered.join(";").replace(/;+$/, "").trim();
       if (!cleaned) return "";
-      return `style="${cleaned}"`;
+      return `style=${quote}${cleaned}${quote}`;
     },
   );
 }
@@ -104,7 +104,7 @@ function isNearWhiteRgb(bgDecl: string): boolean {
 
 function isDarkColor(colorDecl: string): boolean {
   // Named dark colors
-  if (/^color\s*:\s*(black|#000(000)?|#1[0-9a-f]{5}|#2[0-9a-f]{5})\s*$/.test(colorDecl))
+  if (/^color\s*:\s*(black|#000(000)?)\s*$/.test(colorDecl))
     return true;
   // rgb(r, g, b) where all channels are below 100 (dark)
   const rgbMatch = colorDecl.match(/^color\s*:\s*rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/);

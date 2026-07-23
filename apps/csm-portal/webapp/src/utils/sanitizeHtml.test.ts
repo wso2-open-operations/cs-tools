@@ -106,4 +106,19 @@ describe("stripLightModeInlineStyles", () => {
     expect(out).toContain("border: 1px solid #333");
     expect(out).toContain("padding: 4px");
   });
+
+  it("handles single-quoted style attributes the same as double-quoted", () => {
+    const out = stripLightModeInlineStyles(
+      "<div style='background: #ffffff; color: red;'>x</div>",
+    );
+    expect(out).not.toContain("background");
+    expect(out).toContain("color: red");
+  });
+
+  it("does not treat a bright #1xxxxx/#2xxxxx color as dark", () => {
+    const blue = stripLightModeInlineStyles('<span style="color: #1f75fe;">x</span>');
+    expect(blue).toContain("color: #1f75fe");
+    const cyan = stripLightModeInlineStyles('<span style="color: #2fffff;">x</span>');
+    expect(cyan).toContain("color: #2fffff");
+  });
 });
