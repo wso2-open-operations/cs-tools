@@ -497,3 +497,120 @@ func TestPatchIncident(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateIncidentComment(t *testing.T) {
+	const incidentID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/comments", strings.NewReader(`{"type":"comment","content":"hi"}`))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.CreateIncidentComment(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/not-a-uuid/comments", strings.NewReader(`{"type":"comment","content":"hi"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.CreateIncidentComment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/comments", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.CreateIncidentComment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+	})
+
+	t.Run("injects referenceId and referenceType and forwards to the generic comment endpoint", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			getIncidentFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + incidentID + `"}`), nil
+			},
+			createCommentFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"message":"Comment created.","comment":{"id":"22222222-2222-2222-2222-222222222222","createdOn":"2026-01-01T00:00:00Z","createdBy":"user@example.com"}}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/comments", strings.NewReader(`{"type":"comment","content":"hi"}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.CreateIncidentComment(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		if !strings.Contains(string(capturedBody), `"referenceId":"`+incidentID+`"`) {
+			t.Errorf("expected referenceId to be injected, got %q", capturedBody)
+		}
+		if !strings.Contains(string(capturedBody), `"referenceType":"incident"`) {
+			t.Errorf("expected referenceType incident to be injected, got %q", capturedBody)
+		}
+	})
+
+	t.Run("upstream GetIncident error is mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create incident comment.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					getIncidentFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/comments", strings.NewReader(`{"type":"comment","content":"hi"}`)))
+				r.SetPathValue("id", incidentID)
+				w := httptest.NewRecorder()
+				h.CreateIncidentComment(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}
+
+func TestSearchIncidentComments(t *testing.T) {
+	const incidentID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/comments/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.SearchIncidentComments(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+	})
+
+	t.Run("injects referenceId and referenceType and forwards to the generic search endpoint", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			searchCommentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"comments":[],"total":0,"limit":20,"offset":0}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/comments/search", strings.NewReader(`{"pagination":{"offset":0,"limit":20}}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.SearchIncidentComments(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		if !strings.Contains(string(capturedBody), `"referenceId":"`+incidentID+`"`) {
+			t.Errorf("expected referenceId to be injected, got %q", capturedBody)
+		}
+		if !strings.Contains(string(capturedBody), `"referenceType":"incident"`) {
+			t.Errorf("expected referenceType incident to be injected, got %q", capturedBody)
+		}
+	})
+}

@@ -71,6 +71,7 @@ function detailFromBeCase(
     relatedCase: c.relatedCase
       ? { id: c.relatedCase.id, caseNumber: c.relatedCase.number }
       : undefined,
+    linkedServiceRequests: c.linkedServiceRequests ?? undefined,
     assignee,
     assigneeName,
     assigneeIsMe,

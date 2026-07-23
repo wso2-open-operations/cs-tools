@@ -30,6 +30,7 @@ import type {
   BeAttachmentSearchPayload,
   BeAttachmentSearchResponse,
   BeDeleteAttachmentResponse,
+  BeReferenceType,
 } from "@api/backend/types";
 import { uiAttachmentFromBe } from "@api/backend/mappers";
 import { saveBlob } from "@utils/saveBlob";
@@ -64,22 +65,24 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 /**
- * Load all attachments on a case. Calls `POST /attachments/search` scoped to the
- * case (`referenceType: "case"`) with a single wide page.
+ * Load all attachments on a reference entity. Calls `POST /attachments/search`
+ * scoped to `referenceType` (defaults to `"case"` for existing call sites) with
+ * a single wide page.
  */
 export function useGetCsmCaseAttachments(
   caseId: string | undefined,
+  referenceType: BeReferenceType = "case",
 ): UseQueryResult<CaseAttachment[], Error> {
   const api = useBackendApi();
 
   return useQuery<CaseAttachment[], Error>({
-    queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, caseId ?? ""],
+    queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, referenceType, caseId ?? ""],
     queryFn: async (): Promise<CaseAttachment[]> => {
       if (!caseId) return [];
 
       const payload: BeAttachmentSearchPayload = {
         referenceId: caseId,
-        referenceType: "case",
+        referenceType,
         pagination: { offset: 0, limit: ATTACHMENTS_PAGE_LIMIT },
       };
       const response = await api.post<
@@ -102,13 +105,15 @@ export interface PostCsmCaseAttachmentInput {
   description?: string;
   /** Display name of the uploader (used by the mock; the BE sets its own). */
   uploadedBy: string;
+  /** Reference entity type. Defaults to `"case"` for existing call sites. */
+  referenceType?: BeReferenceType;
 }
 
 /**
- * Upload a file attachment to a case via `POST /attachments` (scoped with
- * `referenceType: "case"`). The file is sent as a base64 data URI. The create
- * response is a thin ack, so the list is refetched on success to hydrate the
- * new entry from search.
+ * Upload a file attachment to a reference entity via `POST /attachments`
+ * (`referenceType` defaults to `"case"`). The file is sent as a base64 data
+ * URI. The create response is a thin ack, so the list is refetched on success
+ * to hydrate the new entry from search.
  */
 export function usePostCsmCaseAttachment(): UseMutationResult<
   CaseAttachment | null,
@@ -131,7 +136,7 @@ export function usePostCsmCaseAttachment(): UseMutationResult<
       const dataUri = await readFileAsDataUrl(input.file);
       const payload: BeAttachmentCreatePayload = {
         referenceId: input.caseId,
-        referenceType: "case",
+        referenceType: input.referenceType ?? "case",
         name: input.name?.trim() || input.file.name,
         type: input.file.type || "application/octet-stream",
         file: dataUri,
@@ -146,7 +151,11 @@ export function usePostCsmCaseAttachment(): UseMutationResult<
     },
     onSuccess: (_created, variables) => {
       void queryClient.invalidateQueries({
-        queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, variables.caseId],
+        queryKey: [
+          ApiQueryKeys.CSM_CASE_ATTACHMENTS,
+          variables.referenceType ?? "case",
+          variables.caseId,
+        ],
       });
     },
   });
@@ -175,14 +184,17 @@ export function useDownloadCsmCaseAttachment(): (
 }
 
 export interface DeleteCsmCaseAttachmentInput {
-  /** Owning case id; used only to invalidate the right attachment list. */
+  /** Owning entity id; used only to invalidate the right attachment list. */
   caseId: string;
   attachmentId: string;
+  /** Owning entity type. Defaults to `"case"` for existing call sites. */
+  referenceType?: BeReferenceType;
 }
 
 /**
  * Delete an attachment via `DELETE /attachments/{id}` (ServiceNow data source
- * only). On success the case's attachment list is invalidated so the row drops.
+ * only). On success the owning entity's attachment list is invalidated so the
+ * row drops.
  */
 export function useDeleteCsmCaseAttachment(): UseMutationResult<
   void,
@@ -200,7 +212,11 @@ export function useDeleteCsmCaseAttachment(): UseMutationResult<
     },
     onSuccess: (_void, variables) => {
       void queryClient.invalidateQueries({
-        queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, variables.caseId],
+        queryKey: [
+          ApiQueryKeys.CSM_CASE_ATTACHMENTS,
+          variables.referenceType ?? "case",
+          variables.caseId,
+        ],
       });
     },
   });

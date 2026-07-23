@@ -316,6 +316,8 @@ type ITServiceService interface {
 type CommentService interface {
 	// SearchComments returns a paginated list of comments for the given reference entity.
 	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
+	// CreateComment creates a new comment on the given reference entity.
+	CreateComment(ctx context.Context, req domain.CreateCommentRequest) (domain.CreateCommentResponse, error)
 }
 
 // TaskSlaService defines the operations available on the task-slas entity.

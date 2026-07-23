@@ -33,6 +33,8 @@ type entityIncidentClient interface {
 	CreateIncident(ctx context.Context, body []byte) ([]byte, error)
 	GetIncident(ctx context.Context, id string) ([]byte, error)
 	PatchIncident(ctx context.Context, id string, body []byte) ([]byte, error)
+	CreateComment(ctx context.Context, body []byte) ([]byte, error)
+	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // searchIncidentsRequest mirrors the enum/format-constrained fields of the documented
@@ -467,6 +469,110 @@ func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity PatchIncident failed", "userID", user.UserID, "incidentID", id, "err", err)
 		mapUpstreamError(w, err, "Failed to update incident.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateIncidentComment handles POST /incidents/{id}/comments.
+// Injects referenceId and referenceType into the payload and forwards to the entity
+// service's reference-generic POST /comments.
+func (h *IncidentHandler) CreateIncidentComment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if _, err := h.entity.GetIncident(r.Context(), id); err != nil {
+		slog.ErrorContext(r.Context(), "entity GetIncident failed during comment guard", "userID", user.UserID, "incidentID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to create incident comment.")
+		return
+	}
+
+	newBody, err := injectReferenceFields(body, id, "incident")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.CreateComment(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "incidentID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to create incident comment.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// SearchIncidentComments handles POST /incidents/{id}/comments/search.
+// Injects referenceId and referenceType into the payload and forwards to the entity
+// service's reference-generic POST /comments/search.
+func (h *IncidentHandler) SearchIncidentComments(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	newBody, err := injectReferenceFields(body, id, "incident")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.SearchComments(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "incidentID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to search incident comments.")
 		return
 	}
 

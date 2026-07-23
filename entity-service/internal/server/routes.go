@@ -319,6 +319,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 
 	if commentHandler != nil {
+		mux.HandleFunc("POST /comments", commentHandler.CreateComment)
 		mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
 	}
 

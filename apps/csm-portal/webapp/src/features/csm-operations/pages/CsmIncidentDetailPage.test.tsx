@@ -47,6 +47,21 @@ vi.mock("@features/csm-operations/api/usePatchIncident", () => ({
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: vi.fn() }),
 }));
+vi.mock("@features/csm-operations/api/useCsmIncidentComments", () => ({
+  useGetCsmIncidentComments: () => ({ data: [] }),
+  usePostCsmIncidentComment: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  useGetCsmCaseAttachments: () => ({ data: [] }),
+  usePostCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
+  useDownloadCsmCaseAttachment: () => vi.fn(),
+}));
+vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
+  default: () => null,
+}));
+vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
+  AttachmentsWidget: () => null,
+}));
 
 // Imported after the mocks above so the module picks them up.
 import CsmIncidentDetailPage from "@features/csm-operations/pages/CsmIncidentDetailPage";

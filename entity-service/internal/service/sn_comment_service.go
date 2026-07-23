@@ -47,7 +47,7 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 		return domain.SearchCommentsResponse{}, &apierror.ValidationError{Msg: "referenceId is required"}
 	}
 	if _, ok := validReferenceTypes[req.ReferenceType]; !ok {
-		return domain.SearchCommentsResponse{}, &apierror.ValidationError{Msg: "referenceType must be one of: case, conversation, change_request, deployment"}
+		return domain.SearchCommentsResponse{}, &apierror.ValidationError{Msg: "referenceType must be one of: case, conversation, change_request, deployment, incident"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -110,5 +110,60 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 		Limit:    req.Pagination.Limit,
 		Offset:   req.Pagination.Offset,
 		HasMore:  req.Pagination.Offset+len(comments) < total,
+	}, nil
+}
+
+// CreateComment implements CommentService. It is the reference-generic counterpart of
+// snCaseService.CreateCaseComment, accepting any referenceType in validReferenceTypes
+// instead of hardcoding "case".
+func (s *snCommentSearchService) CreateComment(ctx context.Context, req domain.CreateCommentRequest) (domain.CreateCommentResponse, error) {
+	if req.ReferenceID == "" {
+		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "referenceId is required"}
+	}
+	if _, ok := validReferenceTypes[req.ReferenceType]; !ok {
+		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "referenceType must be one of: case, conversation, change_request, deployment, incident"}
+	}
+	if !validCommentType[req.Type] {
+		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + string(req.Type)}
+	}
+	if req.Content == "" {
+		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "content is required"}
+	}
+	if req.Type == domain.CommentTypeActivity {
+		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "type 'activity' is not supported for ServiceNow"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	snType := snCommentTypeMap[req.Type]
+
+	payload := snCreateCommentPayload{
+		ReferenceID:   uuidToSysid(req.ReferenceID),
+		ReferenceType: string(req.ReferenceType),
+		Type:          snType,
+		Content:       req.Content,
+	}
+
+	raw, err := s.client.Post(ctx, "/comments", token, payload)
+	if err != nil {
+		return domain.CreateCommentResponse{}, err
+	}
+
+	var snResp snCreateCommentResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.CreateCommentResponse{}, fmt.Errorf("sn create comment: parse response: %w", err)
+	}
+
+	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Comment.CreatedOn)
+	if err != nil {
+		return domain.CreateCommentResponse{}, fmt.Errorf("sn create comment: parse createdOn %q: %w", snResp.Comment.CreatedOn, err)
+	}
+
+	return domain.CreateCommentResponse{
+		Message: snResp.Message,
+		Comment: domain.CaseCommentDetail{
+			ID:        sysidToUUID(snResp.Comment.ID),
+			CreatedOn: createdOn,
+			CreatedBy: snResp.Comment.CreatedBy,
+		},
 	}, nil
 }

@@ -182,6 +182,17 @@ export interface BeCaseNumberRef {
 }
 
 /**
+ * A service-request case whose parent points to this case or incident (the reverse
+ * of `parentId`). Carries a display name in addition to {@link BeCaseNumberRef}'s
+ * id/number.
+ */
+export interface BeLinkedServiceRequestRef {
+  id: string;
+  number: string;
+  name: string;
+}
+
+/**
  * The assigned CS engineer embedded in case views. Carries `email` so the FE
  * can tell whether the case is assigned to the signed-in user (the only stable
  * identity the FE has from the JWT). `email` may be `null` depending on the data
@@ -272,6 +283,11 @@ export interface BeCaseView {
   cause?: BeCaseCause | null;
   /** Free-text resolution/close notes from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
   resolutionNotes?: string | null;
+  /**
+   * Service-request cases whose parent points to this case. Populated on every
+   * case detail response, not just high-severity cases.
+   */
+  linkedServiceRequests?: BeLinkedServiceRequestRef[] | null;
 }
 
 export interface BeCaseCreatePayload {
@@ -421,11 +437,11 @@ export interface BeGetCatalogItemVariablesResponse {
 /**
  * Request body for `PATCH /cases/{id}` (mirrors the entity `UpdateCaseRequest`).
  * **Exactly one** of `state` / `severity` / `workState` /
- * `assigneeEmail` / `watchList` is sent per call — the backend rejects zero or
- * more than one. Encoded as a discriminated union (each variant `?: never`s the
- * others) so the exactly-one-field contract is enforced at compile time, not
- * just in docs. `assigneeEmail` and `watchList` are supported **only** for the
- * ServiceNow data source. `workState` is only accepted while the case is
+ * `assigneeEmail` / `watchList` / `parentId` is sent per call — the backend rejects
+ * zero or more than one. Encoded as a discriminated union (each variant `?: never`s
+ * the others) so the exactly-one-field contract is enforced at compile time, not
+ * just in docs. `assigneeEmail`, `watchList`, and `parentId` are supported **only**
+ * for the ServiceNow data source. `workState` is only accepted while the case is
  * `work_in_progress`.
  */
 export type BeCaseUpdatePayload =
@@ -435,18 +451,21 @@ export type BeCaseUpdatePayload =
       workState?: never;
       assigneeEmail?: never;
       watchList?: never;
+      parentId?: never;
       /** Post Resolution Activity — only meaningful (and only accepted by the backend) alongside `state: "closed"` or `"solution_proposed"`. */
       resolutionCode?: BeCaseResolutionCode;
       cause?: BeCaseCause;
       closeNotes?: string;
     }
-  | { state?: never; severity: BeCaseSeverity; workState?: never; assigneeEmail?: never; watchList?: never }
+  | { state?: never; severity: BeCaseSeverity; workState?: never; assigneeEmail?: never; watchList?: never; parentId?: never }
   /** Work sub-state toggle (`ongoing` / `paused`) for an in-progress case. */
-  | { state?: never; severity?: never; workState: BeCaseWorkState; assigneeEmail?: never; watchList?: never }
+  | { state?: never; severity?: never; workState: BeCaseWorkState; assigneeEmail?: never; watchList?: never; parentId?: never }
   /** Email of the engineer to assign (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail: string; watchList?: never }
+  | { state?: never; severity?: never; workState?: never; assigneeEmail: string; watchList?: never; parentId?: never }
   /** Full replacement watch list as emails (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail?: never; watchList: string[] };
+  | { state?: never; severity?: never; workState?: never; assigneeEmail?: never; watchList: string[]; parentId?: never }
+  /** UUID of another case, incident, change request, or problem to link this case to as its parent (ServiceNow only). */
+  | { state?: never; severity?: never; workState?: never; assigneeEmail?: never; watchList?: never; parentId: string };
 
 /** A user in the case watch list, as echoed by `PATCH /cases/{id}`. */
 export interface BeWatchListUser {
@@ -466,6 +485,8 @@ export interface BeUpdatedCase {
   workState?: BeCaseWorkState | null;
   watchList?: BeWatchListUser[];
   assignedTo?: BeEntityRef | null;
+  /** Present when the update set `parentId` — the record this case is now linked to as its parent. */
+  parentCase?: BeCaseNumberRef | null;
 }
 
 /** `PATCH /cases/{id}` response: a message plus the mutated case fields. */
@@ -707,7 +728,8 @@ export type BeReferenceType =
   | "case"
   | "conversation"
   | "change_request"
-  | "deployment";
+  | "deployment"
+  | "incident";
 
 /** A attachment as returned by `POST /attachments/search`. */
 export interface BeAttachment {
@@ -1804,6 +1826,8 @@ export interface BeIncidentDetail extends BeIncident {
   additionalComments?: string | null;
   workNotes?: string | null;
   watchList?: BeIncidentWatchListItem[];
+  /** Service-request cases whose parent points to this incident. */
+  linkedServiceRequests?: BeLinkedServiceRequestRef[] | null;
 }
 
 /**

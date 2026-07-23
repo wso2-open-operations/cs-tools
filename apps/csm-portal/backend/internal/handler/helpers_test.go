@@ -372,6 +372,8 @@ type mockEntityIncidentClient struct {
 	createIncidentFn  func(ctx context.Context, body []byte) ([]byte, error)
 	getIncidentFn     func(ctx context.Context, id string) ([]byte, error)
 	patchIncidentFn   func(ctx context.Context, id string, body []byte) ([]byte, error)
+	createCommentFn   func(ctx context.Context, body []byte) ([]byte, error)
+	searchCommentsFn  func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
@@ -400,6 +402,20 @@ func (m *mockEntityIncidentClient) PatchIncident(ctx context.Context, id string,
 		return m.patchIncidentFn(ctx, id, body)
 	}
 	return []byte(`{}`), nil
+}
+
+func (m *mockEntityIncidentClient) CreateComment(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createCommentFn != nil {
+		return m.createCommentFn(ctx, body)
+	}
+	return []byte(`{"message":"Comment created.","comment":{"id":"11111111-1111-1111-1111-111111111111","createdOn":"2026-01-01T00:00:00Z","createdBy":"user@example.com"}}`), nil
+}
+
+func (m *mockEntityIncidentClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCommentsFn != nil {
+		return m.searchCommentsFn(ctx, body)
+	}
+	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0}`), nil
 }
 
 // ----- mock entity problem client -----
@@ -439,6 +455,8 @@ type mockEntityChangeRequestClient struct {
 	getChangeRequestFn            func(ctx context.Context, id string) ([]byte, error)
 	patchChangeRequestFn          func(ctx context.Context, id string, body []byte) ([]byte, error)
 	getChangeRequestApprovalsFn   func(ctx context.Context, id string) ([]byte, error)
+	createCommentFn               func(ctx context.Context, body []byte) ([]byte, error)
+	searchCommentsFn              func(ctx context.Context, body []byte) ([]byte, error)
 	decideChangeRequestApprovalFn func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
@@ -475,6 +493,20 @@ func (m *mockEntityChangeRequestClient) GetChangeRequestApprovals(ctx context.Co
 		return m.getChangeRequestApprovalsFn(ctx, id)
 	}
 	return []byte(`{"approvals":[]}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) CreateComment(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createCommentFn != nil {
+		return m.createCommentFn(ctx, body)
+	}
+	return []byte(`{"message":"Comment created.","comment":{"id":"11111111-1111-1111-1111-111111111111","createdOn":"2026-01-01T00:00:00Z","createdBy":"user@example.com"}}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCommentsFn != nil {
+		return m.searchCommentsFn(ctx, body)
+	}
+	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0}`), nil
 }
 
 func (m *mockEntityChangeRequestClient) DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error) {

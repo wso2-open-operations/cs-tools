@@ -396,6 +396,11 @@ export interface CsmCaseDetail extends CsmCaseRow {
   nextStates?: CaseState[];
   /** The case this one was created as related to, when any. */
   relatedCase?: { id: string; caseNumber?: string };
+  /**
+   * Service-request cases whose parent points to this case. Populated on
+   * every case detail response, not just high-severity cases.
+   */
+  linkedServiceRequests?: { id: string; number: string; name: string }[];
   /** Display name of the person who opened the case. */
   createdBy?: string;
   /** Email of the creator — used to tell a WSO2 engineer from a customer. */

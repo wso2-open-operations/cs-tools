@@ -74,6 +74,7 @@ export const ApiQueryKeys = {
   CHANGE_REQUEST_STATS: "change-request-stats",
   INCIDENTS: "incidents",
   INCIDENT_DETAILS: "incident-details",
+  INCIDENT_COMMENTS: "incident-comments",
   PROBLEMS: "problems",
   PROBLEM_DETAILS: "problem-details",
   GROUPS_SEARCH: "groups-search",
@@ -127,6 +128,7 @@ export const ApiQueryKeys = {
 export const ApiMutationKeys = {
   POST_COMMENT: ["postComment"],
   POST_CHANGE_REQUEST_COMMENT: ["postChangeRequestComment"],
+  POST_INCIDENT_COMMENT: ["postIncidentComment"],
 } as const;
 
 // Constants for WebSocket communication.

@@ -41,6 +41,31 @@ func stripField(body []byte, field string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// injectReferenceFields merges referenceId and referenceType into a JSON object body,
+// matching the shape the entity service's reference-generic comment/attachment
+// endpoints expect. Used by non-case reference types (e.g. change request, incident)
+// whose BFF routes are scoped by URL path rather than by request body.
+func injectReferenceFields(body []byte, referenceID, referenceType string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = map[string]json.RawMessage{}
+	}
+	idJSON, err := json.Marshal(referenceID)
+	if err != nil {
+		return nil, err
+	}
+	typeJSON, err := json.Marshal(referenceType)
+	if err != nil {
+		return nil, err
+	}
+	m["referenceId"] = idJSON
+	m["referenceType"] = typeJSON
+	return json.Marshal(m)
+}
+
 // entityCaseClient abstracts the entity service operations used by CaseHandler,
 // allowing the handler to be tested independently of the real HTTP client.
 type entityCaseClient interface {

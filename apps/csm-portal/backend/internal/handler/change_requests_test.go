@@ -607,3 +607,116 @@ func TestSearchChangeRequests(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateChangeRequestComment(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/comments", strings.NewReader(`{"type":"comment","content":"hi"}`))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.CreateChangeRequestComment(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/not-a-uuid/comments", strings.NewReader(`{"type":"comment","content":"hi"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.CreateChangeRequestComment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/comments", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.CreateChangeRequestComment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+	})
+
+	t.Run("injects referenceId and referenceType and forwards to the generic comment endpoint", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityChangeRequestClient{
+			getChangeRequestFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCRID + `"}`), nil
+			},
+			createCommentFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"message":"Comment created.","comment":{"id":"11111111-1111-1111-1111-111111111111","createdOn":"2026-01-01T00:00:00Z","createdBy":"user@example.com"}}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/comments", strings.NewReader(`{"type":"comment","content":"hi"}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.CreateChangeRequestComment(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		if !strings.Contains(string(capturedBody), `"referenceId":"`+testCRID+`"`) {
+			t.Errorf("expected referenceId to be injected, got %q", capturedBody)
+		}
+		if !strings.Contains(string(capturedBody), `"referenceType":"change_request"`) {
+			t.Errorf("expected referenceType change_request to be injected, got %q", capturedBody)
+		}
+	})
+
+	t.Run("upstream GetChangeRequest error is mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create change request comment.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityChangeRequestClient{
+					getChangeRequestFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewChangeRequestHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/comments", strings.NewReader(`{"type":"comment","content":"hi"}`)))
+				r.SetPathValue("id", testCRID)
+				w := httptest.NewRecorder()
+				h.CreateChangeRequestComment(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}
+
+func TestSearchChangeRequestComments(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/comments/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.SearchChangeRequestComments(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+	})
+
+	t.Run("injects referenceId and referenceType and forwards to the generic search endpoint", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityChangeRequestClient{
+			searchCommentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"comments":[],"total":0,"limit":20,"offset":0}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/comments/search", strings.NewReader(`{"pagination":{"offset":0,"limit":20}}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.SearchChangeRequestComments(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		if !strings.Contains(string(capturedBody), `"referenceId":"`+testCRID+`"`) {
+			t.Errorf("expected referenceId to be injected, got %q", capturedBody)
+		}
+		if !strings.Contains(string(capturedBody), `"referenceType":"change_request"`) {
+			t.Errorf("expected referenceType change_request to be injected, got %q", capturedBody)
+		}
+	})
+}

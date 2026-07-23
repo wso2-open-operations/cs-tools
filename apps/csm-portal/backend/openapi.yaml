@@ -322,6 +322,246 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /change-requests/{id}/comments:
+    post:
+      summary: Create a comment on a change request.
+      operationId: postChangeRequestsIdComments
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the change request.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Change request comment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnCommentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCommentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /change-requests/{id}/comments/search:
+    post:
+      summary: Search comments on a change request.
+      operationId: postChangeRequestsIdCommentsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the change request.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Change request comment search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCommentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incidents/{id}/comments:
+    post:
+      summary: Create a comment on an incident.
+      operationId: postIncidentsIdComments
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the incident.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident comment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnCommentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCommentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incidents/{id}/comments/search:
+    post:
+      summary: Search comments on an incident.
+      operationId: postIncidentsIdCommentsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the incident.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident comment search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCommentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases/{id}/activities/search:
     post:
       summary: Search the activity trail of a case.
@@ -3804,8 +4044,9 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
-        `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, or `parentId`
+        must be provided. `watchList`, `assigneeEmail`, and `parentId` are supported only for the
+        ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
       oneOf:
@@ -3814,6 +4055,7 @@ components:
         - required: [workState]
         - required: [watchList]
         - required: [assigneeEmail]
+        - required: [parentId]
       properties:
         state:
           type: string
@@ -3846,6 +4088,14 @@ components:
         closeNotes:
           type: string
           description: Free-text closure notes — only allowed when state is closed or solution_proposed.
+        parentId:
+          type: string
+          format: uuid
+          description: >
+            UUID of another case, incident, change request, or problem to link this case to as
+            its parent — e.g. linking a service-request case back to the case or incident that
+            spawned it (ServiceNow only). Linking to a closed/inactive record may silently no-op
+            upstream; the response's parentCase reflects whether the link actually changed.
 
     UpdateCaseResponse:
       type: object
@@ -3910,6 +4160,9 @@ components:
           format: date-time
           nullable: true
           description: Timestamp when the case was resolved.
+        parentCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+          description: Present when the update set parentId, identifying the case, incident, change request, or problem this case is now linked to as its parent.
 
     CaseResolutionCode:
       type: string
@@ -4479,6 +4732,14 @@ components:
           type: string
           nullable: true
           description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
+        linkedServiceRequests:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/LinkedServiceRequestRef'
+          description: >-
+            Service-request cases whose parent points to this case. Populated on every
+            case detail response, not just high-severity cases.
 
     CaseSearchView:
       type: object
@@ -5622,6 +5883,42 @@ components:
           type: string
           description: Comment text
 
+    SnCommentCreatePayload:
+      type: object
+      required:
+        - type
+        - content
+      properties:
+        type:
+          type: string
+          enum: [work_note, comment]
+          description: >
+            work_note is restricted to internal users. activity is not offered here --
+            it is not supported for ServiceNow-backed comment creation (change request,
+            incident).
+        content:
+          type: string
+          description: Comment text
+
+    CommentCreateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    CreateCommentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        comment:
+          $ref: '#/components/schemas/CommentCreateResult'
+
     CaseComment:
       type: object
       properties:
@@ -5745,6 +6042,20 @@ components:
         number:
           type: string
 
+    LinkedServiceRequestRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+      description: >
+        A service-request case whose parent points to this case or incident (the
+        reverse of parentId).
+
     AccountRef:
       type: object
       nullable: true
@@ -5843,6 +6154,7 @@ components:
         - conversation
         - change_request
         - deployment
+        - incident
 
     AttachmentSearchPayload:
       type: object
@@ -7485,6 +7797,12 @@ components:
           type: string
           nullable: true
           description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        linkedServiceRequests:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/LinkedServiceRequestRef'
+          description: Service-request cases whose parent points to this incident.
 
     UpdateIncidentPayload:
       type: object
