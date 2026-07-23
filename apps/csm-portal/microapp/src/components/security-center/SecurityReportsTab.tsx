@@ -15,8 +15,9 @@
 // under the License.
 
 import { useState } from "react";
-import { Badge, IconButton, Stack, Typography } from "@wso2/oxygen-ui";
-import { SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
+import { useNavigate } from "react-router-dom";
+import { Badge, Fab, IconButton, Stack, Typography } from "@wso2/oxygen-ui";
+import { Plus, SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { securityReports } from "@src/services/securityReports";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
@@ -37,9 +38,10 @@ import { SecurityReportFiltersSheet } from "@components/security-center/Security
 // Security reports tab — a CsmIssuesView locked to
 // `caseTypes: ["security_report_analysis"]` with severity hidden. Search +
 // State + Work state + Assignee + Project + Product filters, infinite-scrolled
-// newest-updated first. Read-only for this pass — "New security report" is
-// deliberately deferred, same call Engagements/Operations already made.
+// newest-updated first, plus a Fab into NewSecurityReportPage — mirrors
+// SupportPage's own "New Case" Fab.
 export function SecurityReportsTab() {
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<SecurityReportFilters>(EMPTY_SECURITY_REPORT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
@@ -104,6 +106,18 @@ export function SecurityReportsTab() {
         filters={filters}
         onApply={setFilters}
       />
+
+      {/* Fixed bottom-right, offset above the fixed TabBar — same positioning as SupportPage's own
+          "Create case" Fab. */}
+      <Fab
+        aria-label="New security report"
+        size="medium"
+        color="primary"
+        onClick={() => navigate("/more/security-center/reports/new")}
+        sx={{ position: "fixed", right: 10, bottom: "calc(var(--tab-bar-height) + 60px)" }}
+      >
+        <Plus size={20} />
+      </Fab>
     </Stack>
   );
 }
