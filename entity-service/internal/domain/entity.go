@@ -1798,6 +1798,7 @@ type PatchChangeRequestRequest struct {
 	TestPlan           *string              `json:"testPlan,omitempty"`
 	IsCustomerApproved *bool                `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool                `json:"isCustomerReviewed,omitempty"`
+	RequestApproval    *bool                `json:"requestApproval,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
@@ -1965,6 +1966,7 @@ type ChangeRequest struct {
 	HasCustomerReviewed bool       `json:"hasCustomerReviewed"`
 	ApprovedBy          *EntityRef `json:"approvedBy"`
 	ApprovedOn          *string    `json:"approvedOn"`
+	LegalNextStates     []string   `json:"legalNextStates"`
 }
 
 // ChangeRequestApproverType is a string enum for the kind of approver assigned to an
@@ -2788,9 +2790,12 @@ type SearchProblemsRequest struct {
 
 // SearchProblemView is the problem representation returned in search results.
 type SearchProblemView struct {
-	ID      *string `json:"id"`
-	Number  *string `json:"number"`
-	Subject *string `json:"subject"`
+	ID              *string    `json:"id"`
+	Number          *string    `json:"number"`
+	Subject         *string    `json:"subject"`
+	State           *string    `json:"state"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
 }
 
 // SearchProblemsResponse is the paginated result of a problem search.
@@ -2828,6 +2833,17 @@ type ProblemDetail struct {
 	ResolvedBy          *EntityRef      `json:"resolvedBy"`
 	OpenedOn            *string         `json:"openedOn"`
 	ClosedOn            *string         `json:"closedOn"`
+}
+
+// CreateProblemRequest is the request body for POST /problems. Subject is required;
+// Category, Subcategory, OriginCaseID, and PrimaryIncidentID are optional. OriginCaseID
+// and PrimaryIncidentID are UUIDs from the caller's perspective.
+type CreateProblemRequest struct {
+	Subject           string  `json:"subject"`
+	Category          *string `json:"category,omitempty"`
+	Subcategory       *string `json:"subcategory,omitempty"`
+	OriginCaseID      *string `json:"originCaseId,omitempty"`
+	PrimaryIncidentID *string `json:"primaryIncidentId,omitempty"`
 }
 
 // ConversationState represents the state of a conversation.
