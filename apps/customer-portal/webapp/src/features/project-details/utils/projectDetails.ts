@@ -143,6 +143,14 @@ const MONTH_ABBREVIATIONS = [
   "Dec",
 ];
 
+const isLeapYear = (year: number): boolean =>
+  (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+
+const daysInMonth = (month: number, year: number): number => {
+  const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return days[month - 1] ?? 0;
+};
+
 /**
  * Formats a date string into "MMM DD, YYYY" format using the date parts
  * as provided by the backend, without converting to any timezone.
@@ -155,12 +163,17 @@ export const formatProjectDate = (dateString: string): string => {
   if (!dateString) {
     return "";
   }
-  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(dateString.trim());
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/.exec(
+    dateString.trim(),
+  );
   if (match) {
     const [, yyyy, mm, dd] = match;
-    const monthName = MONTH_ABBREVIATIONS[Number(mm) - 1];
-    if (monthName) {
-      return `${monthName} ${Number(dd)}, ${yyyy}`;
+    const year = Number(yyyy);
+    const month = Number(mm);
+    const day = Number(dd);
+    const monthName = MONTH_ABBREVIATIONS[month - 1];
+    if (monthName && day >= 1 && day <= daysInMonth(month, year)) {
+      return `${monthName} ${day}, ${year}`;
     }
   }
   const formatted = formatBackendTimestampForDisplay(dateString, {
