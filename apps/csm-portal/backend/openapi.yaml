@@ -129,8 +129,10 @@ paths:
       summary: Update a support case.
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
-        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
-        only when the ServiceNow data source is active.
+        `workState`, `watchList`, `assigneeEmail`, `parentId`, `subject`, `description`,
+        `deploymentId`, `deployedProductId`, `relatedCaseId`, or `autocloseHoldUntil`. `watchList`,
+        `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when the
+        ServiceNow data source is active.
       operationId: patchCasesId
       parameters:
         - name: id
@@ -4044,9 +4046,10 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, or `parentId`
-        must be provided. `watchList`, `assigneeEmail`, and `parentId` are supported only for the
-        ServiceNow data source.
+        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
+        `subject`, `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`, or
+        `autocloseHoldUntil` must be provided. `watchList`, `assigneeEmail`, `parentId`, and
+        `autocloseHoldUntil` are supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
       oneOf:
@@ -4056,6 +4059,12 @@ components:
         - required: [watchList]
         - required: [assigneeEmail]
         - required: [parentId]
+        - required: [subject]
+        - required: [description]
+        - required: [deploymentId]
+        - required: [deployedProductId]
+        - required: [relatedCaseId]
+        - required: [autocloseHoldUntil]
       properties:
         state:
           type: string
@@ -4094,8 +4103,42 @@ components:
           description: >
             UUID of another case, incident, change request, or problem to link this case to as
             its parent — e.g. linking a service-request case back to the case or incident that
-            spawned it (ServiceNow only). Linking to a closed/inactive record may silently no-op
-            upstream; the response's parentCase reflects whether the link actually changed.
+            spawned it, or establishing the hierarchical major-case/child-case relationship
+            (ServiceNow only). Linking to a closed/inactive record may silently no-op upstream;
+            the response's parentCase reflects whether the link actually changed. A case may not
+            be closed while it has open children linked via this relationship.
+        subject:
+          type: string
+          description: New subject/title for the case.
+        description:
+          type: string
+          description: New description for the case.
+        deploymentId:
+          type: string
+          format: uuid
+          description: >
+            UUID of the deployment to associate with this case, replacing the existing one. May
+            carry SLA/entitlement side effects owned by the backing data source — the portal
+            performs no validation of those effects.
+        deployedProductId:
+          type: string
+          format: uuid
+          description: UUID of the deployed product to associate with this case, replacing the existing one.
+        relatedCaseId:
+          type: string
+          format: uuid
+          description: >
+            UUID of another case to cross-link to this one as a related case. A looser,
+            non-hierarchical link — not subject to the child-case close restriction that applies
+            to `parentId`.
+        autocloseHoldUntil:
+          type: string
+          format: date-time
+          description: >
+            Places the case on hold in the backing data source's staged auto-closure sequence
+            until this date, mirroring the real ServiceNow UX (an engineer picks a hold-until
+            date). This is the only supported write against that sequence — the raw
+            `autoclosureStep` state is not directly settable (ServiceNow only).
 
     UpdateCaseResponse:
       type: object
@@ -4435,6 +4478,13 @@ components:
             type: string
             format: uuid
           description: Filter by assigned engineer user UUIDs (optional)
+        parentId:
+          type: string
+          format: uuid
+          description: >
+            Filter to child cases of this case UUID (the hierarchical major-case/child-case
+            relationship set via the PATCH `parentId` field). Optional — used to list a case's
+            children via the existing search endpoint rather than a dedicated one.
 
     CaseSearchPayload:
       type: object
@@ -4693,6 +4743,34 @@ components:
           $ref: '#/components/schemas/CaseNumberRef'
         account:
           $ref: '#/components/schemas/AccountRef'
+        watchList:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/WatchListUser'
+          description: Users on the case watch list (ServiceNow only). null/absent when not set.
+        autoclosureStep:
+          type: string
+          readOnly: true
+          nullable: true
+          enum:
+            - DEFAULT
+            - FIRST_COMMENT
+            - ON_HOLD
+            - SECOND_COMMENT
+          description: >-
+            Where the case sits in the backing data source's staged auto-closure sequence
+            (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Informational only — the
+            sequence itself is fully owned by the backing data source's own flows; the only
+            supported write is `autocloseHoldUntil` on the PATCH request (ServiceNow only).
+        autoclosureStateTime:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: >-
+            When the auto-closure sequence next advances — e.g. the "eligible again after" date
+            for a held case (ServiceNow only).
         nextStates:
           type: array
           readOnly: true
@@ -6081,6 +6159,16 @@ components:
           type: string
         type:
           type: string
+        creTeam:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          description: The account's assigned CRE (customer reliability engineering) team. null when not set.
+        sreTeam:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          description: The account's assigned SRE (site reliability engineering) team. null when not set.
 
     AttachmentCreatePayload:
       type: object

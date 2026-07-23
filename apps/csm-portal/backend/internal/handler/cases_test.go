@@ -666,6 +666,94 @@ func TestSearchCases(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards parentId filter unchanged", func(t *testing.T) {
+		// Item 9: the child-case list reuses this existing search endpoint with a
+		// parentId filter — no new endpoint, no BFF-side modeling of the filter.
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"cases":[],"total":0}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		const reqBody = `{"filters":{"parentId":"44444444-4444-4444-4444-444444444444"}}`
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+		}
+	})
+
+	t.Run("passes through account.creTeam/sreTeam unchanged", func(t *testing.T) {
+		// Item 10: additive nested read field on search results, zero BFF handling.
+		const upstreamBody = `{"cases":[{"id":"11111111-1111-1111-1111-111111111111","account":{"id":"77777777-7777-7777-7777-777777777777","name":"Example Account","creTeam":{"id":"88888888-8888-8888-8888-888888888888","name":"CRE Team A"},"sreTeam":{"id":"99999999-9999-9999-9999-999999999999","name":"SRE Team B"}}}],"total":1}`
+		client := &mockEntityCaseClient{
+			searchCasesFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(upstreamBody), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		type teamRef struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		type respCase struct {
+			Account struct {
+				CreTeam teamRef `json:"creTeam"`
+				SreTeam teamRef `json:"sreTeam"`
+			} `json:"account"`
+		}
+		type resp struct {
+			Cases []respCase `json:"cases"`
+		}
+		got := decodeJSON[resp](t, w)
+		if len(got.Cases) != 1 {
+			t.Fatalf("cases = %+v, want 1 entry", got.Cases)
+		}
+		if got.Cases[0].Account.CreTeam.Name != "CRE Team A" || got.Cases[0].Account.SreTeam.Name != "SRE Team B" {
+			t.Errorf("account team refs = %+v, want CRE Team A / SRE Team B", got.Cases[0].Account)
+		}
+	})
+
+	t.Run("passes through autoclosureStep/autoclosureStateTime unchanged", func(t *testing.T) {
+		// Item 6 (revised): additive read fields on search results, zero BFF handling.
+		const upstreamBody = `{"cases":[{"id":"11111111-1111-1111-1111-111111111111","autoclosureStep":"FIRST_COMMENT","autoclosureStateTime":"2026-07-30T00:00:00Z"}],"total":1}`
+		client := &mockEntityCaseClient{
+			searchCasesFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(upstreamBody), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		type respCase struct {
+			AutoclosureStep      string `json:"autoclosureStep"`
+			AutoclosureStateTime string `json:"autoclosureStateTime"`
+		}
+		type resp struct {
+			Cases []respCase `json:"cases"`
+		}
+		got := decodeJSON[resp](t, w)
+		if len(got.Cases) != 1 {
+			t.Fatalf("cases = %+v, want 1 entry", got.Cases)
+		}
+		if got.Cases[0].AutoclosureStep != "FIRST_COMMENT" || got.Cases[0].AutoclosureStateTime != "2026-07-30T00:00:00Z" {
+			t.Errorf("autoclosure fields = %+v, want FIRST_COMMENT / 2026-07-30T00:00:00Z", got.Cases[0])
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to search cases.") {
 			t.Run(tc.name, func(t *testing.T) {
@@ -902,6 +990,120 @@ func TestPatchCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("forwards new single-field PATCH variants verbatim", func(t *testing.T) {
+		t.Parallel()
+		// Items 7, 9: subject/description/deploymentId/deployedProductId/parentId/relatedCaseId
+		// are pure pass-through single-field PATCH variants. None trip the state/workState peek,
+		// so patchCaseFn is invoked directly with the raw body and the upstream response passes
+		// through unchanged.
+		cases := []struct {
+			name       string
+			reqBody    string
+			upstream   string
+			wantField  string
+			wantString string
+		}{
+			{
+				name:       "subject",
+				reqBody:    `{"subject":"New subject text"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","subject":"New subject text"}}`,
+				wantField:  "subject",
+				wantString: "New subject text",
+			},
+			{
+				name:       "description",
+				reqBody:    `{"description":"New description text"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","description":"New description text"}}`,
+				wantField:  "description",
+				wantString: "New description text",
+			},
+			{
+				name:       "deploymentId",
+				reqBody:    `{"deploymentId":"22222222-2222-2222-2222-222222222222"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","deploymentId":"22222222-2222-2222-2222-222222222222"}}`,
+				wantField:  "deploymentId",
+				wantString: "22222222-2222-2222-2222-222222222222",
+			},
+			{
+				name:       "deployedProductId",
+				reqBody:    `{"deployedProductId":"33333333-3333-3333-3333-333333333333"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","deployedProductId":"33333333-3333-3333-3333-333333333333"}}`,
+				wantField:  "deployedProductId",
+				wantString: "33333333-3333-3333-3333-333333333333",
+			},
+			{
+				name:       "parentId",
+				reqBody:    `{"parentId":"44444444-4444-4444-4444-444444444444"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","parentCase":{"id":"44444444-4444-4444-4444-444444444444","number":"CS0001"}}}`,
+				wantField:  "",
+				wantString: "",
+			},
+			{
+				name:       "relatedCaseId",
+				reqBody:    `{"relatedCaseId":"55555555-5555-5555-5555-555555555555"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","relatedCase":{"id":"55555555-5555-5555-5555-555555555555","number":"CS0002"}}}`,
+				wantField:  "",
+				wantString: "",
+			},
+			{
+				// Item 6 (revised): autocloseHoldUntil is the only supported write against
+				// ServiceNow's staged auto-closure sequence; it internally sets
+				// autoclosureStep=ON_HOLD + autoclosureStateTime, but the BFF forwards the
+				// request/response verbatim with no knowledge of that mechanism.
+				name:       "autocloseHoldUntil",
+				reqBody:    `{"autocloseHoldUntil":"2026-08-01T00:00:00Z"}`,
+				upstream:   `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","autoclosureStep":"ON_HOLD","autoclosureStateTime":"2026-08-01T00:00:00Z"}}`,
+				wantField:  "autoclosureStep",
+				wantString: "ON_HOLD",
+			},
+		}
+		for _, tc := range cases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				var capturedBody []byte
+				client := &mockEntityCaseClient{
+					patchCaseFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+						capturedBody = body
+						return []byte(tc.upstream), nil
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(tc.reqBody)))
+				r.SetPathValue("id", testCaseID)
+				w := httptest.NewRecorder()
+				h.PatchCase(w, r)
+
+				assertStatus(t, w, http.StatusOK)
+				assertContentType(t, w, "application/json")
+
+				if string(capturedBody) != tc.reqBody {
+					t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, tc.reqBody)
+				}
+
+				var raw map[string]json.RawMessage
+				if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+					t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
+				}
+				var wrapper struct {
+					Case map[string]json.RawMessage `json:"case"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
+					t.Fatalf("decode wrapper: %v", err)
+				}
+				if tc.wantField != "" {
+					var got string
+					if err := json.Unmarshal(wrapper.Case[tc.wantField], &got); err != nil {
+						t.Fatalf("decode case.%s: %v", tc.wantField, err)
+					}
+					if got != tc.wantString {
+						t.Errorf("case.%s = %q, want %q", tc.wantField, got, tc.wantString)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("GetCase failure during state validation is mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to retrieve current case state.") {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1131,6 +1333,99 @@ func TestGetCase(t *testing.T) {
 					}
 				}
 			})
+		}
+	})
+
+	t.Run("passes through watchList and account.creTeam/sreTeam unchanged", func(t *testing.T) {
+		// Items 2, 10: watchList and account.creTeam/sreTeam are additive entity-response
+		// fields with zero BFF handling — GetCase's injectNextStates merge must not drop or
+		// alter them.
+		const upstreamBody = `{
+			"id":"` + testCaseID + `",
+			"state":"open",
+			"watchList":[{"id":"66666666-6666-6666-6666-666666666666","userName":"jdoe","name":"Jane Doe","email":"jane.doe@example.com"}],
+			"account":{"id":"77777777-7777-7777-7777-777777777777","name":"Example Account","type":"customer","creTeam":{"id":"88888888-8888-8888-8888-888888888888","name":"CRE Team A"},"sreTeam":{"id":"99999999-9999-9999-9999-999999999999","name":"SRE Team B"}}
+		}`
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(upstreamBody), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.GetCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+
+		type watchListUser struct {
+			ID       string `json:"id"`
+			UserName string `json:"userName"`
+			Name     string `json:"name"`
+			Email    string `json:"email"`
+		}
+		type teamRef struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		type account struct {
+			ID      string  `json:"id"`
+			Name    string  `json:"name"`
+			CreTeam teamRef `json:"creTeam"`
+			SreTeam teamRef `json:"sreTeam"`
+		}
+		type resp struct {
+			WatchList []watchListUser `json:"watchList"`
+			Account   account         `json:"account"`
+		}
+		got := decodeJSON[resp](t, w)
+
+		if len(got.WatchList) != 1 || got.WatchList[0].Email != "jane.doe@example.com" || got.WatchList[0].UserName != "jdoe" {
+			t.Errorf("watchList = %+v, want a single entry for jdoe/jane.doe@example.com", got.WatchList)
+		}
+		if got.Account.CreTeam.ID != "88888888-8888-8888-8888-888888888888" || got.Account.CreTeam.Name != "CRE Team A" {
+			t.Errorf("account.creTeam = %+v, want id 88888888-8888-8888-8888-888888888888 / CRE Team A", got.Account.CreTeam)
+		}
+		if got.Account.SreTeam.ID != "99999999-9999-9999-9999-999999999999" || got.Account.SreTeam.Name != "SRE Team B" {
+			t.Errorf("account.sreTeam = %+v, want id 99999999-9999-9999-9999-999999999999 / SRE Team B", got.Account.SreTeam)
+		}
+	})
+
+	t.Run("passes through autoclosureStep and autoclosureStateTime unchanged", func(t *testing.T) {
+		// Item 6 (revised): autoclosureStep/autoclosureStateTime are read-only informational
+		// fields on the entity response — GetCase's injectNextStates merge must not drop or
+		// alter them.
+		const upstreamBody = `{
+			"id":"` + testCaseID + `",
+			"state":"open",
+			"autoclosureStep":"ON_HOLD",
+			"autoclosureStateTime":"2026-08-01T00:00:00Z"
+		}`
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(upstreamBody), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.GetCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+
+		type resp struct {
+			AutoclosureStep      string `json:"autoclosureStep"`
+			AutoclosureStateTime string `json:"autoclosureStateTime"`
+		}
+		got := decodeJSON[resp](t, w)
+
+		if got.AutoclosureStep != "ON_HOLD" {
+			t.Errorf("autoclosureStep = %q, want ON_HOLD", got.AutoclosureStep)
+		}
+		if got.AutoclosureStateTime != "2026-08-01T00:00:00Z" {
+			t.Errorf("autoclosureStateTime = %q, want 2026-08-01T00:00:00Z", got.AutoclosureStateTime)
 		}
 	})
 
