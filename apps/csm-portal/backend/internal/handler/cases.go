@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -86,6 +87,7 @@ type entityCaseClient interface {
 	CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	AddCaseTag(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	RemoveCaseTag(ctx context.Context, caseID, tagID string) ([]byte, error)
+	SearchTags(ctx context.Context, query string, limit int) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -619,6 +621,38 @@ func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SearchTags handles GET /tags/search.
+// Forwards the q and limit query parameters to the entity service and returns
+// the raw response verbatim.
+func (h *CaseHandler) SearchTags(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	q := r.URL.Query().Get("q")
+
+	var limit int
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		parsed, err := strconv.Atoi(limitStr)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+			return
+		}
+		limit = parsed
+	}
+
+	result, err := h.entity.SearchTags(r.Context(), q, limit)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchTags failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to search tags.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // PatchCase handles PATCH /cases/{id}.
