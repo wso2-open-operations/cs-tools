@@ -36,6 +36,15 @@ func uuidToSysid(uuid string) string {
 	return uuid[0:8] + uuid[9:13] + uuid[14:18] + uuid[19:23] + uuid[24:36]
 }
 
+// snParentIDFilter converts an optional parentId filter UUID to a sysid,
+// returning "" (omitted via omitempty) when nil.
+func snParentIDFilter(uuid *string) string {
+	if uuid == nil {
+		return ""
+	}
+	return uuidToSysid(*uuid)
+}
+
 // uuidsToSysids converts a slice of UUID strings to sysids.
 // Returns the original slice unchanged if it is empty.
 func uuidsToSysids(uuids []string) []string {

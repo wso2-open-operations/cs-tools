@@ -251,6 +251,8 @@ type snCaseFilters struct {
 	// Forwarded to Choreo so filtering starts working the moment Ballerina adds
 	// support, but the current POST /cases/search contract ignores this field.
 	Tags []string `json:"tags,omitempty"`
+	// ParentID: see domain.SearchCasesFilters.ParentID doc comment.
+	ParentID string `json:"parentId,omitempty"`
 }
 
 // snStateIDMap maps domain CaseState enums to SN numeric state IDs.
@@ -1688,6 +1690,11 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	if err := validateUUIDs("assignedUserIds", req.Filters.AssignedUserIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
+	if req.Filters.ParentID != nil {
+		if err := validateUUIDs("parentId", []string{*req.Filters.ParentID}); err != nil {
+			return domain.SearchCasesResponse{}, err
+		}
+	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
@@ -1736,6 +1743,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			AssignedUserIDs:    uuidsToSysids(req.Filters.AssignedUserIDs),
 			ProductNames:       req.Filters.ProductNames,
 			Tags:               req.Filters.Tags,
+			ParentID:           snParentIDFilter(req.Filters.ParentID),
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},

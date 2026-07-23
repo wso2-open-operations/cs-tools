@@ -1105,6 +1105,10 @@ type SearchCasesFilters struct {
 	// gap as CaseView.Tags — no Ballerina search-filter support exists yet, so this
 	// filter is accepted here but has no effect until Ballerina wires it through.
 	Tags []string `json:"tags"`
+	// ParentID filters to child cases of this case (the hierarchical major-case/
+	// child-case relationship set via the case PATCH parentId field). Ballerina
+	// support added on ballerina-case-field-additions.
+	ParentID *string `json:"parentId"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
