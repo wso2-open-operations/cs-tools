@@ -298,9 +298,15 @@ export function ProductContextWidget({
 export function TagsWidget({
   tags,
   onAdd,
+  onRemove,
+  removingId,
 }: {
   tags: CaseTag[];
   onAdd?: () => void;
+  /** Remove a single tag (`DELETE /cases/{id}/tags/{tagId}`). Omit to hide the per-chip delete affordance. */
+  onRemove?: (tag: CaseTag) => void;
+  /** Id of the tag whose removal is in flight; disables its chip's delete. */
+  removingId?: string | null;
 }): JSX.Element {
   return (
     <WidgetCard
@@ -330,6 +336,8 @@ export function TagsWidget({
               label={t.label}
               color={t.color ?? "default"}
               variant="outlined"
+              onDelete={onRemove ? () => onRemove(t) : undefined}
+              disabled={removingId === t.id}
             />
           ))}
         </Box>

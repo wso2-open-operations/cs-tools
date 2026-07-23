@@ -25,6 +25,7 @@ import DeploymentDetailsDialog from "@features/csm-projects/components/Deploymen
 import type { BeDeploymentType } from "@api/backend/types";
 import { announcementStateRole } from "@features/csm-announcements/utils/announcementState";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import { formatAbsoluteForUser } from "@utils/dateTime";
 
 interface CaseMetaBandProps {
   detail: CsmCaseDetail;
@@ -281,6 +282,24 @@ export default function CaseMetaBand({
               <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
             </Box>
           </Cell>
+          {!isAnnouncement && (c.customerContext.creTeam || c.customerContext.sreTeam) && (
+            <Cell label="CRE / SRE team">
+              <Typography variant="body2" noWrap>
+                {[c.customerContext.creTeam?.name, c.customerContext.sreTeam?.name]
+                  .filter(Boolean)
+                  .join(" · ") || "—"}
+              </Typography>
+            </Cell>
+          )}
+          {!isAnnouncement && (
+            <Cell label="Watchers">
+              <Typography variant="body2" noWrap>
+                {c.watchers.length > 0
+                  ? c.watchers.map((w) => w.name).join(", ")
+                  : "None"}
+              </Typography>
+            </Cell>
+          )}
           <Cell label="Project" maxWidth={isAnnouncement ? 240 : undefined}>
             {c.projectId ? (
               <LinkText to={`/customers/projects/${c.projectId}`}>
@@ -340,6 +359,13 @@ export default function CaseMetaBand({
                   )}
                 </Typography>
               </Cell>
+              {c.fixEta && (
+                <Cell label="Fix ETA">
+                  <Typography variant="body2" noWrap>
+                    {formatAbsoluteForUser(c.fixEta) ?? "—"}
+                  </Typography>
+                </Cell>
+              )}
             </>
           )}
         </Box>

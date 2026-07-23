@@ -198,6 +198,7 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
       {selectedTaskId && (
         <TaskDetailDialog
           taskId={selectedTaskId}
+          caseId={caseId}
           onClose={() => setSelectedTaskId(null)}
         />
       )}

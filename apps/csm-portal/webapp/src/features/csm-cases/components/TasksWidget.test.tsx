@@ -21,6 +21,8 @@ import { TasksWidget } from "@features/csm-cases/components/TasksWidget";
 import type { BeListCaseTasksResponse, BeTaskDetail } from "@api/backend/types";
 import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { useGetTask } from "@features/csm-cases/api/useGetTask";
+import { useUpdateTask } from "@features/csm-cases/api/useUpdateTask";
+import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 
 vi.mock("@features/csm-cases/api/useSearchCaseTasks", () => ({
   useSearchCaseTasks: vi.fn(),
@@ -28,9 +30,20 @@ vi.mock("@features/csm-cases/api/useSearchCaseTasks", () => ({
 vi.mock("@features/csm-cases/api/useGetTask", () => ({
   useGetTask: vi.fn(),
 }));
+// TaskDetailDialog (rendered on a row click) now also edits state/assignee
+// inline via these two — stub them so this file doesn't hit the real
+// `useSearchUsers` (which throws at import time without runtime config).
+vi.mock("@features/csm-cases/api/useUpdateTask", () => ({
+  useUpdateTask: vi.fn(),
+}));
+vi.mock("@features/csm-users/api/useSearchUsers", () => ({
+  useSearchUsers: vi.fn(),
+}));
 
 const mockedUseSearchCaseTasks = vi.mocked(useSearchCaseTasks);
 const mockedUseGetTask = vi.mocked(useGetTask);
+const mockedUseUpdateTask = vi.mocked(useUpdateTask);
+const mockedUseSearchUsers = vi.mocked(useSearchUsers);
 
 function mockListResult(overrides: Partial<ReturnType<typeof useSearchCaseTasks>>): void {
   mockedUseSearchCaseTasks.mockReturnValue({
@@ -67,6 +80,18 @@ describe("TasksWidget", () => {
     mockedUseSearchCaseTasks.mockReset();
     mockedUseGetTask.mockReset();
     mockDetailResult({});
+    mockedUseUpdateTask.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      isError: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseMutationResult stub
+    } as any);
+    mockedUseSearchUsers.mockReturnValue({
+      data: { users: [], total: 0, limit: 6, offset: 0, hasMore: false },
+      isFetching: false,
+      isError: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseQueryResult stub
+    } as any);
   });
 
   it("renders a loading skeleton while the query is in flight", () => {
