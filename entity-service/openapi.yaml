@@ -2697,6 +2697,14 @@ components:
         complianceViolationDate:
           type: string
           nullable: true
+        acpLastNoticeWindow:
+          type: string
+          nullable: true
+          description: >
+            Last ACP (Account Closure Process) notice window the automation sent an
+            email for (e.g. "90", "60", "30", "15", "7", "0" days), used by that job
+            to avoid re-sending the same notice on subsequent runs. Not derived by
+            any SN business rule — written directly by the ACP automation.
 
     ProjectView:
       type: object
@@ -2741,6 +2749,14 @@ components:
         complianceViolationDate:
           type: string
           nullable: true
+        acpLastNoticeWindow:
+          type: string
+          nullable: true
+          description: >
+            Last ACP (Account Closure Process) notice window the automation sent an
+            email for (e.g. "90", "60", "30", "15", "7", "0" days), used by that job
+            to avoid re-sending the same notice on subsequent runs. Not derived by
+            any SN business rule — written directly by the ACP automation.
 
     SearchProjectsResponse:
       type: object

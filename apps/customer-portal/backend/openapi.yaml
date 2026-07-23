@@ -3581,6 +3581,7 @@ components:
       - assignedTeam
       - createdBy
       - createdOn
+      - updatedOn
       - description
       - duration
       - id
@@ -3605,6 +3606,9 @@ components:
         createdOn:
           type: string
           description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
         createdBy:
           type: string
           description: Created by (User email)

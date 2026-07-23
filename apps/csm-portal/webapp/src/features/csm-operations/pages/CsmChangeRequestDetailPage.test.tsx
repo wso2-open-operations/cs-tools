@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -22,6 +22,8 @@ import type { BeChangeRequestDetail } from "@api/backend/types";
 
 const navigateMock = vi.fn();
 const useGetChangeRequestMock = vi.fn();
+const patchMutateMock = vi.fn();
+const showErrorMock = vi.fn();
 
 vi.mock("react-router", () => ({
   useParams: () => ({ id: "chg-1" }),
@@ -29,14 +31,17 @@ vi.mock("react-router", () => ({
 vi.mock("@hooks/useNavTransition", () => ({
   useNavTransition: () => navigateMock,
 }));
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({
+  useErrorBanner: () => ({ showError: showErrorMock }),
+}));
 vi.mock("@features/csm-operations/api/useGetChangeRequest", () => ({
   useGetChangeRequest: () => useGetChangeRequestMock(),
 }));
 vi.mock("@features/csm-operations/api/usePatchChangeRequest", () => ({
-  usePatchChangeRequest: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-vi.mock("@context/error-banner/ErrorBannerContext", () => ({
-  useErrorBanner: () => ({ showError: vi.fn() }),
+  usePatchChangeRequest: () => ({
+    mutate: patchMutateMock,
+    isPending: false,
+  }),
 }));
 vi.mock("@features/csm-operations/components/ChangeRequestApprovals", () => ({
   default: () => null,
@@ -51,6 +56,8 @@ const BASE_CR: BeChangeRequestDetail = {
   subject: "Upgrade the gateway cluster",
   case: { id: "case-1", name: "CASE0001234" },
   createdOn: "2026-01-01T00:00:00Z",
+  state: "new",
+  type: "normal",
 };
 
 function mockQueryResult(
@@ -83,5 +90,54 @@ describe("CsmChangeRequestDetailPage", () => {
     render(<CsmChangeRequestDetailPage />);
     const linkedCaseCell = screen.getByText("Linked case").parentElement!;
     expect(within(linkedCaseCell).getByText("—")).toBeInTheDocument();
+  });
+});
+
+describe("CsmChangeRequestDetailPage — Request approval (New -> Assess)", () => {
+  it("shows the Request approval button when the backend flags 'assess' as a legal next state", () => {
+    mockQueryResult({ data: { ...BASE_CR, legalNextStates: ["assess"] } });
+    render(<CsmChangeRequestDetailPage />);
+    expect(
+      screen.getByRole("button", { name: /request approval/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the button when legalNextStates is empty (no transition available)", () => {
+    mockQueryResult({ data: { ...BASE_CR, legalNextStates: [] } });
+    render(<CsmChangeRequestDetailPage />);
+    expect(
+      screen.queryByRole("button", { name: /request approval/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the button when legalNextStates is absent — data-driven, no hardcoded state check", () => {
+    mockQueryResult({ data: { ...BASE_CR, legalNextStates: undefined } });
+    render(<CsmChangeRequestDetailPage />);
+    expect(
+      screen.queryByRole("button", { name: /request approval/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("PATCHes { requestApproval: true } for this CR when clicked", () => {
+    mockQueryResult({ data: { ...BASE_CR, legalNextStates: ["assess"] } });
+    render(<CsmChangeRequestDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /request approval/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "chg-1", patch: { requestApproval: true } },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("surfaces a mutation error via the shared error banner", () => {
+    mockQueryResult({ data: { ...BASE_CR, legalNextStates: ["assess"] } });
+    render(<CsmChangeRequestDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /request approval/i }));
+    const [, options] = patchMutateMock.mock.calls[0];
+    const err = new Error("boom");
+    options.onError(err);
+    expect(showErrorMock).toHaveBeenCalledWith(
+      "Could not request approval for this change request.",
+      err,
+    );
   });
 });

@@ -626,6 +626,7 @@ type snPatchChangeRequestPayload struct {
 	TestPlan           *string `json:"testPlan,omitempty"`
 	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
+	RequestApproval    *bool   `json:"requestApproval,omitempty"`
 }
 
 // snPatchChangeRequestResponse mirrors the Choreo PATCH /change-requests/{id} response.
@@ -647,8 +648,22 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		req.Impact == nil && req.State == nil && req.Type == nil && req.Justification == nil &&
 		req.ImpactDescription == nil && req.ServiceOutage == nil && req.CommunicationPlan == nil &&
 		req.RollbackPlan == nil && req.TestPlan == nil && req.IsCustomerApproved == nil &&
-		req.IsCustomerReviewed == nil {
+		req.IsCustomerReviewed == nil && req.RequestApproval == nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
+	}
+
+	exclusiveApprovalFields := 0
+	if req.IsCustomerApproved != nil {
+		exclusiveApprovalFields++
+	}
+	if req.IsCustomerReviewed != nil {
+		exclusiveApprovalFields++
+	}
+	if req.RequestApproval != nil {
+		exclusiveApprovalFields++
+	}
+	if exclusiveApprovalFields > 1 {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "isCustomerApproved, isCustomerReviewed, and requestApproval are mutually exclusive"}
 	}
 
 	if req.Title != nil && *req.Title == "" {
@@ -709,6 +724,7 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		TestPlan:           req.TestPlan,
 		IsCustomerApproved: req.IsCustomerApproved,
 		IsCustomerReviewed: req.IsCustomerReviewed,
+		RequestApproval:    req.RequestApproval,
 	}
 	if req.ProjectID != nil {
 		payload.ProjectID = strPtr(uuidToSysid(*req.ProjectID))
@@ -771,6 +787,7 @@ type snChangeRequestDetail struct {
 	HasCustomerReviewed bool           `json:"hasCustomerReviewed"`
 	ApprovedBy          *snCREntityRef `json:"approvedBy"`
 	ApprovedOn          *string        `json:"approvedOn"`
+	LegalNextStates     []string       `json:"legalNextStates"`
 }
 
 func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error) {
@@ -965,6 +982,7 @@ func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeReque
 		HasCustomerApproved:     cr.HasCustomerApproved,
 		HasCustomerReviewed:     cr.HasCustomerReviewed,
 		ApprovedOn:              cr.ApprovedOn,
+		LegalNextStates:         cr.LegalNextStates,
 	}
 	if cr.ApprovedBy != nil {
 		result.ApprovedBy = &domain.EntityRef{ID: sysidToUUID(cr.ApprovedBy.ID), Name: cr.ApprovedBy.Name}

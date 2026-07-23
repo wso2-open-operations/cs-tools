@@ -61,3 +61,19 @@ func (h *ProblemHandler) GetProblem(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }
+
+// CreateProblem handles POST /problems.
+func (h *ProblemHandler) CreateProblem(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateProblemRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.CreateProblem(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}

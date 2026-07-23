@@ -1,0 +1,639 @@
+openapi: 3.0.1
+info:
+  title: CSM Integration Service API
+  version: 1.0.0
+  description: >
+    Project/account search and their Contacts sub-resource, for third-party (M2M)
+    consumers. Fronted by Choreo's API Manager gateway (subscription + client
+    credentials) — this service performs no inbound auth of its own.
+security:
+  - oauth2ClientCredentials: []
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+
+  /accounts/{id}:
+    get:
+      summary: Get an account by ID.
+      operationId: getAccount
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      responses:
+        "200":
+          description: The account with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/search:
+    post:
+      summary: Search accounts.
+      operationId: searchAccounts
+      parameters:
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      requestBody:
+        description: Account search payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountSearchPayload'
+      responses:
+        "200":
+          description: Accounts matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/{id}/contacts/search:
+    post:
+      summary: Search contacts for an account.
+      operationId: searchAccountContacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      requestBody:
+        description: Account contact search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountContactSearchPayload'
+      responses:
+        "200":
+          description: Contacts for the given account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountContactSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/{id}:
+    get:
+      summary: Get a project by ID.
+      operationId: getProject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      responses:
+        "200":
+          description: The project with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      summary: Update closure-state fields or hasAgent/hasKbReferences toggles on a project.
+      description: >
+        ServiceNow-data-source only. Used by the Account Closure Process (ACP)
+        automation to write closure-state fields on a project. The request body
+        is forwarded to the entity service verbatim — at least one field is
+        required, and the entity service enforces that (400 if none is set). This
+        operation requires a forwarded end-user identity token
+        (`x-user-id-token`); a caller with only M2M credentials receives a 401.
+      operationId: updateProject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      requestBody:
+        description: Closure-state fields to update. At least one is required.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        "200":
+          description: The project was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/search:
+    post:
+      summary: Search projects.
+      operationId: searchProjects
+      parameters:
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      requestBody:
+        description: Project search payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectSearchPayload'
+      responses:
+        "200":
+          description: Projects matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/{id}/contacts/search:
+    post:
+      summary: Search contacts for a project.
+      operationId: searchProjectContacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/UserIDTokenHeader'
+      requestBody:
+        description: Project contact search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectContactSearchPayload'
+      responses:
+        "200":
+          description: Contacts for the given project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContactSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  parameters:
+    UserIDTokenHeader:
+      name: x-user-id-token
+      in: header
+      required: false
+      description: >
+        Optional end-user identity token, forwarded unchanged to the upstream
+        entity service. Not required for this service's own auth (which is
+        always M2M) — only needed if the caller wants data backed by
+        entity-service's ServiceNow data source, which rejects M2M-only
+        requests with no forwarded user identity.
+      schema:
+        type: string
+
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          # Placeholder — fill in with the actual token endpoint for this service's
+          # Choreo-managed API once it's provisioned. Not a real/guessed URL.
+          tokenUrl: "<token_url>"
+          scopes: {}
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: Number of results per page.
+        offset:
+          type: integer
+          description: Zero-based offset into the result set.
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+        tier:
+          type: string
+          enum: [basic, enterprise]
+        region:
+          type: string
+        activationDate:
+          type: string
+          format: date-time
+        deactivationDate:
+          type: string
+          format: date-time
+        ownerId:
+          type: string
+        technicalOwnerId:
+          type: string
+        agentEnabled:
+          type: boolean
+        kbReferencesEnabled:
+          type: boolean
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    AccountSearchPayload:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Case-insensitive match against account name or Salesforce ID.
+
+    AccountSearchResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    AccountContactSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive).
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AccountContactSearchResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              isPrimary:
+                type: boolean
+        offset:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+        projectKey:
+          type: string
+        subscriptionType:
+          type: string
+          enum:
+            - development_support
+            - managed_cloud_subscription
+            - evaluation_subscription
+            - subscription
+            - cloud_evaluation_support
+            - internal
+            - platformer_subscription
+            - cloud_support
+            - professional_services
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    ProjectSearchPayload:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against name, key, and subscription type.
+
+    ProjectSearchResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    ProjectContactSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive).
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ProjectContactSearchResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              registrationState:
+                type: string
+              notificationsEnabled:
+                type: boolean
+              roles:
+                type: array
+                items:
+                  type: string
+        offset:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    ProjectUpdateRequest:
+      type: object
+      description: >
+        All fields are optional individually, but at least one is required —
+        enforced by the entity service, which 400s if none is set.
+      properties:
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        endDateClosureState:
+          type: string
+        invoiceDueDateClosureState:
+          type: string
+        complianceViolationClosureState:
+          type: string
+        acpLastNoticeWindow:
+          type: string
+          description: >
+            Last ACP (Account Closure Process) notice window the automation sent an
+            email for. Must be one of "90", "60", "30", "15", "7", "0".
+
+    ProjectUpdateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        closureState:
+          type: string
+          nullable: true
+        endDateClosureState:
+          type: string
+          nullable: true
+        invoiceDueDateClosureState:
+          type: string
+          nullable: true
+        complianceViolationClosureState:
+          type: string
+          nullable: true
+        acpLastNoticeWindow:
+          type: string
+          nullable: true
+
+    ProjectUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        project:
+          $ref: '#/components/schemas/ProjectUpdateResult'

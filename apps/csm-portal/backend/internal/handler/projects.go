@@ -31,6 +31,7 @@ type entityProjectClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
+	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // ProjectHandler handles HTTP requests for project operations, delegating to the
@@ -141,6 +142,52 @@ func (h *ProjectHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProjectContacts failed", "userID", user.UserID, "projectID", id, "err", err)
 		mapUpstreamError(w, err, "Failed to search project contacts.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// UpdateProject handles PATCH /projects/{id}.
+// The endpoint is path-scoped, so the request body is capped and forwarded to the
+// entity service as-is (no fields are injected) and the response is returned verbatim.
+// The entity service is the source of truth for field-level validation (e.g. at
+// least one field must be provided); the backend has no role-based access control
+// layer yet, so any authenticated user may invoke this today, matching the
+// existing convention on other PATCH endpoints in this codebase.
+func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateProject(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update project.")
 		return
 	}
 

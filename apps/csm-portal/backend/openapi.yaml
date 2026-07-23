@@ -948,6 +948,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    patch:
+      summary: Update a project's closure sub-state fields or KB/agent toggles.
+      description: >
+        Request body is forwarded to the integration service as-is and the
+        response is returned verbatim. At least one field must be provided;
+        the integration service validates this and rejects an empty update.
+      operationId: patchProjectsId
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the project to update.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Project update payload.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdatePayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /projects/search:
     post:
       summary: Search projects.
@@ -3268,6 +3334,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /problems:
+    post:
+      summary: Create a new problem (ServiceNow data source only).
+      operationId: postProblems
+      security:
+        - bearerAuth: []
+      requestBody:
+        description: Problem create payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProblemPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems/{id}:
     get:
       summary: Get a single problem by ID (ServiceNow data source only).
@@ -3386,7 +3503,15 @@ components:
       additionalProperties: false
       description: >
         Any combination of fields may be supplied; at least one is required.
-        Omitted fields are left unchanged.
+        Omitted fields are left unchanged. isCustomerApproved, isCustomerReviewed,
+        and requestApproval are mutually exclusive: at most one may be set.
+      allOf:
+        - not:
+            required: [isCustomerApproved, isCustomerReviewed]
+        - not:
+            required: [isCustomerApproved, requestApproval]
+        - not:
+            required: [isCustomerReviewed, requestApproval]
       properties:
         title:
           type: string
@@ -3439,6 +3564,22 @@ components:
           type: string
         testPlan:
           type: string
+        isCustomerApproved:
+          type: boolean
+          description: >-
+            Records the customer's approval decision on the change request.
+            Mutually exclusive with isCustomerReviewed and requestApproval.
+        isCustomerReviewed:
+          type: boolean
+          description: >-
+            Records the customer's post-implementation review decision.
+            Mutually exclusive with isCustomerApproved and requestApproval.
+        requestApproval:
+          type: boolean
+          description: >-
+            Transitions the change request from New to Assess and requests
+            approval. Mutually exclusive with isCustomerApproved and
+            isCustomerReviewed.
 
     PatchChangeRequestResponse:
       type: object
@@ -4999,6 +5140,65 @@ components:
           type: string
           format: date-time
 
+    ProjectUpdatePayload:
+      type: object
+      minProperties: 1
+      description: >
+        At least one field must be provided. hasAgent and hasKbReferences are
+        simple toggles; the closure-state fields track sub-states of an
+        Account Closure Process and are only applicable to projects sourced
+        from the backing data source.
+      properties:
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        endDateClosureState:
+          type: string
+        invoiceDueDateClosureState:
+          type: string
+        complianceViolationClosureState:
+          type: string
+        acpLastNoticeWindow:
+          type: string
+          description: >
+            Last ACP (Account Closure Process) notice window the automation sent an
+            email for. Must be one of "90", "60", "30", "15", "7", "0".
+
+    ProjectUpdateResponse:
+      type: object
+      required: [message, project]
+      properties:
+        message:
+          type: string
+        project:
+          type: object
+          required: [id, updatedBy, updatedOn]
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedBy:
+              type: string
+            updatedOn:
+              type: string
+              format: date-time
+            closureState:
+              type: string
+              nullable: true
+            endDateClosureState:
+              type: string
+              nullable: true
+            invoiceDueDateClosureState:
+              type: string
+              nullable: true
+            complianceViolationClosureState:
+              type: string
+              nullable: true
+            acpLastNoticeWindow:
+              type: string
+              nullable: true
+
     DeploymentCreatePayload:
       type: object
       required: [projectId, name, type, description]
@@ -5974,6 +6174,13 @@ components:
             approvedOn:
               type: string
               nullable: true
+            legalNextStates:
+              type: array
+              items:
+                type: string
+              description: >-
+                States the change request can legally transition to from its
+                current state, given its type and workflow position.
 
     TaskSummary:
       type: object
@@ -7408,6 +7615,33 @@ components:
         subject:
           type: string
           nullable: true
+        state:
+          type: string
+          nullable: true
+          description: Current workflow state (e.g. "new", "assess", "resolved", "closed")
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+
+    CreateProblemPayload:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+        category:
+          type: string
+        subcategory:
+          type: string
+        originCaseId:
+          type: string
+          format: uuid
+        primaryIncidentId:
+          type: string
+          format: uuid
 
     ProblemSearchResponse:
       type: object
@@ -7439,10 +7673,6 @@ components:
         - $ref: '#/components/schemas/Problem'
         - type: object
           properties:
-            state:
-              type: string
-              nullable: true
-              description: Current workflow state (e.g. "new", "assess", "resolved", "closed")
             priority:
               type: string
               nullable: true
@@ -7463,9 +7693,6 @@ components:
                 $ref: '#/components/schemas/IdNumberRef'
             linkedChangeRequest:
               $ref: '#/components/schemas/IdNumberRef'
-            assignedTo:
-              $ref: '#/components/schemas/EntityRef'
-              nullable: true
             resolutionCode:
               type: string
               nullable: true

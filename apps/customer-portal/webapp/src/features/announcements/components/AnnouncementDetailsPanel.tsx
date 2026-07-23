@@ -114,9 +114,7 @@ export default function AnnouncementDetailsPanel({
   const statusLabel = data.status?.label;
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
-  const updatedOnLabel = formatAnnouncementDateDisplay(
-    data.updatedOn ?? data.createdOn,
-  );
+  const updatedOnLabel = formatAnnouncementDateDisplay(data.updatedOn);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -225,7 +223,7 @@ export default function AnnouncementDetailsPanel({
               aria-hidden
             />
             <Typography variant="body2" color="text.secondary">
-              {updatedOnLabel}
+              {updatedOnLabel || "--"}
             </Typography>
           </Stack>
           {data.issueType?.label && (

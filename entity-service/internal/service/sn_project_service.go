@@ -47,6 +47,7 @@ type snProjectClosureFields struct {
 	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
 	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
 	ComplianceViolationDate         *string `json:"complianceViolationDate"`
+	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow"`
 }
 
 type snProject struct {
@@ -168,6 +169,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 				InvoiceDueDateClosureState:      p.InvoiceDueDateClosureState,
 				ComplianceViolationClosureState: p.ComplianceViolationClosureState,
 				ComplianceViolationDate:         p.ComplianceViolationDate,
+				AcpLastNoticeWindow:             p.AcpLastNoticeWindow,
 			},
 		})
 	}
@@ -265,6 +267,7 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 			InvoiceDueDateClosureState:      sn.InvoiceDueDateClosureState,
 			ComplianceViolationClosureState: sn.ComplianceViolationClosureState,
 			ComplianceViolationDate:         sn.ComplianceViolationDate,
+			AcpLastNoticeWindow:             sn.AcpLastNoticeWindow,
 		},
 		Account: domain.ProjectAccountRef{
 			ID:                  sysidToUUID(sn.Account.ID),
@@ -285,6 +288,7 @@ type snProjectUpdatePayload struct {
 	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
 	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
 	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
+	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow,omitempty"`
 }
 
 // snProjectUpdateResponse mirrors the Choreo PATCH /projects/{id} response.
@@ -301,6 +305,7 @@ type snProjectUpdateResult struct {
 	EndDateClosureState             *string `json:"endDateClosureState"`
 	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState"`
 	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow"`
 }
 
 type snProjectUpdateService struct {
@@ -325,10 +330,21 @@ func NewServiceNowProjectUpdateService(client *integrationservice.Client) Projec
 // already shown values ("Pending Notified") beyond the small set observed
 // during development. A validXxx map here would risk rejecting legitimate
 // values the ACP automation needs to write.
+//
+// AcpLastNoticeWindow, in contrast, IS validated against a fixed set
+// (validAcpNoticeWindows): it has no SN business rule or Flow Designer process
+// behind it at all — the ACP automation is the sole writer, so we fully own
+// its value domain from day one, unlike the sub-states above.
 func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error) {
 	if req.HasAgent == nil && req.HasKbReferences == nil && req.EndDateClosureState == nil &&
-		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil {
+		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil &&
+		req.AcpLastNoticeWindow == nil {
 		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
+	}
+	if req.AcpLastNoticeWindow != nil {
+		if _, ok := validAcpNoticeWindows[*req.AcpLastNoticeWindow]; !ok {
+			return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "acpLastNoticeWindow must be one of: 90, 60, 30, 15, 7, 0"}
+		}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -339,6 +355,7 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		EndDateClosureState:             req.EndDateClosureState,
 		InvoiceDueDateClosureState:      req.InvoiceDueDateClosureState,
 		ComplianceViolationClosureState: req.ComplianceViolationClosureState,
+		AcpLastNoticeWindow:             req.AcpLastNoticeWindow,
 	}
 	raw, err := s.client.Patch(ctx, "/projects/"+uuidToSysid(id), token, payload)
 	if err != nil {
@@ -365,6 +382,7 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 			EndDateClosureState:             sn.Project.EndDateClosureState,
 			InvoiceDueDateClosureState:      sn.Project.InvoiceDueDateClosureState,
 			ComplianceViolationClosureState: sn.Project.ComplianceViolationClosureState,
+			AcpLastNoticeWindow:             sn.Project.AcpLastNoticeWindow,
 		},
 	}, nil
 }
@@ -379,6 +397,19 @@ var validClosureStatuses = map[string]struct{}{
 	"Open":       {},
 	"Suspended":  {},
 	"Restricted": {},
+}
+
+// validAcpNoticeWindows is the fixed set of notice-window buckets the ACP
+// automation may record — see the AcpLastNoticeWindow doc comment on
+// UpdateProject for why this field, unlike the other closure sub-states, is
+// safe to validate strictly.
+var validAcpNoticeWindows = map[string]struct{}{
+	"90": {},
+	"60": {},
+	"30": {},
+	"15": {},
+	"7":  {},
+	"0":  {},
 }
 
 // validSortOrders is the set of accepted SortOrder values.

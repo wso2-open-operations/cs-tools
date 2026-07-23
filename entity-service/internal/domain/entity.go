@@ -353,6 +353,13 @@ type ProjectClosureFields struct {
 	// ComplianceViolationDate is the date a compliance violation was recorded, if any
 	// (ServiceNow data source only).
 	ComplianceViolationDate *string `json:"complianceViolationDate"`
+	// AcpLastNoticeWindow is the last Account Closure Process (ACP) notice window
+	// the automation sent an email for (e.g. "90", "60", "30", "15", "7", "0" days),
+	// used by that job to avoid re-sending the same notice on its next daily run.
+	// Unlike the other fields in this struct, it is not derived by any SN business
+	// rule — the ACP job writes it directly to record its own progress (ServiceNow
+	// data source only).
+	AcpLastNoticeWindow *string `json:"acpLastNoticeWindow"`
 }
 
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
@@ -384,6 +391,7 @@ type ProjectUpdateRequest struct {
 	EndDateClosureState             *string `json:"endDateClosureState,omitempty"`
 	InvoiceDueDateClosureState      *string `json:"invoiceDueDateClosureState,omitempty"`
 	ComplianceViolationClosureState *string `json:"complianceViolationClosureState,omitempty"`
+	AcpLastNoticeWindow             *string `json:"acpLastNoticeWindow,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -403,6 +411,7 @@ type ProjectUpdateResult struct {
 	EndDateClosureState             *string   `json:"endDateClosureState"`
 	InvoiceDueDateClosureState      *string   `json:"invoiceDueDateClosureState"`
 	ComplianceViolationClosureState *string   `json:"complianceViolationClosureState"`
+	AcpLastNoticeWindow             *string   `json:"acpLastNoticeWindow"`
 }
 
 // SearchProjectsRequest is the input for a project search operation.
@@ -1789,6 +1798,7 @@ type PatchChangeRequestRequest struct {
 	TestPlan           *string              `json:"testPlan,omitempty"`
 	IsCustomerApproved *bool                `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool                `json:"isCustomerReviewed,omitempty"`
+	RequestApproval    *bool                `json:"requestApproval,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
@@ -1956,6 +1966,7 @@ type ChangeRequest struct {
 	HasCustomerReviewed bool       `json:"hasCustomerReviewed"`
 	ApprovedBy          *EntityRef `json:"approvedBy"`
 	ApprovedOn          *string    `json:"approvedOn"`
+	LegalNextStates     []string   `json:"legalNextStates"`
 }
 
 // ChangeRequestApproverType is a string enum for the kind of approver assigned to an
@@ -2796,9 +2807,12 @@ type SearchProblemsRequest struct {
 
 // SearchProblemView is the problem representation returned in search results.
 type SearchProblemView struct {
-	ID      *string `json:"id"`
-	Number  *string `json:"number"`
-	Subject *string `json:"subject"`
+	ID              *string    `json:"id"`
+	Number          *string    `json:"number"`
+	Subject         *string    `json:"subject"`
+	State           *string    `json:"state"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
 }
 
 // SearchProblemsResponse is the paginated result of a problem search.
@@ -2836,6 +2850,17 @@ type ProblemDetail struct {
 	ResolvedBy          *EntityRef      `json:"resolvedBy"`
 	OpenedOn            *string         `json:"openedOn"`
 	ClosedOn            *string         `json:"closedOn"`
+}
+
+// CreateProblemRequest is the request body for POST /problems. Subject is required;
+// Category, Subcategory, OriginCaseID, and PrimaryIncidentID are optional. OriginCaseID
+// and PrimaryIncidentID are UUIDs from the caller's perspective.
+type CreateProblemRequest struct {
+	Subject           string  `json:"subject"`
+	Category          *string `json:"category,omitempty"`
+	Subcategory       *string `json:"subcategory,omitempty"`
+	OriginCaseID      *string `json:"originCaseId,omitempty"`
+	PrimaryIncidentID *string `json:"primaryIncidentId,omitempty"`
 }
 
 // ConversationState represents the state of a conversation.
