@@ -292,8 +292,10 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
-	if len(req.WatchList) > 0 || req.AssigneeEmail != nil || req.FixEta != nil {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, and fixEta are only supported for the ServiceNow data source"}
+	if len(req.WatchList) > 0 || req.AssigneeEmail != nil || req.FixEta != nil ||
+		req.RelatedCaseID != nil || req.ParentID != nil || req.AutocloseHoldUntil != nil ||
+		req.Subject != nil || req.Description != nil || req.DeploymentID != nil || req.DeployedProductID != nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, fixEta, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, and deployedProductId are only supported for the ServiceNow data source"}
 	}
 	fieldCount := 0
 	if req.State != nil {

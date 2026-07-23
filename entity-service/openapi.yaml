@@ -1974,6 +1974,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/tasks:
+    post:
+      summary: Create a task on a case (ServiceNow data source only).
+      operationId: createCaseTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseTaskRequest'
+      responses:
+        "201":
+          description: Task created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /tasks/{id}:
     get:
       summary: Get a task by ID (ServiceNow data source only).
@@ -1988,6 +2037,55 @@ paths:
       responses:
         "200":
           description: The task record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a task (ServiceNow data source only).
+      description: >
+        Updates exactly one of state, assignedToEmail, or dueDate.
+      operationId: updateTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        "200":
+          description: Task updated.
           content:
             application/json:
               schema:
@@ -6174,6 +6272,42 @@ components:
           type: integer
         limit:
           type: integer
+
+    CreateCaseTaskRequest:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        assignedToEmail:
+          type: string
+          format: email
+        visibleToCustomer:
+          type: boolean
+
+    UpdateTaskRequest:
+      type: object
+      description: >
+        Exactly one of state, assignedToEmail, or dueDate must be provided.
+      oneOf:
+        - required: [state]
+        - required: [assignedToEmail]
+        - required: [dueDate]
+      properties:
+        state:
+          type: string
+          description: >
+            Plain string, not a closed enum — ServiceNow may surface undocumented
+            raw values; do not assume a closed set.
+        assignedToEmail:
+          type: string
+          format: email
+        dueDate:
+          type: string
+          format: date-time
 
     TaskDetail:
       type: object
