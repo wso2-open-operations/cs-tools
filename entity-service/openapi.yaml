@@ -2022,6 +2022,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Task writes are not yet available (downstream integration not deployed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /tasks/{id}:
     get:
@@ -2110,6 +2116,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Task writes are not yet available (downstream integration not deployed).
           content:
             application/json:
               schema:
@@ -6276,6 +6288,7 @@ components:
     CreateCaseTaskRequest:
       type: object
       required: [subject]
+      additionalProperties: false
       properties:
         subject:
           type: string
@@ -6290,6 +6303,7 @@ components:
 
     UpdateTaskRequest:
       type: object
+      additionalProperties: false
       description: >
         Exactly one of state, assignedToEmail, or dueDate must be provided.
       oneOf:
