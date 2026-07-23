@@ -26,9 +26,8 @@ import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
  * Build a CsmCaseDetail from the rich `BeCaseView`. The view embeds the
  * account / project / deployment / deployed-product / reporter as objects, so
  * their names (and the account tier) come straight off the response with no
- * extra lookups. Side widgets the backend doesn't return yet (watchers, tags,
- * time logs, attachments, linked items) default to empty / placeholder
- * values.
+ * extra lookups. Side widgets the backend doesn't return yet (tags, time
+ * logs, attachments, linked items) default to empty / placeholder values.
  */
 function detailFromBeCase(
   c: BeCaseView,
@@ -36,6 +35,16 @@ function detailFromBeCase(
 ): CsmCaseDetail {
   const account = c.account;
   const customer = account?.name ?? "—";
+  const myEmail = currentUserEmail?.toLowerCase();
+  const watchers = (c.watchList ?? []).map((w) => {
+    const email = w.email ?? undefined;
+    return {
+      id: w.id,
+      name: w.name?.trim() || w.userName,
+      email,
+      isMe: !!email && !!myEmail && email.toLowerCase() === myEmail,
+    };
+  });
   // createdBy.name can be empty for unhydrated users, so fall back to the email.
   const reporter = c.createdBy?.name?.trim() || c.createdBy?.email;
   const assigneeName = c.assignedEngineer?.name?.trim() || undefined;
@@ -71,7 +80,12 @@ function detailFromBeCase(
     relatedCase: c.relatedCase
       ? { id: c.relatedCase.id, caseNumber: c.relatedCase.number }
       : undefined,
+    parentCase: c.parentCase
+      ? { id: c.parentCase.id, caseNumber: c.parentCase.number }
+      : undefined,
     linkedServiceRequests: c.linkedServiceRequests ?? undefined,
+    autoclosureStep: c.autoclosureStep ?? undefined,
+    autoclosureStateTime: c.autoclosureStateTime ?? undefined,
     assignee,
     assigneeName,
     assigneeIsMe,
@@ -98,6 +112,12 @@ function detailFromBeCase(
       primaryContactEmail: c.createdBy?.email ?? "—",
       accountManager: "—",
       openCases: 0,
+      creTeam: account?.creTeam
+        ? { id: account.creTeam.id, name: account.creTeam.name }
+        : undefined,
+      sreTeam: account?.sreTeam
+        ? { id: account.sreTeam.id, name: account.sreTeam.name }
+        : undefined,
     },
     productContext: {
       product,
@@ -107,13 +127,14 @@ function detailFromBeCase(
       deployedProductId: c.deployedProduct?.id,
       environment: "prod",
     },
-    watchers: [],
+    watchers,
     linkedItems: [],
-    tags: [],
+    tags: (c.tags ?? []).map((t) => ({ id: t.id, label: t.label })),
     timeLogs: [],
     audit: [],
     attachments: [],
-    isWatching: false,
+    isWatching: watchers.some((w) => w.isMe),
+    fixEta: c.fixEta ?? null,
     resolution:
       c.resolutionCode || c.cause || c.resolutionNotes
         ? {

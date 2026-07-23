@@ -21,6 +21,7 @@ import type {
   SlaClockType,
 } from "@features/csm-dashboard/types/abtDashboard";
 import type {
+  BeCaseAutoclosureStep,
   BeCaseCause,
   BeCaseIssueType,
   BeCaseResolutionCode,
@@ -227,8 +228,9 @@ export interface TaskSlaSearchResponse {
 
 export interface CaseWatcher {
   id: string;
+  /** Display name, falling back to the SN username when no display name is set. */
   name: string;
-  role: "wso2_engineer" | "customer_contact" | "manager";
+  email?: string;
   isMe?: boolean;
 }
 
@@ -301,6 +303,10 @@ export interface CaseCustomerContext {
   technicalOwner?: string;
   /** Number of currently open cases against this customer (incl. this one). */
   openCases: number;
+  /** The account's assigned CRE (customer reliability engineering) team, when set (ServiceNow only). */
+  creTeam?: { id: string; name: string };
+  /** The account's assigned SRE (site reliability engineering) team, when set (ServiceNow only). */
+  sreTeam?: { id: string; name: string };
 }
 
 /**
@@ -397,10 +403,30 @@ export interface CsmCaseDetail extends CsmCaseRow {
   /** The case this one was created as related to, when any. */
   relatedCase?: { id: string; caseNumber?: string };
   /**
+   * The case, incident, change request, or problem this case is linked to as
+   * its parent (the hierarchical major-case/child-case relationship). Absent
+   * when not linked.
+   */
+  parentCase?: { id: string; caseNumber?: string };
+  /**
    * Service-request cases whose parent points to this case. Populated on
    * every case detail response, not just high-severity cases.
    */
   linkedServiceRequests?: { id: string; number: string; name: string }[];
+  /**
+   * Where the case sits in the backing data source's staged auto-closure
+   * sequence (ServiceNow only). Read-only; `undefined`/`"DEFAULT"` means no
+   * hold is in effect.
+   */
+  autoclosureStep?: BeCaseAutoclosureStep;
+  /** When the auto-closure sequence next advances (ServiceNow only). Read-only. */
+  autoclosureStateTime?: string;
+  /**
+   * The single customer-facing fix-commitment date/time for the case; `null`/
+   * absent when not set. Distinct from the backend-computed SLA clocks shown
+   * in {@link CaseSla} — this is a settable commitment, not a derived clock.
+   */
+  fixEta?: string | null;
   /** Display name of the person who opened the case. */
   createdBy?: string;
   /** Email of the creator — used to tell a WSO2 engineer from a customer. */

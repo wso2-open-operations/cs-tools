@@ -318,17 +318,11 @@ describe("CaseActionBar — create related case (closed-case reopen replacement)
 });
 
 describe("CaseActionBar — unbuilt roadmap items stay disabled, not silently mock", () => {
-  // Create incident / Link to incident / Create task / Hold auto-closure have
-  // no backend flow yet. They must never be clickable — a click that reaches
-  // onAction would surface a mock toast to a real user — and they must never
-  // depend on case state, since it isn't state that's missing, it's the
-  // feature itself.
-  const ROADMAP_ITEMS = [
-    /create incident from case/i,
-    /link to incident/i,
-    /create task/i,
-    /hold auto-closure/i,
-  ];
+  // Create incident / Link to incident have no backend flow yet. They must
+  // never be clickable — a click that reaches onAction would surface a mock
+  // toast to a real user — and they must never depend on case state, since
+  // it isn't state that's missing, it's the feature itself.
+  const ROADMAP_ITEMS = [/create incident from case/i, /link to incident/i];
 
   it.each(ROADMAP_ITEMS)("keeps %s disabled and inert", (name) => {
     const onAction = vi.fn();
@@ -372,6 +366,131 @@ describe("CaseActionBar — Raise internal Git issue is blocked on a closed case
     expect(item).not.toHaveAttribute("aria-disabled", "true");
     fireEvent.click(item);
     expect(onAction).toHaveBeenCalledWith({ secondary: "raise_git_issue" });
+  });
+});
+
+describe("CaseActionBar — Manage watchers / Hold auto-closure / Edit case details / Link to another case", () => {
+  const SECONDARY_ITEMS: Array<[RegExp, string]> = [
+    [/manage watchers/i, "manage_watchers"],
+    [/hold auto-closure/i, "hold_auto_close"],
+    [/edit case details/i, "edit_case_details"],
+    [/link to another case/i, "link_case"],
+  ];
+
+  it.each(SECONDARY_ITEMS)(
+    "dispatches %s as a secondary action when the case is open",
+    (name, key) => {
+      const onAction = vi.fn();
+      render(
+        <CaseActionBar
+          caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+          onAction={onAction}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /more/i }));
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(item);
+      expect(onAction).toHaveBeenCalledWith({ secondary: key });
+    },
+  );
+
+  it.each(SECONDARY_ITEMS)(
+    "disables %s once the case is closed",
+    (name) => {
+      const onAction = vi.fn();
+      render(
+        <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /more/i }));
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(item);
+      expect(onAction).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("CaseActionBar — Create task / Set fix ETA", () => {
+  const ITEMS: Array<[RegExp, string]> = [
+    [/create task/i, "create_task"],
+    [/set fix eta/i, "set_fix_eta"],
+  ];
+
+  it.each(ITEMS)("dispatches %s as a secondary action when the case is open", (name, key) => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: key });
+  });
+
+  it.each(ITEMS)("disables %s once the case is closed", (name) => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("CaseActionBar — advisory close-gate (open task)", () => {
+  it("disables the single-button Close transition with a tooltip when closeBlockedReason is set", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("work_in_progress", ["closed"])}
+        onAction={onAction}
+        closeBlockedReason="This case has an open task."
+      />,
+    );
+    const button = screen.getByRole("button", { name: /^close$/i });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("leaves Close enabled when closeBlockedReason is unset", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("work_in_progress", ["closed"])}
+        onAction={onAction}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /^close$/i });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(onAction).toHaveBeenCalledWith("close", "closed");
+  });
+
+  it("disables only Close (not the other target) in the Change-state menu", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("solution_proposed", ["closed", "waiting_on_wso2"])}
+        onAction={onAction}
+        closeBlockedReason="This case has an open task."
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /change state/i }));
+    const closeItem = screen.getByRole("menuitem", { name: /^close$/i });
+    const waitItem = screen.getByRole("menuitem", { name: /wait on wso2/i });
+    expect(closeItem).toHaveAttribute("aria-disabled", "true");
+    expect(waitItem).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(closeItem);
+    expect(onAction).not.toHaveBeenCalled();
   });
 });
 

@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Avatar,
   Box,
   Button,
   Chip,
@@ -24,18 +25,51 @@ import {
   DialogTitle,
   Divider,
   IconButton,
+  InputAdornment,
+  MenuItem,
+  Select,
   Skeleton,
+  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { RefreshCw, X } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { Pencil, RefreshCw, Search, X } from "@wso2/oxygen-ui-icons-react";
+import { useMemo, useState, type JSX } from "react";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useGetTask } from "@features/csm-cases/api/useGetTask";
+import { useUpdateTask } from "@features/csm-cases/api/useUpdateTask";
+import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
+import {
+  INTERNAL_USER_ROLES,
+  type NormalizedUser,
+} from "@features/csm-users/types/csmUsers";
 import { taskStateColor, taskStateLabel } from "@features/csm-cases/utils/taskState";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 
 interface TaskDetailDialogProps {
   taskId: string;
+  /** Owning case id, so a state/assignee edit also invalidates the case's
+   * tasks list (see {@link useUpdateTask}). Optional: omit when the caller
+   * only has the task id (the task's own detail query still refreshes). */
+  caseId?: string;
   onClose: () => void;
+}
+
+/** Task states an engineer can set via the inline edit (excludes `OTHER`,
+ * which is a display-only fallback for undocumented raw values, not a
+ * settable target). */
+const EDITABLE_TASK_STATES: Array<"OPEN" | "CLOSED"> = ["OPEN", "CLOSED"];
+
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function fullName(u: NormalizedUser): string {
+  return u.name.trim() || u.userName;
 }
 
 function DetailCell({
@@ -56,14 +90,47 @@ function DetailCell({
 }
 
 /**
- * Read-only detail view for a single task, opened from a row click on
+ * Detail view for a single task, opened from a row click on
  * {@link TasksWidget}. A lightweight dialog rather than a full separate
  * detail page/route — a task's data shape is much smaller than a call
  * request or change request, and the parent case is already known from the
- * page it's opened from.
+ * page it's opened from. State and assignee are editable inline via
+ * `PATCH /tasks/{id}` ({@link useUpdateTask}); everything else stays
+ * read-only (the backend has no write path for the rest of the task shape).
  */
-export function TaskDetailDialog({ taskId, onClose }: TaskDetailDialogProps): JSX.Element {
+export function TaskDetailDialog({
+  taskId,
+  caseId,
+  onClose,
+}: TaskDetailDialogProps): JSX.Element {
   const { data: task, isLoading, isError, refetch } = useGetTask(taskId);
+  const updateTask = useUpdateTask(taskId, caseId);
+  const [editingAssignee, setEditingAssignee] = useState(false);
+  const [assigneeInput, setAssigneeInput] = useState("");
+  const assigneeSearch = useDebouncedValue(assigneeInput.trim(), 300);
+  const { data: userResults, isFetching: isFetchingUsers } = useSearchUsers({
+    filters: {
+      ...(assigneeSearch.length > 0 && { searchQuery: assigneeSearch }),
+      roles: INTERNAL_USER_ROLES,
+      active: true,
+    },
+    pagination: { limit: 6, offset: 0 },
+  });
+  const assigneeCandidates = useMemo(
+    () => (userResults?.users ?? []).filter((u) => !!u.email && u.active !== false),
+    [userResults],
+  );
+
+  const onChangeState = (nextState: "OPEN" | "CLOSED"): void => {
+    if (!task || nextState === task.state) return;
+    updateTask.mutate({ state: nextState });
+  };
+
+  const onPickAssignee = (email: string): void => {
+    setEditingAssignee(false);
+    setAssigneeInput("");
+    updateTask.mutate({ assignedToEmail: email });
+  };
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
@@ -113,14 +180,35 @@ export function TaskDetailDialog({ taskId, onClose }: TaskDetailDialogProps): JS
         {!isLoading && !isError && task && (
           <>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-              <Chip
+              <Select
                 size="small"
-                variant="outlined"
-                color={taskStateColor(task.state)}
-                label={taskStateLabel(task.state)}
-              />
+                value={EDITABLE_TASK_STATES.includes(task.state as "OPEN" | "CLOSED") ? task.state : ""}
+                onChange={(e) => onChangeState(e.target.value as "OPEN" | "CLOSED")}
+                disabled={updateTask.isPending}
+                displayEmpty
+                renderValue={() => (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={taskStateColor(task.state)}
+                    label={taskStateLabel(task.state)}
+                  />
+                )}
+                sx={{ "& .MuiSelect-select": { py: 0.25, display: "flex" } }}
+              >
+                {EDITABLE_TASK_STATES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {taskStateLabel(s)}
+                  </MenuItem>
+                ))}
+              </Select>
               {task.requestTypeLabel && (
                 <Chip size="small" variant="outlined" label={task.requestTypeLabel} />
+              )}
+              {updateTask.isError && (
+                <Typography variant="caption" color="error">
+                  Could not update this task.
+                </Typography>
               )}
             </Box>
 
@@ -143,7 +231,76 @@ export function TaskDetailDialog({ taskId, onClose }: TaskDetailDialogProps): JS
                 </Typography>
               </DetailCell>
               <DetailCell label="Assigned to">
-                <Typography variant="body2">{task.assignedTo?.name ?? "—"}</Typography>
+                {editingAssignee ? (
+                  <Box>
+                    <TextField
+                      value={assigneeInput}
+                      onChange={(e) => setAssigneeInput(e.target.value)}
+                      placeholder="Search engineers…"
+                      size="small"
+                      fullWidth
+                      autoFocus
+                      disabled={updateTask.isPending}
+                      slotProps={{
+                        input: {
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <Search size={14} />
+                            </InputAdornment>
+                          ),
+                        },
+                      }}
+                    />
+                    {assigneeInput.trim().length > 0 && (
+                      <Box sx={{ mt: 0.5 }}>
+                        {isFetchingUsers ? (
+                          <Typography variant="caption" color="text.secondary">
+                            Searching…
+                          </Typography>
+                        ) : assigneeCandidates.length === 0 ? (
+                          <Typography variant="caption" color="text.secondary">
+                            No matches.
+                          </Typography>
+                        ) : (
+                          assigneeCandidates.map((u) => (
+                            <Button
+                              key={u.id}
+                              size="small"
+                              variant="text"
+                              color="inherit"
+                              startIcon={
+                                <Avatar sx={{ width: 18, height: 18, fontSize: "0.6rem" }}>
+                                  {initialsOf(fullName(u))}
+                                </Avatar>
+                              }
+                              onClick={() => onPickAssignee(u.email)}
+                              sx={{
+                                display: "flex",
+                                justifyContent: "flex-start",
+                                textTransform: "none",
+                                width: "100%",
+                              }}
+                            >
+                              {fullName(u)}
+                            </Button>
+                          ))
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                ) : (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                    <Typography variant="body2">{task.assignedTo?.name ?? "—"}</Typography>
+                    <IconButton
+                      size="small"
+                      onClick={() => setEditingAssignee(true)}
+                      aria-label="Change assignee"
+                      disabled={updateTask.isPending}
+                    >
+                      <Pencil size={12} />
+                    </IconButton>
+                  </Box>
+                )}
               </DetailCell>
               <DetailCell label="Product">
                 <Typography variant="body2">{task.product?.name ?? "—"}</Typography>

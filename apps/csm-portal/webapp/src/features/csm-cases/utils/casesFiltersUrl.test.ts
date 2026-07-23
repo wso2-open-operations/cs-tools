@@ -32,7 +32,7 @@ describe("readCasesFiltersFromUrl", () => {
 
   it("parses a fully-populated query string", () => {
     const params = new URLSearchParams(
-      "q=timeout&severities=S0,S2&states=open,work_in_progress,closed&types=case,engagement&assignees=alice@example.com,@me&workStates=ongoing,paused&projects=apim&products=API%20Manager,Asgardeo",
+      "q=timeout&severities=S0,S2&states=open,work_in_progress,closed&types=case,engagement&assignees=alice@example.com,@me&workStates=ongoing,paused&projects=apim&products=API%20Manager,Asgardeo&tags=micro-gw,ws-policy",
     );
     expect(readCasesFiltersFromUrl(params)).toEqual({
       search: "timeout",
@@ -44,6 +44,7 @@ describe("readCasesFiltersFromUrl", () => {
       workStates: ["ongoing", "paused"],
       projects: ["apim"],
       productNames: ["API Manager", "Asgardeo"],
+      tags: ["micro-gw", "ws-policy"],
     });
   });
 
@@ -93,6 +94,7 @@ describe("writeCasesFiltersToUrl", () => {
       projects: ["streaming"],
       engagementTypes: [],
       productNames: ["Identity Server", "Asgardeo"],
+      tags: ["micro-gw"],
     };
     const round = readCasesFiltersFromUrl(writeCasesFiltersToUrl(filters));
     expect(round).toEqual(filters);

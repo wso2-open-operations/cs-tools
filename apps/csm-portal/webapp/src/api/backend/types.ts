@@ -142,6 +142,18 @@ export type BeCaseCause =
 
 export type BeCaseSortField = "createdOn" | "updatedOn" | "severity" | "state";
 
+/**
+ * Where a case sits in the backing data source's staged auto-closure sequence
+ * (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Read-only — the
+ * only supported write is `autocloseHoldUntil` on `PATCH /cases/{id}`
+ * (ServiceNow only).
+ */
+export type BeCaseAutoclosureStep =
+  | "DEFAULT"
+  | "FIRST_COMMENT"
+  | "ON_HOLD"
+  | "SECOND_COMMENT";
+
 export interface BeCase {
   id: string;
   number?: string;
@@ -219,6 +231,10 @@ export interface BeCaseAccountRef {
   id: string;
   name?: string;
   type?: string;
+  /** The account's assigned CRE (customer reliability engineering) team, when set (ServiceNow only). */
+  creTeam?: BeEntityRef | null;
+  /** The account's assigned SRE (site reliability engineering) team, when set (ServiceNow only). */
+  sreTeam?: BeEntityRef | null;
 }
 
 /**
@@ -288,6 +304,48 @@ export interface BeCaseView {
    * case detail response, not just high-severity cases.
    */
   linkedServiceRequests?: BeLinkedServiceRequestRef[] | null;
+  /**
+   * The case, incident, change request, or problem this case is linked to as
+   * its parent (the hierarchical major-case/child-case relationship, set via
+   * the PATCH `parentId` field). Null/absent when not linked.
+   */
+  parentCase?: BeCaseNumberRef | null;
+  /**
+   * Users on the case watch list (ServiceNow only). Null/absent when not set
+   * or not supported by the current data source.
+   */
+  watchList?: BeWatchListUser[] | null;
+  /**
+   * Where the case sits in the backing data source's staged auto-closure
+   * sequence. Read-only — see {@link BeCaseAutoclosureStep}.
+   */
+  autoclosureStep?: BeCaseAutoclosureStep | null;
+  /**
+   * When the auto-closure sequence next advances — e.g. the "eligible again
+   * after" date for a held case (ServiceNow only). Read-only.
+   */
+  autoclosureStateTime?: string | null;
+  /**
+   * The single customer-facing fix-commitment date/time for the case. This is
+   * the only fix-ETA field exposed by this API; internal-only estimates are
+   * not surfaced. Settable via `PATCH /cases/{id}` (`fixEta`).
+   */
+  fixEta?: string | null;
+  /** Free-text labels attached to the case. Null/absent when none are set. */
+  tags?: BeTag[] | null;
+}
+
+/** A free-text tag attached to a case (`GET /cases/{id}`, `POST /cases/{id}/tags`). */
+export interface BeTag {
+  id: string;
+  label: string;
+  /** Display color for the tag, if one is set. Null when not set. */
+  color?: string | null;
+}
+
+/** `POST /cases/{id}/tags` request body. */
+export interface BeAddCaseTagPayload {
+  label: string;
 }
 
 export interface BeCaseCreatePayload {
@@ -435,37 +493,82 @@ export interface BeGetCatalogItemVariablesResponse {
 }
 
 /**
+ * Fields never allowed alongside another `PATCH /cases/{id}` variant — the
+ * exactly-one-field contract. Every discriminated-union member below spreads
+ * this (minus its own field) so a new variant only has to add its field name
+ * here once, instead of updating every sibling variant by hand.
+ */
+interface BeCaseUpdateNever {
+  state?: never;
+  severity?: never;
+  workState?: never;
+  assigneeEmail?: never;
+  watchList?: never;
+  parentId?: never;
+  subject?: never;
+  description?: never;
+  deploymentId?: never;
+  deployedProductId?: never;
+  relatedCaseId?: never;
+  autocloseHoldUntil?: never;
+  fixEta?: never;
+}
+
+/**
  * Request body for `PATCH /cases/{id}` (mirrors the entity `UpdateCaseRequest`).
- * **Exactly one** of `state` / `severity` / `workState` /
- * `assigneeEmail` / `watchList` / `parentId` is sent per call — the backend rejects
- * zero or more than one. Encoded as a discriminated union (each variant `?: never`s
- * the others) so the exactly-one-field contract is enforced at compile time, not
- * just in docs. `assigneeEmail`, `watchList`, and `parentId` are supported **only**
- * for the ServiceNow data source. `workState` is only accepted while the case is
+ * **Exactly one** of `state` / `severity` / `workState` / `assigneeEmail` /
+ * `watchList` / `parentId` / `subject` / `description` / `deploymentId` /
+ * `deployedProductId` / `relatedCaseId` / `autocloseHoldUntil` / `fixEta` is
+ * sent per call — the backend rejects zero or more than one. Encoded as a
+ * discriminated union (each variant carries every other field as `never`,
+ * via {@link BeCaseUpdateNever}) so the exactly-one-field contract is
+ * enforced at compile time, not just in docs. `assigneeEmail`, `watchList`,
+ * `parentId`, and `autocloseHoldUntil` are supported **only** for the
+ * ServiceNow data source. `workState` is only accepted while the case is
  * `work_in_progress`.
  */
 export type BeCaseUpdatePayload =
-  | {
+  | (Omit<BeCaseUpdateNever, "state"> & {
       state: BeCaseState;
-      severity?: never;
-      workState?: never;
-      assigneeEmail?: never;
-      watchList?: never;
-      parentId?: never;
       /** Post Resolution Activity — only meaningful (and only accepted by the backend) alongside `state: "closed"` or `"solution_proposed"`. */
       resolutionCode?: BeCaseResolutionCode;
       cause?: BeCaseCause;
       closeNotes?: string;
-    }
-  | { state?: never; severity: BeCaseSeverity; workState?: never; assigneeEmail?: never; watchList?: never; parentId?: never }
+    })
+  | (Omit<BeCaseUpdateNever, "severity"> & { severity: BeCaseSeverity })
   /** Work sub-state toggle (`ongoing` / `paused`) for an in-progress case. */
-  | { state?: never; severity?: never; workState: BeCaseWorkState; assigneeEmail?: never; watchList?: never; parentId?: never }
+  | (Omit<BeCaseUpdateNever, "workState"> & { workState: BeCaseWorkState })
   /** Email of the engineer to assign (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail: string; watchList?: never; parentId?: never }
+  | (Omit<BeCaseUpdateNever, "assigneeEmail"> & { assigneeEmail: string })
   /** Full replacement watch list as emails (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail?: never; watchList: string[]; parentId?: never }
-  /** UUID of another case, incident, change request, or problem to link this case to as its parent (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail?: never; watchList?: never; parentId: string };
+  | (Omit<BeCaseUpdateNever, "watchList"> & { watchList: string[] })
+  /**
+   * UUID of another case, incident, change request, or problem to link this
+   * case to as its parent (ServiceNow only, the hierarchical
+   * major-case/child-case relationship).
+   */
+  | (Omit<BeCaseUpdateNever, "parentId"> & { parentId: string })
+  /** New subject/title for the case. */
+  | (Omit<BeCaseUpdateNever, "subject"> & { subject: string })
+  /** New description for the case. */
+  | (Omit<BeCaseUpdateNever, "description"> & { description: string })
+  /** UUID of the deployment to associate with this case, replacing the existing one. */
+  | (Omit<BeCaseUpdateNever, "deploymentId"> & { deploymentId: string })
+  /** UUID of the deployed product to associate with this case, replacing the existing one. */
+  | (Omit<BeCaseUpdateNever, "deployedProductId"> & { deployedProductId: string })
+  /** UUID of another case to cross-link to this one as a related case (looser than `parentId`; ServiceNow only). */
+  | (Omit<BeCaseUpdateNever, "relatedCaseId"> & { relatedCaseId: string })
+  /**
+   * Places the case on hold in the backing data source's staged auto-closure
+   * sequence until this ISO date-time (ServiceNow only). The raw
+   * `autoclosureStep` is not directly settable.
+   */
+  | (Omit<BeCaseUpdateNever, "autocloseHoldUntil"> & { autocloseHoldUntil: string })
+  /**
+   * Sets the customer-facing fix-commitment date/time for the case (ISO
+   * date-time). The only fix-ETA field this API exposes.
+   */
+  | (Omit<BeCaseUpdateNever, "fixEta"> & { fixEta: string });
 
 /** A user in the case watch list, as echoed by `PATCH /cases/{id}`. */
 export interface BeWatchListUser {
@@ -487,6 +590,8 @@ export interface BeUpdatedCase {
   assignedTo?: BeEntityRef | null;
   /** Present when the update set `parentId` — the record this case is now linked to as its parent. */
   parentCase?: BeCaseNumberRef | null;
+  /** Echoes the updated customer-facing fix-commitment date/time. Present when the update set `fixEta`. */
+  fixEta?: string | null;
 }
 
 /** `PATCH /cases/{id}` response: a message plus the mutated case fields. */
@@ -540,6 +645,15 @@ export interface BeCaseSearchFilters {
    * SN data source only.
    */
   productNames?: string[];
+  /**
+   * Filter to child cases of this case UUID (the hierarchical
+   * major-case/child-case relationship set via the PATCH `parentId` field).
+   * Used to list a case's children via this same search endpoint rather than
+   * a dedicated one.
+   */
+  parentId?: string;
+  /** Filter to cases carrying any of these free-text tag labels (optional). */
+  tags?: string[];
 }
 
 export interface BeCaseSearchPayload {
@@ -1389,6 +1503,37 @@ export interface BeTaskDetail {
   createdOn: string;
   updatedOn: string;
 }
+
+/** `POST /cases/{caseId}/tasks` request body. Only `subject` is required. */
+export interface BeCreateCaseTaskPayload {
+  subject: string;
+  /** ISO date-time; null/absent when the task carries no due date. */
+  dueDate?: string | null;
+  /** Email of the engineer to assign the new task to. */
+  assignedToEmail?: string | null;
+  /** Whether the task should be visible to the customer. */
+  visibleToCustomer?: boolean | null;
+}
+
+/**
+ * Fields never allowed alongside another `PATCH /tasks/{id}` variant — mirrors
+ * {@link BeCaseUpdateNever}'s exactly-one-field pattern for the case PATCH.
+ */
+interface BeUpdateTaskNever {
+  state?: never;
+  assignedToEmail?: never;
+  dueDate?: never;
+}
+
+/**
+ * Request body for `PATCH /tasks/{id}`. **Exactly one** of `state` /
+ * `assignedToEmail` / `dueDate` is sent per call — the backend rejects zero
+ * or more than one.
+ */
+export type BeUpdateTaskPayload =
+  | (Omit<BeUpdateTaskNever, "state"> & { state: string })
+  | (Omit<BeUpdateTaskNever, "assignedToEmail"> & { assignedToEmail: string })
+  | (Omit<BeUpdateTaskNever, "dueDate"> & { dueDate: string });
 
 // ---------------------------------------------------------------------------
 // Change requests (managed-cloud; ServiceNow data source only)
