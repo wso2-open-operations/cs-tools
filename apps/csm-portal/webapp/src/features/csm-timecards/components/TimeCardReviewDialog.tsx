@@ -78,12 +78,25 @@ export default function TimeCardReviewDialog({
   onDecide,
 }: TimeCardReviewDialogProps): JSX.Element {
   const [leadComment, setLeadComment] = useState("");
+  const [rejectBlocked, setRejectBlocked] = useState(false);
+  const trimmedComment = leadComment.trim();
 
-  const decide = (state: "approved" | "rejected"): void =>
+  const decide = (state: "approved" | "rejected"): void => {
+    // The backend requires a non-empty leadComment when rejecting (there's no
+    // other trace a rejection leaves — see CsmTimeCard.rejectionReason), but
+    // doesn't say so anywhere in its error response, so this is enforced here
+    // rather than surfacing a generic "Invalid request payload." after the fact.
+    if (state === "rejected" && trimmedComment === "") {
+      setRejectBlocked(true);
+      return;
+    }
     onDecide({ cardId: card.id, state, leadComment });
+  };
 
   const titlePrefix =
     action === "approve" ? "Accept" : action === "reject" ? "Reject" : "Review";
+  const rejectAllowed = action !== "approve";
+  const commentMissingForReject = rejectBlocked && trimmedComment === "";
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
@@ -113,14 +126,24 @@ export default function TimeCardReviewDialog({
           </Box>
 
           <TextField
-            label="Lead's comment (optional)"
+            label={
+              rejectAllowed
+                ? "Lead's comment (required to reject)"
+                : "Lead's comment (optional)"
+            }
             multiline
             minRows={2}
             value={leadComment}
-            onChange={(e) =>
-              setLeadComment(e.target.value.slice(0, LEAD_COMMENT_MAX))
+            onChange={(e) => {
+              setLeadComment(e.target.value.slice(0, LEAD_COMMENT_MAX));
+              setRejectBlocked(false);
+            }}
+            error={commentMissingForReject}
+            helperText={
+              commentMissingForReject
+                ? "A comment is required to reject a time card."
+                : `${LEAD_COMMENT_MAX - leadComment.length} characters left`
             }
-            helperText={`${LEAD_COMMENT_MAX - leadComment.length} characters left`}
           />
         </Box>
       </DialogContent>
