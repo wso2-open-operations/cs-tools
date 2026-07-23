@@ -25,7 +25,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX } from "react";
+import { useMemo, useState, type JSX, type KeyboardEvent } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
@@ -124,7 +124,7 @@ export default function AddTagDialog({
                   // they fire for the same DOM keydown here — cast rather
                   // than drop the call, so listbox keyboard nav still works.
                   params.inputProps.onKeyDown?.(
-                    e as unknown as React.KeyboardEvent<HTMLInputElement>,
+                    e as unknown as KeyboardEvent<HTMLInputElement>,
                   );
                   if (e.key === "Enter" && !e.defaultPrevented) {
                     e.preventDefault();

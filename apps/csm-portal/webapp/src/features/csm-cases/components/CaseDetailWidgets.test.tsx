@@ -91,4 +91,11 @@ describe("WatchersWidget", () => {
     );
     expect(onManage).toHaveBeenCalled();
   });
+
+  it("hides the Manage watchers action when onManage is omitted", () => {
+    render(<WatchersWidget watchers={WATCHERS} />);
+    expect(
+      screen.queryByRole("button", { name: /manage watchers/i }),
+    ).not.toBeInTheDocument();
+  });
 });

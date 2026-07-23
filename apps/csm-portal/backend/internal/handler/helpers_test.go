@@ -228,7 +228,7 @@ func (m *mockEntityCaseClient) SearchTags(ctx context.Context, query string, lim
 	if m.searchTagsFn != nil {
 		return m.searchTagsFn(ctx, query, limit)
 	}
-	return []byte(`[]`), nil
+	return []byte(`{"tags":[]}`), nil
 }
 
 // ----- mock updates client -----

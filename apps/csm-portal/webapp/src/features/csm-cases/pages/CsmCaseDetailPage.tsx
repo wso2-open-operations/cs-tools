@@ -124,6 +124,12 @@ import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import {
+  isBlankHtml,
+  sanitizeDescriptionHtml,
+  stripLightModeInlineStyles,
+} from "@utils/sanitizeHtml";
+import { useDarkMode } from "@utils/useDarkMode";
+import {
   publicCommentGateReason,
   WORK_STATE_LABEL,
 } from "@features/csm-cases/utils/caseWorkState";
@@ -394,6 +400,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     claims?.email?.split("@")[0] ||
     "Unknown engineer";
   const { showError } = useErrorBanner();
+  const isDarkMode = useDarkMode();
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
   const [metaCollapsed, setMetaCollapsed] = useState(false);
@@ -1808,7 +1815,32 @@ export default function CsmCaseDetailPage(): JSX.Element {
               feed (see the note near `safeComments` above). Editing it is
               still available via the action bar's "Edit case details…" item
               (EditCaseDetailsDialog), which is the only place the description
-              is shown for editing. */}
+              is shown for editing.
+
+              Exception: if comments/search failed, safeComments is empty and
+              the description never renders anywhere — fall back to a
+              read-only card here so the description isn't invisible whenever
+              the activity feed is unavailable. */}
+          {isCommentsError && !isBlankHtml(c.description) && (
+            <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+              <Typography variant="subtitle2">Description</Typography>
+              <Box
+                sx={{
+                  typography: "body2",
+                  color: "text.primary",
+                  "& p": { mb: 0.5 },
+                  "& p:last-child": { mb: 0 },
+                }}
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeDescriptionHtml(
+                    isDarkMode
+                      ? stripLightModeInlineStyles(c.description)
+                      : c.description,
+                  ),
+                }}
+              />
+            </Card>
+          )}
           <CustomerContextWidget
             ctx={c.customerContext}
             project={caseProject}

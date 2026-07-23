@@ -638,7 +638,7 @@ func (h *CaseHandler) SearchTags(w http.ResponseWriter, r *http.Request) {
 	var limit int
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		parsed, err := strconv.Atoi(limitStr)
-		if err != nil || parsed < 0 {
+		if err != nil || parsed < 0 || parsed > 100 {
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}

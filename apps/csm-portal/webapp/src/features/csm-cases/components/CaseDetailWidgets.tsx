@@ -364,9 +364,11 @@ export function WatchersWidget({
       title="Watchers"
       icon={<Users size={16} />}
       action={
-        <Button size="small" variant="text" onClick={onManage}>
-          Manage watchers
-        </Button>
+        onManage ? (
+          <Button size="small" variant="text" onClick={onManage}>
+            Manage watchers
+          </Button>
+        ) : undefined
       }
     >
       {watchers.length === 0 ? (

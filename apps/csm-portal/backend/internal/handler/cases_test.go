@@ -2320,6 +2320,34 @@ func TestSearchTags(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects a limit above the documented maximum", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=101", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("accepts a limit of exactly 100", func(t *testing.T) {
+		var capturedLimit int
+		client := &mockEntityCaseClient{
+			searchTagsFn: func(_ context.Context, _ string, limit int) ([]byte, error) {
+				capturedLimit = limit
+				return []byte(`{"tags":[]}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=100", nil))
+		w := httptest.NewRecorder()
+		h.SearchTags(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if capturedLimit != 100 {
+			t.Errorf("upstream received limit %d, want 100", capturedLimit)
+		}
+	})
+
 	t.Run("forwards q and limit verbatim, returns 200 with matching tags", func(t *testing.T) {
 		var capturedQuery string
 		var capturedLimit int
@@ -2327,7 +2355,7 @@ func TestSearchTags(t *testing.T) {
 			searchTagsFn: func(_ context.Context, query string, limit int) ([]byte, error) {
 				capturedQuery = query
 				capturedLimit = limit
-				return []byte(`[{"id":"22222222-2222-2222-2222-222222222222","label":"micro-gw","color":null}]`), nil
+				return []byte(`{"tags":[{"id":"22222222-2222-2222-2222-222222222222","label":"micro-gw","color":null}]}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -2344,16 +2372,18 @@ func TestSearchTags(t *testing.T) {
 			t.Errorf("upstream received limit %d, want %d", capturedLimit, 10)
 		}
 
-		var tags []struct {
-			ID    string  `json:"id"`
-			Label string  `json:"label"`
-			Color *string `json:"color"`
+		var body struct {
+			Tags []struct {
+				ID    string  `json:"id"`
+				Label string  `json:"label"`
+				Color *string `json:"color"`
+			} `json:"tags"`
 		}
-		if err := json.Unmarshal(w.Body.Bytes(), &tags); err != nil {
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
 		}
-		if len(tags) != 1 || tags[0].Label != "micro-gw" {
-			t.Errorf("tags = %+v, want a single micro-gw entry", tags)
+		if len(body.Tags) != 1 || body.Tags[0].Label != "micro-gw" {
+			t.Errorf("tags = %+v, want a single micro-gw entry", body.Tags)
 		}
 	})
 
@@ -2366,7 +2396,7 @@ func TestSearchTags(t *testing.T) {
 				called = true
 				capturedQuery = query
 				capturedLimit = limit
-				return []byte(`[]`), nil
+				return []byte(`{"tags":[]}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
