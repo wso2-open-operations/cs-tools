@@ -17,12 +17,20 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { TagsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
-import type { CaseTag } from "@features/csm-cases/types/csmCases";
+import {
+  TagsWidget,
+  WatchersWidget,
+} from "@features/csm-cases/components/CaseDetailWidgets";
+import type { CaseTag, CaseWatcher } from "@features/csm-cases/types/csmCases";
 
 const TAGS: CaseTag[] = [
   { id: "tag-1", label: "micro-gw" },
   { id: "tag-2", label: "ws-policy" },
+];
+
+const WATCHERS: CaseWatcher[] = [
+  { id: "w-1", name: "Jane Doe" },
+  { id: "w-2", name: "John Smith", isMe: true },
 ];
 
 describe("TagsWidget", () => {
@@ -58,5 +66,29 @@ describe("TagsWidget", () => {
     render(<TagsWidget tags={TAGS} />);
     const chip = screen.getByText("micro-gw").closest(".MuiChip-root");
     expect(chip?.querySelector(".MuiChip-deleteIcon")).toBeFalsy();
+  });
+});
+
+describe("WatchersWidget", () => {
+  it("renders an empty state when there are no watchers", () => {
+    render(<WatchersWidget watchers={[]} />);
+    expect(
+      screen.getByText("No one is watching this case."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders every watcher as a chip, marking the current user", () => {
+    render(<WatchersWidget watchers={WATCHERS} />);
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByText("John Smith (you)")).toBeInTheDocument();
+  });
+
+  it("calls onManage when the Manage watchers button is clicked", () => {
+    const onManage = vi.fn();
+    render(<WatchersWidget watchers={WATCHERS} onManage={onManage} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /manage watchers/i }),
+    );
+    expect(onManage).toHaveBeenCalled();
   });
 });

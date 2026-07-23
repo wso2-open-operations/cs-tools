@@ -326,11 +326,27 @@ export interface BeCaseView {
    */
   autoclosureStateTime?: string | null;
   /**
-   * The single customer-facing fix-commitment date/time for the case. This is
-   * the only fix-ETA field exposed by this API; internal-only estimates are
-   * not surfaced. Settable via `PATCH /cases/{id}` (`fixEta`).
+   * The customer-facing fix-commitment date/time for the case — the shared
+   * commitment shown to the customer. Settable via `PATCH /cases/{id}`
+   * (`fixEta`). Distinct from the three internal-only estimates below, which
+   * are never shared with the customer.
    */
   fixEta?: string | null;
+  /**
+   * Internal-only best-case fix estimate. Settable via `PATCH /cases/{id}`
+   * (`bestCaseFixEta`). Never surfaced to the customer.
+   */
+  bestCaseFixEta?: string | null;
+  /**
+   * Internal-only most-likely fix estimate. Settable via `PATCH /cases/{id}`
+   * (`mostLikelyFixEta`). Never surfaced to the customer.
+   */
+  mostLikelyFixEta?: string | null;
+  /**
+   * Internal-only worst-case fix estimate. Settable via `PATCH /cases/{id}`
+   * (`worstCaseFixEta`). Never surfaced to the customer.
+   */
+  worstCaseFixEta?: string | null;
   /** Free-text labels attached to the case. Null/absent when none are set. */
   tags?: BeTag[] | null;
 }
@@ -346,6 +362,12 @@ export interface BeTag {
 /** `POST /cases/{id}/tags` request body. */
 export interface BeAddCaseTagPayload {
   label: string;
+}
+
+/** `GET /tags/search?q=&limit=` response: existing free-text tag labels matching the query. */
+export interface BeSearchTagsResponse {
+  tags?: BeTag[];
+  total?: number;
 }
 
 export interface BeCaseCreatePayload {
@@ -512,20 +534,25 @@ interface BeCaseUpdateNever {
   relatedCaseId?: never;
   autocloseHoldUntil?: never;
   fixEta?: never;
+  bestCaseFixEta?: never;
+  mostLikelyFixEta?: never;
+  worstCaseFixEta?: never;
 }
 
 /**
  * Request body for `PATCH /cases/{id}` (mirrors the entity `UpdateCaseRequest`).
  * **Exactly one** of `state` / `severity` / `workState` / `assigneeEmail` /
  * `watchList` / `parentId` / `subject` / `description` / `deploymentId` /
- * `deployedProductId` / `relatedCaseId` / `autocloseHoldUntil` / `fixEta` is
- * sent per call — the backend rejects zero or more than one. Encoded as a
- * discriminated union (each variant carries every other field as `never`,
- * via {@link BeCaseUpdateNever}) so the exactly-one-field contract is
- * enforced at compile time, not just in docs. `assigneeEmail`, `watchList`,
- * `parentId`, and `autocloseHoldUntil` are supported **only** for the
- * ServiceNow data source. `workState` is only accepted while the case is
- * `work_in_progress`.
+ * `deployedProductId` / `relatedCaseId` / `autocloseHoldUntil` / `fixEta` /
+ * `bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta` is sent per call —
+ * the backend rejects zero or more than one. Encoded as a discriminated union
+ * (each variant carries every other field as `never`, via
+ * {@link BeCaseUpdateNever}) so the exactly-one-field contract is enforced at
+ * compile time, not just in docs. `assigneeEmail`, `watchList`, `parentId`,
+ * and `autocloseHoldUntil` are supported **only** for the ServiceNow data
+ * source. `workState` is only accepted while the case is `work_in_progress`.
+ * `bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta` are internal-only
+ * estimates, independent of the customer-facing `fixEta`.
  */
 export type BeCaseUpdatePayload =
   | (Omit<BeCaseUpdateNever, "state"> & {
@@ -566,9 +593,15 @@ export type BeCaseUpdatePayload =
   | (Omit<BeCaseUpdateNever, "autocloseHoldUntil"> & { autocloseHoldUntil: string })
   /**
    * Sets the customer-facing fix-commitment date/time for the case (ISO
-   * date-time). The only fix-ETA field this API exposes.
+   * date-time).
    */
-  | (Omit<BeCaseUpdateNever, "fixEta"> & { fixEta: string });
+  | (Omit<BeCaseUpdateNever, "fixEta"> & { fixEta: string })
+  /** Sets the internal-only best-case fix estimate (ISO date-time). */
+  | (Omit<BeCaseUpdateNever, "bestCaseFixEta"> & { bestCaseFixEta: string })
+  /** Sets the internal-only most-likely fix estimate (ISO date-time). */
+  | (Omit<BeCaseUpdateNever, "mostLikelyFixEta"> & { mostLikelyFixEta: string })
+  /** Sets the internal-only worst-case fix estimate (ISO date-time). */
+  | (Omit<BeCaseUpdateNever, "worstCaseFixEta"> & { worstCaseFixEta: string });
 
 /** A user in the case watch list, as echoed by `PATCH /cases/{id}`. */
 export interface BeWatchListUser {
@@ -592,6 +625,12 @@ export interface BeUpdatedCase {
   parentCase?: BeCaseNumberRef | null;
   /** Echoes the updated customer-facing fix-commitment date/time. Present when the update set `fixEta`. */
   fixEta?: string | null;
+  /** Echoes the updated internal-only best-case fix estimate. Present when the update set `bestCaseFixEta`. */
+  bestCaseFixEta?: string | null;
+  /** Echoes the updated internal-only most-likely fix estimate. Present when the update set `mostLikelyFixEta`. */
+  mostLikelyFixEta?: string | null;
+  /** Echoes the updated internal-only worst-case fix estimate. Present when the update set `worstCaseFixEta`. */
+  worstCaseFixEta?: string | null;
 }
 
 /** `PATCH /cases/{id}` response: a message plus the mutated case fields. */

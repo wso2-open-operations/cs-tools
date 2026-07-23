@@ -135,6 +135,9 @@ function detailFromBeCase(
     attachments: [],
     isWatching: watchers.some((w) => w.isMe),
     fixEta: c.fixEta ?? null,
+    bestCaseFixEta: c.bestCaseFixEta ?? null,
+    mostLikelyFixEta: c.mostLikelyFixEta ?? null,
+    worstCaseFixEta: c.worstCaseFixEta ?? null,
     resolution:
       c.resolutionCode || c.cause || c.resolutionNotes
         ? {
