@@ -16,6 +16,17 @@
 
 import DOMPurify from "dompurify";
 
+// Harden all sanitized <a target="_blank"> links against reverse tabnabbing.
+// Registered once at module load; applies to every DOMPurify.sanitize() call
+// in the app. Mirrors the customer portal's equivalent hook in `utils/common.ts`.
+if (typeof window !== "undefined") {
+  DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+    if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+}
+
 /**
  * Sanitize backend rich-text HTML (ServiceNow case comments, change-request
  * descriptions/plans, …) for safe rendering via dangerouslySetInnerHTML.
@@ -29,6 +40,92 @@ import DOMPurify from "dompurify";
  */
 export function sanitizeRichTextHtml(html: string): string {
   return DOMPurify.sanitize(html);
+}
+
+/** DOMPurify config for backend description/body HTML: strips tables and code blocks. */
+export const DESCRIPTION_PURIFY_CONFIG = {
+  FORBID_TAGS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
+  FORBID_CONTENTS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
+};
+
+/**
+ * Sanitize a case/CR description for display: same base policy as
+ * {@link sanitizeRichTextHtml} but additionally strips tables and code blocks,
+ * matching the customer portal's dedicated description policy.
+ */
+export function sanitizeDescriptionHtml(html: string): string {
+  return DOMPurify.sanitize(html, DESCRIPTION_PURIFY_CONFIG);
+}
+
+/**
+ * Strips pure-white inline background declarations from style attributes so
+ * dark-mode containers no longer render white boxes on a dark background.
+ * Everything else (code-block backgrounds, borders, shadows, text colors) is
+ * intentionally left untouched so light-mode and structural styling stay intact.
+ *
+ * @param html - Raw HTML string.
+ * @returns HTML with pure-white background declarations removed.
+ */
+export function stripLightModeInlineStyles(html: string): string {
+  return html.replace(
+    /style\s*=\s*(["'])([\s\S]*?)\1/gi,
+    (_match, quote: string, styleContent: string) => {
+      const declarations = styleContent.split(";");
+      const filtered = declarations.filter((decl) => {
+        const normalized = decl.toLowerCase().replace(/\s+/g, " ").trim();
+        if (!normalized) return false;
+        if (
+          /^background(-color)?\s*:\s*(#fff(fff)?|white|#f4f4f4|#f5f5f5|#f0f0f0|#f9f9f9|#f8f8f8|#fafafa|#e9e9e9)\s*$/.test(
+            normalized,
+          )
+        )
+          return false;
+        if (/^background(-color)?\s*:/.test(normalized) && isNearWhiteRgb(normalized))
+          return false;
+        if (/^color\s*:/.test(normalized) && isDarkColor(normalized))
+          return false;
+        return true;
+      });
+      const cleaned = filtered.join(";").replace(/;+$/, "").trim();
+      if (!cleaned) return "";
+      return `style=${quote}${cleaned}${quote}`;
+    },
+  );
+}
+
+function isNearWhiteRgb(bgDecl: string): boolean {
+  const rgbMatch = bgDecl.match(
+    /^background(?:-color)?\s*:\s*rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/,
+  );
+  if (!rgbMatch) return false;
+  const [, r, g, b] = rgbMatch.map(Number);
+  return r > 230 && g > 230 && b > 230;
+}
+
+function isDarkColor(colorDecl: string): boolean {
+  // Named dark colors
+  if (/^color\s*:\s*(black|#000(000)?)\s*$/.test(colorDecl))
+    return true;
+  // rgb(r, g, b) where all channels are below 100 (dark)
+  const rgbMatch = colorDecl.match(/^color\s*:\s*rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/);
+  if (rgbMatch) {
+    const [, r, g, b] = rgbMatch.map(Number);
+    return r < 100 && g < 100 && b < 100;
+  }
+  // 3-digit or 6-digit hex colors that are dark (luminance heuristic)
+  const hex3 = colorDecl.match(/^color\s*:\s*#([0-9a-f]{3})\s*$/);
+  if (hex3) {
+    const [rv, gv, bv] = hex3[1].split("").map((c) => parseInt(c + c, 16));
+    return rv < 100 && gv < 100 && bv < 100;
+  }
+  const hex6 = colorDecl.match(/^color\s*:\s*#([0-9a-f]{6})\s*$/);
+  if (hex6) {
+    const rv = parseInt(hex6[1].slice(0, 2), 16);
+    const gv = parseInt(hex6[1].slice(2, 4), 16);
+    const bv = parseInt(hex6[1].slice(4, 6), 16);
+    return rv < 100 && gv < 100 && bv < 100;
+  }
+  return false;
 }
 
 /** True when an HTML string has no visible content (e.g. `<p></p>`, `&nbsp;`). */

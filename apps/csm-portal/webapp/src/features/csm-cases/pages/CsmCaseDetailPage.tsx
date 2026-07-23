@@ -103,6 +103,8 @@ import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCards
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
+import { isBlankHtml, sanitizeDescriptionHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
+import { useDarkMode } from "@utils/useDarkMode";
 import {
   publicCommentGateReason,
   WORK_STATE_LABEL,
@@ -261,6 +263,7 @@ const TAB_DEFS: Array<{
 export default function CsmCaseDetailPage(): JSX.Element {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavTransition();
+  const isDarkMode = useDarkMode();
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
   const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
@@ -1508,6 +1511,31 @@ export default function CsmCaseDetailPage(): JSX.Element {
               </MetaCell>
             </Box>
           </Card>
+          {!isBlankHtml(c.description) && (
+            <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+              <Typography variant="subtitle2">Description</Typography>
+              {/* `comments/search` already returns the description as the
+                  opening activity-feed entry (see the note near
+                  `safeComments` above), so the same text may appear here and
+                  as the first entry in the Activity tab — that's expected,
+                  not a bug. */}
+              <Box
+                sx={{
+                  typography: "body2",
+                  color: "text.primary",
+                  "& p": { mb: 0.5 },
+                  "& p:last-child": { mb: 0 },
+                }}
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeDescriptionHtml(
+                    isDarkMode
+                      ? stripLightModeInlineStyles(c.description)
+                      : c.description,
+                  ),
+                }}
+              />
+            </Card>
+          )}
           <CustomerContextWidget
             ctx={c.customerContext}
             project={caseProject}
