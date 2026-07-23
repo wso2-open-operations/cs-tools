@@ -30,7 +30,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { deployments } from "@src/services/deployments";
-import type { Project } from "@src/types";
+import type { Project, SecurityReportCreatePayloadDto } from "@src/types";
 import { toRawBase64, type PendingAttachment } from "@utils/attachments";
 import { AttachmentsField } from "@components/support/AttachmentsField";
 import { ProjectSelect } from "@components/support/ProjectSelect";
@@ -76,18 +76,29 @@ export default function NewSecurityReportPage() {
 
   const createSecurityReport = useMutation({ mutationFn: cases.create });
 
-  // Raw-base64 (data URI stripped) sizes are what actually goes over the wire for this endpoint —
-  // budget against those, not the data-URI-prefixed lengths PendingAttachment.file holds.
-  const attachmentBytes = useMemo(
-    () => attachments.reduce((sum, a) => sum + toRawBase64(a.file).length, 0),
-    [attachments],
+  // The exact object handleSubmit sends — reused for the size check below so the two can never
+  // drift apart.
+  const buildPayload = (): SecurityReportCreatePayloadDto => ({
+    type: "security_report_analysis",
+    projectId: project?.id ?? "",
+    deploymentId,
+    deployedProductId,
+    subject: subject.trim(),
+    description,
+    attachments: attachments.map((a) => ({ name: a.name, file: toRawBase64(a.file) })),
+  });
+
+  // Measures the real wire size of the actual payload (JSON structure, field names, IDs, filenames,
+  // and all) rather than approximating from subject/description bytes plus a flat overhead buffer —
+  // that approximation undercounts the per-attachment JSON overhead (braces, commas, quoted
+  // filenames), which could let a submission with several small attachments slip past the check
+  // and still 413 against the backend's real cap.
+  const payloadBytes = useMemo(
+    () => new TextEncoder().encode(JSON.stringify(buildPayload())).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildPayload is a plain closure over these same primitives, not memoized itself
+    [project, deploymentId, deployedProductId, subject, description, attachments],
   );
-  const nonAttachmentBytes = useMemo(
-    () => new TextEncoder().encode(subject + description).length,
-    [subject, description],
-  );
-  const attachmentsBudget = Math.max(0, MAX_BODY_BYTES - nonAttachmentBytes - 4 * 1024);
-  const overLimit = attachmentBytes > attachmentsBudget;
+  const overLimit = payloadBytes > MAX_BODY_BYTES;
 
   // Auto-generate "{Deployment} - {Product} - {date}" once both names are loaded, matching the
   // webapp. Event-driven (fired from the product-change handler) rather than a setState effect, so
@@ -134,15 +145,7 @@ export default function NewSecurityReportPage() {
     setIsSubmitting(true);
 
     try {
-      const created = await createSecurityReport.mutateAsync({
-        type: "security_report_analysis",
-        projectId: project.id,
-        deploymentId,
-        deployedProductId,
-        subject: subject.trim(),
-        description,
-        attachments: attachments.map((a) => ({ name: a.name, file: toRawBase64(a.file) })),
-      });
+      const created = await createSecurityReport.mutateAsync(buildPayload());
 
       navigate(`/cases/${created.id}`);
     } catch {
