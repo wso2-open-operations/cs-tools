@@ -128,8 +128,24 @@ export const displayValue = (
   return typeof value === "string" ? value : fallback;
 };
 
+const MONTH_ABBREVIATIONS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 /**
- * Formats a date string into "MMM DD, YYYY" format.
+ * Formats a date string into "MMM DD, YYYY" format using the date parts
+ * as provided by the backend, without converting to any timezone.
  * Example: "Jan 15, 2024"
  *
  * @param {string} dateString - The date string to format.
@@ -138,6 +154,14 @@ export const displayValue = (
 export const formatProjectDate = (dateString: string): string => {
   if (!dateString) {
     return "";
+  }
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(dateString.trim());
+  if (match) {
+    const [, yyyy, mm, dd] = match;
+    const monthName = MONTH_ABBREVIATIONS[Number(mm) - 1];
+    if (monthName) {
+      return `${monthName} ${Number(dd)}, ${yyyy}`;
+    }
   }
   const formatted = formatBackendTimestampForDisplay(dateString, {
     month: "short",
