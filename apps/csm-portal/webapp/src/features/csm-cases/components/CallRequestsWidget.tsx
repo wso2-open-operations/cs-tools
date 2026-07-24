@@ -48,7 +48,7 @@ import { ScheduleCallDialog } from "./ScheduleCallDialog";
 import { RejectCallDialog } from "./RejectCallDialog";
 import { SendCallNotesDialog } from "./SendCallNotesDialog";
 import { CancelCallDialog } from "./CancelCallDialog";
-import { CallRequestRow } from "./CallRequestRow";
+import { CallRequestsTable } from "./CallRequestsTable";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -349,16 +349,11 @@ export function CallRequestsWidget({
         )}
 
         {!isLoading && !isError && requests.length > 0 && (
-          <Box sx={{ display: "flex", flexDirection: "column" }}>
-            {requests.map((cr) => (
-              <CallRequestRow
-                key={cr.id}
-                cr={cr}
-                onAction={handleAction}
-                isClosed={isClosed}
-              />
-            ))}
-          </Box>
+          <CallRequestsTable
+            requests={requests}
+            onAction={handleAction}
+            isClosed={isClosed}
+          />
         )}
       </Card>
 
