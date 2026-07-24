@@ -29,6 +29,7 @@ type entityProjectClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
+	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // ProjectHandler handles HTTP requests for project operations, delegating to the
@@ -84,6 +85,47 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search projects.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// UpdateProject handles PATCH /projects/{id}. Targets a ServiceNow-data-source-only
+// entity-service operation that requires a forwarded end-user identity token — this
+// service is strictly M2M with no mechanism to supply one, so calls here always
+// receive a mapped 401 from upstream. Kept for API-shape completeness (see the
+// entity-client method's doc comment), not because it currently succeeds. The
+// request body is forwarded verbatim; the entity service enforces its own
+// "at least one field" business rule and 400s otherwise, so this handler does not
+// re-validate that.
+func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateProject(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "projectID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update project.")
 		return
 	}
 
