@@ -125,7 +125,7 @@ Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-e
 
 | Variable | Description |
 |---|---|
-| `ENGINEERING_ENTITY_BASE_URL` | Base URL of the engineering entity service |
+| `ENGINEERING_ENTITY_BASE_URL` | Base URL of the engineering entity service (optional) |
 | `ENGINEERING_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### Updates service
@@ -148,9 +148,9 @@ Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-e
 
 | Variable | Description |
 |---|---|
-| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service |
+| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service (optional) |
 | `NOTIFICATIONS_EMAIL_SCOPES` | Comma-separated OAuth2 scopes (optional) |
-| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email |
+| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email (optional) |
 
 ### Notifications — Google Chat channel
 
@@ -158,8 +158,8 @@ Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-e
 
 | Variable | Description |
 |---|---|
-| `NOTIFICATIONS_GOOGLE_CHAT_SPACES` | JSON array of `{"product","webhookUrl"}` objects, one per Google Chat space — e.g. `[{"product":"api-manager","webhookUrl":"https://chat.googleapis.com/..."}]`. Malformed JSON is logged and treated as no spaces configured (does not fail startup) |
-| `CSM_PORTAL_WEB_BASE_URL` | Base URL of the CSM portal webapp, used to build the "Open in CSM Portal" link at `/operations/incidents/{caseId}` (e.g. `http://localhost:3001` for local dev) |
+| `NOTIFICATIONS_GOOGLE_CHAT_SPACES` | JSON array of `{"product","webhookUrl"}` objects, one per Google Chat space — e.g. `[{"product":"api-manager","webhookUrl":"https://chat.googleapis.com/..."}]`. Optional — left unset, malformed, Google Chat alerts are unavailable but startup and every other endpoint work normally |
+| `CSM_PORTAL_WEB_BASE_URL` | Base URL of the CSM portal webapp, used to build the "Open in CSM Portal" link at `/operations/incidents/{caseId}` (e.g. `http://localhost:3001` for local dev). Optional — only needed alongside `NOTIFICATIONS_GOOGLE_CHAT_SPACES` above |
 
 ### Auth
 
