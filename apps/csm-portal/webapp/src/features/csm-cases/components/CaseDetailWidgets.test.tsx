@@ -21,7 +21,38 @@ import {
   TagsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
+import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import type { CaseTag, CaseWatcher } from "@features/csm-cases/types/csmCases";
+
+vi.mock("@features/csm-users/api/useSearchUsers", () => ({
+  useSearchUsers: vi.fn(),
+}));
+
+const mockUseSearchUsers = vi.mocked(useSearchUsers);
+
+function mockCandidates(): void {
+  mockUseSearchUsers.mockReturnValue({
+    data: {
+      users: [
+        {
+          id: "u-2",
+          userName: "jsmith",
+          name: "Jane Smith",
+          email: "jane.smith@example.com",
+          timezone: null,
+          active: true,
+        },
+      ],
+      total: 1,
+      limit: 8,
+      offset: 0,
+      hasMore: false,
+    },
+    isFetching: false,
+    isError: false,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseQueryResult stub
+  } as any);
+}
 
 const TAGS: CaseTag[] = [
   { id: "tag-1", label: "micro-gw" },
@@ -29,7 +60,7 @@ const TAGS: CaseTag[] = [
 ];
 
 const WATCHERS: CaseWatcher[] = [
-  { id: "w-1", name: "Jane Doe" },
+  { id: "w-1", name: "Jane Doe", email: "jane.doe@example.com" },
   { id: "w-2", name: "John Smith", isMe: true },
 ];
 
@@ -83,19 +114,52 @@ describe("WatchersWidget", () => {
     expect(screen.getByText("John Smith (you)")).toBeInTheDocument();
   });
 
-  it("calls onManage when the Manage watchers button is clicked", () => {
-    const onManage = vi.fn();
-    render(<WatchersWidget watchers={WATCHERS} onManage={onManage} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: /manage watchers/i }),
-    );
-    expect(onManage).toHaveBeenCalled();
-  });
-
-  it("hides the Manage watchers action when onManage is omitted", () => {
+  it("hides the Add watcher action when onAdd is omitted", () => {
     render(<WatchersWidget watchers={WATCHERS} />);
     expect(
-      screen.queryByRole("button", { name: /manage watchers/i }),
+      screen.queryByRole("button", { name: /add watcher/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("omits the per-chip remove affordance when onRemove is omitted", () => {
+    render(<WatchersWidget watchers={WATCHERS} />);
+    const chip = screen.getByText("Jane Doe").closest(".MuiChip-root");
+    expect(chip?.querySelector(".MuiChip-deleteIcon")).toBeFalsy();
+  });
+
+  it("calls onRemove with the watcher when its chip delete icon is clicked", () => {
+    const onRemove = vi.fn();
+    render(<WatchersWidget watchers={WATCHERS} onRemove={onRemove} />);
+    const chip = screen.getByText("Jane Doe").closest(".MuiChip-root");
+    const deleteIcon = chip?.querySelector(".MuiChip-deleteIcon");
+    expect(deleteIcon).toBeTruthy();
+    fireEvent.click(deleteIcon as Element);
+    expect(onRemove).toHaveBeenCalledWith(WATCHERS[0]);
+  });
+
+  it("opens an inline search panel on Add watcher and calls onAdd for a picked candidate — no dialog involved", () => {
+    mockCandidates();
+    const onAdd = vi.fn();
+    render(<WatchersWidget watchers={WATCHERS} onAdd={onAdd} />);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /add watcher/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /jane smith/i }));
+    expect(onAdd).toHaveBeenCalledWith("jane.smith@example.com", "Jane Smith");
+  });
+
+  it("closes the inline search panel when its cancel button is clicked", () => {
+    mockCandidates();
+    render(<WatchersWidget watchers={WATCHERS} onAdd={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /add watcher/i }));
+    expect(
+      screen.getByPlaceholderText(/search people to add/i),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /cancel adding a watcher/i }));
+    expect(
+      screen.queryByPlaceholderText(/search people to add/i),
     ).not.toBeInTheDocument();
   });
 });

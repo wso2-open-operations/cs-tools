@@ -84,7 +84,6 @@ import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
 import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
 import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
-import WatchersDialog from "@features/csm-cases/components/WatchersDialog";
 import SetAutocloseHoldDialog from "@features/csm-cases/components/SetAutocloseHoldDialog";
 import EditCaseDetailsDialog, {
   type FieldSaveResult,
@@ -144,6 +143,7 @@ import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import type {
   CaseAttachment,
   CaseLifecycleAction,
+  CaseWatcher,
   CreateRelatedCaseNavState,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
@@ -165,6 +165,14 @@ function MetaCell({
     </Box>
   );
 }
+
+// Watcher add/remove PATCHes resubmit the full watch list as an array of
+// emails (ServiceNow's watch_list only round-trips as `EmailString[]`), so a
+// watcher with no email on file can't be represented at all — see
+// onAddWatcher/onRemoveWatcher below.
+const EMAILLESS_WATCHER_ERROR =
+  "Can't update watchers: one or more current watchers has no email on file, " +
+  "so this list can't be safely resubmitted.";
 
 const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   start_work: "Started work on this case.",
@@ -275,6 +283,9 @@ const TAB_DEFS: Array<{
   label: string;
   icon: JSX.Element;
   disabled?: boolean;
+  /** Hidden from the visible tab bar for now, without removing the tab's
+   * content/data — see the "tasks" entry below. */
+  hidden?: boolean;
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
@@ -283,7 +294,11 @@ const TAB_DEFS: Array<{
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
-  { id: "tasks", label: "Tasks", icon: <CheckSquare size={16} /> },
+  // Hidden from the tab bar for now (review follow-up) — the underlying
+  // tasks feature (data, hooks, widget, create-task action) is untouched, and
+  // the tab's content section still renders if `activeTab` is ever "tasks";
+  // it's just unreachable via tab navigation while hidden.
+  { id: "tasks", label: "Tasks", icon: <CheckSquare size={16} />, hidden: true },
 ];
 
 export default function CsmCaseDetailPage(): JSX.Element {
@@ -411,7 +426,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [linkCaseOpen, setLinkCaseOpen] = useState(false);
-  const [watchersOpen, setWatchersOpen] = useState(false);
   const [autocloseHoldOpen, setAutocloseHoldOpen] = useState(false);
   const [editDetailsOpen, setEditDetailsOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
@@ -474,7 +488,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setPendingDelete(null);
     setPauseConflict(null);
     setLinkCaseOpen(false);
-    setWatchersOpen(false);
     setAutocloseHoldOpen(false);
     setEditDetailsOpen(false);
     setCreateTaskOpen(false);
@@ -782,10 +795,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
-      // Manage watchers opens the multi-select picker; the full-replace PATCH
-      // happens in onSaveWatchers once the set is confirmed.
+      // Manage watchers jumps to the Related tab, which now edits the watch
+      // list inline (add/remove chips) rather than opening a separate dialog.
       if (action.secondary === "manage_watchers") {
-        setWatchersOpen(true);
+        setActiveTab("related");
         return;
       }
 
@@ -1055,26 +1068,69 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [patchCase, showError],
   );
 
-  // Full-replacement watch list save (ServiceNow only; the backend rejects it
-  // on another data source and the error surfaces via showError).
-  const onSaveWatchers = useCallback(
-    (emails: string[]) => {
+  // Watchers are edited inline in the Related tab (see WatchersWidget); the
+  // backend has no add/remove-one endpoint, only a full-list-replace
+  // `PATCH /cases/{id}` (`watchList`), and that PATCH is an array of emails
+  // (ServiceNow's watch_list only round-trips as `EmailString[]`), so both add
+  // and remove compute the next full list from the currently loaded case.
+  // A watcher with no email on file can't be represented in that list at all —
+  // rather than silently dropping them from the watch list, block the mutation
+  // and surface it. ServiceNow only; the backend rejects it on another data
+  // source and the error surfaces via showError.
+  const onAddWatcher = useCallback(
+    (email: string) => {
+      if (!data) return;
+      if (data.watchers.some((w) => !w.email)) {
+        showError(EMAILLESS_WATCHER_ERROR);
+        return;
+      }
+      const current = data.watchers
+        .filter((w): w is CaseWatcher & { email: string } => !!w.email)
+        .map((w) => w.email);
+      if (current.some((e) => e.toLowerCase() === email.toLowerCase())) return;
       patchCase.mutate(
-        { watchList: emails },
+        { watchList: [...current, email] },
         {
-          onSuccess: () => {
-            setWatchersOpen(false);
+          onSuccess: () =>
             setFeedback({
-              message: "Watchers updated.",
+              message: "Watcher added.",
               severity: "success",
               sticky: false,
-            });
-          },
-          onError: (err) => showError("Could not update watchers.", err),
+            }),
+          onError: (err) => showError("Could not add the watcher.", err),
         },
       );
     },
-    [patchCase, showError],
+    [data, patchCase, showError],
+  );
+
+  const onRemoveWatcher = useCallback(
+    (watcher: CaseWatcher) => {
+      if (!data || !watcher.email) return;
+      if (data.watchers.some((w) => !w.email && w.id !== watcher.id)) {
+        showError(EMAILLESS_WATCHER_ERROR);
+        return;
+      }
+      const next = data.watchers
+        .filter(
+          (w): w is CaseWatcher & { email: string } =>
+            !!w.email && w.email.toLowerCase() !== watcher.email?.toLowerCase(),
+        )
+        .map((w) => w.email);
+      patchCase.mutate(
+        { watchList: next },
+        {
+          onSuccess: () =>
+            setFeedback({
+              message: "Watcher removed.",
+              severity: "success",
+              sticky: false,
+            }),
+          onError: (err) => showError("Could not remove the watcher.", err),
+        },
+      );
+    },
+    [data, patchCase, showError],
   );
 
   const onSetAutocloseHold = useCallback(
@@ -1166,7 +1222,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
       createTask.mutate(payload, {
         onSuccess: () => {
           setCreateTaskOpen(false);
-          setActiveTab("tasks");
+          // Not jumping to the Tasks tab here: it's hidden from the tab bar
+          // for now (see the `hidden` flag on its TAB_DEFS entry), so setting
+          // activeTab to a tab with no corresponding rendered Tab would leave
+          // the Tabs component with an out-of-range value. The task itself is
+          // still created — just no tab to land on to see it.
           setFeedback({
             message: "Task created.",
             severity: "success",
@@ -1579,12 +1639,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
         >
           {TAB_DEFS.filter(
             (t) =>
-              !isAnnouncement ||
-              (t.id !== "related" &&
-                t.id !== "sla" &&
-                t.id !== "time" &&
-                t.id !== "call-requests" &&
-                t.id !== "tasks"),
+              !t.hidden &&
+              (!isAnnouncement ||
+                (t.id !== "related" &&
+                  t.id !== "sla" &&
+                  t.id !== "time" &&
+                  t.id !== "call-requests")),
           ).map((t) => {
             // Counts shown only where the tab IS the list (unambiguous). Not
             // shown for "related" — it combines two lists (watchers + child
@@ -1913,12 +1973,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
           }}
         >
           {/* Watchers list — moved off the (single-line) overview Cell so a
-              long watch list has room to wrap as chips. "Manage watchers…" in
-              the action bar opens the same WatchersDialog regardless of which
-              tab is active; this button is a convenience shortcut to it. */}
+              long watch list has room to wrap as chips. Add/remove are
+              inline here (no separate dialog); "Manage watchers…" in the
+              action bar just jumps to this tab. */}
           <WatchersWidget
             watchers={c.watchers}
-            onManage={() => setWatchersOpen(true)}
+            onAdd={onAddWatcher}
+            onRemove={onRemoveWatcher}
+            isSaving={patchCase.isPending}
           />
           <ChildCasesWidget caseId={c.id} />
         </Box>
@@ -2015,15 +2077,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isChanging={patchCase.isPending}
           onClose={() => setSeverityOpen(false)}
           onChange={onChangeSeverity}
-        />
-      )}
-
-      {watchersOpen && (
-        <WatchersDialog
-          currentWatchers={c.watchers}
-          isSaving={patchCase.isPending}
-          onClose={() => setWatchersOpen(false)}
-          onSave={onSaveWatchers}
         />
       )}
 

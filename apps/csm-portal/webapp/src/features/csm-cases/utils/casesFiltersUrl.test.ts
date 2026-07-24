@@ -32,7 +32,7 @@ describe("readCasesFiltersFromUrl", () => {
 
   it("parses a fully-populated query string", () => {
     const params = new URLSearchParams(
-      "q=timeout&severities=S0,S2&states=open,work_in_progress,closed&types=case,engagement&assignees=alice@example.com,@me&workStates=ongoing,paused&projects=apim&products=API%20Manager,Asgardeo&tags=micro-gw,ws-policy",
+      "q=timeout&severities=S0,S2&states=open,work_in_progress,closed&types=case,engagement&assignees=alice@example.com,@me&workStates=ongoing,paused&projects=apim&products=API%20Manager,Asgardeo",
     );
     expect(readCasesFiltersFromUrl(params)).toEqual({
       search: "timeout",
@@ -44,8 +44,12 @@ describe("readCasesFiltersFromUrl", () => {
       workStates: ["ongoing", "paused"],
       projects: ["apim"],
       productNames: ["API Manager", "Asgardeo"],
-      tags: ["micro-gw", "ws-policy"],
     });
+  });
+
+  it("ignores a stale `tags` param (case-list tag filter removed for now)", () => {
+    const params = new URLSearchParams("tags=micro-gw,ws-policy");
+    expect(readCasesFiltersFromUrl(params)).toEqual(DEFAULT_CASES_FILTERS);
   });
 
   it("drops values outside the allowed enums", () => {
@@ -94,7 +98,6 @@ describe("writeCasesFiltersToUrl", () => {
       projects: ["streaming"],
       engagementTypes: [],
       productNames: ["Identity Server", "Asgardeo"],
-      tags: ["micro-gw"],
     };
     const round = readCasesFiltersFromUrl(writeCasesFiltersToUrl(filters));
     expect(round).toEqual(filters);

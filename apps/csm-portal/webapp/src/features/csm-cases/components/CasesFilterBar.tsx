@@ -75,7 +75,10 @@ import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProject
 import MultiSelectField from "@components/MultiSelectField";
 import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
 import ProductNameMultiSelect from "@features/csm-cases/components/ProductNameMultiSelect";
-import TagsMultiSelect from "@features/csm-cases/components/TagsMultiSelect";
+// TagsMultiSelect (case-list tag filter) is deliberately not wired in here for
+// now — see the removal note on `CasesFilters.tags` in casesFiltersUrl.ts.
+// The component itself stays in place; it may come back once tag filtering
+// is revisited.
 
 
 /**
@@ -101,8 +104,6 @@ export interface CasesFilters {
   engagementTypes: BeEngagementType[];
   /** Product family names (e.g. "API Manager"); matches all versions of each. */
   productNames: string[];
-  /** Free-text tag labels (SN's generic label mechanism); matches any of these. */
-  tags: string[];
 }
 
 /**
@@ -541,12 +542,8 @@ export default function CasesFilterBar({
                 onChange={(next) => onChange({ ...filters, productNames: next })}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <TagsMultiSelect
-                values={filters.tags}
-                onChange={(next) => onChange({ ...filters, tags: next })}
-              />
-            </Grid>
+            {/* Tag filter deliberately omitted for now — see the removal note
+                in casesFiltersUrl.ts. `TagsMultiSelect` itself is untouched. */}
           </Grid>
           {activeCount > 0 && (
             <Box sx={{ display: "flex", justifyContent: "flex-end" }}>

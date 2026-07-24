@@ -79,6 +79,10 @@ interface CsmIssuesViewProps {
   showEngagementTypeFilter?: boolean;
   /** Base path for row detail links. Defaults to "/cases". */
   detailBasePath?: string;
+  /** Hide the Severity column in the list (severity is a support-case
+   * concept — SRA and Engagements don't surface it, but the main case list
+   * keeps it). */
+  hideSeverityColumn?: boolean;
 }
 
 /**
@@ -97,6 +101,7 @@ export default function CsmIssuesView({
   hideProjectFilter,
   showEngagementTypeFilter,
   detailBasePath,
+  hideSeverityColumn,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<CasesFilters>(
@@ -269,7 +274,7 @@ export default function CsmIssuesView({
         isLoading={isLoading || isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
-        hideSeverityColumn={isServiceRequestOnly}
+        hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortOrderChange}
       />

@@ -70,6 +70,7 @@ export default function CsmSecurityCenterPage(): JSX.Element {
           entityNoun="security reports"
           lockedFilters={{ caseTypes: ["security_report_analysis"] }}
           hideTypeFilter
+          hideSeverityColumn
           actions={
             <Button
               variant="contained"

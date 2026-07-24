@@ -21,7 +21,10 @@ import {
   Chip,
   CircularProgress,
   IconButton,
+  InputAdornment,
   LinearProgress,
+  Skeleton,
+  TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -37,6 +40,7 @@ import {
   MapPin,
   Paperclip,
   Plus,
+  Search,
   Server,
   Shield,
   Trash2,
@@ -44,9 +48,13 @@ import {
   Upload,
   User,
   Users,
+  X,
 } from "@wso2/oxygen-ui-icons-react";
-import { useRef, type ChangeEvent, type JSX } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type JSX } from "react";
 import { formatBytes } from "@utils/formatBytes";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
+import type { NormalizedUser } from "@features/csm-users/types/csmUsers";
 import type {
   CaseAttachment,
   CaseAuditEntry,
@@ -351,22 +359,174 @@ export function TagsWidget({
 // 3b. Watchers
 // ---------------------------------------------------------------------------
 
+function watcherFullName(u: NormalizedUser): string {
+  return u.name.trim() || u.userName;
+}
+
+/**
+ * Inline "search people, click to add" panel used by {@link WatchersWidget}.
+ * Mounted only while the caller's "Add watcher" toggle is open, so the user
+ * search (`POST /users/search`) isn't issued in the background — same pattern
+ * as {@link AssignEngineerDialog} mounting only while its dialog is open.
+ */
+function WatcherAddPicker({
+  existingEmails,
+  disabled,
+  onPick,
+  onCancel,
+}: {
+  /** Lower-cased emails already on the watch list, filtered out of the results. */
+  existingEmails: string[];
+  disabled?: boolean;
+  onPick: (email: string, name: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [input, setInput] = useState("");
+  const search = useDebouncedValue(input.trim(), 300);
+  const { data, isFetching, isError } = useSearchUsers({
+    filters: {
+      ...(search.length > 0 && { searchQuery: search }),
+      active: true,
+    },
+    pagination: { limit: 8, offset: 0 },
+  });
+
+  const candidates = useMemo(
+    () =>
+      (data?.users ?? []).filter(
+        (u) =>
+          !!u.email &&
+          u.active !== false &&
+          !existingEmails.includes(u.email.toLowerCase()),
+      ),
+    [data, existingEmails],
+  );
+
+  return (
+    <Box
+      sx={{
+        mt: 1,
+        border: 1,
+        borderColor: "divider",
+        borderRadius: 1,
+        p: 1,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0.75,
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+        <TextField
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Search people to add…"
+          size="small"
+          fullWidth
+          autoFocus
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search size={14} />
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+        <IconButton
+          size="small"
+          onClick={onCancel}
+          aria-label="Cancel adding a watcher"
+        >
+          <X size={14} />
+        </IconButton>
+      </Box>
+      <Box sx={{ minHeight: 36 }}>
+        {isFetching ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+            {[0, 1].map((i) => (
+              <Skeleton key={i} variant="rounded" height={28} />
+            ))}
+          </Box>
+        ) : isError ? (
+          <Typography variant="caption" color="error">
+            Could not load people. Try again.
+          </Typography>
+        ) : candidates.length === 0 ? (
+          <Typography variant="caption" color="text.secondary">
+            {search ? "No matches." : "Type to search people…"}
+          </Typography>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column" }}>
+            {candidates.map((u) => (
+              <Button
+                key={u.id}
+                variant="text"
+                color="inherit"
+                size="small"
+                disabled={disabled}
+                onClick={() => onPick(u.email, watcherFullName(u))}
+                sx={{
+                  justifyContent: "flex-start",
+                  textTransform: "none",
+                  px: 0.75,
+                  py: 0.5,
+                  gap: 0.5,
+                }}
+              >
+                {watcherFullName(u)}
+                <Typography variant="caption" color="text.secondary">
+                  {u.email}
+                </Typography>
+              </Button>
+            ))}
+          </Box>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
 export function WatchersWidget({
   watchers,
-  onManage,
+  onAdd,
+  onRemove,
+  isSaving,
 }: {
   watchers: CaseWatcher[];
-  /** Opens the "Manage watchers" dialog (`WatchersDialog`). Omit to hide the action. */
-  onManage?: () => void;
+  /** Add a watcher by email — the caller PATCHes the full replacement watch
+   * list (`PATCH /cases/{id}` `{ watchList }`). Omit to hide the "Add
+   * watcher" control. */
+  onAdd?: (email: string, name: string) => void;
+  /** Remove a single watcher — the caller PATCHes the full replacement watch
+   * list minus this one. Omit to hide the per-chip remove affordance. */
+  onRemove?: (watcher: CaseWatcher) => void;
+  /** True while a watch-list PATCH is in flight; disables add/remove. */
+  isSaving?: boolean;
 }): JSX.Element {
+  const [addOpen, setAddOpen] = useState(false);
+  const existingEmails = useMemo(
+    () =>
+      watchers
+        .filter((w): w is CaseWatcher & { email: string } => !!w.email)
+        .map((w) => w.email.toLowerCase()),
+    [watchers],
+  );
+
   return (
     <WidgetCard
       title="Watchers"
       icon={<Users size={16} />}
       action={
-        onManage ? (
-          <Button size="small" variant="text" onClick={onManage}>
-            Manage watchers
+        onAdd ? (
+          <Button
+            size="small"
+            variant="text"
+            startIcon={<Plus size={14} />}
+            disabled={isSaving}
+            onClick={() => setAddOpen((v) => !v)}
+          >
+            Add watcher
           </Button>
         ) : undefined
       }
@@ -384,9 +544,24 @@ export function WatchersWidget({
               variant="outlined"
               icon={<User size={14} />}
               label={w.isMe ? `${w.name} (you)` : w.name}
+              disabled={isSaving}
+              onDelete={
+                onRemove && w.email ? () => onRemove(w) : undefined
+              }
             />
           ))}
         </Box>
+      )}
+      {addOpen && onAdd && (
+        <WatcherAddPicker
+          existingEmails={existingEmails}
+          disabled={isSaving}
+          onPick={(email, name) => {
+            onAdd(email, name);
+            setAddOpen(false);
+          }}
+          onCancel={() => setAddOpen(false)}
+        />
       )}
     </WidgetCard>
   );
