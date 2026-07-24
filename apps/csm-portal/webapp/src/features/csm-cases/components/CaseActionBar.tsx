@@ -201,7 +201,9 @@ interface SecondaryItem {
  * The "More" overflow lists state-independent actions on a case. Items here
  * map to documented use cases — see `UseCases.md`:
  *   - Reassign engineer              → ISSU-002 (self-assign generalised)
- *   - Manage watchers                → ISSU-018 (PATCH /cases/{id} { watchList }, see WatchersDialog.tsx)
+ *   - Manage watchers                → ISSU-018 (PATCH /cases/{id} { watchList }); jumps to the case
+ *                                       detail Related tab, which edits the watch list inline
+ *                                       (see WatchersWidget in CaseDetailWidgets.tsx)
  *   - Hold auto-closure              → ISSU-027 (PATCH /cases/{id} { autocloseHoldUntil }, see SetAutocloseHoldDialog.tsx)
  *   - Edit case details              → subject/description/deployment/deployed product (see EditCaseDetailsDialog.tsx)
  *   - Link to another case           → parent or related case (see LinkCaseDialog.tsx)

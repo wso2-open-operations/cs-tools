@@ -38,7 +38,9 @@ interface CasesListProps {
   skeletonCount?: number;
   /** Base path for detail links. Defaults to "/cases". */
   detailBasePath?: string;
-  /** Hides the Severity column — Service Requests don't carry a severity. */
+  /** Hide the Severity column. Severity (S1-S4) is a support-case concept, so
+   * non-case lists (service requests, engagements, security reports) hide it —
+   * the main case list keeps it. */
   hideSeverityColumn?: boolean;
   /** Current sort order for the "Updated" column, when the caller wants it
    * sortable. Omit both `sortOrder` and `onSortOrderChange` for a plain

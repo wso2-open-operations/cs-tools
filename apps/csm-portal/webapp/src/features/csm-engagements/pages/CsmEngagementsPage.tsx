@@ -31,6 +31,7 @@ export default function CsmEngagementsPage(): JSX.Element {
       hideTypeFilter
       showEngagementTypeFilter
       detailBasePath="/engagements"
+      hideSeverityColumn
     />
   );
 }

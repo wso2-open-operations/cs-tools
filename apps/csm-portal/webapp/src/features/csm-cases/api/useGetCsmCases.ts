@@ -103,7 +103,6 @@ export function useGetCsmCases(
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
       [...filters.productNames].sort(),
-      [...filters.tags].sort(),
       currentUserEmail ?? "",
       currentUserId ?? "",
       page,
@@ -202,10 +201,8 @@ export function useGetCsmCases(
             ...(filters.productNames.length > 0 && {
               productNames: filters.productNames,
             }),
-            // Free-text tag labels; matches any case carrying one of these.
-            ...(filters.tags.length > 0 && {
-              tags: filters.tags,
-            }),
+            // Tag filter deliberately not wired in here for now — see the
+            // removal note on `CasesFilters` in casesFiltersUrl.ts.
           },
       });
 
