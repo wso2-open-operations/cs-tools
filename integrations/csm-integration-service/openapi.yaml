@@ -36,7 +36,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       responses:
         "200":
           description: The account with the given ID.
@@ -73,8 +72,6 @@ paths:
     post:
       summary: Search accounts.
       operationId: searchAccounts
-      parameters:
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       requestBody:
         description: Account search payload
         required: true
@@ -119,7 +116,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       requestBody:
         description: Account contact search payload
         content:
@@ -163,7 +159,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       responses:
         "200":
           description: The project with the given ID.
@@ -213,7 +208,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       requestBody:
         description: Closure-state fields to update. At least one is required.
         required: true
@@ -263,8 +257,6 @@ paths:
     post:
       summary: Search projects.
       operationId: searchProjects
-      parameters:
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       requestBody:
         description: Project search payload
         required: true
@@ -309,7 +301,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/UserIDTokenHeader'
       requestBody:
         description: Project contact search payload
         content:
@@ -343,20 +334,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
 components:
-  parameters:
-    UserIDTokenHeader:
-      name: x-user-id-token
-      in: header
-      required: false
-      description: >
-        Optional end-user identity token, forwarded unchanged to the upstream
-        entity service. Not required for this service's own auth (which is
-        always M2M) — only needed if the caller wants data backed by
-        entity-service's ServiceNow data source, which rejects M2M-only
-        requests with no forwarded user identity.
-      schema:
-        type: string
-
   securitySchemes:
     oauth2ClientCredentials:
       type: oauth2
