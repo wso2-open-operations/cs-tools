@@ -198,11 +198,18 @@ type Account struct {
 	UpdatedOn           time.Time   `json:"updatedOn"`
 }
 
+// SearchAccountsFilters holds the optional filter criteria for an account search.
+type SearchAccountsFilters struct {
+	SearchQuery    string `json:"searchQuery,omitempty"`
+	Active         *bool  `json:"active,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	Classification string `json:"classification,omitempty"`
+}
+
 // SearchAccountsRequest is the input for an account search operation.
-// SearchQuery is matched case-insensitively against name and sf_id.
 type SearchAccountsRequest struct {
-	Pagination  Pagination `json:"pagination"`
-	SearchQuery string     `json:"searchQuery"`
+	Pagination Pagination            `json:"pagination"`
+	Filters    SearchAccountsFilters `json:"filters,omitempty"`
 }
 
 // SearchAccountsResponse is the paginated result of an account search.
@@ -215,31 +222,62 @@ type SearchAccountsResponse struct {
 	HasMore  bool      `json:"hasMore"`
 }
 
-// SNAccount is the account view returned by the ServiceNow data source.
+// SNAccountView is the account view returned by the ServiceNow data source.
 // Timestamp fields are kept as strings to accommodate empty values from ServiceNow.
-type SNAccount struct {
-	ID                  string  `json:"id"`
-	SfID                string  `json:"sfId"`
-	Name                string  `json:"name"`
-	Tier                string  `json:"tier"`
-	Region              *string `json:"region"`
-	ActivationDate      string  `json:"activationDate"`
-	DeactivationDate    *string `json:"deactivationDate"`
-	OwnerID             string  `json:"ownerId"`
-	TechnicalOwnerID    *string `json:"technicalOwnerId"`
-	AgentEnabled        bool    `json:"agentEnabled"`
-	KbReferencesEnabled bool    `json:"kbReferencesEnabled"`
-	CreatedOn           string  `json:"createdOn"`
-	UpdatedOn           string  `json:"updatedOn"`
+// SupportTier is returned as a plain label string (no ID).
+type SNAccountView struct {
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	Classification   string     `json:"classification"`
+	Pod              *string    `json:"pod"`
+	Region           *string    `json:"region"`
+	SupportTier      *string    `json:"supportTier"`
+	ArrToday         *string    `json:"arrToday"`
+	TechnicalOwner   *EntityRef `json:"technicalOwner"`
+	Owner            *EntityRef `json:"owner"`
+	ActivationDate   string     `json:"activationDate"`
+	DeactivationDate *string    `json:"deactivationDate"`
+	HasAgent         bool       `json:"hasAgent"`
+	HasKbReferences  bool       `json:"hasKbReferences"`
+	CreatedOn        string     `json:"createdOn"`
+	CreatedBy        *string    `json:"createdBy"`
+	UpdatedOn        string     `json:"updatedOn"`
 }
 
 // SearchSNAccountsResponse is the paginated result of a ServiceNow account search.
 type SearchSNAccountsResponse struct {
-	Accounts []SNAccount `json:"accounts"`
-	Total    int         `json:"total"`
-	Limit    int         `json:"limit"`
-	Offset   int         `json:"offset"`
-	HasMore  bool        `json:"hasMore"`
+	Accounts []SNAccountView `json:"accounts"`
+	Total    int             `json:"total"`
+	Limit    int             `json:"limit"`
+	Offset   int             `json:"offset"`
+	HasMore  bool            `json:"hasMore"`
+}
+
+// SNSupportTierRef is a compact reference to a support tier carrying its label.
+type SNSupportTierRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// SNAccountDetail is the full account detail returned by the ServiceNow data source
+// for GET /accounts/{id}. SupportTier is returned as an {id, label} object.
+type SNAccountDetail struct {
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Classification   string            `json:"classification"`
+	Pod              *string           `json:"pod"`
+	Region           *string           `json:"region"`
+	SupportTier      *SNSupportTierRef `json:"supportTier"`
+	ArrToday         *string           `json:"arrToday"`
+	TechnicalOwner   *EntityRef        `json:"technicalOwner"`
+	Owner            *EntityRef        `json:"owner"`
+	ActivationDate   string            `json:"activationDate"`
+	DeactivationDate *string           `json:"deactivationDate"`
+	HasAgent         bool              `json:"hasAgent"`
+	HasKbReferences  bool              `json:"hasKbReferences"`
+	CreatedOn        string            `json:"createdOn"`
+	CreatedBy        *string           `json:"createdBy"`
+	UpdatedOn        string            `json:"updatedOn"`
 }
 
 // SubscriptionType classifies the subscription type of a project.
@@ -295,6 +333,35 @@ type ProjectAccountRef struct {
 	KbReferencesEnabled bool       `json:"kbReferencesEnabled"`
 }
 
+// ProjectClosureFields groups the ServiceNow-only closure-tracking fields
+// shared by ProjectDetailsView and ProjectView, so the two don't drift when a
+// closure field is added or renamed. Embedded anonymously; encoding/json
+// promotes its fields to the parent's JSON object, so the wire shape is
+// unaffected.
+type ProjectClosureFields struct {
+	// ClosureState is the project's closure/access state (ServiceNow data source only).
+	ClosureState *string `json:"closureState"`
+	// EndDateClosureState reflects the closure state driven by the project's end date
+	// (ServiceNow data source only).
+	EndDateClosureState *string `json:"endDateClosureState"`
+	// InvoiceDueDateClosureState reflects the closure state driven by the invoice due
+	// date (ServiceNow data source only).
+	InvoiceDueDateClosureState *string `json:"invoiceDueDateClosureState"`
+	// ComplianceViolationClosureState reflects the closure state driven by a compliance
+	// violation (ServiceNow data source only).
+	ComplianceViolationClosureState *string `json:"complianceViolationClosureState"`
+	// ComplianceViolationDate is the date a compliance violation was recorded, if any
+	// (ServiceNow data source only).
+	ComplianceViolationDate *string `json:"complianceViolationDate"`
+	// SuspensionProcessState is a free-form JSON object tracking per-dimension
+	// Account Closure Process (ACP) suspension-process state (event type + action
+	// results, e.g. per the "based_on_subscription_end_date"/"based_on_due_invoices"/
+	// "based_on_compliance" keys an existing SN suspension flow writes). This layer
+	// does not interpret, validate, or impose any schema on its contents — it is
+	// passed through opaquely as written by that SN flow (ServiceNow data source only).
+	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
+}
+
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
 // It embeds the linked account and uses createdOn/updatedOn for consistency
 // with the ProjectView search result.
@@ -309,6 +376,42 @@ type ProjectDetailsView struct {
 	EndDate          time.Time         `json:"endDate"`
 	CreatedOn        time.Time         `json:"createdOn"`
 	UpdatedOn        time.Time         `json:"updatedOn"`
+	ProjectClosureFields
+}
+
+// ProjectUpdateRequest is the input for PATCH /projects/{id} (ServiceNow data
+// source only — no Postgres equivalent). All fields are optional; at least
+// one must be provided. Note: ClosureState itself is not settable — it is
+// derived automatically from the three closure sub-state fields below by an
+// SN business rule, so setting one of those and re-fetching the project is
+// how a caller observes the resulting overall status.
+type ProjectUpdateRequest struct {
+	HasAgent                        *bool           `json:"hasAgent,omitempty"`
+	HasKbReferences                 *bool           `json:"hasKbReferences,omitempty"`
+	EndDateClosureState             *string         `json:"endDateClosureState,omitempty"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState,omitempty"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState,omitempty"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState,omitempty"`
+}
+
+// ProjectUpdateResponse is the result of a project update operation
+// (ServiceNow data source only).
+type ProjectUpdateResponse struct {
+	Message string              `json:"message"`
+	Project ProjectUpdateResult `json:"project"`
+}
+
+// ProjectUpdateResult is the updated project's metadata, including the
+// closure state as recomputed by ServiceNow after the update.
+type ProjectUpdateResult struct {
+	ID                              string          `json:"id"`
+	UpdatedBy                       string          `json:"updatedBy"`
+	UpdatedOn                       time.Time       `json:"updatedOn"`
+	ClosureState                    *string         `json:"closureState"`
+	EndDateClosureState             *string         `json:"endDateClosureState"`
+	InvoiceDueDateClosureState      *string         `json:"invoiceDueDateClosureState"`
+	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
+	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 }
 
 // SearchProjectsRequest is the input for a project search operation.
@@ -316,6 +419,19 @@ type ProjectDetailsView struct {
 type SearchProjectsRequest struct {
 	Pagination  Pagination `json:"pagination"`
 	SearchQuery string     `json:"searchQuery"`
+	// ClosureStatus filters by closure status (ServiceNow data source only).
+	ClosureStatus string `json:"closureStatus"`
+	// EndDateFrom filters projects with an end date on or after this date
+	// (yyyy-MM-dd, ServiceNow data source only).
+	EndDateFrom string `json:"endDateFrom"`
+	// EndDateTo filters projects with an end date on or before this date
+	// (yyyy-MM-dd, ServiceNow data source only).
+	EndDateTo string `json:"endDateTo"`
+	// SortBy is the field to sort results by. Currently only "endDate" is
+	// meaningful (ServiceNow data source only).
+	SortBy string `json:"sortBy"`
+	// SortOrder is the sort direction ("asc" or "desc", ServiceNow data source only).
+	SortOrder string `json:"sortOrder"`
 }
 
 // ProjectView is the unified search result shape returned for all data sources.
@@ -326,7 +442,11 @@ type ProjectView struct {
 	Name             string           `json:"name"`
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
-	CreatedOn        time.Time        `json:"createdOn"`
+	// EndDate is nil when the backing data source has no end date recorded
+	// for this project (e.g. ServiceNow leaves it blank).
+	EndDate   *time.Time `json:"endDate"`
+	CreatedOn time.Time  `json:"createdOn"`
+	ProjectClosureFields
 }
 
 // SearchProjectsResponse is the paginated result of a project search.
@@ -715,46 +835,58 @@ const (
 type CaseResolutionCode string
 
 const (
-	CaseResolutionCodeSolvedFixedBySupportGuidanceProvided    CaseResolutionCode = "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
-	CaseResolutionCodeSolvedFixedByClosingRelatedIncident     CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
-	CaseResolutionCodeSolvedFixedByClosingRelatedRDTicket     CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
-	CaseResolutionCodeSolvedWorkaroundProvided                CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED"
-	CaseResolutionCodeSolvedByCustomer                        CaseResolutionCode = "SOLVED_BY_CUSTOMER"
-	CaseResolutionCodeConsideredForRoadmap                    CaseResolutionCode = "CONSIDERED_FOR_ROADMAP"
-	CaseResolutionCodeInconclusiveOutOfScope                  CaseResolutionCode = "INCONCLUSIVE_OUT_OF_SCOPE"
-	CaseResolutionCodeInconclusiveCannotReproduce             CaseResolutionCode = "INCONCLUSIVE_CANNOT_REPRODUCE"
-	CaseResolutionCodeInconclusiveNoWorkaround                CaseResolutionCode = "INCONCLUSIVE_NO_WORKAROUND"
-	CaseResolutionCodeDuplicateIssue                          CaseResolutionCode = "DUPLICATE_ISSUE"
-	CaseResolutionCodeVoidedCanceled                          CaseResolutionCode = "VOIDED_CANCELED"
-	CaseResolutionCodeOnHold                                  CaseResolutionCode = "ON_HOLD"
-	CaseResolutionCodeConsideredForRoadmapAlt                 CaseResolutionCode = "CONSIDERED_FOR_ROADMAP_ALT"
-	CaseResolutionCodeSolvedFixedTheIssue                     CaseResolutionCode = "SOLVED_FIXED_THE_ISSUE"
-	CaseResolutionCodeSolvedWorkaroundProvidedAlt             CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED_ALT"
-	CaseResolutionCodeSolvedByContributor                     CaseResolutionCode = "SOLVED_BY_CONTRIBUTOR"
-	CaseResolutionCodeSolvedByNovera                          CaseResolutionCode = "SOLVED_BY_NOVERA"
-	CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness    CaseResolutionCode = "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS"
+	CaseResolutionCodeSolvedFixedBySupportGuidanceProvided CaseResolutionCode = "SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED"
+	CaseResolutionCodeSolvedFixedByClosingRelatedIncident  CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT"
+	CaseResolutionCodeSolvedFixedByClosingRelatedRDTicket  CaseResolutionCode = "SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET"
+	CaseResolutionCodeSolvedWorkaroundProvided             CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED"
+	CaseResolutionCodeSolvedByCustomer                     CaseResolutionCode = "SOLVED_BY_CUSTOMER"
+	CaseResolutionCodeConsideredForRoadmap                 CaseResolutionCode = "CONSIDERED_FOR_ROADMAP"
+	CaseResolutionCodeInconclusiveOutOfScope               CaseResolutionCode = "INCONCLUSIVE_OUT_OF_SCOPE"
+	CaseResolutionCodeInconclusiveCannotReproduce          CaseResolutionCode = "INCONCLUSIVE_CANNOT_REPRODUCE"
+	CaseResolutionCodeInconclusiveNoWorkaround             CaseResolutionCode = "INCONCLUSIVE_NO_WORKAROUND"
+	CaseResolutionCodeDuplicateIssue                       CaseResolutionCode = "DUPLICATE_ISSUE"
+	CaseResolutionCodeVoidedCanceled                       CaseResolutionCode = "VOIDED_CANCELED"
+	CaseResolutionCodeOnHold                               CaseResolutionCode = "ON_HOLD"
+	CaseResolutionCodeConsideredForRoadmapAlt              CaseResolutionCode = "CONSIDERED_FOR_ROADMAP_ALT"
+	CaseResolutionCodeSolvedFixedTheIssue                  CaseResolutionCode = "SOLVED_FIXED_THE_ISSUE"
+	CaseResolutionCodeSolvedWorkaroundProvidedAlt          CaseResolutionCode = "SOLVED_WORKAROUND_PROVIDED_ALT"
+	CaseResolutionCodeSolvedByContributor                  CaseResolutionCode = "SOLVED_BY_CONTRIBUTOR"
+	CaseResolutionCodeSolvedByNovera                       CaseResolutionCode = "SOLVED_BY_NOVERA"
+	CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness CaseResolutionCode = "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS"
 )
 
-// CaseCause enumerates the root-cause categories for a resolved case.
+// CaseCause enumerates the root-cause categories for a resolved case, one per
+// entry in the backing data source's real "cause" choice list (verified
+// against the live picklist; the previous 16-value set was a fabricated
+// taxonomy that didn't correspond to any real choice in that list).
 type CaseCause string
 
 const (
-	CaseCauseUserMisunderstandingConcepts      CaseCause = "USER_MISUNDERSTANDING_CONCEPTS"
-	CaseCauseUserMisunderstandingDocumentation CaseCause = "USER_MISUNDERSTANDING_DOCUMENTATION"
-	CaseCauseUserNotFollowingDocumentation     CaseCause = "USER_NOT_FOLLOWING_DOCUMENTATION"
-	CaseCauseUserMistake                       CaseCause = "USER_MISTAKE"
-	CaseCauseSolutionProblematicArchitecture   CaseCause = "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
-	CaseCauseSolutionProblematicCode           CaseCause = "SOLUTION_PROBLEMATIC_CODE"
-	CaseCauseApplicationBug                    CaseCause = "APPLICATION_BUG"
-	CaseCauseApplicationMisleadingUXUI         CaseCause = "APPLICATION_MISLEADING_UX_UI"
-	CaseCauseApplicationLimitation             CaseCause = "APPLICATION_LIMITATION"
-	CaseCauseApplicationMissingFeature         CaseCause = "APPLICATION_MISSING_FEATURE"
-	CaseCauseApplicationDocumentationGap       CaseCause = "APPLICATION_DOCUMENTATION_GAP"
-	CaseCauseApplicationDocumentationError     CaseCause = "APPLICATION_DOCUMENTATION_ERROR"
-	CaseCauseInfrastructureCustomerSide        CaseCause = "INFRASTRUCTURE_CUSTOMERS_SIDE"
-	CaseCauseInfrastructureSaaSNotEnough       CaseCause = "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
-	CaseCauseInfrastructureSaaSother           CaseCause = "INFRASTRUCTURE_SAAS_SIDE_OTHER"
-	CaseCauseUnknown                           CaseCause = "UNKNOWN"
+	CaseCauseSolutionArchitecture          CaseCause = "SOLUTION_ARCHITECTURE"
+	CaseCauseDeploymentArchitecture        CaseCause = "DEPLOYMENT_ARCHITECTURE"
+	CaseCauseUserErrorConfiguration        CaseCause = "USER_ERROR_CONFIGURATION"
+	CaseCauseUserErrorProductConcept       CaseCause = "USER_ERROR_PRODUCT_CONCEPT"
+	CaseCauseUserErrorRuntime              CaseCause = "USER_ERROR_RUNTIME"
+	CaseCauseUserErrorRecommendation       CaseCause = "USER_ERROR_RECOMMENDATION_BEST_PRACTICES"
+	CaseCauseCustomizationLimitation       CaseCause = "CUSTOMIZATION_LIMITATION"
+	CaseCauseCustomizationBug              CaseCause = "CUSTOMIZATION_BUG"
+	CaseCauseDocumentationGap              CaseCause = "DOCUMENTATION_GAP"
+	CaseCauseDocumentationError            CaseCause = "DOCUMENTATION_ERROR"
+	CaseCauseProductLimitation             CaseCause = "PRODUCT_LIMITATION"
+	CaseCauseProductBug                    CaseCause = "PRODUCT_BUG"
+	CaseCauseProductRegression             CaseCause = "PRODUCT_REGRESSION"
+	CaseCauseProductMigration              CaseCause = "PRODUCT_MIGRATION"
+	CaseCauseInfrastructureDatabase        CaseCause = "INFRASTRUCTURE_DATABASE"
+	CaseCauseInfrastructureOS              CaseCause = "INFRASTRUCTURE_OS"
+	CaseCauseInfrastructureNetwork         CaseCause = "INFRASTRUCTURE_NETWORK"
+	CaseCauseInfrastructureJDK             CaseCause = "INFRASTRUCTURE_JDK"
+	CaseCauseInfrastructureLDAP            CaseCause = "INFRASTRUCTURE_LDAP"
+	CaseCauseInfrastructureLoadBalancer    CaseCause = "INFRASTRUCTURE_LOAD_BALANCER"
+	CaseCauseInfrastructureIAAS            CaseCause = "INFRASTRUCTURE_IAAS"
+	CaseCauseInfrastructureExternalProduct CaseCause = "INFRASTRUCTURE_EXTERNAL_PRODUCT"
+	CaseCauseInfrastructureProxy           CaseCause = "INFRASTRUCTURE_PROXY"
+	CaseCauseInfrastructureOther           CaseCause = "INFRASTRUCTURE_OTHER"
+	CaseCauseUnknown                       CaseCause = "UNKNOWN"
 )
 
 // EngagementType classifies the type of an engagement case.
@@ -835,11 +967,26 @@ type CaseNumberRef struct {
 	Number string `json:"number"`
 }
 
+// LinkedServiceRequestRef is a compact reference to a service-request case linked to
+// another case or incident as its parent (the reverse of ParentID: a case or incident
+// pointed to as parent by one or more service-request cases).
+type LinkedServiceRequestRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	Name   string `json:"name"`
+}
+
 // AccountRef is a compact reference to an account.
 type AccountRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// CreTeam is the account's CRE (customer relationship engineering) team, resolved to a
+	// named group reference (ServiceNow data source only).
+	CreTeam *EntityRef `json:"creTeam,omitempty"`
+	// SreTeam is the account's SRE team, resolved to a named group reference (ServiceNow
+	// data source only).
+	SreTeam *EntityRef `json:"sreTeam,omitempty"`
 }
 
 // UserIDEmailRef is a compact user reference carrying only id and email.
@@ -890,6 +1037,54 @@ type CaseView struct {
 	ParentCase             *CaseNumberRef       `json:"parentCase"`
 	RelatedCase            *CaseNumberRef       `json:"relatedCase"`
 	AccountDetails         *AccountRef          `json:"account"`
+	// LinkedServiceRequests lists any service-request cases whose parent points to this
+	// case. Populated on every case detail response, not just high-severity cases.
+	LinkedServiceRequests []LinkedServiceRequestRef `json:"linkedServiceRequests"`
+	// Resolution fields — populated only for resolved/closed ServiceNow cases.
+	ResolvedOn      *time.Time          `json:"resolvedOn"`
+	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
+	Cause           *CaseCause          `json:"cause"`
+	ResolutionNotes *string             `json:"resolutionNotes"`
+	// WatchList is the set of users watching the case (ServiceNow data source only).
+	WatchList []WatchListUser `json:"watchList,omitempty"`
+	// AutoclosureStep indicates where the case sits in ServiceNow's staged auto-closure
+	// sequence: DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT. Read-only —
+	// informational only; the sequence itself is fully owned by ServiceNow's own flows
+	// (ServiceNow data source only).
+	AutoclosureStep *string `json:"autoclosureStep,omitempty"`
+	// AutoclosureStateTime is when the auto-closure sequence next advances (e.g. the
+	// "eligible again after" date for a held case). Read-only (ServiceNow data source only).
+	AutoclosureStateTime *time.Time `json:"autoclosureStateTime,omitempty"`
+	// FixEta is the single customer-facing fix-commitment date/time
+	// (ServiceNow u_fix_eta_shared).
+	FixEta *time.Time `json:"fixEta"`
+	// BestCaseFixEta is the internal-only best-case fix-commitment date
+	// (ServiceNow u_best_case_fix_eta). CSM-engineer-facing only.
+	BestCaseFixEta *time.Time `json:"bestCaseFixEta"`
+	// MostLikelyFixEta is the internal-only most-likely fix-commitment date
+	// (ServiceNow u_most_likely_fix_eta). CSM-engineer-facing only.
+	MostLikelyFixEta *time.Time `json:"mostLikelyFixEta"`
+	// WorstCaseFixEta is the internal-only worst-case fix-commitment date
+	// (ServiceNow u_worst_case_fix_eta). CSM-engineer-facing only.
+	WorstCaseFixEta *time.Time `json:"worstCaseFixEta"`
+	// Tags are the free-text labels attached to the case via ServiceNow's generic
+	// platform label/label_entry mechanism (not a case-specific column).
+	//
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina adapter exists yet for SN's generic
+	// label/label_entry tables. Confirmed real tag values exist in production
+	// (e.g. "micro-gw", "ws-policy", "node") but nothing in the current Choreo
+	// GET /cases/{id} contract returns them. This field is always nil until a
+	// Ballerina endpoint surfaces the case's tags.
+	Tags []Tag `json:"tags"`
+}
+
+// Tag is a free-text label attached to a case via ServiceNow's generic
+// label/label_entry mechanism. Color is optional because not every label in SN
+// carries a display color.
+type Tag struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Color *string `json:"color"`
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
@@ -913,6 +1108,14 @@ type SearchCasesFilters struct {
 	WorkStates       []CaseWorkState  `json:"workStates"`
 	AssignedUserIDs  []string         `json:"assignedUserIds"`
 	ProductNames     []string         `json:"productNames"`
+	// Tags filters cases by attached free-text label. Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same
+	// gap as CaseView.Tags — no Ballerina search-filter support exists yet, so this
+	// filter is accepted here but has no effect until Ballerina wires it through.
+	Tags []string `json:"tags"`
+	// ParentID filters to child cases of this case (the hierarchical major-case/
+	// child-case relationship set via the case PATCH parentId field). Ballerina
+	// support added on ballerina-case-field-additions.
+	ParentID *string `json:"parentId"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
@@ -961,20 +1164,67 @@ type SearchCasesResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// Exactly one of State, Severity, WorkState, WatchList, or AssigneeEmail must be provided.
-// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
+// Exactly one of State, Severity, WorkState, WatchList, AssigneeEmail, ParentID, RelatedCaseID,
+// AutocloseHoldUntil, Subject, Description, DeploymentID, DeployedProductID, FixEta,
+// BestCaseFixEta, MostLikelyFixEta, or WorstCaseFixEta must be provided.
+// WatchList, AssigneeEmail, ParentID, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
+// DeploymentID, DeployedProductID, FixEta, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta
+// are only supported for the ServiceNow data source.
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
 type UpdateCaseRequest struct {
-	ID             string         `json:"-"`
-	State          *CaseState     `json:"state"`
-	Severity       *CaseSeverity  `json:"severity"`
-	WorkState      *CaseWorkState `json:"workState"`
-	WatchList      []string       `json:"watchList"`
-	AssigneeEmail  *string        `json:"assigneeEmail"`
+	ID             string              `json:"-"`
+	State          *CaseState          `json:"state"`
+	Severity       *CaseSeverity       `json:"severity"`
+	WorkState      *CaseWorkState      `json:"workState"`
+	WatchList      []string            `json:"watchList"`
+	AssigneeEmail  *string             `json:"assigneeEmail"`
 	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
-	Cause          *CaseCause     `json:"cause"`
-	CloseNotes     *string        `json:"closeNotes"`
+	Cause          *CaseCause          `json:"cause"`
+	CloseNotes     *string             `json:"closeNotes"`
+	// ParentID links this case (typically a service request) to another task-derived
+	// record (case, incident, change request, or problem) as its parent. Platform UUID,
+	// converted to the backing data source's internal id before dispatch. This is the
+	// native hierarchical "major case / child case" relationship — subject to the
+	// close-gating rule that rejects closing a case with open children.
+	ParentID *string `json:"parentId"`
+	// RelatedCaseID links this case to another case via a looser, non-hierarchical
+	// cross-link, not subject to any close-gating rule. Platform UUID, converted to the
+	// backing data source's internal id before dispatch (ServiceNow data source only).
+	RelatedCaseID *string `json:"relatedCaseId"`
+	// AutocloseHoldUntil places the case on hold in ServiceNow's staged auto-closure
+	// sequence: internally sets u_autoclosure_step = ON_HOLD and u_autoclosure_state_time
+	// to this date together, mirroring the real UX (an engineer picks a hold-until date).
+	// This is the only supported write against the auto-closure sequence — the raw step
+	// enum is not freely settable (ServiceNow data source only).
+	AutocloseHoldUntil *time.Time `json:"autocloseHoldUntil"`
+	// Subject updates the case's short description/title (ServiceNow data source only).
+	Subject *string `json:"subject"`
+	// Description updates the case's full description (ServiceNow data source only).
+	Description *string `json:"description"`
+	// DeploymentID moves the case to a different deployment. Platform UUID, converted to
+	// the backing data source's internal id before dispatch (ServiceNow data source only).
+	DeploymentID *string `json:"deploymentId"`
+	// DeployedProductID moves the case to a different deployed product. Platform UUID,
+	// converted to the backing data source's internal id before dispatch (ServiceNow data
+	// source only).
+	DeployedProductID *string `json:"deployedProductId"`
+	// FixEta sets the customer-facing fix-commitment date/time (ServiceNow
+	// u_fix_eta_shared). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists yet
+	// for this field — see snUpdateCasePayload.FixEta in sn_case_service.go.
+	FixEta *time.Time `json:"fixEta"`
+	// BestCaseFixEta sets the internal-only best-case fix-commitment date (ServiceNow
+	// u_best_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists
+	// yet for this field — see snUpdateCasePayload.BestCaseFixEta in sn_case_service.go.
+	BestCaseFixEta *time.Time `json:"bestCaseFixEta"`
+	// MostLikelyFixEta sets the internal-only most-likely fix-commitment date (ServiceNow
+	// u_most_likely_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support
+	// exists yet for this field — see snUpdateCasePayload.MostLikelyFixEta in sn_case_service.go.
+	MostLikelyFixEta *time.Time `json:"mostLikelyFixEta"`
+	// WorstCaseFixEta sets the internal-only worst-case fix-commitment date (ServiceNow
+	// u_worst_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write support exists
+	// yet for this field — see snUpdateCasePayload.WorstCaseFixEta in sn_case_service.go.
+	WorstCaseFixEta *time.Time `json:"worstCaseFixEta"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -1003,6 +1253,26 @@ type UpdatedCase struct {
 	Cause          *CaseCause           `json:"cause,omitempty"`
 	CloseNotes     *string              `json:"closeNotes,omitempty"`
 	ResolvedOn     *time.Time           `json:"resolvedOn,omitempty"`
+	ParentCase     *CaseNumberRef       `json:"parentCase,omitempty"`
+	// FixEta echoes the updated customer-facing fix-commitment date/time
+	// (u_fix_eta_shared) back on a successful PATCH. Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.FixEta doc comment; always nil until Ballerina supports the write.
+	FixEta *time.Time `json:"fixEta,omitempty"`
+	// BestCaseFixEta echoes the updated internal-only best-case fix-commitment date
+	// (u_best_case_fix_eta) back on a successful PATCH. Ballerina support added on
+	// ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.BestCaseFixEta doc comment; always nil until Ballerina supports the write.
+	BestCaseFixEta *time.Time `json:"bestCaseFixEta,omitempty"`
+	// MostLikelyFixEta echoes the updated internal-only most-likely fix-commitment date
+	// (u_most_likely_fix_eta) back on a successful PATCH. Ballerina support added on
+	// ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.MostLikelyFixEta doc comment; always nil until Ballerina supports the write.
+	MostLikelyFixEta *time.Time `json:"mostLikelyFixEta,omitempty"`
+	// WorstCaseFixEta echoes the updated internal-only worst-case fix-commitment date
+	// (u_worst_case_fix_eta) back on a successful PATCH. Ballerina support added on
+	// ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main) — see
+	// UpdateCaseRequest.WorstCaseFixEta doc comment; always nil until Ballerina supports the write.
+	WorstCaseFixEta *time.Time `json:"worstCaseFixEta,omitempty"`
 }
 
 // WatchListUser is a compact user reference within the watch list.
@@ -1105,6 +1375,18 @@ type CreateCaseCommentRequest struct {
 	Content   string      `json:"content"`
 }
 
+// AddCaseTagRequest is the request body for POST /cases/{id}/tags.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): SN's tagging is the generic platform label/label_entry
+// mechanism (table-agnostic, not a case column), so it needs an entirely new
+// Ballerina/Choreo adapter — nothing in the current contract creates a label on a
+// case. This request/the AddCaseTag service method are implemented so the
+// entity-service side is ready once Ballerina adds the endpoint.
+type AddCaseTagRequest struct {
+	CaseID string `json:"-"`
+	Label  string `json:"label"`
+}
+
 // CreateCaseCommentResponse is the response for creating a new case comment.
 type CreateCaseCommentResponse struct {
 	Message string            `json:"message"`
@@ -1116,6 +1398,21 @@ type CaseCommentDetail struct {
 	ID        string    `json:"id"`
 	CreatedOn time.Time `json:"createdOn"`
 	CreatedBy string    `json:"createdBy"`
+}
+
+// CreateCommentRequest is the input for creating a comment on any supported reference
+// entity (case, conversation, change_request, deployment, incident).
+type CreateCommentRequest struct {
+	ReferenceID   string        `json:"referenceId"`
+	ReferenceType ReferenceType `json:"referenceType"`
+	Type          CommentType   `json:"type"`
+	Content       string        `json:"content"`
+}
+
+// CreateCommentResponse is the response for POST /comments.
+type CreateCommentResponse struct {
+	Message string            `json:"message"`
+	Comment CaseCommentDetail `json:"comment"`
 }
 
 // SearchCaseCommentsRequest is the input for listing comments on a case.
@@ -1328,6 +1625,7 @@ const (
 	ReferenceTypeConversation  ReferenceType = "conversation"
 	ReferenceTypeChangeRequest ReferenceType = "change_request"
 	ReferenceTypeDeployment    ReferenceType = "deployment"
+	ReferenceTypeIncident      ReferenceType = "incident"
 )
 
 // SearchAttachmentsRequest is the input for POST /attachments/search.
@@ -1584,18 +1882,90 @@ type GetCatalogItemVariablesResponse struct {
 	Variables []CatalogItemVariable `json:"variables"`
 }
 
+// SearchContactsFilters holds the optional filter criteria for a contact search.
+type SearchContactsFilters struct {
+	SearchQuery string `json:"searchQuery"`
+}
+
+// ProjectContact is a contact associated with a project. Supported by the
+// ServiceNow data source only; there is no Postgres equivalent.
+type ProjectContact struct {
+	Name                 string   `json:"name"`
+	Email                string   `json:"email"`
+	RegistrationState    string   `json:"registrationState"`
+	NotificationsEnabled bool     `json:"notificationsEnabled"`
+	Roles                []string `json:"roles"`
+}
+
+// SearchProjectContactsRequest is the input for POST /projects/{id}/contacts/search.
+// Filters and Pagination are both optional.
+type SearchProjectContactsRequest struct {
+	Filters    SearchContactsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchProjectContactsResponse is the paginated result of a project contact search.
+type SearchProjectContactsResponse struct {
+	Contacts []ProjectContact `json:"contacts"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
+}
+
+// AccountContact is a contact associated with an account. Supported by the
+// ServiceNow data source only; there is no Postgres equivalent.
+type AccountContact struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	IsPrimary bool   `json:"isPrimary"`
+}
+
+// SearchAccountContactsRequest is the input for POST /accounts/{id}/contacts/search.
+// Filters and Pagination are both optional.
+type SearchAccountContactsRequest struct {
+	Filters    SearchContactsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchAccountContactsResponse is the paginated result of an account contact search.
+type SearchAccountContactsResponse struct {
+	Contacts []AccountContact `json:"contacts"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
+}
+
 // PatchChangeRequestRequest is the request body for PATCH /change-requests/{id}.
+// All fields are optional, but at least one must be provided.
 type PatchChangeRequestRequest struct {
-	PlannedStartOn     *string `json:"plannedStartOn,omitempty"`
-	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
-	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
+	Title              *string              `json:"title,omitempty"`
+	Description        *string              `json:"description,omitempty"`
+	ProjectID          *string              `json:"projectId,omitempty"`
+	CaseID             *string              `json:"caseId,omitempty"`
+	DeploymentID       *string              `json:"deploymentId,omitempty"`
+	DeployedProductID  *string              `json:"deployedProductId,omitempty"`
+	AssignedEngineerID *string              `json:"assignedEngineerId,omitempty"`
+	AssignedTeamID     *string              `json:"assignedTeamId,omitempty"`
+	PlannedStartOn     *string              `json:"plannedStartOn,omitempty"`
+	PlannedEndOn       *string              `json:"plannedEndOn,omitempty"`
+	Impact             *ChangeRequestImpact `json:"impact,omitempty"`
+	State              *ChangeRequestState  `json:"state,omitempty"`
+	Type               *ChangeRequestType   `json:"type,omitempty"`
+	Justification      *string              `json:"justification,omitempty"`
+	ImpactDescription  *string              `json:"impactDescription,omitempty"`
+	ServiceOutage      *string              `json:"serviceOutage,omitempty"`
+	CommunicationPlan  *string              `json:"communicationPlan,omitempty"`
+	RollbackPlan       *string              `json:"rollbackPlan,omitempty"`
+	TestPlan           *string              `json:"testPlan,omitempty"`
+	IsCustomerApproved *bool                `json:"isCustomerApproved,omitempty"`
+	IsCustomerReviewed *bool                `json:"isCustomerReviewed,omitempty"`
+	RequestApproval    *bool                `json:"requestApproval,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
 type PatchChangeRequestResponse struct {
-	ID        string `json:"id"`
-	UpdatedOn string `json:"updatedOn"`
-	UpdatedBy string `json:"updatedBy"`
+	Message       string        `json:"message"`
+	ChangeRequest ChangeRequest `json:"changeRequest"`
 }
 
 // TimeCardState represents the workflow state of a time card.
@@ -1615,16 +1985,41 @@ type SearchTimeCardsFilters struct {
 	ProjectIDs   []string        `json:"projectIds,omitempty"`
 	CaseID       *string         `json:"caseId,omitempty"`
 	UserID       *string         `json:"userId,omitempty"`
-	ApproverID   *string         `json:"approverId,omitempty"`   // eligible approver (SN approver_list)
+	ApproverID   *string         `json:"approverId,omitempty"`   // eligible approver (SN approver_list); their own cards are always excluded server-side
 	ApprovedByID *string         `json:"approvedById,omitempty"` // who actually approved (SN approved_by)
+	UserIDs      []string        `json:"userIds,omitempty"`      // match cards submitted by any of these users (OR semantics)
 	StartDate    *string         `json:"startDate,omitempty"`
 	EndDate      *string         `json:"endDate,omitempty"`
 	States       []TimeCardState `json:"states,omitempty"`
 }
 
+// TimeCardSortField enumerates the columns available for sorting time-card search results.
+type TimeCardSortField string
+
+const (
+	TimeCardSortFieldUpdatedOn TimeCardSortField = "updatedOn"
+	TimeCardSortFieldWorkDate  TimeCardSortField = "workDate"
+)
+
+// TimeCardSortOrder controls the sort direction.
+type TimeCardSortOrder string
+
+const (
+	TimeCardSortOrderAsc  TimeCardSortOrder = "asc"
+	TimeCardSortOrderDesc TimeCardSortOrder = "desc"
+)
+
+// TimeCardSort specifies the sort field and direction for time-card search results.
+type TimeCardSort struct {
+	Field TimeCardSortField `json:"field"`
+	Order TimeCardSortOrder `json:"order"`
+}
+
 // SearchTimeCardsRequest is the request body for POST /time-cards/search.
+// SortBy defaults to updatedOn desc when its Field is left empty.
 type SearchTimeCardsRequest struct {
 	Filters    *SearchTimeCardsFilters `json:"filters,omitempty"`
+	SortBy     TimeCardSort            `json:"sortBy"`
 	Pagination Pagination              `json:"pagination"`
 }
 
@@ -1643,15 +2038,25 @@ type TimeCardCaseRef struct {
 
 // TimeCardView is a single time card in search results.
 type TimeCardView struct {
-	ID          string           `json:"id"`
-	TotalTime   float64          `json:"totalTime"`
-	CreatedOn   string           `json:"createdOn"`
-	HasBillable bool             `json:"hasBillable"`
-	State       *string          `json:"state"`
-	User        *TimeCardRef     `json:"user"`
-	ApprovedBy  *TimeCardRef     `json:"approvedBy"`
-	Project     *TimeCardRef     `json:"project"`
-	Case        *TimeCardCaseRef `json:"case"`
+	ID                       string           `json:"id"`
+	TotalTime                float64          `json:"totalTime"`
+	CreatedOn                string           `json:"createdOn"` // deprecated: same value as WorkDate; kept until callers migrate
+	WorkDate                 string           `json:"workDate"`  // the date work was actually carried out (not the record's real creation timestamp)
+	HasBillable              bool             `json:"hasBillable"`
+	TimeAnalyzing            int              `json:"timeAnalyzing"`
+	TimeSettingUp            int              `json:"timeSettingUp"`
+	TimeReproducingDebugging int              `json:"timeReproducingDebugging"`
+	TimeProvidingSolution    int              `json:"timeProvidingSolution"`
+	TimePatching             int              `json:"timePatching"`
+	IssueComplexity          *string          `json:"issueComplexity"`
+	WorkLogComment           *string          `json:"workLogComment"`
+	RejectionReason          *string          `json:"rejectionReason"`
+	State                    *string          `json:"state"`
+	Approvers                []TimeCardRef    `json:"approvers,omitempty"`
+	User                     *TimeCardRef     `json:"user"`
+	ApprovedBy               *TimeCardRef     `json:"approvedBy"`
+	Project                  *TimeCardRef     `json:"project"`
+	Case                     *TimeCardCaseRef `json:"case"`
 }
 
 // SearchTimeCardsResponse is the response for POST /time-cards/search.
@@ -1722,6 +2127,70 @@ type ChangeRequest struct {
 	HasCustomerReviewed bool       `json:"hasCustomerReviewed"`
 	ApprovedBy          *EntityRef `json:"approvedBy"`
 	ApprovedOn          *string    `json:"approvedOn"`
+	LegalNextStates     []string   `json:"legalNextStates"`
+}
+
+// ChangeRequestApproverType is a string enum for the kind of approver assigned to an
+// approval stage: a static ServiceNow group, or the change request's dynamic customer contact.
+type ChangeRequestApproverType string
+
+const (
+	ChangeRequestApproverTypeStaticGroup    ChangeRequestApproverType = "STATIC_GROUP"
+	ChangeRequestApproverTypeDynamicContact ChangeRequestApproverType = "DYNAMIC_CONTACT"
+)
+
+// ChangeRequestApprovalStatus is a string enum for the overall status of an approval stage.
+type ChangeRequestApprovalStatus string
+
+const (
+	ChangeRequestApprovalStatusApproved ChangeRequestApprovalStatus = "APPROVED"
+	ChangeRequestApprovalStatusRejected ChangeRequestApprovalStatus = "REJECTED"
+	ChangeRequestApprovalStatusPending  ChangeRequestApprovalStatus = "PENDING"
+)
+
+// ChangeRequestApprover is a single approver's response within an approval stage.
+// Status is an open string set (e.g. APPROVED, NOT_REQUIRED, REQUESTED, REJECTED,
+// CANCELLED, NO_CONSENSUS, or an unrecognized value uppercased) rather than a fixed
+// enum, so it is passed through as-is rather than validated against a closed list.
+type ChangeRequestApprover struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	RespondedOn *string `json:"respondedOn"`
+}
+
+// ChangeRequestApproval represents a single approval stage (e.g. Assess, Authorize,
+// Customer Approval) on a change request, along with the individual approvers within
+// that stage. A change request may have zero to several stages depending on its
+// current state.
+type ChangeRequestApproval struct {
+	Stage        string                      `json:"stage"`
+	ApproverType ChangeRequestApproverType   `json:"approverType"`
+	ApproverName string                      `json:"approverName"`
+	Status       ChangeRequestApprovalStatus `json:"status"`
+	Approvers    []ChangeRequestApprover     `json:"approvers"`
+}
+
+// ChangeRequestApprovals is the response for GET /change-requests/{id}/approvals.
+type ChangeRequestApprovals struct {
+	Approvals []ChangeRequestApproval `json:"approvals"`
+}
+
+// ChangeRequestApprovalDecisionRequest is the request body for
+// POST /change-requests/{id}/approvals/decision.
+type ChangeRequestApprovalDecisionRequest struct {
+	// Decision is the caller's decision on their own pending approval
+	// ("approved" or "rejected").
+	Decision string `json:"decision"`
+}
+
+// ChangeRequestApprovalDecisionResponse is the response for
+// POST /change-requests/{id}/approvals/decision.
+type ChangeRequestApprovalDecisionResponse struct {
+	// ID is the UUID of the approval record that was decided.
+	ID string `json:"id"`
+	// State is the resulting state of the approval ("approved" or "rejected").
+	State string `json:"state"`
 }
 
 // VulnerabilityPriority is a string enum for the priority (severity) of a product vulnerability.
@@ -2136,6 +2605,92 @@ type TaskSlaDetail struct {
 	Schedule                  *TaskSlaScheduleRef      `json:"schedule"`
 }
 
+// TaskSummary is a single task record in a case's task list, returned by
+// POST /cases/{id}/tasks/search.
+//
+// State is deliberately a plain *string, not a closed Go enum/const-validated
+// type: ServiceNow's task state choice-list carries raw values beyond the
+// well-known ones (e.g. an undocumented raw "0" has been observed live, which
+// the Ballerina layer maps to "OTHER"). A closed enum would fail deserialization
+// or drop data the moment SN returns a value we haven't enumerated. Known
+// values as currently mapped by the upstream integration: "OPEN", "CLOSED",
+// "OTHER" (fallback for any unmapped raw value), or nil if state is unset.
+type TaskSummary struct {
+	ID         string     `json:"id"`
+	Subject    string     `json:"subject"`
+	State      *string    `json:"state"`
+	DueDate    *string    `json:"dueDate"`
+	AssignedTo *EntityRef `json:"assignedTo"`
+	UpdatedOn  string     `json:"updatedOn"`
+}
+
+// SearchCaseTasksRequest is the request body for POST /cases/{id}/tasks/search.
+type SearchCaseTasksRequest struct {
+	Pagination Pagination `json:"pagination"`
+}
+
+// SearchCaseTasksResponse is the response for POST /cases/{id}/tasks/search.
+type SearchCaseTasksResponse struct {
+	Tasks  []TaskSummary `json:"tasks"`
+	Total  int           `json:"total"`
+	Offset int           `json:"offset"`
+	Limit  int           `json:"limit"`
+}
+
+// TaskDetail is the full task record returned by GET /tasks/{id}.
+//
+// RequestType/RequestTypeLabel and Environment/EnvironmentLabel follow the same
+// plain-*string rule as TaskSummary.State above: these are ServiceNow choice-list
+// fields (raw key + resolved label) and must not be modeled as closed enums for
+// the same reason — an unmapped raw value must degrade to nil, not break the
+// response. Known RequestType values are SN-configuration-dependent (e.g. "1"
+// observed live for "Log Extraction"); Environment is currently unobserved live
+// (nil) but follows the identical key/label shape.
+type TaskDetail struct {
+	ID                string         `json:"id"`
+	Subject           string         `json:"subject"`
+	State             *string        `json:"state"`
+	DueDate           *string        `json:"dueDate"`
+	VisibleToCustomer bool           `json:"visibleToCustomer"`
+	AssignedTo        *EntityRef     `json:"assignedTo"`
+	RequestType       *string        `json:"requestType"`
+	RequestTypeLabel  *string        `json:"requestTypeLabel"`
+	Environment       *string        `json:"environment"`
+	EnvironmentLabel  *string        `json:"environmentLabel"`
+	Product           *EntityRef     `json:"product"`
+	ParentCase        *CaseNumberRef `json:"parentCase"`
+	CreatedOn         string         `json:"createdOn"`
+	UpdatedOn         string         `json:"updatedOn"`
+}
+
+// CreateCaseTaskRequest is the request body for POST /cases/{id}/tasks.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): ServiceNow/Ballerina task support is read-only today
+// (SearchCaseTasks/GetTask only). No Choreo endpoint exists yet to create a
+// sn_customerservice_task record. This request/the CreateCaseTask service method
+// are implemented so the entity-service side is ready the moment Ballerina adds
+// the corresponding endpoint; until then, calling it returns a downstream error.
+type CreateCaseTaskRequest struct {
+	CaseID            string     `json:"-"`
+	Subject           string     `json:"subject"`
+	DueDate           *time.Time `json:"dueDate"`
+	AssignedToEmail   *string    `json:"assignedToEmail"`
+	VisibleToCustomer *bool      `json:"visibleToCustomer"`
+}
+
+// UpdateTaskRequest is the request body for PATCH /tasks/{id}. Exactly one of
+// State, AssignedToEmail, or DueDate must be provided per request, following the
+// same convention as UpdateCaseRequest.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as CreateCaseTaskRequest above — no Choreo
+// write endpoint exists yet for sn_customerservice_task.
+type UpdateTaskRequest struct {
+	ID              string     `json:"-"`
+	State           *string    `json:"state"`
+	AssignedToEmail *string    `json:"assignedToEmail"`
+	DueDate         *time.Time `json:"dueDate"`
+}
+
 // IncidentPriority represents the priority level of an incident.
 type IncidentPriority string
 
@@ -2186,21 +2741,22 @@ type SearchIncidentsRequest struct {
 
 // SearchIncidentView is the unified incident representation returned in search results.
 type SearchIncidentView struct {
-	ID              *string              `json:"id"`
-	Number          *string              `json:"number"`
-	OpenedOn        *string              `json:"openedOn"`
-	Subject         *string              `json:"subject"`
-	Caller          *EntityRef           `json:"caller"`
-	Priority        *string `json:"priority"`
-	State           *string `json:"state"`
-	Category        *string `json:"category"`
-	Parent          *EntityRef           `json:"parent"`
-	AssignmentGroup *EntityRef           `json:"assignmentGroup"`
-	AssignedTo      *EntityRef           `json:"assignedTo"`
-	CreatedOn       string               `json:"createdOn"`
-	CreatedBy       string               `json:"createdBy"`
-	UpdatedOn       string               `json:"updatedOn"`
-	UpdatedBy       string               `json:"updatedBy"`
+	ID              *string    `json:"id"`
+	Number          *string    `json:"number"`
+	OpenedOn        *string    `json:"openedOn"`
+	Subject         *string    `json:"subject"`
+	Caller          *EntityRef `json:"caller"`
+	Priority        *string    `json:"priority"`
+	State           *string    `json:"state"`
+	Category        *string    `json:"category"`
+	Parent          *EntityRef `json:"parent"`
+	ParentIncident  *EntityRef `json:"parentIncident"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
+	CreatedOn       string     `json:"createdOn"`
+	CreatedBy       string     `json:"createdBy"`
+	UpdatedOn       string     `json:"updatedOn"`
+	UpdatedBy       string     `json:"updatedBy"`
 }
 
 // SearchIncidentsResponse is the paginated result of an incident search.
@@ -2209,4 +2765,358 @@ type SearchIncidentsResponse struct {
 	Total     int                  `json:"total"`
 	Offset    int                  `json:"offset"`
 	Limit     int                  `json:"limit"`
+}
+
+// IncidentState represents the workflow state of an incident.
+type IncidentState string
+
+const (
+	IncidentStateNew        IncidentState = "NEW"
+	IncidentStateInProgress IncidentState = "IN_PROGRESS"
+	IncidentStateOnHold     IncidentState = "ON_HOLD"
+	IncidentStateResolved   IncidentState = "RESOLVED"
+	IncidentStateClosed     IncidentState = "CLOSED"
+	IncidentStateCancelled  IncidentState = "CANCELLED"
+)
+
+// IncidentCategory represents the category of an incident.
+type IncidentCategory string
+
+const (
+	IncidentCategoryInquiry             IncidentCategory = "INQUIRY"
+	IncidentCategoryServiceInterruption IncidentCategory = "SERVICE_INTERRUPTION"
+	IncidentCategorySecurity            IncidentCategory = "SECURITY"
+)
+
+// IncidentSubcategory represents the subcategory of an incident.
+type IncidentSubcategory string
+
+const (
+	IncidentSubcategoryDHCP                  IncidentSubcategory = "DHCP"
+	IncidentSubcategoryOracle                IncidentSubcategory = "ORACLE"
+	IncidentSubcategoryCPU                   IncidentSubcategory = "CPU"
+	IncidentSubcategoryKeyboard              IncidentSubcategory = "KEYBOARD"
+	IncidentSubcategoryDOSDDOS               IncidentSubcategory = "DOS_DDOS"
+	IncidentSubcategoryPrivilegeEscalations  IncidentSubcategory = "PRIVILEGE_ESCALATIONS"
+	IncidentSubcategoryThreatIntelligence    IncidentSubcategory = "THREAT_INTELLIGENCE"
+	IncidentSubcategoryScansAndProbes        IncidentSubcategory = "SCANS_AND_PROBES"
+	IncidentSubcategoryApplicationSecurity   IncidentSubcategory = "APPLICATION_SECURITY"
+	IncidentSubcategoryConfigChangeRequest   IncidentSubcategory = "CONFIG_CHANGE_REQUEST"
+	IncidentSubcategoryIPAddress             IncidentSubcategory = "IP_ADDRESS"
+	IncidentSubcategoryFullOutage            IncidentSubcategory = "FULL_OUTAGE"
+	IncidentSubcategorySQLServer             IncidentSubcategory = "SQL_SERVER"
+	IncidentSubcategorySlowness              IncidentSubcategory = "SLOWNESS"
+	IncidentSubcategoryMemory                IncidentSubcategory = "MEMORY"
+	IncidentSubcategoryMouse                 IncidentSubcategory = "MOUSE"
+	IncidentSubcategoryPrivacy               IncidentSubcategory = "PRIVACY"
+	IncidentSubcategoryDataBreach            IncidentSubcategory = "DATA_BREACH"
+	IncidentSubcategorySystemCompromises     IncidentSubcategory = "SYSTEM_COMPROMISES"
+	IncidentSubcategoryDNS                   IncidentSubcategory = "DNS"
+	IncidentSubcategoryOS                    IncidentSubcategory = "OS"
+	IncidentSubcategoryDisk                  IncidentSubcategory = "DISK"
+	IncidentSubcategoryVPN                   IncidentSubcategory = "VPN"
+	IncidentSubcategoryMalware               IncidentSubcategory = "MALWARE"
+	IncidentSubcategoryVulnerability         IncidentSubcategory = "VULNERABILITY"
+	IncidentSubcategoryUnauthorizedAccess    IncidentSubcategory = "UNAUTHORIZED_ACCESS"
+	IncidentSubcategoryIdentityProtection    IncidentSubcategory = "IDENTITY_PROTECTION"
+	IncidentSubcategoryPhishing              IncidentSubcategory = "PHISHING"
+	IncidentSubcategoryImproperConfiguration IncidentSubcategory = "IMPROPER_CONFIGURATION"
+	IncidentSubcategoryInformationRequest    IncidentSubcategory = "INFORMATION_REQUEST"
+	IncidentSubcategoryDB2                   IncidentSubcategory = "DB2"
+	IncidentSubcategoryPartialOutage         IncidentSubcategory = "PARTIAL_OUTAGE"
+	IncidentSubcategoryEmail                 IncidentSubcategory = "EMAIL"
+	IncidentSubcategoryMonitor               IncidentSubcategory = "MONITOR"
+	IncidentSubcategoryWireless              IncidentSubcategory = "WIRELESS"
+)
+
+// IncidentContactType represents the contact type of an incident.
+type IncidentContactType string
+
+const (
+	IncidentContactTypeSelfService   IncidentContactType = "SELF_SERVICE"
+	IncidentContactTypeEmail         IncidentContactType = "EMAIL"
+	IncidentContactTypeWalkIn        IncidentContactType = "WALK_IN"
+	IncidentContactTypeAzure         IncidentContactType = "AZURE"
+	IncidentContactTypeEmailInternal IncidentContactType = "EMAIL_INTERNAL"
+	IncidentContactTypeSite247       IncidentContactType = "SITE_247"
+	IncidentContactTypeDirect        IncidentContactType = "DIRECT"
+	IncidentContactTypePhone         IncidentContactType = "PHONE"
+	IncidentContactTypeSentinel      IncidentContactType = "SENTINEL"
+	IncidentContactTypeVirtualAgent  IncidentContactType = "VIRTUAL_AGENT"
+	IncidentContactTypeChat          IncidentContactType = "CHAT"
+	IncidentContactTypeEmailExternal IncidentContactType = "EMAIL_EXTERNAL"
+)
+
+// IncidentImpact represents the impact level of an incident.
+type IncidentImpact string
+
+const (
+	IncidentImpactHigh   IncidentImpact = "HIGH"
+	IncidentImpactMedium IncidentImpact = "MEDIUM"
+	IncidentImpactLow    IncidentImpact = "LOW"
+)
+
+// IncidentUrgency represents the urgency level of an incident.
+type IncidentUrgency string
+
+const (
+	IncidentUrgencyHigh   IncidentUrgency = "HIGH"
+	IncidentUrgencyMedium IncidentUrgency = "MEDIUM"
+	IncidentUrgencyLow    IncidentUrgency = "LOW"
+)
+
+// CreateIncidentRequest is the input for POST /incidents.
+type CreateIncidentRequest struct {
+	CallerID            string               `json:"callerId"`
+	Category            IncidentCategory     `json:"category"`
+	Subcategory         *IncidentSubcategory `json:"subcategory,omitempty"`
+	ServiceID           string               `json:"serviceId"`
+	ServiceOfferingID   *string              `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string              `json:"configurationItemId,omitempty"`
+	ContactType         *IncidentContactType `json:"contactType,omitempty"`
+	Impact              IncidentImpact       `json:"impact"`
+	Urgency             IncidentUrgency      `json:"urgency"`
+	AssignmentGroupID   *string              `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string              `json:"assignedEngineerId,omitempty"`
+	Subject             string               `json:"subject"`
+	WatchList           []string             `json:"watchList,omitempty"`
+	AdditionalComments  *string              `json:"additionalComments,omitempty"`
+	WorkNotes           *string              `json:"workNotes,omitempty"`
+	ParentID            *string              `json:"parentId,omitempty"`
+	ParentIncidentID    *string              `json:"parentIncidentId,omitempty"`
+	ChangeRequestID     *string              `json:"changeRequestId,omitempty"`
+	ProblemID           *string              `json:"problemId,omitempty"`
+	CausedByID          *string              `json:"causedById,omitempty"`
+}
+
+// CreateIncidentResponse is the output for POST /incidents.
+type CreateIncidentResponse struct {
+	Message  string `json:"message"`
+	Incident struct {
+		ID        string `json:"id"`
+		Number    string `json:"number"`
+		CreatedOn string `json:"createdOn"`
+		CreatedBy string `json:"createdBy"`
+	} `json:"incident"`
+}
+
+// UpdateIncidentRequest is the input for PATCH /incidents/{id}. All fields are optional,
+// but at least one must be provided.
+type UpdateIncidentRequest struct {
+	ID                  string               `json:"-"`
+	Subject             *string              `json:"subject,omitempty"`
+	Priority            *IncidentPriority    `json:"priority,omitempty"`
+	State               *IncidentState       `json:"state,omitempty"`
+	Category            *IncidentCategory    `json:"category,omitempty"`
+	Subcategory         *IncidentSubcategory `json:"subcategory,omitempty"`
+	ContactType         *IncidentContactType `json:"contactType,omitempty"`
+	Impact              *IncidentImpact      `json:"impact,omitempty"`
+	Urgency             *IncidentUrgency     `json:"urgency,omitempty"`
+	ResolutionCode      *string              `json:"resolutionCode,omitempty"`
+	ParentID            *string              `json:"parentId,omitempty"`
+	ParentIncidentID    *string              `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string              `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string              `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string              `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string              `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string              `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string              `json:"changeRequestId,omitempty"`
+	ProblemID           *string              `json:"problemId,omitempty"`
+	CausedByID          *string              `json:"causedById,omitempty"`
+	ResolvedByID        *string              `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string              `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string              `json:"incidentReport,omitempty"`
+	AdditionalComments  *string              `json:"additionalComments,omitempty"`
+	WorkNotes           *string              `json:"workNotes,omitempty"`
+	WatchList           *[]string            `json:"watchList,omitempty"`
+}
+
+// UpdateIncidentResponse is the output for PATCH /incidents/{id}.
+type UpdateIncidentResponse struct {
+	Message  string       `json:"message"`
+	Incident IncidentView `json:"incident"`
+}
+
+// IncidentWatchListItem represents a user on the incident watch list.
+type IncidentWatchListItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// IncidentView is the full detail representation returned by GET /incidents/{id}.
+type IncidentView struct {
+	ID                 *string                 `json:"id"`
+	Number             *string                 `json:"number"`
+	OpenedOn           *string                 `json:"openedOn"`
+	Subject            *string                 `json:"subject"`
+	Caller             *EntityRef              `json:"caller"`
+	Priority           *string                 `json:"priority"`
+	State              *string                 `json:"state"`
+	Category           *string                 `json:"category"`
+	Subcategory        *string                 `json:"subcategory"`
+	Parent             *EntityRef              `json:"parent"`
+	ParentIncident     *EntityRef              `json:"parentIncident"`
+	AssignmentGroup    *EntityRef              `json:"assignmentGroup"`
+	AssignedTo         *EntityRef              `json:"assignedTo"`
+	Service            *EntityRef              `json:"service"`
+	ServiceOffering    *EntityRef              `json:"serviceOffering"`
+	ConfigurationItem  *EntityRef              `json:"configurationItem"`
+	ContactType        *string                 `json:"contactType"`
+	Impact             *string                 `json:"impact"`
+	Urgency            *string                 `json:"urgency"`
+	ChangeRequest      *EntityRef              `json:"changeRequest"`
+	Problem            *EntityRef              `json:"problem"`
+	CausedBy           *EntityRef              `json:"causedBy"`
+	AdditionalComments *string                 `json:"additionalComments"`
+	WorkNotes          *string                 `json:"workNotes"`
+	WatchList          []IncidentWatchListItem `json:"watchList"`
+	// LinkedServiceRequests lists any service-request cases whose parent points to this
+	// incident.
+	LinkedServiceRequests []LinkedServiceRequestRef `json:"linkedServiceRequests"`
+	CreatedOn             string                    `json:"createdOn"`
+	CreatedBy             string                    `json:"createdBy"`
+	UpdatedOn             string                    `json:"updatedOn"`
+	UpdatedBy             string                    `json:"updatedBy"`
+	// Resolution fields — populated only for resolved/closed ServiceNow incidents.
+	ResolutionCode  *string `json:"resolutionCode"`
+	ResolutionNotes *string `json:"resolutionNotes"`
+	ResolvedBy      *string `json:"resolvedBy"`
+	ResolvedOn      *string `json:"resolvedOn"`
+	IncidentReport  *string `json:"incidentReport"`
+}
+
+// SearchProblemsFilters holds all optional filter criteria for a problem search.
+type SearchProblemsFilters struct {
+	SearchQuery string `json:"searchQuery"`
+}
+
+// SearchProblemsRequest is the input for POST /problems/search.
+type SearchProblemsRequest struct {
+	Filters    SearchProblemsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// SearchProblemView is the problem representation returned in search results.
+type SearchProblemView struct {
+	ID              *string    `json:"id"`
+	Number          *string    `json:"number"`
+	Subject         *string    `json:"subject"`
+	State           *string    `json:"state"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
+}
+
+// SearchProblemsResponse is the paginated result of a problem search.
+type SearchProblemsResponse struct {
+	Problems []SearchProblemView `json:"problems"`
+	Total    int                 `json:"total"`
+	Offset   int                 `json:"offset"`
+	Limit    int                 `json:"limit"`
+}
+
+// ProblemDetail is the full detail representation returned by GET /problems/{id}.
+//
+// State and ResolutionCode are plain, unvalidated passthrough strings from the
+// data source rather than closed enums. Known State values at the time of writing:
+// NEW | ASSESS | ROOT_CAUSE_ANALYSIS | FIX_IN_PROGRESS | RESOLVED | CLOSED. Do not
+// add strict validation against this list — it is not guaranteed exhaustive.
+type ProblemDetail struct {
+	ID                  *string         `json:"id"`
+	Number              *string         `json:"number"`
+	Subject             *string         `json:"subject"`
+	State               *string         `json:"state"`
+	Priority            *string         `json:"priority"`
+	Category            *string         `json:"category"`
+	Subcategory         *string         `json:"subcategory"`
+	OriginCase          *CaseNumberRef  `json:"originCase"`
+	PrimaryIncident     *CaseNumberRef  `json:"primaryIncident"`
+	LinkedIncidents     []CaseNumberRef `json:"linkedIncidents"`
+	LinkedChangeRequest *CaseNumberRef  `json:"linkedChangeRequest"`
+	AssignedTo          *EntityRef      `json:"assignedTo"`
+	ResolutionCode      *string         `json:"resolutionCode"`
+	CauseNotes          *string         `json:"causeNotes"`
+	FixNotes            *string         `json:"fixNotes"`
+	Workaround          *string         `json:"workaround"`
+	ResolvedOn          *string         `json:"resolvedOn"`
+	ResolvedBy          *EntityRef      `json:"resolvedBy"`
+	OpenedOn            *string         `json:"openedOn"`
+	ClosedOn            *string         `json:"closedOn"`
+}
+
+// CreateProblemRequest is the request body for POST /problems. Subject is required;
+// Category, Subcategory, OriginCaseID, and PrimaryIncidentID are optional. OriginCaseID
+// and PrimaryIncidentID are UUIDs from the caller's perspective.
+type CreateProblemRequest struct {
+	Subject           string  `json:"subject"`
+	Category          *string `json:"category,omitempty"`
+	Subcategory       *string `json:"subcategory,omitempty"`
+	OriginCaseID      *string `json:"originCaseId,omitempty"`
+	PrimaryIncidentID *string `json:"primaryIncidentId,omitempty"`
+}
+
+// ConversationState represents the state of a conversation.
+type ConversationState string
+
+const (
+	ConversationStateActive   ConversationState = "ACTIVE"
+	ConversationStateResolved ConversationState = "RESOLVED"
+)
+
+// ConversationSortField enumerates the columns available for sorting conversation search results.
+type ConversationSortField string
+
+const (
+	ConversationSortFieldCreatedOn ConversationSortField = "createdOn"
+	ConversationSortFieldUpdatedOn ConversationSortField = "updatedOn"
+)
+
+// ConversationSortOrder controls the sort direction for conversation search.
+type ConversationSortOrder string
+
+const (
+	ConversationSortOrderAsc  ConversationSortOrder = "asc"
+	ConversationSortOrderDesc ConversationSortOrder = "desc"
+)
+
+// ConversationSort specifies the sort field and direction for conversation search results.
+type ConversationSort struct {
+	Field ConversationSortField `json:"field"`
+	Order ConversationSortOrder `json:"order"`
+}
+
+// SearchConversationsFilters holds all optional filter criteria for a conversation search.
+type SearchConversationsFilters struct {
+	ProjectIDs  []string            `json:"projectIds"`
+	States      []ConversationState `json:"states"`
+	SearchQuery string              `json:"searchQuery"`
+	CreatedByMe bool                `json:"createdByMe"`
+}
+
+// SearchConversationsRequest is the input for POST /conversations/search.
+type SearchConversationsRequest struct {
+	Filters    SearchConversationsFilters `json:"filters"`
+	SortBy     ConversationSort           `json:"sortBy"`
+	Pagination Pagination                 `json:"pagination"`
+}
+
+// SearchConversationView is the conversation representation returned in search results.
+type SearchConversationView struct {
+	ID             *string    `json:"id"`
+	Number         *string    `json:"number"`
+	InitialMessage *string    `json:"initialMessage"`
+	MessageCount   int        `json:"messageCount"`
+	Project        *EntityRef `json:"project"`
+	Case           *EntityRef `json:"case"`
+	State          *string    `json:"state"`
+	CreatedOn      string     `json:"createdOn"`
+	CreatedBy      string     `json:"createdBy"`
+}
+
+// SearchConversationsResponse is the paginated result of a conversation search.
+type SearchConversationsResponse struct {
+	Conversations []SearchConversationView `json:"conversations"`
+	Total         int                      `json:"total"`
+	Offset        int                      `json:"offset"`
+	Limit         int                      `json:"limit"`
 }

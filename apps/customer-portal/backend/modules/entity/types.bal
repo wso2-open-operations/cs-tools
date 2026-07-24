@@ -379,6 +379,8 @@ public type Case record {|
     string number;
     # Created date and time
     string createdOn;
+    # Updated date and time
+    string updatedOn;
     # Created by (User email)
     string createdBy;
     # Case title
@@ -2801,6 +2803,19 @@ public type DeployedProductMetricsUsageCountsPayload record {|
     Date endDate;
 |};
 
+# Aggregated statistics for a single count type over the queried date range.
+public type CountTypeAggregation record {|
+    # Aggregation function applied for this count type (e.g. sum, max)
+    string aggregation;
+    # Minimum aggregated value across the range
+    decimal min;
+    # Maximum aggregated value across the range
+    decimal max;
+    # Average aggregated value across the range
+    decimal avg;
+    json...;
+|};
+
 # Summary for deployed product metrics usage counts.
 public type DeployedProductMetricsUsageCountsSummary record {|
     # Date range of the metrics query
@@ -2812,7 +2827,38 @@ public type DeployedProductMetricsUsageCountsSummary record {|
         json...;
     |} dateRange;
     # Count types aggregated over the range
-    map<int> countTypes;
+    map<CountTypeAggregation> countTypes;
+    json...;
+|};
+
+# A single instance's contribution to a count-type entry.
+public type UsageCountInstance record {|
+    # System ID of the instance
+    string id;
+    # Instance name or key
+    string name;
+    # Count value contributed by this instance
+    decimal value;
+    json...;
+|};
+
+# Aggregated value for a single count type on a single date.
+public type UsageCountEntry record {|
+    # Aggregated value across instances
+    decimal value;
+    # Aggregation function applied (e.g. sum, max)
+    string aggregation;
+    # Per-instance breakdown
+    UsageCountInstance[] instances;
+    json...;
+|};
+
+# A single chart data entry for deployed product usage counts grouped by date.
+public type DeployedProductUsageCountsChartEntry record {|
+    # Date of the chart entry (format: YYYY-MM-DD)
+    string date;
+    # Pivoted counts keyed by count type
+    map<UsageCountEntry> counts;
     json...;
 |};
 
@@ -2829,6 +2875,6 @@ public type DeployedProductMetricsUsageCountsResponse record {|
     # Summary statistics for the queried range
     DeployedProductMetricsUsageCountsSummary summary;
     # Chart data points ordered by date
-    json[] chartData;
+    DeployedProductUsageCountsChartEntry[] chartData;
     json...;
 |};

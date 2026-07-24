@@ -95,6 +95,41 @@ export interface EntityReference {
   label: string;
 }
 
+export interface CaseFeedbackPayloadDto {
+  emojiId: string;
+  chipIds?: string[];
+  additionalComment?: string;
+}
+
+export interface SubmittedFeedbackDto {
+  id: string;
+  assessmentId: string;
+  caseId: string;
+  createdBy: string;
+  createdOn: string;
+}
+
+export interface CaseFeedbackResponseDto {
+  message: string;
+  feedback: SubmittedFeedbackDto;
+}
+
+export interface FeedbackEmojiSummaryDto {
+  id: string;
+  name: string;
+  selectedImage: string;
+}
+
+export interface CaseFeedbackDto {
+  id: string;
+  emoji: FeedbackEmojiSummaryDto;
+  chips?: string[] | null;
+  assessmentId: string;
+  createdBy: string;
+  createdOn: string;
+  additionalComment?: string | null;
+}
+
 export interface GetCasesRequestDto {
   filters?: {
     caseTypes?: string[];

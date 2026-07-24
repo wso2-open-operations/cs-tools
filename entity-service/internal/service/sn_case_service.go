@@ -21,6 +21,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,32 +41,92 @@ type snCasesResponse struct {
 }
 
 type snCase struct {
-	ID               string                 `json:"id"`
-	InternalID       string                 `json:"internalId"`
-	Number           string                 `json:"number"`
-	Title            string                 `json:"title"`
-	Description      string                 `json:"description"`
-	CreatedOn        string                 `json:"createdOn"`
-	UpdatedOn        *string                `json:"updatedOn"`
-	CreatedBy        string                 `json:"createdBy"`
-	Project          snCaseEntityRef        `json:"project"`
-	Deployment       snCaseEntityRef        `json:"deployment"`
-	DeployedProduct  snCaseDeployedProduct  `json:"deployedProduct"`
-	Product          *snCaseEntityRef       `json:"product"`
-	State            *snCaseState           `json:"state"`
-	WorkState        *snCaseLabel           `json:"workState"`
-	Severity         *snCaseLabel           `json:"severity"`
-	IssueType        *snCaseIssueType       `json:"issueType"`
-	EngagementType   *snCaseLabel           `json:"engagementType"`
-	CaseType         *snCaseEntityRef       `json:"caseType"`
-	Catalog          *snCaseEntityRef       `json:"catalog"`
-	CatalogItem      *snCaseEntityRef       `json:"catalogItem"`
-	AssignedTeam     *snCaseEntityRef       `json:"assignedTeam"`
-	Conversation     *snCaseEntityRef       `json:"conversation"`
-	AssignedEngineer *snAssignedEngineerRef `json:"assignedEngineer"`
-	ParentCase       *snCaseRef             `json:"parentCase"`
-	RelatedCase      *snCaseRef             `json:"relatedCase"`
-	Account          *snCaseAccount         `json:"account"`
+	ID                    string                      `json:"id"`
+	InternalID            string                      `json:"internalId"`
+	Number                string                      `json:"number"`
+	Title                 string                      `json:"title"`
+	Description           string                      `json:"description"`
+	CreatedOn             string                      `json:"createdOn"`
+	UpdatedOn             *string                     `json:"updatedOn"`
+	CreatedBy             string                      `json:"createdBy"`
+	Project               snCaseEntityRef             `json:"project"`
+	Deployment            snCaseEntityRef             `json:"deployment"`
+	DeployedProduct       snCaseDeployedProduct       `json:"deployedProduct"`
+	Product               *snCaseEntityRef            `json:"product"`
+	State                 *snCaseState                `json:"state"`
+	WorkState             *snCaseLabel                `json:"workState"`
+	Severity              *snCaseLabel                `json:"severity"`
+	IssueType             *snCaseIssueType            `json:"issueType"`
+	EngagementType        *snCaseLabel                `json:"engagementType"`
+	CaseType              *snCaseEntityRef            `json:"caseType"`
+	Catalog               *snCaseEntityRef            `json:"catalog"`
+	CatalogItem           *snCaseEntityRef            `json:"catalogItem"`
+	AssignedTeam          *snCaseEntityRef            `json:"assignedTeam"`
+	Conversation          *snCaseEntityRef            `json:"conversation"`
+	AssignedEngineer      *snAssignedEngineerRef      `json:"assignedEngineer"`
+	ParentCase            *snCaseRef                  `json:"parentCase"`
+	RelatedCase           *snCaseRef                  `json:"relatedCase"`
+	Account               *snCaseAccount              `json:"account"`
+	LinkedServiceRequests []snLinkedServiceRequestRef `json:"linkedServiceRequests"`
+	ResolutionCode        *struct {
+		ID    json.Number `json:"id"`
+		Label string      `json:"label"`
+	} `json:"resolutionCode"`
+	Cause *struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	} `json:"cause"`
+	ResolutionNotes *string `json:"resolutionNotes"`
+	ResolvedOn      *string `json:"resolvedOn"`
+	// WatchList carries the watchers on the case (four SN glide_lists collapsed into one
+	// list by Ballerina). Confirmed present on the Choreo GET /cases/{id} response
+	// (CaseResponse.watchList in digiops-cs modules/servicenow/types.bal).
+	WatchList []snWatchListUser `json:"watchList"`
+	// AutoclosureStep/AutoclosureStateTime surface ServiceNow's real staged auto-closure
+	// sequence (u_autoclosure_step / u_autoclosure_state_time), confirmed live against a
+	// held case on wso2sndev (see EntityLayerSpec-2026-07-23.md item 6). Ballerina's
+	// Case/CaseResponse carry matching autoclosureStep/autoclosureStateTime fields (added
+	// on the ballerina-case-field-additions branch, not yet merged to digiops-cs main --
+	// the closest field on main today, hasAutoClosed, means something different: case has
+	// already been auto-closed, not "where the case sits in the auto-closure sequence").
+	AutoclosureStep *string `json:"autoclosureStep"`
+	// AutoclosureStateTime is when the auto-closure sequence next advances (e.g. the
+	// "eligible again after" date for a held case).
+	AutoclosureStateTime *string `json:"autoclosureStateTime"`
+	// FixEta is the single customer-facing fix-commitment date/time
+	// (u_fix_eta_shared). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina field currently
+	// surfaces this — the Choreo GET /cases/{id} response does not include a
+	// "fixEta" key today, so this always unmarshals to nil. Ask: add a
+	// "fixEta" (glide_date_time) field to servicenow:CaseResponse.
+	FixEta *string `json:"fixEta"`
+	// BestCaseFixEta is the internal-only best-case fix-commitment date
+	// (u_best_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina field currently
+	// surfaces this — the Choreo GET /cases/{id} response does not include a
+	// "bestCaseFixEta" key today, so this always unmarshals to nil. Ask: add a
+	// "bestCaseFixEta" (glide_date) field to servicenow:CaseResponse.
+	BestCaseFixEta *string `json:"bestCaseFixEta"`
+	// MostLikelyFixEta is the internal-only most-likely fix-commitment date
+	// (u_most_likely_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina field currently
+	// surfaces this — the Choreo GET /cases/{id} response does not include a
+	// "mostLikelyFixEta" key today, so this always unmarshals to nil. Ask: add a
+	// "mostLikelyFixEta" (glide_date) field to servicenow:CaseResponse.
+	MostLikelyFixEta *string `json:"mostLikelyFixEta"`
+	// WorstCaseFixEta is the internal-only worst-case fix-commitment date
+	// (u_worst_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina field currently
+	// surfaces this — the Choreo GET /cases/{id} response does not include a
+	// "worstCaseFixEta" key today, so this always unmarshals to nil. Ask: add a
+	// "worstCaseFixEta" (glide_date) field to servicenow:CaseResponse.
+	WorstCaseFixEta *string `json:"worstCaseFixEta"`
+}
+
+// snWatchListUser mirrors the watch-list user shape ServiceNow/Ballerina returns on both
+// the case detail read (CaseResponse.watchList) and the update-case response
+// (snUpdateCaseResponse.Case.WatchList below).
+type snWatchListUser struct {
+	ID       string  `json:"id"`
+	UserName string  `json:"userName"`
+	Name     *string `json:"name"`
+	Email    *string `json:"email"`
 }
 
 type snCaseEntityRef struct {
@@ -83,6 +145,12 @@ type snCaseRef struct {
 	Number string `json:"number"`
 }
 
+type snLinkedServiceRequestRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	Name   string `json:"name"`
+}
+
 type snAssignedEngineerRef struct {
 	ID    string  `json:"id"`
 	Name  string  `json:"name"`
@@ -93,6 +161,13 @@ type snCaseAccount struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// CreTeam and SreTeam resolve the account's CRE/SRE group refs. Per the project
+	// owner's resolution, SN's u_integration_cs_team maps to CreTeam and u_sre_team maps
+	// to SreTeam -- both refs to sys_user_group. Ballerina's Case/CaseResponse.account
+	// gained matching fields on ballerina-case-field-additions, not yet merged to
+	// digiops-cs main.
+	CreTeam *snCaseEntityRef `json:"creTeam"`
+	SreTeam *snCaseEntityRef `json:"sreTeam"`
 }
 
 type snCaseState struct {
@@ -191,6 +266,12 @@ type snCaseFilters struct {
 	WorkStateKeys      []int    `json:"workStateKeys,omitempty"`
 	AssignedUserIDs    []string `json:"assignedUserIds,omitempty"`
 	ProductNames       []string `json:"productNames,omitempty"`
+	// Tags: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see domain.SearchCasesFilters.Tags doc comment.
+	// Forwarded to Choreo so filtering starts working the moment Ballerina adds
+	// support, but the current POST /cases/search contract ignores this field.
+	Tags []string `json:"tags,omitempty"`
+	// ParentID: see domain.SearchCasesFilters.ParentID doc comment.
+	ParentID string `json:"parentId,omitempty"`
 }
 
 // snStateIDMap maps domain CaseState enums to SN numeric state IDs.
@@ -356,9 +437,6 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	snType, ok := snCaseTypeMap[req.Type]
 	if !ok {
@@ -470,9 +548,6 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 
 func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CaseView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/cases/"+uuidToSysid(id), token)
 	if err != nil {
@@ -566,7 +641,106 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	}
 	if c.Account != nil {
 		cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
+		// CRE/SRE team (see snCaseAccount.CreTeam/SreTeam doc comment) pass through once
+		// Ballerina's matching fields land on digiops-cs main; until then these are nil.
+		if c.Account.CreTeam != nil {
+			if id := sysidToUUID(c.Account.CreTeam.ID); id != "" {
+				cv.AccountDetails.CreTeam = &domain.EntityRef{ID: id, Name: c.Account.CreTeam.Name}
+			}
+		}
+		if c.Account.SreTeam != nil {
+			if id := sysidToUUID(c.Account.SreTeam.ID); id != "" {
+				cv.AccountDetails.SreTeam = &domain.EntityRef{ID: id, Name: c.Account.SreTeam.Name}
+			}
+		}
 	}
+	if len(c.LinkedServiceRequests) > 0 {
+		lsr := make([]domain.LinkedServiceRequestRef, 0, len(c.LinkedServiceRequests))
+		for _, r := range c.LinkedServiceRequests {
+			lsr = append(lsr, domain.LinkedServiceRequestRef{ID: sysidToUUID(r.ID), Number: r.Number, Name: r.Name})
+		}
+		cv.LinkedServiceRequests = lsr
+	}
+	if c.ResolutionCode != nil {
+		if rc, ok := snResolutionCodeByID[c.ResolutionCode.ID.String()]; ok {
+			cv.ResolutionCode = &rc
+		}
+	}
+	if c.Cause != nil {
+		if cause, ok := snCauseByID[c.Cause.ID]; ok {
+			cv.Cause = &cause
+		}
+	}
+	cv.ResolutionNotes = c.ResolutionNotes
+	if c.ResolvedOn != nil && *c.ResolvedOn != "" {
+		resolvedOn, err := time.Parse(snCreatedOnLayout, *c.ResolvedOn)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse resolvedOn %q: %w", *c.ResolvedOn, err)
+		}
+		cv.ResolvedOn = &resolvedOn
+	}
+	if len(c.WatchList) > 0 {
+		wl := make([]domain.WatchListUser, 0, len(c.WatchList))
+		for _, u := range c.WatchList {
+			wlu := domain.WatchListUser{ID: sysidToUUID(u.ID), UserName: u.UserName}
+			if u.Name != nil {
+				wlu.Name = *u.Name
+			}
+			if u.Email != nil {
+				wlu.Email = *u.Email
+			}
+			wl = append(wl, wlu)
+		}
+		cv.WatchList = wl
+	}
+	// AutoclosureStep/AutoclosureStateTime pass through once Ballerina's matching fields
+	// (see snCase field doc comments) land on digiops-cs main; until then these are nil.
+	cv.AutoclosureStep = c.AutoclosureStep
+	if c.AutoclosureStateTime != nil && *c.AutoclosureStateTime != "" {
+		autoclosureStateTime, err := time.Parse(snCreatedOnLayout, *c.AutoclosureStateTime)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse autoclosureStateTime %q: %w", *c.AutoclosureStateTime, err)
+		}
+		cv.AutoclosureStateTime = &autoclosureStateTime
+	}
+	// FixEta passes through once Ballerina's matching field (see snCase.FixEta doc
+	// comment) lands; until then this is always nil.
+	if c.FixEta != nil && *c.FixEta != "" {
+		fixEta, err := time.Parse(snCreatedOnLayout, *c.FixEta)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse fixEta %q: %w", *c.FixEta, err)
+		}
+		cv.FixEta = &fixEta
+	}
+	// BestCaseFixEta passes through once Ballerina's matching field (see
+	// snCase.BestCaseFixEta doc comment) lands; until then this is always nil.
+	if c.BestCaseFixEta != nil && *c.BestCaseFixEta != "" {
+		bestCaseFixEta, err := time.Parse(snCreatedOnLayout, *c.BestCaseFixEta)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse bestCaseFixEta %q: %w", *c.BestCaseFixEta, err)
+		}
+		cv.BestCaseFixEta = &bestCaseFixEta
+	}
+	// MostLikelyFixEta passes through once Ballerina's matching field (see
+	// snCase.MostLikelyFixEta doc comment) lands; until then this is always nil.
+	if c.MostLikelyFixEta != nil && *c.MostLikelyFixEta != "" {
+		mostLikelyFixEta, err := time.Parse(snCreatedOnLayout, *c.MostLikelyFixEta)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse mostLikelyFixEta %q: %w", *c.MostLikelyFixEta, err)
+		}
+		cv.MostLikelyFixEta = &mostLikelyFixEta
+	}
+	// WorstCaseFixEta passes through once Ballerina's matching field (see
+	// snCase.WorstCaseFixEta doc comment) lands; until then this is always nil.
+	if c.WorstCaseFixEta != nil && *c.WorstCaseFixEta != "" {
+		worstCaseFixEta, err := time.Parse(snCreatedOnLayout, *c.WorstCaseFixEta)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse worstCaseFixEta %q: %w", *c.WorstCaseFixEta, err)
+		}
+		cv.WorstCaseFixEta = &worstCaseFixEta
+	}
+	// Tags are not populated: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see CaseView.Tags doc comment.
+	// cv.Tags is left nil.
 
 	return cv, nil
 }
@@ -599,9 +773,6 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateCaseCommentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	snType := snCommentTypeMap[req.Type]
 
@@ -685,9 +856,6 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCaseCommentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snSearchCommentsPayload{
 		ReferenceID:   uuidToSysid(req.CaseID),
@@ -762,9 +930,50 @@ type snUpdateCasePayload struct {
 	WorkStateKey   *int     `json:"workStateKey,omitempty"`
 	WatchList      []string `json:"watchList,omitempty"`
 	AssigneeEmail  *string  `json:"assigneeEmail,omitempty"`
-	ResolutionCode *int    `json:"resolutionCode,omitempty"`
+	ResolutionCode *int     `json:"resolutionCode,omitempty"`
 	Cause          *string  `json:"cause,omitempty"`
 	CloseNotes     *string  `json:"closeNotes,omitempty"`
+	// ParentID writes the native task.parent field. Confirmed already supported by
+	// digiops-cs (servicenow:CaseUpdatePayload.parentId + validateCaseUpdatePayload in
+	// utils.bal already validate it as an exactly-one-field option) -- fully wired.
+	ParentID *string `json:"parentId,omitempty"`
+	// RelatedCaseID writes the looser, non-hierarchical u_related_case cross-link.
+	// servicenow:CaseUpdatePayload's relatedCaseId field + validateCaseUpdatePayload
+	// support (ballerina-case-field-additions branch, not yet merged to digiops-cs main).
+	RelatedCaseID *string `json:"relatedCaseId,omitempty"`
+	// AutocloseHoldUntil places the case on hold in ServiceNow's staged auto-closure
+	// sequence, internally setting u_autoclosure_step = ON_HOLD and
+	// u_autoclosure_state_time = this date together. Matching field on
+	// servicenow:CaseUpdatePayload added on ballerina-case-field-additions, not yet
+	// merged to digiops-cs main.
+	AutocloseHoldUntil *string `json:"autocloseHoldUntil,omitempty"`
+	// Title/Description/DeploymentID/DeployedProductID as PATCH-time fields (previously
+	// servicenow:CaseUpdatePayload only supported these at create time, via
+	// CaseCreatePayload) -- added on ballerina-case-field-additions, not yet merged to
+	// digiops-cs main.
+	Title             *string `json:"title,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	DeploymentID      *string `json:"deploymentId,omitempty"`
+	DeployedProductID *string `json:"deployedProductId,omitempty"`
+	// FixEta writes the customer-facing fix-commitment date/time (u_fix_eta_shared).
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write field exists yet for this — ask:
+	// add a "fixEta" field to servicenow:CaseUpdatePayload backed by u_fix_eta_shared.
+	FixEta *string `json:"fixEta,omitempty"`
+	// BestCaseFixEta writes the internal-only best-case fix-commitment date
+	// (u_best_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write field exists
+	// yet for this — ask: add a "bestCaseFixEta" field to servicenow:CaseUpdatePayload
+	// backed by u_best_case_fix_eta.
+	BestCaseFixEta *string `json:"bestCaseFixEta,omitempty"`
+	// MostLikelyFixEta writes the internal-only most-likely fix-commitment date
+	// (u_most_likely_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write field
+	// exists yet for this — ask: add a "mostLikelyFixEta" field to
+	// servicenow:CaseUpdatePayload backed by u_most_likely_fix_eta.
+	MostLikelyFixEta *string `json:"mostLikelyFixEta,omitempty"`
+	// WorstCaseFixEta writes the internal-only worst-case fix-commitment date
+	// (u_worst_case_fix_eta). Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina write field
+	// exists yet for this — ask: add a "worstCaseFixEta" field to
+	// servicenow:CaseUpdatePayload backed by u_worst_case_fix_eta.
+	WorstCaseFixEta *string `json:"worstCaseFixEta,omitempty"`
 }
 
 // snResolutionStates are the state keys that allow resolution fields.
@@ -804,35 +1013,53 @@ var snResolutionCodeByID = func() map[string]domain.CaseResolutionCode {
 	return m
 }()
 
-// snCauseLabelToEnum maps ServiceNow cause label strings to domain CaseCause enums.
-var snCauseLabelToEnum map[string]domain.CaseCause
-
-// snCauseLabel maps domain CaseCause enums to the ServiceNow cause label strings.
-var snCauseLabel = map[domain.CaseCause]string{
-	domain.CaseCauseUserMisunderstandingConcepts:      "User - Misunderstanding concepts",
-	domain.CaseCauseUserMisunderstandingDocumentation: "User - Misunderstanding documentation",
-	domain.CaseCauseUserNotFollowingDocumentation:     "User - Not following documentation",
-	domain.CaseCauseUserMistake:                       "User - Mistake",
-	domain.CaseCauseSolutionProblematicArchitecture:   "Solution - Problematic solution architecture",
-	domain.CaseCauseSolutionProblematicCode:           "Solution - Problematic code",
-	domain.CaseCauseApplicationBug:                    "Application - Bug",
-	domain.CaseCauseApplicationMisleadingUXUI:         "Application - Misleading UX / UI",
-	domain.CaseCauseApplicationLimitation:             "Application - Limitation",
-	domain.CaseCauseApplicationMissingFeature:         "Application - Missing feature",
-	domain.CaseCauseApplicationDocumentationGap:       "Application - Documentation gap",
-	domain.CaseCauseApplicationDocumentationError:     "Application - Documentation error",
-	domain.CaseCauseInfrastructureCustomerSide:        "Infrastructure - Customer's side",
-	domain.CaseCauseInfrastructureSaaSNotEnough:       "Infrastructure - SaaS side - Not enough ...",
-	domain.CaseCauseInfrastructureSaaSother:           "Infrastructure - SaaS side - Other",
-	domain.CaseCauseUnknown:                           "Unknown",
+// snCauseKey maps domain CaseCause enums to the ServiceNow integer choice
+// values for sn_customerservice_case.cause on the PROD tenant (wso2),
+// verified via sys_choice. Unlike resolution codes' scattered keys, prod's
+// cause choice list happens to number sequentially 1-25 in picklist order.
+//
+// The DEV tenant (wso2sndev) configures this same field with the label text
+// as its stored value instead of an integer — a real cross-tenant
+// inconsistency, not a bug in this mapping. This map targets prod, the only
+// tenant live customer traffic reaches; DEV-tenant testing of the cause
+// field will not round-trip correctly against this mapping.
+var snCauseKey = map[domain.CaseCause]int{
+	domain.CaseCauseSolutionArchitecture:          1,
+	domain.CaseCauseDeploymentArchitecture:        2,
+	domain.CaseCauseUserErrorConfiguration:        3,
+	domain.CaseCauseUserErrorProductConcept:       4,
+	domain.CaseCauseUserErrorRuntime:              5,
+	domain.CaseCauseUserErrorRecommendation:       6,
+	domain.CaseCauseCustomizationLimitation:       7,
+	domain.CaseCauseCustomizationBug:              8,
+	domain.CaseCauseDocumentationGap:              9,
+	domain.CaseCauseDocumentationError:            10,
+	domain.CaseCauseProductLimitation:             11,
+	domain.CaseCauseProductBug:                    12,
+	domain.CaseCauseProductRegression:             13,
+	domain.CaseCauseProductMigration:              14,
+	domain.CaseCauseInfrastructureDatabase:        15,
+	domain.CaseCauseInfrastructureOS:              16,
+	domain.CaseCauseInfrastructureNetwork:         17,
+	domain.CaseCauseInfrastructureJDK:             18,
+	domain.CaseCauseInfrastructureLDAP:            19,
+	domain.CaseCauseInfrastructureLoadBalancer:    20,
+	domain.CaseCauseInfrastructureIAAS:            21,
+	domain.CaseCauseInfrastructureExternalProduct: 22,
+	domain.CaseCauseInfrastructureProxy:           23,
+	domain.CaseCauseInfrastructureOther:           24,
+	domain.CaseCauseUnknown:                       25,
 }
 
-func init() {
-	snCauseLabelToEnum = make(map[string]domain.CaseCause, len(snCauseLabel))
-	for k, v := range snCauseLabel {
-		snCauseLabelToEnum[v] = k
+// snCauseByID maps ServiceNow cause choice-value strings (the SN "cause"
+// field's id, e.g. "12") to domain CaseCause enums.
+var snCauseByID = func() map[string]domain.CaseCause {
+	m := make(map[string]domain.CaseCause, len(snCauseKey))
+	for k, v := range snCauseKey {
+		m[strconv.Itoa(v)] = k
 	}
-}
+	return m
+}()
 
 // snWorkStateIDMap maps domain CaseWorkState enums to SN numeric work state IDs.
 var snWorkStateIDMap = map[domain.CaseWorkState]int{
@@ -843,13 +1070,13 @@ var snWorkStateIDMap = map[domain.CaseWorkState]int{
 type snUpdateCaseResponse struct {
 	Message string `json:"message"`
 	Case    struct {
-		ID             string       `json:"id"`
-		UpdatedOn      string       `json:"updatedOn"`
-		UpdatedBy      string       `json:"updatedBy"`
-		State          *snCaseState `json:"state"`
-		Severity       *snCaseLabel `json:"severity"`
-		WorkState      *snCaseLabel `json:"workState"`
-		WatchList      []struct {
+		ID        string       `json:"id"`
+		UpdatedOn string       `json:"updatedOn"`
+		UpdatedBy string       `json:"updatedBy"`
+		State     *snCaseState `json:"state"`
+		Severity  *snCaseLabel `json:"severity"`
+		WorkState *snCaseLabel `json:"workState"`
+		WatchList []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
 			Name     string `json:"name"`
@@ -867,8 +1094,20 @@ type snUpdateCaseResponse struct {
 			ID    string `json:"id"`
 			Label string `json:"label"`
 		} `json:"cause"`
-		CloseNotes *string `json:"closeNotes"`
-		ResolvedOn *string `json:"resolvedOn"`
+		CloseNotes *string    `json:"closeNotes"`
+		ResolvedOn *string    `json:"resolvedOn"`
+		ParentCase *snCaseRef `json:"parentCase"`
+		// FixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see snUpdateCasePayload.FixEta doc comment.
+		FixEta *string `json:"fixEta"`
+		// BestCaseFixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see
+		// snUpdateCasePayload.BestCaseFixEta doc comment.
+		BestCaseFixEta *string `json:"bestCaseFixEta"`
+		// MostLikelyFixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see
+		// snUpdateCasePayload.MostLikelyFixEta doc comment.
+		MostLikelyFixEta *string `json:"mostLikelyFixEta"`
+		// WorstCaseFixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see
+		// snUpdateCasePayload.WorstCaseFixEta doc comment.
+		WorstCaseFixEta *string `json:"worstCaseFixEta"`
 	} `json:"case"`
 }
 
@@ -895,20 +1134,53 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.AssigneeEmail != nil {
 		fieldCount++
 	}
+	if req.ParentID != nil {
+		fieldCount++
+	}
+	if req.RelatedCaseID != nil {
+		fieldCount++
+	}
+	if req.AutocloseHoldUntil != nil {
+		fieldCount++
+	}
+	if req.Subject != nil {
+		fieldCount++
+	}
+	if req.Description != nil {
+		fieldCount++
+	}
+	if req.DeploymentID != nil {
+		fieldCount++
+	}
+	if req.DeployedProductID != nil {
+		fieldCount++
+	}
+	if req.FixEta != nil {
+		fieldCount++
+	}
+	if req.BestCaseFixEta != nil {
+		fieldCount++
+	}
+	if req.MostLikelyFixEta != nil {
+		fieldCount++
+	}
+	if req.WorstCaseFixEta != nil {
+		fieldCount++
+	}
+	const fieldList = "state, severity, workState, watchList, assigneeEmail, parentId, relatedCaseId, " +
+		"autocloseHoldUntil, subject, description, deploymentId, deployedProductId, fixEta, " +
+		"bestCaseFixEta, mostLikelyFixEta, or worstCaseFixEta"
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, severity, workState, watchList, or assigneeEmail must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of " + fieldList + " must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, workState, watchList, or assigneeEmail may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of " + fieldList + " may be provided per request"}
 	}
 	if hasResolutionFields && req.State == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is also provided"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.UpdateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snUpdateCasePayload{}
 	if req.State != nil {
@@ -931,11 +1203,12 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			payload.ResolutionCode = &key
 		}
 		if req.Cause != nil {
-			label, ok := snCauseLabel[*req.Cause]
+			key, ok := snCauseKey[*req.Cause]
 			if !ok {
 				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "cause contains invalid value: " + string(*req.Cause)}
 			}
-			payload.Cause = &label
+			val := strconv.Itoa(key)
+			payload.Cause = &val
 		}
 		payload.CloseNotes = req.CloseNotes
 	}
@@ -964,6 +1237,80 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 	if req.AssigneeEmail != nil {
 		payload.AssigneeEmail = req.AssigneeEmail
+	}
+	if req.ParentID != nil {
+		if err := validateUUIDs("parentId", []string{*req.ParentID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.ParentID)
+		payload.ParentID = &sysid
+	}
+	if req.RelatedCaseID != nil {
+		if err := validateUUIDs("relatedCaseId", []string{*req.RelatedCaseID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.RelatedCaseID)
+		payload.RelatedCaseID = &sysid
+	}
+	if req.AutocloseHoldUntil != nil {
+		holdUntil := req.AutocloseHoldUntil.Format(snCreatedOnLayout)
+		payload.AutocloseHoldUntil = &holdUntil
+	}
+	if req.Subject != nil {
+		if *req.Subject == "" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "subject cannot be empty"}
+		}
+		payload.Title = req.Subject
+	}
+	if req.Description != nil {
+		if *req.Description == "" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "description cannot be empty"}
+		}
+		payload.Description = req.Description
+	}
+	if req.DeploymentID != nil {
+		if err := validateUUIDs("deploymentId", []string{*req.DeploymentID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.DeploymentID)
+		payload.DeploymentID = &sysid
+	}
+	if req.DeployedProductID != nil {
+		if err := validateUUIDs("deployedProductId", []string{*req.DeployedProductID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		sysid := uuidToSysid(*req.DeployedProductID)
+		payload.DeployedProductID = &sysid
+	}
+	if req.FixEta != nil {
+		fixEta := formatSNDate(req.FixEta)
+		payload.FixEta = &fixEta
+	}
+	if req.BestCaseFixEta != nil {
+		bestCaseFixEta := formatSNDate(req.BestCaseFixEta)
+		payload.BestCaseFixEta = &bestCaseFixEta
+	}
+	if req.MostLikelyFixEta != nil {
+		mostLikelyFixEta := formatSNDate(req.MostLikelyFixEta)
+		payload.MostLikelyFixEta = &mostLikelyFixEta
+	}
+	if req.WorstCaseFixEta != nil {
+		worstCaseFixEta := formatSNDate(req.WorstCaseFixEta)
+		payload.WorstCaseFixEta = &worstCaseFixEta
+	}
+
+	// Close-gate: reject closing a case that still has an open, customer-visible task.
+	// This is the authoritative server-side check (item 1's close-gating requirement) --
+	// it only needs the existing read path (task search + task detail), so it is fully
+	// wired even though task writes themselves are still Ballerina-blocked.
+	if payload.StateKey != nil && *payload.StateKey == snStateIDMap[domain.CaseStateClosed] {
+		blocked, err := s.hasOpenVisibleTasks(ctx, uuidToSysid(req.ID), token)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if blocked {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "case cannot be closed while it has an open task visible to the customer"}
+		}
 	}
 
 	raw, err := s.client.Patch(ctx, "/cases/"+uuidToSysid(req.ID), token, payload)
@@ -1024,17 +1371,59 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 	}
 	if snResp.Case.Cause != nil {
-		if c, ok := snCauseLabelToEnum[snResp.Case.Cause.Label]; ok {
+		if c, ok := snCauseByID[snResp.Case.Cause.ID]; ok {
 			resp.Case.Cause = &c
 		}
 	}
 	resp.Case.CloseNotes = snResp.Case.CloseNotes
+	if snResp.Case.ParentCase != nil {
+		resp.Case.ParentCase = &domain.CaseNumberRef{ID: sysidToUUID(snResp.Case.ParentCase.ID), Number: snResp.Case.ParentCase.Number}
+	}
 	if snResp.Case.ResolvedOn != nil {
 		resolvedOn, err := time.Parse(snCreatedOnLayout, *snResp.Case.ResolvedOn)
 		if err != nil {
 			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse resolvedAt %q: %w", *snResp.Case.ResolvedOn, err)
 		}
 		resp.Case.ResolvedOn = &resolvedOn
+	}
+	// FixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see snUpdateCasePayload.FixEta doc comment;
+	// snResp.Case.FixEta is always nil until Ballerina echoes it back.
+	if snResp.Case.FixEta != nil && *snResp.Case.FixEta != "" {
+		fixEta, err := time.Parse(snCreatedOnLayout, *snResp.Case.FixEta)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse fixEta %q: %w", *snResp.Case.FixEta, err)
+		}
+		resp.Case.FixEta = &fixEta
+	}
+	// BestCaseFixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see
+	// snUpdateCasePayload.BestCaseFixEta doc comment; snResp.Case.BestCaseFixEta is always
+	// nil until Ballerina echoes it back.
+	if snResp.Case.BestCaseFixEta != nil && *snResp.Case.BestCaseFixEta != "" {
+		bestCaseFixEta, err := time.Parse(snCreatedOnLayout, *snResp.Case.BestCaseFixEta)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse bestCaseFixEta %q: %w", *snResp.Case.BestCaseFixEta, err)
+		}
+		resp.Case.BestCaseFixEta = &bestCaseFixEta
+	}
+	// MostLikelyFixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see
+	// snUpdateCasePayload.MostLikelyFixEta doc comment; snResp.Case.MostLikelyFixEta is
+	// always nil until Ballerina echoes it back.
+	if snResp.Case.MostLikelyFixEta != nil && *snResp.Case.MostLikelyFixEta != "" {
+		mostLikelyFixEta, err := time.Parse(snCreatedOnLayout, *snResp.Case.MostLikelyFixEta)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse mostLikelyFixEta %q: %w", *snResp.Case.MostLikelyFixEta, err)
+		}
+		resp.Case.MostLikelyFixEta = &mostLikelyFixEta
+	}
+	// WorstCaseFixEta: Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main), see
+	// snUpdateCasePayload.WorstCaseFixEta doc comment; snResp.Case.WorstCaseFixEta is always
+	// nil until Ballerina echoes it back.
+	if snResp.Case.WorstCaseFixEta != nil && *snResp.Case.WorstCaseFixEta != "" {
+		worstCaseFixEta, err := time.Parse(snCreatedOnLayout, *snResp.Case.WorstCaseFixEta)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse worstCaseFixEta %q: %w", *snResp.Case.WorstCaseFixEta, err)
+		}
+		resp.Case.WorstCaseFixEta = &worstCaseFixEta
 	}
 
 	return resp, nil
@@ -1103,9 +1492,6 @@ func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.Cre
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.CreateAttachmentResponse{}, err
@@ -1155,6 +1541,7 @@ var validReferenceTypes = map[domain.ReferenceType]struct{}{
 	domain.ReferenceTypeConversation:  {},
 	domain.ReferenceTypeChangeRequest: {},
 	domain.ReferenceTypeDeployment:    {},
+	domain.ReferenceTypeIncident:      {},
 }
 
 type snSearchAttachmentsPayload struct {
@@ -1189,9 +1576,6 @@ func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.Se
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchAttachmentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
@@ -1289,9 +1673,6 @@ func (s *snCaseService) SearchCaseActivities(ctx context.Context, req domain.Sea
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCaseActivitiesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{req.CaseID}); err != nil {
 		return domain.SearchCaseActivitiesResponse{}, err
@@ -1374,9 +1755,6 @@ func (s *snCaseService) SearchCaseActivities(ctx context.Context, req domain.Sea
 
 func (s *snCaseService) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return nil, "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	resp, err := s.client.GetBinary(ctx, "/attachments/"+uuidToSysid(attachmentID)+"/content", token)
 	if err != nil {
@@ -1388,9 +1766,6 @@ func (s *snCaseService) GetCaseAttachmentContent(ctx context.Context, attachment
 
 func (s *snCaseService) DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.DeleteAttachmentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Delete(ctx, "/attachments/"+uuidToSysid(req.AttachmentID), token)
 	if err != nil {
@@ -1437,11 +1812,13 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	if err := validateUUIDs("assignedUserIds", req.Filters.AssignedUserIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
+	if req.Filters.ParentID != nil {
+		if err := validateUUIDs("parentId", []string{*req.Filters.ParentID}); err != nil {
+			return domain.SearchCasesResponse{}, err
+		}
+	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchCasesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snCaseSort
 	if req.SortBy.Field != "" {
@@ -1487,6 +1864,8 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			WorkStateKeys:      domainWorkStatesToSNIDs(req.Filters.WorkStates),
 			AssignedUserIDs:    uuidsToSysids(req.Filters.AssignedUserIDs),
 			ProductNames:       req.Filters.ProductNames,
+			Tags:               req.Filters.Tags,
+			ParentID:           snParentIDFilter(req.Filters.ParentID),
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -1692,4 +2071,175 @@ func snWorkStateLabelToEnum(ws *snCaseLabel) *domain.CaseWorkState {
 	default:
 		return nil
 	}
+}
+
+// hasOpenVisibleTasks reports whether the case identified by caseSysid has any
+// open task that is visible to the customer. Used by the close-gate in
+// UpdateCase (item 1's authoritative "can this case close?" check).
+//
+// SN's case-scoped task listing (snTask/snCaseTasksResponse, see
+// sn_task_service.go) does not carry visibleToCustomer -- only the single-task
+// detail response (snTaskDetail) does. So this walks the non-closed tasks
+// returned by the search and fetches each one's detail to check visibility.
+// Case task counts are small in practice, so a single page (limit 100) is
+// fetched rather than paginating fully; if that assumption stops holding, this
+// should switch to paging until exhausted.
+func (s *snCaseService) hasOpenVisibleTasks(ctx context.Context, caseSysid, token string) (bool, error) {
+	payload := snCaseTasksSearchPayload{Pagination: snProjectPagination{Limit: 100, Offset: 0}}
+
+	raw, err := s.client.Post(ctx, "/cases/"+caseSysid+"/tasks/search", token, payload)
+	if err != nil {
+		return false, err
+	}
+
+	var tasksResp snCaseTasksResponse
+	if err := json.Unmarshal(raw, &tasksResp); err != nil {
+		return false, fmt.Errorf("sn update case: parse case tasks response: %w", err)
+	}
+
+	for _, t := range tasksResp.Tasks {
+		if t.State != nil && *t.State == "CLOSED" {
+			continue
+		}
+
+		detailRaw, err := s.client.Get(ctx, "/tasks/"+t.ID, token)
+		if err != nil {
+			return false, err
+		}
+		var detail snTaskDetail
+		if err := json.Unmarshal(detailRaw, &detail); err != nil {
+			return false, fmt.Errorf("sn update case: parse task detail response: %w", err)
+		}
+		if detail.VisibleToCustomer {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// snAddTagPayload is the Choreo POST /cases/{id}/tags request body.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for this. SN's
+// tagging is the generic platform label/label_entry mechanism (table-agnostic,
+// not a case column), so a new adapter is needed -- ask: add
+// POST /cases/{id}/tags (body: {"label": string}) and
+// DELETE /cases/{id}/tags/{tagId} to servicenow.bal, backed by the sys_label /
+// label_entry tables scoped to reference_table="sn_customerservice_case".
+type snAddTagPayload struct {
+	Label string `json:"label"`
+}
+
+// snTag mirrors the Choreo tag shape (once it exists).
+type snTag struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Color *string `json:"color"`
+}
+
+type snAddTagResponse struct {
+	Message string `json:"message"`
+	Tag     snTag  `json:"tag"`
+}
+
+// AddCaseTag attaches a free-text label to the case identified by caseID.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snAddTagPayload doc comment. This is implemented so
+// the entity-service side is ready the moment Ballerina adds the endpoint;
+// until then, calling it returns a downstream error (no such Choreo route today).
+func (s *snCaseService) AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error) {
+	if err := validateUUIDs("id", []string{caseID}); err != nil {
+		return domain.Tag{}, err
+	}
+	if strings.TrimSpace(label) == "" {
+		return domain.Tag{}, &apierror.ValidationError{Msg: "label is required"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	payload := snAddTagPayload{Label: label}
+	raw, err := s.client.Post(ctx, "/cases/"+uuidToSysid(caseID)+"/tags", token, payload)
+	if err != nil {
+		return domain.Tag{}, err
+	}
+
+	var snResp snAddTagResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.Tag{}, fmt.Errorf("sn add case tag: parse response: %w", err)
+	}
+
+	return domain.Tag{
+		ID:    sysidToUUID(snResp.Tag.ID),
+		Label: snResp.Tag.Label,
+		Color: snResp.Tag.Color,
+	}, nil
+}
+
+// RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): see snAddTagPayload doc comment (no such Choreo route today).
+func (s *snCaseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) error {
+	if err := validateUUIDs("id", []string{caseID}); err != nil {
+		return err
+	}
+	if err := validateUUIDs("tagId", []string{tagID}); err != nil {
+		return err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	_, err := s.client.Delete(ctx, "/cases/"+uuidToSysid(caseID)+"/tags/"+uuidToSysid(tagID), token)
+	return err
+}
+
+// snSearchTagsResponse mirrors the Choreo GET /tags/search response (once it exists).
+type snSearchTagsResponse struct {
+	Tags []snTag `json:"tags"`
+}
+
+// SearchTags returns the tags (not scoped to any single case) whose label matches query, for
+// FE autocomplete when attaching a tag to a case.
+//
+// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for this.
+// SN's tagging is the generic platform label mechanism (table-agnostic, not a case column), so
+// listing/searching existing labels needs a new adapter -- ask: add
+// GET /tags/search?q={query}&limit={limit} (response: {"tags": [{"id", "label", "color"}]}) to
+// servicenow.bal, backed by the sys_label table (optionally scoped to labels used against
+// reference_table="sn_customerservice_case" label_entry rows). This is implemented so the
+// entity-service side is ready the moment Ballerina adds the endpoint; until then, calling it
+// returns a downstream error (no such Choreo route today).
+func (s *snCaseService) SearchTags(ctx context.Context, query string, limit int) ([]domain.Tag, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	q := url.Values{}
+	if query != "" {
+		q.Set("q", query)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/tags/search"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+
+	raw, err := s.client.Get(ctx, path, token)
+	if err != nil {
+		return nil, err
+	}
+
+	var snResp snSearchTagsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return nil, fmt.Errorf("sn search tags: parse response: %w", err)
+	}
+
+	tags := make([]domain.Tag, 0, len(snResp.Tags))
+	for _, t := range snResp.Tags {
+		tags = append(tags, domain.Tag{
+			ID:    sysidToUUID(t.ID),
+			Label: t.Label,
+			Color: t.Color,
+		})
+	}
+	return tags, nil
 }

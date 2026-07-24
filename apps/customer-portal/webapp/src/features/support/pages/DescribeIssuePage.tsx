@@ -32,6 +32,8 @@ import { useAllDeploymentProducts } from "@features/support/hooks/useAllDeployme
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { buildEnvProducts } from "@features/support/utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/permission";
+import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
+import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import type { ChatNavState } from "@features/support/types/conversations";
 import { CHAT_MAX_CHARS } from "@features/support/constants/chatConstants";
 
@@ -50,6 +52,7 @@ export default function DescribeIssuePage(): JSX.Element {
   const location = useLocation();
   const { projectId } = useParams<{ projectId: string }>();
   const { showError } = useErrorBanner();
+  const piiGuard = usePiiGuard();
   const [value, setValue] = useState("");
   const [isLoadingAfterClick, setIsLoadingAfterClick] = useState(false);
 
@@ -90,25 +93,32 @@ export default function DescribeIssuePage(): JSX.Element {
   const handleSubmit = useCallback(async () => {
     if (!plainText.trim() || !projectId) return;
     if (submittingRef.current) return;
-    submittingRef.current = true;
-    setIsLoadingAfterClick(true);
 
-    try {
-      const accountId = projectDetails?.account?.id ?? projectId;
-      const state: ChatNavState = {
-        initialUserMessage: plainText.trim(),
-        initialEnvProducts: envProducts,
-        accountId,
-      };
-      navigate(`/projects/${projectId}/support/chat`, { state });
-    } catch {
-      showError(
-        "Could not get help. Please try again or create a support case.",
-      );
-    } finally {
-      submittingRef.current = false;
-      setIsLoadingAfterClick(false);
-    }
+    const startChat = () => {
+      submittingRef.current = true;
+      setIsLoadingAfterClick(true);
+
+      try {
+        const accountId = projectDetails?.account?.id ?? projectId;
+        const state: ChatNavState = {
+          initialUserMessage: plainText.trim(),
+          initialEnvProducts: envProducts,
+          accountId,
+        };
+        navigate(`/projects/${projectId}/support/chat`, { state });
+      } catch {
+        showError(
+          "Could not get help. Please try again or create a support case.",
+        );
+      } finally {
+        submittingRef.current = false;
+        setIsLoadingAfterClick(false);
+      }
+    };
+
+    // Warn about PII before starting the chat. "Edit" keeps the text so the
+    // user can revise it; "Post anyway" proceeds.
+    piiGuard.checkBeforeSubmit(plainText.trim(), startChat);
   }, [
     plainText,
     projectId,
@@ -116,6 +126,7 @@ export default function DescribeIssuePage(): JSX.Element {
     projectDetails?.account?.id,
     navigate,
     showError,
+    piiGuard,
   ]);
 
   const isMessageTooLong = value.length > CHAT_MAX_CHARS;
@@ -273,6 +284,8 @@ export default function DescribeIssuePage(): JSX.Element {
           </Box>
         </CardContent>
       </Card>
+
+      <PiiWarningDialog {...piiGuard.dialogProps} />
     </Box>
   );
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -37,25 +38,25 @@ type snChangeRequestsResponse struct {
 }
 
 type snChangeRequest struct {
-	ID               string                `json:"id"`
-	Number           string                `json:"number"`
-	Title            string                `json:"title"`
-	Description      string                `json:"description"`
-	CreatedOn        string                `json:"createdOn"`
-	UpdatedOn        *string               `json:"updatedOn"`
-	Project          snCREntityRef         `json:"project"`
-	Case             *snCREntityRef        `json:"case"`
-	Deployment       *snCREntityRef        `json:"deployment"`
-	DeployedProduct  *snCREntityRef        `json:"deployedProduct"`
-	Product          *snCREntityRef        `json:"product"`
-	AssignedEngineer *snCREntityRef        `json:"assignedEngineer"`
-	AssignedTeam     *snCREntityRef        `json:"assignedTeam"`
-	PlannedStartOn   *string               `json:"plannedStartOn"`
-	PlannedEndOn     *string               `json:"plannedEndOn"`
-	Duration         *string               `json:"duration"`
-	Impact           *snCRLabel            `json:"impact"`
-	State            *snCRLabel            `json:"state"`
-	Type             *snCRLabel            `json:"type"`
+	ID               string         `json:"id"`
+	Number           string         `json:"number"`
+	Title            string         `json:"title"`
+	Description      string         `json:"description"`
+	CreatedOn        string         `json:"createdOn"`
+	UpdatedOn        *string        `json:"updatedOn"`
+	Project          snCREntityRef  `json:"project"`
+	Case             *snCREntityRef `json:"case"`
+	Deployment       *snCREntityRef `json:"deployment"`
+	DeployedProduct  *snCREntityRef `json:"deployedProduct"`
+	Product          *snCREntityRef `json:"product"`
+	AssignedEngineer *snCREntityRef `json:"assignedEngineer"`
+	AssignedTeam     *snCREntityRef `json:"assignedTeam"`
+	PlannedStartOn   *string        `json:"plannedStartOn"`
+	PlannedEndOn     *string        `json:"plannedEndOn"`
+	Duration         *string        `json:"duration"`
+	Impact           *snCRLabel     `json:"impact"`
+	State            *snCRLabel     `json:"state"`
+	Type             *snCRLabel     `json:"type"`
 }
 
 type snCREntityRef struct {
@@ -267,9 +268,6 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchChangeRequestsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	var snSortBy *snCRSort
 	if req.SortBy.Field != "" {
@@ -460,7 +458,6 @@ var snCRCategoryIDMap = map[domain.ChangeRequestCategory]string{
 	domain.ChangeRequestCategoryCloudComputing:       "cloud computing",
 }
 
-
 func strPtr(s string) *string { return &s }
 
 // CreateChangeRequest implements ChangeRequestService for the ServiceNow data source.
@@ -516,9 +513,6 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snCreateChangeRequestPayload{
 		Subject:            req.Subject,
@@ -594,41 +588,173 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	return resp, nil
 }
 
+// snCRPatchStateIDMap maps domain ChangeRequestState enums to SN numeric state IDs for PATCH.
+var snCRPatchStateIDMap = map[domain.ChangeRequestState]int{
+	domain.ChangeRequestStateNew:              -5,
+	domain.ChangeRequestStateAssess:           -4,
+	domain.ChangeRequestStateAuthorize:        -3,
+	domain.ChangeRequestStateScheduled:        -2,
+	domain.ChangeRequestStateImplement:        -1,
+	domain.ChangeRequestStateReview:           0,
+	domain.ChangeRequestStateCustomerReview:   1,
+	domain.ChangeRequestStateRollback:         2,
+	domain.ChangeRequestStateClosed:           3,
+	domain.ChangeRequestStateCanceled:         4,
+	domain.ChangeRequestStateCustomerApproval: 5,
+}
+
 // snPatchChangeRequestPayload mirrors the Choreo PATCH /change-requests/{id} request body.
 type snPatchChangeRequestPayload struct {
+	Title              *string `json:"title,omitempty"`
+	Description        *string `json:"description,omitempty"`
+	ProjectID          *string `json:"projectId,omitempty"`
+	CaseID             *string `json:"caseId,omitempty"`
+	DeploymentID       *string `json:"deploymentId,omitempty"`
+	DeployedProductID  *string `json:"deployedProductId,omitempty"`
+	AssignedEngineerID *string `json:"assignedEngineerId,omitempty"`
+	AssignedTeamID     *string `json:"assignedTeamId,omitempty"`
 	PlannedStartOn     *string `json:"plannedStartOn,omitempty"`
+	PlannedEndOn       *string `json:"plannedEndOn,omitempty"`
+	ImpactKey          *int    `json:"impactKey,omitempty"`
+	StateKey           *int    `json:"stateKey,omitempty"`
+	TypeKey            *string `json:"typeKey,omitempty"`
+	Justification      *string `json:"justification,omitempty"`
+	ImpactDescription  *string `json:"impactDescription,omitempty"`
+	ServiceOutage      *string `json:"serviceOutage,omitempty"`
+	CommunicationPlan  *string `json:"communicationPlan,omitempty"`
+	RollbackPlan       *string `json:"rollbackPlan,omitempty"`
+	TestPlan           *string `json:"testPlan,omitempty"`
 	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
+	RequestApproval    *bool   `json:"requestApproval,omitempty"`
 }
 
 // snPatchChangeRequestResponse mirrors the Choreo PATCH /change-requests/{id} response.
 type snPatchChangeRequestResponse struct {
-	Message       string `json:"message"`
-	ChangeRequest struct {
-		ID        string `json:"id"`
-		UpdatedOn string `json:"updatedOn"`
-		UpdatedBy string `json:"updatedBy"`
-	} `json:"changeRequest"`
+	Message       string                `json:"message"`
+	ChangeRequest snChangeRequestDetail `json:"changeRequest"`
 }
 
 func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.PatchChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.PatchChangeRequestResponse{}, err
 	}
 
-	if req.PlannedStartOn == nil && req.IsCustomerApproved == nil && req.IsCustomerReviewed == nil {
+	if req.Title == nil && req.Description == nil && req.ProjectID == nil && req.CaseID == nil &&
+		req.DeploymentID == nil && req.DeployedProductID == nil && req.AssignedEngineerID == nil &&
+		req.AssignedTeamID == nil && req.PlannedStartOn == nil && req.PlannedEndOn == nil &&
+		req.Impact == nil && req.State == nil && req.Type == nil && req.Justification == nil &&
+		req.ImpactDescription == nil && req.ServiceOutage == nil && req.CommunicationPlan == nil &&
+		req.RollbackPlan == nil && req.TestPlan == nil && req.IsCustomerApproved == nil &&
+		req.IsCustomerReviewed == nil && req.RequestApproval == nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 
+	exclusiveApprovalFields := 0
+	if req.IsCustomerApproved != nil {
+		exclusiveApprovalFields++
+	}
+	if req.IsCustomerReviewed != nil {
+		exclusiveApprovalFields++
+	}
+	if req.RequestApproval != nil {
+		exclusiveApprovalFields++
+	}
+	if exclusiveApprovalFields > 1 {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "isCustomerApproved, isCustomerReviewed, and requestApproval are mutually exclusive"}
+	}
+
+	if req.Title != nil && *req.Title == "" {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "title cannot be empty"}
+	}
+	if req.Impact != nil {
+		if _, ok := snCRImpactIDMap[*req.Impact]; !ok {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid impact %q", *req.Impact)}
+		}
+	}
+	if req.State != nil {
+		if _, ok := snCRPatchStateIDMap[*req.State]; !ok {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid state %q", *req.State)}
+		}
+	}
+	if req.Type != nil {
+		if _, ok := snCRCreateTypeIDMap[*req.Type]; !ok {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		}
+	}
+	if req.PlannedStartOn != nil {
+		if _, err := time.Parse(snCreatedOnLayout, *req.PlannedStartOn); err != nil {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedStartOn must follow the format: YYYY-MM-DD HH:mm:ss"}
+		}
+	}
+	if req.PlannedEndOn != nil {
+		if _, err := time.Parse(snCreatedOnLayout, *req.PlannedEndOn); err != nil {
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedEndOn must follow the format: YYYY-MM-DD HH:mm:ss"}
+		}
+	}
+
+	uuidFields := map[string]*string{
+		"projectId":          req.ProjectID,
+		"caseId":             req.CaseID,
+		"deploymentId":       req.DeploymentID,
+		"deployedProductId":  req.DeployedProductID,
+		"assignedEngineerId": req.AssignedEngineerID,
+		"assignedTeamId":     req.AssignedTeamID,
+	}
+	for field, val := range uuidFields {
+		if val != nil {
+			if err := validateUUIDs(field, []string{*val}); err != nil {
+				return domain.PatchChangeRequestResponse{}, err
+			}
+		}
+	}
+
 	payload := snPatchChangeRequestPayload{
+		Title:              req.Title,
+		Description:        req.Description,
 		PlannedStartOn:     req.PlannedStartOn,
+		PlannedEndOn:       req.PlannedEndOn,
+		Justification:      req.Justification,
+		ImpactDescription:  req.ImpactDescription,
+		ServiceOutage:      req.ServiceOutage,
+		CommunicationPlan:  req.CommunicationPlan,
+		RollbackPlan:       req.RollbackPlan,
+		TestPlan:           req.TestPlan,
 		IsCustomerApproved: req.IsCustomerApproved,
 		IsCustomerReviewed: req.IsCustomerReviewed,
+		RequestApproval:    req.RequestApproval,
+	}
+	if req.ProjectID != nil {
+		payload.ProjectID = strPtr(uuidToSysid(*req.ProjectID))
+	}
+	if req.CaseID != nil {
+		payload.CaseID = strPtr(uuidToSysid(*req.CaseID))
+	}
+	if req.DeploymentID != nil {
+		payload.DeploymentID = strPtr(uuidToSysid(*req.DeploymentID))
+	}
+	if req.DeployedProductID != nil {
+		payload.DeployedProductID = strPtr(uuidToSysid(*req.DeployedProductID))
+	}
+	if req.AssignedEngineerID != nil {
+		payload.AssignedEngineerID = strPtr(uuidToSysid(*req.AssignedEngineerID))
+	}
+	if req.AssignedTeamID != nil {
+		payload.AssignedTeamID = strPtr(uuidToSysid(*req.AssignedTeamID))
+	}
+	if req.Impact != nil {
+		v := snCRImpactIDMap[*req.Impact]
+		payload.ImpactKey = &v
+	}
+	if req.State != nil {
+		v := snCRPatchStateIDMap[*req.State]
+		payload.StateKey = &v
+	}
+	if req.Type != nil {
+		v := snCRCreateTypeIDMap[*req.Type]
+		payload.TypeKey = &v
 	}
 
 	raw, err := s.client.Patch(ctx, "/change-requests/"+uuidToSysid(id), token, payload)
@@ -642,9 +768,8 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	}
 
 	return domain.PatchChangeRequestResponse{
-		ID:        sysidToUUID(snResp.ChangeRequest.ID),
-		UpdatedOn: snResp.ChangeRequest.UpdatedOn,
-		UpdatedBy: snResp.ChangeRequest.UpdatedBy,
+		Message:       snResp.Message,
+		ChangeRequest: mapSNChangeRequestDetailToView(snResp.ChangeRequest),
 	}, nil
 }
 
@@ -662,13 +787,11 @@ type snChangeRequestDetail struct {
 	HasCustomerReviewed bool           `json:"hasCustomerReviewed"`
 	ApprovedBy          *snCREntityRef `json:"approvedBy"`
 	ApprovedOn          *string        `json:"approvedOn"`
+	LegalNextStates     []string       `json:"legalNextStates"`
 }
 
 func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ChangeRequest{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ChangeRequest{}, err
@@ -684,6 +807,127 @@ func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string
 		return domain.ChangeRequest{}, fmt.Errorf("sn get change request: parse response: %w", err)
 	}
 
+	return mapSNChangeRequestDetailToView(cr), nil
+}
+
+// snChangeRequestApprovalsResponse mirrors the Choreo GET /change-requests/{id}/approvals response.
+type snChangeRequestApprovalsResponse struct {
+	Approvals []snChangeRequestApproval `json:"approvals"`
+}
+
+type snChangeRequestApproval struct {
+	Stage        string                    `json:"stage"`
+	ApproverType string                    `json:"approverType"`
+	ApproverName string                    `json:"approverName"`
+	Status       string                    `json:"status"`
+	Approvers    []snChangeRequestApprover `json:"approvers"`
+}
+
+type snChangeRequestApprover struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	RespondedOn *string `json:"respondedOn"`
+}
+
+// GetChangeRequestApprovals returns the approval stages and per-approver status for a
+// single change request identified by UUID.
+func (s *snChangeRequestService) GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ChangeRequestApprovals{}, err
+	}
+
+	raw, err := s.client.Get(ctx, "/change-requests/"+uuidToSysid(id)+"/approvals", token)
+	if err != nil {
+		return domain.ChangeRequestApprovals{}, err
+	}
+
+	var snResp snChangeRequestApprovalsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.ChangeRequestApprovals{}, fmt.Errorf("sn get change request approvals: parse response: %w", err)
+	}
+
+	approvals := make([]domain.ChangeRequestApproval, 0, len(snResp.Approvals))
+	for _, a := range snResp.Approvals {
+		approvers := make([]domain.ChangeRequestApprover, 0, len(a.Approvers))
+		for _, ap := range a.Approvers {
+			approvers = append(approvers, domain.ChangeRequestApprover{
+				ID:          sysidToUUID(ap.ID),
+				Name:        ap.Name,
+				Status:      ap.Status,
+				RespondedOn: ap.RespondedOn,
+			})
+		}
+		approvals = append(approvals, domain.ChangeRequestApproval{
+			Stage:        a.Stage,
+			ApproverType: domain.ChangeRequestApproverType(a.ApproverType),
+			ApproverName: a.ApproverName,
+			Status:       domain.ChangeRequestApprovalStatus(a.Status),
+			Approvers:    approvers,
+		})
+	}
+
+	return domain.ChangeRequestApprovals{Approvals: approvals}, nil
+}
+
+// snChangeRequestApprovalDecisionPayload mirrors the Choreo
+// POST /change-requests/{id}/approvals/decision request body.
+type snChangeRequestApprovalDecisionPayload struct {
+	Decision string `json:"decision"`
+}
+
+// snChangeRequestApprovalDecisionResponse mirrors the Choreo
+// POST /change-requests/{id}/approvals/decision response.
+type snChangeRequestApprovalDecisionResponse struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+}
+
+// changeRequestApprovalDecisions is the set of valid values accepted for a
+// change request approval decision.
+var changeRequestApprovalDecisions = map[string]bool{
+	"approved": true,
+	"rejected": true,
+}
+
+// DecideChangeRequestApproval submits the caller's decision on their own pending
+// approval for a change request. ServiceNow enforces that only the caller's own
+// pending approval can be acted on; the change request's own state cascades
+// automatically via ServiceNow's existing business rule.
+func (s *snChangeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ChangeRequestApprovalDecisionResponse{}, err
+	}
+
+	if !changeRequestApprovalDecisions[decision] {
+		return domain.ChangeRequestApprovalDecisionResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid decision %q", decision)}
+	}
+
+	payload := snChangeRequestApprovalDecisionPayload{Decision: decision}
+
+	raw, err := s.client.Post(ctx, "/change-requests/"+uuidToSysid(id)+"/approvals/decision", token, payload)
+	if err != nil {
+		return domain.ChangeRequestApprovalDecisionResponse{}, err
+	}
+
+	var snResp snChangeRequestApprovalDecisionResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.ChangeRequestApprovalDecisionResponse{}, fmt.Errorf("sn decide change request approval: parse response: %w", err)
+	}
+
+	return domain.ChangeRequestApprovalDecisionResponse{
+		ID:    sysidToUUID(snResp.ID),
+		State: snResp.State,
+	}, nil
+}
+
+// mapSNChangeRequestDetailToView maps a Choreo change-request detail payload to the domain view,
+// shared by GetChangeRequest and PatchChangeRequest.
+func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeRequest {
 	subject := cr.Title
 	description := cr.Description
 
@@ -738,10 +982,11 @@ func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string
 		HasCustomerApproved:     cr.HasCustomerApproved,
 		HasCustomerReviewed:     cr.HasCustomerReviewed,
 		ApprovedOn:              cr.ApprovedOn,
+		LegalNextStates:         cr.LegalNextStates,
 	}
 	if cr.ApprovedBy != nil {
 		result.ApprovedBy = &domain.EntityRef{ID: sysidToUUID(cr.ApprovedBy.ID), Name: cr.ApprovedBy.Name}
 	}
 
-	return result, nil
+	return result
 }

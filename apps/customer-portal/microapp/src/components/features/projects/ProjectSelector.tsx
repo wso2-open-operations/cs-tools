@@ -101,7 +101,7 @@ export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
       </Stack>
       <ErrorBoundary fallback={fallback}>
         <Suspense fallback={fallback}>
-          <Box sx={{ flex: 1, overflowY: "auto", py: 1 }}>
+          <Box sx={{ flex: 1, overflowY: "auto", py: 1, WebkitOverflowScrolling: "touch" }}>
             <ProjectsList search={search} onClose={onClose} />
           </Box>
         </Suspense>

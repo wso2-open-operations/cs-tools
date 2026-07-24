@@ -34,6 +34,52 @@ func NewIncidentHandler(svc service.IncidentService) *IncidentHandler {
 	return &IncidentHandler{svc: svc}
 }
 
+// GetIncident handles GET /incidents/{id}.
+func (h *IncidentHandler) GetIncident(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	result, err := h.svc.GetIncidentByID(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// CreateIncident handles POST /incidents.
+func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateIncidentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.CreateIncident(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// PatchIncident handles PATCH /incidents/{id}.
+func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateIncidentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	resp, err := h.svc.UpdateIncident(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // SearchIncidents handles POST /incidents/search.
 func (h *IncidentHandler) SearchIncidents(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchIncidentsRequest

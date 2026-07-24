@@ -133,6 +133,108 @@ export function isSecurityReportAnalysisType(type: CaseTypeInput): boolean {
 }
 
 /**
+ * Detects whether a case type represents an Announcement.
+ * Prefers stable id matching and falls back to normalized label matching.
+ */
+export function isAnnouncementType(type: CaseTypeInput): boolean {
+  if (!type) return false;
+
+  const target = CaseType.ANNOUNCEMENT.toLowerCase().replace(/_/g, "");
+
+  const normalize = (val: string) =>
+    val
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "")
+      .trim();
+
+  switch (typeof type) {
+    case "string":
+      return normalize(type) === target;
+
+    case "object":
+      switch (true) {
+        case type.id === CaseType.ANNOUNCEMENT:
+          return true;
+        case !!type.label:
+          return normalize(type.label!) === target;
+        default:
+          return false;
+      }
+
+    default:
+      return false;
+  }
+}
+
+/**
+ * Detects whether a case type represents an Engagement.
+ * Prefers stable id matching and falls back to normalized label matching.
+ */
+export function isEngagementType(type: CaseTypeInput): boolean {
+  if (!type) return false;
+
+  const target = CaseType.ENGAGEMENT.toLowerCase().replace(/_/g, "");
+
+  const normalize = (val: string) =>
+    val
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "")
+      .trim();
+
+  switch (typeof type) {
+    case "string":
+      return normalize(type) === target;
+
+    case "object":
+      switch (true) {
+        case type.id === CaseType.ENGAGEMENT:
+          return true;
+        case !!type.label:
+          return normalize(type.label!) === target;
+        default:
+          return false;
+      }
+
+    default:
+      return false;
+  }
+}
+
+/**
+ * Detects whether a case type represents a Service Request.
+ * Prefers stable id matching and falls back to normalized label matching.
+ */
+export function isServiceRequestType(type: CaseTypeInput): boolean {
+  if (!type) return false;
+
+  const target = CaseType.SERVICE_REQUEST.toLowerCase().replace(/_/g, "");
+
+  const normalize = (val: string) =>
+    val
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "")
+      .trim();
+
+  switch (typeof type) {
+    case "string":
+      return normalize(type) === target;
+
+    case "object":
+      switch (true) {
+        case type.id === CaseType.SERVICE_REQUEST:
+          return true;
+        case !!type.label:
+          return normalize(type.label!) === target;
+        default:
+          return false;
+      }
+
+    default:
+      return false;
+  }
+}
+
+/**
  * Comprehensive check to determine if a created case is a security report.
  * Consolidates multiple possible indicators into a single check.
  *

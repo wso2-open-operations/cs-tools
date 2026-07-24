@@ -31,6 +31,7 @@ import {
   billableLabel,
   LEAD_COMMENT_MAX,
 } from "@features/csm-timecards/constants/timeCardConstants";
+import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
 import type {
   CsmTimeCard,
   TimeCardDecisionInput,
@@ -38,6 +39,14 @@ import type {
 
 interface TimeCardReviewDialogProps {
   card: CsmTimeCard;
+  /**
+   * The decision already chosen (e.g. the Approve/Reject button clicked on the
+   * list) — when set, the dialog only offers that one action, instead of
+   * asking the user to pick again from both. Omit for a generic "Review" entry
+   * point (see `CaseTimeCardsPanel`'s single Review button) where no decision
+   * has been made yet and both options should show.
+   */
+  action?: TimecardAction;
   /** True while the decision mutation is in flight. */
   isDeciding: boolean;
   onClose: () => void;
@@ -63,19 +72,36 @@ function Field({ label, value }: { label: string; value: string }): JSX.Element 
  */
 export default function TimeCardReviewDialog({
   card,
+  action,
   isDeciding,
   onClose,
   onDecide,
 }: TimeCardReviewDialogProps): JSX.Element {
   const [leadComment, setLeadComment] = useState("");
+  const [rejectBlocked, setRejectBlocked] = useState(false);
+  const trimmedComment = leadComment.trim();
 
-  const decide = (state: "approved" | "rejected"): void =>
+  const decide = (state: "approved" | "rejected"): void => {
+    // The backend requires a non-empty leadComment when rejecting (there's no
+    // other trace a rejection leaves — see CsmTimeCard.rejectionReason), but
+    // doesn't say so anywhere in its error response, so this is enforced here
+    // rather than surfacing a generic "Invalid request payload." after the fact.
+    if (state === "rejected" && trimmedComment === "") {
+      setRejectBlocked(true);
+      return;
+    }
     onDecide({ cardId: card.id, state, leadComment });
+  };
+
+  const titlePrefix =
+    action === "approve" ? "Accept" : action === "reject" ? "Reject" : "Review";
+  const rejectAllowed = action !== "approve";
+  const commentMissingForReject = rejectBlocked && trimmedComment === "";
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
-        Review time card · {card.caseNumber} · {card.totalMinutes} min
+        {titlePrefix} time card · {card.caseNumber} · {card.totalMinutes} min
       </DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -94,20 +120,30 @@ export default function TimeCardReviewDialog({
                 Logged
               </Typography>
               <Typography variant="body2">
-                <RelativeTime iso={card.createdOn} />
+                <RelativeTime iso={card.workDate} />
               </Typography>
             </Box>
           </Box>
 
           <TextField
-            label="Lead's comment (optional)"
+            label={
+              rejectAllowed
+                ? "Lead's comment (required to reject)"
+                : "Lead's comment (optional)"
+            }
             multiline
             minRows={2}
             value={leadComment}
-            onChange={(e) =>
-              setLeadComment(e.target.value.slice(0, LEAD_COMMENT_MAX))
+            onChange={(e) => {
+              setLeadComment(e.target.value.slice(0, LEAD_COMMENT_MAX));
+              setRejectBlocked(false);
+            }}
+            error={commentMissingForReject}
+            helperText={
+              commentMissingForReject
+                ? "A comment is required to reject a time card."
+                : `${LEAD_COMMENT_MAX - leadComment.length} characters left`
             }
-            helperText={`${LEAD_COMMENT_MAX - leadComment.length} characters left`}
           />
         </Box>
       </DialogContent>
@@ -115,24 +151,28 @@ export default function TimeCardReviewDialog({
         <Button color="inherit" onClick={onClose} disabled={isDeciding}>
           Cancel
         </Button>
-        <Button
-          color="error"
-          variant="outlined"
-          startIcon={<X size={16} />}
-          onClick={() => decide("rejected")}
-          disabled={isDeciding}
-        >
-          Reject
-        </Button>
-        <Button
-          color="success"
-          variant="contained"
-          startIcon={<Check size={16} />}
-          onClick={() => decide("approved")}
-          disabled={isDeciding}
-        >
-          Accept
-        </Button>
+        {action !== "approve" && (
+          <Button
+            color="error"
+            variant="outlined"
+            startIcon={<X size={16} />}
+            onClick={() => decide("rejected")}
+            disabled={isDeciding}
+          >
+            Reject
+          </Button>
+        )}
+        {action !== "reject" && (
+          <Button
+            color="success"
+            variant="outlined"
+            startIcon={<Check size={16} />}
+            onClick={() => decide("approved")}
+            disabled={isDeciding}
+          >
+            Accept
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

@@ -24,10 +24,12 @@ import {
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarClock,
   CheckCircle,
   ChevronDown,
   Clock,
   Copy,
+  Eye,
   Gauge,
   GitBranch,
   Inbox,
@@ -35,6 +37,7 @@ import {
   ListChecks,
   PauseCircle,
   Phone,
+  Pencil,
   Play,
   Send,
   User,
@@ -198,10 +201,14 @@ interface SecondaryItem {
  * The "More" overflow lists state-independent actions on a case. Items here
  * map to documented use cases — see `UseCases.md`:
  *   - Reassign engineer              → ISSU-002 (self-assign generalised)
- *   - Hold auto-closure              → ISSU-027 (only while awaiting info / solution proposed)
+ *   - Manage watchers                → ISSU-018 (PATCH /cases/{id} { watchList }, see WatchersDialog.tsx)
+ *   - Hold auto-closure              → ISSU-027 (PATCH /cases/{id} { autocloseHoldUntil }, see SetAutocloseHoldDialog.tsx)
+ *   - Edit case details              → subject/description/deployment/deployed product (see EditCaseDetailsDialog.tsx)
+ *   - Link to another case           → parent or related case (see LinkCaseDialog.tsx)
  *   - Create incident / link incident → ISSU-021
  *   - Raise Git issue                → ISSU-020
- *   - Create task                    → ISSU-025
+ *   - Create task                    → ISSU-025 (POST /cases/{caseId}/tasks, see CreateTaskDialog.tsx)
+ *   - Set fix ETA                    → PATCH /cases/{id} { fixEta }, see SetFixEtaDialog.tsx
  *   - Request a call                 → ISSU-008 (opens the Call requests tab's create dialog)
  *   - Log time                       → ISSU-017
  *   - Change severity                → PATCH /cases/{id} { severity }, already fully
@@ -209,7 +216,6 @@ interface SecondaryItem {
  *   - Copy case link                 → ISSU-010 (per-comment + per-case permalinks)
  *
  * Intentionally NOT here:
- *   - Watch / unwatch  → withdrawn along with the Watchers widget (ISSU-018), no backend flow planned yet
  *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
  *   - Escalate to lead → withdrawn, no backend flow planned yet
  */
@@ -268,9 +274,9 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   // not built yet, regardless of the case's current state.
   const NOT_BUILT_YET = "Not available yet — this action is planned but not built.";
 
-  // Only "Copy case link", "Request a call", "Log time", "Assign / reassign
-  // engineer…", "Raise internal Git issue…", and "Change severity…" are wired
-  // up. The rest are disabled until their backend flows land.
+  // Only "Create incident from case…" and "Link to incident…" remain
+  // disabled/not-built — every other item below (including "Create task…"
+  // and "Set fix ETA…") is wired up.
   items.push(
     {
       key: "raise_git_issue",
@@ -300,14 +306,56 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       key: "change_severity",
       label: "Change severity…",
       icon: <Gauge size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
+    {
+      key: "edit_case_details",
+      label: "Edit case details…",
+      icon: <Pencil size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
+    {
+      key: "manage_watchers",
+      label: "Manage watchers…",
+      icon: <Eye size={16} />,
       divider: true,
       disabled: caseClosed,
       tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
     },
-    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    {
+      key: "hold_auto_close",
+      label: "Hold auto-closure…",
+      icon: <PauseCircle size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
+    {
+      key: "link_case",
+      label: "Link to another case…",
+      icon: <LinkIcon size={16} />,
+      divider: true,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
     { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true, tooltip: NOT_BUILT_YET },
     { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
-    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true, tooltip: NOT_BUILT_YET },
+    {
+      key: "create_task",
+      label: "Create task…",
+      icon: <ListChecks size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
+    {
+      key: "set_fix_eta",
+      label: "Set fix ETA…",
+      icon: <CalendarClock size={16} />,
+      divider: true,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
     {
       key: "request_call",
       label: "Request a call…",
@@ -328,6 +376,14 @@ interface CaseActionBarProps {
     action: CaseLifecycleAction | { secondary: string },
     targetState?: CaseState,
   ) => void | Promise<unknown>;
+  /**
+   * FE-only, advisory reason to disable the "Close" transition — e.g. an open
+   * task still on the case. Purely a UX hint: the entity-service already
+   * enforces the real close gate server-side, so a rejected close still
+   * surfaces via the caller's own error handling even if this prop is unset
+   * or stale. Only ever applied to a `targetState === "closed"` button.
+   */
+  closeBlockedReason?: string;
 }
 
 /**
@@ -340,6 +396,7 @@ interface CaseActionBarProps {
 export default function CaseActionBar({
   caseDetail,
   onAction,
+  closeBlockedReason,
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [stateMenuAnchor, setStateMenuAnchor] = useState<HTMLElement | null>(null);
@@ -356,6 +413,7 @@ export default function CaseActionBar({
   const secondary = buildSecondaryItems(caseDetail);
 
   const runPrimary = (p: PrimaryButton): void => {
+    if (p.targetState === "closed" && closeBlockedReason) return;
     void onAction(p.action, p.targetState);
   };
 
@@ -372,15 +430,29 @@ export default function CaseActionBar({
       {primary.length === 1 && (
         // A single reachable state needs no menu — show the transition
         // itself as one click rather than "Change state" → pick the only item.
-        <Button
-          size="small"
-          variant="contained"
-          color={primary[0].color}
-          startIcon={primary[0].icon}
-          onClick={() => runPrimary(primary[0])}
-        >
-          {primary[0].label}
-        </Button>
+        (() => {
+          const p = primary[0];
+          const blocked = p.targetState === "closed" && !!closeBlockedReason;
+          const button = (
+            <Button
+              size="small"
+              variant="contained"
+              color={p.color}
+              startIcon={p.icon}
+              disabled={blocked}
+              onClick={() => runPrimary(p)}
+            >
+              {p.label}
+            </Button>
+          );
+          return blocked ? (
+            <Tooltip title={closeBlockedReason}>
+              <Box component="span">{button}</Box>
+            </Tooltip>
+          ) : (
+            button
+          );
+        })()
       )}
       {primary.length > 1 && (
         <>
@@ -398,21 +470,35 @@ export default function CaseActionBar({
             open={!!stateMenuAnchor}
             onClose={() => setStateMenuAnchor(null)}
           >
-            {primary.map((p) => (
-              <MenuItem
-                key={p.targetState}
-                onClick={() => {
-                  setStateMenuAnchor(null);
-                  runPrimary(p);
-                }}
-                sx={{ gap: 1.25, minHeight: 36 }}
-              >
-                <Box sx={{ color: `${p.color}.main`, display: "flex" }}>
-                  {p.icon}
-                </Box>
-                {p.label}
-              </MenuItem>
-            ))}
+            {primary.map((p) => {
+              const blocked = p.targetState === "closed" && !!closeBlockedReason;
+              const menuItem = (
+                <MenuItem
+                  key={p.targetState}
+                  disabled={blocked}
+                  onClick={() => {
+                    if (blocked) return;
+                    setStateMenuAnchor(null);
+                    runPrimary(p);
+                  }}
+                  sx={{ gap: 1.25, minHeight: 36 }}
+                >
+                  <Box sx={{ color: `${p.color}.main`, display: "flex" }}>
+                    {p.icon}
+                  </Box>
+                  {p.label}
+                </MenuItem>
+              );
+              return blocked ? (
+                <Tooltip key={p.targetState} title={closeBlockedReason}>
+                  <Box component="span" sx={{ display: "block" }}>
+                    {menuItem}
+                  </Box>
+                </Tooltip>
+              ) : (
+                menuItem
+              );
+            })}
           </Menu>
         </>
       )}

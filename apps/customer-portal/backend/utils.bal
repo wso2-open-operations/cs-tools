@@ -100,6 +100,7 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             number: case.number,
             title: case.title,
             createdOn: case.createdOn,
+            updatedOn: case.updatedOn,
             createdBy: case.createdBy,
             description: case.description,
             duration: case.duration,
@@ -232,6 +233,28 @@ public isolated function extractErrorMessage(error err) returns string {
     map<anydata|readonly> & readonly errorDetails = err.detail();
     anydata|readonly errorMessage = errorDetails[ERR_BODY] ?: ();
     return errorMessage is string ? errorMessage : UNEXPECTED_ERROR_MSG;
+}
+
+# Get the user-facing message from the JSON error body of the given client error.
+#
+# + err - Client error to handle
+# + return - Value of the 'message' field in the error body, or a generic message if unavailable
+public isolated function extractClientErrorMessage(error err) returns string {
+    map<anydata|readonly> & readonly errorDetails = err.detail();
+    anydata|readonly errorBody = errorDetails[ERR_BODY] ?: ();
+    if errorBody is map<anydata> {
+        anydata message = errorBody[ERR_MESSAGE];
+        return message is string ? message : UNEXPECTED_ERROR_MSG;
+    }
+    if errorBody is string {
+        json|error parsedBody = errorBody.fromJsonString();
+        if parsedBody is map<json> {
+            json message = parsedBody[ERR_MESSAGE];
+            return message is string ? message : UNEXPECTED_ERROR_MSG;
+        }
+        return errorBody;
+    }
+    return UNEXPECTED_ERROR_MSG;
 }
 
 # Log forbidden project access attempt.
@@ -1415,6 +1438,26 @@ public isolated function mapDeployedProductMetricsUsageCounts(
         entity:DeployedProductMetricsUsageCountsResponse response)
         returns types:DeployedProductMetricsUsageCountsResponse {
 
+    map<types:CountTypeAggregation> countTypes = response.summary.countTypes.map(value => {
+        aggregation: value.aggregation,
+        min: value.min,
+        max: value.max,
+        avg: value.avg
+    });
+
+    types:DeployedProductUsageCountsChartEntry[] chartData = response.chartData.map(entry => {
+        date: entry.date,
+        counts: entry.counts.map(countEntry => {
+            value: countEntry.value,
+            aggregation: countEntry.aggregation,
+            instances: countEntry.instances.map(inst => {
+                id: inst.id,
+                name: inst.name,
+                value: inst.value
+            })
+        })
+    });
+
     return {
         product: {
             id: response.deployedProduct.id,
@@ -1425,8 +1468,8 @@ public isolated function mapDeployedProductMetricsUsageCounts(
                 'start: response.summary.dateRange.'start,
                 'end: response.summary.dateRange.'end
             },
-            countTypes: response.summary.countTypes
+            countTypes
         },
-        chartData: response.chartData
+        chartData
     };
 }

@@ -21,6 +21,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  Divider,
   Stack,
   TextField,
   Typography,
@@ -39,12 +40,14 @@ import {
   FileText,
   ExternalLink,
   Pencil,
+  MessageSquare,
 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState, useMemo } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePatchCase } from "@features/support/api/usePatchCase";
+import { useGetCaseFeedback } from "@features/support/api/useGetCaseFeedback";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import DOMPurify from "dompurify";
@@ -114,6 +117,8 @@ export default function CaseDetailsDetailsPanel({
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { mutate: patchCase, isPending: isPatchPending } = usePatchCase(projectId, caseId);
+  const isClosed = data?.status?.label?.trim().toLowerCase() === "closed";
+  const { data: feedback } = useGetCaseFeedback(caseId, isClosed);
 
   const handleEditWatchList = () => {
     const current = savedWatchList ?? (data?.watchList ?? [])
@@ -541,7 +546,7 @@ export default function CaseDetailsDetailsPanel({
       )}
 
       {/* Section 4: Closed Case Details (only when case is closed) */}
-      {statusLabel?.toLowerCase() === "closed" && (
+      {isClosed && (
         <CaseDetailsCard
           title={
             isServiceRequest ? "Closed Request Details" : "Closed Case Details"
@@ -577,6 +582,53 @@ export default function CaseDetailsDetailsPanel({
               </Typography>
             </Box>
           </Box>
+        </CaseDetailsCard>
+      )}
+
+      {/* Section 4b: Customer Feedback (only when feedback has been submitted) */}
+      {isClosed && feedback && (
+        <CaseDetailsCard
+          title="Customer Feedback"
+          icon={<MessageSquare size={20} aria-hidden />}
+        >
+          <Stack spacing={1.5}>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Box
+                component="img"
+                src={feedback.emoji.selectedImage}
+                alt={feedback.emoji.name}
+                sx={{ width: 40, height: 40, objectFit: "contain", flexShrink: 0 }}
+              />
+              <Typography variant="body1" color="text.primary" sx={{ fontWeight: 600 }}>
+                {feedback.emoji.name}
+              </Typography>
+            </Stack>
+            {feedback.chips && feedback.chips.length > 0 && (
+              <Stack direction="row" flexWrap="wrap" gap={1} sx={{ ml: 7 }}>
+                {feedback.chips.map((chip) => (
+                  <Chip
+                    key={chip}
+                    label={chip}
+                    size="small"
+                    variant="outlined"
+                    sx={{ fontSize: "0.75rem" }}
+                  />
+                ))}
+              </Stack>
+            )}
+            {feedback.additionalComment && (
+              <Typography {...valueSx} sx={{ whiteSpace: "pre-wrap", ml: 7 }}>
+                <Typography component="span" color="text.secondary" sx={{ fontWeight: 500 }}>
+                  Details:{" "}
+                </Typography>
+                {feedback.additionalComment}
+              </Typography>
+            )}
+            <Divider sx={{ my: 0.5 }} />
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+              Submitted by {feedback.createdBy} on {formatUtcToLocal(feedback.createdOn)}
+            </Typography>
+          </Stack>
         </CaseDetailsCard>
       )}
 

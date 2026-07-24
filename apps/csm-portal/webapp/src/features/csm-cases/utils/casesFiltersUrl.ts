@@ -36,6 +36,7 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   projects: [],
   engagementTypes: [],
   productNames: [],
+  tags: [],
 };
 
 const VALID_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -99,6 +100,7 @@ export function readCasesFiltersFromUrl(
     projects: parseFreeFormCsv(params.get("projects")),
     engagementTypes: parseCsv(params.get("engagementTypes"), VALID_ENGAGEMENT_TYPES),
     productNames: parseFreeFormCsv(params.get("products")),
+    tags: parseFreeFormCsv(params.get("tags")),
   };
 }
 
@@ -117,6 +119,7 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.projects.length) out.set("projects", f.projects.join(","));
   if (f.engagementTypes.length) out.set("engagementTypes", f.engagementTypes.join(","));
   if (f.productNames.length) out.set("products", f.productNames.join(","));
+  if (f.tags.length) out.set("tags", f.tags.join(","));
   return out;
 }
 
@@ -137,6 +140,7 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.projects.length) n += 1;
   if (f.engagementTypes.length) n += 1;
   if (f.productNames.length) n += 1;
+  if (f.tags.length) n += 1;
   return n;
 }
 

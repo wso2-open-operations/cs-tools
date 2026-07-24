@@ -18,42 +18,55 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import UsageEnvironmentProductsPanel from "@features/usage-metrics/components/UsageEnvironmentProductsPanel";
 
-vi.mock("@features/project-details/api/usePostDeploymentInstancesUsagesSearch", () => ({
-  default: () => ({
-    data: { usages: [] },
+vi.mock("@features/project-details/api/usePostDeploymentProductsSearch", () => ({
+  usePostDeploymentProductsSearchAll: () => ({
+    data: [
+      {
+        id: "prod-1",
+        description: null,
+        product: { id: "p-1", label: "Gateway" },
+        deployment: { id: "dep-1", label: "Dep 1" },
+        version: "1.0.0",
+      },
+    ],
     isLoading: false,
     isError: false,
   }),
 }));
 
-vi.mock("@features/project-details/api/usePostDeploymentInstancesMetricsSearch", () => ({
+vi.mock("@features/project-details/api/usePostDeploymentProductMetricsSearch", () => ({
   default: () => ({
-    data: { metrics: [] },
-    isLoading: false,
-    isError: false,
-  }),
-}));
-
-vi.mock("@features/usage-metrics/utils/usageMetricsEnvironmentProducts", () => ({
-  buildUsageProductInstanceAccordionKey: (a: string, b: string) => `${a}::${b}`,
-  deriveUsageEnvironmentProducts: () => [
-    {
-      id: "prod-1",
-      name: "Gateway",
-      version: "",
-      runningInstances: 1,
-      metricKeys: ["TRANSACTION_COUNT"],
-      summaryStats: [{ label: "Transactions", value: "10" }],
-      coreMetrics: [
-        { label: "Total Cores", value: "4" },
-        { label: "Instances", value: "1" },
-      ],
-      chartTrends: [],
-      instances: [],
-      instanceSummary: { label: "", curr: 0, min: 0, max: 0, avg: 0, trend: [] },
-      coreSummary: { label: "", curr: 0, min: 0, max: 0, avg: 0, trend: [] },
+    data: {
+      product: { id: "prod-1", label: "Gateway" },
+      summary: { dateRange: { start: "", end: "" }, totalInstances: 1, minCores: 4, maxCores: 4, avgCores: 4 },
+      chartData: [],
     },
-  ],
+    isLoading: false,
+  }),
+}));
+
+vi.mock("@features/project-details/api/usePostDeploymentProductUsageCountsSearch", () => ({
+  default: () => ({
+    data: {
+      product: { id: "prod-1", label: "Gateway" },
+      summary: {
+        dateRange: { start: "", end: "" },
+        countTypes: { TRANSACTION_COUNT: { aggregation: "max", min: 10, max: 10, avg: 10 } },
+      },
+      chartData: [],
+    },
+    isLoading: false,
+  }),
+}));
+
+vi.mock("@features/project-details/api/useGetDeployedProductInstancesInfinite", () => ({
+  default: () => ({
+    data: undefined,
+    isLoading: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
 }));
 
 describe("UsageEnvironmentProductsPanel", () => {
@@ -70,8 +83,7 @@ describe("UsageEnvironmentProductsPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Gateway"));
+    fireEvent.click(screen.getByText("Gateway 1.0.0"));
     expect(onToggleProduct).toHaveBeenCalledWith("prod-1");
   });
 });
-

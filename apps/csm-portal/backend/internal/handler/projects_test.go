@@ -169,3 +169,227 @@ func TestSearchProjects(t *testing.T) {
 		}
 	})
 }
+
+func TestSearchProjectContacts(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := httptest.NewRequest(http.MethodPost, "/projects/"+projectID+"/contacts/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.SearchProjectContacts(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects//contacts/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchProjectContacts(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-42/contacts/search", strings.NewReader(`{}`)))
+		r.SetPathValue("id", "proj-42")
+		w := httptest.NewRecorder()
+		h.SearchProjectContacts(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/"+projectID+"/contacts/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.SearchProjectContacts(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/"+projectID+"/contacts/search", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.SearchProjectContacts(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body verbatim and returns upstream response", func(t *testing.T) {
+		var capturedProjectID string
+		var capturedBody []byte
+		reqBody := `{"filters":{"searchQuery":"jane"},"pagination":{"limit":20,"offset":0}}`
+		client := &mockEntityProjectClient{
+			searchProjectContactsFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedProjectID = id
+				capturedBody = body
+				return []byte(`{"contacts":[{"name":"Jane Doe"}],"total":1,"limit":20,"offset":0}`), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/"+projectID+"/contacts/search", strings.NewReader(reqBody)))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.SearchProjectContacts(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedProjectID != projectID {
+			t.Errorf("projectID = %q, want %q", capturedProjectID, projectID)
+		}
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to search project contacts.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProjectClient{
+					searchProjectContactsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProjectHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/projects/"+projectID+"/contacts/search", strings.NewReader(`{}`)))
+				r.SetPathValue("id", projectID)
+				w := httptest.NewRecorder()
+				h.SearchProjectContacts(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestUpdateProject(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(`{"hasAgent":true}`))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/projects/", strings.NewReader(`{"hasAgent":true}`)))
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/projects/proj-42", strings.NewReader(`{"hasAgent":true}`)))
+		r.SetPathValue("id", "proj-42")
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body verbatim and returns upstream response", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		reqBody := `{"endDateClosureState":"in_progress","complianceViolationClosureState":"completed"}`
+		client := &mockEntityProjectClient{
+			updateProjectFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedID = id
+				capturedBody = body
+				return []byte(`{"message":"Project updated.","project":{"id":"` + projectID + `","updatedBy":"user@example.com","updatedOn":"2026-01-01T00:00:00Z","closureState":"in_progress","endDateClosureState":"in_progress","invoiceDueDateClosureState":null,"complianceViolationClosureState":"completed"}}`), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(reqBody)))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != projectID {
+			t.Errorf("projectID = %q, want %q", capturedID, projectID)
+		}
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "Project updated." {
+			t.Errorf("message = %v, want %q", resp["message"], "Project updated.")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update project.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProjectClient{
+					updateProjectFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProjectHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(`{"hasAgent":true}`)))
+				r.SetPathValue("id", projectID)
+				w := httptest.NewRecorder()
+				h.UpdateProject(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

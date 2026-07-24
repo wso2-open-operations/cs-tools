@@ -50,16 +50,16 @@ export interface CsmNavItem {
  * the Quick-nav palette's "Pages" section, and "Pin this page" title/kind
  * derivation — so a new page only has to be added here once.
  *
- * Dashboard, Support, Updates and Time cards are the shipped sections; the rest
- * are flagged `wip` so a deployment can disable them via
- * `CSM_PORTAL_DISABLE_WIP_FEATURES` until they are ready.
+ * Dashboard, Support, Updates, Time cards, Engagements and Security Center are
+ * the shipped sections; the rest are flagged `wip` so a deployment can disable
+ * them via `CSM_PORTAL_DISABLE_WIP_FEATURES` until they are ready.
  */
 export const CSM_NAV_ITEMS: CsmNavItem[] = [
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn },
   { id: "support", label: "Support", path: "/cases", icon: Headset },
   { id: "operations", label: "Operations", path: "/operations", icon: Cog, wip: true },
-  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase, wip: true },
-  { id: "security-center", label: "Security Center", path: "/security-center", icon: Shield, wip: true },
+  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase },
+  { id: "security-center", label: "Security Center", path: "/security-center", icon: Shield },
   { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
   { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock },
   { id: "announcements", label: "Announcements", path: "/announcements", icon: Megaphone },
@@ -94,10 +94,26 @@ export function navItemForPath(pathname: string): CsmNavItem | undefined {
 }
 
 /**
+ * Sub-paths under a `wip` nav item that are actually finished and shouldn't
+ * be redirected by {@link isDisabledWipPath} — Incidents is done (search,
+ * create, detail) even though the rest of Operations (Service Requests,
+ * Change Requests) isn't, and the `operations` nav item's single `wip` flag
+ * has no per-sub-route granularity of its own.
+ */
+const WIP_EXEMPT_PATH_PREFIXES = ["/operations/incidents"];
+
+function isWipExemptPath(pathname: string): boolean {
+  return WIP_EXEMPT_PATH_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
+
+/**
  * True when `pathname` belongs to a WIP section the current config disables.
  * Used to redirect direct/deep links to disabled sections back to the dashboard.
  */
 export function isDisabledWipPath(pathname: string): boolean {
   if (!DISABLE_WIP_FEATURES) return false;
+  if (isWipExemptPath(pathname)) return false;
   return navItemForPath(pathname)?.wip === true;
 }

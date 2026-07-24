@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -74,17 +73,17 @@ type snTaskSlaStage struct {
 }
 
 type snTaskSlaDetail struct {
-	ID                        string                    `json:"id"`
-	Task                      *snTaskSlaTaskRef         `json:"task"`
+	ID                        string                     `json:"id"`
+	Task                      *snTaskSlaTaskRef          `json:"task"`
 	SlaDefinition             *snTaskSlaDefinitionDetail `json:"slaDefinition"`
-	Stage                     *snTaskSlaStage           `json:"stage"`
-	BusinessTimeLeft          *string                   `json:"businessTimeLeft"`
-	BusinessElapsedTime       *string                   `json:"businessElapsedTime"`
-	BusinessElapsedPercentage *float64                  `json:"businessElapsedPercentage"`
-	StartTime                 *string                   `json:"startTime"`
-	EndTime                   *string                   `json:"endTime"`
-	Active                    *bool                     `json:"active"`
-	Schedule                  *snTaskSlaScheduleRef     `json:"schedule"`
+	Stage                     *snTaskSlaStage            `json:"stage"`
+	BusinessTimeLeft          *string                    `json:"businessTimeLeft"`
+	BusinessElapsedTime       *string                    `json:"businessElapsedTime"`
+	BusinessElapsedPercentage *float64                   `json:"businessElapsedPercentage"`
+	StartTime                 *string                    `json:"startTime"`
+	EndTime                   *string                    `json:"endTime"`
+	Active                    *bool                      `json:"active"`
+	Schedule                  *snTaskSlaScheduleRef      `json:"schedule"`
 }
 
 type snTaskSlaDefinitionDetail struct {
@@ -195,28 +194,28 @@ func snTaskSlaToDetailView(t snTaskSlaDetail) domain.TaskSlaDetail {
 
 	if t.SlaDefinition != nil {
 		def := &domain.TaskSlaDefinitionDetail{
-			Name:             t.SlaDefinition.Name,
-			Type:             t.SlaDefinition.Type,
-			Target:           t.SlaDefinition.Target,
-			Flow:             t.SlaDefinition.Flow,
-			Workflow:         t.SlaDefinition.Workflow,
-			IsEnableLogging:  t.SlaDefinition.EnableLogging,
-			DurationType:     t.SlaDefinition.DurationType,
-			Duration:         t.SlaDefinition.Duration,
-			ScheduleSource:   t.SlaDefinition.ScheduleSource,
-			Schedule:         t.SlaDefinition.Schedule,
-			TimezoneSource:   t.SlaDefinition.TimezoneSource,
-			Timezone:         t.SlaDefinition.Timezone,
-			StartCondition:   t.SlaDefinition.StartCondition,
+			Name:               t.SlaDefinition.Name,
+			Type:               t.SlaDefinition.Type,
+			Target:             t.SlaDefinition.Target,
+			Flow:               t.SlaDefinition.Flow,
+			Workflow:           t.SlaDefinition.Workflow,
+			IsEnableLogging:    t.SlaDefinition.EnableLogging,
+			DurationType:       t.SlaDefinition.DurationType,
+			Duration:           t.SlaDefinition.Duration,
+			ScheduleSource:     t.SlaDefinition.ScheduleSource,
+			Schedule:           t.SlaDefinition.Schedule,
+			TimezoneSource:     t.SlaDefinition.TimezoneSource,
+			Timezone:           t.SlaDefinition.Timezone,
+			StartCondition:     t.SlaDefinition.StartCondition,
 			IsRetroactiveStart: t.SlaDefinition.RetroactiveStart,
 			IsRetroactivePause: t.SlaDefinition.RetroactivePause,
-			WhenToCancel:     t.SlaDefinition.WhenToCancel,
-			CancelCondition:  t.SlaDefinition.CancelCondition,
-			PauseCondition:   t.SlaDefinition.PauseCondition,
-			WhenToResume:     t.SlaDefinition.WhenToResume,
-			StopCondition:    t.SlaDefinition.StopCondition,
-			ResetCondition:   t.SlaDefinition.ResetCondition,
-			ResetAction:      t.SlaDefinition.ResetAction,
+			WhenToCancel:       t.SlaDefinition.WhenToCancel,
+			CancelCondition:    t.SlaDefinition.CancelCondition,
+			PauseCondition:     t.SlaDefinition.PauseCondition,
+			WhenToResume:       t.SlaDefinition.WhenToResume,
+			StopCondition:      t.SlaDefinition.StopCondition,
+			ResetCondition:     t.SlaDefinition.ResetCondition,
+			ResetAction:        t.SlaDefinition.ResetAction,
 		}
 		if t.SlaDefinition.ID != nil {
 			id := sysidToUUID(*t.SlaDefinition.ID)
@@ -246,9 +245,6 @@ func snTaskSlaToDetailView(t snTaskSlaDetail) domain.TaskSlaDetail {
 
 func (s *snTaskSlaService) GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.TaskSlaDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.TaskSlaDetail{}, err
@@ -269,9 +265,6 @@ func (s *snTaskSlaService) GetTaskSla(ctx context.Context, id string) (domain.Ta
 
 func (s *snTaskSlaService) SearchTaskSlas(ctx context.Context, req domain.SearchTaskSlasRequest) (domain.SearchTaskSlasResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchTaskSlasResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchTaskSlasResponse{}, err

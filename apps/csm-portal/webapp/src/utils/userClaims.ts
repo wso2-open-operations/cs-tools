@@ -18,6 +18,13 @@
 // decoded claims as `any`; this interface narrows it for type-safe access.
 export interface IdTokenClaims {
   sub?: string;
+  /**
+   * Stable per-account identifier this IdP issues as `userid` — unlike
+   * `sub`, which this tenant issues per-session (a fresh value every
+   * sign-in), so it can't be used to recognize the same account across
+   * sessions/tabs.
+   */
+  userid?: string;
   email?: string;
   given_name?: string;
   family_name?: string;

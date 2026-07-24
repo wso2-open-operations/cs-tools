@@ -61,7 +61,15 @@ export default function Brand({
         !isNavigationDisabled &&
         navigate("/", { state: { fromHeader: true } })
       }
-      sx={{ cursor: isNavigationDisabled ? "default" : "pointer" }}
+      sx={{
+        cursor: isNavigationDisabled ? "default" : "pointer",
+        // Never let the row's flex layout shrink the brand — with several
+        // pinned tabs plus the search bar, there isn't always room for
+        // everything, and without this "CSM Portal" would wrap onto a
+        // second line instead of PinnedTabs (already horizontally
+        // scrollable) absorbing the squeeze.
+        flexShrink: 0,
+      }}
     >
       {/* brand logo */}
       <HeaderUI.BrandLogo>
@@ -73,7 +81,9 @@ export default function Brand({
         />
       </HeaderUI.BrandLogo>
       {/* brand title */}
-      <HeaderUI.BrandTitle>CSM Portal</HeaderUI.BrandTitle>
+      <HeaderUI.BrandTitle sx={{ whiteSpace: "nowrap" }}>
+        CSM Portal
+      </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );
 }

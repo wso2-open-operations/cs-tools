@@ -114,24 +114,45 @@ export type BeCaseResolutionCode =
 
 /** Root-cause category for a closed or solution-proposed case. Same gating as {@link BeCaseResolutionCode}. */
 export type BeCaseCause =
-  | "USER_MISUNDERSTANDING_CONCEPTS"
-  | "USER_MISUNDERSTANDING_DOCUMENTATION"
-  | "USER_NOT_FOLLOWING_DOCUMENTATION"
-  | "USER_MISTAKE"
-  | "SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE"
-  | "SOLUTION_PROBLEMATIC_CODE"
-  | "APPLICATION_BUG"
-  | "APPLICATION_MISLEADING_UX_UI"
-  | "APPLICATION_LIMITATION"
-  | "APPLICATION_MISSING_FEATURE"
-  | "APPLICATION_DOCUMENTATION_GAP"
-  | "APPLICATION_DOCUMENTATION_ERROR"
-  | "INFRASTRUCTURE_CUSTOMERS_SIDE"
-  | "INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH"
-  | "INFRASTRUCTURE_SAAS_SIDE_OTHER"
+  | "SOLUTION_ARCHITECTURE"
+  | "DEPLOYMENT_ARCHITECTURE"
+  | "USER_ERROR_CONFIGURATION"
+  | "USER_ERROR_PRODUCT_CONCEPT"
+  | "USER_ERROR_RUNTIME"
+  | "USER_ERROR_RECOMMENDATION_BEST_PRACTICES"
+  | "CUSTOMIZATION_LIMITATION"
+  | "CUSTOMIZATION_BUG"
+  | "DOCUMENTATION_GAP"
+  | "DOCUMENTATION_ERROR"
+  | "PRODUCT_LIMITATION"
+  | "PRODUCT_BUG"
+  | "PRODUCT_REGRESSION"
+  | "PRODUCT_MIGRATION"
+  | "INFRASTRUCTURE_DATABASE"
+  | "INFRASTRUCTURE_OS"
+  | "INFRASTRUCTURE_NETWORK"
+  | "INFRASTRUCTURE_JDK"
+  | "INFRASTRUCTURE_LDAP"
+  | "INFRASTRUCTURE_LOAD_BALANCER"
+  | "INFRASTRUCTURE_IAAS"
+  | "INFRASTRUCTURE_EXTERNAL_PRODUCT"
+  | "INFRASTRUCTURE_PROXY"
+  | "INFRASTRUCTURE_OTHER"
   | "UNKNOWN";
 
 export type BeCaseSortField = "createdOn" | "updatedOn" | "severity" | "state";
+
+/**
+ * Where a case sits in the backing data source's staged auto-closure sequence
+ * (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Read-only — the
+ * only supported write is `autocloseHoldUntil` on `PATCH /cases/{id}`
+ * (ServiceNow only).
+ */
+export type BeCaseAutoclosureStep =
+  | "DEFAULT"
+  | "FIRST_COMMENT"
+  | "ON_HOLD"
+  | "SECOND_COMMENT";
 
 export interface BeCase {
   id: string;
@@ -173,6 +194,17 @@ export interface BeCaseNumberRef {
 }
 
 /**
+ * A service-request case whose parent points to this case or incident (the reverse
+ * of `parentId`). Carries a display name in addition to {@link BeCaseNumberRef}'s
+ * id/number.
+ */
+export interface BeLinkedServiceRequestRef {
+  id: string;
+  number: string;
+  name: string;
+}
+
+/**
  * The assigned CS engineer embedded in case views. Carries `email` so the FE
  * can tell whether the case is assigned to the signed-in user (the only stable
  * identity the FE has from the JWT). `email` may be `null` depending on the data
@@ -199,6 +231,10 @@ export interface BeCaseAccountRef {
   id: string;
   name?: string;
   type?: string;
+  /** The account's assigned CRE (customer reliability engineering) team, when set (ServiceNow only). */
+  creTeam?: BeEntityRef | null;
+  /** The account's assigned SRE (site reliability engineering) team, when set (ServiceNow only). */
+  sreTeam?: BeEntityRef | null;
 }
 
 /**
@@ -255,6 +291,83 @@ export interface BeCaseView {
   createdOn?: string;
   updatedOn?: string;
   closedOn?: string | null;
+  /** Timestamp when the case was resolved. Populated for resolved/closed cases; null otherwise. */
+  resolvedOn?: string | null;
+  /** Resolution code from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
+  resolutionCode?: BeCaseResolutionCode | null;
+  /** Root-cause category from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
+  cause?: BeCaseCause | null;
+  /** Free-text resolution/close notes from a prior close/propose-solution. Populated for resolved/closed cases; null otherwise. */
+  resolutionNotes?: string | null;
+  /**
+   * Service-request cases whose parent points to this case. Populated on every
+   * case detail response, not just high-severity cases.
+   */
+  linkedServiceRequests?: BeLinkedServiceRequestRef[] | null;
+  /**
+   * The case, incident, change request, or problem this case is linked to as
+   * its parent (the hierarchical major-case/child-case relationship, set via
+   * the PATCH `parentId` field). Null/absent when not linked.
+   */
+  parentCase?: BeCaseNumberRef | null;
+  /**
+   * Users on the case watch list (ServiceNow only). Null/absent when not set
+   * or not supported by the current data source.
+   */
+  watchList?: BeWatchListUser[] | null;
+  /**
+   * Where the case sits in the backing data source's staged auto-closure
+   * sequence. Read-only — see {@link BeCaseAutoclosureStep}.
+   */
+  autoclosureStep?: BeCaseAutoclosureStep | null;
+  /**
+   * When the auto-closure sequence next advances — e.g. the "eligible again
+   * after" date for a held case (ServiceNow only). Read-only.
+   */
+  autoclosureStateTime?: string | null;
+  /**
+   * The customer-facing fix-commitment date/time for the case — the shared
+   * commitment shown to the customer. Settable via `PATCH /cases/{id}`
+   * (`fixEta`). Distinct from the three internal-only estimates below, which
+   * are never shared with the customer.
+   */
+  fixEta?: string | null;
+  /**
+   * Internal-only best-case fix estimate. Settable via `PATCH /cases/{id}`
+   * (`bestCaseFixEta`). Never surfaced to the customer.
+   */
+  bestCaseFixEta?: string | null;
+  /**
+   * Internal-only most-likely fix estimate. Settable via `PATCH /cases/{id}`
+   * (`mostLikelyFixEta`). Never surfaced to the customer.
+   */
+  mostLikelyFixEta?: string | null;
+  /**
+   * Internal-only worst-case fix estimate. Settable via `PATCH /cases/{id}`
+   * (`worstCaseFixEta`). Never surfaced to the customer.
+   */
+  worstCaseFixEta?: string | null;
+  /** Free-text labels attached to the case. Null/absent when none are set. */
+  tags?: BeTag[] | null;
+}
+
+/** A free-text tag attached to a case (`GET /cases/{id}`, `POST /cases/{id}/tags`). */
+export interface BeTag {
+  id: string;
+  label: string;
+  /** Display color for the tag, if one is set. Null when not set. */
+  color?: string | null;
+}
+
+/** `POST /cases/{id}/tags` request body. */
+export interface BeAddCaseTagPayload {
+  label: string;
+}
+
+/** `GET /tags/search?q=&limit=` response: existing free-text tag labels matching the query. */
+export interface BeSearchTagsResponse {
+  tags?: BeTag[];
+  total?: number;
 }
 
 export interface BeCaseCreatePayload {
@@ -402,34 +515,93 @@ export interface BeGetCatalogItemVariablesResponse {
 }
 
 /**
+ * Fields never allowed alongside another `PATCH /cases/{id}` variant — the
+ * exactly-one-field contract. Every discriminated-union member below spreads
+ * this (minus its own field) so a new variant only has to add its field name
+ * here once, instead of updating every sibling variant by hand.
+ */
+interface BeCaseUpdateNever {
+  state?: never;
+  severity?: never;
+  workState?: never;
+  assigneeEmail?: never;
+  watchList?: never;
+  parentId?: never;
+  subject?: never;
+  description?: never;
+  deploymentId?: never;
+  deployedProductId?: never;
+  relatedCaseId?: never;
+  autocloseHoldUntil?: never;
+  fixEta?: never;
+  bestCaseFixEta?: never;
+  mostLikelyFixEta?: never;
+  worstCaseFixEta?: never;
+}
+
+/**
  * Request body for `PATCH /cases/{id}` (mirrors the entity `UpdateCaseRequest`).
- * **Exactly one** of `state` / `severity` / `workState` /
- * `assigneeEmail` / `watchList` is sent per call — the backend rejects zero or
- * more than one. Encoded as a discriminated union (each variant `?: never`s the
- * others) so the exactly-one-field contract is enforced at compile time, not
- * just in docs. `assigneeEmail` and `watchList` are supported **only** for the
- * ServiceNow data source. `workState` is only accepted while the case is
- * `work_in_progress`.
+ * **Exactly one** of `state` / `severity` / `workState` / `assigneeEmail` /
+ * `watchList` / `parentId` / `subject` / `description` / `deploymentId` /
+ * `deployedProductId` / `relatedCaseId` / `autocloseHoldUntil` / `fixEta` /
+ * `bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta` is sent per call —
+ * the backend rejects zero or more than one. Encoded as a discriminated union
+ * (each variant carries every other field as `never`, via
+ * {@link BeCaseUpdateNever}) so the exactly-one-field contract is enforced at
+ * compile time, not just in docs. `assigneeEmail`, `watchList`, `parentId`,
+ * and `autocloseHoldUntil` are supported **only** for the ServiceNow data
+ * source. `workState` is only accepted while the case is `work_in_progress`.
+ * `bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta` are internal-only
+ * estimates, independent of the customer-facing `fixEta`.
  */
 export type BeCaseUpdatePayload =
-  | {
+  | (Omit<BeCaseUpdateNever, "state"> & {
       state: BeCaseState;
-      severity?: never;
-      workState?: never;
-      assigneeEmail?: never;
-      watchList?: never;
       /** Post Resolution Activity — only meaningful (and only accepted by the backend) alongside `state: "closed"` or `"solution_proposed"`. */
       resolutionCode?: BeCaseResolutionCode;
       cause?: BeCaseCause;
       closeNotes?: string;
-    }
-  | { state?: never; severity: BeCaseSeverity; workState?: never; assigneeEmail?: never; watchList?: never }
+    })
+  | (Omit<BeCaseUpdateNever, "severity"> & { severity: BeCaseSeverity })
   /** Work sub-state toggle (`ongoing` / `paused`) for an in-progress case. */
-  | { state?: never; severity?: never; workState: BeCaseWorkState; assigneeEmail?: never; watchList?: never }
+  | (Omit<BeCaseUpdateNever, "workState"> & { workState: BeCaseWorkState })
   /** Email of the engineer to assign (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail: string; watchList?: never }
+  | (Omit<BeCaseUpdateNever, "assigneeEmail"> & { assigneeEmail: string })
   /** Full replacement watch list as emails (ServiceNow only). */
-  | { state?: never; severity?: never; workState?: never; assigneeEmail?: never; watchList: string[] };
+  | (Omit<BeCaseUpdateNever, "watchList"> & { watchList: string[] })
+  /**
+   * UUID of another case, incident, change request, or problem to link this
+   * case to as its parent (ServiceNow only, the hierarchical
+   * major-case/child-case relationship).
+   */
+  | (Omit<BeCaseUpdateNever, "parentId"> & { parentId: string })
+  /** New subject/title for the case. */
+  | (Omit<BeCaseUpdateNever, "subject"> & { subject: string })
+  /** New description for the case. */
+  | (Omit<BeCaseUpdateNever, "description"> & { description: string })
+  /** UUID of the deployment to associate with this case, replacing the existing one. */
+  | (Omit<BeCaseUpdateNever, "deploymentId"> & { deploymentId: string })
+  /** UUID of the deployed product to associate with this case, replacing the existing one. */
+  | (Omit<BeCaseUpdateNever, "deployedProductId"> & { deployedProductId: string })
+  /** UUID of another case to cross-link to this one as a related case (looser than `parentId`; ServiceNow only). */
+  | (Omit<BeCaseUpdateNever, "relatedCaseId"> & { relatedCaseId: string })
+  /**
+   * Places the case on hold in the backing data source's staged auto-closure
+   * sequence until this ISO date-time (ServiceNow only). The raw
+   * `autoclosureStep` is not directly settable.
+   */
+  | (Omit<BeCaseUpdateNever, "autocloseHoldUntil"> & { autocloseHoldUntil: string })
+  /**
+   * Sets the customer-facing fix-commitment date/time for the case (ISO
+   * date-time).
+   */
+  | (Omit<BeCaseUpdateNever, "fixEta"> & { fixEta: string })
+  /** Sets the internal-only best-case fix estimate (ISO date-time). */
+  | (Omit<BeCaseUpdateNever, "bestCaseFixEta"> & { bestCaseFixEta: string })
+  /** Sets the internal-only most-likely fix estimate (ISO date-time). */
+  | (Omit<BeCaseUpdateNever, "mostLikelyFixEta"> & { mostLikelyFixEta: string })
+  /** Sets the internal-only worst-case fix estimate (ISO date-time). */
+  | (Omit<BeCaseUpdateNever, "worstCaseFixEta"> & { worstCaseFixEta: string });
 
 /** A user in the case watch list, as echoed by `PATCH /cases/{id}`. */
 export interface BeWatchListUser {
@@ -449,6 +621,16 @@ export interface BeUpdatedCase {
   workState?: BeCaseWorkState | null;
   watchList?: BeWatchListUser[];
   assignedTo?: BeEntityRef | null;
+  /** Present when the update set `parentId` — the record this case is now linked to as its parent. */
+  parentCase?: BeCaseNumberRef | null;
+  /** Echoes the updated customer-facing fix-commitment date/time. Present when the update set `fixEta`. */
+  fixEta?: string | null;
+  /** Echoes the updated internal-only best-case fix estimate. Present when the update set `bestCaseFixEta`. */
+  bestCaseFixEta?: string | null;
+  /** Echoes the updated internal-only most-likely fix estimate. Present when the update set `mostLikelyFixEta`. */
+  mostLikelyFixEta?: string | null;
+  /** Echoes the updated internal-only worst-case fix estimate. Present when the update set `worstCaseFixEta`. */
+  worstCaseFixEta?: string | null;
 }
 
 /** `PATCH /cases/{id}` response: a message plus the mutated case fields. */
@@ -502,6 +684,15 @@ export interface BeCaseSearchFilters {
    * SN data source only.
    */
   productNames?: string[];
+  /**
+   * Filter to child cases of this case UUID (the hierarchical
+   * major-case/child-case relationship set via the PATCH `parentId` field).
+   * Used to list a case's children via this same search endpoint rather than
+   * a dedicated one.
+   */
+  parentId?: string;
+  /** Filter to cases carrying any of these free-text tag labels (optional). */
+  tags?: string[];
 }
 
 export interface BeCaseSearchPayload {
@@ -690,7 +881,8 @@ export type BeReferenceType =
   | "case"
   | "conversation"
   | "change_request"
-  | "deployment";
+  | "deployment"
+  | "incident";
 
 /** A attachment as returned by `POST /attachments/search`. */
 export interface BeAttachment {
@@ -1296,6 +1488,93 @@ export interface BeUpdateCallRequestResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Tasks — a lightweight, case-scoped to-do item (distinct from call requests
+// and change requests: no multi-stage lifecycle). Only 2 real live `state`
+// values are seen in this org's data (`OPEN`/`CLOSED`); `OTHER` is a genuine
+// fallback for undocumented raw values and must be handled, not treated as
+// unreachable. `dueDate` is sparsely populated (~13% of records) — render its
+// absence as a normal, expected case rather than a broken layout.
+// ---------------------------------------------------------------------------
+
+export type BeTaskState = "OPEN" | "CLOSED" | "OTHER";
+
+/** A task list item returned by `POST /cases/{caseId}/tasks/search`. */
+export interface BeTaskSummary {
+  id: string;
+  subject: string;
+  state: BeTaskState | null;
+  dueDate: string | null;
+  assignedTo: BeEntityRef | null;
+  updatedOn: string;
+}
+
+/** `POST /cases/{caseId}/tasks/search` request payload. */
+export interface BeCaseTasksSearchPayload {
+  pagination?: BePagination;
+}
+
+/** `POST /cases/{caseId}/tasks/search` response. */
+export interface BeListCaseTasksResponse {
+  tasks: BeTaskSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+/**
+ * `GET /tasks/{id}` response. `visibleToCustomer` is confirmed `false` on
+ * every sampled record for this org — it is shown as a plain fact, never used
+ * to drive conditional UI.
+ */
+export interface BeTaskDetail {
+  id: string;
+  subject: string;
+  state: BeTaskState | null;
+  dueDate: string | null;
+  visibleToCustomer: boolean;
+  assignedTo: BeEntityRef | null;
+  requestType: string | null;
+  requestTypeLabel: string | null;
+  environment: string | null;
+  environmentLabel: string | null;
+  product: BeEntityRef | null;
+  parentCase: BeCaseNumberRef | null;
+  createdOn: string;
+  updatedOn: string;
+}
+
+/** `POST /cases/{caseId}/tasks` request body. Only `subject` is required. */
+export interface BeCreateCaseTaskPayload {
+  subject: string;
+  /** ISO date-time; null/absent when the task carries no due date. */
+  dueDate?: string | null;
+  /** Email of the engineer to assign the new task to. */
+  assignedToEmail?: string | null;
+  /** Whether the task should be visible to the customer. */
+  visibleToCustomer?: boolean | null;
+}
+
+/**
+ * Fields never allowed alongside another `PATCH /tasks/{id}` variant — mirrors
+ * {@link BeCaseUpdateNever}'s exactly-one-field pattern for the case PATCH.
+ */
+interface BeUpdateTaskNever {
+  state?: never;
+  assignedToEmail?: never;
+  dueDate?: never;
+}
+
+/**
+ * Request body for `PATCH /tasks/{id}`. **Exactly one** of `state` /
+ * `assignedToEmail` / `dueDate` is sent per call — the backend rejects zero
+ * or more than one.
+ */
+export type BeUpdateTaskPayload =
+  | (Omit<BeUpdateTaskNever, "state"> & { state: string })
+  | (Omit<BeUpdateTaskNever, "assignedToEmail"> & { assignedToEmail: string })
+  | (Omit<BeUpdateTaskNever, "dueDate"> & { dueDate: string });
+
+// ---------------------------------------------------------------------------
 // Change requests (managed-cloud; ServiceNow data source only)
 // ---------------------------------------------------------------------------
 
@@ -1377,6 +1656,62 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   hasCustomerReviewed?: boolean;
   approvedBy?: BeEntityRef | null;
   approvedOn?: string | null;
+  /**
+   * Backend-supplied legal transitions out of the CR's current state, mirroring
+   * `nextStates` on a case (`CaseActionBar.tsx`) — render one action per entry
+   * rather than hardcoding a `state === 'new'` check. Intentionally narrow today:
+   * the only transition modeled so far is New -> Assess, so this is only ever
+   * `["assess"]` or `[]`.
+   */
+  legalNextStates?: string[];
+}
+
+/** An approval stage seen on a change request, e.g. Assess, Authorize. */
+export type BeChangeRequestApprovalStage = "Assess" | "Authorize" | "Customer Approval";
+
+/** Who a change-request approval stage is assigned to. */
+export type BeChangeRequestApproverType = "STATIC_GROUP" | "DYNAMIC_CONTACT";
+
+/**
+ * An individual approver's response within an approval stage
+ * (`GET /change-requests/{id}/approvals`). `status` is an open, backend-passthrough
+ * string (seen live: `APPROVED`, `NOT_REQUIRED`, `REQUESTED`; also possible:
+ * `REJECTED`, `CANCELLED`, `NO_CONSENSUS`, or an unrecognized value) — the backend
+ * does not validate/whitelist it, so render with a fallback rather than a closed union.
+ */
+export interface BeChangeRequestApprover {
+  id: string;
+  name?: string | null;
+  status: string;
+  respondedOn?: string | null;
+}
+
+/** One approval stage on a change request, with its individual approvers. */
+export interface BeChangeRequestApproval {
+  stage: string;
+  approverType: BeChangeRequestApproverType | string;
+  approverName?: string | null;
+  status: string;
+  approvers: BeChangeRequestApprover[];
+}
+
+/** `GET /change-requests/{id}/approvals` response. */
+export interface BeChangeRequestApprovalsView {
+  approvals: BeChangeRequestApproval[];
+}
+
+/** Caller's decision on their own pending change-request approval. */
+export type BeChangeRequestApprovalDecision = "approved" | "rejected";
+
+/** `POST /change-requests/{id}/approvals/decision` request body. */
+export interface BeChangeRequestApprovalDecisionPayload {
+  decision: BeChangeRequestApprovalDecision;
+}
+
+/** `POST /change-requests/{id}/approvals/decision` response. */
+export interface BeChangeRequestApprovalDecisionResponse {
+  id: string;
+  state: string;
 }
 
 /**
@@ -1515,12 +1850,15 @@ export interface BeConfigurationItemSearchResponse {
 /**
  * `PATCH /change-requests/{id}` body (ServiceNow data source only). At least
  * one field is required by the BE (`minProperties: 1`). `plannedStartOn` is a
- * `YYYY-MM-DD HH:MM:SS` string.
+ * `YYYY-MM-DD HH:MM:SS` string. `requestApproval` is mutually exclusive with
+ * the other fields here — it drives the New -> Assess transition (see
+ * `legalNextStates` on {@link BeChangeRequestDetail}) rather than editing a value.
  */
 export interface BePatchChangeRequestPayload {
   plannedStartOn?: string;
   isCustomerApproved?: boolean;
   isCustomerReviewed?: boolean;
+  requestApproval?: true;
 }
 
 /** `PATCH /change-requests/{id}` response — the touched identifiers. */
@@ -1552,6 +1890,344 @@ export interface BeChangeRequestSearchResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ---------------------------------------------------------------------------
+// Incidents (ServiceNow data source only). Unlike change requests, every
+// enum here is UPPER_SNAKE_CASE on the wire (matches
+// apps/csm-portal/backend/internal/handler/incidents.go's validation maps
+// exactly) — don't copy change requests' lowercase convention for these.
+// ---------------------------------------------------------------------------
+
+export type BeIncidentPriority = "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "PLANNING";
+
+export type BeIncidentState =
+  | "NEW"
+  | "IN_PROGRESS"
+  | "ON_HOLD"
+  | "RESOLVED"
+  | "CLOSED"
+  | "CANCELLED";
+
+export type BeIncidentCategory = "INQUIRY" | "SERVICE_INTERRUPTION" | "SECURITY";
+
+export type BeIncidentSubcategory =
+  | "DHCP"
+  | "ORACLE"
+  | "CPU"
+  | "KEYBOARD"
+  | "DOS_DDOS"
+  | "PRIVILEGE_ESCALATIONS"
+  | "THREAT_INTELLIGENCE"
+  | "SCANS_AND_PROBES"
+  | "APPLICATION_SECURITY"
+  | "CONFIG_CHANGE_REQUEST"
+  | "IP_ADDRESS"
+  | "FULL_OUTAGE"
+  | "SQL_SERVER"
+  | "SLOWNESS"
+  | "MEMORY"
+  | "MOUSE"
+  | "PRIVACY"
+  | "DATA_BREACH"
+  | "SYSTEM_COMPROMISES"
+  | "DNS"
+  | "OS"
+  | "DISK"
+  | "VPN"
+  | "MALWARE"
+  | "VULNERABILITY"
+  | "UNAUTHORIZED_ACCESS"
+  | "IDENTITY_PROTECTION"
+  | "PHISHING"
+  | "IMPROPER_CONFIGURATION"
+  | "INFORMATION_REQUEST"
+  | "DB2"
+  | "PARTIAL_OUTAGE"
+  | "EMAIL"
+  | "MONITOR"
+  | "WIRELESS";
+
+export type BeIncidentContactType =
+  | "SELF_SERVICE"
+  | "EMAIL"
+  | "WALK_IN"
+  | "AZURE"
+  | "EMAIL_INTERNAL"
+  | "SITE_247"
+  | "DIRECT"
+  | "PHONE"
+  | "SENTINEL"
+  | "VIRTUAL_AGENT"
+  | "CHAT"
+  | "EMAIL_EXTERNAL";
+
+export type BeIncidentImpact = "HIGH" | "MEDIUM" | "LOW";
+export type BeIncidentUrgency = "HIGH" | "MEDIUM" | "LOW";
+
+/** List-item shape for an incident (`POST /incidents/search`). */
+export interface BeIncident {
+  id: string | null;
+  number: string | null;
+  openedOn: string | null;
+  subject: string | null;
+  caller?: BeEntityRef | null;
+  priority: BeIncidentPriority | null;
+  state: BeIncidentState | null;
+  category: BeIncidentCategory | null;
+  parent?: BeEntityRef | null;
+  assignmentGroup?: BeEntityRef | null;
+  assignedTo?: BeEntityRef | null;
+  createdOn?: string;
+  createdBy?: string;
+  updatedOn?: string;
+  updatedBy?: string;
+}
+
+export interface BeIncidentWatchListItem {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * `GET /incidents/{id}` — the search view plus the fields only the detail
+ * endpoint returns (subcategory, service/serviceOffering/configurationItem,
+ * contactType, impact/urgency, the changeRequest/problem/causedBy links,
+ * comments, and the watch list).
+ */
+export interface BeIncidentDetail extends BeIncident {
+  subcategory?: BeIncidentSubcategory | null;
+  service?: BeEntityRef | null;
+  serviceOffering?: BeEntityRef | null;
+  configurationItem?: BeEntityRef | null;
+  contactType?: BeIncidentContactType | null;
+  impact?: BeIncidentImpact | null;
+  urgency?: BeIncidentUrgency | null;
+  changeRequest?: BeEntityRef | null;
+  problem?: BeEntityRef | null;
+  causedBy?: BeEntityRef | null;
+  additionalComments?: string | null;
+  workNotes?: string | null;
+  watchList?: BeIncidentWatchListItem[];
+  /** Service-request cases whose parent points to this incident. */
+  linkedServiceRequests?: BeLinkedServiceRequestRef[] | null;
+}
+
+/**
+ * `POST /incidents` body. `callerId`, `category`, `serviceId`, `impact`,
+ * `urgency`, and `subject` are required by the backend
+ * (`validateCreateIncidentBody` in incidents.go); everything else is
+ * optional. There is no `priority` field here — ServiceNow computes it
+ * server-side from `impact` × `urgency`, so it only ever appears on read
+ * (see {@link BeIncident.priority}).
+ */
+export interface BeCreateIncidentPayload {
+  callerId: string;
+  category: BeIncidentCategory;
+  subcategory?: BeIncidentSubcategory;
+  serviceId: string;
+  serviceOfferingId?: string;
+  configurationItemId?: string;
+  contactType?: BeIncidentContactType;
+  impact: BeIncidentImpact;
+  urgency: BeIncidentUrgency;
+  assignmentGroupId?: string;
+  assignedEngineerId?: string;
+  subject: string;
+  watchList?: string[];
+  additionalComments?: string;
+  workNotes?: string;
+  parentId?: string;
+  changeRequestId?: string;
+  problemId?: string;
+  causedById?: string;
+}
+
+/** `POST /incidents` response — the created identifiers. */
+export interface BeCreateIncidentResponse {
+  message: string;
+  incident: {
+    id: string;
+    number: string;
+    createdOn: string;
+    createdBy: string;
+  };
+}
+
+/**
+ * `PATCH /incidents/{id}` body (ServiceNow data source only,
+ * `minProperties: 1`). Covers the in-scope subset the Edit dialog sends —
+ * the full `UpdateIncidentPayload` schema also documents `incidentReport` /
+ * `resolvedById`, deliberately left out here since there's no read-side
+ * model for them yet either (see {@link BeIncidentDetail}). `resolutionCode`
+ * / `resolutionNotes` ARE included (write-only, same as `incidentReport` —
+ * `IncidentDetail` never echoes them back on read) since ServiceNow requires
+ * them to move an incident to `RESOLVED`/`CLOSED` (confirmed live: those two
+ * state values 500 without them).
+ */
+export interface BeUpdateIncidentPayload {
+  subject?: string;
+  category?: BeIncidentCategory;
+  subcategory?: BeIncidentSubcategory;
+  contactType?: BeIncidentContactType;
+  impact?: BeIncidentImpact;
+  urgency?: BeIncidentUrgency;
+  state?: BeIncidentState;
+  resolutionCode?: string;
+  resolutionNotes?: string;
+  // Reference/note fields are `nullable: true` on the documented schema — the
+  // portal sends an explicit `null` to clear one (e.g. unassign an engineer),
+  // as distinct from omitting the field entirely, which the BE treats as
+  // "leave unchanged".
+  serviceId?: string | null;
+  serviceOfferingId?: string | null;
+  configurationItemId?: string | null;
+  assignmentGroupId?: string | null;
+  assignedEngineerId?: string | null;
+  watchList?: string[];
+  workNotes?: string | null;
+  additionalComments?: string | null;
+  parentId?: string | null;
+  changeRequestId?: string | null;
+  problemId?: string | null;
+  causedById?: string | null;
+}
+
+/** `PATCH /incidents/{id}` response — the full updated incident. */
+export interface BePatchIncidentResponse {
+  message: string;
+  incident: BeIncidentDetail;
+}
+
+export interface BeIncidentSearchPayload {
+  filters?: {
+    searchQuery?: string;
+    priorities?: BeIncidentPriority[];
+    parentIds?: string[];
+  };
+  sortBy?: {
+    field?: "createdOn" | "updatedOn" | "openedOn";
+    order?: "asc" | "desc";
+  };
+  pagination?: BePagination;
+}
+
+export interface BeIncidentSearchResponse {
+  incidents: BeIncident[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ---------------------------------------------------------------------------
+// Problems (SRE-owned; ServiceNow data source only). Enum casing mirrors
+// incidents (UPPER_SNAKE_CASE on the wire), not change requests.
+// ---------------------------------------------------------------------------
+
+export type BeProblemState =
+  | "NEW"
+  | "ASSESS"
+  | "ROOT_CAUSE_ANALYSIS"
+  | "FIX_IN_PROGRESS"
+  | "RESOLVED"
+  | "CLOSED";
+
+/**
+ * A reference to another record embedded within a problem. Deliberately
+ * generic (id + number only, no record-type discriminant): the backend does
+ * not tag these with a type, and `originCase` in particular can point at
+ * either a Case or an Incident depending on the underlying data despite its
+ * name. Render as a plain, non-navigable reference unless the caller
+ * independently knows the target record type and has a route for it.
+ */
+export interface BeProblemRef {
+  id: string;
+  number?: string;
+}
+
+/**
+ * List-item shape for `POST /problems/search`. Includes `state` plus the
+ * assignment refs alongside id/number/subject; full record detail (priority,
+ * category, resolution fields, etc.) is still only on `GET /problems/{id}`
+ * (see {@link BeProblemDetail}).
+ */
+export interface BeProblemSearchView {
+  id: string;
+  number?: string;
+  subject?: string;
+  state?: BeProblemState;
+  assignmentGroup?: BeEntityRef | null;
+  assignedTo?: BeEntityRef | null;
+}
+
+export interface BeProblemSearchFilters {
+  searchQuery?: string;
+  /**
+   * Filter by state. Not confirmed live against the backend at the time this
+   * was written, so if the backend rejects or silently ignores this filter,
+   * drop it here and from `ProblemsTab`'s payload, and remove the state
+   * control from `ProblemsFilterBar`.
+   */
+  states?: BeProblemState[];
+}
+
+export interface BeProblemSearchPayload {
+  filters?: BeProblemSearchFilters;
+  pagination?: BePagination;
+}
+
+/** Note: mirrors the change-request/incident search responses — no `hasMore`. */
+export interface BeProblemSearchResponse {
+  problems: BeProblemSearchView[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * `GET /problems/{id}` response. `originCase` / `primaryIncident` /
+ * `linkedChangeRequest` are singular refs (each may reference a different
+ * record type — see {@link BeProblemRef}); `linkedIncidents` is a genuine
+ * one-to-many and must be rendered as a list, not a single value.
+ */
+export interface BeProblemDetail {
+  id: string;
+  number?: string;
+  subject?: string;
+  state?: BeProblemState;
+  priority?: string | null;
+  /** May be null/empty on many records — render blank gracefully, not as an awkward empty field. */
+  category?: string | null;
+  subcategory?: string | null;
+  /** Despite the name, may reference an Incident rather than a Case. */
+  originCase?: BeProblemRef | null;
+  primaryIncident?: BeProblemRef | null;
+  linkedIncidents?: BeProblemRef[];
+  linkedChangeRequest?: BeProblemRef | null;
+  assignedTo?: BeEntityRef | null;
+  resolutionCode?: string | null;
+  causeNotes?: string | null;
+  fixNotes?: string | null;
+  workaround?: string | null;
+  resolvedOn?: string | null;
+  resolvedBy?: BeEntityRef | null;
+  openedOn?: string | null;
+  closedOn?: string | null;
+}
+
+/**
+ * `POST /problems` body (ServiceNow data source only). `subject` is the only
+ * required field. There is no `priority` field — priority is not settable on
+ * create (SN computes/defaults it server-side, confirmed by live testing), so
+ * it's deliberately omitted here and from the create form.
+ */
+export interface BeCreateProblemPayload {
+  subject: string;
+  category?: string;
+  subcategory?: string;
+  originCaseId?: string;
+  primaryIncidentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1637,13 +2313,43 @@ export interface BeTimeCardCaseRef {
 export interface BeTimeCardView {
   id: string;
   totalTime: number;
+  /**
+   * The date the work was actually carried out (YYYY-MM-DD) — what the engineer
+   * picked in the log form, so it can be in the past. This is the field to
+   * display and to group/sort by ("the week this work happened").
+   */
+  workDate: string;
+  /**
+   * @deprecated Superseded by {@link workDate}; don't build new logic on it. It
+   * currently reads the same underlying field, so the two hold the same value.
+   */
   createdOn: string;
   hasBillable: boolean;
   state: BeTimeCardState;
   user?: BeTimeCardRef;
-  approvedBy?: BeTimeCardRef;
+  /**
+   * The approver who accepted the card — populated **only** when `state` is
+   * `approved`. ServiceNow does not record who rejected a card, so this is null
+   * for a `rejected` card (and for an undecided one); see {@link rejectionReason}.
+   */
+  approvedBy?: BeTimeCardRef | null;
+  /**
+   * The approver's comment when rejecting — populated **only** when `state` is
+   * `rejected`, otherwise null. It's the only trace a rejection leaves: there is
+   * no "rejected by" / "rejected on" field (a known backend gap).
+   */
+  rejectionReason?: string | null;
   project?: BeTimeCardRef;
   case?: BeTimeCardCaseRef;
+  /**
+   * The engineers eligible to decide this card (SN `approver_list`). Not in
+   * the BFF's `openapi.yaml` (stale doc — `time-cards` responses are a raw
+   * passthrough of the entity-service's `TimeCardView`, which does return
+   * this), but confirmed present on the wire. Used to gate the "Review"
+   * action in the UI: the backend 403s a decision from anyone not in this
+   * list, regardless of team-lead status.
+   */
+  approvers?: BeTimeCardRef[];
 }
 
 /**
@@ -1656,9 +2362,14 @@ export interface BeTimeCardView {
  */
 export interface BeSearchTimeCardsFilters {
   projectIds?: string[];
+  /** Only time cards logged against this case. */
+  caseId?: string;
   /** Only time cards submitted by this user. */
   userId?: string;
-  /** Only time cards this user is eligible to approve (SN `approver_list`). */
+  /** Only time cards submitted by any of these users (multi-engineer filter). */
+  userIds?: string[];
+  /** Only time cards this user is eligible to approve (SN `approver_list`);
+   * the caller's own cards are excluded unconditionally when this is set. */
   approverId?: string;
   /** Only time cards actually approved by this user (SN `approved_by`). */
   approvedById?: string;

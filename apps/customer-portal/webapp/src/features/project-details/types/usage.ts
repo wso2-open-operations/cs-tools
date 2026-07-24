@@ -151,7 +151,86 @@ export type InstanceSearchRequest = SearchRequestBase & {
 
 // Request type for POST .../instances/usages/search and POST .../instances/metrics/search.
 export type InstanceMetricsRequest = {
-  filters: DateRangeFilter;
+  startDate: string;
+  endDate: string;
+};
+
+// Item type for a single instance's core count on a product metrics chart day.
+export type ProductMetricsChartInstance = {
+  id: string;
+  name: string;
+  cores: number;
+};
+
+// Item type for a single day on a product metrics (core usage) chart.
+export type ProductMetricsChartPoint = {
+  date: string;
+  instanceCount: number;
+  totalCores: number;
+  minCores: number;
+  maxCores: number;
+  avgCores: number;
+  instances: ProductMetricsChartInstance[];
+};
+
+// Aggregated core-usage summary for a product over a date range.
+export type ProductMetricsSummary = {
+  dateRange: { start: string; end: string };
+  totalInstances: number;
+  minCores: number;
+  maxCores: number;
+  avgCores: number;
+};
+
+// Response type for POST .../deployments/:deploymentId/products/:productId/metrics/search.
+export type ProductMetricsResponse = {
+  product: IdLabelRef;
+  summary: ProductMetricsSummary;
+  chartData: ProductMetricsChartPoint[];
+};
+
+// Aggregation applied to a usage-count metric type ("max", "avg", "sum", ...).
+export type ProductUsageCountAggregation = string;
+
+// Summary stat for one usage-count metric type (e.g. TOTAL_USERS) over the date range.
+export type ProductUsageCountTypeSummary = {
+  aggregation: ProductUsageCountAggregation;
+  min: number;
+  max: number;
+  avg: number;
+};
+
+// Aggregated usage-counts summary for a product over a date range.
+export type ProductUsageCountsSummary = {
+  dateRange: { start: string; end: string };
+  countTypes: Record<string, ProductUsageCountTypeSummary>;
+};
+
+// Item type for a single instance's value for a usage-count metric on a chart day.
+export type ProductUsageCountChartInstance = {
+  id: string;
+  name: string;
+  value: number;
+};
+
+// Value for one usage-count metric type on a single chart day.
+export type ProductUsageCountChartValue = {
+  value: number;
+  aggregation: ProductUsageCountAggregation;
+  instances: ProductUsageCountChartInstance[];
+};
+
+// Item type for a single day on a product usage-counts chart.
+export type ProductUsageCountsChartPoint = {
+  date: string;
+  counts: Record<string, ProductUsageCountChartValue>;
+};
+
+// Response type for POST .../deployments/:deploymentId/products/:productId/metrics/usage-counts/search.
+export type ProductUsageCountsResponse = {
+  product: IdLabelRef;
+  summary: ProductUsageCountsSummary;
+  chartData: ProductUsageCountsChartPoint[];
 };
 
 // Item type for a single point for Recharts / LineChart x-axis rows.

@@ -19,6 +19,7 @@ import {
   type ActivityBreakdown,
 } from "@features/csm-timecards/types/timeCards";
 import { WORK_LOG_MAX } from "@features/csm-timecards/constants/timeCardConstants";
+import { isBlankHtml } from "@utils/sanitizeHtml";
 
 /** A fresh breakdown with every activity at zero minutes. */
 export function emptyBreakdown(): ActivityBreakdown {
@@ -67,7 +68,12 @@ export function timeCardDraftErrors(draft: TimeCardDraft): TimeCardDraftErrors {
   if (!hasLoggedTime(draft.breakdown)) {
     errors.minutes = "Log time against at least one activity.";
   }
-  if (!draft.workLogComment.trim()) {
+  // workLogComment is rich-text HTML from Editor, not a plain string — an
+  // untouched editor still outputs non-empty-looking HTML (e.g.
+  // "<p><br></p>"), so `.trim()` truthiness would treat an empty comment as
+  // filled in. isBlankHtml is the same check used wherever else the app
+  // decides whether HTML content is really empty.
+  if (isBlankHtml(draft.workLogComment)) {
     errors.workLogComment = "Add a work log comment.";
   } else if (draft.workLogComment.length > WORK_LOG_MAX) {
     errors.workLogComment = `Comment must be ${WORK_LOG_MAX} characters or fewer.`;

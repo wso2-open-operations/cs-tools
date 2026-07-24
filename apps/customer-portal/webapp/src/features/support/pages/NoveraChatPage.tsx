@@ -56,6 +56,8 @@ import {
 } from "@features/support/utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/permission";
 import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
+import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import { ChatSender } from "@features/support/types/conversations";
 import type {
   ChatNavState,
@@ -64,6 +66,7 @@ import type {
 import ChatHeader from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatHeader";
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageList";
+import TokenRequestModal from "@features/support/components/novera-ai-assistant/novera-chat-page/TokenRequestModal";
 import ChatSkeleton from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatSkeleton";
 import {
   displayTextFromConversationContent,
@@ -348,6 +351,7 @@ export default function NoveraChatPage(): JSX.Element {
   const [isInputDisabled, setIsInputDisabled] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const inputValueRef = useRef("");
+  const piiGuard = usePiiGuard();
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -667,13 +671,41 @@ export default function NoveraChatPage(): JSX.Element {
     void sendViaWebSocket("This Resolved My Issue");
   }, [isSending, sendViaWebSocket]);
 
+  // Feature-flagged (config.js): request a token limit increase over the chat
+  // WebSocket. Kept off until the backend handler is ready.
+  const tokenRequestEnabled =
+    window.config?.CUSTOMER_PORTAL_NOVERA_TOKEN_REQUEST_ENABLED ?? false;
+  const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
+
+  const handleTokenIncreaseSubmit = useCallback(
+    async (reason: string): Promise<void> => {
+      if (!projectId || !accountId) {
+        throw new Error("Unable to submit the request right now.");
+      }
+      await connect(projectId);
+      await sendUserMessage({
+        type: "token_increase_request",
+        accountId,
+        reason,
+        limitType: "session",
+      });
+    },
+    [projectId, accountId, connect, sendUserMessage],
+  );
+
   const handleSendMessage = useCallback(async (): Promise<boolean> => {
     const text = htmlToPlainText(inputValueRef.current).trim();
     if (!text || isSending || !projectId) return false;
-    setInputValueAndRef("");
-    setResetTrigger((prev) => prev + 1);
-    return sendViaWebSocket(text);
-  }, [isSending, projectId, sendViaWebSocket, setInputValueAndRef]);
+
+    // Warn about PII before sending. The input is only cleared once the send
+    // actually proceeds, so choosing "Edit" preserves the user's text.
+    piiGuard.checkBeforeSubmit(text, () => {
+      setInputValueAndRef("");
+      setResetTrigger((prev) => prev + 1);
+      void sendViaWebSocket(text);
+    });
+    return true;
+  }, [isSending, projectId, sendViaWebSocket, setInputValueAndRef, piiGuard]);
 
   useEffect(() => {
     if (!initialUserMessage?.trim()) return;
@@ -725,6 +757,11 @@ export default function NoveraChatPage(): JSX.Element {
               messagesEndRef={messagesEndRef}
               onCreateCase={handleCreateCase}
               onSolutionWorked={handleSolutionWorked}
+              onRequestTokenIncrease={
+                tokenRequestEnabled
+                  ? () => setIsTokenModalOpen(true)
+                  : undefined
+              }
               onFetchOlder={
                 urlConversationId && hasNextPage && !isFetchingNextPage
                   ? () => fetchNextPage()
@@ -750,6 +787,15 @@ export default function NoveraChatPage(): JSX.Element {
         </Paper>
       </Box>
 
+      <PiiWarningDialog {...piiGuard.dialogProps} />
+
+      {tokenRequestEnabled && (
+        <TokenRequestModal
+          open={isTokenModalOpen}
+          onClose={() => setIsTokenModalOpen(false)}
+          onSubmit={handleTokenIncreaseSubmit}
+        />
+      )}
     </Box>
   );
 }

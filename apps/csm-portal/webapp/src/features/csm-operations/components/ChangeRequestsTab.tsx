@@ -241,6 +241,7 @@ export default function ChangeRequestsTab(): JSX.Element {
           rowsPerPage={rowsPerPage}
           onRowsPerPageChange={handleChangeRowsPerPage}
           rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+          labelDisplayedRows={({ from, to, count }) => `Showing ${from}–${to} of ${count}`}
           showFirstButton
           showLastButton
         />

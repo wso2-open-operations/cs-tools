@@ -21,6 +21,7 @@ export interface TabOption {
   id: string;
   label: string;
   icon?: React.ElementType;
+  iconColor?: string;
   count?: number | string;
   badgeColor?: string;
 }
@@ -72,7 +73,9 @@ const TabBar = ({
             variant="outlined"
             aria-selected={isActive}
             onClick={() => onTabChange(tab.id)}
-            startIcon={Icon ? <Icon size={16} /> : undefined}
+            startIcon={
+              Icon ? <Icon size={16} color={tab.iconColor} /> : undefined
+            }
             sx={{
               position: "relative",
               flex: keepButtonWidth ? "0 0 auto" : 1,

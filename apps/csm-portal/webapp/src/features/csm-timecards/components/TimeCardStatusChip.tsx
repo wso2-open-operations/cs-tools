@@ -29,5 +29,5 @@ export default function TimeCardStatusChip({
   size?: "small" | "medium";
 }): JSX.Element {
   const meta = TIME_CARD_STATE_META[state];
-  return <SemanticChip role={meta.role} label={meta.label} size={size} />;
+  return <SemanticChip role={meta.role} label={meta.label} size={size} variant={meta.variant} />;
 }

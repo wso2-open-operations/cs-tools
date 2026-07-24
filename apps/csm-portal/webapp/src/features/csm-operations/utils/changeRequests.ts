@@ -82,6 +82,20 @@ export function changeRequestStateColor(state?: string | null): ChipColor {
   return STATE_COLOR[state as BeChangeRequestState] ?? "default";
 }
 
+/**
+ * Human-readable reason a comment cannot be posted on this change request right
+ * now, or `null` when it can. Change requests don't share the case work-state
+ * model — the only gate is terminal state.
+ */
+export function changeRequestCommentGateReason(
+  state?: string | null,
+): string | null {
+  if (state === "closed" || state === "canceled") {
+    return "Comments are disabled on a closed or canceled change request.";
+  }
+  return null;
+}
+
 export function changeRequestImpactLabel(impact?: string | null): string {
   if (!impact) return "—";
   return IMPACT_LABEL[impact as BeChangeRequestImpact] ?? humanize(impact);
@@ -89,6 +103,41 @@ export function changeRequestImpactLabel(impact?: string | null): string {
 
 export function changeRequestImpactColor(impact?: string | null): ChipColor {
   return IMPACT_COLOR[impact as BeChangeRequestImpact] ?? "default";
+}
+
+// Approval-stage / approver status labels and colours. The backend passes
+// these through from the data source without validating them (see
+// `BeChangeRequestApprover.status`), so both maps are deliberately partial —
+// unrecognized values fall back to a humanized version of the raw string
+// rather than crashing or rendering nothing.
+const APPROVAL_STATUS_LABEL: Record<string, string> = {
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  PENDING: "Pending",
+  REQUESTED: "Requested",
+  NOT_REQUIRED: "Not required",
+  CANCELLED: "Cancelled",
+  NO_CONSENSUS: "No consensus",
+};
+
+const APPROVAL_STATUS_COLOR: Record<string, ChipColor> = {
+  APPROVED: "success",
+  REJECTED: "error",
+  PENDING: "warning",
+  REQUESTED: "warning",
+  NOT_REQUIRED: "default",
+  CANCELLED: "default",
+  NO_CONSENSUS: "error",
+};
+
+export function approvalStatusLabel(status?: string | null): string {
+  if (!status) return "—";
+  return APPROVAL_STATUS_LABEL[status.toUpperCase()] ?? humanize(status.toLowerCase());
+}
+
+export function approvalStatusColor(status?: string | null): ChipColor {
+  if (!status) return "default";
+  return APPROVAL_STATUS_COLOR[status.toUpperCase()] ?? "default";
 }
 
 export interface ChangeRequestFilters {

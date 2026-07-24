@@ -3581,6 +3581,7 @@ components:
       - assignedTeam
       - createdBy
       - createdOn
+      - updatedOn
       - description
       - duration
       - id
@@ -3605,6 +3606,9 @@ components:
         createdOn:
           type: string
           description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
         createdBy:
           type: string
           description: Created by (User email)
@@ -5135,6 +5139,29 @@ components:
           $ref: '#/components/schemas/Date'
         endDate:
           $ref: '#/components/schemas/Date'
+    CountTypeAggregation:
+      required:
+      - aggregation
+      - min
+      - max
+      - avg
+      type: object
+      properties:
+        aggregation:
+          type: string
+          description: Aggregation function applied for this count type (e.g. sum, max)
+        min:
+          type: number
+          format: double
+          description: Minimum aggregated value across the range
+        max:
+          type: number
+          format: double
+          description: Maximum aggregated value across the range
+        avg:
+          type: number
+          format: double
+          description: Average aggregated value across the range
     DeployedProductMetricsUsageCountsSummary:
       required:
       - dateRange
@@ -5157,7 +5184,7 @@ components:
           type: object
           description: Count types aggregated over the range
           additionalProperties:
-            type: integer
+            $ref: '#/components/schemas/CountTypeAggregation'
     DeployedProductMetricsUsageCountsResponse:
       required:
       - product
@@ -5183,7 +5210,57 @@ components:
           type: array
           description: Chart data points ordered by date
           items:
-            type: object
+            $ref: '#/components/schemas/DeployedProductUsageCountsChartEntry'
+    UsageCountInstance:
+      required:
+      - id
+      - name
+      - value
+      type: object
+      properties:
+        id:
+          type: string
+          description: System ID of the instance
+        name:
+          type: string
+          description: Instance name or key
+        value:
+          type: number
+          format: double
+          description: Count value contributed by this instance
+    UsageCountEntry:
+      required:
+      - value
+      - aggregation
+      - instances
+      type: object
+      properties:
+        value:
+          type: number
+          format: double
+          description: Aggregated value across instances
+        aggregation:
+          type: string
+          description: Aggregation function applied (e.g. sum, max)
+        instances:
+          type: array
+          description: Per-instance breakdown
+          items:
+            $ref: '#/components/schemas/UsageCountInstance'
+    DeployedProductUsageCountsChartEntry:
+      required:
+      - date
+      - counts
+      type: object
+      properties:
+        date:
+          type: string
+          description: "Date of the chart entry (format: YYYY-MM-DD)"
+        counts:
+          type: object
+          description: Pivoted counts keyed by count type
+          additionalProperties:
+            $ref: '#/components/schemas/UsageCountEntry'
     DeployedProductUpdatePayload:
       type: object
       properties:

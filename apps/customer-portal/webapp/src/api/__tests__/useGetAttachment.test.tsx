@@ -109,7 +109,7 @@ describe("useGetAttachment", () => {
     clickSpy.mockRestore();
   });
 
-  it("should open downloadUrl when GET fails and URL is set", async () => {
+  it("should reject when GET fails even if downloadUrl is set", async () => {
     mockAuthFetch.mockResolvedValue({
       ok: false,
       status: 500,
@@ -120,18 +120,16 @@ describe("useGetAttachment", () => {
     const { result } = renderHook(() => useGetAttachment(), { wrapper });
 
     await act(async () => {
-      await result.current.downloadAttachment({
-        id: "att-1",
-        name: "x",
-        downloadUrl: "https://sn.example/file",
-      });
+      await expect(
+        result.current.downloadAttachment({
+          id: "att-1",
+          name: "x",
+          downloadUrl: "https://sn.example/file",
+        }),
+      ).rejects.toThrow(/Error/);
     });
 
-    expect(openSpy).toHaveBeenCalledWith(
-      "https://sn.example/file",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    expect(openSpy).not.toHaveBeenCalled();
   });
 
   it("should reject when GET fails and no downloadUrl", async () => {

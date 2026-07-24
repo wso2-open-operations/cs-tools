@@ -60,7 +60,19 @@ var snTimeCardStateLabelToDomain = map[string]string{
 
 type snTimeCardSearchPayload struct {
 	Filters    *snTimeCardFilters  `json:"filters,omitempty"`
+	SortBy     *snTimeCardSort     `json:"sortBy,omitempty"`
 	Pagination snProjectPagination `json:"pagination"`
+}
+
+type snTimeCardSort struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}
+
+// snTimeCardSortFieldMap maps domain TimeCardSortField values to SN field names.
+var snTimeCardSortFieldMap = map[domain.TimeCardSortField]string{
+	domain.TimeCardSortFieldUpdatedOn: "updatedOn",
+	domain.TimeCardSortFieldWorkDate:  "workDate",
 }
 
 type snTimeCardFilters struct {
@@ -69,6 +81,7 @@ type snTimeCardFilters struct {
 	UserID       string   `json:"userId,omitempty"`
 	ApproverID   string   `json:"approverId,omitempty"`
 	ApprovedByID string   `json:"approvedById,omitempty"`
+	UserIDs      []string `json:"userIds,omitempty"`
 	StartDate    string   `json:"startDate,omitempty"`
 	EndDate      string   `json:"endDate,omitempty"`
 	States       []string `json:"states,omitempty"`
@@ -82,15 +95,25 @@ type snTimeCardsResponse struct {
 }
 
 type snTimeCard struct {
-	ID          string             `json:"id"`
-	TotalTime   float64            `json:"totalTime"`
-	CreatedOn   string             `json:"createdOn"`
-	HasBillable bool               `json:"hasBillable"`
-	State       *snTimeCardLabel   `json:"state"`
-	User        *snTimeCardRef     `json:"user"`
-	ApprovedBy  *snTimeCardRef     `json:"approvedBy"`
-	Project     *snTimeCardRef     `json:"project"`
-	Case        *snTimeCardCaseRef `json:"case"`
+	ID                       string             `json:"id"`
+	TotalTime                float64            `json:"totalTime"`
+	CreatedOn                string             `json:"createdOn"`
+	WorkDate                 string             `json:"workDate"`
+	HasBillable              bool               `json:"hasBillable"`
+	TimeAnalyzing            int                `json:"timeAnalyzing"`
+	TimeSettingUp            int                `json:"timeSettingUp"`
+	TimeReproducingDebugging int                `json:"timeReproducingDebugging"`
+	TimeProvidingSolution    int                `json:"timeProvidingSolution"`
+	TimePatching             int                `json:"timePatching"`
+	IssueComplexity          *string            `json:"issueComplexity"`
+	WorkLogComment           *string            `json:"workLogComment"`
+	RejectionReason          *string            `json:"rejectionReason"`
+	State                    *snTimeCardLabel   `json:"state"`
+	Approvers                []snTimeCardRef    `json:"approvers"`
+	User                     *snTimeCardRef     `json:"user"`
+	ApprovedBy               *snTimeCardRef     `json:"approvedBy"`
+	Project                  *snTimeCardRef     `json:"project"`
+	Case                     *snTimeCardCaseRef `json:"case"`
 }
 
 type snTimeCardLabel struct {
@@ -110,10 +133,19 @@ type snTimeCardCaseRef struct {
 
 func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 	view := domain.TimeCardView{
-		ID:          sysidToUUID(tc.ID),
-		TotalTime:   tc.TotalTime,
-		CreatedOn:   tc.CreatedOn,
-		HasBillable: tc.HasBillable,
+		ID:                       sysidToUUID(tc.ID),
+		TotalTime:                tc.TotalTime,
+		CreatedOn:                tc.WorkDate, // deprecated alias — always mirrors WorkDate, not SN's separate createdOn field
+		WorkDate:                 tc.WorkDate,
+		HasBillable:              tc.HasBillable,
+		TimeAnalyzing:            tc.TimeAnalyzing,
+		TimeSettingUp:            tc.TimeSettingUp,
+		TimeReproducingDebugging: tc.TimeReproducingDebugging,
+		TimeProvidingSolution:    tc.TimeProvidingSolution,
+		TimePatching:             tc.TimePatching,
+		IssueComplexity:          tc.IssueComplexity,
+		WorkLogComment:           tc.WorkLogComment,
+		RejectionReason:          tc.RejectionReason,
 	}
 
 	if tc.State != nil {
@@ -125,6 +157,13 @@ func snTimeCardToView(tc snTimeCard) domain.TimeCardView {
 		}
 	}
 
+	if len(tc.Approvers) > 0 {
+		approvers := make([]domain.TimeCardRef, 0, len(tc.Approvers))
+		for _, a := range tc.Approvers {
+			approvers = append(approvers, domain.TimeCardRef{ID: sysidToUUID(a.ID), Name: a.Name})
+		}
+		view.Approvers = approvers
+	}
 	if tc.User != nil {
 		view.User = &domain.TimeCardRef{ID: sysidToUUID(tc.User.ID), Name: tc.User.Name}
 	}
@@ -160,11 +199,22 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchTimeCardsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+
+	var snSortBy *snTimeCardSort
+	if req.SortBy.Field != "" {
+		snField, ok := snTimeCardSortFieldMap[req.SortBy.Field]
+		if !ok {
+			return domain.SearchTimeCardsResponse{}, &apierror.ValidationError{Msg: "sortBy.field " + string(req.SortBy.Field) + " is not supported by ServiceNow"}
+		}
+		order := string(req.SortBy.Order)
+		if order == "" {
+			order = "desc"
+		}
+		snSortBy = &snTimeCardSort{Field: snField, Order: order}
 	}
 
 	payload := snTimeCardSearchPayload{
+		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 
@@ -197,6 +247,9 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 				return domain.SearchTimeCardsResponse{}, err
 			}
 		}
+		if err := validateUUIDs("userIds", req.Filters.UserIDs); err != nil {
+			return domain.SearchTimeCardsResponse{}, err
+		}
 
 		snStates := make([]string, 0, len(req.Filters.States))
 		for _, state := range req.Filters.States {
@@ -218,6 +271,9 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 		}
 		if req.Filters.ApprovedByID != nil {
 			filters.ApprovedByID = uuidToSysid(*req.Filters.ApprovedByID)
+		}
+		if len(req.Filters.UserIDs) > 0 {
+			filters.UserIDs = uuidsToSysids(req.Filters.UserIDs)
 		}
 		if req.Filters.StartDate != nil {
 			filters.StartDate = *req.Filters.StartDate
@@ -310,9 +366,6 @@ func nonNegativeMinutes(field string, v int) error {
 
 func (s *snTimeCardService) CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.TimeCardMutationResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	if req.CaseID == "" {
 		return domain.TimeCardMutationResponse{}, &apierror.ValidationError{Msg: "caseId is required"}
@@ -373,9 +426,6 @@ func (s *snTimeCardService) CreateTimeCard(ctx context.Context, req domain.Creat
 
 func (s *snTimeCardService) UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.TimeCardMutationResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.TimeCardMutationResponse{}, err
 	}

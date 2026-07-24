@@ -99,3 +99,15 @@ export const ANNOUNCEMENTS_EMPTY_STATE_ICON_MAX_WIDTH_PX = 200;
 
 /** Empty-state illustration bottom margin (px). */
 export const ANNOUNCEMENTS_EMPTY_STATE_ICON_MARGIN_BOTTOM_PX = 16;
+
+/** Comments panel: section heading. */
+export const ANNOUNCEMENT_COMMENTS_HEADING = "Comments";
+
+/** Comments panel: error fallback message. */
+export const ANNOUNCEMENT_COMMENTS_ERROR_MESSAGE = "Could not load comments.";
+
+/** Comments panel: label shown on "load more" button while fetching. */
+export const ANNOUNCEMENT_COMMENTS_LOADING_LABEL = "Loading...";
+
+/** Comments panel: "load more" button label. */
+export const ANNOUNCEMENT_COMMENTS_LOAD_MORE_LABEL = "Load more";

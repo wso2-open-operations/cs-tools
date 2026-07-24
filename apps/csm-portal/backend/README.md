@@ -125,7 +125,7 @@ Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-e
 
 | Variable | Description |
 |---|---|
-| `ENGINEERING_ENTITY_BASE_URL` | Base URL of the engineering entity service |
+| `ENGINEERING_ENTITY_BASE_URL` | Base URL of the engineering entity service (optional) |
 | `ENGINEERING_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### Updates service
@@ -148,9 +148,9 @@ Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-e
 
 | Variable | Description |
 |---|---|
-| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service |
+| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service (optional) |
 | `NOTIFICATIONS_EMAIL_SCOPES` | Comma-separated OAuth2 scopes (optional) |
-| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email |
+| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email (optional) |
 
 ### Notifications — Google Chat channel
 
@@ -158,8 +158,8 @@ Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-e
 
 | Variable | Description |
 |---|---|
-| `NOTIFICATIONS_GOOGLE_CHAT_SPACES` | JSON array of `{"product","webhookUrl"}` objects, one per Google Chat space — e.g. `[{"product":"api-manager","webhookUrl":"https://chat.googleapis.com/..."}]`. Malformed JSON is logged and treated as no spaces configured (does not fail startup) |
-| `CSM_PORTAL_WEB_BASE_URL` | Base URL of the CSM portal webapp, used to build the "Open in CSM Portal" link at `/operations/incidents/{caseId}` (e.g. `http://localhost:3001` for local dev) |
+| `NOTIFICATIONS_GOOGLE_CHAT_SPACES` | JSON array of `{"product","webhookUrl"}` objects, one per Google Chat space — e.g. `[{"product":"api-manager","webhookUrl":"https://chat.googleapis.com/..."}]`. Optional — left unset, malformed, Google Chat alerts are unavailable but startup and every other endpoint work normally |
+| `CSM_PORTAL_WEB_BASE_URL` | Base URL of the CSM portal webapp, used to build the "Open in CSM Portal" link at `/operations/incidents/{caseId}` (e.g. `http://localhost:3001` for local dev). Optional — only needed alongside `NOTIFICATIONS_GOOGLE_CHAT_SPACES` above |
 
 ### Auth
 
@@ -213,6 +213,7 @@ backend/
 │       ├── products.go                   # HTTP handlers for product endpoints
 │       ├── projects.go                   # HTTP handlers for project endpoints
 │       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
+│       ├── problems.go                   # HTTP handlers for problem endpoints (ServiceNow only)
 │       ├── notifications.go              # HTTP handlers for notification channels (Google Chat alert endpoint)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
 │       └── users.go                      # HTTP handlers for user endpoints
@@ -247,8 +248,8 @@ backend/
 
 ### Accounts
 
-- `GET /accounts/{id}` — Get account by ID
-- `POST /accounts/search` — Search accounts
+- `GET /accounts/{id}` — Get account by ID; response takes one of two shapes: `Account`, or `AccountDetail` (`supportTier` as `{id, label}`, `owner`/`technicalOwner` as `{id, name}`)
+- `POST /accounts/search` — Search accounts; optional `filters` (`searchQuery`, `active`, `pod`, `classification`); response takes one of two shapes: `AccountSearchResponse`, or `AccountViewSearchResponse` (`supportTier` as a label string, `owner`/`technicalOwner` as `{id, name}`)
 
 ### Projects
 
@@ -273,7 +274,7 @@ backend/
 
 - `POST /change-requests` — Create a change request (ServiceNow data source only)
 - `GET /change-requests/{id}` — Get change request by ID (ServiceNow data source only)
-- `PATCH /change-requests/{id}` — Update a change request (`plannedStartOn`, `isCustomerApproved`, `isCustomerReviewed`; ServiceNow data source only)
+- `PATCH /change-requests/{id}` — Update a change request; all fields optional but at least one required (`title`, `description`, `projectId`, `caseId`, `deploymentId`, `deployedProductId`, `assignedEngineerId`, `assignedTeamId`, `plannedStartOn`/`plannedEndOn` (format `YYYY-MM-DD HH:MM:SS`), `impact`, `state`, `type`, `justification`, `impactDescription`, `serviceOutage`, `communicationPlan`, `rollbackPlan`, `testPlan`); returns `{message, changeRequest}` with the full updated change request (ServiceNow data source only)
 - `POST /change-requests/search` — Search change requests (ServiceNow data source only)
 
 ### CMDB
@@ -300,6 +301,7 @@ backend/
 ### Conversations
 
 - `GET /conversations/{id}/messages` — Get paginated messages for a conversation; optional query params `limit` (1–100, default 20) and `offset` (default 0) (ServiceNow data source only)
+- `POST /conversations/search` — Search conversations; optional `filters` (`projectIds`, `states` (`ACTIVE`/`RESOLVED`), `searchQuery`, `createdByMe`) and `sortBy` (`field`: `createdOn`/`updatedOn`, `order`) (ServiceNow data source only)
 
 ### Updates
 
@@ -309,6 +311,13 @@ backend/
 ### Incidents
 
 - `POST /incidents/search` — Search incidents; optional `filters` (`searchQuery`, `priorities`, `parentIds`) and `sortBy` (`field`: `createdOn`/`updatedOn`/`openedOn`, `order`) (ServiceNow data source only)
+- `POST /incidents` — Create an incident (`callerId`, `category`, `serviceId`, `impact`, `urgency`, `subject` required; `subcategory`, `serviceOfferingId`, `configurationItemId`, `contactType`, `assignmentGroupId`, `assignedEngineerId`, `watchList`, `additionalComments`, `workNotes`, `parentId`, `parentIncidentId`, `changeRequestId`, `problemId`, `causedById` optional) (ServiceNow data source only)
+- `GET /incidents/{id}` — Get full incident detail by ID (ServiceNow data source only)
+- `PATCH /incidents/{id}` — Partially update an incident; all fields optional but at least one required (`subject`, `priority`, `state`, `category`/`subcategory`, `contactType`, `impact`/`urgency`, `resolutionCode`/`resolutionNotes`/`incidentReport`, `parentId`/`parentIncidentId`/`assignmentGroupId`/`assignedEngineerId`/`serviceId`/`serviceOfferingId`/`configurationItemId`/`changeRequestId`/`problemId`/`causedById`/`resolvedById`, `additionalComments`, `workNotes`, `watchList`); set a reference field to `null` to clear it (ServiceNow data source only)
+
+### Problems
+
+- `POST /problems/search` — Search problems; optional `filters` (`searchQuery`) (ServiceNow data source only)
 
 ### Notifications
 
@@ -366,4 +375,31 @@ curl -X POST http://localhost:8080/incidents/search \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"filters":{"searchQuery":"outage","priorities":["CRITICAL"]},"pagination":{"limit":10,"offset":0}}'
+
+# Create an incident
+curl -X POST http://localhost:8080/incidents \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"callerId":"<caller-id>","category":"SECURITY","serviceId":"<service-id>","impact":"HIGH","urgency":"HIGH","subject":"Suspicious login activity"}'
+
+# Get an incident by ID
+curl -H "x-jwt-assertion: $JWT" http://localhost:8080/incidents/<incident-id>
+
+# Partially update an incident
+curl -X PATCH http://localhost:8080/incidents/<incident-id> \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"state":"RESOLVED","resolutionCode":"Solved (Work Around)"}'
+
+# Search problems
+curl -X POST http://localhost:8080/problems/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"searchQuery":"database"},"pagination":{"limit":10,"offset":0}}'
+
+# Search conversations
+curl -X POST http://localhost:8080/conversations/search \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"states":["ACTIVE"]},"pagination":{"limit":10,"offset":0}}'
 ```

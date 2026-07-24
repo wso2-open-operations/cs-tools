@@ -25,3 +25,4 @@ export * from "./ChangeRequestListContent";
 export * from "./ServiceRequestListContent";
 export * from "./FilterSlotContent";
 export * from "./CallRequestCard";
+export * from "./CaseFeedbackDialog";

@@ -63,6 +63,18 @@ const CsmChangeRequestDetailPage = lazy(
 const CreateChangeRequestPage = lazy(
   () => import("@features/csm-operations/pages/CreateChangeRequestPage"),
 );
+const CsmIncidentDetailPage = lazy(
+  () => import("@features/csm-operations/pages/CsmIncidentDetailPage"),
+);
+const CreateIncidentPage = lazy(
+  () => import("@features/csm-operations/pages/CreateIncidentPage"),
+);
+const ProblemDetailPage = lazy(
+  () => import("@features/csm-operations/pages/ProblemDetailPage"),
+);
+const CreateProblemPage = lazy(
+  () => import("@features/csm-operations/pages/CreateProblemPage"),
+);
 const CsmAdminLayout = lazy(
   () => import("@features/csm-admin/pages/CsmAdminLayout"),
 );
@@ -286,6 +298,22 @@ export default function App(): JSX.Element {
                     path="operations/change-requests/:id"
                     element={<CsmChangeRequestDetailPage />}
                   />
+                  <Route
+                    path="operations/incidents/new"
+                    element={<CreateIncidentPage />}
+                  />
+                  <Route
+                    path="operations/incidents/:id"
+                    element={<CsmIncidentDetailPage />}
+                  />
+                  <Route
+                    path="operations/problems/new"
+                    element={<CreateProblemPage />}
+                  />
+                  <Route
+                    path="operations/problems/:id"
+                    element={<ProblemDetailPage />}
+                  />
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />
                   <Route path="engagements/:caseId" element={<CsmCaseDetailPage />} />
@@ -301,6 +329,10 @@ export default function App(): JSX.Element {
                   />
                   <Route path="time-cards" element={<CsmTimeCardsPage />} />
                   <Route path="announcements" element={<CsmAnnouncementsPage />} />
+                  <Route
+                    path="announcements/:caseId"
+                    element={<CsmCaseDetailPage />}
+                  />
                 </Route>
               </Route>
 

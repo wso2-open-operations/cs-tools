@@ -19,7 +19,6 @@ import type {
   ActivityKey,
   IssueComplexity,
   TimeCardState,
-  TimeSheetState,
 } from "@features/csm-timecards/types/timeCards";
 
 /** A labelled activity row in the time-breakdown editor (log-time form only). */
@@ -69,27 +68,20 @@ export const LEAD_COMMENT_MAX = 500;
  * Label + semantic colour for each card state (drives the status chip).
  * `recalled` and `processed` appear in the backend's state enum but are
  * unreachable via the portal's API today — kept here for type completeness.
+ * Every state renders `outlined` — a solid-filled chip on every row read as
+ * too much colour on the list; `submitted` additionally uses the neutral
+ * `default` role rather than the info blue.
  */
 export const TIME_CARD_STATE_META: Record<
   TimeCardState,
-  { label: string; role: SemanticRole }
+  { label: string; role: SemanticRole; variant?: "filled" | "outlined" }
 > = {
-  pending: { label: "Pending", role: "default" },
-  submitted: { label: "Submitted", role: "info" },
-  approved: { label: "Approved", role: "success" },
-  rejected: { label: "Rejected", role: "error" },
-  recalled: { label: "Recalled", role: "warning" },
-  processed: { label: "Processed", role: "success" },
-};
-
-/** Label + semantic colour for each rolled-up time-sheet state. */
-export const TIME_SHEET_STATE_META: Record<
-  TimeSheetState,
-  { label: string; role: SemanticRole }
-> = {
-  submitted: { label: "Submitted", role: "info" },
-  approved: { label: "Approved", role: "success" },
-  rejected: { label: "Rejected", role: "error" },
+  pending: { label: "Pending", role: "default", variant: "outlined" },
+  submitted: { label: "Submitted", role: "default", variant: "outlined" },
+  approved: { label: "Approved", role: "success", variant: "outlined" },
+  rejected: { label: "Rejected", role: "error", variant: "outlined" },
+  recalled: { label: "Recalled", role: "warning", variant: "outlined" },
+  processed: { label: "Processed", role: "success", variant: "outlined" },
 };
 
 /**

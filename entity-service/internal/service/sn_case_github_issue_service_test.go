@@ -52,17 +52,6 @@ func TestSNCaseGithubIssueService_CreateCaseGithubIssue_Validation(t *testing.T)
 		wantErr any // pointer type to assert via errors.As-style type switch below
 	}{
 		{
-			name: "missing token",
-			ctx:  context.Background(),
-			req: domain.CreateCaseGithubIssueRequest{
-				CaseID:      validCaseID,
-				Reason:      domain.CaseGithubIssueReasonDefault,
-				Title:       "t",
-				Description: "d",
-			},
-			wantErr: &apierror.UnauthorizedError{},
-		},
-		{
 			name: "empty case ID",
 			ctx:  contextWithUserIDToken("token"),
 			req: domain.CreateCaseGithubIssueRequest{
@@ -160,10 +149,6 @@ func TestSNCaseGithubIssueService_CreateCaseGithubIssue_Validation(t *testing.T)
 				t.Fatalf("expected error, got nil")
 			}
 			switch tt.wantErr.(type) {
-			case *apierror.UnauthorizedError:
-				if _, ok := err.(*apierror.UnauthorizedError); !ok {
-					t.Fatalf("expected *apierror.UnauthorizedError, got %T: %v", err, err)
-				}
 			case *apierror.ValidationError:
 				if _, ok := err.(*apierror.ValidationError); !ok {
 					t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)

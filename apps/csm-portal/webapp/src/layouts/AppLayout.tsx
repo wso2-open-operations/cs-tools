@@ -35,6 +35,7 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
+import { useSyncRecentViewsIdentity } from "@features/csm-recent/hooks/useRecentViews";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
 import HtmlAnnouncementBanner from "@components/announcement-banner/HtmlAnnouncementBanner";
 import TopBanner from "@components/top-banner/TopBanner";
@@ -69,6 +70,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const mainContentRef = useRef<HTMLDivElement>(null);
   const { isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
   const { isErrorPageDisplayed } = useErrorPageContext();
+  useSyncRecentViewsIdentity();
 
   useEffect(() => {
     if (mainContentRef.current) {

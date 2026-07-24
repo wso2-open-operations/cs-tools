@@ -41,10 +41,8 @@ type SNUserService interface {
 	// error indicates an infrastructure failure.
 	SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchSNUsersResponse, error)
 	// GetMe returns the profile of the currently authenticated user from ServiceNow.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	GetMe(ctx context.Context) (domain.GetUserMeResponse, error)
 	// PatchMe updates mutable fields on the currently authenticated user in ServiceNow.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error)
 }
 
@@ -62,11 +60,10 @@ type AccountService interface {
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
-	// filters in req. An UnauthorizedError is returned when x-user-id-token is absent.
+	// filters in req.
 	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchSNAccountsResponse, error)
-	// GetAccountByID returns the ServiceNow account for the given UUID.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
-	GetAccountByID(ctx context.Context, id string) (domain.SNAccount, error)
+	// GetAccountByID returns the full account detail for the given UUID.
+	GetAccountByID(ctx context.Context, id string) (domain.SNAccountDetail, error)
 }
 
 // ProjectService defines the operations available on the project entity.
@@ -80,6 +77,32 @@ type ProjectService interface {
 	GetProjectByID(ctx context.Context, id string) (domain.ProjectDetailsView, error)
 }
 
+// ProjectUpdateService defines the write operations available on a project.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ProjectUpdateService interface {
+	// UpdateProject applies the given field changes to the project identified by
+	// id. A ValidationError is returned for a malformed UUID or an empty request;
+	// a NotFoundError if no project matches; an UnauthorizedError if the caller
+	// lacks the required SN role.
+	UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error)
+}
+
+// ProjectContactService defines the operations available on project contacts.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ProjectContactService interface {
+	// SearchProjectContacts returns a paginated list of contacts associated with
+	// the project identified by projectID.
+	SearchProjectContacts(ctx context.Context, projectID string, req domain.SearchProjectContactsRequest) (domain.SearchProjectContactsResponse, error)
+}
+
+// AccountContactService defines the operations available on account contacts.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type AccountContactService interface {
+	// SearchAccountContacts returns a paginated list of contacts associated with
+	// the account identified by accountID.
+	SearchAccountContacts(ctx context.Context, accountID string, req domain.SearchAccountContactsRequest) (domain.SearchAccountContactsResponse, error)
+}
+
 // ProductService defines the operations available on the product entity.
 type ProductService interface {
 	// SearchProducts returns a paginated list of products that match the filters
@@ -91,7 +114,7 @@ type ProductService interface {
 // SNProductService defines the product operations backed by the ServiceNow data source.
 type SNProductService interface {
 	// SearchProducts returns a paginated list of ServiceNow products matching the
-	// search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	// search query.
 	SearchProducts(ctx context.Context, req domain.SearchProductsRequest) (domain.SearchSNProductsResponse, error)
 }
 
@@ -159,9 +182,13 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCase updates the state, severity, watch list, or assignee of a case.
+	// UpdateCase updates the state, severity, watch list, assignee, or fix ETA (customer-facing
+	// or internal best-case/most-likely/worst-case) of a case.
 	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
-	// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
+	// WatchList, AssigneeEmail, FixEta, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta are
+	// only supported for the ServiceNow data source.
+	// Transitioning State to closed is rejected with a ValidationError if the case has any
+	// open task that is visible to the customer (the authoritative case-close gate).
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
 	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
 	// A ValidationError is returned for invalid input.
@@ -181,6 +208,21 @@ type CaseService interface {
 	// DeleteCaseAttachment removes the attachment identified by req.AttachmentID from the case.
 	// A NotFoundError is returned if the attachment does not exist.
 	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
+	// AddCaseTag attaches a free-text label to the case identified by caseID.
+	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty label).
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina adapter exists yet for ServiceNow's generic
+	// label/label_entry mechanism; see AddCaseTagRequest doc comment.
+	AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error)
+	// RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
+	// A NotFoundError is returned if the tag does not exist on the case.
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): same gap as AddCaseTag above.
+	RemoveCaseTag(ctx context.Context, caseID, tagID string) error
+	// SearchTags returns the tags (not scoped to any single case) whose label matches query,
+	// for FE autocomplete when attaching a tag to a case. An empty query returns all known tags.
+	// limit caps the number of results (<=0 means use the downstream default).
+	// Ballerina support added on ballerina-tasks-fixeta-tags (not yet merged to digiops-cs main): no Ballerina/Choreo endpoint exists yet for a
+	// case-agnostic tag search; see SearchTags in sn_case_service.go for the requested contract.
+	SearchTags(ctx context.Context, query string, limit int) ([]domain.Tag, error)
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
@@ -234,6 +276,15 @@ type ChangeRequestService interface {
 
 	// PatchChangeRequest updates mutable fields on a change request identified by UUID.
 	PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error)
+
+	// GetChangeRequestApprovals returns the approval stages and per-approver status
+	// for a single change request identified by UUID.
+	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
+
+	// DecideChangeRequestApproval submits the caller's decision ("approved" or
+	// "rejected") on their own pending approval for a change request identified
+	// by UUID. Supported by the ServiceNow data source only.
+	DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error)
 }
 
 // TimeCardService defines the operations available on the time-cards entity.
@@ -252,7 +303,7 @@ type TimeCardService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ConfigurationItemService interface {
 	// SearchConfigurationItems returns a paginated list of CMDB configuration items filtered by
-	// optional search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	// optional search query.
 	SearchConfigurationItems(ctx context.Context, req domain.SearchConfigurationItemsRequest) (domain.SearchConfigurationItemsResponse, error)
 }
 
@@ -260,7 +311,6 @@ type ConfigurationItemService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type GroupService interface {
 	// SearchGroups returns a paginated list of groups filtered by optional search query.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchGroups(ctx context.Context, req domain.SearchGroupsRequest) (domain.SearchGroupsResponse, error)
 }
 
@@ -268,7 +318,7 @@ type GroupService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ServiceOfferingService interface {
 	// SearchServiceOfferings returns a paginated list of service offerings filtered by
-	// optional service IDs. An UnauthorizedError is returned when x-user-id-token is absent.
+	// optional service IDs.
 	SearchServiceOfferings(ctx context.Context, req domain.SearchServiceOfferingsRequest) (domain.SearchServiceOfferingsResponse, error)
 }
 
@@ -276,7 +326,6 @@ type ServiceOfferingService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ITServiceService interface {
 	// SearchITServices returns a paginated list of CMDB services from ServiceNow.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchITServices(ctx context.Context, req domain.SearchITServicesRequest) (domain.SearchITServicesResponse, error)
 }
 
@@ -285,19 +334,40 @@ type ITServiceService interface {
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type CommentService interface {
 	// SearchComments returns a paginated list of comments for the given reference entity.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
+	// CreateComment creates a new comment on the given reference entity.
+	CreateComment(ctx context.Context, req domain.CreateCommentRequest) (domain.CreateCommentResponse, error)
 }
 
 // TaskSlaService defines the operations available on the task-slas entity.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type TaskSlaService interface {
 	// SearchTaskSlas returns a paginated list of task SLA records filtered by optional task IDs.
-	// An UnauthorizedError is returned when x-user-id-token is absent.
 	SearchTaskSlas(ctx context.Context, req domain.SearchTaskSlasRequest) (domain.SearchTaskSlasResponse, error)
 	// GetTaskSla returns the full detail of a single task SLA record by its UUID.
 	// A NotFoundError is returned if the record does not exist.
 	GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error)
+}
+
+// TaskService defines the operations available on the tasks entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type TaskService interface {
+	// SearchCaseTasks returns a paginated list of tasks for the case identified by
+	// caseID. A ValidationError is returned for invalid input (e.g. malformed UUID).
+	SearchCaseTasks(ctx context.Context, caseID string, req domain.SearchCaseTasksRequest) (domain.SearchCaseTasksResponse, error)
+	// GetTask returns the full detail of a single task by its UUID.
+	// A NotFoundError is returned if the task does not exist.
+	GetTask(ctx context.Context, id string) (domain.TaskDetail, error)
+	// CreateCaseTask creates a new task on the case identified by caseID.
+	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty subject).
+	// Returns a ServiceUnavailableError until the downstream ballerina-tasks-fixeta-tags
+	// endpoint (not yet merged to digiops-cs main) ships; see CreateCaseTaskRequest doc comment.
+	CreateCaseTask(ctx context.Context, caseID string, req domain.CreateCaseTaskRequest) (domain.TaskDetail, error)
+	// UpdateTask updates exactly one of state, assignedToEmail, or dueDate on the task
+	// identified by taskID. A ValidationError is returned for invalid values, a malformed
+	// UUID, or if zero or more than one field is provided.
+	// Returns a ServiceUnavailableError until the downstream endpoint ships, same as CreateCaseTask above.
+	UpdateTask(ctx context.Context, taskID string, req domain.UpdateTaskRequest) (domain.TaskDetail, error)
 }
 
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.
@@ -318,4 +388,40 @@ type IncidentService interface {
 	// SearchIncidents returns a paginated list of incidents filtered by optional search query,
 	// priority keys, and parent IDs. A ValidationError is returned for invalid input.
 	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
+
+	// CreateIncident creates a new incident in ServiceNow.
+	// callerId, category, serviceId, impact, urgency, and subject are required.
+	CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error)
+
+	// GetIncidentByID returns the full detail of a single incident by its UUID.
+	// A NotFoundError is returned if the incident does not exist.
+	GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error)
+
+	// UpdateIncident partially updates an existing incident. At least one field must be
+	// provided. A NotFoundError is returned if the incident does not exist.
+	UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error)
+}
+
+// ProblemService defines the operations available on the problems entity.
+type ProblemService interface {
+	// SearchProblems returns a paginated list of problems filtered by optional search query.
+	// A ValidationError is returned for invalid input.
+	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
+
+	// GetProblem returns the full detail of a single problem by its UUID.
+	// A NotFoundError is returned if the problem does not exist.
+	GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error)
+
+	// CreateProblem creates a new problem. Subject is required; OriginCaseID is optional.
+	// Supported by the ServiceNow data source only.
+	CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error)
+}
+
+// ConversationService defines the operations available on the conversations entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ConversationService interface {
+	// SearchConversations returns a paginated list of conversations filtered by optional
+	// project IDs, states, search query, and createdByMe. A ValidationError is returned
+	// for invalid input.
+	SearchConversations(ctx context.Context, req domain.SearchConversationsRequest) (domain.SearchConversationsResponse, error)
 }

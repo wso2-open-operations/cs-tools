@@ -265,7 +265,10 @@ export default function AddUserModal({
     onSubmit,
   ]);
 
-  const isDetailsValid = firstName.trim().length > 0 && email.trim().length > 0;
+  const isDetailsValid =
+    firstName.trim().length > 0 &&
+    lastName.trim().length > 0 &&
+    email.trim().length > 0;
 
   return (
     <Dialog
@@ -397,7 +400,8 @@ export default function AddUserModal({
                   htmlFor="add-user-lastname"
                   sx={{ display: "block", mb: 1, fontSize: "0.875rem" }}
                 >
-                  {ADD_USER_LAST_NAME_LABEL}
+                  {ADD_USER_LAST_NAME_LABEL}{" "}
+                  <span style={{ color: "var(--oxygen-palette-error-main)" }}>*</span>
                 </InputLabel>
                 <Input
                   id="add-user-lastname"

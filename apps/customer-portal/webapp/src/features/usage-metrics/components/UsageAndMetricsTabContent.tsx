@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button } from "@wso2/oxygen-ui";
-import { Upload } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, Typography } from "@wso2/oxygen-ui";
+import { Server, Upload } from "@wso2/oxygen-ui-icons-react";
 import type { ReactNode } from "react";
 import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
@@ -31,6 +31,7 @@ import {
   resolveUsagePresetDateRange,
 } from "@features/usage-metrics/utils/usageMetricsTab";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
+import { getUsageOverviewAccentForTypeId } from "@features/usage-metrics/utils/usageMetricsAccent";
 
 /**
  * Usage & Metrics area: time range, inner environment tabs, overview and product drill-downs.
@@ -53,10 +54,12 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
 
-  const dateRange = useMemo(
-    () => resolveUsagePresetDateRange(timeRange),
-    [timeRange],
-  );
+  const dateRange = useMemo(() => {
+    if (timeRange === UsageTimeRange.CUSTOM && appliedCustomStart && appliedCustomEnd) {
+      return { startDate: appliedCustomStart, endDate: appliedCustomEnd };
+    }
+    return resolveUsagePresetDateRange(timeRange);
+  }, [timeRange, appliedCustomStart, appliedCustomEnd]);
 
   const { data: deploymentsData } = usePostProjectDeploymentsSearchAll(
     projectId ?? "",
@@ -64,26 +67,31 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
 
   const deploymentTabs = useMemo(
     () =>
-      (deploymentsData ?? []).map((dep) => ({
-        id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
-        label: dep.name,
-        instanceCount: dep.instanceCount ?? 0,
-        productCount: dep.productCount ?? 0,
-      })),
+      (deploymentsData ?? [])
+        .filter((dep) => (dep.productCount ?? 0) > 0)
+        .map((dep) => ({
+          id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
+          label: dep.name,
+          icon: Server,
+          iconColor: getUsageOverviewAccentForTypeId(dep.type.id).iconColor,
+          instanceCount: dep.instanceCount ?? 0,
+          productCount: dep.productCount ?? 0,
+        })),
     [deploymentsData],
   );
 
-  // Default to the first deployment that has products, fallback to first tab.
-  const defaultTab = useMemo(() => {
-    const withProducts = deploymentTabs.find((t) => t.productCount > 0);
-    return (withProducts ?? deploymentTabs[0])?.id ?? "";
-  }, [deploymentTabs]);
+  const defaultTab = deploymentTabs[0]?.id ?? "";
 
   const activeTab = innerTab || defaultTab;
 
   const activeDeploymentId = useMemo(
     () => getActiveUsageDeploymentId(activeTab),
     [activeTab],
+  );
+
+  const activeDeployment = useMemo(
+    () => (deploymentsData ?? []).find((dep) => dep.id === activeDeploymentId),
+    [deploymentsData, activeDeploymentId],
   );
 
   const toggleProduct = useCallback((productId: string) => {
@@ -196,6 +204,13 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
         </Box>
         {uploadButton}
       </Box>
+
+      {activeDeployment && (
+        <Typography variant="body2" color="text.secondary">
+          {activeDeployment.name}
+          {activeDeployment.type?.label && ` · ${activeDeployment.type.label}`}
+        </Typography>
+      )}
 
       <DeploymentUsageUploadDialog
         open={uploadOpen}

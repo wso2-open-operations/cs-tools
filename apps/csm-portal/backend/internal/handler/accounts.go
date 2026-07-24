@@ -30,6 +30,7 @@ import (
 type entityAccountClient interface {
 	GetAccount(ctx context.Context, id string) ([]byte, error)
 	SearchAccounts(ctx context.Context, body []byte) ([]byte, error)
+	SearchAccountContacts(ctx context.Context, accountID string, body []byte) ([]byte, error)
 }
 
 // AccountHandler handles HTTP requests for account operations, delegating to the
@@ -95,6 +96,48 @@ func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchAccounts failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to search accounts.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchAccountContacts handles POST /accounts/{id}/contacts/search.
+// The endpoint is path-scoped, so the request body is capped and forwarded to the
+// entity service as-is (no fields are injected) and the response is returned verbatim.
+func (h *AccountHandler) SearchAccountContacts(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if len(body) > 0 && !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchAccountContacts(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchAccountContacts failed", "userID", user.UserID, "accountID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to search account contacts.")
 		return
 	}
 

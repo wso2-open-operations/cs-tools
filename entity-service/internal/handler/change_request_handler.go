@@ -93,3 +93,30 @@ func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.R
 	_ = json.NewEncoder(w).Encode(result)
 }
 
+// GetChangeRequestApprovals handles GET /change-requests/{id}/approvals.
+func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	result, err := h.svc.GetChangeRequestApprovals(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// DecideChangeRequestApproval handles POST /change-requests/{id}/approvals/decision.
+func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req domain.ChangeRequestApprovalDecisionRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	result, err := h.svc.DecideChangeRequestApproval(r.Context(), id, req.Decision)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}

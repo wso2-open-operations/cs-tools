@@ -50,3 +50,17 @@ func (h *CommentHandler) SearchComments(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// CreateComment handles POST /comments.
+func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateCommentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.CreateComment(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

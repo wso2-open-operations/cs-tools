@@ -20,9 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
@@ -36,20 +34,33 @@ type snAccountsResponse struct {
 	Limit        int         `json:"limit"`
 }
 
+type snSupportTier struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type snPersonRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type snAccount struct {
-	ID               string  `json:"id"`
-	SfID             string  `json:"sfId"`
-	Name             string  `json:"name"`
-	SupportTier      string  `json:"supportTier"`
-	Region           *string `json:"region"`
-	ActivationDate   string  `json:"activationDate"`
-	DeactivationDate *string `json:"deactivationDate"`
-	OwnerID          string  `json:"ownerId"`
-	TechnicalOwnerID *string `json:"technicalOwnerId"`
-	HasAgent         bool    `json:"hasAgent"`
-	HasKbReferences  bool    `json:"hasKbReferences"`
-	CreatedOn        string  `json:"createdOn"`
-	UpdatedOn        string  `json:"updatedOn"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	SupportTier      *snSupportTier `json:"supportTier"`
+	Classification   string         `json:"classification"`
+	Pod              *string        `json:"pod"`
+	Region           *string        `json:"region"`
+	ArrToday         *string        `json:"arrToday"`
+	ActivationDate   string         `json:"activationDate"`
+	DeactivationDate *string        `json:"deactivationDate"`
+	TechnicalOwner   *snPersonRef   `json:"technicalOwner"`
+	Owner            *snPersonRef   `json:"owner"`
+	HasAgent         bool           `json:"hasAgent"`
+	HasKbReferences  bool           `json:"hasKbReferences"`
+	CreatedOn        string         `json:"createdOn"`
+	CreatedBy        *string        `json:"createdBy"`
+	UpdatedOn        string         `json:"updatedOn"`
 }
 
 // snAccountSearchPayload is the Choreo POST /accounts/search request body.
@@ -59,7 +70,10 @@ type snAccountSearchPayload struct {
 }
 
 type snAccountFilters struct {
-	SearchQuery string `json:"searchQuery,omitempty"`
+	SearchQuery    string `json:"searchQuery,omitempty"`
+	Active         *bool  `json:"active,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	Classification string `json:"classification,omitempty"`
 }
 
 type snAccountService struct {
@@ -75,17 +89,19 @@ func (s *snAccountService) SearchAccounts(ctx context.Context, req domain.Search
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchSNAccountsResponse{}, err
 	}
-	if err := validateSearchQuery(req.SearchQuery); err != nil {
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchSNAccountsResponse{}, err
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SearchSNAccountsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	payload := snAccountSearchPayload{
-		Filters:    snAccountFilters{SearchQuery: req.SearchQuery},
+		Filters: snAccountFilters{
+			SearchQuery:    req.Filters.SearchQuery,
+			Active:         req.Filters.Active,
+			Pod:            req.Filters.Pod,
+			Classification: req.Filters.Classification,
+		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 
@@ -99,7 +115,7 @@ func (s *snAccountService) SearchAccounts(ctx context.Context, req domain.Search
 		return domain.SearchSNAccountsResponse{}, fmt.Errorf("sn accounts: parse response: %w", err)
 	}
 
-	accounts := make([]domain.SNAccount, 0, len(snResp.Accounts))
+	accounts := make([]domain.SNAccountView, 0, len(snResp.Accounts))
 	for _, a := range snResp.Accounts {
 		accounts = append(accounts, snAccountToDomain(a))
 	}
@@ -113,54 +129,169 @@ func (s *snAccountService) SearchAccounts(ctx context.Context, req domain.Search
 	}, nil
 }
 
-func (s *snAccountService) GetAccountByID(ctx context.Context, id string) (domain.SNAccount, error) {
+func (s *snAccountService) GetAccountByID(ctx context.Context, id string) (domain.SNAccountDetail, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.SNAccount{}, err
+		return domain.SNAccountDetail{}, err
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.SNAccount{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
 
 	raw, err := s.client.Get(ctx, "/accounts/"+uuidToSysid(id), token)
 	if err != nil {
-		return domain.SNAccount{}, err
+		return domain.SNAccountDetail{}, err
 	}
 
 	var a snAccount
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return domain.SNAccount{}, fmt.Errorf("sn accounts: parse account response: %w", err)
+		return domain.SNAccountDetail{}, fmt.Errorf("sn accounts: parse account response: %w", err)
 	}
 
-	return snAccountToDomain(a), nil
+	return snAccountToDetail(a), nil
 }
 
-func snAccountToDomain(a snAccount) domain.SNAccount {
-	var deactivationDate *string
-	if a.DeactivationDate != nil && *a.DeactivationDate != "" {
-		deactivationDate = a.DeactivationDate
+func nilIfEmpty(s *string) *string {
+	if s != nil && *s == "" {
+		return nil
+	}
+	return s
+}
+
+func snAccountCommonFields(a snAccount) (deactivationDate *string, technicalOwner, owner *domain.EntityRef) {
+	deactivationDate = nilIfEmpty(a.DeactivationDate)
+	if a.TechnicalOwner != nil && a.TechnicalOwner.ID != "" {
+		technicalOwner = &domain.EntityRef{ID: sysidToUUID(a.TechnicalOwner.ID), Name: a.TechnicalOwner.Name}
+	}
+	if a.Owner != nil && a.Owner.ID != "" {
+		owner = &domain.EntityRef{ID: sysidToUUID(a.Owner.ID), Name: a.Owner.Name}
+	}
+	return
+}
+
+func snAccountToDomain(a snAccount) domain.SNAccountView {
+	deactivationDate, technicalOwner, owner := snAccountCommonFields(a)
+
+	var supportTier *string
+	if a.SupportTier != nil && a.SupportTier.Label != "" {
+		supportTier = &a.SupportTier.Label
 	}
 
-	var technicalOwnerID *string
-	if a.TechnicalOwnerID != nil && *a.TechnicalOwnerID != "" {
-		uid := sysidToUUID(*a.TechnicalOwnerID)
-		technicalOwnerID = &uid
+	return domain.SNAccountView{
+		ID:               sysidToUUID(a.ID),
+		Name:             a.Name,
+		Classification:   a.Classification,
+		Pod:              nilIfEmpty(a.Pod),
+		Region:           nilIfEmpty(a.Region),
+		SupportTier:      supportTier,
+		ArrToday:         nilIfEmpty(a.ArrToday),
+		TechnicalOwner:   technicalOwner,
+		Owner:            owner,
+		ActivationDate:   a.ActivationDate,
+		DeactivationDate: deactivationDate,
+		HasAgent:         a.HasAgent,
+		HasKbReferences:  a.HasKbReferences,
+		CreatedOn:        a.CreatedOn,
+		CreatedBy:        nilIfEmpty(a.CreatedBy),
+		UpdatedOn:        a.UpdatedOn,
+	}
+}
+
+func snAccountToDetail(a snAccount) domain.SNAccountDetail {
+	deactivationDate, technicalOwner, owner := snAccountCommonFields(a)
+
+	var supportTier *domain.SNSupportTierRef
+	if a.SupportTier != nil && a.SupportTier.ID != "" {
+		supportTier = &domain.SNSupportTierRef{
+			ID:    sysidToUUID(a.SupportTier.ID),
+			Label: a.SupportTier.Label,
+		}
 	}
 
-	return domain.SNAccount{
-		ID:                  sysidToUUID(a.ID),
-		SfID:                a.SfID,
-		Name:                a.Name,
-		Tier:                strings.ToLower(a.SupportTier),
-		Region:              a.Region,
-		ActivationDate:      a.ActivationDate,
-		DeactivationDate:    deactivationDate,
-		OwnerID:             sysidToUUID(a.OwnerID),
-		TechnicalOwnerID:    technicalOwnerID,
-		AgentEnabled:        a.HasAgent,
-		KbReferencesEnabled: a.HasKbReferences,
-		CreatedOn:           a.CreatedOn,
-		UpdatedOn:           a.UpdatedOn,
+	return domain.SNAccountDetail{
+		ID:               sysidToUUID(a.ID),
+		Name:             a.Name,
+		Classification:   a.Classification,
+		Pod:              nilIfEmpty(a.Pod),
+		Region:           nilIfEmpty(a.Region),
+		SupportTier:      supportTier,
+		ArrToday:         nilIfEmpty(a.ArrToday),
+		TechnicalOwner:   technicalOwner,
+		Owner:            owner,
+		ActivationDate:   a.ActivationDate,
+		DeactivationDate: deactivationDate,
+		HasAgent:         a.HasAgent,
+		HasKbReferences:  a.HasKbReferences,
+		CreatedOn:        a.CreatedOn,
+		CreatedBy:        nilIfEmpty(a.CreatedBy),
+		UpdatedOn:        a.UpdatedOn,
 	}
+}
+
+// snAccountContactsResponse mirrors the Choreo POST /accounts/{id}/contacts/search response.
+type snAccountContactsResponse struct {
+	Contacts     []snAccountContact `json:"contacts"`
+	TotalRecords int                `json:"totalRecords"`
+	Offset       int                `json:"offset"`
+	Limit        int                `json:"limit"`
+}
+
+type snAccountContact struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	IsPrimary bool   `json:"isPrimary"`
+}
+
+type snAccountContactService struct {
+	client *integrationservice.Client
+}
+
+// NewServiceNowAccountContactService constructs an AccountContactService backed by the Choreo API.
+func NewServiceNowAccountContactService(client *integrationservice.Client) AccountContactService {
+	return &snAccountContactService{client: client}
+}
+
+// SearchAccountContacts implements AccountContactService. Supported by the ServiceNow
+// data source only; there is no Postgres fallback.
+func (s *snAccountContactService) SearchAccountContacts(ctx context.Context, accountID string, req domain.SearchAccountContactsRequest) (domain.SearchAccountContactsResponse, error) {
+	if err := validateUUIDs("id", []string{accountID}); err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	payload := snContactSearchPayload{
+		Filters:    snContactFilters{SearchQuery: req.Filters.SearchQuery},
+		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
+
+	raw, err := s.client.Post(ctx, "/accounts/"+uuidToSysid(accountID)+"/contacts/search", token, payload)
+	if err != nil {
+		return domain.SearchAccountContactsResponse{}, err
+	}
+
+	var snResp snAccountContactsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.SearchAccountContactsResponse{}, fmt.Errorf("sn account contacts: parse response: %w", err)
+	}
+
+	contacts := make([]domain.AccountContact, 0, len(snResp.Contacts))
+	for _, c := range snResp.Contacts {
+		contacts = append(contacts, domain.AccountContact{
+			Name:      c.Name,
+			Email:     c.Email,
+			IsPrimary: c.IsPrimary,
+		})
+	}
+
+	return domain.SearchAccountContactsResponse{
+		Contacts: contacts,
+		Total:    snResp.TotalRecords,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+	}, nil
 }

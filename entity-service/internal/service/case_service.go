@@ -292,8 +292,10 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
-	if len(req.WatchList) > 0 || req.AssigneeEmail != nil {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList and assigneeEmail are only supported for the ServiceNow data source"}
+	if len(req.WatchList) > 0 || req.AssigneeEmail != nil || req.FixEta != nil ||
+		req.RelatedCaseID != nil || req.ParentID != nil || req.AutocloseHoldUntil != nil ||
+		req.Subject != nil || req.Description != nil || req.DeploymentID != nil || req.DeployedProductID != nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, fixEta, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, and deployedProductId are only supported for the ServiceNow data source"}
 	}
 	fieldCount := 0
 	if req.State != nil {
@@ -455,4 +457,16 @@ func (s *caseService) GetCaseAttachmentContent(_ context.Context, _ string) ([]b
 
 func (s *caseService) DeleteCaseAttachment(_ context.Context, _ domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
 	return domain.DeleteAttachmentResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
+}
+
+func (s *caseService) AddCaseTag(_ context.Context, _, _ string) (domain.Tag, error) {
+	return domain.Tag{}, &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
+}
+
+func (s *caseService) RemoveCaseTag(_ context.Context, _, _ string) error {
+	return &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
+}
+
+func (s *caseService) SearchTags(_ context.Context, _ string, _ int) ([]domain.Tag, error) {
+	return nil, &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
 }

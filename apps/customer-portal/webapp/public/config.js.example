@@ -123,6 +123,14 @@ window.config = {
   //   false – widget is hidden.
   CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED: false,
 
+  // ── Novera token limit increase request ────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_NOVERA_TOKEN_REQUEST_ENABLED  (optional — default: false)
+  //   true  – when a user hits the Novera token limit, shows a CTA to request an
+  //           increase (sends the request over the chat WebSocket).
+  //   false – feature hidden. Keep false until the backend handler is ready.
+  CUSTOMER_PORTAL_NOVERA_TOKEN_REQUEST_ENABLED: false,
+
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
   // CUSTOMER_PORTAL_TOP_BANNERS  (optional — default: [])

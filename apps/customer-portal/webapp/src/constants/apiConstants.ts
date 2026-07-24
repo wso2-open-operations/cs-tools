@@ -71,7 +71,10 @@ export const ApiQueryKeys = {
   DEPLOYMENT_INSTANCE_METRICS: "deployment-instance-metrics",
   DEPLOYED_PRODUCT_INSTANCE_METRICS: "deployed-product-instance-metrics",
   PROJECT_INSTANCE_USAGE_STATS: "project-instance-usage-stats",
+  DEPLOYMENT_PRODUCT_METRICS: "deployment-product-metrics",
+  DEPLOYMENT_PRODUCT_USAGE_COUNTS: "deployment-product-usage-counts",
   CASE_ESCALATIONS_SEARCH: "case-escalations-search",
+  CASE_FEEDBACK: "case-feedback",
   GLOBAL_SEARCH: "global-search",
 } as const;
 

@@ -55,6 +55,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		snAccountHandler = handler.NewSNAccountHandler(service.NewServiceNowAccountService(serviceNowIntegrationServiceClient))
 	}
 
+	var accountContactHandler *handler.AccountContactHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		accountContactHandler = handler.NewAccountContactHandler(service.NewServiceNowAccountContactService(serviceNowIntegrationServiceClient))
+	}
+
 	projectRepo := repository.NewProjectRepository(db)
 	pgProjectSvc := service.NewProjectService(projectRepo)
 	var activeProjectSvc service.ProjectService
@@ -64,6 +69,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		activeProjectSvc = pgProjectSvc
 	}
 	projectHandler := handler.NewProjectHandler(activeProjectSvc)
+
+	var projectContactHandler *handler.ProjectContactHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		projectContactHandler = handler.NewProjectContactHandler(service.NewServiceNowProjectContactService(serviceNowIntegrationServiceClient))
+	}
+
+	var projectUpdateHandler *handler.ProjectUpdateHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		projectUpdateHandler = handler.NewProjectUpdateHandler(service.NewServiceNowProjectUpdateService(serviceNowIntegrationServiceClient))
+	}
 
 	productRepo := repository.NewProductRepository(db)
 	productSvc := service.NewProductService(productRepo)
@@ -147,6 +162,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		incidentHandler = handler.NewIncidentHandler(service.NewServiceNowIncidentService(serviceNowIntegrationServiceClient))
 	}
 
+	var problemHandler *handler.ProblemHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		problemHandler = handler.NewProblemHandler(service.NewServiceNowProblemService(serviceNowIntegrationServiceClient))
+	}
+
+	var conversationHandler *handler.ConversationHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		conversationHandler = handler.NewConversationHandler(service.NewServiceNowConversationService(serviceNowIntegrationServiceClient))
+	}
+
 	var itServiceHandler *handler.ITServiceHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		itServiceHandler = handler.NewITServiceHandler(service.NewServiceNowITServiceService(serviceNowIntegrationServiceClient))
@@ -182,6 +207,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		snUserHandler = handler.NewSNUserHandler(service.NewServiceNowUserService(serviceNowIntegrationServiceClient))
 	}
 
+	var taskHandler *handler.TaskHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		taskHandler = handler.NewTaskHandler(service.NewServiceNowTaskService(serviceNowIntegrationServiceClient))
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
@@ -199,8 +229,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
 		mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	}
+	if accountContactHandler != nil {
+		mux.HandleFunc("POST /accounts/{id}/contacts/search", accountContactHandler.SearchAccountContacts)
+	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	if projectContactHandler != nil {
+		mux.HandleFunc("POST /projects/{id}/contacts/search", projectContactHandler.SearchProjectContacts)
+	}
+	if projectUpdateHandler != nil {
+		mux.HandleFunc("PATCH /projects/{id}", projectUpdateHandler.UpdateProject)
+	}
 	if snProductHandler != nil {
 		mux.HandleFunc("POST /products/search", snProductHandler.SearchProducts)
 	} else {
@@ -227,6 +266,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)
 	mux.HandleFunc("DELETE /attachments/{id}", caseHandler.DeleteCaseAttachment)
+	mux.HandleFunc("POST /cases/{id}/tags", caseHandler.AddCaseTag)
+	mux.HandleFunc("DELETE /cases/{id}/tags/{tagId}", caseHandler.RemoveCaseTag)
+	mux.HandleFunc("GET /tags/search", caseHandler.SearchTags)
 
 	if callRequestHandler != nil {
 		mux.HandleFunc("POST /call-requests", callRequestHandler.CreateCallRequest)
@@ -243,6 +285,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 		mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
+		mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
+		mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
 	}
 
 	if timeCardHandler != nil {
@@ -278,6 +322,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 
 	if commentHandler != nil {
+		mux.HandleFunc("POST /comments", commentHandler.CreateComment)
 		mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
 	}
 
@@ -286,8 +331,28 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
 	}
 
+	if taskHandler != nil {
+		mux.HandleFunc("POST /cases/{id}/tasks/search", taskHandler.SearchCaseTasks)
+		mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
+		mux.HandleFunc("POST /cases/{id}/tasks", taskHandler.CreateCaseTask)
+		mux.HandleFunc("PATCH /tasks/{id}", taskHandler.UpdateTask)
+	}
+
 	if incidentHandler != nil {
+		mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)
+		mux.HandleFunc("PATCH /incidents/{id}", incidentHandler.PatchIncident)
+		mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
 		mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
+	}
+
+	if problemHandler != nil {
+		mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
+		mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
+		mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
+	}
+
+	if conversationHandler != nil {
+		mux.HandleFunc("POST /conversations/search", conversationHandler.SearchConversations)
 	}
 
 	return middleware.CorrelationID(

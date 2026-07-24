@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,12 +28,23 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
+// changeRequestApprovalDecisionPayload is the strict shape accepted by
+// DecideChangeRequestApproval: exactly one field, and Decision must be
+// "approved" or "rejected".
+type changeRequestApprovalDecisionPayload struct {
+	Decision string `json:"decision"`
+}
+
 // entityChangeRequestClient abstracts the entity service change-request operations.
 type entityChangeRequestClient interface {
 	CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error)
 	SearchChangeRequests(ctx context.Context, body []byte) ([]byte, error)
 	GetChangeRequest(ctx context.Context, id string) ([]byte, error)
 	PatchChangeRequest(ctx context.Context, id string, body []byte) ([]byte, error)
+	GetChangeRequestApprovals(ctx context.Context, id string) ([]byte, error)
+	CreateComment(ctx context.Context, body []byte) ([]byte, error)
+	SearchComments(ctx context.Context, body []byte) ([]byte, error)
+	DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -139,6 +151,184 @@ func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.R
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve change request.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetChangeRequestApprovals handles GET /change-requests/{id}/approvals.
+func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetChangeRequestApprovals(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve change request approvals.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateChangeRequestComment handles POST /change-requests/{id}/comments.
+// Injects referenceId and referenceType into the payload and forwards to the entity
+// service's reference-generic POST /comments.
+func (h *ChangeRequestHandler) CreateChangeRequestComment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if _, err := h.entity.GetChangeRequest(r.Context(), id); err != nil {
+		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed during comment guard", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to create change request comment.")
+		return
+	}
+
+	newBody, err := injectReferenceFields(body, id, "change_request")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.CreateComment(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to create change request comment.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// SearchChangeRequestComments handles POST /change-requests/{id}/comments/search.
+// Injects referenceId and referenceType into the payload and forwards to the entity
+// service's reference-generic POST /comments/search.
+func (h *ChangeRequestHandler) SearchChangeRequestComments(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	newBody, err := injectReferenceFields(body, id, "change_request")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.SearchComments(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to search change request comments.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// DecideChangeRequestApproval handles POST /change-requests/{id}/approvals/decision. Any user
+// with access to the change request may attempt a decision; ServiceNow itself enforces that
+// only the caller's own pending approval can be acted on, so this is not a bypass-only endpoint.
+func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	var payload changeRequestApprovalDecisionPayload
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || decoder.More() {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if payload.Decision != "approved" && payload.Decision != "rejected" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.DecideChangeRequestApproval(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity DecideChangeRequestApproval failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to submit change request approval decision.")
 		return
 	}
 

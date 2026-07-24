@@ -51,6 +51,9 @@ export function getCaseTypeChipProps(label: string | null | undefined): {
   if (normalized === "changerequest") {
     return { color: colors.blue?.[500] ?? "#3B82F6", displayLabel: "Change Request" };
   }
+  if (normalized === "announcement") {
+    return { color: colors.indigo?.[500] ?? "#6366F1", displayLabel: "Announcement" };
+  }
   return { color: colors.grey?.[500] ?? "#6B7280", displayLabel: label?.trim() ?? "--" };
 }
 
@@ -59,12 +62,13 @@ export function getCaseTypeChipProps(label: string | null | undefined): {
  * Returns null when the case has no project (navigation not possible).
  *
  * We match on the normalized label because caseType.id is a ServiceNow GUID, not a constant.
- * Known labels from the API: "Engagement", "Service Request", "Security Report Analysis", "Query".
+ * Known labels from the API: "Engagement", "Service Request", "Security Report Analysis", "Query", "Announcement".
  *
  * Route mapping:
  *   engagement              → /projects/:id/engagements/:caseId
  *   service request         → /projects/:id/operations/service-requests/:caseId
  *   security report analysis → /projects/:id/security-center/security-report-analysis/:caseId
+ *   announcement            → /projects/:id/announcements/:caseId
  *   default case / unknown  → /projects/:id/support/cases/:caseId
  */
 export function getCaseNavigationPath(c: GlobalSearchCase): string | null {
@@ -81,6 +85,9 @@ export function getCaseNavigationPath(c: GlobalSearchCase): string | null {
   }
   if (typeLabel === "securityreportanalysis") {
     return `/projects/${projectId}/security-center/security-report-analysis/${c.id}`;
+  }
+  if (typeLabel === "announcement") {
+    return `/projects/${projectId}/announcements/${c.id}`;
   }
   return `/projects/${projectId}/support/cases/${c.id}`;
 }

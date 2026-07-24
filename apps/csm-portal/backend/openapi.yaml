@@ -129,8 +129,11 @@ paths:
       summary: Update a support case.
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
-        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
-        only when the ServiceNow data source is active.
+        `workState`, `watchList`, `assigneeEmail`, `parentId`, `subject`, `description`,
+        `deploymentId`, `deployedProductId`, `relatedCaseId`, `autocloseHoldUntil`, `fixEta`,
+        `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`.
+        `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when
+        the ServiceNow data source is active.
       operationId: patchCasesId
       parameters:
         - name: id
@@ -305,6 +308,246 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /change-requests/{id}/comments:
+    post:
+      summary: Create a comment on a change request.
+      operationId: postChangeRequestsIdComments
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the change request.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Change request comment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnCommentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCommentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /change-requests/{id}/comments/search:
+    post:
+      summary: Search comments on a change request.
+      operationId: postChangeRequestsIdCommentsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the change request.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Change request comment search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCommentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incidents/{id}/comments:
+    post:
+      summary: Create a comment on an incident.
+      operationId: postIncidentsIdComments
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the incident.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident comment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnCommentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCommentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incidents/{id}/comments/search:
+    post:
+      summary: Search comments on an incident.
+      operationId: postIncidentsIdCommentsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the incident.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident comment search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCommentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -730,6 +973,10 @@ paths:
   /accounts/{id}:
     get:
       summary: Get an account by ID.
+      description: >
+        Returns full account detail. The response takes one of two shapes:
+        Account, or AccountDetail (supportTier as an {id, label} object,
+        owner/technicalOwner as {id, name} references).
       operationId: getAccountsId
       parameters:
         - name: id
@@ -744,7 +991,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Account'
+                oneOf:
+                  - $ref: '#/components/schemas/Account'
+                  - $ref: '#/components/schemas/AccountDetail'
         "400":
           description: BadRequest
           content:
@@ -779,6 +1028,11 @@ paths:
   /accounts/search:
     post:
       summary: Search accounts.
+      description: >
+        Returns a paginated list of accounts. The response takes one of two
+        shapes: AccountSearchResponse, or AccountViewSearchResponse
+        (supportTier as a plain label string, owner/technicalOwner as
+        {id, name} references).
       operationId: postAccountsSearch
       requestBody:
         description: Account search payload
@@ -793,7 +1047,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AccountSearchResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AccountSearchResponse'
+                  - $ref: '#/components/schemas/AccountViewSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -802,6 +1058,73 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /accounts/{id}/contacts/search:
+    post:
+      summary: Search contacts on an account.
+      description: >
+        Returns a paginated list of contacts associated with the account. The
+        request body is forwarded to the integration service as-is and the
+        response is returned verbatim.
+      operationId: postAccountsIdContactsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the account.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Account contact search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountContactSearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountContactSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -868,6 +1191,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    patch:
+      summary: Update a project's closure sub-state fields or KB/agent toggles.
+      description: >
+        Request body is forwarded to the integration service as-is and the
+        response is returned verbatim. At least one field must be provided;
+        the integration service validates this and rejects an empty update.
+      operationId: patchProjectsId
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the project to update.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Project update payload.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdatePayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /projects/search:
     post:
       summary: Search projects.
@@ -894,6 +1283,67 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /projects/{id}/contacts/search:
+    post:
+      summary: Search contacts on a project.
+      description: >
+        Returns a paginated list of contacts associated with the project. The
+        request body is forwarded to the integration service as-is and the
+        response is returned verbatim.
+      operationId: postProjectsIdContactsSearch
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the project.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Project contact search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectContactSearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContactSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -1673,6 +2123,188 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/tags:
+    post:
+      summary: Add a free-text tag to a case (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is.
+      operationId: addCaseTag
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCaseTagPayload'
+      responses:
+        "201":
+          description: Tag added to the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/tags/{tagId}:
+    delete:
+      summary: Remove a tag from a case (ServiceNow data source only).
+      operationId: removeCaseTag
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+        - name: tagId
+          in: path
+          required: true
+          description: UUID of the tag.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Tag removed successfully. No response body.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case or tag not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /tags/search:
+    get:
+      summary: Search existing free-text tags by label (ServiceNow data source only).
+      description: >
+        Forwards the q and limit query parameters to the integration service as-is and
+        returns the matching tags.
+      operationId: searchTags
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Free-text search query matched against tag labels.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of tags to return.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Matching tags.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tags]
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tag'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
@@ -1695,7 +2327,7 @@ paths:
               $ref: '#/components/schemas/PatchChangeRequestPayload'
       responses:
         "200":
-          description: Updated change request identifiers.
+          description: Change request updated successfully.
           content:
             application/json:
               schema:
@@ -1774,6 +2406,127 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /change-requests/{id}/approvals:
+    get:
+      summary: Get the approval stages for a change request (ServiceNow data source only).
+      operationId: getChangeRequestApprovals
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the change request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestApprovalsView'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /change-requests/{id}/approvals/decision:
+    post:
+      summary: >-
+        Decide the caller's own pending approval on a change request
+        (ServiceNow data source only). ServiceNow enforces that only the
+        caller's own pending approval can be acted on; the change request's
+        own state cascades automatically via ServiceNow's existing business
+        rule.
+      operationId: decideChangeRequestApproval
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the change request.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestApprovalDecisionPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestApprovalDecisionResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
           content:
             application/json:
               schema:
@@ -2299,6 +3052,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /conversations/search:
+    post:
+      summary: Search conversations (ServiceNow data source only).
+      operationId: postConversationsSearch
+      security:
+        - bearerAuth: []
+      requestBody:
+        description: Conversation search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /slas/search:
     post:
       summary: Search task SLA records (ServiceNow data source only).
@@ -2390,6 +3194,259 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Task SLA not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{caseId}/tasks/search:
+    post:
+      summary: Search tasks for a case, paginated (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is and the response is returned verbatim.
+      operationId: searchCaseTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        description: Case task search payload.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseTaskSearchPayload'
+      responses:
+        "200":
+          description: Paginated list of tasks for the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSearchResponse'
+        "400":
+          description: Bad request (invalid UUID or request body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{caseId}/tasks:
+    post:
+      summary: Create a task on a case (ServiceNow data source only).
+      description: >
+        The case ID is taken from the URL path; the request body is forwarded to
+        the integration service as-is, which enforces field requirements.
+      operationId: createCaseTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseTaskPayload'
+      responses:
+        "201":
+          description: Task created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request (invalid UUID or request body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /tasks/{id}:
+    get:
+      summary: Get a single task by ID (ServiceNow data source only).
+      operationId: getTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID.
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update a task (ServiceNow data source only).
+      description: >
+        Updates exactly one field of the task. Provide exactly one of: `state`,
+        `assignedToEmail`, or `dueDate`. The request body is forwarded to the
+        integration service as-is, which enforces the exactly-one-field rule.
+      operationId: updateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskPayload'
+      responses:
+        "200":
+          description: Task updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        "400":
+          description: Bad request (invalid UUID or request body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
           content:
             application/json:
               schema:
@@ -2676,6 +3733,315 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /incidents:
+    post:
+      summary: Create a new incident (ServiceNow data source only).
+      operationId: postIncidents
+      requestBody:
+        description: Incident create payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIncidentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Referenced resource not found (e.g. caller, service, or assignment group).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incidents/{id}:
+    get:
+      summary: Get an incident by ID (ServiceNow data source only).
+      operationId: getIncidentById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Incident detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    patch:
+      summary: Partially update an incident (ServiceNow data source only).
+      operationId: patchIncidentById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident update payload. All fields are optional, but at least one must be provided.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIncidentPayload'
+        required: true
+      responses:
+        "200":
+          description: Incident updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIncidentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /problems:
+    post:
+      summary: Create a new problem (ServiceNow data source only).
+      operationId: postProblems
+      security:
+        - bearerAuth: []
+      requestBody:
+        description: Problem create payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProblemPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /problems/{id}:
+    get:
+      summary: Get a single problem by ID (ServiceNow data source only).
+      operationId: getProblem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the problem.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /problems/search:
+    post:
+      summary: Search problems (ServiceNow data source only).
+      operationId: postProblemsSearch
+      requestBody:
+        description: Problem search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProblemSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /notifications/google-chat/alerts:
     post:
       summary: >-
@@ -2746,25 +4112,95 @@ components:
     PatchChangeRequestPayload:
       type: object
       minProperties: 1
+      additionalProperties: false
+      description: >
+        Any combination of fields may be supplied; at least one is required.
+        Omitted fields are left unchanged. isCustomerApproved, isCustomerReviewed,
+        and requestApproval are mutually exclusive: at most one may be set.
+      allOf:
+        - not:
+            required: [isCustomerApproved, isCustomerReviewed]
+        - not:
+            required: [isCustomerApproved, requestApproval]
+        - not:
+            required: [isCustomerReviewed, requestApproval]
       properties:
+        title:
+          type: string
+        description:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        deployedProductId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        assignedTeamId:
+          type: string
+          format: uuid
         plannedStartOn:
           type: string
           description: Planned start date and time (format YYYY-MM-DD HH:MM:SS).
+          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+        plannedEndOn:
+          type: string
+          description: Planned end date and time (format YYYY-MM-DD HH:MM:SS).
+          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+        impact:
+          type: string
+          enum: [high, medium, low]
+        state:
+          type: string
+          enum: [new, assess, authorize, customer_approval, scheduled, implement, review, customer_review, rollback, closed, canceled]
+        type:
+          type: string
+          enum: [standard, normal, emergency, model, site_reliability_ops, azure]
+        justification:
+          type: string
+        impactDescription:
+          type: string
+        serviceOutage:
+          type: string
+        communicationPlan:
+          type: string
+        rollbackPlan:
+          type: string
+        testPlan:
+          type: string
         isCustomerApproved:
           type: boolean
+          description: >-
+            Records the customer's approval decision on the change request.
+            Mutually exclusive with isCustomerReviewed and requestApproval.
         isCustomerReviewed:
           type: boolean
+          description: >-
+            Records the customer's post-implementation review decision.
+            Mutually exclusive with isCustomerApproved and requestApproval.
+        requestApproval:
+          type: boolean
+          description: >-
+            Transitions the change request from New to Assess and requests
+            approval. Mutually exclusive with isCustomerApproved and
+            isCustomerReviewed.
 
     PatchChangeRequestResponse:
       type: object
+      required: [message, changeRequest]
       properties:
-        id:
+        message:
           type: string
-          format: uuid
-        updatedOn:
-          type: string
-        updatedBy:
-          type: string
+        changeRequest:
+          $ref: '#/components/schemas/ChangeRequestDetail'
 
     TimeCardState:
       type: string
@@ -2784,6 +4220,28 @@ components:
           items:
             type: string
             format: uuid
+        caseId:
+          type: string
+          format: uuid
+          description: Only time cards logged against this case.
+        userId:
+          type: string
+          format: uuid
+          description: Only time cards submitted by this user.
+        approverId:
+          type: string
+          format: uuid
+          description: Only time cards this user is eligible to approve (SN approver_list). The approver's own cards are always excluded server-side.
+        approvedById:
+          type: string
+          format: uuid
+          description: Only time cards actually approved by this user (SN approved_by).
+        userIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Match cards submitted by any of these users.
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -2958,8 +4416,11 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `severity`, `workState`, `watchList`, or `assigneeEmail` must be provided.
-        `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
+        `subject`, `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`,
+        `autocloseHoldUntil`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`
+        must be provided. `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are
+        supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
       oneOf:
@@ -2968,6 +4429,17 @@ components:
         - required: [workState]
         - required: [watchList]
         - required: [assigneeEmail]
+        - required: [parentId]
+        - required: [subject]
+        - required: [description]
+        - required: [deploymentId]
+        - required: [deployedProductId]
+        - required: [relatedCaseId]
+        - required: [autocloseHoldUntil]
+        - required: [fixEta]
+        - required: [bestCaseFixEta]
+        - required: [mostLikelyFixEta]
+        - required: [worstCaseFixEta]
       properties:
         state:
           type: string
@@ -3000,6 +4472,69 @@ components:
         closeNotes:
           type: string
           description: Free-text closure notes — only allowed when state is closed or solution_proposed.
+        parentId:
+          type: string
+          format: uuid
+          description: >
+            UUID of another case, incident, change request, or problem to link this case to as
+            its parent — e.g. linking a service-request case back to the case or incident that
+            spawned it, or establishing the hierarchical major-case/child-case relationship
+            (ServiceNow only). Linking to a closed/inactive record may silently no-op upstream;
+            the response's parentCase reflects whether the link actually changed. A case may not
+            be closed while it has open children linked via this relationship.
+        subject:
+          type: string
+          description: New subject/title for the case.
+        description:
+          type: string
+          description: New description for the case.
+        deploymentId:
+          type: string
+          format: uuid
+          description: >
+            UUID of the deployment to associate with this case, replacing the existing one. May
+            carry SLA/entitlement side effects owned by the backing data source — the portal
+            performs no validation of those effects.
+        deployedProductId:
+          type: string
+          format: uuid
+          description: UUID of the deployed product to associate with this case, replacing the existing one.
+        relatedCaseId:
+          type: string
+          format: uuid
+          description: >
+            UUID of another case to cross-link to this one as a related case. A looser,
+            non-hierarchical link — not subject to the child-case close restriction that applies
+            to `parentId`.
+        autocloseHoldUntil:
+          type: string
+          format: date-time
+          description: >
+            Places the case on hold in the backing data source's staged auto-closure sequence
+            until this date, mirroring the real ServiceNow UX (an engineer picks a hold-until
+            date). This is the only supported write against that sequence — the raw
+            `autoclosureStep` state is not directly settable (ServiceNow only).
+        fixEta:
+          type: string
+          format: date-time
+          description: >
+            Sets the customer-facing fix-commitment date/time for the case. This is the only
+            fix-ETA field exposed by this API; internal-only estimates are not surfaced.
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sets the best-case fix-commitment date/time estimate for the case.
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sets the most-likely fix-commitment date/time estimate for the case.
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sets the worst-case fix-commitment date/time estimate for the case.
 
     UpdateCaseResponse:
       type: object
@@ -3064,6 +4599,14 @@ components:
           format: date-time
           nullable: true
           description: Timestamp when the case was resolved.
+        parentCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+          description: Present when the update set parentId, identifying the case, incident, change request, or problem this case is now linked to as its parent.
+        fixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Echoes the updated customer-facing fix-commitment date/time. Present when the update set fixEta.
 
     CaseResolutionCode:
       type: string
@@ -3092,21 +4635,30 @@ components:
       type: string
       description: Root-cause category for a closed or solution-proposed case.
       enum:
-        - USER_MISUNDERSTANDING_CONCEPTS
-        - USER_MISUNDERSTANDING_DOCUMENTATION
-        - USER_NOT_FOLLOWING_DOCUMENTATION
-        - USER_MISTAKE
-        - SOLUTION_PROBLEMATIC_SOLUTION_ARCHITECTURE
-        - SOLUTION_PROBLEMATIC_CODE
-        - APPLICATION_BUG
-        - APPLICATION_MISLEADING_UX_UI
-        - APPLICATION_LIMITATION
-        - APPLICATION_MISSING_FEATURE
-        - APPLICATION_DOCUMENTATION_GAP
-        - APPLICATION_DOCUMENTATION_ERROR
-        - INFRASTRUCTURE_CUSTOMERS_SIDE
-        - INFRASTRUCTURE_SAAS_SIDE_NOT_ENOUGH
-        - INFRASTRUCTURE_SAAS_SIDE_OTHER
+        - SOLUTION_ARCHITECTURE
+        - DEPLOYMENT_ARCHITECTURE
+        - USER_ERROR_CONFIGURATION
+        - USER_ERROR_PRODUCT_CONCEPT
+        - USER_ERROR_RUNTIME
+        - USER_ERROR_RECOMMENDATION_BEST_PRACTICES
+        - CUSTOMIZATION_LIMITATION
+        - CUSTOMIZATION_BUG
+        - DOCUMENTATION_GAP
+        - DOCUMENTATION_ERROR
+        - PRODUCT_LIMITATION
+        - PRODUCT_BUG
+        - PRODUCT_REGRESSION
+        - PRODUCT_MIGRATION
+        - INFRASTRUCTURE_DATABASE
+        - INFRASTRUCTURE_OS
+        - INFRASTRUCTURE_NETWORK
+        - INFRASTRUCTURE_JDK
+        - INFRASTRUCTURE_LDAP
+        - INFRASTRUCTURE_LOAD_BALANCER
+        - INFRASTRUCTURE_IAAS
+        - INFRASTRUCTURE_EXTERNAL_PRODUCT
+        - INFRASTRUCTURE_PROXY
+        - INFRASTRUCTURE_OTHER
         - UNKNOWN
 
     CaseLabelRef:
@@ -3132,6 +4684,29 @@ components:
         email:
           type: string
           format: email
+
+    Tag:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          description: Free-text tag label.
+        color:
+          type: string
+          nullable: true
+          description: Display color for the tag, if one is set. null when not set.
+
+    AddCaseTagPayload:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          description: Free-text tag label to attach to the case.
 
     CaseCreatePayload:
       type: object
@@ -3327,6 +4902,18 @@ components:
             type: string
             format: uuid
           description: Filter by assigned engineer user UUIDs (optional)
+        parentId:
+          type: string
+          format: uuid
+          description: >
+            Filter to child cases of this case UUID (the hierarchical major-case/child-case
+            relationship set via the PATCH `parentId` field). Optional — used to list a case's
+            children via the existing search endpoint rather than a dedicated one.
+        tags:
+          type: array
+          items:
+            type: string
+          description: Filter to cases carrying any of these free-text tag labels (optional)
 
     CaseSearchPayload:
       type: object
@@ -3585,6 +5172,34 @@ components:
           $ref: '#/components/schemas/CaseNumberRef'
         account:
           $ref: '#/components/schemas/AccountRef'
+        watchList:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/WatchListUser'
+          description: Users on the case watch list (ServiceNow only). null/absent when not set.
+        autoclosureStep:
+          type: string
+          readOnly: true
+          nullable: true
+          enum:
+            - DEFAULT
+            - FIRST_COMMENT
+            - ON_HOLD
+            - SECOND_COMMENT
+          description: >-
+            Where the case sits in the backing data source's staged auto-closure sequence
+            (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Informational only — the
+            sequence itself is fully owned by the backing data source's own flows; the only
+            supported write is `autocloseHoldUntil` on the PATCH request (ServiceNow only).
+        autoclosureStateTime:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: >-
+            When the auto-closure sequence next advances — e.g. the "eligible again after" date
+            for a held case (ServiceNow only).
         nextStates:
           type: array
           readOnly: true
@@ -3605,6 +5220,61 @@ components:
             case may still be created as related to this one — true for a
             standard `case`-type case closed within the last 60 days, empty
             otherwise.
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was resolved. Populated for resolved/closed ServiceNow cases; null otherwise.
+        resolutionCode:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CaseResolutionCode'
+          description: Resolution code. Populated for resolved/closed ServiceNow cases; null otherwise.
+        cause:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CaseCause'
+          description: Root-cause category. Populated for resolved/closed ServiceNow cases; null otherwise.
+        resolutionNotes:
+          type: string
+          nullable: true
+          description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
+        linkedServiceRequests:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/LinkedServiceRequestRef'
+          description: >-
+            Service-request cases whose parent points to this case. Populated on every
+            case detail response, not just high-severity cases.
+        fixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            The single customer-facing fix-commitment date/time for the case. This is the
+            only fix-ETA field exposed by this API; internal-only estimates are not surfaced.
+        bestCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Best-case fix-commitment date/time estimate for the case.
+        mostLikelyFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most-likely fix-commitment date/time estimate for the case.
+        worstCaseFixEta:
+          type: string
+          format: date-time
+          nullable: true
+          description: Worst-case fix-commitment date/time estimate for the case.
+        tags:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Tag'
+          description: Free-text labels attached to the case. null/absent when none are set.
 
     CaseSearchView:
       type: object
@@ -3921,9 +5591,21 @@ components:
                 limit:
                   default: 20
                   maximum: 100
-        searchQuery:
-          type: string
-          description: Searches across name and sfId (case-insensitive); max 200 characters
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across name and sfId (case-insensitive); max 200 characters
+            active:
+              type: boolean
+              description: Filter by active status.
+            pod:
+              type: string
+              description: Filter by pod.
+            classification:
+              type: string
+              description: Filter by classification.
 
     AccountSearchResponse:
       type: object
@@ -3941,6 +5623,45 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    AccountContactSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive)
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    AccountContactSearchResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              isPrimary:
+                type: boolean
+        offset:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Total number of matching contacts
 
     Account:
       type: object
@@ -3977,6 +5698,130 @@ components:
           type: string
           format: date-time
 
+    AccountViewSearchResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountView'
+        total:
+          type: integer
+          description: Total number of matching accounts
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    AccountView:
+      description: Account search view (alternate response shape).
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          type: string
+          nullable: true
+          description: Support tier label (e.g. "Gold", "Platinum").
+        arrToday:
+          type: string
+          nullable: true
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
+
+    SupportTierRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+
+    AccountDetail:
+      description: Full account detail (alternate response shape).
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        classification:
+          type: string
+        pod:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        supportTier:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SupportTierRef'
+        arrToday:
+          type: string
+          nullable: true
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        technicalOwner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        activationDate:
+          type: string
+        deactivationDate:
+          type: string
+          nullable: true
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
+
     ProjectSearchPayload:
       type: object
       properties:
@@ -4007,6 +5852,51 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    ProjectContactSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Searches across contact name and email (case-insensitive)
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    ProjectContactSearchResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              registrationState:
+                type: string
+              notificationsEnabled:
+                type: boolean
+              roles:
+                type: array
+                items:
+                  type: string
+        offset:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Total number of matching contacts
 
     Project:
       type: object
@@ -4045,6 +5935,79 @@ components:
         updatedOn:
           type: string
           format: date-time
+        suspensionProcessState:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >
+            Free-form, per-dimension Account Closure Process (ACP) suspension-process
+            state (event type + action results) written by an existing ServiceNow
+            suspension flow. This is opaque JSON passed through as-is — its shape is
+            not defined or validated by this layer.
+
+    ProjectUpdatePayload:
+      type: object
+      minProperties: 1
+      description: >
+        At least one field must be provided. hasAgent and hasKbReferences are
+        simple toggles; the closure-state fields track sub-states of an
+        Account Closure Process and are only applicable to projects sourced
+        from the backing data source.
+      properties:
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        endDateClosureState:
+          type: string
+        invoiceDueDateClosureState:
+          type: string
+        complianceViolationClosureState:
+          type: string
+        suspensionProcessState:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >
+            Free-form, per-dimension Account Closure Process (ACP) suspension-process
+            state (event type + action results) written by an existing ServiceNow
+            suspension flow. This is opaque JSON passed through as-is — its shape is
+            not defined or validated by this layer.
+
+    ProjectUpdateResponse:
+      type: object
+      required: [message, project]
+      properties:
+        message:
+          type: string
+        project:
+          type: object
+          required: [id, updatedBy, updatedOn]
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedBy:
+              type: string
+            updatedOn:
+              type: string
+              format: date-time
+            closureState:
+              type: string
+              nullable: true
+            endDateClosureState:
+              type: string
+              nullable: true
+            invoiceDueDateClosureState:
+              type: string
+              nullable: true
+            complianceViolationClosureState:
+              type: string
+              nullable: true
+            suspensionProcessState:
+              type: object
+              additionalProperties: true
+              nullable: true
 
     DeploymentCreatePayload:
       type: object
@@ -4469,6 +6432,42 @@ components:
           type: string
           description: Comment text
 
+    SnCommentCreatePayload:
+      type: object
+      required:
+        - type
+        - content
+      properties:
+        type:
+          type: string
+          enum: [work_note, comment]
+          description: >
+            work_note is restricted to internal users. activity is not offered here --
+            it is not supported for ServiceNow-backed comment creation (change request,
+            incident).
+        content:
+          type: string
+          description: Comment text
+
+    CommentCreateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    CreateCommentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        comment:
+          $ref: '#/components/schemas/CommentCreateResult'
+
     CaseComment:
       type: object
       properties:
@@ -4592,6 +6591,20 @@ components:
         number:
           type: string
 
+    LinkedServiceRequestRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+      description: >
+        A service-request case whose parent points to this case or incident (the
+        reverse of parentId).
+
     AccountRef:
       type: object
       nullable: true
@@ -4603,6 +6616,16 @@ components:
           type: string
         type:
           type: string
+        creTeam:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          description: The account's assigned CRE (customer reliability engineering) team. null when not set.
+        sreTeam:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          description: The account's assigned SRE (site reliability engineering) team. null when not set.
 
     AttachmentCreatePayload:
       type: object
@@ -4690,6 +6713,7 @@ components:
         - conversation
         - change_request
         - deployment
+        - incident
 
     AttachmentSearchPayload:
       type: object
@@ -5021,6 +7045,201 @@ components:
             approvedOn:
               type: string
               nullable: true
+            legalNextStates:
+              type: array
+              items:
+                type: string
+              description: >-
+                States the change request can legally transition to from its
+                current state, given its type and workflow position.
+
+    TaskSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: Current workflow state (e.g. "open", "in_progress", "closed")
+        dueDate:
+          type: string
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        updatedOn:
+          type: string
+
+    TaskSearchResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSummary'
+        total:
+          type: integer
+          description: Total number of matching tasks
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CaseTaskSearchPayload:
+      type: object
+      nullable: true
+      description: >
+        Payload for paginating the tasks of a case. The case ID is taken from
+        the URL path. The payload is forwarded to the integration service as-is.
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    TaskDetail:
+      allOf:
+        - $ref: '#/components/schemas/TaskSummary'
+        - type: object
+          properties:
+            visibleToCustomer:
+              type: boolean
+            requestType:
+              type: string
+              nullable: true
+            requestTypeLabel:
+              type: string
+              nullable: true
+            environment:
+              type: string
+              nullable: true
+            environmentLabel:
+              type: string
+              nullable: true
+            product:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            parentCase:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            createdOn:
+              type: string
+
+    CreateCaseTaskPayload:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          description: Subject/title of the new task.
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Due date for the task.
+        assignedToEmail:
+          type: string
+          format: email
+          nullable: true
+          description: Email of the engineer to assign the task to.
+        visibleToCustomer:
+          type: boolean
+          nullable: true
+          description: Whether the task is visible to the customer.
+
+    UpdateTaskPayload:
+      type: object
+      description: >
+        Exactly one of `state`, `assignedToEmail`, or `dueDate` must be provided.
+      oneOf:
+        - required: [state]
+        - required: [assignedToEmail]
+        - required: [dueDate]
+      properties:
+        state:
+          type: string
+          description: The new state of the task.
+        assignedToEmail:
+          type: string
+          format: email
+          description: Email of the engineer to assign the task to.
+        dueDate:
+          type: string
+          format: date-time
+          description: New due date for the task.
+
+    ChangeRequestApprover:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          description: >-
+            Approver-level status as reported by the backing data source
+            (e.g. "APPROVED", "NOT_REQUIRED", "REQUESTED"); open string set,
+            not a fixed enum.
+        respondedOn:
+          type: string
+          nullable: true
+
+    ChangeRequestApproval:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [Assess, Authorize, Customer Approval]
+        approverType:
+          type: string
+          enum: [STATIC_GROUP, DYNAMIC_CONTACT]
+        approverName:
+          type: string
+        status:
+          type: string
+          enum: [APPROVED, REJECTED, PENDING]
+        approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestApprover'
+
+    ChangeRequestApprovalsView:
+      type: object
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestApproval'
+
+    ChangeRequestApprovalDecisionPayload:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+          description: Caller's decision on their own pending approval.
+
+    ChangeRequestApprovalDecisionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID of the approval record that was decided.
+        state:
+          type: string
+          description: Resulting state of the approval ("approved" or "rejected").
 
     CaseVariable:
       type: object
@@ -5533,6 +7752,89 @@ components:
           type: boolean
           description: Whether additional pages are available.
 
+    ConversationSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            projectIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            states:
+              type: array
+              items:
+                type: string
+                enum: [ACTIVE, RESOLVED]
+            searchQuery:
+              type: string
+            createdByMe:
+              type: boolean
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 50
+
+    ConversationView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        initialMessage:
+          type: string
+          nullable: true
+        messageCount:
+          type: integer
+        project:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        case:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        state:
+          type: string
+          nullable: true
+          enum: [ACTIVE, RESOLVED]
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+
+    ConversationSearchResponse:
+      type: object
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationView'
+        total:
+          type: integer
+          description: Total number of matching conversations
+        limit:
+          type: integer
+        offset:
+          type: integer
+
     SearchTaskSlasPayload:
       type: object
       properties:
@@ -5876,6 +8178,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/EntityRef'
+        parentIncident:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
         assignmentGroup:
           nullable: true
           allOf:
@@ -5894,3 +8200,463 @@ components:
           format: date-time
         updatedBy:
           type: string
+
+    CreateIncidentPayload:
+      type: object
+      required: [callerId, category, serviceId, impact, urgency, subject]
+      properties:
+        callerId:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+        configurationItemId:
+          type: string
+          format: uuid
+        contactType:
+          type: string
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT, PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        watchList:
+          type: array
+          items:
+            type: string
+            format: uuid
+        additionalComments:
+          type: string
+        workNotes:
+          type: string
+        parentId:
+          type: string
+          format: uuid
+        parentIncidentId:
+          type: string
+          format: uuid
+        changeRequestId:
+          type: string
+          format: uuid
+        problemId:
+          type: string
+          format: uuid
+        causedById:
+          type: string
+          format: uuid
+
+    CreateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            createdOn:
+              type: string
+              format: date-time
+            createdBy:
+              type: string
+
+    IncidentWatchListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+
+    IncidentDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        openedOn:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        caller:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        priority:
+          type: string
+          nullable: true
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          nullable: true
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          nullable: true
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          nullable: true
+          enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
+        parent:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        parentIncident:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        assignmentGroup:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        assignedTo:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        service:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        serviceOffering:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        configurationItem:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        contactType:
+          type: string
+          nullable: true
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT, PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+        impact:
+          type: string
+          nullable: true
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          nullable: true
+          enum: [HIGH, MEDIUM, LOW]
+        changeRequest:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        problem:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        causedBy:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        additionalComments:
+          type: string
+          nullable: true
+        workNotes:
+          type: string
+          nullable: true
+        watchList:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentWatchListItem'
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        resolutionCode:
+          type: string
+          nullable: true
+          description: Resolution code label. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolutionNotes:
+          type: string
+          nullable: true
+          description: Free-text resolution notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolvedBy:
+          type: string
+          nullable: true
+          description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolvedOn:
+          type: string
+          nullable: true
+          description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        incidentReport:
+          type: string
+          nullable: true
+          description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        linkedServiceRequests:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/LinkedServiceRequestRef'
+          description: Service-request cases whose parent points to this incident.
+
+    UpdateIncidentPayload:
+      type: object
+      description: All fields are optional, but at least one must be provided. Set a field to null to clear it.
+      minProperties: 1
+      properties:
+        subject:
+          type: string
+        priority:
+          type: string
+          enum: [CRITICAL, HIGH, MODERATE, LOW, PLANNING]
+        state:
+          type: string
+          enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
+        contactType:
+          type: string
+          enum: [SELF_SERVICE, EMAIL, WALK_IN, AZURE, EMAIL_INTERNAL, SITE_247, DIRECT, PHONE, SENTINEL, VIRTUAL_AGENT, CHAT, EMAIL_EXTERNAL]
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        resolutionCode:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        parentIncidentId:
+          type: string
+          format: uuid
+          nullable: true
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+        assignedEngineerId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceOfferingId:
+          type: string
+          format: uuid
+          nullable: true
+        configurationItemId:
+          type: string
+          format: uuid
+          nullable: true
+        changeRequestId:
+          type: string
+          format: uuid
+          nullable: true
+        problemId:
+          type: string
+          format: uuid
+          nullable: true
+        causedById:
+          type: string
+          format: uuid
+          nullable: true
+        resolvedById:
+          type: string
+          format: uuid
+          nullable: true
+        resolutionNotes:
+          type: string
+          nullable: true
+        incidentReport:
+          type: string
+          nullable: true
+        additionalComments:
+          type: string
+          nullable: true
+        workNotes:
+          type: string
+          nullable: true
+        watchList:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    UpdateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          $ref: '#/components/schemas/IncidentDetail'
+
+    ProblemSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    Problem:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: Current workflow state (e.g. "new", "assess", "resolved", "closed")
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+
+    CreateProblemPayload:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+        category:
+          type: string
+        subcategory:
+          type: string
+        originCaseId:
+          type: string
+          format: uuid
+        primaryIncidentId:
+          type: string
+          format: uuid
+
+    ProblemSearchResponse:
+      type: object
+      properties:
+        problems:
+          type: array
+          items:
+            $ref: '#/components/schemas/Problem'
+        total:
+          type: integer
+          description: Total number of matching problems
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    IdNumberRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+
+    ProblemDetail:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            priority:
+              type: string
+              nullable: true
+            category:
+              type: string
+              nullable: true
+            subcategory:
+              type: string
+              nullable: true
+            originCase:
+              $ref: '#/components/schemas/CaseNumberRef'
+            primaryIncident:
+              $ref: '#/components/schemas/IdNumberRef'
+            linkedIncidents:
+              type: array
+              nullable: true
+              items:
+                $ref: '#/components/schemas/IdNumberRef'
+            linkedChangeRequest:
+              $ref: '#/components/schemas/IdNumberRef'
+            resolutionCode:
+              type: string
+              nullable: true
+            causeNotes:
+              type: string
+              nullable: true
+            fixNotes:
+              type: string
+              nullable: true
+            workaround:
+              type: string
+              nullable: true
+            resolvedOn:
+              type: string
+              nullable: true
+            resolvedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            openedOn:
+              type: string
+              nullable: true
+            closedOn:
+              type: string
+              nullable: true

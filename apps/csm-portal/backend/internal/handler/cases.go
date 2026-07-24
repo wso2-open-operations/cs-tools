@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -38,6 +39,31 @@ func stripField(body []byte, field string) ([]byte, error) {
 		return nil, err
 	}
 	delete(m, field)
+	return json.Marshal(m)
+}
+
+// injectReferenceFields merges referenceId and referenceType into a JSON object body,
+// matching the shape the entity service's reference-generic comment/attachment
+// endpoints expect. Used by non-case reference types (e.g. change request, incident)
+// whose BFF routes are scoped by URL path rather than by request body.
+func injectReferenceFields(body []byte, referenceID, referenceType string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = map[string]json.RawMessage{}
+	}
+	idJSON, err := json.Marshal(referenceID)
+	if err != nil {
+		return nil, err
+	}
+	typeJSON, err := json.Marshal(referenceType)
+	if err != nil {
+		return nil, err
+	}
+	m["referenceId"] = idJSON
+	m["referenceType"] = typeJSON
 	return json.Marshal(m)
 }
 
@@ -59,6 +85,9 @@ type entityCaseClient interface {
 	SearchCallRequests(ctx context.Context, body []byte) ([]byte, error)
 	PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 	CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	AddCaseTag(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	RemoveCaseTag(ctx context.Context, caseID, tagID string) ([]byte, error)
+	SearchTags(ctx context.Context, query string, limit int) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -517,6 +546,109 @@ func (h *CaseHandler) DeleteCaseAttachment(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity DeleteCaseAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", err)
 		mapUpstreamError(w, err, "Failed to delete case attachment.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// AddCaseTag handles POST /cases/{id}/tags.
+// Raw pass-through — free-text tag creation is validated at the entity layer.
+func (h *CaseHandler) AddCaseTag(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.AddCaseTag(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AddCaseTag failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to add case tag.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// RemoveCaseTag handles DELETE /cases/{id}/tags/{tagId}.
+// The entity service returns 204 No Content on success; forwarded as-is with no body.
+func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	tagID := r.PathValue("tagId")
+	if tagID == "" || !uuidRe.MatchString(tagID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if _, err := h.entity.RemoveCaseTag(r.Context(), caseID, tagID); err != nil {
+		slog.ErrorContext(r.Context(), "entity RemoveCaseTag failed", "userID", user.UserID, "caseID", caseID, "tagID", tagID, "err", err)
+		mapUpstreamError(w, err, "Failed to remove case tag.")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SearchTags handles GET /tags/search.
+// Forwards the q and limit query parameters to the entity service and returns
+// the raw response verbatim.
+func (h *CaseHandler) SearchTags(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	q := r.URL.Query().Get("q")
+
+	var limit int
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		parsed, err := strconv.Atoi(limitStr)
+		if err != nil || parsed < 0 || parsed > 100 {
+			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+			return
+		}
+		limit = parsed
+	}
+
+	result, err := h.entity.SearchTags(r.Context(), q, limit)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchTags failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to search tags.")
 		return
 	}
 

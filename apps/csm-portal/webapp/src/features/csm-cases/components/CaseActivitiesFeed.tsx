@@ -43,6 +43,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
+import ImageFullscreenModal from "@features/csm-cases/components/ImageFullscreenModal";
 import RelativeTime from "@components/RelativeTime";
 import { formatBytes } from "@utils/formatBytes";
 import { formatAbsoluteForUser } from "@utils/dateTime";
@@ -132,6 +133,8 @@ export default function CaseActivitiesFeed({
   const [showAttachments, setShowAttachments] = useState(true);
   const [newestFirst, setNewestFirst] = useState(true);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
+  const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(null);
+  const [fullscreenImageAlt, setFullscreenImageAlt] = useState<string | undefined>(undefined);
 
   const entries: FeedEntry[] = useMemo(() => {
     const out: FeedEntry[] = [];
@@ -262,6 +265,10 @@ export default function CaseActivitiesFeed({
                 <CsmCaseCommentBubble
                   key={`c-${e.comment.id}`}
                   comment={e.comment}
+                  onImageClick={(src, alt) => {
+                    setFullscreenImageSrc(src);
+                    setFullscreenImageAlt(alt);
+                  }}
                 />
               );
             }
@@ -447,6 +454,15 @@ export default function CaseActivitiesFeed({
           })}
         </Box>
       )}
+      <ImageFullscreenModal
+        open={!!fullscreenImageSrc}
+        imageSrc={fullscreenImageSrc}
+        imageAlt={fullscreenImageAlt}
+        onClose={() => {
+          setFullscreenImageSrc(null);
+          setFullscreenImageAlt(undefined);
+        }}
+      />
     </Box>
   );
 }

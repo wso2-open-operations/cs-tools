@@ -239,9 +239,7 @@ function DeploymentExpandedView({
   const a = getUsageOverviewAccentForTypeId(typeId);
 
   const metricsPayload = useMemo(
-    () => ({
-      filters: { startDate: dateRange.startDate, endDate: dateRange.endDate },
-    }),
+    () => ({ startDate: dateRange.startDate, endDate: dateRange.endDate }),
     [dateRange],
   );
 
@@ -370,7 +368,7 @@ function EnvironmentBreakdownAccordion({
   const fetchDeploymentId = (expanded || hasExpandedRef.current) ? row.deploymentId : undefined;
 
   const metricsPayload = useMemo(
-    () => ({ filters: { startDate: dateRange.startDate, endDate: dateRange.endDate } }),
+    () => ({ startDate: dateRange.startDate, endDate: dateRange.endDate }),
     [dateRange],
   );
 
@@ -576,9 +574,7 @@ export default function UsageOverviewPanel({
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
   const metricsPayload = useMemo(
-    () => ({
-      filters: { startDate: dateRange.startDate, endDate: dateRange.endDate },
-    }),
+    () => ({ startDate: dateRange.startDate, endDate: dateRange.endDate }),
     [dateRange],
   );
 

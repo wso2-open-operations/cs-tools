@@ -20,8 +20,10 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -226,4 +228,60 @@ func (h *CaseHandler) DeleteCaseAttachment(w http.ResponseWriter, r *http.Reques
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// AddCaseTag handles POST /cases/{id}/tags.
+func (h *CaseHandler) AddCaseTag(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+
+	var req domain.AddCaseTagRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = caseID
+
+	tag, err := h.svc.AddCaseTag(r.Context(), caseID, req.Label)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(tag)
+}
+
+// RemoveCaseTag handles DELETE /cases/{id}/tags/{tagId}.
+func (h *CaseHandler) RemoveCaseTag(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+	tagID := r.PathValue("tagId")
+
+	if err := h.svc.RemoveCaseTag(r.Context(), caseID, tagID); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SearchTags handles GET /tags/search?q={query}&limit={limit}. Not scoped to a single case; used
+// for FE autocomplete when attaching a tag.
+func (h *CaseHandler) SearchTags(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeServiceError(w, r, &apierror.ValidationError{Msg: "limit must be a non-negative integer"})
+			return
+		}
+		limit = parsed
+	}
+
+	tags, err := h.svc.SearchTags(r.Context(), query, limit)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string][]domain.Tag{"tags": tags})
 }

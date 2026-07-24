@@ -30,6 +30,12 @@ import { CORRELATION_ID_HEADER, newCorrelationId } from "@utils/correlationId";
 // fail authentication at once.
 let signInInFlight = false;
 
+// Shared across every caller's hook instance for the same reason as
+// `signInInFlight`: many concurrent requests can discover a dead refresh
+// token at once, and they should all await the SAME hidden-iframe silent
+// sign-in attempt rather than each opening their own.
+let silentSignInInFlight: Promise<boolean> | null = null;
+
 // Only the Asgardeo "unauthenticated" code means the token was expired/missing
 // when the call ran (e.g. the refresh token itself has expired, so the SDK's
 // periodic background refresh can no longer mint a new access token). Anything
@@ -148,7 +154,7 @@ function buildRequestHeaders(
 // backend; calls to any other origin are refused so credentials can't be
 // leaked to third-party hosts.
 export function useAuthApiClient() {
-  const { getAccessToken, getIdToken, signIn } = useAsgardeo();
+  const { getAccessToken, getIdToken, signIn, signInSilently } = useAsgardeo();
   const logger = useLogger();
 
   // Redirect to a full sign-in, single-flighted so concurrent auth failures
@@ -164,6 +170,27 @@ export function useAuthApiClient() {
     }
     return new Promise<Response>(() => {});
   }, [signIn]);
+
+  // Before giving up and bouncing the whole tab to a full sign-in redirect
+  // (which discards any in-progress work — an open comment draft, an unsaved
+  // dialog), try a silent, hidden-iframe re-authentication. If the user's IdP
+  // session (SSO cookie) is still alive, this mints a fresh token without any
+  // visible navigation; only a genuinely dead IdP session falls through to
+  // `redirectToSignIn`. Single-flighted for the same reason as sign-in above.
+  const trySilentSignIn = useCallback((): Promise<boolean> => {
+    if (!silentSignInInFlight) {
+      silentSignInInFlight = Promise.resolve(signInSilently())
+        .then((result) => Boolean(result))
+        .catch((error) => {
+          logger.debug("[auth] silent sign-in failed", error);
+          return false;
+        })
+        .finally(() => {
+          silentSignInInFlight = null;
+        });
+    }
+    return silentSignInInFlight;
+  }, [signInSilently, logger]);
 
   const attemptFetch = useCallback(
     async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
@@ -262,13 +289,30 @@ export function useAuthApiClient() {
             throw retryError;
           }
 
-          // Still unauthenticated after the retry — the session (refresh
-          // token) is gone. Redirect for a full sign-in instead of letting
-          // the SDK's periodic refresh keep retrying forever.
+          // Still unauthenticated after the retry — the refresh token is
+          // dead. Try a silent re-auth first: if the IdP session is still
+          // alive this mints a fresh token with no visible navigation, so
+          // in-progress work survives.
+          if (await trySilentSignIn()) {
+            try {
+              return await attemptFetch(input, options);
+            } catch (afterSilentSignInError) {
+              if (!isTokenExpiredError(afterSilentSignInError)) {
+                throw afterSilentSignInError;
+              }
+              // Silent sign-in reported success but the token still won't
+              // authenticate (e.g. a race with a session that expired a
+              // moment later) — fall through to the hard redirect below.
+            }
+          }
+
+          // Silent re-auth was unavailable or the IdP session itself is
+          // gone. Redirect for a full sign-in instead of letting the SDK's
+          // periodic refresh keep retrying forever.
           return redirectToSignIn();
         }
       }
     },
-    [attemptFetch, redirectToSignIn],
+    [attemptFetch, redirectToSignIn, trySilentSignIn],
   );
 }

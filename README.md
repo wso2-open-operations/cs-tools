@@ -14,8 +14,10 @@ cs-tools/
 │   ├── csm-portal/          # CSM Portal (Go backend + React webapp)
 │   └── customer-portal/     # Customer Portal (Ballerina backend + React webapp + React microapp)
 ├── entity-service/          # Shared entity service
-└── integrations/
-    └── customer-service/    # Customer operations related integration Ballerina service
+├── integrations/
+│   └── customer-service/    # Customer operations related integration Ballerina service
+└── operations/
+    └── csm-integration-service/  # Go M2M service for third-party account/project search
 ```
 
 ## Components
@@ -60,6 +62,18 @@ See the [Entity Service README](./entity-service/README.md) for full setup and u
 ### Customer Service Integration (`integrations/customer-service/`)
 
 A Ballerina REST service that aggregates and exposes customer data from multiple backend systems. Provides endpoints for contact lookup, deployment search, and deployed product queries. Includes an in-memory cache layer to reduce upstream load.
+
+### CSM Integration Service (`integrations/csm-integration-service/`)
+
+A Go REST service that exposes customer data to third-party (M2M) consumers, backed by the Entity Service.
+
+| Layer | Technology |
+|-------|------------|
+| Language | Go |
+| Framework | `net/http` (standard library) |
+| Upstream | Entity Service (OAuth2 client credentials) |
+
+See the [CSM Integration Service README](./integrations/csm-integration-service/README.md) for full setup and usage documentation.
 
 ## GitHub Actions
 
