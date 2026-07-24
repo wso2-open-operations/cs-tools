@@ -32,7 +32,7 @@ Server starts at `http://localhost:8080`.
     require a forwarded end-user identity token and will always reject a request
     from this service with 401 — this service can only ever serve entity-service
     data that doesn't require one (Postgres-backed operations). See `CLAUDE.md`
-    for the known consequence this has for `PATCH /projects/{id}`.
+    before adding any new endpoint that targets a ServiceNow-backed operation.
 
 ## Prerequisites
 
