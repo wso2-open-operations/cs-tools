@@ -266,6 +266,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+    patch:
+      summary: Update a project's closure-state fields or hasAgent/hasKbReferences toggles.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. At least one
+        field must be provided. closureState itself is not settable — it is derived
+        automatically from the three closure sub-state fields by an SN business
+        rule, so setting one of those and re-fetching the project is how a caller
+        observes the resulting overall status.
+      operationId: updateProject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        "200":
+          description: The project was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUpdateResponse'
+        "400":
+          description: Bad request — no field provided, or an invalid value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/search:
     post:
       summary: Search projects by name, key, or subscription type.
@@ -3060,6 +3114,73 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    ProjectUpdateRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: >
+        At least one field must be provided. hasAgent and hasKbReferences are
+        simple toggles; the closure-state fields track sub-states of an
+        Account Closure Process and are only applicable to projects sourced
+        from ServiceNow.
+      properties:
+        hasAgent:
+          type: boolean
+        hasKbReferences:
+          type: boolean
+        endDateClosureState:
+          type: string
+        invoiceDueDateClosureState:
+          type: string
+        complianceViolationClosureState:
+          type: string
+        suspensionProcessState:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >
+            Free-form, per-dimension Account Closure Process (ACP) suspension-process
+            state (event type + action results) written by an existing ServiceNow
+            suspension flow. This is opaque JSON passed through as-is — its shape is
+            not defined or validated by this layer.
+
+    ProjectUpdateResponse:
+      type: object
+      required: [message, project]
+      properties:
+        message:
+          type: string
+        project:
+          $ref: '#/components/schemas/ProjectUpdateResult'
+
+    ProjectUpdateResult:
+      type: object
+      required: [id, updatedBy, updatedOn]
+      properties:
+        id:
+          type: string
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        closureState:
+          type: string
+          nullable: true
+        endDateClosureState:
+          type: string
+          nullable: true
+        invoiceDueDateClosureState:
+          type: string
+          nullable: true
+        complianceViolationClosureState:
+          type: string
+          nullable: true
+        suspensionProcessState:
+          type: object
+          additionalProperties: true
+          nullable: true
 
     SearchProjectContactsRequest:
       type: object
