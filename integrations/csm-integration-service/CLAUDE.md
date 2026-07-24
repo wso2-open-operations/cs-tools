@@ -37,14 +37,15 @@ operation that can reach a ServiceNow-backed entity-service operation will
 **always** get a mapped 401 from `mapUpstreamError` — not conditionally, always,
 since there is no longer any path for a user token to reach entity-service.
 
-**Known consequence: `UpdateProject` (`PATCH /projects/{id}`) cannot work.** It
-was added for the Account Closure Process (ACP) automation, targets a
-ServiceNow-data-source-only entity-service operation, and has no way to supply
-the end-user identity that operation requires. This is a deliberate, accepted
-gap (not something to silently "fix" by re-adding the pass-through) — its
-handler/entity-client code and `openapi.yaml` entry are left in place as-is,
-documenting the endpoint's existence and why it 401s unconditionally, rather than
-being deleted. Confirm with whoever owns the ACP automation before changing this.
+**`PATCH /projects/{id}` (`UpdateProject`) was removed for this reason.** It was
+added for the Account Closure Process (ACP) automation, but it targeted a
+ServiceNow-data-source-only entity-service operation that requires a forwarded
+end-user identity — something this service structurally cannot provide once M2M
+is the only auth model. Rather than leave a handler that can never succeed, the
+endpoint (handler, entity-client method, route, `openapi.yaml` entry, tests) was
+deleted outright. The ACP automation needs a different path to reach that
+entity-service operation — this service is not it. Don't re-add this endpoint
+here without solving that identity problem first.
 
 ## Middleware chain
 
@@ -96,6 +97,12 @@ make build   # runs tests then compiles ./cmd/server
 
 ## Adding a new endpoint
 
+0. **Confirm the upstream operation doesn't require a forwarded end-user
+   identity first.** This service is M2M-only with no mechanism to carry one —
+   if the entity-service operation you want to expose is ServiceNow-backed and
+   requires `x-user-id-token`, it cannot work here, full stop (see above; this
+   is exactly why `UpdateProject` was removed). Don't start building against an
+   operation that can't succeed.
 1. **Upstream client** (`internal/entity/entity.go`) — add a method on `Client`
    that calls `c.do()`; use `url.PathEscape()` for every path parameter
 2. **Handler interface** — extend the local interface in the relevant handler file
@@ -104,9 +111,7 @@ make build   # runs tests then compiles ./cmd/server
    failure → write response. No auth check — see "Why no Auth middleware" above
 4. **Route** (`cmd/server/main.go`) — register using Go 1.22 method-prefixed
    patterns: `"POST /accounts/{id}/contacts/search"`
-5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/404/500 responses,
-   plus 401 if the operation can reach a ServiceNow-backed entity-service
-   operation (see below)
+5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/404/500 responses
 6. **Tests** — add a handler test following `accounts_test.go`/`projects_test.go`'s
    shape (empty/invalid path param, body-too-large, invalid JSON, success
    passthrough, `upstreamErrors` table); extend the mock in `helpers_test.go` to
