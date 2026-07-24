@@ -281,6 +281,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -3117,6 +3118,7 @@ components:
     ProjectUpdateRequest:
       type: object
       minProperties: 1
+      additionalProperties: false
       description: >
         At least one field must be provided. hasAgent and hasKbReferences are
         simple toggles; the closure-state fields track sub-states of an
