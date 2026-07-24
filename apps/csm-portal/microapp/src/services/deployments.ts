@@ -1,0 +1,119 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { queryOptions } from "@tanstack/react-query";
+import { DEPLOYMENTS_SEARCH_ENDPOINT, DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT } from "@config/endpoints";
+import type {
+  DeploymentDto,
+  DeploymentSearchResponseDto,
+  DeployedProductSearchItemDto,
+  DeployedProductSearchResponseDto,
+} from "@src/types";
+import {
+  toDeploymentOption,
+  toDeployedProductOption,
+  toDeployment,
+  toDeployedProduct,
+  type DeploymentOption,
+  type DeployedProductOption,
+  type Deployment,
+  type DeployedProduct,
+} from "@src/types";
+import apiClient from "./apiClient";
+
+// openapi.yaml declares both endpoints' pagination.limit maximum as 100, but the live upstream
+// entity service actually rejects 100 with a 400 — the same documented discrepancy
+// services/cases.ts's COMMENTS_PAGE_LIMIT and services/products.ts's PRODUCTS_PAGE_LIMIT already
+// caught for their own endpoints; match that real, working value instead of the doc.
+const SEARCH_PAGE_LIMIT = 50;
+
+const searchDeployments = async (projectId: string): Promise<DeploymentOption[]> => {
+  const { data } = await apiClient.post<DeploymentSearchResponseDto>(DEPLOYMENTS_SEARCH_ENDPOINT, {
+    pagination: { offset: 0, limit: SEARCH_PAGE_LIMIT },
+    projectIds: [projectId],
+  });
+  return data.deployments.map(toDeploymentOption);
+};
+
+const searchDeployedProducts = async (deploymentId: string): Promise<DeployedProductOption[]> => {
+  const { data } = await apiClient.post<DeployedProductSearchResponseDto>(
+    DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT(deploymentId),
+    { pagination: { offset: 0, limit: SEARCH_PAGE_LIMIT } },
+  );
+  return data.deployedProducts.map(toDeployedProductOption);
+};
+
+// Richer variants of the two searches above, for the Customers > Project > Deployments tab
+// (read-only browsing) rather than the case-create cascading picker. Unlike those, these fetch
+// every page rather than just the first — a project's deployments (or a deployment's products)
+// can exceed SEARCH_PAGE_LIMIT, and this tab has no pagination/infinite-scroll UI of its own, so
+// the query itself has to return the complete list. Loop terminates on a short page (fewer rows
+// than requested), same technique as services/products.ts's fetchProductNames.
+const listDeployments = async (projectId: string): Promise<Deployment[]> => {
+  const all: DeploymentDto[] = [];
+  for (let offset = 0; ; offset += SEARCH_PAGE_LIMIT) {
+    const { data } = await apiClient.post<DeploymentSearchResponseDto>(DEPLOYMENTS_SEARCH_ENDPOINT, {
+      pagination: { offset, limit: SEARCH_PAGE_LIMIT },
+      projectIds: [projectId],
+    });
+    all.push(...data.deployments);
+    if (data.deployments.length < SEARCH_PAGE_LIMIT) break;
+  }
+  return all.map(toDeployment);
+};
+
+const listDeployedProducts = async (deploymentId: string): Promise<DeployedProduct[]> => {
+  const all: DeployedProductSearchItemDto[] = [];
+  for (let offset = 0; ; offset += SEARCH_PAGE_LIMIT) {
+    const { data } = await apiClient.post<DeployedProductSearchResponseDto>(
+      DEPLOYMENT_PRODUCTS_SEARCH_ENDPOINT(deploymentId),
+      { pagination: { offset, limit: SEARCH_PAGE_LIMIT } },
+    );
+    all.push(...data.deployedProducts);
+    if (data.deployedProducts.length < SEARCH_PAGE_LIMIT) break;
+  }
+  return all.map(toDeployedProduct);
+};
+
+export const deployments = {
+  byProject: (projectId: string) =>
+    queryOptions({
+      queryKey: ["deployments", projectId],
+      queryFn: () => searchDeployments(projectId),
+      enabled: !!projectId,
+    }),
+
+  productsByDeployment: (deploymentId: string) =>
+    queryOptions({
+      queryKey: ["deployment-products", deploymentId],
+      queryFn: () => searchDeployedProducts(deploymentId),
+      enabled: !!deploymentId,
+    }),
+
+  list: (projectId: string) =>
+    queryOptions({
+      queryKey: ["deployments", "list", projectId],
+      queryFn: () => listDeployments(projectId),
+      enabled: !!projectId,
+    }),
+
+  productsList: (deploymentId: string) =>
+    queryOptions({
+      queryKey: ["deployment-products", "list", deploymentId],
+      queryFn: () => listDeployedProducts(deploymentId),
+      enabled: !!deploymentId,
+    }),
+};

@@ -1,0 +1,91 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import {
+  CASE_CALL_REQUEST_ENDPOINT,
+  CASE_CALL_REQUESTS_ENDPOINT,
+  CASE_CALL_REQUESTS_SEARCH_ENDPOINT,
+} from "@config/endpoints";
+import type {
+  CallRequestUpdateInput,
+  CreateCallRequestPayloadDto,
+  CreateCallRequestResponseDto,
+  UpdateCallRequestPayloadDto,
+  UpdateCallRequestResponseDto,
+  SearchCallRequestsResponseDto,
+} from "@src/types";
+import { toCallRequest, type CallRequest } from "@src/types";
+import apiClient from "./apiClient";
+
+// ServiceNow data source only, mirroring the backend's own scoping.
+const getCallRequests = async (caseId: string): Promise<CallRequest[]> => {
+  const { data } = await apiClient.post<SearchCallRequestsResponseDto>(CASE_CALL_REQUESTS_SEARCH_ENDPOINT(caseId), {
+    pagination: { limit: 50 },
+  });
+  return (data.callRequests ?? []).map(toCallRequest);
+};
+
+const createCallRequest = async (
+  caseId: string,
+  payload: CreateCallRequestPayloadDto,
+): Promise<CreateCallRequestResponseDto> => {
+  const { data } = await apiClient.post<CreateCallRequestResponseDto>(CASE_CALL_REQUESTS_ENDPOINT(caseId), payload);
+  return data;
+};
+
+// Agent-side lifecycle actions on a call request (schedule, reject, cancel,
+// send notes, or reschedule a request back to the customer) — all funnel
+// through this one state-transition PATCH, same as the webapp's
+// usePatchCsmCaseCallRequest. Which optional fields matter depends on the
+// target `state`; see UpdateCallRequestPayloadDto.
+const updateCallRequest = async (input: CallRequestUpdateInput): Promise<UpdateCallRequestResponseDto> => {
+  const payload: UpdateCallRequestPayloadDto = {
+    state: input.state,
+    cancellationReason: input.cancellationReason,
+    utcTimes: input.utcTimes,
+    durationInMinutes: input.durationInMinutes,
+    meetingDate: input.meetingDate,
+    assignee: input.assignee,
+    notes: input.notes,
+    plan: input.plan,
+    attendees: input.attendees,
+    actionItems: input.actionItems,
+    actualDurationMin: input.actualDurationMin,
+  };
+  const { data } = await apiClient.patch<UpdateCallRequestResponseDto>(
+    CASE_CALL_REQUEST_ENDPOINT(input.caseId, input.callRequestId),
+    payload,
+  );
+  return data;
+};
+
+export const callRequests = {
+  forCase: (caseId: string) =>
+    queryOptions({
+      queryKey: ["case", caseId, "call-requests"],
+      queryFn: () => getCallRequests(caseId),
+      // CallRequestsTab reads this via useSuspenseQuery. Without
+      // placeholderData, an update's post-mutation invalidateQueries
+      // re-suspends the tab back to its skeleton on every refetch instead of
+      // just swapping the list in place once the new data lands — same
+      // network time as the webapp's plain useQuery, but it visibly blanks
+      // out first, reading as slower even though it isn't.
+      placeholderData: keepPreviousData,
+    }),
+  create: createCallRequest,
+  update: updateCallRequest,
+};

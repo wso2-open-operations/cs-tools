@@ -100,24 +100,39 @@ The scan should report **0 issues**. If a new finding appears, fix the root caus
 
 Copy `.env` and fill in the values:
 
-### Entity service
+### Shared OAuth2 client credentials
+
+Every upstream service client (customer entity, engineering entity, updates, SCIM, and future notification channels) authenticates as the same OAuth2 client-credentials app — only each service's base URL and scopes differ, so the credentials are configured once and reused.
 
 | Variable | Description |
 |---|---|
-| `ENTITY_BASE_URL` | Base URL of the entity service |
-| `ENTITY_TOKEN_URL` | OAuth2 token endpoint |
-| `ENTITY_CLIENT_ID` | OAuth2 client ID |
-| `ENTITY_CLIENT_SECRET` | OAuth2 client secret |
-| `ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+| `OAUTH2_CLIENT_ID` | OAuth2 client ID, shared by every upstream service client |
+| `OAUTH2_CLIENT_SECRET` | OAuth2 client secret, shared by every upstream service client |
+| `OAUTH2_TOKEN_URL` | OAuth2 token endpoint, shared by every upstream service client |
+
+### Customer entity service
+
+Backs `entity.CustomerEntityClient` (this repo's entity-service; cases, accounts, projects, products, etc.) — uses the shared OAuth2 credentials above.
+
+| Variable | Description |
+|---|---|
+| `CUSTOMER_ENTITY_BASE_URL` | Base URL of the customer entity service |
+| `CUSTOMER_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
+### Engineering entity service (not yet wired in)
+
+Backs `entity.EngineeringEntityClient.CreateGitIssue` (wso2-enterprise/digiops-engineering) but is not constructed in `cmd/server/main.go` — no handler calls it yet. These variables are not read by any code today. It uses the same shared OAuth2 credentials above (same `OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own.
+
+| Variable | Description |
+|---|---|
+| `ENGINEERING_ENTITY_BASE_URL` | Base URL of the engineering entity service |
+| `ENGINEERING_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### Updates service
 
 | Variable | Description |
 |---|---|
 | `UPDATES_BASE_URL` | Base URL of the updates service |
-| `UPDATES_TOKEN_URL` | OAuth2 token endpoint |
-| `UPDATES_CLIENT_ID` | OAuth2 client ID |
-| `UPDATES_CLIENT_SECRET` | OAuth2 client secret |
 | `UPDATES_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### SCIM operations service
@@ -125,10 +140,26 @@ Copy `.env` and fill in the values:
 | Variable | Description |
 |---|---|
 | `SCIM_BASE_URL` | Base URL of the SCIM operations service |
-| `SCIM_TOKEN_URL` | OAuth2 token endpoint |
-| `SCIM_CLIENT_ID` | OAuth2 client ID |
-| `SCIM_CLIENT_SECRET` | OAuth2 client secret |
 | `SCIM_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
+### Notifications — email channel (not yet wired in)
+
+`internal/notifications` (`EmailClient.SendEmail`) is ready to use but is not constructed in `cmd/server/main.go` — no handler calls it yet. These variables are not read by any code today; they're documented here for when the first caller is added, which should reuse the shared `OAUTH2_*` credentials above rather than adding its own. Each notification channel gets its own `NOTIFICATIONS_<CHANNEL>_*` prefix for its channel-specific settings — SMS/Twilio will follow this same convention once added.
+
+| Variable | Description |
+|---|---|
+| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service |
+| `NOTIFICATIONS_EMAIL_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email |
+
+### Notifications — Google Chat channel
+
+`internal/notifications` (`GoogleChatClient.SendIncidentAlert`) posts a card message — title, short description, and an "Open in CSM Portal" button — to a Google Chat space via an incoming webhook. There's one space per product (each WSO2 product has its own space), so the client is configured with a list of `{product, webhookUrl}` pairs and routes each alert to the space matching the case's product (case- and whitespace-insensitive match; an unconfigured product returns an error rather than falling back). Unlike every other upstream client it does not use the shared `OAUTH2_*` credentials; a webhook URL is the only credential needed per space (Space settings > Apps & integrations > Webhooks). It's called from `POST /notifications/google-chat/alerts` (see [API Endpoints](#notifications) below), which today is triggered manually rather than from real case/incident creation.
+
+| Variable | Description |
+|---|---|
+| `NOTIFICATIONS_GOOGLE_CHAT_SPACES` | JSON array of `{"product","webhookUrl"}` objects, one per Google Chat space — e.g. `[{"product":"api-manager","webhookUrl":"https://chat.googleapis.com/..."}]`. Malformed JSON is logged and treated as no spaces configured (does not fail startup) |
+| `CSM_PORTAL_WEB_BASE_URL` | Base URL of the CSM portal webapp, used to build the "Open in CSM Portal" link at `/operations/incidents/{caseId}` (e.g. `http://localhost:3001` for local dev) |
 
 ### Auth
 
@@ -143,7 +174,7 @@ Copy `.env` and fill in the values:
 
 | Variable | Description |
 |---|---|
-| `PORT` | Server listen address (default `:8080`) |
+| `PORT` | Server listen port — a plain number, not an address (default `8080`) |
 
 ## Project Structure
 
@@ -153,13 +184,19 @@ backend/
 ├── internal/
 │   ├── apierror/               # Typed upstream error types (4xx/5xx passthrough)
 │   ├── entity/
-│   │   ├── client.go           # OAuth2 HTTP client for the entity service
-│   │   └── entity.go           # Entity service operations (cases, accounts, projects, ...)
+│   │   ├── doc.go               # Package overview — one config/client pair per entity service
+│   │   ├── customer_client.go   # OAuth2 HTTP client for the customer entity service (this repo's entity-service)
+│   │   ├── customer.go          # CustomerEntityClient operations (cases, accounts, projects, ...)
+│   │   └── engineering.go       # EngineeringEntityClient — CreateGitIssue (not yet wired into main.go — no caller)
 │   ├── scim/
 │   │   └── client.go           # OAuth2 HTTP client for the SCIM operations service
 │   ├── updates/
 │   │   ├── client.go           # OAuth2 HTTP client for the updates service
 │   │   └── updates.go          # Updates service operations
+│   ├── notifications/
+│   │   ├── doc.go               # Package overview — one config/client pair per channel
+│   │   ├── email.go             # EmailConfig/EmailClient/SendEmail (not yet wired into main.go — no caller)
+│   │   └── googlechat.go        # GoogleChatConfig/GoogleChatClient/SendIncidentAlert (per-product webhook routing)
 │   ├── middleware/
 │   │   ├── auth.go             # JWT validation; injects UserInfo into context
 │   │   ├── correlation.go      # X-CSM-Correlation-ID propagation + slog enrichment
@@ -177,6 +214,7 @@ backend/
 │       ├── projects.go                   # HTTP handlers for project endpoints
 │       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
 │       ├── problems.go                   # HTTP handlers for problem endpoints (ServiceNow only)
+│       ├── notifications.go              # HTTP handlers for notification channels (Google Chat alert endpoint)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
@@ -280,6 +318,10 @@ backend/
 ### Problems
 
 - `POST /problems/search` — Search problems; optional `filters` (`searchQuery`) (ServiceNow data source only)
+
+### Notifications
+
+- `POST /notifications/google-chat/alerts` — Send an incident alert card message to the Google Chat space configured for `product`; body requires `product`, `title`, `shortDescription`, `caseId`. Triggered manually today, pending integration into real case/incident creation.
 
 ## Run Locally
 

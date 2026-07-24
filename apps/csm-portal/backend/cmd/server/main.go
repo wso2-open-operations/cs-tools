@@ -19,12 +19,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +34,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
@@ -39,40 +42,57 @@ import (
 func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
-	cfg := entity.Config{
-		BaseURL:      mustEnv("ENTITY_BASE_URL"),
-		TokenURL:     mustEnv("ENTITY_TOKEN_URL"),
-		ClientID:     mustEnv("ENTITY_CLIENT_ID"),
-		ClientSecret: mustEnv("ENTITY_CLIENT_SECRET"),
-		// Scopes is optional; set ENTITY_SCOPES as a comma-separated list if required.
-		Scopes: splitComma(os.Getenv("ENTITY_SCOPES")),
+
+	// All upstream service clients (entity, updates, SCIM, and future notification
+	// channels) authenticate as the same OAuth2 client-credentials app; only the
+	// base URL and scopes differ per service.
+	oauth2ClientID := mustEnv("OAUTH2_CLIENT_ID")
+	oauth2ClientSecret := mustEnv("OAUTH2_CLIENT_SECRET")
+	oauth2TokenURL := mustEnv("OAUTH2_TOKEN_URL")
+
+	customerEntityCfg := entity.CustomerEntityConfig{
+		BaseURL:      mustEnv("CUSTOMER_ENTITY_BASE_URL"),
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		// Scopes is optional; set CUSTOMER_ENTITY_SCOPES as a comma-separated list if required.
+		Scopes: splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
 	}
 
-	entityClient := entity.NewClient(cfg)
-	caseHandler := handler.NewCaseHandler(entityClient)
-	accountHandler := handler.NewAccountHandler(entityClient)
-	projectHandler := handler.NewProjectHandler(entityClient)
-	productHandler := handler.NewProductHandler(entityClient)
-	deploymentHandler := handler.NewDeploymentHandler(entityClient)
-	changeRequestHandler := handler.NewChangeRequestHandler(entityClient)
-	itServiceHandler := handler.NewITServiceHandler(entityClient)
-	serviceOfferingHandler := handler.NewServiceOfferingHandler(entityClient)
-	groupHandler := handler.NewGroupHandler(entityClient)
-	configurationItemHandler := handler.NewConfigurationItemHandler(entityClient)
-	catalogHandler := handler.NewCatalogHandler(entityClient)
-	timeCardHandler := handler.NewTimeCardHandler(entityClient)
-	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
-	conversationHandler := handler.NewConversationHandler(entityClient)
-	taskSlaHandler := handler.NewTaskSlaHandler(entityClient)
-	taskHandler := handler.NewTaskHandler(entityClient)
-	incidentHandler := handler.NewIncidentHandler(entityClient)
-	problemHandler := handler.NewProblemHandler(entityClient)
+	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
+	caseHandler := handler.NewCaseHandler(customerEntityClient)
+	accountHandler := handler.NewAccountHandler(customerEntityClient)
+	projectHandler := handler.NewProjectHandler(customerEntityClient)
+	productHandler := handler.NewProductHandler(customerEntityClient)
+	deploymentHandler := handler.NewDeploymentHandler(customerEntityClient)
+	changeRequestHandler := handler.NewChangeRequestHandler(customerEntityClient)
+	itServiceHandler := handler.NewITServiceHandler(customerEntityClient)
+	serviceOfferingHandler := handler.NewServiceOfferingHandler(customerEntityClient)
+	groupHandler := handler.NewGroupHandler(customerEntityClient)
+	configurationItemHandler := handler.NewConfigurationItemHandler(customerEntityClient)
+	catalogHandler := handler.NewCatalogHandler(customerEntityClient)
+	timeCardHandler := handler.NewTimeCardHandler(customerEntityClient)
+	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(customerEntityClient)
+	conversationHandler := handler.NewConversationHandler(customerEntityClient)
+	taskSlaHandler := handler.NewTaskSlaHandler(customerEntityClient)
+	taskHandler := handler.NewTaskHandler(customerEntityClient)
+	incidentHandler := handler.NewIncidentHandler(customerEntityClient)
+	problemHandler := handler.NewProblemHandler(customerEntityClient)
+
+	// Google Chat is not yet configured for every deployment, so its spaces
+	// are read with os.Getenv (never mustEnv) — a missing or malformed value
+	// only surfaces as an error the first time an alert is sent for a product
+	// with no matching space.
+	googleChatClient := notifications.NewGoogleChatClient(notifications.GoogleChatConfig{
+		Spaces: parseGoogleChatSpaces(os.Getenv("NOTIFICATIONS_GOOGLE_CHAT_SPACES")),
+	})
+	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
-		TokenURL:     mustEnv("UPDATES_TOKEN_URL"),
-		ClientID:     mustEnv("UPDATES_CLIENT_ID"),
-		ClientSecret: mustEnv("UPDATES_CLIENT_SECRET"),
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
 		Scopes:       splitComma(os.Getenv("UPDATES_SCOPES")),
 	}
 	updatesClient := updates.NewClient(updatesCfg)
@@ -80,13 +100,13 @@ func main() {
 
 	scimCfg := scim.Config{
 		BaseURL:      mustEnv("SCIM_BASE_URL"),
-		TokenURL:     mustEnv("SCIM_TOKEN_URL"),
-		ClientID:     mustEnv("SCIM_CLIENT_ID"),
-		ClientSecret: mustEnv("SCIM_CLIENT_SECRET"),
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
 		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
 	}
 	scimClient := scim.NewClient(scimCfg)
-	usersHandler := handler.NewUsersHandler(scimClient, entityClient)
+	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient)
 
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
@@ -174,8 +194,10 @@ func main() {
 	mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
 	mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
 	mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
+	// Called manually today; not yet wired into real incident/case creation.
+	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
 
-	addr := envOrDefault("PORT", ":8080")
+	addr := ":" + mustPort("PORT", "8080")
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -236,6 +258,19 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
+// mustPort returns the value of the given environment variable (or def if
+// unset) as a bare port number, e.g. "8080" — not an address like ":8080" or
+// "localhost:8080". Exits the process if the value isn't a valid TCP port.
+func mustPort(key, def string) string {
+	v := envOrDefault(key, def)
+	port, err := strconv.Atoi(v)
+	if err != nil || port < 1 || port > 65535 {
+		slog.Error("environment variable must be a plain port number (e.g. \"8080\"), not an address", "key", key, "value", v)
+		os.Exit(1)
+	}
+	return v
+}
+
 // loadDotEnv reads a .env file and sets any unset environment variables from it.
 // Silently ignored if the file does not exist; logs a warning for any other error.
 func loadDotEnv(path string) {
@@ -284,4 +319,21 @@ func splitComma(s string) []string {
 		}
 	}
 	return result
+}
+
+// parseGoogleChatSpaces decodes NOTIFICATIONS_GOOGLE_CHAT_SPACES, a JSON array
+// of {"product":"...","webhookUrl":"..."} objects — one per Google Chat space.
+// A missing or malformed value logs a warning and yields no spaces rather
+// than failing startup, since this channel is not required for every
+// deployment.
+func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {
+	if raw == "" {
+		return nil
+	}
+	var spaces []notifications.GoogleChatSpace
+	if err := json.Unmarshal([]byte(raw), &spaces); err != nil {
+		slog.Error("failed to parse NOTIFICATIONS_GOOGLE_CHAT_SPACES; Google Chat alerts will be unavailable", "err", err)
+		return nil
+	}
+	return spaces
 }

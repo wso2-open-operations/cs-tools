@@ -40,7 +40,7 @@ func TestTokenFetchTimeout(t *testing.T) {
 	tokenFetchTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { tokenFetchTimeout = 10 * time.Second })
 
-	client := NewClient(Config{
+	client := NewCustomerEntityClient(CustomerEntityConfig{
 		BaseURL:      tokenSrv.URL,
 		TokenURL:     tokenSrv.URL + "/token",
 		ClientID:     "test-client",
