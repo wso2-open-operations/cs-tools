@@ -91,6 +91,47 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
+// UpdateProject handles PATCH /projects/{id}. Targets a ServiceNow-data-source-only
+// entity-service operation that requires a forwarded end-user identity token — this
+// service is strictly M2M with no mechanism to supply one, so calls here always
+// receive a mapped 401 from upstream. Kept for API-shape completeness (see the
+// entity-client method's doc comment), not because it currently succeeds. The
+// request body is forwarded verbatim; the entity service enforces its own
+// "at least one field" business rule and 400s otherwise, so this handler does not
+// re-validate that.
+func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateProject(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "projectID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update project.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 // SearchProjectContacts handles POST /projects/{id}/contacts/search.
 // The endpoint is path-scoped, so the request body is capped and forwarded to the
 // entity service as-is (no fields are injected) and the response is returned verbatim.
@@ -121,45 +162,6 @@ func (h *ProjectHandler) SearchProjectContacts(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProjectContacts failed", "projectID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search project contacts.")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
-// UpdateProject handles PATCH /projects/{id}. This is a ServiceNow-data-source-only
-// entity-service operation (used by the Account Closure Process automation to write
-// closure-state fields on a project) — a caller with no forwarded x-user-id-token
-// gets a mapped 401. The request body is forwarded verbatim; the entity service
-// enforces its own "at least one field" business rule and 400s otherwise, so this
-// handler does not re-validate that.
-func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.UpdateProject(r.Context(), id, body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateProject failed", "projectID", id, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to update project.")
 		return
 	}
 

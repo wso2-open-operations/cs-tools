@@ -59,12 +59,17 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/projects/%s/contacts/search", url.PathEscape(projectID)), body)
 }
 
-// UpdateProject calls PATCH /projects/{id} on the entity service. This is a
+// UpdateProject calls PATCH /projects/{id} on the entity service. This targets a
 // ServiceNow-data-source-only operation (used by the Account Closure Process
-// automation to write closure-state fields on a project) — the upstream
-// entity-service rejects a request with no forwarded x-user-id-token with a 401,
-// which propagates unchanged. Response is returned as raw JSON; typed response
-// structs are deferred.
+// automation to write closure-state fields on a project) that requires a
+// forwarded end-user identity token. This service is strictly M2M with no
+// mechanism to carry one, so entity-service is expected to reject this call
+// with 401 — kept for API-shape completeness and so ACP's caller-side wiring
+// has somewhere real to point at, not because it currently succeeds. This
+// method returns c.do()'s raw result unchanged; status mapping happens in the
+// handler via mapUpstreamError, which may produce a different status (e.g. a
+// generic 500) for a transport-level failure that never reaches entity-service
+// at all. Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
 }

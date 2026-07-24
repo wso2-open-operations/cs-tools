@@ -16,44 +16,50 @@ validation here without confirming that assumption no longer holds.
 
 **This is not the same claim as "this service never returns 401/403."** `mapUpstreamError`
 (`internal/handler/response.go`) maps an upstream 401/403 straight through to the
-caller — confirmed in practice: entity-service's ServiceNow-backed operations
-reject a request with no forwarded `x-user-id-token` with a 401, and that status
-propagates here unchanged. "No app-level auth" means this service performs no
-authentication check of its own; it does not mean 401/403 can't happen. Any
-endpoint that can reach a ServiceNow-backed entity-service operation must document
-401 in `openapi.yaml`.
+caller. "No app-level auth" means this service performs no authentication check of
+its own; it does not mean 401/403 can't happen.
 
-## Optional `x-user-id-token` pass-through
+## This service is M2M-only — no end-user identity is ever forwarded
 
-This service's own identity to entity-service is always M2M — it never
-authenticates as an end user, and it does not require callers to supply one either.
-However, entity-service has a second, independent data source: some of its
-operations are backed by ServiceNow rather than Postgres, and **ServiceNow-backed
-operations require a forwarded end-user identity token** — they reject a
-request that arrives with only M2M credentials and no `x-user-id-token`
-(confirmed directly against `cs_entity_service`, which returns 401
+Earlier revisions of this service optionally forwarded a caller-supplied
+`x-user-id-token` header to entity-service, for entity-service's ServiceNow-backed
+operations (which require a forwarded end-user identity and reject M2M-only
+requests — confirmed directly against `cs_entity_service`, which returns 401
 `Missing or invalid user ID token header.` on every such resource with no
-exceptions).
+exceptions). That pass-through has been removed: this service's identity to
+entity-service is now unconditionally M2M, with no mechanism anywhere to carry an
+end-user token. Do not re-add one without confirming this decision no longer
+holds — see git history for the removal if context is needed.
 
-So: if a caller happens to have an end-user identity token and includes it as
-`x-user-id-token` on its request to this service, `middleware.UserIDToken`
-(`internal/middleware/usertoken.go`) picks it up and `entity.Client` forwards it
-unchanged on the outgoing entity-service call (`entity.WithUserIDToken`,
-`internal/entity/client.go`). If the header is absent — the common case — nothing
-is forwarded, and the call proceeds as pure M2M. This service does not validate,
-require, or inspect the token's contents; it is a transparent pass-through, not an
-auth check of its own.
+Practical implication: this service can only ever serve entity-service data that
+doesn't require a forwarded user identity (Postgres-backed operations). Any
+operation that can reach a ServiceNow-backed entity-service operation will
+**always** get a mapped 401 from `mapUpstreamError` — not conditionally, always,
+since there is no longer any path for a user token to reach entity-service.
 
-Practical implication: whether this service can serve a given endpoint's data
-depends on whether the *caller* can supply a user token, not on anything this
-service can control. Endpoints backed by Postgres work with pure M2M. Endpoints
-backed by ServiceNow only work if the caller forwards a real user's
-`x-user-id-token` — an M2M-only caller with no such token will get a mapped 401
-from `mapUpstreamError` for those.
+**`PATCH /projects/{id}` (`UpdateProject`) is kept despite this — deliberately, not
+by oversight.** It was added for the Account Closure Process (ACP) automation, but
+it targets a ServiceNow-data-source-only entity-service operation that requires a
+forwarded end-user identity — something this service structurally cannot provide
+under an M2M-only model. **Every call to this endpoint currently receives a mapped
+401 from `mapUpstreamError`, unconditionally.** It's kept for API-shape
+completeness (a real caller has somewhere to point at, and the shape of the
+request/response is documented and stable), not because it works today.
+
+Confirmed directly from the private `digiops-cs#2483` issue (written by the
+engineer who built this): the full HTTP path was "deferred pending a captured
+end-user token" even in the original implementation — there is no existing
+service/system identity anywhere in this stack that this endpoint, or ACP, could
+use instead. Making this endpoint actually succeed requires either (a) a
+dedicated ServiceNow/Asgardeo service account provisioned and wired into
+entity-service as a fallback identity, or (b) ACP reaching entity-service through
+some other path with its own credential. Neither is solved by this service's own
+code — don't attempt to "fix" this endpoint locally without that groundwork
+existing first.
 
 ## Middleware chain
 
-`SecurityHeaders → CorrelationID → UserIDToken → Logger → Mux`
+`SecurityHeaders → CorrelationID → Logger → Mux`
 
 - `SecurityHeaders` (`internal/middleware/security_headers.go`): sets
   `X-Content-Type-Options: nosniff`, `Content-Security-Policy:
@@ -65,8 +71,6 @@ from `mapUpstreamError` for those.
   double-prefixing an ID that already has it; stores the ID in context for the
   slog handler and for the entity client to forward; echoes the ID in the
   response header
-- `UserIDToken` (`internal/middleware/usertoken.go`): optionally forwards a
-  caller-supplied `x-user-id-token` header — see above; a no-op when absent
 - `Logger` (`internal/middleware/logger.go`): logs every completed request (method,
   path, status, elapsed) via slog
 
@@ -103,6 +107,13 @@ make build   # runs tests then compiles ./cmd/server
 
 ## Adding a new endpoint
 
+0. **Confirm the upstream operation doesn't require a forwarded end-user
+   identity first.** This service is M2M-only with no mechanism to carry one —
+   if the entity-service operation you want to expose is ServiceNow-backed and
+   requires `x-user-id-token`, calls will always 401 here (see `UpdateProject`
+   above, kept deliberately in that state). Know this going in rather than being
+   surprised by it later — a new endpoint in this situation should document the
+   same "always 401 today" reality rather than implying it works.
 1. **Upstream client** (`internal/entity/entity.go`) — add a method on `Client`
    that calls `c.do()`; use `url.PathEscape()` for every path parameter
 2. **Handler interface** — extend the local interface in the relevant handler file
@@ -111,9 +122,9 @@ make build   # runs tests then compiles ./cmd/server
    failure → write response. No auth check — see "Why no Auth middleware" above
 4. **Route** (`cmd/server/main.go`) — register using Go 1.22 method-prefixed
    patterns: `"POST /accounts/{id}/contacts/search"`
-5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/404/500 responses,
-   plus 401 if the operation can reach a ServiceNow-backed entity-service
-   operation (see below)
+5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/401/403/404/500
+   responses — `mapUpstreamError` can map an upstream 401 or 403 straight
+   through to the caller, so both belong alongside the others
 6. **Tests** — add a handler test following `accounts_test.go`/`projects_test.go`'s
    shape (empty/invalid path param, body-too-large, invalid JSON, success
    passthrough, `upstreamErrors` table); extend the mock in `helpers_test.go` to
@@ -146,8 +157,7 @@ published to third-party consumers via Choreo's Developer Portal.
 
 - **Never commit secrets** — client IDs/secrets and service URLs with credentials
   must not appear in source code or config files; use environment variables
-- **No sensitive data in logs** — log only IDs and error summaries; this includes
-  `x-user-id-token` — never log its value, even at debug level
+- **No sensitive data in logs** — log only IDs and error summaries
 - **No app-level inbound auth** — this is intentional (see above), not an
   oversight; don't "fix" it by bolting on JWT validation without confirming the
   Choreo gateway model has changed

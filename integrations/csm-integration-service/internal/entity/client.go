@@ -49,24 +49,6 @@ func correlationIDFromContext(ctx context.Context) string {
 	return v
 }
 
-const userIDTokenKey ctxKey = "x-user-id-token" // #nosec G101 -- context map key, not a credential
-
-// WithUserIDToken returns a copy of ctx carrying an end-user identity token to be
-// forwarded as x-user-id-token on every outgoing entity request. This is optional:
-// this service has no end-user auth of its own (it's M2M-only, fronted by Choreo's
-// API Manager gateway), so most callers never set this. It exists purely as a
-// pass-through for consumers that do have an end-user identity token available and
-// need entity-service's ServiceNow-backed operations, which require one — those
-// operations reject requests with neither an M2M-only caller nor a forwarded token.
-func WithUserIDToken(ctx context.Context, token string) context.Context {
-	return context.WithValue(ctx, userIDTokenKey, token)
-}
-
-func userIDTokenFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(userIDTokenKey).(string)
-	return v
-}
-
 // Config holds the configuration for the entity service client.
 type Config struct {
 	BaseURL      string
@@ -79,10 +61,8 @@ type Config struct {
 // Client is an HTTP client authenticated via the OAuth2 client credentials grant.
 // Tokens are acquired and refreshed automatically; callers need not manage them.
 //
-// This client's own auth to entity-service is always M2M — it never authenticates
-// as an end user. It additionally forwards an end-user identity token when one is
-// present in the request context (see WithUserIDToken), purely as a pass-through
-// for callers that have one. Most requests carry no such token.
+// This client's auth to entity-service is always M2M — it never authenticates as
+// an end user, and has no mechanism to forward one.
 type Client struct {
 	http    *http.Client
 	baseURL string
@@ -127,9 +107,6 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 	}
 	if id := correlationIDFromContext(ctx); id != "" {
 		req.Header.Set("X-CSM-Correlation-ID", id)
-	}
-	if token := userIDTokenFromContext(ctx); token != "" {
-		req.Header.Set("x-user-id-token", token)
 	}
 
 	resp, err := c.http.Do(req)

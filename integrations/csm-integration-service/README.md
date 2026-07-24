@@ -27,13 +27,15 @@ Server starts at `http://localhost:8080`.
     (which authenticates its own end users), this service has no end-user identity to
     check.
   - Outbound service calls: OAuth2 client credentials grant to the entity service
-    (managed automatically) — always M2M, on every request.
-  - **Optional `x-user-id-token` pass-through**: entity-service's ServiceNow-backed
-    operations require a forwarded end-user identity token and reject M2M-only
-    requests. If a caller includes `x-user-id-token` on its request to this service,
-    it is forwarded unchanged to entity-service. Most callers won't set it, and
-    endpoints backed by Postgres work fine without it — this is a transparent
-    pass-through, not something this service validates or requires.
+    (managed automatically) — always M2M, on every request, with no mechanism to
+    carry an end-user identity. entity-service's ServiceNow-backed operations
+    require a forwarded end-user identity token and will always reject a request
+    from this service with 401 — this service can only ever serve entity-service
+    data that doesn't require one (Postgres-backed operations). `PATCH
+    /projects/{id}` is a known, deliberate exception: it's kept for the Account
+    Closure Process (ACP) automation's API shape, but currently always 401s —
+    see `CLAUDE.md` before adding any other endpoint that targets a
+    ServiceNow-backed operation.
 
 ## Prerequisites
 
@@ -57,12 +59,11 @@ make build   # vet + test + compile
 Handler tests use a mock entity client (`internal/handler/helpers_test.go`) and a
 shared `upstreamErrors` table covering every `mapUpstreamError` status-code mapping.
 Entity client tests spin up real `httptest.Server`s to exercise the OAuth2
-client-credentials flow, error-body truncation, correlation ID forwarding, and the
-optional `x-user-id-token` pass-through (both forwarded-when-present and
-omitted-when-absent). Middleware tests cover header injection, ID
-generation/preservation, and pass-through behavior. `cmd/server` (wiring only) and
-`internal/apierror` (a two-line `Error()` method) have no dedicated tests, matching
-the same judgment call `apps/csm-portal/backend` makes for its own equivalents.
+client-credentials flow, error-body truncation, and correlation ID forwarding.
+Middleware tests cover header injection and ID generation/preservation.
+`cmd/server` (wiring only) and `internal/apierror` (a two-line `Error()` method)
+have no dedicated tests, matching the same judgment call `apps/csm-portal/backend`
+makes for its own equivalents.
 
 ### Run tests before every push (recommended)
 
@@ -114,7 +115,6 @@ csm-integration-service/
 │   │   └── entity.go             # Entity service operations (accounts, projects, contacts)
 │   ├── middleware/
 │   │   ├── correlation.go        # X-CSM-Correlation-ID propagation + slog enrichment
-│   │   ├── usertoken.go          # Optional x-user-id-token pass-through
 │   │   ├── logger.go             # Per-request access log
 │   │   └── security_headers.go   # X-Content-Type-Options, CSP, HSTS on every response
 │   └── handler/
@@ -135,6 +135,7 @@ csm-integration-service/
 - `GET /projects/{id}` — get a project by ID
 - `POST /projects/search` — search projects
 - `POST /projects/{id}/contacts/search` — search a project's contacts
+- `PATCH /projects/{id}` — update project closure-state fields (ACP automation; currently always 401s, see Overview above)
 
 All responses are raw JSON passthrough from the entity service — this service does not
 reshape upstream response bodies.
@@ -148,13 +149,4 @@ curl -X POST http://localhost:8080/accounts/<id>/contacts/search -d '{}'
 curl -X POST http://localhost:8080/projects/search -d '{}'
 curl http://localhost:8080/projects/<id>
 curl -X POST http://localhost:8080/projects/<id>/contacts/search -d '{}'
-```
-
-If entity-service's data for a given call is ServiceNow-backed, include a real
-end-user identity token so it can be forwarded:
-
-```bash
-curl -X POST http://localhost:8080/accounts/search \
-  -H "x-user-id-token: <token>" \
-  -d '{}'
 ```
