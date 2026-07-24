@@ -61,7 +61,6 @@ func main() {
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
-	mux.HandleFunc("PATCH /projects/{id}", projectHandler.UpdateProject)
 
 	addr := ":" + envOrDefault("PORT", "8080")
 
