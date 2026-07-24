@@ -75,17 +75,10 @@ func main() {
 	// No Auth layer in this middleware chain — inbound requests are trusted at the
 	// Choreo API Manager gateway (subscription + M2M app auth), not validated again
 	// in this service. See internal/handler's doc comments for the same note.
-	//
-	// UserIDToken is not an auth check either — it's an optional pass-through. Most
-	// callers never set x-user-id-token; when one does, it's forwarded to
-	// entity-service for callers that need its ServiceNow-backed operations. See
-	// internal/middleware/usertoken.go.
 	srv := &http.Server{
 		Handler: middleware.SecurityHeaders(
 			middleware.CorrelationID(
-				middleware.UserIDToken(
-					middleware.Logger(mux),
-				),
+				middleware.Logger(mux),
 			),
 		),
 		ReadHeaderTimeout: 10 * time.Second,
