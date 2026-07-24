@@ -31,8 +31,11 @@ Server starts at `http://localhost:8080`.
     carry an end-user identity. entity-service's ServiceNow-backed operations
     require a forwarded end-user identity token and will always reject a request
     from this service with 401 — this service can only ever serve entity-service
-    data that doesn't require one (Postgres-backed operations). See `CLAUDE.md`
-    before adding any new endpoint that targets a ServiceNow-backed operation.
+    data that doesn't require one (Postgres-backed operations). `PATCH
+    /projects/{id}` is a known, deliberate exception: it's kept for the Account
+    Closure Process (ACP) automation's API shape, but currently always 401s —
+    see `CLAUDE.md` before adding any other endpoint that targets a
+    ServiceNow-backed operation.
 
 ## Prerequisites
 
@@ -132,6 +135,7 @@ csm-integration-service/
 - `GET /projects/{id}` — get a project by ID
 - `POST /projects/search` — search projects
 - `POST /projects/{id}/contacts/search` — search a project's contacts
+- `PATCH /projects/{id}` — update project closure-state fields (ACP automation; currently always 401s, see Overview above)
 
 All responses are raw JSON passthrough from the entity service — this service does not
 reshape upstream response bodies.
