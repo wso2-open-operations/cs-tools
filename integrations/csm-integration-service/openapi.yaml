@@ -50,7 +50,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -93,7 +93,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -136,7 +136,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -173,7 +173,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -236,6 +236,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: NotFound
           content:
@@ -280,7 +286,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -323,7 +329,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity)
+          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -572,6 +578,7 @@ components:
 
     ProjectUpdateRequest:
       type: object
+      minProperties: 1
       description: >
         All fields are optional individually, but at least one is required —
         enforced by the entity service, which 400s if none is set.
