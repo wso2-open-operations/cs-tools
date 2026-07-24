@@ -18,7 +18,6 @@ import {
   Box,
   Button,
   Chip,
-  LinearProgress,
   Skeleton,
   Table,
   TableBody,
@@ -128,11 +127,6 @@ export default function IncidentsTab(): JSX.Element {
       />
 
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
-        {/* A background refetch (pagination/filter change) shows this thin
-            bar instead of swapping to skeleton rows — isLoading alone gates
-            the skeleton, so keepPreviousData's already-loaded rows stay
-            visible while the next page/filter loads. */}
-        <Box sx={{ height: 2 }}>{isFetching && !isLoading && <LinearProgress sx={{ height: 2 }} />}</Box>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
@@ -147,7 +141,7 @@ export default function IncidentsTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading ? (
+              {isLoading || isFetching ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
                     <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
@@ -234,6 +228,7 @@ export default function IncidentsTab(): JSX.Element {
           rowsPerPage={rowsPerPage}
           onRowsPerPageChange={handleChangeRowsPerPage}
           rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+          labelDisplayedRows={({ from, to, count }) => `Showing ${from}–${to} of ${count}`}
           showFirstButton
           showLastButton
         />

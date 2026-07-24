@@ -320,6 +320,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // type, so an announcement opened that way would otherwise render the full
   // case UI. Combine the route with the loaded case's own caseType.
   const isAnnouncement = isAnnouncementRoute || data?.caseType === "announcement";
+  // Same reasoning as isAnnouncement above — Service Requests don't carry a
+  // severity, so combine the route with the loaded case's own caseType.
+  const isServiceRequest =
+    isServiceRequestRoute || data?.caseType === "service_request";
   const {
     data: comments,
     isLoading: isCommentsLoading,
@@ -1453,7 +1457,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {!isAnnouncement && <SeverityChip severity={c.severity} withLabel />}
+            {!isAnnouncement && !isServiceRequest && (
+              <SeverityChip severity={c.severity} withLabel />
+            )}
             {!isAnnouncement && <StateChip state={c.state} />}
             {!isAnnouncement && relatedCase && (
               <Chip

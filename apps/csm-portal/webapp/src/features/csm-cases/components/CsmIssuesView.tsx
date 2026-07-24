@@ -130,6 +130,10 @@ export default function CsmIssuesView({
   const showSeverityFilter =
     lockedFilters?.caseTypes?.length === 1 &&
     lockedFilters.caseTypes[0] === "case";
+  // Service Requests don't carry a severity, so the column is redundant there.
+  const isServiceRequestOnly =
+    lockedFilters?.caseTypes?.length === 1 &&
+    lockedFilters.caseTypes[0] === "service_request";
 
   const debouncedSearch = useDebouncedValue(filters.search, 300);
   // User filters (debounced search) with the locked overrides applied last so
@@ -265,6 +269,7 @@ export default function CsmIssuesView({
         isLoading={isLoading || isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
+        hideSeverityColumn={isServiceRequestOnly}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortOrderChange}
       />

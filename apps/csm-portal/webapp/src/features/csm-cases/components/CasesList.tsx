@@ -38,6 +38,8 @@ interface CasesListProps {
   skeletonCount?: number;
   /** Base path for detail links. Defaults to "/cases". */
   detailBasePath?: string;
+  /** Hides the Severity column — Service Requests don't carry a severity. */
+  hideSeverityColumn?: boolean;
   /** Current sort order for the "Updated" column, when the caller wants it
    * sortable. Omit both `sortOrder` and `onSortOrderChange` for a plain
    * (non-interactive) header — the list is always server-sorted by
@@ -47,11 +49,17 @@ interface CasesListProps {
 }
 
 // Every column is left-aligned for a consistent scan line down the table.
-const HEADER_CELLS: string[] = [
+const HEADER_CELLS_WITH_SEVERITY: string[] = [
   "Case ID",
   "Subject",
   "Product",
   "Severity",
+  "State",
+];
+const HEADER_CELLS_WITHOUT_SEVERITY: string[] = [
+  "Case ID",
+  "Subject",
+  "Product",
   "State",
 ];
 
@@ -59,18 +67,27 @@ const HEADER_CELLS: string[] = [
 // column so a long subject no longer has to share one cell with them.
 // The work-state chip (only present for WIP cases) stacks under the State chip
 // in the State column, so it doesn't need a column of its own.
-const GRID =
+const GRID_WITH_SEVERITY =
   "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto";
+const GRID_WITHOUT_SEVERITY =
+  "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) minmax(110px, 1fr) auto";
 
 export default function CasesList({
   cases,
   isLoading,
   skeletonCount = 6,
   detailBasePath = "/cases",
+  hideSeverityColumn = false,
   sortOrder,
   onSortOrderChange,
 }: CasesListProps): JSX.Element {
   const theme = useTheme();
+  const headerCells = hideSeverityColumn
+    ? HEADER_CELLS_WITHOUT_SEVERITY
+    : HEADER_CELLS_WITH_SEVERITY;
+  const gridTemplateColumns = hideSeverityColumn
+    ? GRID_WITHOUT_SEVERITY
+    : GRID_WITH_SEVERITY;
 
   return (
     <Box
@@ -82,7 +99,7 @@ export default function CasesList({
         // Single grid context drives column tracks for header + every row.
         // Each row below uses `grid-template-columns: subgrid` so columns line up.
         display: "grid",
-        gridTemplateColumns: GRID,
+        gridTemplateColumns,
         columnGap: 2,
       }}
     >
@@ -101,7 +118,7 @@ export default function CasesList({
           borderColor: "divider",
         }}
       >
-        {HEADER_CELLS.map((label) => (
+        {headerCells.map((label) => (
           <Typography
             key={label}
             variant="caption"
@@ -246,9 +263,11 @@ export default function CasesList({
               <Typography variant="body2" noWrap title={c.product || undefined}>
                 {c.product}
               </Typography>
-              <Box sx={{ justifySelf: "start" }}>
-                <SeverityChip severity={c.severity} clickable />
-              </Box>
+              {!hideSeverityColumn && (
+                <Box sx={{ justifySelf: "start" }}>
+                  <SeverityChip severity={c.severity} clickable />
+                </Box>
+              )}
               {/* State chip, with the work-state chip stacked beneath it (the
                   latter only for WIP cases). */}
               <Box

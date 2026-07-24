@@ -119,7 +119,7 @@ export default function CompositionDonut({
               data={pieData}
               colors={pieData.map((s) => s.color)}
               legend={{ show: false }}
-              tooltip={{ show: true }}
+              tooltip={{ show: true, wrapperStyle: { zIndex: 1000 } }}
               width="100%"
               height={DONUT_SIZE}
               pies={[
