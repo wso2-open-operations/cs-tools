@@ -16,44 +16,39 @@ validation here without confirming that assumption no longer holds.
 
 **This is not the same claim as "this service never returns 401/403."** `mapUpstreamError`
 (`internal/handler/response.go`) maps an upstream 401/403 straight through to the
-caller — confirmed in practice: entity-service's ServiceNow-backed operations
-reject a request with no forwarded `x-user-id-token` with a 401, and that status
-propagates here unchanged. "No app-level auth" means this service performs no
-authentication check of its own; it does not mean 401/403 can't happen. Any
-endpoint that can reach a ServiceNow-backed entity-service operation must document
-401 in `openapi.yaml`.
+caller. "No app-level auth" means this service performs no authentication check of
+its own; it does not mean 401/403 can't happen.
 
-## Optional `x-user-id-token` pass-through
+## This service is M2M-only — no end-user identity is ever forwarded
 
-This service's own identity to entity-service is always M2M — it never
-authenticates as an end user, and it does not require callers to supply one either.
-However, entity-service has a second, independent data source: some of its
-operations are backed by ServiceNow rather than Postgres, and **ServiceNow-backed
-operations require a forwarded end-user identity token** — they reject a
-request that arrives with only M2M credentials and no `x-user-id-token`
-(confirmed directly against `cs_entity_service`, which returns 401
+Earlier revisions of this service optionally forwarded a caller-supplied
+`x-user-id-token` header to entity-service, for entity-service's ServiceNow-backed
+operations (which require a forwarded end-user identity and reject M2M-only
+requests — confirmed directly against `cs_entity_service`, which returns 401
 `Missing or invalid user ID token header.` on every such resource with no
-exceptions).
+exceptions). That pass-through has been removed: this service's identity to
+entity-service is now unconditionally M2M, with no mechanism anywhere to carry an
+end-user token. Do not re-add one without confirming this decision no longer
+holds — see git history for the removal if context is needed.
 
-So: if a caller happens to have an end-user identity token and includes it as
-`x-user-id-token` on its request to this service, `middleware.UserIDToken`
-(`internal/middleware/usertoken.go`) picks it up and `entity.Client` forwards it
-unchanged on the outgoing entity-service call (`entity.WithUserIDToken`,
-`internal/entity/client.go`). If the header is absent — the common case — nothing
-is forwarded, and the call proceeds as pure M2M. This service does not validate,
-require, or inspect the token's contents; it is a transparent pass-through, not an
-auth check of its own.
+Practical implication: this service can only ever serve entity-service data that
+doesn't require a forwarded user identity (Postgres-backed operations). Any
+operation that can reach a ServiceNow-backed entity-service operation will
+**always** get a mapped 401 from `mapUpstreamError` — not conditionally, always,
+since there is no longer any path for a user token to reach entity-service.
 
-Practical implication: whether this service can serve a given endpoint's data
-depends on whether the *caller* can supply a user token, not on anything this
-service can control. Endpoints backed by Postgres work with pure M2M. Endpoints
-backed by ServiceNow only work if the caller forwards a real user's
-`x-user-id-token` — an M2M-only caller with no such token will get a mapped 401
-from `mapUpstreamError` for those.
+**Known consequence: `UpdateProject` (`PATCH /projects/{id}`) cannot work.** It
+was added for the Account Closure Process (ACP) automation, targets a
+ServiceNow-data-source-only entity-service operation, and has no way to supply
+the end-user identity that operation requires. This is a deliberate, accepted
+gap (not something to silently "fix" by re-adding the pass-through) — its
+handler/entity-client code and `openapi.yaml` entry are left in place as-is,
+documenting the endpoint's existence and why it 401s unconditionally, rather than
+being deleted. Confirm with whoever owns the ACP automation before changing this.
 
 ## Middleware chain
 
-`SecurityHeaders → CorrelationID → UserIDToken → Logger → Mux`
+`SecurityHeaders → CorrelationID → Logger → Mux`
 
 - `SecurityHeaders` (`internal/middleware/security_headers.go`): sets
   `X-Content-Type-Options: nosniff`, `Content-Security-Policy:
@@ -65,8 +60,6 @@ from `mapUpstreamError` for those.
   double-prefixing an ID that already has it; stores the ID in context for the
   slog handler and for the entity client to forward; echoes the ID in the
   response header
-- `UserIDToken` (`internal/middleware/usertoken.go`): optionally forwards a
-  caller-supplied `x-user-id-token` header — see above; a no-op when absent
 - `Logger` (`internal/middleware/logger.go`): logs every completed request (method,
   path, status, elapsed) via slog
 
@@ -146,8 +139,7 @@ published to third-party consumers via Choreo's Developer Portal.
 
 - **Never commit secrets** — client IDs/secrets and service URLs with credentials
   must not appear in source code or config files; use environment variables
-- **No sensitive data in logs** — log only IDs and error summaries; this includes
-  `x-user-id-token` — never log its value, even at debug level
+- **No sensitive data in logs** — log only IDs and error summaries
 - **No app-level inbound auth** — this is intentional (see above), not an
   oversight; don't "fix" it by bolting on JWT validation without confirming the
   Choreo gateway model has changed
