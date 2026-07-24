@@ -122,7 +122,9 @@ make build   # runs tests then compiles ./cmd/server
    failure → write response. No auth check — see "Why no Auth middleware" above
 4. **Route** (`cmd/server/main.go`) — register using Go 1.22 method-prefixed
    patterns: `"POST /accounts/{id}/contacts/search"`
-5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/404/500 responses
+5. **OpenAPI spec** (`openapi.yaml`) — add the path with 200/400/401/403/404/500
+   responses — `mapUpstreamError` can map an upstream 401 or 403 straight
+   through to the caller, so both belong alongside the others
 6. **Tests** — add a handler test following `accounts_test.go`/`projects_test.go`'s
    shape (empty/invalid path param, body-too-large, invalid JSON, success
    passthrough, `upstreamErrors` table); extend the mock in `helpers_test.go` to
