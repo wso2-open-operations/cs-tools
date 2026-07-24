@@ -37,13 +37,13 @@ function mockSearchResult(
   } as unknown as ReturnType<typeof useSearchTags>);
 }
 
-describe("AddTagDialog — search-and-select-or-create tag entry", () => {
+describe("AddTagDialog — search-and-SELECT tag entry (no free-text creation)", () => {
   beforeEach(() => {
     mockedUseSearchTags.mockReset();
     mockSearchResult({});
   });
 
-  it("disables Add tag until a label is typed", () => {
+  it("disables Add tag until a suggestion is selected", () => {
     render(
       <AddTagDialog
         existingLabels={[]}
@@ -55,7 +55,24 @@ describe("AddTagDialog — search-and-select-or-create tag entry", () => {
     expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
   });
 
-  it("submits the trimmed label typed into the field", () => {
+  it("typing alone does not enable Add tag — a suggestion must be selected", () => {
+    mockSearchResult({ data: [{ id: "t1", label: "micro-gw" }] });
+    render(
+      <AddTagDialog
+        existingLabels={[]}
+        isSaving={false}
+        onClose={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/^tag$/i), {
+      target: { value: "micro-gw-but-not-quite" },
+    });
+    expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
+  });
+
+  it("submits the label once a suggestion is clicked", () => {
+    mockSearchResult({ data: [{ id: "t1", label: "micro-gw" }] });
     const onSave = vi.fn();
     render(
       <AddTagDialog
@@ -66,29 +83,16 @@ describe("AddTagDialog — search-and-select-or-create tag entry", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText(/^tag$/i), {
-      target: { value: "  micro-gw  " },
+      target: { value: "micro" },
     });
+    fireEvent.click(screen.getByText("micro-gw"));
+    expect(screen.getByRole("button", { name: /add tag/i })).not.toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /add tag/i }));
     expect(onSave).toHaveBeenCalledWith("micro-gw");
   });
 
-  it("submits on Enter", () => {
-    const onSave = vi.fn();
-    render(
-      <AddTagDialog
-        existingLabels={[]}
-        isSaving={false}
-        onClose={() => {}}
-        onSave={onSave}
-      />,
-    );
-    const input = screen.getByLabelText(/^tag$/i);
-    fireEvent.change(input, { target: { value: "ws-policy" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(onSave).toHaveBeenCalledWith("ws-policy");
-  });
-
   it("blocks a case-insensitive duplicate of an existing tag", () => {
+    mockSearchResult({ data: [{ id: "t1", label: "Micro-GW" }] });
     const onSave = vi.fn();
     render(
       <AddTagDialog
@@ -99,10 +103,12 @@ describe("AddTagDialog — search-and-select-or-create tag entry", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText(/^tag$/i), {
-      target: { value: "micro-gw" },
+      target: { value: "micro" },
     });
+    // Already-on-the-case labels are filtered out of the suggestion list, so
+    // there is nothing to select and Add tag stays disabled.
+    expect(screen.queryByText("Micro-GW")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
-    expect(screen.getByText(/already has that tag/i)).toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
   });
 

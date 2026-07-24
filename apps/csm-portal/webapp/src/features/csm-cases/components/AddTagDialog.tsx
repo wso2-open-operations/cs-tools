@@ -25,11 +25,10 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX, type KeyboardEvent } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
-const MAX_TAG_LABEL_LEN = 100;
 const TAG_SEARCH_DEBOUNCE_MS = 300;
 
 interface AddTagDialogProps {
@@ -41,13 +40,12 @@ interface AddTagDialogProps {
 }
 
 /**
- * Add a tag to a case (`POST /cases/{id}/tags`). Tags are genuinely free-text
- * on the backing data source (SN's generic label mechanism, e.g. `micro-gw`,
- * `ws-policy`) — this is a search-and-select-or-create combobox, not a picker
- * constrained to a closed enum: it searches existing labels via
- * `GET /tags/search` as the user types (debounced), and still lets them type a
- * label with no match to create a genuinely new tag. ServiceNow-source only;
- * the caller surfaces a rejection on another source.
+ * Add a tag to a case (`POST /cases/{id}/tags`). Tags are a curated,
+ * pre-existing vocabulary, not free text — this is search-and-SELECT only:
+ * it searches existing labels via `GET /tags/search` as the user types
+ * (debounced), but there is no "create a new tag" fallback for typed text
+ * with no match. ServiceNow-source only; the caller surfaces a rejection on
+ * another source.
  */
 export default function AddTagDialog({
   existingLabels,
@@ -55,16 +53,16 @@ export default function AddTagDialog({
   onClose,
   onSave,
 }: AddTagDialogProps): JSX.Element {
-  const [label, setLabel] = useState("");
-  const debouncedLabel = useDebouncedValue(label, TAG_SEARCH_DEBOUNCE_MS);
-  const query = debouncedLabel.trim();
+  const [inputValue, setInputValue] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const debouncedInput = useDebouncedValue(inputValue, TAG_SEARCH_DEBOUNCE_MS);
+  const query = debouncedInput.trim();
   const { data: matches, isFetching, isError } = useSearchTags(query, true);
 
-  const trimmed = label.trim();
-  const isDuplicate = existingLabels.some(
-    (l) => l.toLowerCase() === trimmed.toLowerCase(),
-  );
-  const canSubmit = trimmed.length > 0 && !isDuplicate;
+  const isDuplicate =
+    selected !== null &&
+    existingLabels.some((l) => l.toLowerCase() === selected.toLowerCase());
+  const canSubmit = selected !== null && !isDuplicate;
 
   // Suggestions from the search, minus labels already on this case (those
   // would just be rejected as a duplicate anyway).
@@ -76,8 +74,8 @@ export default function AddTagDialog({
   }, [matches, existingLabels]);
 
   const handleSubmit = (): void => {
-    if (!canSubmit) return;
-    onSave(trimmed);
+    if (!canSubmit || selected === null) return;
+    onSave(selected);
   };
 
   return (
@@ -85,24 +83,26 @@ export default function AddTagDialog({
       <DialogTitle>Add tag</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <Autocomplete<string, false, false, true>
-            freeSolo
+          <Autocomplete<string, false, false, false>
             size="small"
             fullWidth
             options={options}
-            inputValue={label}
+            value={selected}
+            inputValue={inputValue}
             loading={isFetching}
             disabled={isSaving}
+            onChange={(_event, value) => setSelected(value)}
             onInputChange={(_event, value, reason) => {
               if (reason === "input" || reason === "reset" || reason === "clear") {
-                setLabel(value.slice(0, MAX_TAG_LABEL_LEN));
+                setInputValue(value);
+                if (reason !== "reset") setSelected(null);
               }
             }}
             noOptionsText={
               isError
-                ? "Couldn't search existing tags — you can still type a new one."
+                ? "Couldn't search existing tags — try again."
                 : query
-                  ? "No matching tags — press Enter to create it."
+                  ? "No matching tags."
                   : "Type to search existing tags…"
             }
             renderInput={(params) => (
@@ -115,28 +115,12 @@ export default function AddTagDialog({
                 helperText={
                   isDuplicate ? "This case already has that tag." : undefined
                 }
-                onKeyDown={(e) => {
-                  // `params.inputProps.onKeyDown` is the built-in listbox
-                  // navigation handler (arrow keys / Enter-to-select) that
-                  // Autocomplete wires onto the underlying <input>. MUI types
-                  // this TextField's `onKeyDown` against the root div and
-                  // `inputProps.onKeyDown` against the input element, but
-                  // they fire for the same DOM keydown here — cast rather
-                  // than drop the call, so listbox keyboard nav still works.
-                  params.inputProps.onKeyDown?.(
-                    e as unknown as KeyboardEvent<HTMLInputElement>,
-                  );
-                  if (e.key === "Enter" && !e.defaultPrevented) {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
               />
             )}
           />
           <Typography variant="caption" color="text.secondary">
-            Search existing tags or type a new label — tags are free-text,
-            there's no fixed list.
+            Search and select an existing tag — tags are a fixed vocabulary,
+            not free text.
           </Typography>
         </Box>
       </DialogContent>
