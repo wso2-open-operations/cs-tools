@@ -37,15 +37,25 @@ operation that can reach a ServiceNow-backed entity-service operation will
 **always** get a mapped 401 from `mapUpstreamError` — not conditionally, always,
 since there is no longer any path for a user token to reach entity-service.
 
-**`PATCH /projects/{id}` (`UpdateProject`) was removed for this reason.** It was
-added for the Account Closure Process (ACP) automation, but it targeted a
-ServiceNow-data-source-only entity-service operation that requires a forwarded
-end-user identity — something this service structurally cannot provide once M2M
-is the only auth model. Rather than leave a handler that can never succeed, the
-endpoint (handler, entity-client method, route, `openapi.yaml` entry, tests) was
-deleted outright. The ACP automation needs a different path to reach that
-entity-service operation — this service is not it. Don't re-add this endpoint
-here without solving that identity problem first.
+**`PATCH /projects/{id}` (`UpdateProject`) is kept despite this — deliberately, not
+by oversight.** It was added for the Account Closure Process (ACP) automation, but
+it targets a ServiceNow-data-source-only entity-service operation that requires a
+forwarded end-user identity — something this service structurally cannot provide
+under an M2M-only model. **Every call to this endpoint currently receives a mapped
+401 from `mapUpstreamError`, unconditionally.** It's kept for API-shape
+completeness (a real caller has somewhere to point at, and the shape of the
+request/response is documented and stable), not because it works today.
+
+Confirmed directly from the private `digiops-cs#2483` issue (written by the
+engineer who built this): the full HTTP path was "deferred pending a captured
+end-user token" even in the original implementation — there is no existing
+service/system identity anywhere in this stack that this endpoint, or ACP, could
+use instead. Making this endpoint actually succeed requires either (a) a
+dedicated ServiceNow/Asgardeo service account provisioned and wired into
+entity-service as a fallback identity, or (b) ACP reaching entity-service through
+some other path with its own credential. Neither is solved by this service's own
+code — don't attempt to "fix" this endpoint locally without that groundwork
+existing first.
 
 ## Middleware chain
 
@@ -100,9 +110,10 @@ make build   # runs tests then compiles ./cmd/server
 0. **Confirm the upstream operation doesn't require a forwarded end-user
    identity first.** This service is M2M-only with no mechanism to carry one —
    if the entity-service operation you want to expose is ServiceNow-backed and
-   requires `x-user-id-token`, it cannot work here, full stop (see above; this
-   is exactly why `UpdateProject` was removed). Don't start building against an
-   operation that can't succeed.
+   requires `x-user-id-token`, calls will always 401 here (see `UpdateProject`
+   above, kept deliberately in that state). Know this going in rather than being
+   surprised by it later — a new endpoint in this situation should document the
+   same "always 401 today" reality rather than implying it works.
 1. **Upstream client** (`internal/entity/entity.go`) — add a method on `Client`
    that calls `c.do()`; use `url.PathEscape()` for every path parameter
 2. **Handler interface** — extend the local interface in the relevant handler file
