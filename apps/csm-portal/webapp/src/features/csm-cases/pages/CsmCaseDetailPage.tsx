@@ -166,6 +166,14 @@ function MetaCell({
   );
 }
 
+// Watcher add/remove PATCHes resubmit the full watch list as an array of
+// emails (ServiceNow's watch_list only round-trips as `EmailString[]`), so a
+// watcher with no email on file can't be represented at all — see
+// onAddWatcher/onRemoveWatcher below.
+const EMAILLESS_WATCHER_ERROR =
+  "Can't update watchers: one or more current watchers has no email on file, " +
+  "so this list can't be safely resubmitted.";
+
 const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   start_work: "Started work on this case.",
   assign_to_me: "Assigned to you.",
@@ -1062,12 +1070,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   // Watchers are edited inline in the Related tab (see WatchersWidget); the
   // backend has no add/remove-one endpoint, only a full-list-replace
-  // `PATCH /cases/{id}` (`watchList`), so both add and remove compute the next
-  // full list from the currently loaded case. ServiceNow only; the backend
-  // rejects it on another data source and the error surfaces via showError.
+  // `PATCH /cases/{id}` (`watchList`), and that PATCH is an array of emails
+  // (ServiceNow's watch_list only round-trips as `EmailString[]`), so both add
+  // and remove compute the next full list from the currently loaded case.
+  // A watcher with no email on file can't be represented in that list at all —
+  // rather than silently dropping them from the watch list, block the mutation
+  // and surface it. ServiceNow only; the backend rejects it on another data
+  // source and the error surfaces via showError.
   const onAddWatcher = useCallback(
     (email: string) => {
       if (!data) return;
+      if (data.watchers.some((w) => !w.email)) {
+        showError(EMAILLESS_WATCHER_ERROR);
+        return;
+      }
       const current = data.watchers
         .filter((w): w is CaseWatcher & { email: string } => !!w.email)
         .map((w) => w.email);
@@ -1091,6 +1107,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const onRemoveWatcher = useCallback(
     (watcher: CaseWatcher) => {
       if (!data || !watcher.email) return;
+      if (data.watchers.some((w) => !w.email && w.id !== watcher.id)) {
+        showError(EMAILLESS_WATCHER_ERROR);
+        return;
+      }
       const next = data.watchers
         .filter(
           (w): w is CaseWatcher & { email: string } =>
