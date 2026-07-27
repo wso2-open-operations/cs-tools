@@ -23,44 +23,31 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   Typography,
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
-import {
-  formatDateTimeLocal,
-  parseDateTimeLocal,
-  resolveDisplayTimeZone,
-  zonedInputToUtcIso,
-} from "@utils/dateTime";
+import { formatDateOnly, parseDateOnly } from "@utils/dateTime";
 
-const { DateTimePicker, LocalizationProvider } = DatePickers;
+const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 
-/** One of the four independent fix-ETA fields this dialog can set. */
-export type FixEtaField =
-  | "fixEta"
-  | "bestCaseFixEta"
-  | "mostLikelyFixEta"
-  | "worstCaseFixEta";
+/** One of the three independent internal-only fix-ETA estimate fields this dialog can set. */
+export type FixEtaField = "bestCaseFixEta" | "mostLikelyFixEta" | "worstCaseFixEta";
 
 interface SetFixEtaDialogProps {
-  /** Current customer-facing fix-commitment date/time, if any (ISO). */
-  currentFixEta?: string | null;
-  /** Current internal-only best-case estimate, if any (ISO). */
+  /** Current internal-only best-case estimate, if any (date-only "YYYY-MM-DD"). */
   currentBestCaseFixEta?: string | null;
-  /** Current internal-only most-likely estimate, if any (ISO). */
+  /** Current internal-only most-likely estimate, if any (date-only "YYYY-MM-DD"). */
   currentMostLikelyFixEta?: string | null;
-  /** Current internal-only worst-case estimate, if any (ISO). */
+  /** Current internal-only worst-case estimate, if any (date-only "YYYY-MM-DD"). */
   currentWorstCaseFixEta?: string | null;
-  /** True while any of the four PATCHes is in flight; disables every field's Save. */
+  /** True while any of the three PATCHes is in flight; disables every field's Save. */
   isSaving: boolean;
   onClose: () => void;
-  /** Apply one field's new value (`PATCH { [field]: valueIso }`), as a UTC ISO string. */
-  onSave: (field: FixEtaField, valueIso: string) => void;
+  /** Apply one field's new value (`PATCH { [field]: "YYYY-MM-DD" }`). */
+  onSave: (field: FixEtaField, valueDateOnly: string) => void;
 }
 
 const FIELD_LABEL: Record<FixEtaField, string> = {
-  fixEta: "Fix ETA",
   bestCaseFixEta: "Best case",
   mostLikelyFixEta: "Most likely",
   worstCaseFixEta: "Worst case",
@@ -69,46 +56,42 @@ const FIELD_LABEL: Record<FixEtaField, string> = {
 interface FixEtaFieldRowProps {
   field: FixEtaField;
   currentValue?: string | null;
-  timeZone: string;
   isSaving: boolean;
-  onSave: (field: FixEtaField, valueIso: string) => void;
+  onSave: (field: FixEtaField, valueDateOnly: string) => void;
 }
 
 /**
- * One independently-saved date/time field. Each row owns its own draft value
- * and Save action — the four fields are unrelated PATCH variants (see
- * `BeCaseUpdatePayload`), so saving one never requires the others to be filled.
+ * One independently-saved date field. Each row owns its own draft value and
+ * Save action — the three fields are unrelated PATCH variants (see
+ * `BeCaseUpdatePayload`), so saving one never requires the others to be
+ * filled. Date-only, no time-of-day component, matching this codebase's
+ * `SetAutocloseHoldDialog` picker convention.
  */
 function FixEtaFieldRow({
   field,
   currentValue,
-  timeZone,
   isSaving,
   onSave,
 }: FixEtaFieldRowProps): JSX.Element {
-  const [value, setValue] = useState<string>(
-    currentValue ? formatDateTimeLocal(new Date(currentValue)) : "",
-  );
-  const parsed = parseDateTimeLocal(value);
+  const [value, setValue] = useState<string>(currentValue ?? "");
+  const parsed = parseDateOnly(value);
   const canSubmit = !!parsed;
 
   const handleSave = (): void => {
-    if (!canSubmit) return;
-    const iso = zonedInputToUtcIso(value, timeZone);
-    if (!iso) return;
-    onSave(field, iso);
+    if (!canSubmit || !value) return;
+    onSave(field, value);
   };
 
   return (
     <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
       <LocalizationProvider dateAdapter={AdapterDateFns}>
-        <DateTimePicker
-          label={`${FIELD_LABEL[field]} (${timeZone})`}
+        <DatePicker
+          label={FIELD_LABEL[field]}
           value={parsed}
           onChange={(next) =>
             setValue(
               next instanceof Date && !Number.isNaN(next.getTime())
-                ? formatDateTimeLocal(next)
+                ? formatDateOnly(next)
                 : "",
             )
           }
@@ -134,16 +117,14 @@ function FixEtaFieldRow({
 }
 
 /**
- * Set the case's four independent fix-ETA fields: the single customer-facing
- * commitment (`fixEta` on `PATCH /cases/{id}`) plus three internal-only
- * estimates (`bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta`) never
- * shared with the customer. Each field is its own single-field PATCH variant
- * (see `BeCaseUpdatePayload`), so every row saves independently — filling in
- * one estimate never requires the others. ServiceNow-source only for
- * `fixEta`; the caller surfaces a rejection on another source.
+ * Set the case's three independent internal-only fix-ETA estimates
+ * (`bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta`), never shared
+ * with the customer. Each field is its own single-field, date-only PATCH
+ * variant (see `BeCaseUpdatePayload`), so every row saves independently —
+ * filling in one estimate never requires the others. ServiceNow-source only;
+ * the caller surfaces a rejection on another source.
  */
 export default function SetFixEtaDialog({
-  currentFixEta,
   currentBestCaseFixEta,
   currentMostLikelyFixEta,
   currentWorstCaseFixEta,
@@ -151,58 +132,32 @@ export default function SetFixEtaDialog({
   onClose,
   onSave,
 }: SetFixEtaDialogProps): JSX.Element {
-  const timeZone = resolveDisplayTimeZone();
-
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Set fix ETA</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           <Typography variant="body2" color="text.secondary">
-            Each field below is saved independently — you don't need to fill
-            in every estimate to save one.
-          </Typography>
-
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
-            <Typography variant="caption" color="text.secondary">
-              Customer-facing fix-commitment date/time. Shared with the
-              customer — distinct from the backend-computed SLA clocks shown
-              on the SLAs tab.
-            </Typography>
-            <FixEtaFieldRow
-              field="fixEta"
-              currentValue={currentFixEta}
-              timeZone={timeZone}
-              isSaving={isSaving}
-              onSave={onSave}
-            />
-          </Box>
-
-          <Divider />
-
-          <Typography variant="subtitle2">Internal-only estimates</Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: -1.5 }}>
-            Never shared with the customer.
+            Internal-only estimates, never shared with the customer. Each
+            field below is saved independently — you don't need to fill in
+            every estimate to save one.
           </Typography>
 
           <FixEtaFieldRow
             field="bestCaseFixEta"
             currentValue={currentBestCaseFixEta}
-            timeZone={timeZone}
             isSaving={isSaving}
             onSave={onSave}
           />
           <FixEtaFieldRow
             field="mostLikelyFixEta"
             currentValue={currentMostLikelyFixEta}
-            timeZone={timeZone}
             isSaving={isSaving}
             onSave={onSave}
           />
           <FixEtaFieldRow
             field="worstCaseFixEta"
             currentValue={currentWorstCaseFixEta}
-            timeZone={timeZone}
             isSaving={isSaving}
             onSave={onSave}
           />

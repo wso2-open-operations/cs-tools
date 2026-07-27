@@ -93,7 +93,9 @@ import LinkIncidentDialog from "@features/csm-cases/components/LinkIncidentDialo
 import LinkCaseDialog, {
   type CaseLinkType,
 } from "@features/csm-cases/components/LinkCaseDialog";
-import SetFixEtaDialog from "@features/csm-cases/components/SetFixEtaDialog";
+import SetFixEtaDialog, {
+  type FixEtaField,
+} from "@features/csm-cases/components/SetFixEtaDialog";
 import CreateTaskDialog from "@features/csm-cases/components/CreateTaskDialog";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import { useCreateCaseTask } from "@features/csm-cases/api/useCreateCaseTask";
@@ -1269,21 +1271,24 @@ export default function CsmCaseDetailPage(): JSX.Element {
   );
 
   const onSetFixEta = useCallback(
-    (fixEtaIso: string) => {
-      patchCase.mutate(
-        { fixEta: fixEtaIso },
-        {
-          onSuccess: () => {
-            setFixEtaOpen(false);
-            setFeedback({
-              message: "Fix ETA updated.",
-              severity: "success",
-              sticky: false,
-            });
-          },
-          onError: (err) => showError("Could not set the fix ETA.", err),
+    (field: FixEtaField, valueDateOnly: string) => {
+      const payload: BeCaseUpdatePayload =
+        field === "bestCaseFixEta"
+          ? { bestCaseFixEta: valueDateOnly }
+          : field === "mostLikelyFixEta"
+            ? { mostLikelyFixEta: valueDateOnly }
+            : { worstCaseFixEta: valueDateOnly };
+      patchCase.mutate(payload, {
+        onSuccess: () => {
+          setFixEtaOpen(false);
+          setFeedback({
+            message: "Fix ETA updated.",
+            severity: "success",
+            sticky: false,
+          });
         },
-      );
+        onError: (err) => showError("Could not set the fix ETA.", err),
+      });
     },
     [patchCase, showError],
   );
@@ -2166,7 +2171,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {fixEtaOpen && (
         <SetFixEtaDialog
-          currentFixEta={c.fixEta}
+          currentBestCaseFixEta={c.bestCaseFixEta}
+          currentMostLikelyFixEta={c.mostLikelyFixEta}
+          currentWorstCaseFixEta={c.worstCaseFixEta}
           isSaving={patchCase.isPending}
           onClose={() => setFixEtaOpen(false)}
           onSave={onSetFixEta}

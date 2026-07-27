@@ -19,53 +19,51 @@ import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import SetFixEtaDialog from "@features/csm-cases/components/SetFixEtaDialog";
 
-describe("SetFixEtaDialog — four independent fields", () => {
-  it("renders one Save button per field, each disabled until a date/time is picked", () => {
+describe("SetFixEtaDialog — three independent internal-only fields", () => {
+  it("renders one Save button per field, each disabled until a date is picked", () => {
     render(
       <SetFixEtaDialog isSaving={false} onClose={() => {}} onSave={() => {}} />,
     );
     const saveButtons = screen.getAllByRole("button", { name: /^save$/i });
-    expect(saveButtons).toHaveLength(4);
+    expect(saveButtons).toHaveLength(3);
     saveButtons.forEach((btn) => expect(btn).toBeDisabled());
   });
 
   it("seeds each field from its current value and enables that field's Save immediately", () => {
     render(
       <SetFixEtaDialog
-        currentFixEta="2099-06-15T10:30:00.000Z"
-        currentBestCaseFixEta="2099-06-16T10:30:00.000Z"
-        currentMostLikelyFixEta="2099-06-17T10:30:00.000Z"
-        currentWorstCaseFixEta="2099-06-18T10:30:00.000Z"
+        currentBestCaseFixEta="2099-06-16"
+        currentMostLikelyFixEta="2099-06-17"
+        currentWorstCaseFixEta="2099-06-18"
         isSaving={false}
         onClose={() => {}}
         onSave={() => {}}
       />,
     );
     const saveButtons = screen.getAllByRole("button", { name: /^save$/i });
-    expect(saveButtons).toHaveLength(4);
+    expect(saveButtons).toHaveLength(3);
     saveButtons.forEach((btn) => expect(btn).toBeEnabled());
   });
 
-  it("saves only the fixEta field with a UTC ISO string, independent of the other three", () => {
+  it("saves only the bestCaseFixEta field as a date-only string, independent of the other two", () => {
     const onSave = vi.fn();
     render(
       <SetFixEtaDialog
-        currentFixEta="2099-06-15T10:30:00.000Z"
+        currentBestCaseFixEta="2099-06-16"
         isSaving={false}
         onClose={() => {}}
         onSave={onSave}
       />,
     );
     const saveButtons = screen.getAllByRole("button", { name: /^save$/i });
-    // The fixEta row is the only one seeded, so it's the only enabled Save.
+    // The bestCaseFixEta row is the only one seeded, so it's the only enabled Save.
     const enabled = saveButtons.filter((btn) => !btn.hasAttribute("disabled"));
     expect(enabled).toHaveLength(1);
     fireEvent.click(enabled[0]);
     expect(onSave).toHaveBeenCalledTimes(1);
     const [field, arg] = onSave.mock.calls[0] as [string, string];
-    expect(field).toBe("fixEta");
-    expect(() => new Date(arg).toISOString()).not.toThrow();
-    expect(new Date(arg).getUTCFullYear()).toBe(2099);
+    expect(field).toBe("bestCaseFixEta");
+    expect(arg).toBe("2099-06-16");
   });
 
   it("calls onClose on Close without calling onSave", () => {

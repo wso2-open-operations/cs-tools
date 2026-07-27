@@ -210,7 +210,8 @@ interface SecondaryItem {
  *                                       Kept here even though a Tasks tab exists: that tab is
  *                                       still `hidden` in CsmCaseDetailPage's TAB_DEFS, so this
  *                                       menu item is the only reachable entry point today.
- *   - Set fix ETA                    → PATCH /cases/{id} { fixEta }, see SetFixEtaDialog.tsx
+ *   - Set fix ETA                    → PATCH /cases/{id} { bestCaseFixEta | mostLikelyFixEta |
+ *                                       worstCaseFixEta }, see SetFixEtaDialog.tsx
  *   - Log time                       → ISSU-017
  *   - Change severity                → PATCH /cases/{id} { severity }, already fully
  *                                       backend-supported (see ChangeSeverityDialog.tsx)

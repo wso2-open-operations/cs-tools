@@ -341,6 +341,26 @@ export function parseDateOnly(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * "YYYY-MM-DD" to a human-readable date string (e.g. "Aug 1, 2026"), for
+ * read-only display of a date-only field. Uses {@link parseDateOnly}'s
+ * local-midnight parse rather than {@link formatAbsoluteForUser}'s UTC parse,
+ * so the displayed day never shifts depending on the viewer's timezone.
+ * Returns `null` when the input is empty or unparseable.
+ */
+export function formatDateOnlyForDisplay(
+  value: string | null | undefined,
+): string | null {
+  if (!value) return null;
+  const date = parseDateOnly(value);
+  if (!date) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
 /** Local-midnight Date back to "YYYY-MM-DD", the inverse of {@link parseDateOnly}. */
 export function formatDateOnly(date: Date): string {
   const y = date.getFullYear();
