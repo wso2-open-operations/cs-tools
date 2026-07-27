@@ -449,12 +449,16 @@ export default function NoveraChatPage(): JSX.Element {
           ? (payload.actions as NoveraAction[])
           : undefined;
         const next = [...prev];
+        const answerId =
+          typeof payload.messageId === "string" ? payload.messageId : undefined;
         next[idx] = {
           ...msg,
           isLoading: false,
           isError: false,
           text: finalMessage || msg.text,
           showCreateCaseAction: payload.actions != null,
+          showFeedbackActions: !!answerId,
+          feedbackMessageId: answerId,
           slotState: payload.slotState as SlotState | undefined,
           thinkingSteps: [],
           thinkingLabel: null,
@@ -606,6 +610,21 @@ export default function NoveraChatPage(): JSX.Element {
           }
           break;
         }
+        case "feedback_ack": {
+          const ackId = String(event.messageId ?? "");
+          const ackRating =
+            event.rating === 1 ? 1 : event.rating === -1 ? -1 : null;
+          if (ackId) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.feedbackMessageId === ackId
+                  ? { ...m, feedbackRating: ackRating }
+                  : m,
+              ),
+            );
+          }
+          break;
+        }
         case "error":
           pendingFinalRef.current = null;
           tokenQueueRef.current = [];
@@ -718,6 +737,49 @@ export default function NoveraChatPage(): JSX.Element {
     void sendViaWebSocket("This Resolved My Issue");
   }, [isSending, sendViaWebSocket]);
 
+  // Answer feedback (👍/👎) over the existing chat socket (#2534). Optimistic:
+  // reflect the vote immediately, revert if the send fails. feedback_ack later
+  // confirms the persisted value.
+  const submitFeedback = useCallback(
+    (messageId: string, rating: 1 | -1) => {
+      if (!projectId) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.feedbackMessageId === messageId ? { ...m, feedbackRating: rating } : m,
+        ),
+      );
+      void connect(projectId)
+        .then(() =>
+          sendUserMessage({
+            type: "feedback",
+            messageId,
+            rating,
+            conversationId: conversationId ?? undefined,
+            accountId: accountId || undefined,
+          }),
+        )
+        .catch(() => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.feedbackMessageId === messageId
+                ? { ...m, feedbackRating: null }
+                : m,
+            ),
+          );
+        });
+    },
+    [accountId, connect, conversationId, projectId, sendUserMessage],
+  );
+
+  const handleThumbsUp = useCallback(
+    (messageId: string) => submitFeedback(messageId, 1),
+    [submitFeedback],
+  );
+  const handleThumbsDown = useCallback(
+    (messageId: string) => submitFeedback(messageId, -1),
+    [submitFeedback],
+  );
+
   // Feature-flagged (config.js): request a token limit increase over the chat
   // WebSocket. Kept off until the backend handler is ready.
   const tokenRequestEnabled =
@@ -803,6 +865,8 @@ export default function NoveraChatPage(): JSX.Element {
               messages={messages}
               messagesEndRef={messagesEndRef}
               onCreateCase={handleCreateCase}
+              onThumbsUp={handleThumbsUp}
+              onThumbsDown={handleThumbsDown}
               onSolutionWorked={handleSolutionWorked}
               onRequestTokenIncrease={
                 tokenRequestEnabled

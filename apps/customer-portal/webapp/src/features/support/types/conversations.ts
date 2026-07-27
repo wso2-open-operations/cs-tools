@@ -212,6 +212,10 @@ export type Message = {
   createdOnRaw?: string;
   showFeedbackActions?: boolean;
   showCreateCaseAction?: boolean;
+  /** Stable id of this assistant answer (from the WS `final` event), used to rate it. */
+  feedbackMessageId?: string;
+  /** The rating the user has given this answer, if any (+1 up / -1 down). */
+  feedbackRating?: 1 | -1 | null;
   isLoading?: boolean;
   isError?: boolean;
   slotState?: SlotState;
@@ -252,6 +256,14 @@ export type ChatWebSocketPayload =
       accountId: string;
       reason: string;
       limitType: "session" | "monthly";
+    }
+  | {
+      type: "feedback";
+      messageId: string;
+      rating: 1 | -1;
+      conversationId?: string;
+      accountId?: string;
+      comment?: string;
     };
 
 // Model type for chat WebSocket hook options.

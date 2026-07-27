@@ -381,7 +381,9 @@ export default function ConversationDetailsPage(): JSX.Element {
         const idx = prev.findIndex((m) => m.id === activeId);
         if (idx === -1) return prev;
         pendingFinalRef.current = null;
-        const { finalMessage } = pending;
+        const { finalMessage, payload } = pending;
+        const answerId =
+          typeof payload.messageId === "string" ? payload.messageId : undefined;
         const msg = prev[idx];
         const next = [...prev];
         next[idx] = {
@@ -389,6 +391,8 @@ export default function ConversationDetailsPage(): JSX.Element {
           isLoading: false,
           isError: false,
           text: finalMessage || msg.text,
+          showFeedbackActions: !!answerId,
+          feedbackMessageId: answerId,
           isStreaming: false,
           thinkingSteps: [],
           thinkingLabel: null,
@@ -486,6 +490,21 @@ export default function ConversationDetailsPage(): JSX.Element {
           const finalMessage = getFinalMessageFromPayload(payload);
           pendingFinalRef.current = { payload, finalMessage };
           flushPendingFinalIfReady();
+          break;
+        }
+        case "feedback_ack": {
+          const ackId = String(event.messageId ?? "");
+          const ackRating =
+            event.rating === 1 ? 1 : event.rating === -1 ? -1 : null;
+          if (ackId) {
+            setNewMessages((prev) =>
+              prev.map((m) =>
+                m.feedbackMessageId === ackId
+                  ? { ...m, feedbackRating: ackRating }
+                  : m,
+              ),
+            );
+          }
           break;
         }
         case "error":
@@ -592,6 +611,48 @@ export default function ConversationDetailsPage(): JSX.Element {
     await sendViaWebSocket(text);
     return true;
   }, [accountId, isSending, projectId, sendViaWebSocket, setInputValueAndRef]);
+
+  // Answer feedback (👍/👎) over the existing chat socket (#2534). Optimistic
+  // with revert-on-failure; feedback_ack confirms the persisted value.
+  const submitFeedback = useCallback(
+    (messageId: string, rating: 1 | -1) => {
+      if (!projectId) return;
+      setNewMessages((prev) =>
+        prev.map((m) =>
+          m.feedbackMessageId === messageId ? { ...m, feedbackRating: rating } : m,
+        ),
+      );
+      void connect(projectId)
+        .then(() =>
+          sendUserMessage({
+            type: "feedback",
+            messageId,
+            rating,
+            conversationId: conversationId ?? undefined,
+            accountId: accountId || undefined,
+          }),
+        )
+        .catch(() => {
+          setNewMessages((prev) =>
+            prev.map((m) =>
+              m.feedbackMessageId === messageId
+                ? { ...m, feedbackRating: null }
+                : m,
+            ),
+          );
+        });
+    },
+    [accountId, connect, conversationId, projectId, sendUserMessage],
+  );
+
+  const handleThumbsUp = useCallback(
+    (messageId: string) => submitFeedback(messageId, 1),
+    [submitFeedback],
+  );
+  const handleThumbsDown = useCallback(
+    (messageId: string) => submitFeedback(messageId, -1),
+    [submitFeedback],
+  );
 
   const conversationStatus = summary?.status;
   const conversationStatusLabel = conversationStatus ?? "--";
@@ -814,7 +875,12 @@ export default function ConversationDetailsPage(): JSX.Element {
                     m.isLoading ? (
                       <LoadingDotsBubble key={m.id} />
                     ) : (
-                      <ChatMessageBubble key={m.id} message={m} />
+                      <ChatMessageBubble
+                        key={m.id}
+                        message={m}
+                        onThumbsUp={handleThumbsUp}
+                        onThumbsDown={handleThumbsDown}
+                      />
                     ),
                   )}
                 </>
