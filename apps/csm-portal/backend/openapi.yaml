@@ -130,7 +130,7 @@ paths:
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
         `workState`, `watchList`, `assigneeEmail`, `parentId`, `subject`, `description`,
-        `deploymentId`, `deployedProductId`, `relatedCaseId`, `autocloseHoldUntil`, `fixEta`,
+        `deploymentId`, `deployedProductId`, `relatedCaseId`, `autocloseHoldUntil`,
         `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`.
         `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when
         the ServiceNow data source is active.
@@ -4419,7 +4419,7 @@ components:
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
         `subject`, `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`,
-        `autocloseHoldUntil`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`
+        `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`
         must be provided. `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are
         supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
@@ -4437,7 +4437,6 @@ components:
         - required: [deployedProductId]
         - required: [relatedCaseId]
         - required: [autocloseHoldUntil]
-        - required: [fixEta]
         - required: [bestCaseFixEta]
         - required: [mostLikelyFixEta]
         - required: [worstCaseFixEta]
@@ -4515,27 +4514,24 @@ components:
             until this date, mirroring the real ServiceNow UX (an engineer picks a hold-until
             date). This is the only supported write against that sequence — the raw
             `autoclosureStep` state is not directly settable (ServiceNow only).
-        fixEta:
-          type: string
-          format: date-time
-          description: >
-            Sets the customer-facing fix-commitment date/time for the case. This is the only
-            fix-ETA field exposed by this API; internal-only estimates are not surfaced.
         bestCaseFixEta:
           type: string
-          format: date-time
-          nullable: true
-          description: Sets the best-case fix-commitment date/time estimate for the case.
+          format: date
+          description: >
+            Sets the internal-only best-case fix-commitment date estimate for the case
+            (date-only, YYYY-MM-DD). Never surfaced to the customer.
         mostLikelyFixEta:
           type: string
-          format: date-time
-          nullable: true
-          description: Sets the most-likely fix-commitment date/time estimate for the case.
+          format: date
+          description: >
+            Sets the internal-only most-likely fix-commitment date estimate for the case
+            (date-only, YYYY-MM-DD). Never surfaced to the customer.
         worstCaseFixEta:
           type: string
-          format: date-time
-          nullable: true
-          description: Sets the worst-case fix-commitment date/time estimate for the case.
+          format: date
+          description: >
+            Sets the internal-only worst-case fix-commitment date estimate for the case
+            (date-only, YYYY-MM-DD). Never surfaced to the customer.
 
     UpdateCaseResponse:
       type: object
@@ -4603,11 +4599,27 @@ components:
         parentCase:
           $ref: '#/components/schemas/CaseNumberRef'
           description: Present when the update set parentId, identifying the case, incident, change request, or problem this case is now linked to as its parent.
-        fixEta:
+        bestCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
-          description: Echoes the updated customer-facing fix-commitment date/time. Present when the update set fixEta.
+          description: >-
+            Echoes the updated internal-only best-case fix-commitment date back (date-only,
+            YYYY-MM-DD). Present when the update set bestCaseFixEta.
+        mostLikelyFixEta:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            Echoes the updated internal-only most-likely fix-commitment date back (date-only,
+            YYYY-MM-DD). Present when the update set mostLikelyFixEta.
+        worstCaseFixEta:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            Echoes the updated internal-only worst-case fix-commitment date back (date-only,
+            YYYY-MM-DD). Present when the update set worstCaseFixEta.
 
     CaseResolutionCode:
       type: string
@@ -5261,28 +5273,27 @@ components:
           description: >-
             Service-request cases whose parent points to this case. Populated on every
             case detail response, not just high-severity cases.
-        fixEta:
-          type: string
-          format: date-time
-          nullable: true
-          description: >-
-            The single customer-facing fix-commitment date/time for the case. This is the
-            only fix-ETA field exposed by this API; internal-only estimates are not surfaced.
         bestCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
-          description: Best-case fix-commitment date/time estimate for the case.
+          description: >-
+            Internal-only best-case fix-commitment date estimate for the case (date-only,
+            YYYY-MM-DD). Never surfaced to the customer.
         mostLikelyFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
-          description: Most-likely fix-commitment date/time estimate for the case.
+          description: >-
+            Internal-only most-likely fix-commitment date estimate for the case (date-only,
+            YYYY-MM-DD). Never surfaced to the customer.
         worstCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
-          description: Worst-case fix-commitment date/time estimate for the case.
+          description: >-
+            Internal-only worst-case fix-commitment date estimate for the case (date-only,
+            YYYY-MM-DD). Never surfaced to the customer.
         tags:
           type: array
           nullable: true
