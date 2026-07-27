@@ -420,12 +420,12 @@ const (
 	testTaskSysid = "33333333333333333333333333333333"
 )
 
-// --- UpdateCase: field-count union (including the new fixEta variant) ---
+// --- UpdateCase: field-count union (including the internal fix-ETA date variants) ---
 
 func TestSNCaseService_UpdateCase_FieldCountValidation(t *testing.T) {
 	svc := NewServiceNowCaseService(nil, nil)
 	closed := domain.CaseStateClosed
-	fixEta := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	bestCase := "2026-08-01"
 
 	tests := []struct {
 		name string
@@ -436,8 +436,8 @@ func TestSNCaseService_UpdateCase_FieldCountValidation(t *testing.T) {
 			req:  domain.UpdateCaseRequest{ID: testCaseUUID},
 		},
 		{
-			name: "state and fixEta both provided",
-			req:  domain.UpdateCaseRequest{ID: testCaseUUID, State: &closed, FixEta: &fixEta},
+			name: "state and bestCaseFixEta both provided",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, State: &closed, BestCaseFixEta: &bestCase},
 		},
 	}
 
@@ -520,61 +520,6 @@ func TestSNCaseService_UpdateCase_CloseGate_AllowsWhenNoVisibleOpenTask(t *testi
 	}
 	if !patchCalled {
 		t.Fatalf("expected PATCH /cases/{id} to be called when no visible open task blocks the close")
-	}
-}
-
-// --- FixEta read/write mapping ---
-
-func TestSNCaseService_GetCaseByID_MapsFixEta(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/cases/"+testCaseSysid, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": testCaseSysid, "internalId": "INT-1", "number": "CS0001",
-			"title": "t", "description": "d",
-			"createdOn": "2026-01-01 00:00:00", "createdBy": "a@example.com",
-			"project":         map[string]any{"id": "", "name": ""},
-			"deployment":      map[string]any{"id": "", "name": ""},
-			"deployedProduct": map[string]any{"id": "", "name": "", "version": ""},
-			"fixEta":          "2026-02-15 10:30:00",
-		})
-	})
-
-	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil)
-
-	cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), testCaseUUID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cv.FixEta == nil {
-		t.Fatalf("expected FixEta to be populated, got nil")
-	}
-	want := time.Date(2026, 2, 15, 10, 30, 0, 0, time.UTC)
-	if !cv.FixEta.Equal(want) {
-		t.Fatalf("FixEta = %v, want %v", cv.FixEta, want)
-	}
-}
-
-func TestSNCaseService_UpdateCase_FixEta_SendsFormattedDate(t *testing.T) {
-	var gotBody map[string]any
-	mux := http.NewServeMux()
-	mux.HandleFunc("/cases/"+testCaseSysid, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		_ = json.NewEncoder(w).Encode(map[string]any{"message": "ok", "case": map[string]any{"id": testCaseSysid, "updatedOn": "2026-01-01 00:00:00"}})
-	})
-
-	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil)
-
-	fixEta := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, FixEta: &fixEta})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got, _ := gotBody["fixEta"].(string)
-	want := "2026-03-01 12:00:00"
-	if got != want {
-		t.Fatalf("fixEta sent = %q, want %q", got, want)
 	}
 }
 
@@ -672,10 +617,9 @@ func TestSNCaseService_RemoveCaseTag_Success(t *testing.T) {
 func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t *testing.T) {
 	svc := NewServiceNowCaseService(nil, nil)
 	closed := domain.CaseStateClosed
-	fixEta := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	bestCase := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
-	mostLikely := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
-	worstCase := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+	bestCase := "2026-08-02"
+	mostLikely := "2026-08-03"
+	worstCase := "2026-08-04"
 
 	tests := []struct {
 		name string
@@ -686,8 +630,8 @@ func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t 
 			req:  domain.UpdateCaseRequest{ID: testCaseUUID, State: &closed, BestCaseFixEta: &bestCase},
 		},
 		{
-			name: "fixEta and mostLikelyFixEta both provided",
-			req:  domain.UpdateCaseRequest{ID: testCaseUUID, FixEta: &fixEta, MostLikelyFixEta: &mostLikely},
+			name: "mostLikelyFixEta and worstCaseFixEta both provided",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, MostLikelyFixEta: &mostLikely, WorstCaseFixEta: &worstCase},
 		},
 		{
 			name: "bestCaseFixEta and worstCaseFixEta both provided",
@@ -708,27 +652,27 @@ func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t 
 func TestSNCaseService_UpdateCase_InternalFixEtaVariants_EachIndependentlySettable(t *testing.T) {
 	tests := []struct {
 		name    string
-		req     func(t time.Time) domain.UpdateCaseRequest
+		req     func(v string) domain.UpdateCaseRequest
 		bodyKey string
 	}{
 		{
 			name: "bestCaseFixEta",
-			req: func(t time.Time) domain.UpdateCaseRequest {
-				return domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &t}
+			req: func(v string) domain.UpdateCaseRequest {
+				return domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &v}
 			},
 			bodyKey: "bestCaseFixEta",
 		},
 		{
 			name: "mostLikelyFixEta",
-			req: func(t time.Time) domain.UpdateCaseRequest {
-				return domain.UpdateCaseRequest{ID: testCaseUUID, MostLikelyFixEta: &t}
+			req: func(v string) domain.UpdateCaseRequest {
+				return domain.UpdateCaseRequest{ID: testCaseUUID, MostLikelyFixEta: &v}
 			},
 			bodyKey: "mostLikelyFixEta",
 		},
 		{
 			name: "worstCaseFixEta",
-			req: func(t time.Time) domain.UpdateCaseRequest {
-				return domain.UpdateCaseRequest{ID: testCaseUUID, WorstCaseFixEta: &t}
+			req: func(v string) domain.UpdateCaseRequest {
+				return domain.UpdateCaseRequest{ID: testCaseUUID, WorstCaseFixEta: &v}
 			},
 			bodyKey: "worstCaseFixEta",
 		},
@@ -746,15 +690,45 @@ func TestSNCaseService_UpdateCase_InternalFixEtaVariants_EachIndependentlySettab
 			client := newTestSNClient(t, mux)
 			svc := NewServiceNowCaseService(client, nil)
 
-			value := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+			value := "2026-03-01"
 			_, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req(value))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			got, _ := gotBody[tt.bodyKey].(string)
-			want := "2026-03-01 12:00:00"
+			want := "2026-03-01"
 			if got != want {
 				t.Fatalf("%s sent = %q, want %q", tt.bodyKey, got, want)
+			}
+		})
+	}
+}
+
+func TestSNCaseService_UpdateCase_InternalFixEtaVariants_RejectsMalformedDate(t *testing.T) {
+	tests := []struct {
+		name string
+		req  domain.UpdateCaseRequest
+	}{
+		{
+			name: "bestCaseFixEta not YYYY-MM-DD",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: strPtr("2026-08-01T00:00:00Z")},
+		},
+		{
+			name: "mostLikelyFixEta not a date",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, MostLikelyFixEta: strPtr("not-a-date")},
+		},
+		{
+			name: "worstCaseFixEta empty string",
+			req:  domain.UpdateCaseRequest{ID: testCaseUUID, WorstCaseFixEta: strPtr("")},
+		},
+	}
+
+	svc := NewServiceNowCaseService(nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req)
+			if _, ok := err.(*apierror.ValidationError); !ok {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 			}
 		})
 	}
@@ -770,9 +744,9 @@ func TestSNCaseService_GetCaseByID_MapsInternalFixEtaFields(t *testing.T) {
 			"project":          map[string]any{"id": "", "name": ""},
 			"deployment":       map[string]any{"id": "", "name": ""},
 			"deployedProduct":  map[string]any{"id": "", "name": "", "version": ""},
-			"bestCaseFixEta":   "2026-02-10 00:00:00",
-			"mostLikelyFixEta": "2026-02-15 00:00:00",
-			"worstCaseFixEta":  "2026-02-20 00:00:00",
+			"bestCaseFixEta":   "2026-02-10",
+			"mostLikelyFixEta": "2026-02-15",
+			"worstCaseFixEta":  "2026-02-20",
 		})
 	})
 
@@ -784,17 +758,14 @@ func TestSNCaseService_GetCaseByID_MapsInternalFixEtaFields(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	wantBestCase := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
-	if cv.BestCaseFixEta == nil || !cv.BestCaseFixEta.Equal(wantBestCase) {
-		t.Fatalf("BestCaseFixEta = %v, want %v", cv.BestCaseFixEta, wantBestCase)
+	if cv.BestCaseFixEta == nil || *cv.BestCaseFixEta != "2026-02-10" {
+		t.Fatalf("BestCaseFixEta = %v, want 2026-02-10", cv.BestCaseFixEta)
 	}
-	wantMostLikely := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
-	if cv.MostLikelyFixEta == nil || !cv.MostLikelyFixEta.Equal(wantMostLikely) {
-		t.Fatalf("MostLikelyFixEta = %v, want %v", cv.MostLikelyFixEta, wantMostLikely)
+	if cv.MostLikelyFixEta == nil || *cv.MostLikelyFixEta != "2026-02-15" {
+		t.Fatalf("MostLikelyFixEta = %v, want 2026-02-15", cv.MostLikelyFixEta)
 	}
-	wantWorstCase := time.Date(2026, 2, 20, 0, 0, 0, 0, time.UTC)
-	if cv.WorstCaseFixEta == nil || !cv.WorstCaseFixEta.Equal(wantWorstCase) {
-		t.Fatalf("WorstCaseFixEta = %v, want %v", cv.WorstCaseFixEta, wantWorstCase)
+	if cv.WorstCaseFixEta == nil || *cv.WorstCaseFixEta != "2026-02-20" {
+		t.Fatalf("WorstCaseFixEta = %v, want 2026-02-20", cv.WorstCaseFixEta)
 	}
 }
 
@@ -805,9 +776,9 @@ func TestSNCaseService_UpdateCase_EchoesInternalFixEtaFieldsBack(t *testing.T) {
 			"message": "ok",
 			"case": map[string]any{
 				"id": testCaseSysid, "updatedOn": "2026-01-01 00:00:00",
-				"bestCaseFixEta":   "2026-02-10 00:00:00",
-				"mostLikelyFixEta": "2026-02-15 00:00:00",
-				"worstCaseFixEta":  "2026-02-20 00:00:00",
+				"bestCaseFixEta":   "2026-02-10",
+				"mostLikelyFixEta": "2026-02-15",
+				"worstCaseFixEta":  "2026-02-20",
 			},
 		})
 	})
@@ -815,23 +786,20 @@ func TestSNCaseService_UpdateCase_EchoesInternalFixEtaFieldsBack(t *testing.T) {
 	client := newTestSNClient(t, mux)
 	svc := NewServiceNowCaseService(client, nil)
 
-	bestCase := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
+	bestCase := "2026-02-10"
 	resp, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &bestCase})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	wantBestCase := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
-	if resp.Case.BestCaseFixEta == nil || !resp.Case.BestCaseFixEta.Equal(wantBestCase) {
-		t.Fatalf("BestCaseFixEta = %v, want %v", resp.Case.BestCaseFixEta, wantBestCase)
+	if resp.Case.BestCaseFixEta == nil || *resp.Case.BestCaseFixEta != "2026-02-10" {
+		t.Fatalf("BestCaseFixEta = %v, want 2026-02-10", resp.Case.BestCaseFixEta)
 	}
-	wantMostLikely := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
-	if resp.Case.MostLikelyFixEta == nil || !resp.Case.MostLikelyFixEta.Equal(wantMostLikely) {
-		t.Fatalf("MostLikelyFixEta = %v, want %v", resp.Case.MostLikelyFixEta, wantMostLikely)
+	if resp.Case.MostLikelyFixEta == nil || *resp.Case.MostLikelyFixEta != "2026-02-15" {
+		t.Fatalf("MostLikelyFixEta = %v, want 2026-02-15", resp.Case.MostLikelyFixEta)
 	}
-	wantWorstCase := time.Date(2026, 2, 20, 0, 0, 0, 0, time.UTC)
-	if resp.Case.WorstCaseFixEta == nil || !resp.Case.WorstCaseFixEta.Equal(wantWorstCase) {
-		t.Fatalf("WorstCaseFixEta = %v, want %v", resp.Case.WorstCaseFixEta, wantWorstCase)
+	if resp.Case.WorstCaseFixEta == nil || *resp.Case.WorstCaseFixEta != "2026-02-20" {
+		t.Fatalf("WorstCaseFixEta = %v, want 2026-02-20", resp.Case.WorstCaseFixEta)
 	}
 }
 

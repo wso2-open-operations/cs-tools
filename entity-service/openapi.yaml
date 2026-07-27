@@ -629,8 +629,8 @@ paths:
       summary: Update a support case.
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
-        `workState`, `watchList`, `assigneeEmail`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`,
-        or `worstCaseFixEta`. `watchList`, `assigneeEmail`, `fixEta`, `bestCaseFixEta`,
+        `workState`, `watchList`, `assigneeEmail`, `bestCaseFixEta`, `mostLikelyFixEta`,
+        or `worstCaseFixEta`. `watchList`, `assigneeEmail`, `bestCaseFixEta`,
         `mostLikelyFixEta`, and `worstCaseFixEta` are supported only when the ServiceNow data
         source is active.
       operationId: patchCase
@@ -3752,9 +3752,9 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `fixEta`,
+        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`,
         `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta` must be provided.
-        `watchList`, `assigneeEmail`, `fixEta`, `bestCaseFixEta`, `mostLikelyFixEta`, and
+        `watchList`, `assigneeEmail`, `bestCaseFixEta`, `mostLikelyFixEta`, and
         `worstCaseFixEta` are supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
@@ -3764,7 +3764,6 @@ components:
         - required: [workState]
         - required: [watchList]
         - required: [assigneeEmail]
-        - required: [fixEta]
         - required: [bestCaseFixEta]
         - required: [mostLikelyFixEta]
         - required: [worstCaseFixEta]
@@ -3845,28 +3844,24 @@ components:
         closeNotes:
           type: string
           description: Close notes. Only allowed when state is closed or solution_proposed.
-        fixEta:
-          type: string
-          format: date-time
-          description: The single customer-facing fix-commitment date/time (ServiceNow only).
         bestCaseFixEta:
           type: string
-          format: date-time
+          format: date
           description: >-
-            Internal-only best-case fix-commitment date, visible to CSM engineers only
-            (ServiceNow only).
+            Internal-only best-case fix-commitment date (date-only, YYYY-MM-DD), visible
+            to CSM engineers only (ServiceNow only).
         mostLikelyFixEta:
           type: string
-          format: date-time
+          format: date
           description: >-
-            Internal-only most-likely fix-commitment date, visible to CSM engineers only
-            (ServiceNow only).
+            Internal-only most-likely fix-commitment date (date-only, YYYY-MM-DD), visible
+            to CSM engineers only (ServiceNow only).
         worstCaseFixEta:
           type: string
-          format: date-time
+          format: date
           description: >-
-            Internal-only worst-case fix-commitment date, visible to CSM engineers only
-            (ServiceNow only).
+            Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible
+            to CSM engineers only (ServiceNow only).
 
     UpdateCaseResponse:
       type: object
@@ -3970,34 +3965,27 @@ components:
           format: date-time
           nullable: true
           description: Timestamp when the case was resolved, present when state is closed or solution_proposed.
-        fixEta:
-          type: string
-          format: date-time
-          nullable: true
-          description: >-
-            Echoes the updated customer-facing fix-commitment date/time back, present when
-            fixEta was the field updated.
         bestCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
           description: >-
-            Echoes the updated internal-only best-case fix-commitment date back, present when
-            bestCaseFixEta was the field updated.
+            Echoes the updated internal-only best-case fix-commitment date back (date-only,
+            YYYY-MM-DD), present when bestCaseFixEta was the field updated.
         mostLikelyFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
           description: >-
-            Echoes the updated internal-only most-likely fix-commitment date back, present when
-            mostLikelyFixEta was the field updated.
+            Echoes the updated internal-only most-likely fix-commitment date back (date-only,
+            YYYY-MM-DD), present when mostLikelyFixEta was the field updated.
         worstCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
           description: >-
-            Echoes the updated internal-only worst-case fix-commitment date back, present when
-            worstCaseFixEta was the field updated.
+            Echoes the updated internal-only worst-case fix-commitment date back (date-only,
+            YYYY-MM-DD), present when worstCaseFixEta was the field updated.
 
     CaseLabelRef:
       type: object
@@ -4502,34 +4490,27 @@ components:
           type: string
           nullable: true
           description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
-        fixEta:
-          type: string
-          format: date-time
-          nullable: true
-          description: >-
-            The single customer-facing fix-commitment date/time. Populated for ServiceNow
-            cases; null otherwise.
         bestCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
           description: >-
-            Internal-only best-case fix-commitment date, visible to CSM engineers only.
-            Populated for ServiceNow cases; null otherwise.
+            Internal-only best-case fix-commitment date (date-only, YYYY-MM-DD), visible to
+            CSM engineers only. Populated for ServiceNow cases; null otherwise.
         mostLikelyFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
           description: >-
-            Internal-only most-likely fix-commitment date, visible to CSM engineers only.
-            Populated for ServiceNow cases; null otherwise.
+            Internal-only most-likely fix-commitment date (date-only, YYYY-MM-DD), visible
+            to CSM engineers only. Populated for ServiceNow cases; null otherwise.
         worstCaseFixEta:
           type: string
-          format: date-time
+          format: date
           nullable: true
           description: >-
-            Internal-only worst-case fix-commitment date, visible to CSM engineers only.
-            Populated for ServiceNow cases; null otherwise.
+            Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible to
+            CSM engineers only. Populated for ServiceNow cases; null otherwise.
 
     CaseSearchView:
       type: object

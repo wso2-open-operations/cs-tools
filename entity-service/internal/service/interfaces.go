@@ -182,10 +182,10 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCase updates the state, severity, watch list, assignee, or fix ETA (customer-facing
-	// or internal best-case/most-likely/worst-case) of a case.
+	// UpdateCase updates the state, severity, watch list, assignee, or internal-only
+	// fix-ETA estimate (best-case/most-likely/worst-case) of a case.
 	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
-	// WatchList, AssigneeEmail, FixEta, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta are
+	// WatchList, AssigneeEmail, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta are
 	// only supported for the ServiceNow data source.
 	// Transitioning State to closed is rejected with a ValidationError if the case has any
 	// open task that is visible to the customer (the authoritative case-close gate).
