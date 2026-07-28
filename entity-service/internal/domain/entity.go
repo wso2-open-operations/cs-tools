@@ -1179,9 +1179,13 @@ type SearchCasesResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// Exactly one of State, Severity, WorkState, WatchList, AssigneeEmail, ParentID, RelatedCaseID,
+// At least one of State, Severity, WorkState, WatchList, AssigneeEmail, ParentID, RelatedCaseID,
 // AutocloseHoldUntil, Subject, Description, DeploymentID, DeployedProductID,
 // BestCaseFixEta, MostLikelyFixEta, or WorstCaseFixEta must be provided.
+// State, Severity, WorkState, WatchList, AssigneeEmail, and ParentID are mutually exclusive of
+// each other and of every other field in this request. RelatedCaseID, AutocloseHoldUntil,
+// Subject, Description, DeploymentID, DeployedProductID, BestCaseFixEta, MostLikelyFixEta, and
+// WorstCaseFixEta may be combined with each other in any subset within a single request.
 // WatchList, AssigneeEmail, ParentID, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
 // DeploymentID, DeployedProductID, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta
 // are only supported for the ServiceNow data source.

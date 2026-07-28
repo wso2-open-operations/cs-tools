@@ -232,14 +232,6 @@ func TestSNCaseService_UpdateCase_ExactlyOneFieldValidation(t *testing.T) {
 			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID},
 		},
 		{
-			name: "two new fields provided at once",
-			req: domain.UpdateCaseRequest{
-				ID:                 testDeploymentUUID,
-				Subject:            strPtr("New subject"),
-				AutocloseHoldUntil: timePtr(testAutocloseHoldUntil),
-			},
-		},
-		{
 			name: "new field mixed with a pre-existing field",
 			req: domain.UpdateCaseRequest{
 				ID:            testDeploymentUUID,
@@ -618,8 +610,6 @@ func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t 
 	svc := NewServiceNowCaseService(nil, nil)
 	closed := domain.CaseStateClosed
 	bestCase := "2026-08-02"
-	mostLikely := "2026-08-03"
-	worstCase := "2026-08-04"
 
 	tests := []struct {
 		name string
@@ -628,14 +618,6 @@ func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t 
 		{
 			name: "state and bestCaseFixEta both provided",
 			req:  domain.UpdateCaseRequest{ID: testCaseUUID, State: &closed, BestCaseFixEta: &bestCase},
-		},
-		{
-			name: "mostLikelyFixEta and worstCaseFixEta both provided",
-			req:  domain.UpdateCaseRequest{ID: testCaseUUID, MostLikelyFixEta: &mostLikely, WorstCaseFixEta: &worstCase},
-		},
-		{
-			name: "bestCaseFixEta and worstCaseFixEta both provided",
-			req:  domain.UpdateCaseRequest{ID: testCaseUUID, BestCaseFixEta: &bestCase, WorstCaseFixEta: &worstCase},
 		},
 	}
 
@@ -646,6 +628,59 @@ func TestSNCaseService_UpdateCase_FieldCountValidation_InternalFixEtaVariants(t 
 				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 			}
 		})
+	}
+}
+
+// TestSNCaseService_UpdateCase_CombinableFieldsCombineInSingleRequest verifies that the
+// combinable-group fields (everything except state, severity, workState, watchList,
+// assigneeEmail, and parentId) can be PATCHed together in one request and all land in a
+// single payload sent to ServiceNow.
+func TestSNCaseService_UpdateCase_CombinableFieldsCombineInSingleRequest(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+	bestCase := "2026-08-02"
+	mostLikely := "2026-08-03"
+	worstCase := "2026-08-04"
+
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil)
+	req := domain.UpdateCaseRequest{
+		ID:               testDeploymentUUID,
+		Subject:          strPtr("Updated subject"),
+		Description:      strPtr("Updated description"),
+		BestCaseFixEta:   &bestCase,
+		MostLikelyFixEta: &mostLikely,
+		WorstCaseFixEta:  &worstCase,
+	}
+
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for field, want := range map[string]string{
+		"title":            "Updated subject",
+		"description":      "Updated description",
+		"bestCaseFixEta":   bestCase,
+		"mostLikelyFixEta": mostLikely,
+		"worstCaseFixEta":  worstCase,
+	} {
+		got, ok := gotBody[field]
+		if !ok {
+			t.Fatalf("expected payload field %q to be present in %+v", field, gotBody)
+		}
+		if got != want {
+			t.Fatalf("payload field %q: got %v, want %v", field, got, want)
+		}
 	}
 }
 

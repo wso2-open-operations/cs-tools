@@ -1104,60 +1104,66 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 
 	hasResolutionFields := req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil
 
-	fieldCount := 0
+	// exclusiveCount covers the role-gated fields with complex side effects
+	// (state transitions, assignment, watch list, parent linkage) -- SN keeps
+	// these mutually exclusive of each other and of every other field.
+	exclusiveCount := 0
 	if req.State != nil {
-		fieldCount++
+		exclusiveCount++
 	}
 	if req.Severity != nil {
-		fieldCount++
+		exclusiveCount++
 	}
 	if req.WorkState != nil {
-		fieldCount++
+		exclusiveCount++
 	}
 	if len(req.WatchList) > 0 {
-		fieldCount++
+		exclusiveCount++
 	}
 	if req.AssigneeEmail != nil {
-		fieldCount++
+		exclusiveCount++
 	}
 	if req.ParentID != nil {
-		fieldCount++
+		exclusiveCount++
 	}
+	// combinableCount covers plain field writes with no cross-field side
+	// effects -- SN now accepts any subset of these together in one PATCH.
+	combinableCount := 0
 	if req.RelatedCaseID != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.AutocloseHoldUntil != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.Subject != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.Description != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.DeploymentID != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.DeployedProductID != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.BestCaseFixEta != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.MostLikelyFixEta != nil {
-		fieldCount++
+		combinableCount++
 	}
 	if req.WorstCaseFixEta != nil {
-		fieldCount++
+		combinableCount++
 	}
 	const fieldList = "state, severity, workState, watchList, assigneeEmail, parentId, relatedCaseId, " +
 		"autocloseHoldUntil, subject, description, deploymentId, deployedProductId, " +
 		"bestCaseFixEta, mostLikelyFixEta, or worstCaseFixEta"
-	if fieldCount == 0 {
+	if exclusiveCount == 0 && combinableCount == 0 {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of " + fieldList + " must be provided"}
 	}
-	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of " + fieldList + " may be provided per request"}
+	if exclusiveCount > 1 || (exclusiveCount == 1 && combinableCount > 0) {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state, severity, workState, watchList, assigneeEmail, and parentId cannot be combined with each other or with any other field in the same request"}
 	}
 	if hasResolutionFields && req.State == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is also provided"}
