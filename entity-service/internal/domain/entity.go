@@ -450,6 +450,8 @@ type ProjectView struct {
 	// for this project (e.g. ServiceNow leaves it blank).
 	EndDate   *time.Time `json:"endDate"`
 	CreatedOn time.Time  `json:"createdOn"`
+	// Account is nil when the project has no linked account (ServiceNow data source only).
+	Account *EntityRef `json:"account"`
 	ProjectClosureFields
 }
 
