@@ -608,6 +608,32 @@ func TestSNCaseService_UpdateCase_CloseGate_AllowsWhenNoVisibleOpenTask(t *testi
 	}
 }
 
+func TestSNCaseService_UpdateCase_CloseGate_FailsOpenWhenTaskCheckErrors(t *testing.T) {
+	patchCalled := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cases/"+testCaseSysid+"/tasks/search", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": "Failed to bind request payload to the expected schema."})
+	})
+	mux.HandleFunc("/cases/"+testCaseSysid, func(w http.ResponseWriter, r *http.Request) {
+		patchCalled = true
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": "ok", "case": map[string]any{"id": testCaseSysid, "updatedOn": "2026-01-01 00:00:00"}})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil)
+
+	closed := domain.CaseStateClosed
+	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, State: &closed})
+	if err != nil {
+		t.Fatalf("expected close to fail open when the task check itself errors, got %v", err)
+	}
+	if !patchCalled {
+		t.Fatalf("expected PATCH /cases/{id} to be called when the close-gate task check errors (fail open)")
+	}
+}
+
 // --- Case tags ---
 
 func TestSNCaseService_AddCaseTag_Validation(t *testing.T) {
