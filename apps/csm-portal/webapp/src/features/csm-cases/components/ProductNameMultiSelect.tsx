@@ -38,9 +38,12 @@ interface ProductNameMultiSelectProps {
 /**
  * Product filter for the cases list — the product-name twin of
  * {@link AsyncProjectMultiSelect}. Loads the first page of distinct product
- * family names on open (no typing needed) and pages through the rest on
- * scroll, narrowing server-side as the user types, instead of paging through
- * the entire product catalogue up front. The selected values ARE the names,
+ * family names on open (no typing needed); {@link useInfiniteProductSearch}
+ * then continues paging the rest in the background (bounded, see
+ * `MAX_AUTO_PAGES`) so the list fills in without the user needing to scroll
+ * first — `handleListboxScroll` below is a scroll-triggered fallback for
+ * paging past that cap. Narrows server-side as the user types. The selected
+ * values ARE the names,
  * which flow straight into `filters.productNames` (ServiceNow matches
  * `product.name`, so every version of a product is included) — unlike
  * Project/Assignee there's no id to resolve to a display name, so an
