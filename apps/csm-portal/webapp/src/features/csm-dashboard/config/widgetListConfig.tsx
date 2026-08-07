@@ -18,6 +18,7 @@
 
 import { Chip, Typography } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
+import { useLocation } from "react-router";
 import type {
   BeCaseSearchView,
   BeIncident,
@@ -52,7 +53,6 @@ import { resolveAccountTier, type Account } from "@features/csm-accounts/types/c
 import type { Project } from "@features/csm-projects/types/csmProjects";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import { normalizeUser, type User, type SnUser } from "@features/csm-users/types/csmUsers";
-import UserRefLink from "@components/UserRefLink";
 import { vulnerabilityPriorityColor } from "@features/csm-security-center/utils/vulnerabilities";
 import type { BeProductVulnerabilityView } from "@api/backend/types";
 import type { BeCallRequestView } from "@api/backend/types";
@@ -63,6 +63,17 @@ import type { BeCallRequestView } from "@api/backend/types";
  * agnostic); each renderer below casts it to the same typed shape its own
  * tab already assumes, since it's the identical upstream response. */
 type WidgetItem = Record<string, unknown>;
+
+/** Router state carried on every list-shape widget row's navigation (every
+ * renderer below other than `CaseWidgetList`/`TimeCardWidgetList`, which
+ * embed their own tab's real list component and so already get this for
+ * free — see `CasesList`'s own `useLocation()` call), so the destination
+ * page's own Back button can return to this exact dashboard instead of
+ * falling through to a hardcoded/generic destination. */
+function useDashboardReturnState(): { from: string } {
+  const location = useLocation();
+  return { from: `${location.pathname}${location.search}` };
+}
 
 function formatDate(value?: string | null): string {
   return (
@@ -123,6 +134,7 @@ function TimeCardWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.
 
 function IncidentWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const incidents = items as unknown as BeIncident[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -137,6 +149,7 @@ function IncidentWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.
       rows={incidents.map((incident, i) => ({
         key: incident.id ?? `incident-${i}`,
         href: incident.id ? `/operations/incidents/${incident.id}` : undefined,
+        state: dashboardReturnState,
         cells: [
           <Typography key="number" variant="body2" noWrap>
             {incident.number || "—"}
@@ -181,6 +194,7 @@ function IncidentWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.
 
 function ChangeRequestWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const changeRequests = items as unknown as BeChangeRequestSearchView[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -195,6 +209,7 @@ function ChangeRequestWidgetList({ items, isLoading }: WidgetListRendererProps):
       rows={changeRequests.map((cr, i) => ({
         key: cr.id ?? `cr-${i}`,
         href: cr.id ? `/operations/change-requests/${cr.id}` : undefined,
+        state: dashboardReturnState,
         cells: [
           <Typography key="number" variant="body2" noWrap>
             {cr.number || "—"}
@@ -239,6 +254,7 @@ function ChangeRequestWidgetList({ items, isLoading }: WidgetListRendererProps):
 
 function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const problems = items as unknown as BeProblemSearchView[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -252,6 +268,7 @@ function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
       rows={problems.map((problem, i) => ({
         key: problem.id ?? `problem-${i}`,
         href: problem.id ? `/operations/problems/${problem.id}` : undefined,
+        state: dashboardReturnState,
         cells: [
           <Typography key="number" variant="body2" noWrap>
             {problem.number || "—"}
@@ -283,6 +300,7 @@ function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
 
 function AccountWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const accounts = items as unknown as Account[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -297,6 +315,7 @@ function AccountWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
         return {
           key: a.id,
           href: `/customers/accounts/${a.id}`,
+          state: dashboardReturnState,
           cells: [
             <Typography key="name" variant="body2" noWrap title={a.name}>
               {a.name}
@@ -320,6 +339,7 @@ function AccountWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
 
 function ProjectWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const projects = items as unknown as Project[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -332,6 +352,7 @@ function ProjectWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
       rows={projects.map((p) => ({
         key: p.id,
         href: `/customers/projects/${p.id}`,
+        state: dashboardReturnState,
         cells: [
           <Typography key="name" variant="body2" noWrap title={p.name}>
             {p.name}
@@ -348,6 +369,7 @@ function ProjectWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
 
 function UserWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const users = items.map((item) => normalizeUser(item as unknown as User | SnUser));
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -360,8 +382,17 @@ function UserWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
       rows={users.map((u) => ({
         key: u.id,
         href: `/people/${encodeURIComponent(u.id)}`,
+        state: dashboardReturnState,
+        // Plain text, not `UserRefLink` — that renders its own nested
+        // RouterLink with no `state`, so clicking the name specifically
+        // (vs. elsewhere in the row) would silently drop `dashboardReturnState`
+        // and land on a plain default back target instead. The row itself
+        // is already the link (with state), matching every sibling widget's
+        // "name" cell (see AccountWidgetList/ProjectWidgetList above).
         cells: [
-          <UserRefLink key="user" name={u.userName} email={u.email} userId={u.id} />,
+          <Typography key="user" variant="body2" noWrap>
+            {u.userName}
+          </Typography>,
           <Typography key="email" variant="body2" noWrap>
             {u.email}
           </Typography>,
@@ -376,6 +407,7 @@ function UserWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
 
 function ProductVulnerabilityWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const vulnerabilities = items as unknown as BeProductVulnerabilityView[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -388,6 +420,7 @@ function ProductVulnerabilityWidgetList({ items, isLoading }: WidgetListRenderer
       rows={vulnerabilities.map((vuln) => ({
         key: vuln.id,
         href: `/security-center/vulnerabilities/${encodeURIComponent(vuln.id)}`,
+        state: dashboardReturnState,
         cells: [
           <Typography key="cve" variant="body2" noWrap sx={{ fontFamily: "monospace" }}>
             {vuln.cveId || vuln.vulnerabilityId || "—"}
@@ -475,6 +508,7 @@ function TaskWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
  * opening a dialog. */
 function CallRequestWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const callRequests = items as unknown as BeCallRequestView[];
+  const dashboardReturnState = useDashboardReturnState();
   return (
     <DashboardMiniTable
       isLoading={isLoading}
@@ -488,6 +522,7 @@ function CallRequestWidgetList({ items, isLoading }: WidgetListRendererProps): J
       rows={callRequests.map((cr, i) => ({
         key: cr.id ?? `call-request-${i}`,
         href: cr.case?.id ? `/cases/${cr.case.id}` : undefined,
+        state: dashboardReturnState,
         cells: [
           <Typography key="number" variant="body2" noWrap>
             {cr.number || "—"}

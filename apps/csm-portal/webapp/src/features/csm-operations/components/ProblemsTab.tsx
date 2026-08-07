@@ -30,6 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { useLocation } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
@@ -53,6 +54,7 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
  */
 export default function ProblemsTab(): JSX.Element {
   const navigate = useNavTransition();
+  const location = useLocation();
   const [filters, setFilters] = useState<ProblemFilters>(DEFAULT_PROBLEM_FILTERS);
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [page, setPage] = useState(0);
@@ -162,15 +164,16 @@ export default function ProblemsTab(): JSX.Element {
               ) : (
                 problems.map((problem) => {
                   const detailPath = `/operations/problems/${problem.id}`;
+                  const detailState = { from: `${location.pathname}${location.search}` };
                   return (
                   <TableRow
                     key={problem.id}
                     hover
-                    onClick={() => navigate(detailPath)}
+                    onClick={() => navigate(detailPath, { state: detailState })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        navigate(detailPath);
+                        navigate(detailPath, { state: detailState });
                       }
                     }}
                     tabIndex={0}

@@ -17,7 +17,7 @@
 import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode, useEffect } from "react";
-import { useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useGetProblem } from "@features/csm-operations/api/useGetProblem";
 import { problemStateColor, problemStateLabel } from "@features/csm-operations/utils/problems";
@@ -97,6 +97,11 @@ function ProblemRefItem({
 export default function ProblemDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavTransition();
+  // Prefer the list URL the row link captured (if any) so "back" returns to
+  // the exact view the engineer came from, falling back to the bare tab path
+  // for a bookmarked or directly-linked problem.
+  const backState = useLocation().state as { from?: string } | undefined;
+  const backTarget = backState?.from ?? OPERATIONS_PROBLEMS_PATH;
   const { data, isLoading, isError } = useGetProblem(id);
 
   const recordView = useRecordRecentView();
@@ -114,7 +119,7 @@ export default function ProblemDetailPage(): JSX.Element {
   }, [data, recordView]);
 
   const back = (): void => {
-    navigate(OPERATIONS_PROBLEMS_PATH);
+    navigate(backTarget);
   };
 
   const BackButton = (

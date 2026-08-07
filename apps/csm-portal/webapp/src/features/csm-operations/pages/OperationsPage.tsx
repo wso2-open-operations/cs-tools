@@ -15,8 +15,9 @@
 // under the License.
 
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
-import { Plus } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import { useLocation } from "react-router";
 import SectionTabs from "@components/section-tabs/SectionTabs";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
@@ -40,9 +41,27 @@ export default function OperationsPage(): JSX.Element {
   const tabs = useQueryTabs("operations");
   const activeTab = tabs.activeKey;
   const navigate = useNavTransition();
+  // Set by a dashboard widget's click-through (see DashboardWidgetTile /
+  // widgetListConfig.tsx), since this page has no dashboard context of its
+  // own. The service_requests tab renders its own Back button instead (via
+  // CsmIssuesView, which reads this same state) — skip here to avoid a
+  // duplicate.
+  const backState = useLocation().state as { from?: string } | undefined;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {backState?.from && activeTab !== "service_requests" && (
+        <Button
+          variant="text"
+          size="small"
+          startIcon={<ArrowLeft size={16} />}
+          onClick={() => navigate(backState.from as string)}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          Back
+        </Button>
+      )}
+
       <Box>
         <Typography variant="h5">Operations</Typography>
         <Typography variant="body2" color="text.secondary">

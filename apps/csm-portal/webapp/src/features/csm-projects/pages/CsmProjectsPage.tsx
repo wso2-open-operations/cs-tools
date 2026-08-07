@@ -16,6 +16,7 @@
 
 import {
   Box,
+  Button,
   Skeleton,
   Table,
   TableBody,
@@ -27,7 +28,9 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
+import { useLocation } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -55,6 +58,10 @@ function formatDate(value?: string | null): string {
 
 export default function CsmProjectsPage(): JSX.Element {
   const navigate = useNavTransition();
+  const location = useLocation();
+  // Set by a dashboard widget's click-through, since this page has no
+  // dashboard context of its own.
+  const backState = location.state as { from?: string } | undefined;
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -87,6 +94,18 @@ export default function CsmProjectsPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {backState?.from && (
+        <Button
+          variant="text"
+          size="small"
+          startIcon={<ArrowLeft size={16} />}
+          onClick={() => navigate(backState.from as string)}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          Back
+        </Button>
+      )}
+
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Typography variant="body2" color="text.secondary">
           Search across project name, project key, and subscription type.
@@ -151,7 +170,10 @@ export default function CsmProjectsPage(): JSX.Element {
                 </TableRow>
               ) : (
                 projects.map((p) => {
-                  const goToProject = (): void => navigate(`/customers/projects/${p.id}`);
+                  const goToProject = (): void =>
+                    navigate(`/customers/projects/${p.id}`, {
+                      state: { from: `${location.pathname}${location.search}` },
+                    });
                   const handleRowKeyDown = (e: KeyboardEvent<HTMLTableRowElement>): void => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();

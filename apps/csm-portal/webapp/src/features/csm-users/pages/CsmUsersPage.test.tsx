@@ -17,7 +17,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const authFetchMock = vi.fn();
@@ -84,6 +84,43 @@ function renderPageWithDestinations(
           <Route path="/admin/users" element={<CsmUsersPage />} />
           <Route path="/admin/roles/:id" element={<div>Role members page</div>} />
           <Route path="/people/:id" element={<div>User profile page</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/** Destination probe: renders wherever a navigation actually lands, showing
+ * both the resulting path and the location.state that came with it — so
+ * tests assert on real router navigation, not a static marker or a mocked
+ * navigate function. */
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <>
+      <div data-testid="location-probe">{location.pathname + location.search}</div>
+      <div data-testid="location-state-probe">{JSON.stringify(location.state ?? null)}</div>
+    </>
+  );
+}
+
+/**
+ * Same as {@link renderPageWithDestinations}, but `/people/:id` and
+ * `/dashboard` both render {@link LocationProbe} instead of a static marker
+ * — used to assert a navigation actually carries the right `location.state`
+ * forward, not just that it landed on the right page.
+ */
+function renderPageWithLocationProbe(
+  initialPath: string | { pathname: string; state?: unknown },
+): ReturnType<typeof render> {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <Routes>
+          <Route path="/admin/users" element={<CsmUsersPage />} />
+          <Route path="/people/:id" element={<LocationProbe />} />
+          <Route path="/dashboard" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -286,5 +323,45 @@ describe("CsmUsersPage — role truncation and row navigation", () => {
     row.focus();
     fireEvent.keyDown(row, { key: "Enter" });
     expect(await screen.findByText("User profile page")).toBeInTheDocument();
+  });
+
+  it("carries this page's own URL forward as `from` when a row navigates to a profile", async () => {
+    renderPageWithLocationProbe("/admin/users");
+
+    await waitFor(() => expect(screen.getByText("John Smith")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("John Smith").closest("tr") as HTMLElement);
+
+    expect(await screen.findByTestId("location-state-probe")).toHaveTextContent(
+      JSON.stringify({ from: "/admin/users", parentState: null }),
+    );
+  });
+
+  it("renders no Back button when it wasn't reached from a dashboard widget", () => {
+    renderPage("/admin/users");
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+  });
+
+  it("renders a Back button that returns to the dashboard when reached via a dashboard widget's `from` state", async () => {
+    renderPageWithLocationProbe({ pathname: "/admin/users", state: { from: "/dashboard" } });
+
+    const backButton = await screen.findByRole("button", { name: "Back" });
+    fireEvent.click(backButton);
+
+    expect(await screen.findByTestId("location-probe")).toHaveTextContent("/dashboard");
+  });
+
+  it("restores its own dashboard-return state after a round trip through a profile (dashboard → users → profile → users → dashboard)", async () => {
+    renderPageWithLocationProbe({ pathname: "/admin/users", state: { from: "/dashboard" } });
+
+    // Users list, reached from the dashboard, still shows its own Back button.
+    expect(await screen.findByRole("button", { name: "Back" })).toBeInTheDocument();
+
+    // Row click into a profile carries both this page's own URL (`from`) and
+    // the dashboard state it was itself carrying (`parentState`).
+    await waitFor(() => expect(screen.getByText("John Smith")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("John Smith").closest("tr") as HTMLElement);
+    expect(await screen.findByTestId("location-state-probe")).toHaveTextContent(
+      JSON.stringify({ from: "/admin/users", parentState: { from: "/dashboard" } }),
+    );
   });
 });

@@ -30,7 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import FilteredCsvExportButton from "@components/FilteredCsvExportButton";
@@ -80,6 +80,7 @@ function formatDate(value?: string | null): string {
 export default function IncidentsTab(): JSX.Element {
   const navigate = useNavTransition();
   const api = useBackendApi();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<IncidentFilters>(
     () => readIncidentFiltersFromUrl(searchParams),
@@ -256,7 +257,12 @@ export default function IncidentsTab(): JSX.Element {
                     // type allows) still get distinct React keys.
                     key={incident.id ?? `incident-${index}`}
                     hover
-                    onClick={() => incident.id && navigate(`/operations/incidents/${incident.id}`)}
+                    onClick={() =>
+                      incident.id &&
+                      navigate(`/operations/incidents/${incident.id}`, {
+                        state: { from: `${location.pathname}${location.search}` },
+                      })
+                    }
                     sx={{ cursor: "pointer" }}
                   >
                     <TableCell>{incident.number || "—"}</TableCell>

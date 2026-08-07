@@ -16,6 +16,7 @@
 
 import {
   Box,
+  Button,
   Checkbox,
   FormControl,
   IconButton,
@@ -38,9 +39,9 @@ import {
   Typography,
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import UserRefLink from "@components/UserRefLink";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
@@ -80,6 +81,10 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
  */
 export default function CsmUsersPage(): JSX.Element {
   const navigate = useNavTransition();
+  const location = useLocation();
+  // Set by a dashboard widget's click-through, since this page has no
+  // dashboard context of its own.
+  const backState = location.state as { from?: string } | undefined;
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => readUsersFiltersFromUrl(searchParams), [searchParams]);
 
@@ -156,6 +161,18 @@ export default function CsmUsersPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {backState?.from && (
+        <Button
+          variant="text"
+          size="small"
+          startIcon={<ArrowLeft size={16} />}
+          onClick={() => navigate(backState.from as string)}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          Back
+        </Button>
+      )}
+
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Typography variant="body2" color="text.secondary">
           Search across username and email (case-insensitive). Filter by role, group, team and
@@ -375,7 +392,20 @@ export default function CsmUsersPage(): JSX.Element {
               ) : (
                 users.map((u) => {
                   const profilePath = `/people/${encodeURIComponent(u.id)}`;
-                  const goToProfile = (): void => navigate(profilePath);
+                  // `parentState` nests this page's OWN inherited state
+                  // (e.g. `{ from: "/dashboard" }`, when this page was
+                  // itself reached from a dashboard widget) so the profile
+                  // page can restore it on its own way back — otherwise a
+                  // dashboard → here → profile → Back round trip would land
+                  // back on this page with no `from`, silently dropping its
+                  // own Back button.
+                  const goToProfile = (): void =>
+                    navigate(profilePath, {
+                      state: {
+                        from: `${location.pathname}${location.search}`,
+                        parentState: backState ?? null,
+                      },
+                    });
                   const handleRowKeyDown = (e: KeyboardEvent<HTMLTableRowElement>): void => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();

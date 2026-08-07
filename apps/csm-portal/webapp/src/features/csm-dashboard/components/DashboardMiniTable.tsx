@@ -34,6 +34,11 @@ export interface DashboardMiniTableRow {
    * — a row with no standalone detail *page* (e.g. a task, only ever shown
    * in a dialog) uses `onClick` instead. */
   href?: string;
+  /** Router state carried on `href`'s navigation — e.g. `{ from: <dashboard
+   * path> }`, so the destination page's own Back button can return here
+   * instead of falling through to a hardcoded/generic destination. Ignored
+   * when `href` is unset. */
+  state?: unknown;
   /** Opens something in place (a dialog) rather than navigating — for a
    * resource with no standalone detail route. See `href`'s doc comment for
    * when to use which. */
@@ -134,7 +139,7 @@ export default function DashboardMiniTable({
             <Box
               key={row.key}
               {...(row.href
-                ? { component: RouterLink, to: row.href }
+                ? { component: RouterLink, to: row.href, state: row.state }
                 : row.onClick
                   ? { onClick: row.onClick, role: "button", tabIndex: 0 }
                   : {})}

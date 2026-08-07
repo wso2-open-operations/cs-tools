@@ -30,7 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import FilteredCsvExportButton from "@components/FilteredCsvExportButton";
@@ -90,6 +90,7 @@ function toISOEnd(date: string): string {
 export default function ChangeRequestsTab(): JSX.Element {
   const navigate = useNavTransition();
   const api = useBackendApi();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<ChangeRequestFilters>(
     () => readChangeRequestFiltersFromUrl(searchParams),
@@ -269,7 +270,11 @@ export default function ChangeRequestsTab(): JSX.Element {
                   <TableRow
                     key={cr.id}
                     hover
-                    onClick={() => navigate(`/operations/change-requests/${cr.id}`)}
+                    onClick={() =>
+                      navigate(`/operations/change-requests/${cr.id}`, {
+                        state: { from: `${location.pathname}${location.search}` },
+                      })
+                    }
                     sx={{ cursor: "pointer" }}
                   >
                     <TableCell>{cr.number || "—"}</TableCell>
