@@ -49,25 +49,58 @@ describe("caseAcceptsPublicComments", () => {
 });
 
 describe("publicCommentGateReason", () => {
-  it("returns null when public comments are allowed", () => {
-    expect(publicCommentGateReason("work_in_progress", "ongoing")).toBeNull();
+  it("returns null when public comments are allowed and the caller is the assignee", () => {
+    expect(
+      publicCommentGateReason("work_in_progress", "ongoing", true),
+    ).toBeNull();
   });
 
-  it("gives a resume hint for a paused case", () => {
-    expect(publicCommentGateReason("work_in_progress", "paused")).toMatch(
-      /paused/i,
+  it("gives a resume hint for the assignee's paused case", () => {
+    expect(
+      publicCommentGateReason("work_in_progress", "paused", true),
+    ).toMatch(/paused/i);
+  });
+
+  it("gives an in-progress hint for other states when the caller is the assignee", () => {
+    expect(publicCommentGateReason("open", null, true)).toMatch(
+      /in progress/i,
+    );
+    expect(publicCommentGateReason("closed", null, true)).toMatch(
+      /in progress/i,
     );
   });
 
-  it("gives an in-progress hint for other states", () => {
-    expect(publicCommentGateReason("open", null)).toMatch(/in progress/i);
-    expect(publicCommentGateReason("closed", null)).toMatch(/in progress/i);
+  it("does not promise a work-note fallback (pending the backend exemption)", () => {
+    expect(publicCommentGateReason("open", null, true)).not.toMatch(
+      /work note/i,
+    );
+    expect(
+      publicCommentGateReason("work_in_progress", "paused", true),
+    ).not.toMatch(/work note/i);
   });
 
-  it("does not promise a work-note fallback (pending the backend exemption)", () => {
-    expect(publicCommentGateReason("open", null)).not.toMatch(/work note/i);
-    expect(publicCommentGateReason("work_in_progress", "paused")).not.toMatch(
-      /work note/i,
+  it("blocks a non-assignee with the ownership reason, even on an otherwise-open case", () => {
+    expect(
+      publicCommentGateReason("work_in_progress", "ongoing", false),
+    ).toMatch(/assigned engineer/i);
+  });
+
+  it("blocks a non-assignee with the ownership reason rather than the state/paused reason", () => {
+    const reason = publicCommentGateReason(
+      "work_in_progress",
+      "paused",
+      false,
+    );
+    expect(reason).toMatch(/assigned engineer/i);
+    expect(reason).not.toMatch(/paused/i);
+  });
+
+  it("blocks a non-assignee with the ownership reason regardless of case state", () => {
+    expect(publicCommentGateReason("open", null, false)).toMatch(
+      /assigned engineer/i,
+    );
+    expect(publicCommentGateReason("closed", null, false)).toMatch(
+      /assigned engineer/i,
     );
   });
 });

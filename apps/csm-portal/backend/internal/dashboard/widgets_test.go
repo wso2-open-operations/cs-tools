@@ -119,17 +119,16 @@ func TestParseDashboardsConfig_ValidRoundTrip(t *testing.T) {
 		t.Errorf("WidgetTemplate.GridWidth = %d, want 3", w.GridWidth)
 	}
 
-	// The detail that matters for ResolveFilters' substitution logic
-	// downstream: a JSON array value unmarshals into map[string]any as
-	// []any, not []string — assert the actual runtime type, not just
-	// presence, since substituteCurrentUser's []any and []string cases
-	// behave identically but are reached via different type switches.
+	// The "__current_user__" placeholder is deliberately left exactly as
+	// authored: this package no longer substitutes it (that moved to the
+	// frontend, see DashboardHandler's doc comment in
+	// internal/handler/dashboards.go) — it is opaque config content here,
+	// same as every other filter value.
 	//
 	// Query is opaque to this package (see widgets.go's WidgetTemplate doc
 	// comment), so the specific case-search filter DSL shape used here
 	// ({"filters":[{"field","op","values"}, ...]}, see .env.example's
-	// DASHBOARDS_CONFIG) is just realistic example data for this generic
-	// substitution test, not something ResolveFilters interprets.
+	// DASHBOARDS_CONFIG) is just realistic example data.
 	assignedEntryValues := func(query map[string]any) ([]any, bool) {
 		arr, ok := query["filters"].([]any)
 		if !ok || len(arr) == 0 {
@@ -147,16 +146,8 @@ func TestParseDashboardsConfig_ValidRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("Query has no filters[0].values entry")
 	}
-	if len(assigned) != 1 || assigned[0] != CurrentUserPlaceholder {
-		t.Errorf("Query[filters][0][values] = %v, want [%q]", assigned, CurrentUserPlaceholder)
-	}
-
-	// End-to-end: resolving through the real substitution path yields a
-	// concrete user id in place of the placeholder.
-	resolved := ResolveFilters(w, "user-123")
-	resolvedAssigned, ok := assignedEntryValues(resolved)
-	if !ok || len(resolvedAssigned) != 1 || resolvedAssigned[0] != "user-123" {
-		t.Errorf("ResolveFilters(...)[filters][0][values] = %v, want [\"user-123\"]", resolvedAssigned)
+	if len(assigned) != 1 || assigned[0] != "__current_user__" {
+		t.Errorf("Query[filters][0][values] = %v, want the unresolved placeholder [%q]", assigned, "__current_user__")
 	}
 }
 
@@ -202,16 +193,17 @@ func TestParseDashboardsConfig_PieWidgetSlicesAndDescription(t *testing.T) {
 		t.Errorf("Slices[0] = %+v, want {Label: Critical, Color: error}", w.Slices[0])
 	}
 
-	// A slice's own criteria resolve the current-user placeholder
-	// independently of the widget's own base Query — ResolveSliceFilters
-	// must not require (or merge in) the base at all.
-	resolved := ResolveSliceFilters(w.Slices[1], "user-123")
-	assigned, ok := resolved["assignedUserIds"].([]any)
-	if !ok || len(assigned) != 1 || assigned[0] != "user-123" {
-		t.Errorf("ResolveSliceFilters(Slices[1], ...)[assignedUserIds] = %v, want [\"user-123\"]", resolved["assignedUserIds"])
+	// A slice's own criteria keep the literal "__current_user__" placeholder
+	// (substitution moved to the frontend, see DashboardHandler's doc
+	// comment) and stay independent of the widget's own base Query — this
+	// package never merges the two.
+	sliceQuery := w.Slices[1].Query
+	assigned, ok := sliceQuery["assignedUserIds"].([]any)
+	if !ok || len(assigned) != 1 || assigned[0] != "__current_user__" {
+		t.Errorf("Slices[1].Query[assignedUserIds] = %v, want the unresolved placeholder [%q]", sliceQuery["assignedUserIds"], "__current_user__")
 	}
-	if _, present := resolved["states"]; present {
-		t.Errorf("ResolveSliceFilters must not merge in the widget's own base query, got %v", resolved)
+	if _, present := sliceQuery["states"]; present {
+		t.Errorf("Slices[1].Query must not carry the widget's own base query, got %v", sliceQuery)
 	}
 }
 
@@ -307,8 +299,13 @@ func TestParseDashboardsConfig_LegacyKeys(t *testing.T) {
 		t.Errorf(`the criteria object's own "filters" array must be untouched by the rename: %v`, w.Query)
 	}
 
-	// 4. Legacy slice-level "filters" lands in the slice's Query and still
-	//    resolves the current-user placeholder end to end.
+	// 4. Legacy slice-level "filters" lands in the slice's Query and keeps
+	//    the literal "__current_user__" placeholder -- this package no
+	//    longer resolves it, see DashboardHandler's doc comment in
+	//    internal/handler/dashboards.go. The slice's own case-table
+	//    resourceType also picks up the auto-injected "type" filter (see
+	//    injectImpliedTypeFilters), so the array now carries 2 entries, not
+	//    just the configured one.
 	pie := got[0].Widgets[1]
 	if pie.Query == nil {
 		t.Fatalf("legacy pie widget Query is nil")
@@ -316,15 +313,19 @@ func TestParseDashboardsConfig_LegacyKeys(t *testing.T) {
 	if len(pie.Slices) != 1 || pie.Slices[0].Query == nil {
 		t.Fatalf("legacy slice \"filters\" was not adopted into Query: %+v", pie.Slices)
 	}
-	resolved := ResolveSliceFilters(pie.Slices[0], "user-123")
-	arr, ok := resolved["filters"].([]any)
-	if !ok || len(arr) != 1 {
-		t.Fatalf("ResolveSliceFilters(legacy slice) = %v", resolved)
+	arr, ok := pie.Slices[0].Query["filters"].([]any)
+	if !ok {
+		t.Fatalf("legacy slice Query has no \"filters\" array: %v", pie.Slices[0].Query)
 	}
-	entry, _ := arr[0].(map[string]any)
-	values, ok := entry["values"].([]any)
-	if !ok || len(values) != 1 || values[0] != "user-123" {
-		t.Errorf("legacy slice placeholder unresolved: values = %v, want [\"user-123\"]", entry["values"])
+	var assignedValues []any
+	for _, e := range arr {
+		m, _ := e.(map[string]any)
+		if m["field"] == "assignedUserId" {
+			assignedValues, _ = m["values"].([]any)
+		}
+	}
+	if len(assignedValues) != 1 || assignedValues[0] != "__current_user__" {
+		t.Errorf("legacy slice assignedUserId values = %v, want the unresolved placeholder [%q]", assignedValues, "__current_user__")
 	}
 }
 
@@ -363,14 +364,23 @@ func TestParseDashboardsConfig_NewKeysWinOverLegacy(t *testing.T) {
 	}
 	q := got[0].Widgets[0].Query
 
+	// resourceType "case" also picks up the auto-injected "type" filter
+	// (see injectImpliedTypeFilters), so the array carries that entry
+	// alongside the configured "state" one -- find the "state" entry by
+	// field rather than assuming it is the only one.
 	arr, ok := q["filters"].([]any)
-	if !ok || len(arr) != 1 {
+	if !ok {
 		t.Fatalf(`Query["filters"] = %v`, q["filters"])
 	}
-	entry, _ := arr[0].(map[string]any)
-	values, _ := entry["values"].([]any)
-	if len(values) != 1 || values[0] != "open" {
-		t.Errorf(`"query" must win over the deprecated "filters": got state values %v, want ["open"]`, values)
+	var stateValues []any
+	for _, e := range arr {
+		m, _ := e.(map[string]any)
+		if m["field"] == "state" {
+			stateValues, _ = m["values"].([]any)
+		}
+	}
+	if len(stateValues) != 1 || stateValues[0] != "open" {
+		t.Errorf(`"query" must win over the deprecated "filters": got state values %v, want ["open"]`, stateValues)
 	}
 
 	if _, stillThere := q["orGroups"]; stillThere {
@@ -414,5 +424,78 @@ func TestParseDashboardsConfig_WidgetSection(t *testing.T) {
 	}
 	if section := got[0].Widgets[1].Section; section != "Escalations" {
 		t.Errorf("escalated-incidents.Section = %q, want %q", section, "Escalations")
+	}
+}
+
+func TestParseDashboardsConfig_WidgetColumnsAndSortBy(t *testing.T) {
+	const raw = `[
+		{
+			"id": "sample-dashboard",
+			"displayName": "Sample Dashboard",
+			"widgets": [
+				{
+					"id": "my-patches",
+					"displayName": "My Patches",
+					"resourceType": "case",
+					"shape": "list",
+					"gridWidth": 12,
+					"query": {},
+					"columns": [
+						{"path": "subject", "label": "Subject"},
+						{"path": "project.key", "label": "Project key"},
+						{"path": "bestCaseFixEta", "label": "Best case ETA", "format": "date"}
+					],
+					"sortBy": {"field": "updatedOn", "order": "asc"}
+				},
+				{
+					"id": "no-columns-widget",
+					"displayName": "No Columns Widget",
+					"resourceType": "case",
+					"shape": "list",
+					"gridWidth": 12,
+					"query": {}
+				}
+			]
+		}
+	]`
+
+	got, err := ParseDashboardsConfig(raw)
+	if err != nil {
+		t.Fatalf("ParseDashboardsConfig returned error: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Widgets) != 2 {
+		t.Fatalf("ParseDashboardsConfig(raw) = %+v, want 1 dashboard with 2 widgets", got)
+	}
+
+	w := got[0].Widgets[0]
+	wantColumns := []Column{
+		{Path: "subject", Label: "Subject"},
+		{Path: "project.key", Label: "Project key"},
+		{Path: "bestCaseFixEta", Label: "Best case ETA", Format: "date"},
+	}
+	if len(w.Columns) != len(wantColumns) {
+		t.Fatalf("my-patches.Columns = %+v, want %+v", w.Columns, wantColumns)
+	}
+	for i, want := range wantColumns {
+		if w.Columns[i] != want {
+			t.Errorf("my-patches.Columns[%d] = %+v, want %+v", i, w.Columns[i], want)
+		}
+	}
+	if field, _ := w.SortBy["field"].(string); field != "updatedOn" {
+		t.Errorf("my-patches.SortBy[field] = %v, want %q", w.SortBy["field"], "updatedOn")
+	}
+	if order, _ := w.SortBy["order"].(string); order != "asc" {
+		t.Errorf("my-patches.SortBy[order] = %v, want %q", w.SortBy["order"], "asc")
+	}
+
+	// A widget with neither key configured round-trips to nil for both — the
+	// existing hardcoded per-resourceType frontend renderer's own no-op path
+	// depends on this staying nil, not an empty slice/map.
+	noColumns := got[0].Widgets[1]
+	if noColumns.Columns != nil {
+		t.Errorf("no-columns-widget.Columns = %+v, want nil", noColumns.Columns)
+	}
+	if noColumns.SortBy != nil {
+		t.Errorf("no-columns-widget.SortBy = %+v, want nil", noColumns.SortBy)
 	}
 }

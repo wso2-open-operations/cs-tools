@@ -257,7 +257,9 @@ func TestCreateCaseComment(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	const ongoingCase = `{"state":"work_in_progress","workState":"ongoing"}`
+	// user-123 is the UserID set by withUser (see helpers_test.go), so this fixture
+	// represents the requesting user being the case's assigned engineer.
+	const ongoingCase = `{"state":"work_in_progress","workState":"ongoing","assignedEngineer":{"id":"user-123"}}`
 
 	t.Run("rejects comment when state is not work_in_progress", func(t *testing.T) {
 		for _, state := range []string{"open", "waiting_on_wso2", "closed"} {
@@ -307,6 +309,53 @@ func TestCreateCaseComment(t *testing.T) {
 		h.CreateCaseComment(w, r)
 		assertStatus(t, w, http.StatusConflict)
 		assertErrorMessage(t, w, ErrMsgCommentNotAllowed)
+	})
+
+	t.Run("rejects public comment when requester is not the assigned engineer", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"work_in_progress","workState":"ongoing","assignedEngineer":{"id":"someone-else"}}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		assertErrorMessage(t, w, ErrMsgCommentNotOwnCase)
+	})
+
+	t.Run("rejects public comment when case has no assigned engineer", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"work_in_progress","workState":"ongoing"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		assertErrorMessage(t, w, ErrMsgCommentNotOwnCase)
+	})
+
+	t.Run("allows public comment when requester is the assigned engineer", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(ongoingCase), nil
+			},
+			createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"comment-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusCreated)
 	})
 
 	t.Run("allows work_note when case is not closed", func(t *testing.T) {

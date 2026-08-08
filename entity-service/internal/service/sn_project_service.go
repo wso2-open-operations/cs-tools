@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -98,8 +99,47 @@ type snProjectPagination struct {
 // snCreatedOnLayout is the datetime format used by the Choreo API.
 const snCreatedOnLayout = "2006-01-02 15:04:05"
 
+// snAltCreatedOnLayout is an alternate datetime format ServiceNow occasionally
+// returns instead of snCreatedOnLayout for the same fields (createdOn, updatedOn,
+// resolvedOn, autoclosureStateTime, ...). Root cause (confirmed via Choreo prod
+// logs): an SN-side script include reads these fields with
+// GlideRecord.getDisplayValue(), which renders per session locale, instead of
+// getValue(), which is always canonical ISO. Fixing that is out of scope here
+// (the SN scoped app is shared with the live customer portal) — see
+// parseSNDateTime, the Go-side tolerant parser that works around it.
+const snAltCreatedOnLayout = "01-02-2006 15:04:05"
+
 // snDateLayout is the date-only format used by the Choreo API for start/end dates.
 const snDateLayout = "2006-01-02"
+
+// parseSNDateTime parses a ServiceNow datetime string, tolerating both formats
+// observed in production. It tries snCreatedOnLayout first — the overwhelmingly
+// common case, and the fast path — and only on failure falls back to
+// snAltCreatedOnLayout.
+//
+// Before this helper existed, a bare time.Parse(snCreatedOnLayout, ...) on one
+// of these fields would return an error, and callers turned that into a 500 —
+// even though the underlying SN write (case update, new comment) had already
+// succeeded. See the case/comment PATCH and POST paths in sn_case_service.go
+// and sn_comment_service.go.
+//
+// callSite and field identify where the value came from, for the WARN logged
+// when the fallback format is the one that actually matched: this keeps the
+// upstream format drift visible/monitorable instead of silently masked. If
+// neither format parses, the original snCreatedOnLayout error is returned
+// unchanged — a genuinely malformed value still fails the request.
+func parseSNDateTime(ctx context.Context, callSite, field, value string) (time.Time, error) {
+	t, err := time.Parse(snCreatedOnLayout, value)
+	if err == nil {
+		return t, nil
+	}
+	if alt, altErr := time.Parse(snAltCreatedOnLayout, value); altErr == nil {
+		slog.WarnContext(ctx, "sn date field in alternate MM-DD-YYYY format, applied fallback parse",
+			"callSite", callSite, "field", field, "value", value)
+		return alt, nil
+	}
+	return time.Time{}, err
+}
 
 type snProjectService struct {
 	client     *integrationservice.Client

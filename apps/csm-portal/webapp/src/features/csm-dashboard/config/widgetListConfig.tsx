@@ -520,6 +520,14 @@ export const WIDGET_LIST_RENDERERS: Record<
   (props: WidgetListRendererProps) => JSX.Element
 > = {
   case: CaseWidgetList,
+  // service_request / security_report_analysis / announcement / engagement
+  // all route to the same /cases/search response shape as `case` (see
+  // widgetResourceConfig.ts) -- their rows are case rows, so they reuse
+  // CaseWidgetList verbatim rather than a lookalike renderer.
+  service_request: CaseWidgetList,
+  security_report_analysis: CaseWidgetList,
+  announcement: CaseWidgetList,
+  engagement: CaseWidgetList,
   incident: IncidentWidgetList,
   change_request: ChangeRequestWidgetList,
   problem: ProblemWidgetList,

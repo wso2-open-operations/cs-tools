@@ -72,7 +72,7 @@ func main() {
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
-	dashboardHandler := handler.NewDashboardHandler(customerEntityClient)
+	dashboardHandler := handler.NewDashboardHandler()
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	productHandler := handler.NewProductHandler(customerEntityClient)
@@ -283,9 +283,20 @@ func main() {
 //	                       only; the default (unset/false) does the startup
 //	                       read once and never touches the disk again. A
 //	                       non-empty unparseable value warns and is false.
+//	DASHBOARD_PRESETS_FILE a JSON file of presetKey -> literal filter fragment
+//	                       ({"field":...,"op":...,"values":...}), shared
+//	                       across every dashboard in DASHBOARDS_DIR (a
+//	                       dashboard's own top-level "filterPresets" shadows a
+//	                       same-named entry here). Only consulted on the
+//	                       DASHBOARDS_DIR path — the deprecated
+//	                       DASHBOARDS_CONFIG path has no directory of its own
+//	                       to keep a presets file alongside. Unset is legal
+//	                       and means no shared presets, same as unset
+//	                       DASHBOARDS_DIR itself.
 //
-// Neither set is legal and yields no dashboards: a deployment that has not
-// configured any must still start and serve every other endpoint.
+// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and yields no
+// dashboards: a deployment that has not configured any must still start and
+// serve every other endpoint.
 func loadDashboards() *dashboard.Registry {
 	dir := strings.TrimSpace(os.Getenv("DASHBOARDS_DIR"))
 	if dir == "" {
@@ -296,6 +307,8 @@ func loadDashboards() *dashboard.Registry {
 		}
 		return dashboard.NewStaticRegistry(dashboards)
 	}
+
+	presetsFile := strings.TrimSpace(os.Getenv("DASHBOARD_PRESETS_FILE"))
 
 	// ParseBool rather than a "true" string compare: the latter silently reads
 	// 1, yes and on as OFF, and never reports a typo at all -- the operator
@@ -312,16 +325,16 @@ func loadDashboards() *dashboard.Registry {
 		}
 		hotReload = parsed
 	}
-	registry, err := dashboard.NewDirRegistry(dir, hotReload)
+	registry, err := dashboard.NewDirRegistry(dir, hotReload, presetsFile)
 	if err != nil {
-		slog.Error("invalid dashboard definitions", "dir", dir, "err", err)
+		slog.Error("invalid dashboard definitions", "dir", dir, "presetsFile", presetsFile, "err", err)
 		os.Exit(1)
 	}
 	if hotReload {
 		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request. Intended for local development only",
 			"dir", dir)
 	}
-	slog.Info("loaded dashboard definitions", "dir", dir, "count", len(registry.Dashboards()), "hotReload", hotReload)
+	slog.Info("loaded dashboard definitions", "dir", dir, "presetsFile", presetsFile, "count", len(registry.Dashboards()), "hotReload", hotReload)
 	return registry
 }
 

@@ -100,8 +100,21 @@ func NewStaticRegistry(dashboards []Dashboard) *Registry {
 // in both modes: a definition set that is broken at startup is a broken
 // deploy, and the caller is expected to make it fatal. hotReload only governs
 // what happens on subsequent reads.
-func NewDirRegistry(dir string, hotReload bool) (*Registry, error) {
-	r := &Registry{dir: dir, hotReload: hotReload, load: LoadDir}
+//
+// presetsFile is the shared filter-preset file (see LoadSharedPresets and
+// DASHBOARD_PRESETS_FILE in cmd/server/main.go); "" means no shared presets
+// are configured, which is legal, same as an unset DASHBOARDS_DIR. It is
+// re-read on every load alongside dir, so hot-reload mode also picks up an
+// edited presets file without a restart.
+func NewDirRegistry(dir string, hotReload bool, presetsFile string) (*Registry, error) {
+	load := func(d string) ([]Dashboard, error) {
+		sharedPresets, err := LoadSharedPresets(presetsFile)
+		if err != nil {
+			return nil, err
+		}
+		return loadDir(d, sharedPresets)
+	}
+	r := &Registry{dir: dir, hotReload: hotReload, load: load}
 	dashboards, err := r.load(dir)
 	if err != nil {
 		return nil, err
@@ -181,11 +194,19 @@ func All() []Dashboard { return Active().Dashboards() }
 // ByID looks a dashboard up by id in the active registry.
 func ByID(id string) (Dashboard, bool) { return Active().ByID(id) }
 
-// LoadDir reads every *.json file in dir as one dashboard definition. The
-// filename is not significant in any way: id, displayName, type and the rest
-// all come from the file's content, and files are processed in lexical
-// filename order purely so the resulting order (which is what the frontend's
-// dashboard picker shows) is deterministic.
+// LoadDir reads every *.json file in dir whose name does not start with "_"
+// as one dashboard definition. The filename is otherwise not significant in
+// any way: id, displayName, type and the rest all come from the file's
+// content, and files are processed in lexical filename order purely so the
+// resulting order (which is what the frontend's dashboard picker shows) is
+// deterministic.
+//
+// The leading-underscore exclusion exists because the shared filter-presets
+// file (DASHBOARD_PRESETS_FILE, conventionally "_presets.json" — see
+// LoadSharedPresets) lives in the same directory as the dashboard
+// definitions it is shared across, not a separate one, and is not itself a
+// dashboard: without the exclusion, LoadDir would try to decode it as one
+// and fail on its missing "id"/"displayName".
 //
 // Every failure is an error naming the offending file, and none of them is
 // recoverable by skipping the file. A dropped dashboard is invisible: the
@@ -198,7 +219,19 @@ func ByID(id string) (Dashboard, bool) { return Active().ByID(id) }
 // An empty directory is legal and yields no dashboards: a deployment that has
 // not authored any definitions yet must still start and serve every other
 // endpoint. A missing directory is not legal — it is a misconfigured path.
+//
+// LoadDir never applies shared filter presets (see LoadSharedPresets) — it is
+// the plain, no-shared-presets form kept for the many callers (including this
+// package's own tests) that only care about a directory of definitions.
+// NewDirRegistry is the production path and always goes through loadDir with
+// whatever DASHBOARD_PRESETS_FILE resolves to, which may itself be an empty
+// map.
 func LoadDir(dir string) ([]Dashboard, error) {
+	return loadDir(dir, nil)
+}
+
+// loadDir is LoadDir's shared-presets-aware counterpart.
+func loadDir(dir string, sharedPresets map[string]map[string]any) ([]Dashboard, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard definitions: read directory %q: %w", dir, err)
@@ -210,6 +243,12 @@ func LoadDir(dir string) ([]Dashboard, error) {
 			continue
 		}
 		if !strings.EqualFold(filepath.Ext(entry.Name()), definitionExt) {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), "_") {
+			// Reserved for non-dashboard config living alongside the
+			// definitions, e.g. the shared filter-presets file — see
+			// LoadDir's doc comment.
 			continue
 		}
 		names = append(names, entry.Name())
@@ -230,18 +269,65 @@ func LoadDir(dir string) ([]Dashboard, error) {
 		loaded = append(loaded, sourced{dashboard: d, source: path})
 	}
 
-	return finalize(loaded, true)
+	return finalize(loaded, true, sharedPresets)
 }
 
-// finalize runs the shared post-decode pipeline over a decoded set: the
-// deprecated-key migration first (so validation sees the current shape), then
-// cross-field validation. requireType is true for the directory loader, where
-// every definition is authored against the current schema, and false for the
-// deprecated DASHBOARDS_CONFIG path, whose already-deployed values predate
-// the type field entirely.
-func finalize(loaded []sourced, requireType bool) ([]Dashboard, error) {
+// LoadSharedPresets reads path (DASHBOARD_PRESETS_FILE — see
+// cmd/server/main.go) as a JSON object mapping presetKey -> literal filter
+// fragment ({"field":...,"op":...,"values":...}) — the same shape a
+// dashboard's own top-level "filterPresets" object uses (see
+// Dashboard.FilterPresets). An empty path is legal and yields an empty,
+// nil-error map: a deployment that has not authored a shared presets file
+// yet must still start, same "must still start" philosophy LoadDir's empty
+// directory already gets. A configured path that cannot be read or parsed,
+// or that contains a preset whose own fragment is itself a {"preset": ...}
+// reference (presets cannot reference other presets), is fatal and names the
+// file.
+func LoadSharedPresets(path string) (map[string]map[string]any, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // path is deployment configuration, not user input
+	if err != nil {
+		return nil, fmt.Errorf("dashboard filter presets: read %q: %w", path, err)
+	}
+	var presets map[string]map[string]any
+	if err := json.Unmarshal(raw, &presets); err != nil {
+		return nil, fmt.Errorf("dashboard filter presets: parse %q: %w", path, err)
+	}
+	if err := validatePresetsNotRecursive(presets, path, "shared"); err != nil {
+		return nil, err
+	}
+	return presets, nil
+}
+
+// finalize runs the shared post-decode pipeline over a decoded set:
+// deprecated-key migration first (so everything after sees the current
+// shape), then filter-preset expansion and implied-"type"-filter injection
+// (so validation and every caller downstream see fully literal, complete
+// filters), then cross-field validation. requireType is true for the
+// directory loader, where every definition is authored against the current
+// schema, and false for the deprecated DASHBOARDS_CONFIG path, whose
+// already-deployed values predate the type field entirely. sharedPresets is
+// the DASHBOARD_PRESETS_FILE set (see LoadSharedPresets); nil/empty is legal
+// and means no shared presets, same as an unset DASHBOARDS_DIR.
+func finalize(loaded []sourced, requireType bool, sharedPresets map[string]map[string]any) ([]Dashboard, error) {
 	for i := range loaded {
 		migrateLegacyWidgetKeys(&loaded[i].dashboard, loaded[i].source)
+	}
+
+	for i := range loaded {
+		d := &loaded[i].dashboard
+		if err := resolveDashboardFilterPresets(d, sharedPresets, loaded[i].source); err != nil {
+			return nil, err
+		}
+		injectImpliedTypeFilters(d, loaded[i].source)
+		// Presets are a pure config-authoring convenience: once every
+		// {"preset": ...} reference in this dashboard has been expanded,
+		// nothing downstream (validation, the handler, the frontend) has any
+		// use for the raw preset definitions themselves, and they must never
+		// be visible past load time.
+		d.FilterPresets = nil
 	}
 
 	if err := validate(loaded, requireType); err != nil {
@@ -353,6 +439,12 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	ResourceAccount: true, ResourceProject: true, ResourceUser: true,
 	ResourceTimeCard: true, ResourceProblem: true, ResourceProductVulnerability: true,
 	ResourceCallRequest: true,
+	// The remaining four case-table values (see ResourceServiceRequest's doc
+	// comment) — same /cases/search endpoint as ResourceCase, distinguished
+	// only by the auto-injected "type" filter (caseTableResourceTypes,
+	// injectImpliedTypeFilters).
+	ResourceServiceRequest: true, ResourceSecurityReportAnalysis: true,
+	ResourceAnnouncement: true, ResourceEngagement: true,
 }
 
 var validWidgetShapes = map[Shape]bool{

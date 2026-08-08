@@ -5332,8 +5332,8 @@ components:
         - **projectOnboardingStatus** (in): free-text SN choice labels for the
           parent project's onboarding status (e.g. "Completed",
           "Not-Applicable" -- not a closed enum at this layer).
-        - **projectType** (in): the parent project's type, as project-type
-          UUIDs.
+        - **projectType** (in): the parent project's type, matched by the
+          project type's name (e.g. "Subscription").
         - **integrationCsTeam** (in): the parent account's integration CS
           team, as team UUIDs.
         - **resolutionNotes** (isEmpty): values ignored; matches cases with
@@ -5439,7 +5439,17 @@ components:
             - problem
             - product_vulnerability
             - call_request
-          description: Which resource's /search endpoint this widget's filters target
+            - service_request
+            - security_report_analysis
+            - announcement
+            - engagement
+          description: >
+            Which resource's /search endpoint this widget's filters target.
+            service_request, security_report_analysis, announcement and
+            engagement are additional values of the case-search "type" field
+            (see Case's own type enum) exposed as their own widget
+            resourceType alongside case itself — all five route to the same
+            POST /cases/search.
         shape:
           type: string
           enum:
@@ -5462,13 +5472,15 @@ components:
           type: object
           additionalProperties: true
           description: >
-            Search criteria for this widget, with any current-user
-            placeholder already substituted. Pass this directly as the
-            filters of that resourceType's own POST /{resourceType}s/search
-            request to resolve the widget's data. For shapes "pie"/"bar"
-            this is a shared base merged under every slices entry's own
-            query (caller-side; slices entry keys win on conflict) rather
-            than queried on its own.
+            Search criteria for this widget, exactly as configured — any
+            "__current_user__"/"__current_team__" placeholder a filter value
+            carries is left unresolved for the caller to substitute
+            client-side before use. Pass this directly as the filters of
+            that resourceType's own POST /{resourceType}s/search request to
+            resolve the widget's data. For shapes "pie"/"bar" this is a
+            shared base merged under every slices entry's own query
+            (caller-side; slices entry keys win on conflict) rather than
+            queried on its own.
         groupBy:
           type: string
           description: Unused
@@ -5498,9 +5510,11 @@ components:
                 type: object
                 additionalProperties: true
                 description: >
-                  This slice's own criteria only, with any current-user
-                  placeholder already substituted — merge under the parent
-                  widget's own query to resolve this slice's total.
+                  This slice's own criteria only, exactly as configured — any
+                  "__current_user__"/"__current_team__" placeholder a filter
+                  value carries is left unresolved for the caller to
+                  substitute client-side — merge under the parent widget's
+                  own query to resolve this slice's total.
         section:
           type: string
           description: >
@@ -5509,6 +5523,46 @@ components:
             value first appears among the dashboard's widgets. Widgets
             with no section (the common case) render in one untitled
             group, same as before this field existed.
+        columns:
+          type: array
+          description: >
+            Only meaningful for shape "list": an ordered set of columns the
+            frontend should render instead of that resourceType's own
+            hardcoded list renderer. Absent/empty renders exactly as before
+            this field existed (the existing hardcoded per-resourceType
+            renderer).
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+                description: >
+                  Dot-separated path into one item of that resourceType's
+                  own /search response, reaching into nested objects to
+                  arbitrary depth (e.g. "project.key",
+                  "project.account.tier") — search responses embed related
+                  entities as nested JSON objects, not flat records. Not
+                  validated server-side; a path that resolves to nothing
+                  renders that cell empty.
+              label:
+                type: string
+                description: Column header text.
+              format:
+                type: string
+                description: >
+                  Rendering hint. Omitted (or "text") renders plain text;
+                  "date" formats a date/date-time value the same way the
+                  frontend's existing hardcoded list renderers already do.
+        sortBy:
+          type: object
+          additionalProperties: true
+          description: >
+            Only meaningful for shape "list": opaque sort criteria, forwarded
+            verbatim as the sortBy object of that resourceType's own POST
+            /{resourceType}s/search request — same passthrough philosophy as
+            query/filters. Not validated here; an unsupported field name for
+            that resourceType is surfaced by that resource's own /search
+            endpoint, not caught here.
 
     DashboardListItem:
       type: object

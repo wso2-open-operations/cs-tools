@@ -445,7 +445,7 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	if len(parsed.ProjectOnboardingStatuses) > 0 {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "projectOnboardingStatus" is not supported by this data source`}
 	}
-	if len(parsed.ProjectTypeIDs) > 0 {
+	if len(parsed.ProjectTypeNames) > 0 {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "projectType" is not supported by this data source`}
 	}
 	if len(parsed.IntegrationCsTeamIDs) > 0 {

@@ -182,6 +182,8 @@ export default function AgentsLandingPagePilot({
                   filters={widget.query}
                   listLimit={widget.listLimit}
                   slices={widget.slices}
+                  columns={widget.columns}
+                  sortBy={widget.sortBy}
                   selectedTeamGroupId={selectedTeamGroupId}
                   selectedTeamLabel={selectedTeamLabel}
                 />

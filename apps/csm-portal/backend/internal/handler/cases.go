@@ -230,8 +230,11 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		var currentCase struct {
-			State     string  `json:"state"`
-			WorkState *string `json:"workState"`
+			State            string  `json:"state"`
+			WorkState        *string `json:"workState"`
+			AssignedEngineer *struct {
+				ID *string `json:"id"`
+			} `json:"assignedEngineer"`
 		}
 		if err := json.Unmarshal(current, &currentCase); err != nil {
 			slog.ErrorContext(r.Context(), "failed to parse case state for comment guard", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -240,6 +243,10 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		}
 		if currentCase.State != "work_in_progress" || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
 			writeError(w, http.StatusConflict, ErrMsgCommentNotAllowed)
+			return
+		}
+		if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != user.UserID {
+			writeError(w, http.StatusForbidden, ErrMsgCommentNotOwnCase)
 			return
 		}
 	}

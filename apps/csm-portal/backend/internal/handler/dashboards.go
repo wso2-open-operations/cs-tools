@@ -17,8 +17,6 @@
 package handler
 
 import (
-	"encoding/json"
-	"log/slog"
 	"net/http"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
@@ -26,9 +24,12 @@ import (
 )
 
 // dashboardPieSliceView is one wedge of a Shape "pie" widget — see
-// dashboard.PieSlice. Query is this slice's own criteria only (already
-// __current_user__-resolved), meant to be merged under the parent widget's
-// own (also resolved) Query by the caller.
+// dashboard.PieSlice. Query is this slice's own criteria verbatim, including
+// any unresolved "__current_user__"/"__current_team__" placeholder a filter
+// value carries — the caller (frontend) resolves those client-side (see
+// apps/csm-portal/webapp/src/features/csm-dashboard/utils/teamFilterPlaceholder.ts
+// for the pattern this mirrors), and merges Query under the parent widget's
+// own Query itself.
 type dashboardPieSliceView struct {
 	Label string         `json:"label"`
 	Color string         `json:"color,omitempty"`
@@ -51,6 +52,13 @@ type dashboardWidgetView struct {
 	ListLimit    int                     `json:"listLimit,omitempty"`
 	Slices       []dashboardPieSliceView `json:"slices,omitempty"`
 	Section      string                  `json:"section,omitempty"`
+	// Columns and SortBy are only meaningful for Shape "list" — see
+	// dashboard.WidgetTemplate.Columns/SortBy. Forwarded verbatim: Columns
+	// is display config the BE never resolves, and SortBy is opaque search
+	// criteria like Query, just for that ResourceType's own /search
+	// request's "sortBy" instead of its "filters".
+	Columns []dashboard.Column `json:"columns,omitempty"`
+	SortBy  map[string]any     `json:"sortBy,omitempty"`
 }
 
 // dashboardListItemView is a dashboard's list-level metadata, returned by
@@ -84,50 +92,21 @@ type dashboardDetailView struct {
 
 // DashboardHandler handles HTTP requests for the config-driven dashboard
 // widget pilot.
-type DashboardHandler struct {
-	entity entityUserClient
-}
-
-// NewDashboardHandler creates a DashboardHandler backed by the given entity
-// client, used to resolve the caller's own platform user id (see
-// resolveCurrentUserID) for widgets whose filters need it.
-func NewDashboardHandler(entity entityUserClient) *DashboardHandler {
-	return &DashboardHandler{entity: entity}
-}
-
-// resolveCurrentUserID returns the caller's platform user id — the same id
-// GET /users/me resolves via the entity service — for substituting
-// dashboard.CurrentUserPlaceholder into widget filters.
 //
-// This is deliberately NOT user.UserID from the JWT: that claim is whatever
-// identity value the gateway/IdP embeds (e.g. the Asgardeo subject), which is
-// a different id than the platform's own SN/Postgres-backed user record.
-// Using the JWT claim directly here was the actual bug behind an
-// "identity-mapping gap" this task had, until now, treated as an accepted
-// ServiceNow DEV environment limitation: /cases/search correctly rejected
-// that id with "no active user found for sys_id ..." because it was never a
-// valid sys_id to begin with. Falls back to the JWT claim (rather than an
-// empty string) only if the entity lookup itself fails, so a transient
-// entity-service error degrades to the previous (broken but non-crashing)
-// behavior instead of a hard failure.
-func (h *DashboardHandler) resolveCurrentUserID(r *http.Request, user *middleware.UserInfo) string {
-	raw, err := h.entity.GetUserMe(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetUserMe failed while resolving dashboard current-user id", "userID", user.UserID, "err", err)
-		return user.UserID
-	}
-	var me struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &me); err != nil {
-		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed while resolving dashboard current-user id", "userID", user.UserID, "err", err)
-		return user.UserID
-	}
-	if me.ID == "" {
-		slog.ErrorContext(r.Context(), "entity GetUserMe returned an empty id while resolving dashboard current-user id", "userID", user.UserID)
-		return user.UserID
-	}
-	return me.ID
+// It has no upstream dependency: every widget's Query/Slices are served
+// straight from the registry, with any "__current_user__"/"__current_team__"
+// placeholder a filter value carries left exactly as configured for the
+// frontend to resolve client-side. Resolving the current user's own platform
+// id used to require an entity-service round trip (GET /users/me) on every
+// request here; that responsibility moved to the frontend, which already
+// resolves GET /users/me for its own purposes and can substitute the id
+// itself, the same way it already does for "__current_team__" (see
+// apps/csm-portal/webapp/src/features/csm-dashboard/utils/teamFilterPlaceholder.ts).
+type DashboardHandler struct{}
+
+// NewDashboardHandler creates a DashboardHandler.
+func NewDashboardHandler() *DashboardHandler {
+	return &DashboardHandler{}
 }
 
 // GetDashboards handles GET /dashboards.
@@ -168,8 +147,6 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	currentUserID := h.resolveCurrentUserID(r, user)
-
 	widgets := make([]dashboardWidgetView, 0, len(d.Widgets))
 	for _, tpl := range d.Widgets {
 		var slices []dashboardPieSliceView
@@ -179,7 +156,7 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 				slices = append(slices, dashboardPieSliceView{
 					Label: slice.Label,
 					Color: slice.Color,
-					Query: dashboard.ResolveSliceFilters(slice, currentUserID),
+					Query: slice.Query,
 				})
 			}
 		}
@@ -190,11 +167,13 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 			ResourceType: tpl.ResourceType,
 			Shape:        tpl.Shape,
 			GridWidth:    tpl.GridWidth,
-			Query:        dashboard.ResolveFilters(tpl, currentUserID),
+			Query:        tpl.Query,
 			GroupBy:      tpl.GroupBy,
 			ListLimit:    tpl.ListLimit,
 			Slices:       slices,
 			Section:      tpl.Section,
+			Columns:      tpl.Columns,
+			SortBy:       tpl.SortBy,
 		})
 	}
 

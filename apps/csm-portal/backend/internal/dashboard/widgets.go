@@ -32,11 +32,6 @@ import (
 	"strings"
 )
 
-// CurrentUserPlaceholder marks a filter value that must be resolved to the
-// requesting user's id before the filters are sent upstream. It never
-// reaches the entity service: ResolveFilters always substitutes it.
-const CurrentUserPlaceholder = "__current_user__"
-
 // ResourceType identifies which resource a widget's filters search against.
 type ResourceType string
 
@@ -51,6 +46,21 @@ const (
 	ResourceProblem              ResourceType = "problem"
 	ResourceProductVulnerability ResourceType = "product_vulnerability"
 	ResourceCallRequest          ResourceType = "call_request"
+	// ResourceServiceRequest, ResourceSecurityReportAnalysis,
+	// ResourceAnnouncement and ResourceEngagement are additional values of
+	// the case-search "type" field (see apps/csm-portal/backend/openapi.yaml,
+	// the case Type enum) exposed as their own widget resourceType, alongside
+	// ResourceCase itself. All five route to the same /cases/search endpoint
+	// -- the frontend maps each resourceType to that endpoint independently
+	// (nothing here derives the endpoint from the string) -- and all five get
+	// an implicit "type" filter auto-injected at load time (see
+	// caseTableResourceTypes and injectImpliedTypeFilters) so a dashboard
+	// author never has to paste {"field":"type","op":"in","values":[...]}
+	// into every widget by hand.
+	ResourceServiceRequest         ResourceType = "service_request"
+	ResourceSecurityReportAnalysis ResourceType = "security_report_analysis"
+	ResourceAnnouncement           ResourceType = "announcement"
+	ResourceEngagement             ResourceType = "engagement"
 )
 
 // Shape is how a widget's resolved data should be rendered.
@@ -101,12 +111,45 @@ func (s *PieSlice) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Column is one column of a Shape "list" widget's generic column renderer
+// (see WidgetTemplate.Columns). It is opaque config, like Query/SortBy: the
+// BE never resolves Path or interprets Format, it only forwards this struct
+// to the frontend as part of the widget's own view.
+type Column struct {
+	// Path addresses a field on each item of that ResourceType's own
+	// /search response, dot-separated to reach into nested objects/refs to
+	// arbitrary depth (e.g. "project.key", "project.account.tier") — every
+	// resource's search response embeds related entities as nested JSON
+	// objects, not flat records. Not validated here: the frontend resolves
+	// it against whatever the response actually returns, and a path that
+	// resolves to nothing renders that cell empty rather than erroring the
+	// whole widget.
+	Path string `json:"path"`
+	// Label is this column's header text.
+	Label string `json:"label"`
+	// Format is a rendering hint for the resolved value. "" (equivalently
+	// "text", the default) renders plain text; "date" formats a date/
+	// date-time string the same way the frontend's existing hardcoded list
+	// renderers already format one. Not validated here — the frontend falls
+	// back to plain text for a value it doesn't recognize.
+	Format string `json:"format,omitempty"`
+}
+
 // WidgetTemplate is resource-agnostic: Query is opaque JSON, forwarded
-// verbatim (after __current_user__ substitution) as the filters object of
-// that ResourceType's own /search payload (every resource's search payload
-// shape is {filters: {...}, pagination: {...}}). The BE never interprets
-// filter contents beyond substituting the current-user placeholder and
-// migrating deprecated key names (see migrateLegacyWidgetKeys).
+// verbatim as the filters object of that ResourceType's own /search payload
+// (every resource's search payload shape is {filters: {...}, pagination:
+// {...}}). Any "__current_user__"/"__current_team__" placeholder string a
+// filter value carries is left exactly as authored -- the BE does not
+// resolve it, the frontend does, client-side (see
+// apps/csm-portal/webapp/src/features/csm-dashboard/utils, e.g.
+// teamFilterPlaceholder.ts for the pattern). The two things the BE does
+// interpret, both once at directory-load time rather than per-request, are:
+// migrating deprecated key names (see migrateLegacyWidgetKeys), and
+// expanding {"preset": "key"} filter references and auto-injecting the
+// implied "type" filter for case-table resourceTypes (see
+// resolveDashboardFilterPresets and injectImpliedTypeFilters). Past load
+// time, Query is exactly what it looks like: a literal filters object with
+// nothing left to resolve on this side.
 type WidgetTemplate struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
@@ -129,6 +172,20 @@ type WidgetTemplate struct {
 	// Widgets with no Section (the common case) render in one untitled
 	// group, exactly as before this field existed.
 	Section string `json:"section,omitempty"`
+	// Columns is only meaningful for Shape list: an ordered set of columns
+	// the frontend should render instead of that ResourceType's own
+	// hardcoded list renderer. Each entry's Path is resolved against every
+	// item in the resolved search response (see Column). Absent/empty
+	// Columns is a no-op — the frontend falls back to its existing
+	// per-ResourceType renderer exactly as before this field existed.
+	Columns []Column `json:"columns,omitempty"`
+	// SortBy is only meaningful for Shape list: opaque JSON, forwarded
+	// verbatim as the sortBy object of that ResourceType's own /search
+	// payload — same passthrough philosophy as Query/filters. The BE does
+	// not validate or interpret it; an unsupported field name for that
+	// ResourceType is a caller (frontend/config-author) mistake, surfaced by
+	// that resource's own /search endpoint, not caught here.
+	SortBy map[string]any `json:"sortBy,omitempty"`
 
 	// legacyFilters holds a pre-rename config's "filters" key so
 	// migrateLegacyWidgetKeys can move it into Query. Unexported so it can
@@ -182,6 +239,21 @@ type Dashboard struct {
 	// assignedUserIds) is deliberately deferred to a later increment.
 	IsTeamBased bool             `json:"isTeamBased"`
 	Widgets     []WidgetTemplate `json:"widgets"`
+
+	// FilterPresets is this dashboard's own map of presetKey -> literal
+	// filter fragment ({"field":...,"op":...,"values":...}), the
+	// dashboard-local half of the preset mechanism (see
+	// resolveDashboardFilterPresets and DASHBOARD_PRESETS_FILE's shared
+	// half in registry.go). Referenced from anywhere a literal filter
+	// object can appear in this dashboard's own widgets/slices --
+	// query.filters, an anyOf branch's filters, or a PieSlice's own
+	// query.filters -- via {"preset": "presetKey"}. A dashboard-local
+	// preset shadows a same-named shared one. Every reference is expanded
+	// into its fragment's literal form once, at directory-load time, so
+	// nothing downstream (including the frontend and the entity service)
+	// ever sees "filterPresets" or a {"preset": ...} reference: this field
+	// is cleared to nil once resolution has run (see finalize).
+	FilterPresets map[string]map[string]any `json:"filterPresets,omitempty"`
 }
 
 // ParseDashboardsConfig decodes DASHBOARDS_CONFIG, a JSON array of Dashboard
@@ -219,7 +291,11 @@ func ParseDashboardsConfig(raw string) ([]Dashboard, error) {
 	for i, d := range dashboards {
 		loaded = append(loaded, sourced{dashboard: d, source: fmt.Sprintf("DASHBOARDS_CONFIG[%d]", i)})
 	}
-	return finalize(loaded, false)
+	// The deprecated single-variable path has no directory and therefore no
+	// DASHBOARD_PRESETS_FILE of its own to read here — nil shared presets, so
+	// only a dashboard's own "filterPresets" (if any) can resolve a
+	// {"preset": ...} reference on this path.
+	return finalize(loaded, false, nil)
 }
 
 // migrateLegacyWidgetKeys upgrades one pre-rename dashboard definition in
@@ -319,56 +395,227 @@ func migrateLegacyCriteriaKeys(query map[string]any, source, dashboardID, widget
 	query["anyOf"] = migrated
 }
 
-// ResolveFilters returns tpl's Query with CurrentUserPlaceholder substituted
-// by currentUserID wherever it appears as a string inside a []any (the only
-// place a per-user value belongs in a criteria object — e.g. assignedUserIds,
-// userIds). It walks the object generically by key, so no criteria key name
-// is hardcoded here. It does not mutate tpl.Query.
-func ResolveFilters(tpl WidgetTemplate, currentUserID string) map[string]any {
-	return substituteCurrentUser(tpl.Query, currentUserID).(map[string]any)
+// caseTableResourceTypes is every ResourceType whose /search endpoint is the
+// case-search one (see ResourceCase's doc comment): the implied "type"
+// filter injectImpliedTypeFilters backstops is only meaningful for these.
+var caseTableResourceTypes = map[ResourceType]bool{
+	ResourceCase: true, ResourceServiceRequest: true, ResourceSecurityReportAnalysis: true,
+	ResourceAnnouncement: true, ResourceEngagement: true,
 }
 
-// ResolveSliceFilters is ResolveFilters' counterpart for one Shape "pie"
-// slice: substitutes CurrentUserPlaceholder in slice.Query only. It
-// deliberately does NOT merge in the widget's own base Query — the caller
-// (frontend) merges this slice's query under the widget's own resolved
-// Query itself (this slice's keys win on conflict), the same way it
-// already merges any other per-slice override. Sending the two separately,
-// rather than one pre-merged object per slice, avoids repeating the base
-// criteria' JSON in every slice over the wire. Does not mutate slice.Query.
-func ResolveSliceFilters(slice PieSlice, currentUserID string) map[string]any {
-	return substituteCurrentUser(slice.Query, currentUserID).(map[string]any)
-}
-
-func substituteCurrentUser(v any, currentUserID string) any {
-	switch val := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(val))
-		for k, sub := range val {
-			out[k] = substituteCurrentUser(sub, currentUserID)
+// injectImpliedTypeFilters walks every widget (and, independently, every one
+// of its Slices) in d whose ResourceType is a caseTableResourceTypes member,
+// ensuring its own Query carries an explicit {"field":"type","op":"in",
+// "values":["<resourceType>"]} entry in its top-level "filters" array.
+//
+// A PieSlice's own Query is checked and injected into independently of its
+// owning widget's Query, not just once at the widget level: the frontend
+// resolves a slice's value by merging the slice's Query keys on top of the
+// widget's own base Query (this slice's keys win on conflict, see PieSlice's
+// doc comment) -- a shallow, whole-key merge, not an array-level one. A slice
+// that defines its own "filters" array therefore replaces the widget's
+// "filters" entirely, including whatever "type" entry was injected there,
+// unless the slice's own "filters" carries its own.
+//
+// If a Query already has an explicit "type" field filter, it is left
+// untouched (never overwritten) but warned about: after this mechanism (and
+// the config rewrite it backstops) lands, no widget should still need to
+// paste one in by hand.
+func injectImpliedTypeFilters(d *Dashboard, source string) {
+	for wi := range d.Widgets {
+		w := &d.Widgets[wi]
+		if !caseTableResourceTypes[w.ResourceType] {
+			continue
 		}
-		return out
-	case []string:
-		out := make([]string, len(val))
-		for i, s := range val {
-			if s == CurrentUserPlaceholder {
-				s = currentUserID
-			}
-			out[i] = s
+		w.Query = injectTypeFilter(w.Query, w.ResourceType, source, d.ID, w.ID, "")
+		for si := range w.Slices {
+			s := &w.Slices[si]
+			s.Query = injectTypeFilter(s.Query, w.ResourceType, source, d.ID, w.ID, s.Label)
 		}
-		return out
-	case []any:
-		out := make([]any, len(val))
-		for i, sub := range val {
-			out[i] = substituteCurrentUser(sub, currentUserID)
-		}
-		return out
-	case string:
-		if val == CurrentUserPlaceholder {
-			return currentUserID
-		}
-		return val
-	default:
-		return val
 	}
+}
+
+// injectTypeFilter returns query (creating it if nil) with an explicit
+// "type" filter entry guaranteed present in its top-level "filters" array,
+// for the given resourceType. See injectImpliedTypeFilters for the full
+// rationale; slice is "" when called for a widget's own Query, and the
+// slice's Label otherwise, purely so the warning below can name it.
+func injectTypeFilter(query map[string]any, resourceType ResourceType, source, dashboardID, widgetID, slice string) map[string]any {
+	if query == nil {
+		query = map[string]any{}
+	}
+	filters, _ := query["filters"].([]any)
+	for _, entry := range filters {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["field"] == "type" {
+			attrs := []any{"source", source, "dashboardId", dashboardID, "widgetId", widgetID}
+			if slice != "" {
+				attrs = append(attrs, "slice", slice)
+			}
+			slog.Warn(`dashboard definitions: widget already has an explicit "type" filter; resourceType now auto-injects this at load time, so the explicit one is redundant -- remove it in a later config cleanup pass`, attrs...)
+			return query
+		}
+	}
+	query["filters"] = append(filters, map[string]any{
+		"field": "type", "op": "in", "values": []any{string(resourceType)},
+	})
+	return query
+}
+
+// isPresetRef reports whether m is a filter-preset reference, the
+// {"preset": "presetKey"} shape a literal filter object ({"field":
+// ...,"op":...,"values":...}) may be replaced with wherever one is legal
+// (see resolveDashboardFilterPresets). Any map carrying a "preset" key is
+// treated as an attempted reference -- including one with extra keys or a
+// non-string value -- so a malformed reference is rejected loudly by the
+// caller rather than silently treated as a literal filter with a
+// coincidentally-named "preset" field.
+func isPresetRef(m map[string]any) bool {
+	_, has := m["preset"]
+	return has
+}
+
+// resolvePresetRef expands one {"preset": "presetKey"} reference (m, which
+// isPresetRef has already confirmed carries a "preset" key) into a fresh
+// copy of the fragment presets[key] defines, or fails loud, naming ctx (the
+// dashboard/widget/slice/position the reference was found at) if the
+// reference is malformed or the key is unknown.
+func resolvePresetRef(m map[string]any, presets map[string]map[string]any, ctx string) (map[string]any, error) {
+	if len(m) != 1 {
+		return nil, fmt.Errorf("%s: preset reference %v carries extra keys; expected exactly {\"preset\": \"<key>\"}", ctx, m)
+	}
+	key, ok := m["preset"].(string)
+	if !ok || strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("%s: preset reference %v has a non-string or empty \"preset\" key", ctx, m)
+	}
+	fragment, ok := presets[key]
+	if !ok {
+		return nil, fmt.Errorf("%s: references unknown filter preset %q; define it in this dashboard's own \"filterPresets\" or in the shared DASHBOARD_PRESETS_FILE", ctx, key)
+	}
+	out := make(map[string]any, len(fragment))
+	for k, v := range fragment {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// resolveFilterList resolves every {"preset": "key"} entry in list (one
+// "filters" array, see resolveQueryPresets) into its literal fragment,
+// leaving every other entry untouched. ctx names the array for error
+// messages; list itself is never mutated, a new slice is returned.
+func resolveFilterList(list []any, presets map[string]map[string]any, ctx string) ([]any, error) {
+	out := make([]any, len(list))
+	for i, entry := range list {
+		m, ok := entry.(map[string]any)
+		if !ok || !isPresetRef(m) {
+			out[i] = entry
+			continue
+		}
+		resolved, err := resolvePresetRef(m, presets, fmt.Sprintf("%s[%d]", ctx, i))
+		if err != nil {
+			return nil, err
+		}
+		out[i] = resolved
+	}
+	return out, nil
+}
+
+// resolveQueryPresets expands every {"preset": "key"} reference inside
+// query in place -- in its own top-level "filters" array, and in each
+// "anyOf" branch's own "filters" array (the only two places a literal filter
+// object appears in this DSL, see WidgetTemplate's doc comment). query may
+// be nil, in which case there is nothing to resolve. ctx names the owning
+// widget/slice for error messages.
+func resolveQueryPresets(query map[string]any, presets map[string]map[string]any, ctx string) error {
+	if query == nil {
+		return nil
+	}
+	if arr, ok := query["filters"].([]any); ok {
+		resolved, err := resolveFilterList(arr, presets, ctx+`: "query.filters"`)
+		if err != nil {
+			return err
+		}
+		query["filters"] = resolved
+	}
+	if anyOf, ok := query["anyOf"].([]any); ok {
+		for i, branch := range anyOf {
+			bm, ok := branch.(map[string]any)
+			if !ok {
+				continue
+			}
+			if arr, ok := bm["filters"].([]any); ok {
+				resolved, err := resolveFilterList(arr, presets, fmt.Sprintf("%s: \"query.anyOf[%d].filters\"", ctx, i))
+				if err != nil {
+					return err
+				}
+				bm["filters"] = resolved
+			}
+		}
+	}
+	return nil
+}
+
+// validatePresetsNotRecursive rejects a preset whose own fragment is itself
+// a {"preset": ...} reference: presets are a flat, one-level expansion, and
+// silently ignoring a nested reference would leave a widget's Query holding
+// an unresolved {"preset": ...} object that reaches the frontend/entity
+// service looking like (and being misread as) a literal filter.
+func validatePresetsNotRecursive(presets map[string]map[string]any, source, label string) error {
+	for key, fragment := range presets {
+		if isPresetRef(fragment) {
+			return fmt.Errorf("dashboard definitions: %s: %s preset %q is itself a preset reference; a preset's fragment must be a literal filter, presets cannot reference other presets", source, label, key)
+		}
+	}
+	return nil
+}
+
+// resolveDashboardFilterPresets expands every {"preset": "key"} reference in
+// d's widgets (and their slices) into its literal fragment, once, in place.
+// The effective preset set for d is sharedPresets with d.FilterPresets
+// merged on top -- a dashboard-local preset shadows a same-named shared one
+// on key collision, by design (a dashboard can intentionally override a
+// shared default). d.FilterPresets itself is validated non-recursive first,
+// same as the shared set (see LoadSharedPresets).
+func resolveDashboardFilterPresets(d *Dashboard, sharedPresets map[string]map[string]any, source string) error {
+	if err := validatePresetsNotRecursive(d.FilterPresets, source, `dashboard-local "filterPresets"`); err != nil {
+		return err
+	}
+
+	presets := sharedPresets
+	if len(d.FilterPresets) > 0 {
+		merged := make(map[string]map[string]any, len(sharedPresets)+len(d.FilterPresets))
+		for k, v := range sharedPresets {
+			merged[k] = v
+		}
+		for k, v := range d.FilterPresets {
+			merged[k] = v
+		}
+		presets = merged
+	}
+	// Deliberately no "presets is empty, skip resolution" short circuit even
+	// though it looks like a safe optimization: a widget can carry a
+	// {"preset": "key"} reference with no presets configured anywhere (a
+	// typo, or a preset definition that was removed), and that must still
+	// fail loud here -- resolveQueryPresets/resolvePresetRef already handles
+	// a nil/empty presets map correctly (the lookup simply misses and
+	// reports the unknown key), so there is nothing to gain by skipping.
+
+	for wi := range d.Widgets {
+		w := &d.Widgets[wi]
+		ctx := fmt.Sprintf("dashboard definitions: %s (id %q): widget %q", source, d.ID, w.ID)
+		if err := resolveQueryPresets(w.Query, presets, ctx); err != nil {
+			return err
+		}
+		for si := range w.Slices {
+			s := &w.Slices[si]
+			sctx := fmt.Sprintf("%s: slice %q", ctx, s.Label)
+			if err := resolveQueryPresets(s.Query, presets, sctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

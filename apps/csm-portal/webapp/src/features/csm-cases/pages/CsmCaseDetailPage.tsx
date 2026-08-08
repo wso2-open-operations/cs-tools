@@ -82,7 +82,9 @@ import {
   useGetCsmCaseAttachmentContent,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
-import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
+import CaseActionBar, {
+  canAcknowledge,
+} from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
 import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
 import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
@@ -817,6 +819,30 @@ export default function CsmCaseDetailPage(): JSX.Element {
         );
         return;
       }
+
+      // Auto-acknowledge as a side effect of starting work: an engineer who
+      // starts work on an unacknowledged, acknowledgeable case has implicitly
+      // claimed it, so don't make them separately click "Acknowledge" too.
+      // Evaluated against the pre-PATCH `data` closed over above, not a
+      // refetch — severity never changes via this flow and `acknowledgedBy`
+      // can only change if someone else acknowledges concurrently, which the
+      // backend's first-write-wins semantics already handle gracefully. The
+      // `state` PATCH above and this `acknowledge` PATCH must stay separate
+      // calls: the entity-service rejects combining `state` and `acknowledge`
+      // (and other mutually-exclusive fields) in one request. This is a
+      // bonus, not the action the user asked for, so it's best-effort: any
+      // failure here must not block `resolveOngoingConflict` below, and we
+      // don't surface a separate error toast — the Acknowledge button simply
+      // stays visible afterward, which is a safe, correct fallback the
+      // engineer can act on manually.
+      if (canAcknowledge(data)) {
+        try {
+          await patchCase.mutateAsync({ acknowledge: true });
+        } catch {
+          // Swallow: see comment above.
+        }
+      }
+
       await resolveOngoingConflict(others, successMessage, successSeverity, reportSuccess);
     },
     [data, findMyOngoingCases, patchCase, showError, resolveOngoingConflict],
@@ -1579,11 +1605,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const c = data;
   const isClosed = c.state === "closed";
   // The backend rejects a customer-visible comment unless the case is
-  // work_in_progress + ongoing. Internal work notes are allowed in any state,
-  // so this only disables the public-reply path in the composer — never work
-  // notes. Mirrors the BFF comment guard so the engineer sees a clear reason
-  // instead of a generic error.
-  const publicReplyGateReason = publicCommentGateReason(c.state, c.workState);
+  // work_in_progress + ongoing AND the signed-in engineer is the case's
+  // assignee. Internal work notes are allowed in any state, so this only
+  // disables the public-reply path in the composer — never work notes.
+  // Mirrors the BFF comment guard so the engineer sees a clear reason instead
+  // of a generic error.
+  const publicReplyGateReason = publicCommentGateReason(
+    c.state,
+    c.workState,
+    c.assigneeIsMe,
+  );
   // The composer's inline "Resume work" quick-fix only applies to this one
   // lock reason — the case is already work_in_progress and assigned to the
   // signed-in engineer, just paused, so resuming is the single-field PATCH

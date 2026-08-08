@@ -41,11 +41,28 @@ export function caseAcceptsPublicComments(
  * depends on the backend exempting work notes from the in-progress guard
  * (pending follow-up); copy stays non-committal until then. Does not gate work
  * notes.
+ *
+ * `assigneeIsMe` is checked first and unconditionally: the backend now also
+ * rejects a public comment from anyone other than the case's assigned
+ * engineer, on top of the existing state/work-state gate. A non-assignee gets
+ * the ownership reason regardless of what state/workState say — even a
+ * perfectly "ongoing" case is still not theirs to reply on — rather than
+ * layering ownership on top of the state check, because
+ * `canResumeToUnlockPublicReply` already only offers its "Resume work"
+ * quick-fix to the assignee. If a non-assignee's paused case fell through to
+ * the state reason instead, the composer would show a resumable-sounding
+ * hint for an action that isn't actually available to them. Ownership first
+ * keeps the messaging and the quick-fix in agreement: a non-assignee never
+ * sees a resumable-sounding reason, only the ownership block.
  */
 export function publicCommentGateReason(
   state: CaseState | undefined,
   workState: CaseWorkState | null | undefined,
+  assigneeIsMe: boolean,
 ): string | null {
+  if (!assigneeIsMe) {
+    return "Only the case's assigned engineer can reply to the customer.";
+  }
   if (caseAcceptsPublicComments(state, workState)) return null;
   if (state === "work_in_progress" && workState === "paused") {
     return "This case is paused — public replies are disabled. Resume work to reply to the customer.";

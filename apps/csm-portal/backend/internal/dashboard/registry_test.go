@@ -429,7 +429,7 @@ func TestRegistry_DefaultModeReadsDiskExactlyOnce(t *testing.T) {
 	writeDefinition(t, dir, "a.json", csDefinition)
 
 	var reads atomic.Int64
-	r, err := NewDirRegistry(dir, false)
+	r, err := NewDirRegistry(dir, false, "")
 	if err != nil {
 		t.Fatalf("NewDirRegistry returned error: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestRegistry_HotReloadPicksUpChanges(t *testing.T) {
 	dir := t.TempDir()
 	writeDefinition(t, dir, "a.json", csDefinition)
 
-	r, err := NewDirRegistry(dir, true)
+	r, err := NewDirRegistry(dir, true, "")
 	if err != nil {
 		t.Fatalf("NewDirRegistry returned error: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestRegistry_HotReloadKeepsLastKnownGoodOnError(t *testing.T) {
 	dir := t.TempDir()
 	writeDefinition(t, dir, "a.json", csDefinition)
 
-	r, err := NewDirRegistry(dir, true)
+	r, err := NewDirRegistry(dir, true, "")
 	if err != nil {
 		t.Fatalf("NewDirRegistry returned error: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestNewDirRegistry_FailsAtStartupInBothModes(t *testing.T) {
 	for _, hotReload := range []bool{false, true} {
 		dir := t.TempDir()
 		writeDefinition(t, dir, "broken.json", `{"id": "broken", "displayName":`)
-		if _, err := NewDirRegistry(dir, hotReload); err == nil {
+		if _, err := NewDirRegistry(dir, hotReload, ""); err == nil {
 			t.Fatalf("NewDirRegistry(hotReload=%v) returned no error for a malformed definition", hotReload)
 		}
 	}

@@ -4844,8 +4844,8 @@ components:
         - **projectOnboardingStatus** (in): free-text SN choice labels for the
           parent project's onboarding status (e.g. "Completed",
           "Not-Applicable" -- not a closed enum at this layer).
-        - **projectType** (in): the parent project's type, as project-type
-          UUIDs.
+        - **projectType** (in): the parent project's type, matched by the
+          project type's name (e.g. "Subscription").
         - **integrationCsTeam** (in): the parent account's integration CS
           team, as team UUIDs.
         - **resolutionNotes** (isEmpty): values ignored; matches cases with

@@ -20,6 +20,8 @@ import { useBackendApi } from "@api/backend/client";
 import type { BeWidgetResourceType, BeWidgetShape } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
+import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
+import { resolveCurrentUserPlaceholder } from "@features/csm-dashboard/utils/currentUserFilterPlaceholder";
 
 /** Default number of rows fetched for a `shape: "list"` widget when the
  * template doesn't set its own `listLimit`. */
@@ -64,12 +66,30 @@ export function useWidgetData(
    * the team isn't resolved yet — in which case any `integrationCsTeam`
    * entry carrying that placeholder is dropped rather than sent literally. */
   selectedTeamGroupId?: string | string[],
+  /** Only meaningful for shape "list". Opaque sort criteria (see
+   * `BeDashboardWidget.sortBy`), forwarded verbatim as this search
+   * request's own `sortBy` — same passthrough philosophy as `filters`. The
+   * widget config is responsible for a field name valid for that
+   * resourceType's own search contract. */
+  sortBy?: Record<string, unknown>,
+  /** The signed-in user's own platform id (`useCurrentUser().user.id`), used
+   * to resolve a widget's `__current_user__` filter placeholder (see
+   * `currentUserFilterPlaceholder.ts`) before it's sent — `undefined` while
+   * the user profile hasn't loaded yet, in which case any filter entry
+   * carrying that placeholder is dropped rather than sent literally. */
+  currentUserId?: string,
 ): UseQueryResult<WidgetData, Error> {
   const api = useBackendApi();
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   const limit = shape === "list" ? (listLimit ?? DEFAULT_LIST_LIMIT) : 1;
   const effectiveOffset = shape === "list" ? offset : 0;
-  const resolvedFilters = resolveTeamPlaceholder(filters, selectedTeamGroupId);
+  const resolvedFilters = resolveCurrentUserPlaceholder(
+    resolveRelativeDateFilters(
+      resolveTeamPlaceholder(filters, selectedTeamGroupId),
+    ),
+    currentUserId,
+  );
+  const effectiveSortBy = shape === "list" ? sortBy : undefined;
 
   return useQuery<WidgetData, Error>({
     queryKey: [
@@ -79,6 +99,7 @@ export function useWidgetData(
       resolvedFilters,
       limit,
       effectiveOffset,
+      effectiveSortBy,
     ],
     enabled,
     queryFn: async (): Promise<WidgetData> => {
@@ -90,11 +111,16 @@ export function useWidgetData(
         throw new Error(`Unsupported widget resourceType: ${resourceType}`);
       }
       const res = await api.post<
-        { filters: Record<string, unknown>; pagination: { offset: number; limit: number } },
+        {
+          filters: Record<string, unknown>;
+          pagination: { offset: number; limit: number };
+          sortBy?: Record<string, unknown>;
+        },
         Record<string, unknown>
       >(config.searchEndpoint, {
         filters: resolvedFilters,
         pagination: { offset: effectiveOffset, limit },
+        ...(effectiveSortBy ? { sortBy: effectiveSortBy } : {}),
       });
       const total = typeof res.total === "number" ? res.total : 0;
       const rawItems = res[config.itemsKey];

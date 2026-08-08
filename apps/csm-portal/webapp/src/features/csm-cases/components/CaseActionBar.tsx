@@ -413,7 +413,8 @@ const ACKNOWLEDGEABLE_SEVERITIES = new Set<Severity>(["S0", "S1", "S2", "S3"]);
  * first-write-wins, so once `acknowledgedBy` is set there is nothing left to
  * do and the button disappears rather than turning into a no-op.
  */
-function canAcknowledge(caseDetail: CsmCaseDetail): boolean {
+// eslint-disable-next-line react-refresh/only-export-components -- exported so CsmCaseDetailPage's startWork can reuse the same acknowledgeability check rather than duplicating it (fast-refresh DX only)
+export function canAcknowledge(caseDetail: CsmCaseDetail): boolean {
   return (
     !caseDetail.acknowledgedBy && ACKNOWLEDGEABLE_SEVERITIES.has(caseDetail.severity)
   );

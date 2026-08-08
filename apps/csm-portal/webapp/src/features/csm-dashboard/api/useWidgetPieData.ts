@@ -21,6 +21,8 @@ import type { BeDashboardPieSlice, BeWidgetResourceType } from "@api/backend/typ
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
 import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
+import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
+import { resolveCurrentUserPlaceholder } from "@features/csm-dashboard/utils/currentUserFilterPlaceholder";
 
 export interface PieSliceResult extends BeDashboardPieSlice {
   value: number;
@@ -54,15 +56,26 @@ export function useWidgetPieData(
    * `mergeWidgetFilters`, since a slice's own `query` may carry the
    * placeholder too, not just the widget's base `query`. */
   selectedTeamGroupId?: string | string[],
+  /** The signed-in user's own platform id (`useCurrentUser().user.id`), for
+   * resolving a `__current_user__` filter placeholder (see
+   * `currentUserFilterPlaceholder.ts`) — applied AFTER `mergeWidgetFilters`,
+   * same as `selectedTeamGroupId`, since a slice's own `query` may carry the
+   * placeholder too, not just the widget's base `query`. */
+  currentUserId?: string,
 ): WidgetPieData {
   const api = useBackendApi();
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
 
   const queries = useQueries({
     queries: slices.map((slice) => {
-      const filters = resolveTeamPlaceholder(
-        mergeWidgetFilters(baseFilters, slice.query),
-        selectedTeamGroupId,
+      const filters = resolveCurrentUserPlaceholder(
+        resolveRelativeDateFilters(
+          resolveTeamPlaceholder(
+            mergeWidgetFilters(baseFilters, slice.query),
+            selectedTeamGroupId,
+          ),
+        ),
+        currentUserId,
       );
       return {
         queryKey: [

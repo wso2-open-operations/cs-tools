@@ -1327,20 +1327,22 @@ type CaseFilterBranch struct {
 // where the pre-redesign per-field validation and query/payload-building
 // logic still lives, unchanged.
 type ParsedCaseFilters struct {
-	Types            []string
-	ProjectIDs       []string
-	DeploymentIDs    []string
-	States           []CaseState
-	Severities       []CaseSeverity
-	IssueTypes       []CaseIssueType
-	EngagementTypes  []EngagementType
-	ClosedStartDate  *time.Time
-	ClosedEndDate    *time.Time
-	StartCreatedDate *time.Time
-	EndCreatedDate   *time.Time
-	StartUpdatedDate *time.Time
-	EndUpdatedDate   *time.Time
-	CreatedBy        []string
+	Types             []string
+	ProjectIDs        []string
+	DeploymentIDs     []string
+	States            []CaseState
+	Severities        []CaseSeverity
+	IssueTypes        []CaseIssueType
+	EngagementTypes   []EngagementType
+	ClosedStartDate   *time.Time
+	ClosedEndDate     *time.Time
+	ResolvedStartDate *time.Time
+	ResolvedEndDate   *time.Time
+	StartCreatedDate  *time.Time
+	EndCreatedDate    *time.Time
+	StartUpdatedDate  *time.Time
+	EndUpdatedDate    *time.Time
+	CreatedBy         []string
 	// CreatedByMe is true when the array carried a createdBy+eq current-user
 	// placeholder filter. The ServiceNow backend forwards this as-is (Ballerina
 	// resolves the caller itself); the Postgres backend folds the caller's
@@ -1366,9 +1368,10 @@ type ParsedCaseFilters struct {
 	// status is one of these values (optional; free-text SN choice labels, e.g.
 	// "Completed", "Not-Applicable" -- not a closed enum at this layer).
 	ProjectOnboardingStatuses []string
-	// ProjectTypeIDs filters to cases whose parent project's type is one of these
-	// project-type UUIDs (optional).
-	ProjectTypeIDs []string
+	// ProjectTypeNames filters to cases whose parent project's type is one of
+	// these project-type names, e.g. "Subscription" (optional; the backing data
+	// source matches project type by name, not by id).
+	ProjectTypeNames []string
 	// IntegrationCsTeamIDs filters to cases whose parent account's integration CS
 	// team is one of these team UUIDs (optional).
 	IntegrationCsTeamIDs []string

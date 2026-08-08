@@ -207,3 +207,71 @@ describe("WIDGET_RESOURCE_CONFIG.case — previously-dropped fields", () => {
     expect(atRiskParsed.states).toEqual(violationsParsed.states);
   });
 });
+
+/**
+ * service_request / security_report_analysis / announcement / engagement:
+ * additional case-table resourceTypes (see `BeWidgetResourceType`), all
+ * routing to the same /cases/search endpoint and response shape as `case`
+ * (only the click-through destination differs per type).
+ */
+describe("WIDGET_RESOURCE_CONFIG — case-table resourceTypes beyond `case`", () => {
+  it("all route to /cases/search and read the cases[] items key, same as case", () => {
+    for (const type of [
+      "service_request",
+      "security_report_analysis",
+      "announcement",
+      "engagement",
+    ] as const) {
+      expect(WIDGET_RESOURCE_CONFIG[type].searchEndpoint).toBe("/cases/search");
+      expect(WIDGET_RESOURCE_CONFIG[type].itemsKey).toBe("cases");
+    }
+  });
+
+  it("service_request's buildHref lands on the operations service-requests tab with translated filters", () => {
+    const href = WIDGET_RESOURCE_CONFIG.service_request.buildHref({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+    expect(href.startsWith("/operations?")).toBe(true);
+    const params = hrefParams(href);
+    expect(params.get("tab")).toBe("service_requests");
+    expect(params.get("states")).toBe("open");
+  });
+
+  it("security_report_analysis's buildHref lands on the security center security-reports tab with translated filters", () => {
+    const href = WIDGET_RESOURCE_CONFIG.security_report_analysis.buildHref({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+    expect(href.startsWith("/security-center?")).toBe(true);
+    const params = hrefParams(href);
+    expect(params.get("tab")).toBe("security_reports");
+    expect(params.get("states")).toBe("open");
+  });
+
+  it("engagement's buildHref lands on /engagements with translated filters", () => {
+    const href = WIDGET_RESOURCE_CONFIG.engagement.buildHref({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+    expect(href.startsWith("/engagements?")).toBe(true);
+    const params = hrefParams(href);
+    expect(params.get("states")).toBe("open");
+  });
+
+  it("announcement's buildHref is the unfiltered /announcements page (no URL filter scheme exists there yet)", () => {
+    expect(
+      WIDGET_RESOURCE_CONFIG.announcement.buildHref({
+        filters: [{ field: "state", op: "in", values: ["open"] }],
+      }),
+    ).toBe("/announcements");
+  });
+
+  it("each of the four has its own distinct icon from `case` and from each other", () => {
+    const icons = [
+      WIDGET_RESOURCE_CONFIG.case.icon,
+      WIDGET_RESOURCE_CONFIG.service_request.icon,
+      WIDGET_RESOURCE_CONFIG.security_report_analysis.icon,
+      WIDGET_RESOURCE_CONFIG.announcement.icon,
+      WIDGET_RESOURCE_CONFIG.engagement.icon,
+    ];
+    expect(new Set(icons).size).toBe(icons.length);
+  });
+});

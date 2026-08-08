@@ -323,6 +323,8 @@ type snCaseFilters struct {
 	EngagementTypeKeys []int    `json:"engagementTypeKeys,omitempty"`
 	ClosedStartDate    string   `json:"closedStartDate,omitempty"`
 	ClosedEndDate      string   `json:"closedEndDate,omitempty"`
+	ResolvedStartDate  string   `json:"resolvedStartDate,omitempty"`
+	ResolvedEndDate    string   `json:"resolvedEndDate,omitempty"`
 	StartCreatedDate   string   `json:"startCreatedDate,omitempty"`
 	EndCreatedDate     string   `json:"endCreatedDate,omitempty"`
 	StartUpdatedDate   string   `json:"startUpdatedDate,omitempty"`
@@ -343,10 +345,14 @@ type snCaseFilters struct {
 	// ParentID: see domain.SearchCasesFilters.ParentID doc comment.
 	ParentID                  string   `json:"parentId,omitempty"`
 	ProjectOnboardingStatuses []string `json:"projectOnboardingStatuses,omitempty"`
-	ProjectTypeIDs            []string `json:"projectTypeIds,omitempty"`
-	IntegrationCsTeamIDs      []string `json:"integrationCsTeamIds,omitempty"`
-	Unassigned                bool     `json:"unassigned,omitempty"`
-	ResolutionNotesEmpty      bool     `json:"resolutionNotesEmpty,omitempty"`
+	// ProjectTypeNames carries project-type NAMES (e.g. "Subscription"), not
+	// sys_ids: CaseUtils.searchCases matches project.u_project_type.u_name. The
+	// wire key stays "projectTypeIds" because that is the field name the SN
+	// scripted API reads.
+	ProjectTypeNames     []string `json:"projectTypeIds,omitempty"`
+	IntegrationCsTeamIDs []string `json:"integrationCsTeamIds,omitempty"`
+	Unassigned           bool     `json:"unassigned,omitempty"`
+	ResolutionNotesEmpty bool     `json:"resolutionNotesEmpty,omitempty"`
 	// TaskSLAFilter: SN-side join on Task SLA table, filtering by businessElapsedPercent
 	// range. Confined to SN adapter per vendor-neutral boundary; see
 	// domain.TaskSLAFilter doc comment.
@@ -696,7 +702,7 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		return domain.CreateCaseResponse{}, fmt.Errorf("sn create case: parse response: %w", err)
 	}
 
-	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Case.CreatedOn)
+	createdOn, err := parseSNDateTime(ctx, "sn create case", "createdOn", snResp.Case.CreatedOn)
 	if err != nil {
 		return domain.CreateCaseResponse{}, fmt.Errorf("sn create case: parse createdOn %q: %w", snResp.Case.CreatedOn, err)
 	}
@@ -732,13 +738,13 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		return domain.CaseView{}, fmt.Errorf("sn get case: parse response: %w", err)
 	}
 
-	createdOn, err := time.Parse(snCreatedOnLayout, c.CreatedOn)
+	createdOn, err := parseSNDateTime(ctx, "sn get case", "createdOn", c.CreatedOn)
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("sn get case: parse createdOn %q: %w", c.CreatedOn, err)
 	}
 	updatedOn := createdOn
 	if c.UpdatedOn != nil && *c.UpdatedOn != "" {
-		updatedOn, err = time.Parse(snCreatedOnLayout, *c.UpdatedOn)
+		updatedOn, err = parseSNDateTime(ctx, "sn get case", "updatedOn", *c.UpdatedOn)
 		if err != nil {
 			return domain.CaseView{}, fmt.Errorf("sn get case: parse updatedOn %q: %w", *c.UpdatedOn, err)
 		}
@@ -869,7 +875,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	}
 	cv.ResolutionNotes = c.ResolutionNotes
 	if c.ResolvedOn != nil && *c.ResolvedOn != "" {
-		resolvedOn, err := time.Parse(snCreatedOnLayout, *c.ResolvedOn)
+		resolvedOn, err := parseSNDateTime(ctx, "sn get case", "resolvedOn", *c.ResolvedOn)
 		if err != nil {
 			return domain.CaseView{}, fmt.Errorf("sn get case: parse resolvedOn %q: %w", *c.ResolvedOn, err)
 		}
@@ -897,7 +903,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	// the matching fields (see snCase field doc comments); until then these are nil.
 	cv.AutoclosureStep = c.AutoclosureStep
 	if c.AutoclosureStateTime != nil && *c.AutoclosureStateTime != "" {
-		autoclosureStateTime, err := time.Parse(snCreatedOnLayout, *c.AutoclosureStateTime)
+		autoclosureStateTime, err := parseSNDateTime(ctx, "sn get case", "autoclosureStateTime", *c.AutoclosureStateTime)
 		if err != nil {
 			return domain.CaseView{}, fmt.Errorf("sn get case: parse autoclosureStateTime %q: %w", *c.AutoclosureStateTime, err)
 		}
@@ -978,7 +984,7 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 		return domain.CreateCaseCommentResponse{}, fmt.Errorf("sn create comment: parse response: %w", err)
 	}
 
-	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Comment.CreatedOn)
+	createdOn, err := parseSNDateTime(ctx, "sn create comment", "createdOn", snResp.Comment.CreatedOn)
 	if err != nil {
 		return domain.CreateCaseCommentResponse{}, fmt.Errorf("sn create comment: parse createdOn %q: %w", snResp.Comment.CreatedOn, err)
 	}
@@ -1073,7 +1079,7 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 
 	comments := make([]domain.CaseComment, 0, len(snResp.Comments))
 	for _, c := range snResp.Comments {
-		createdAt, err := time.Parse(snCreatedOnLayout, c.CreatedOn)
+		createdAt, err := parseSNDateTime(ctx, "sn search comments", "createdOn", c.CreatedOn)
 		if err != nil {
 			return domain.SearchCaseCommentsResponse{}, fmt.Errorf("sn search comments: parse createdOn %q: %w", c.CreatedOn, err)
 		}
@@ -1531,7 +1537,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse response: %w", err)
 	}
 
-	updatedOn, err := time.Parse(snCreatedOnLayout, snResp.Case.UpdatedOn)
+	updatedOn, err := parseSNDateTime(ctx, "sn update case", "updatedOn", snResp.Case.UpdatedOn)
 	if err != nil {
 		return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse updatedOn %q: %w", snResp.Case.UpdatedOn, err)
 	}
@@ -1606,7 +1612,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		resp.Case.ParentCase = &domain.CaseNumberRef{ID: sysidToUUID(snResp.Case.ParentCase.ID), Number: snResp.Case.ParentCase.Number, Type: snParentCaseTypeToDomain(snResp.Case.ParentCase.Type)}
 	}
 	if snResp.Case.ResolvedOn != nil {
-		resolvedOn, err := time.Parse(snCreatedOnLayout, *snResp.Case.ResolvedOn)
+		resolvedOn, err := parseSNDateTime(ctx, "sn update case", "resolvedOn", *snResp.Case.ResolvedOn)
 		if err != nil {
 			return domain.UpdateCaseResponse{}, fmt.Errorf("sn update case: parse resolvedAt %q: %w", *snResp.Case.ResolvedOn, err)
 		}
@@ -2109,6 +2115,8 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		EngagementTypeKeys:        domainEngagementTypesToSNIDs(parsed.EngagementTypes),
 		ClosedStartDate:           formatSNDateTimeUTC(parsed.ClosedStartDate),
 		ClosedEndDate:             formatSNDateTimeUTC(parsed.ClosedEndDate),
+		ResolvedStartDate:         formatSNDateTimeUTC(parsed.ResolvedStartDate),
+		ResolvedEndDate:           formatSNDateTimeUTC(parsed.ResolvedEndDate),
 		StartCreatedDate:          formatSNDateTimeUTC(parsed.StartCreatedDate),
 		EndCreatedDate:            formatSNDateTimeUTC(parsed.EndCreatedDate),
 		StartUpdatedDate:          formatSNDateTimeUTC(parsed.StartUpdatedDate),
@@ -2122,7 +2130,7 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		ExcludeTags:               parsed.ExcludeTags,
 		ParentID:                  snParentIDFilter(parsed.ParentID),
 		ProjectOnboardingStatuses: parsed.ProjectOnboardingStatuses,
-		ProjectTypeIDs:            uuidsToSysids(parsed.ProjectTypeIDs),
+		ProjectTypeNames:          parsed.ProjectTypeNames,
 		IntegrationCsTeamIDs:      uuidsToSysids(parsed.IntegrationCsTeamIDs),
 		Unassigned:                parsed.Unassigned,
 		ResolutionNotesEmpty:      parsed.ResolutionNotesEmpty,
@@ -2160,6 +2168,10 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		req.Parsed.ClosedEndDate.Before(*req.Parsed.ClosedStartDate) {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "closedOn: lte value must not be before gte value"}
 	}
+	if req.Parsed.ResolvedEndDate != nil && req.Parsed.ResolvedStartDate != nil &&
+		req.Parsed.ResolvedEndDate.Before(*req.Parsed.ResolvedStartDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "resolvedOn: lte value must not be before gte value"}
+	}
 	if req.Parsed.EndCreatedDate != nil && req.Parsed.StartCreatedDate != nil &&
 		req.Parsed.EndCreatedDate.Before(*req.Parsed.StartCreatedDate) {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
@@ -2182,9 +2194,8 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			return domain.SearchCasesResponse{}, err
 		}
 	}
-	if err := validateUUIDs("projectType", req.Parsed.ProjectTypeIDs); err != nil {
-		return domain.SearchCasesResponse{}, err
-	}
+	// projectType values are free-text project-type names (no UUID validation);
+	// integrationCsTeam values are still UUIDs.
 	if err := validateUUIDs("integrationCsTeam", req.Parsed.IntegrationCsTeamIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}

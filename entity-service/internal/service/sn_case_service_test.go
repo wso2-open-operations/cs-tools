@@ -1081,6 +1081,7 @@ func TestSNCaseService_SearchCases_GenericFiltersTranslateToSNPayload(t *testing
 				{Field: "assignedUserId", Op: "isEmpty"},
 				{Field: "resolutionNotes", Op: "isEmpty"},
 				{Field: "createdBy", Op: "eq", Values: []string{currentUserFilterPlaceholder}},
+				{Field: "projectType", Op: "in", Values: []string{"Subscription", "Free Trial"}},
 			},
 		},
 	}
@@ -1107,6 +1108,13 @@ func TestSNCaseService_SearchCases_GenericFiltersTranslateToSNPayload(t *testing
 	}
 	if len(gotBody.Filters.CreatedBy) != 0 {
 		t.Fatalf("expected CreatedBy to stay empty for the current-user placeholder, got %v", gotBody.Filters.CreatedBy)
+	}
+	// projectType values are project-type NAMES passed through verbatim -- no
+	// UUID validation, no id conversion (mirrors the product filter).
+	if len(gotBody.Filters.ProjectTypeNames) != 2 ||
+		gotBody.Filters.ProjectTypeNames[0] != "Subscription" ||
+		gotBody.Filters.ProjectTypeNames[1] != "Free Trial" {
+		t.Fatalf("ProjectTypeNames = %v, want [Subscription, Free Trial] passed through unchanged", gotBody.Filters.ProjectTypeNames)
 	}
 }
 

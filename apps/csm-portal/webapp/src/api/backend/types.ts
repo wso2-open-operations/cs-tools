@@ -2808,6 +2808,14 @@ export interface BeUserSearchByEmailResponse {
  * own data by issuing a `POST /{resourceType}s/search`-shaped request (see
  * `widgetResourceConfig.ts` for the real endpoint per type) with `filters`
  * forwarded verbatim.
+ *
+ * `service_request`, `security_report_analysis`, `announcement`, and
+ * `engagement` are additional values of the case-search `type` field (see
+ * `BeCaseType`/`ALL_CASE_TYPES` in `caseType.ts`) exposed as their own widget
+ * resourceType alongside `case` itself — all five route to the same `POST
+ * /cases/search`, the backend auto-injecting the implied `type` filter for
+ * each at dashboard-load time when a widget doesn't already carry one
+ * explicitly.
  */
 export type BeWidgetResourceType =
   | "case"
@@ -2820,7 +2828,11 @@ export type BeWidgetResourceType =
   | "problem"
   | "product_vulnerability"
   | "task"
-  | "call_request";
+  | "call_request"
+  | "service_request"
+  | "security_report_analysis"
+  | "announcement"
+  | "engagement";
 
 /**
  * How a widget's resolved data should be rendered. `pie` and `bar` both
@@ -2851,6 +2863,30 @@ export interface BeDashboardPieSlice {
   /** Falls back to a fixed rotation over the same palette if omitted. */
   color?: BeWidgetPaletteColor;
   query: Record<string, unknown>;
+}
+
+/** Rendering hint for a {@link BeDashboardWidgetColumn}'s resolved value.
+ * Omitted (or `"text"`) renders plain text; `"date"` formats a date/
+ * date-time string the same way the app's existing hardcoded list renderers
+ * already format one (see `formatDate` in `widgetListConfig.tsx`). */
+export type BeDashboardWidgetColumnFormat = "text" | "date";
+
+/** One column of a `shape: "list"` widget's generic column renderer (see
+ * {@link BeDashboardWidget.columns}). Opaque config: the BE never resolves
+ * `path` or interprets `format`, it only forwards this object. */
+export interface BeDashboardWidgetColumn {
+  /**
+   * Dot-separated path into one item of that widget's own resourceType
+   * search response, reaching into nested objects to arbitrary depth (e.g.
+   * `"project.key"`, `"project.account.tier"`) — every resource's search
+   * response embeds related entities as nested JSON objects, not flat
+   * records. A path that resolves to nothing on a given row renders that
+   * cell empty rather than erroring the whole widget.
+   */
+  path: string;
+  /** Column header text. */
+  label: string;
+  format?: BeDashboardWidgetColumnFormat;
 }
 
 /**
@@ -2894,6 +2930,19 @@ export interface BeDashboardWidget {
    * common case) render in one untitled group, same as before this field
    * existed. */
   section?: string;
+  /** Only meaningful for shape "list": an ordered set of columns to render
+   * instead of that resourceType's own hardcoded list renderer (see
+   * `WIDGET_LIST_RENDERERS` in `widgetListConfig.tsx`). Absent/empty is a
+   * no-op — the existing hardcoded per-resourceType renderer applies
+   * exactly as before this field existed. */
+  columns?: BeDashboardWidgetColumn[];
+  /** Only meaningful for shape "list": opaque sort criteria, forwarded
+   * verbatim as the `sortBy` of that resourceType's own
+   * `POST /{resourceType}s/search` request — same passthrough philosophy
+   * as `query`/`filters`. The caller is responsible for using a field name
+   * valid for that resourceType's own search contract; an invalid one is
+   * rejected by that search endpoint, not caught here. */
+  sortBy?: Record<string, unknown>;
 }
 
 /**
