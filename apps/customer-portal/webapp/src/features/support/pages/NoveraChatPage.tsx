@@ -793,6 +793,12 @@ export default function NoveraChatPage(): JSX.Element {
             rating,
             conversationId: conversationId ?? undefined,
             accountId: accountId || undefined,
+            projectId: projectId || undefined,
+            // Names, not just ids: a reviewer reading the dashboard should see
+            // who this came from without resolving sys_ids by hand. Already
+            // loaded for this page, so this costs no extra request.
+            accountName: projectDetails?.account?.name || undefined,
+            projectName: projectDetails?.name || undefined,
             ...(tags ? { tags } : {}),
           }),
         )
@@ -807,7 +813,15 @@ export default function NoveraChatPage(): JSX.Element {
           );
         });
     },
-    [accountId, connect, conversationId, projectId, sendUserMessage],
+    [
+      accountId,
+      connect,
+      conversationId,
+      projectId,
+      projectDetails?.account?.name,
+      projectDetails?.name,
+      sendUserMessage,
+    ],
   );
 
   /**

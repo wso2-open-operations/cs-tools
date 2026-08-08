@@ -266,6 +266,19 @@ export type ChatWebSocketPayload =
       conversationId?: string;
       accountId?: string;
       comment?: string;
+      /**
+       * Predefined reason slugs from feedbackTags.ts. The backend validates
+       * against its own allow-list and drops anything it does not recognise.
+       */
+      tags?: string[];
+      projectId?: string;
+      /**
+       * Display labels so the analytics dashboard can show "Acme Corp / Billing"
+       * instead of a pair of sys_ids. Cosmetic only — the ids above stay the join
+       * keys, and the backend caps and sanitises these before storing them.
+       */
+      accountName?: string;
+      projectName?: string;
     };
 
 // Model type for chat WebSocket hook options.
