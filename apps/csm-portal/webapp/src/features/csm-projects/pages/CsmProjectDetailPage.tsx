@@ -27,7 +27,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, ChevronDown, Plus } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX, type MouseEvent, type ReactNode } from "react";
+import { type JSX, type MouseEvent, type ReactNode, useState } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
@@ -38,9 +38,19 @@ import {
   endDateLabel,
   startDateLabel,
 } from "@features/csm-projects/utils/projectLifecycle";
+import { usePathTabs } from "@hooks/useSectionTabs";
 import { useNavTransition } from "@hooks/useNavTransition";
 
-type ProjectTabId = "overview" | "deployments" | "contacts" | "workItems";
+type ProjectTabId = "overview" | "deployments" | "contacts" | "work-items";
+
+// Every known top-level tab id, for `usePathTabs` to validate an incoming URL
+// segment against.
+const PROJECT_TAB_IDS: readonly ProjectTabId[] = [
+  "overview",
+  "deployments",
+  "contacts",
+  "work-items",
+];
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
@@ -141,7 +151,23 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const fromListState = location.state as { from?: string } | undefined;
   const resolvedBackPath = fromListState?.from ?? "/customers/projects";
   const { data, isLoading, isError } = useGetProject(id);
-  const [activeTab, setActiveTab] = useState<ProjectTabId>("overview");
+  // Tab is a real URL path segment (`/customers/projects/:id/:tab?`) so a
+  // link to a specific tab is shareable/bookmarkable. Work items nests a
+  // second, independently-tabbed level under its own
+  // `/customers/projects/:id/work-items/:tab?` route (see App.tsx), so its
+  // active-tab state isn't read from this hook's own `tab` param — that
+  // param, under the nested route, actually holds the *sub*-tab segment
+  // (consumed by WorkItemsTab's own `usePathTabs` call below). This page
+  // instead derives whether Work items is the active top-level tab from the
+  // pathname directly, and only defers to `usePathTabs`'s own resolution for
+  // the other three tabs.
+  const basePath = `/customers/projects/${id}`;
+  const { activeTab: pathTab, setActiveTab: setPathTab } =
+    usePathTabs<ProjectTabId>(basePath, PROJECT_TAB_IDS, "overview");
+  const isWorkItemsRoute =
+    location.pathname === `${basePath}/work-items` ||
+    location.pathname.startsWith(`${basePath}/work-items/`);
+  const activeTab: ProjectTabId = isWorkItemsRoute ? "work-items" : pathTab;
   const [createMenuAnchor, setCreateMenuAnchor] = useState<HTMLElement | null>(
     null,
   );
@@ -260,11 +286,14 @@ export default function CsmProjectDetailPage(): JSX.Element {
       </Box>
 
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => setPathTab(v as ProjectTabId)}
+        >
           <Tab value="overview" label="Overview" />
           <Tab value="deployments" label="Deployments" />
           <Tab value="contacts" label="Project contacts" />
-          <Tab value="workItems" label="Work items" />
+          <Tab value="work-items" label="Work items" />
         </Tabs>
       </Box>
 
@@ -323,7 +352,9 @@ export default function CsmProjectDetailPage(): JSX.Element {
 
       {activeTab === "contacts" && <ProjectContactsTab projectId={p.id} />}
 
-      {activeTab === "workItems" && <WorkItemsTab projectId={p.id} />}
+      {activeTab === "work-items" && (
+        <WorkItemsTab projectId={p.id} basePath={`${basePath}/work-items`} />
+      )}
     </Box>
   );
 }

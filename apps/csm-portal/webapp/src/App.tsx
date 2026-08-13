@@ -315,8 +315,17 @@ export default function App(): JSX.Element {
                     path="customers/accounts/:id"
                     element={<CsmAccountDetailPage />}
                   />
+                  {/* Project detail's own top-level tabs are a real URL path
+                      segment (`usePathTabs`); Work items is a second,
+                      independently-tabbed level, so it needs its own route
+                      for its `:tab?` sub-segment — the top-level `:tab?`
+                      route alone only ever captures one extra path segment. */}
                   <Route
-                    path="customers/projects/:id"
+                    path="customers/projects/:id/:tab?"
+                    element={<CsmProjectDetailPage />}
+                  />
+                  <Route
+                    path="customers/projects/:id/work-items/:tab?"
                     element={<CsmProjectDetailPage />}
                   />
 
