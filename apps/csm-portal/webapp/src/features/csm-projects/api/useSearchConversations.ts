@@ -18,6 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
+  BeConversationState,
   BeConversationView,
   BeSearchConversationsPayload,
   BeSearchConversationsResponse,
@@ -27,6 +28,19 @@ import type {
 export interface ConversationPagination {
   page: number;
   rowsPerPage: number;
+}
+
+/**
+ * The subset of `BeSearchConversationsFilters` the Conversations tab exposes
+ * to the user (`projectIds` is fixed to the surrounding project, not part of
+ * this). All optional/empty by default — an unset filter is simply omitted
+ * from the request payload rather than sent as an empty array/false, so a
+ * default search stays identical to the pre-filter-bar request.
+ */
+export interface ConversationSearchFilters {
+  states?: BeConversationState[];
+  searchQuery?: string;
+  createdByMe?: boolean;
 }
 
 export interface ConversationSearchResult {
@@ -43,19 +57,35 @@ export interface ConversationSearchResult {
 export function useSearchConversations(
   projectId: string | undefined,
   pagination: ConversationPagination,
+  filters: ConversationSearchFilters = {},
 ): UseQueryResult<ConversationSearchResult, Error> {
   const api = useBackendApi();
   const limit = Math.min(pagination.rowsPerPage, BE_MAX_PAGE_LIMIT);
   const offset = pagination.page * limit;
+  const { states, searchQuery, createdByMe } = filters;
+  const trimmedSearch = searchQuery?.trim() || undefined;
 
   return useQuery<ConversationSearchResult, Error>({
-    queryKey: [ApiQueryKeys.CONVERSATIONS_SEARCH, projectId ?? "", pagination.page, limit],
+    queryKey: [
+      ApiQueryKeys.CONVERSATIONS_SEARCH,
+      projectId ?? "",
+      pagination.page,
+      limit,
+      states ?? [],
+      trimmedSearch ?? "",
+      createdByMe ?? false,
+    ],
     queryFn: async (): Promise<ConversationSearchResult> => {
       const res = await api.post<
         BeSearchConversationsPayload,
         BeSearchConversationsResponse
       >("/conversations/search", {
-        filters: { projectIds: [projectId ?? ""] },
+        filters: {
+          projectIds: [projectId ?? ""],
+          ...(states && states.length > 0 ? { states } : {}),
+          ...(trimmedSearch ? { searchQuery: trimmedSearch } : {}),
+          ...(createdByMe ? { createdByMe: true } : {}),
+        },
         sortBy: { field: "updatedOn", order: "desc" },
         pagination: { limit, offset },
       });

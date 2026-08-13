@@ -1002,13 +1002,24 @@ export interface BeCommentSearchResponse extends BeSearchResponseBase {
 // Conversations (Novera chat sessions)
 // ---------------------------------------------------------------------------
 
-export type BeConversationState = "ACTIVE" | "RESOLVED";
+export type BeConversationState =
+  | "ACTIVE"
+  | "RESOLVED"
+  | "CONVERTED"
+  | "ABANDONED"
+  | "CLOSED";
 
 /**
  * A chat session as returned by `POST /conversations/search` — the ServiceNow
  * "conversation" record a case may originate from. `id`/`number`/`state` are
  * nullable on the wire (a conversation that never resolved to a real SN
  * record can have gaps); `case` is null for a chat that never became a case.
+ *
+ * `createdBy` carries the canonical {@link BeUserReference} shape, same as
+ * case `createdBy`. Known limitation specific to conversations: the upstream
+ * data only carries a single identity string for the initiator, so only ONE
+ * of `email`/`name` is usually populated (never both) — unlike cases, which
+ * usually have both. `null` when the initiator has no resolvable identity.
  */
 export interface BeConversationView {
   id: string | null;
@@ -1019,12 +1030,18 @@ export interface BeConversationView {
   case: BeEntityRef | null;
   state: BeConversationState | null;
   createdOn: string;
-  createdBy: string;
+  createdBy: BeUserReference | null;
 }
 
 export interface BeSearchConversationsFilters {
   projectIds?: string[];
   states?: BeConversationState[];
+  /** Free-text search across the conversation (matches the same fields the
+   * data source indexes for it — number, initiator, initial message). */
+  searchQuery?: string;
+  /** When `true`, scopes results to conversations initiated by the
+   * signed-in user. */
+  createdByMe?: boolean;
 }
 
 export interface BeSearchConversationsPayload {

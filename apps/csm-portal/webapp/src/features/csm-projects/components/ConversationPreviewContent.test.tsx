@@ -15,10 +15,10 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import ConversationTranscriptDialog from "@features/csm-projects/components/ConversationTranscriptDialog";
+import ConversationPreviewContent from "@features/csm-projects/components/ConversationPreviewContent";
 import type { BeConversationView } from "@api/backend/types";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
@@ -33,6 +33,10 @@ vi.mock("@features/csm-cases/components/CsmCaseCommentBubble", () => ({
   default: ({ comment }: { comment: CsmCaseComment }) => <div>Message: {comment.bodyHtml}</div>,
 }));
 
+vi.mock("@features/csm-users/api/useResolvedUserId", () => ({
+  useResolvedUserId: () => undefined,
+}));
+
 function conversation(overrides: Partial<BeConversationView> = {}): BeConversationView {
   return {
     id: "conv-1",
@@ -43,14 +47,9 @@ function conversation(overrides: Partial<BeConversationView> = {}): BeConversati
     case: null,
     state: "ACTIVE",
     createdOn: "2026-07-01T10:00:00Z",
-    createdBy: "Jane Doe",
+    createdBy: { id: null, email: "jane@example.com", name: "Jane Doe" },
     ...overrides,
   };
-}
-
-function LocationProbe() {
-  const location = useLocation();
-  return <div data-testid="location-probe">{location.pathname}</div>;
 }
 
 function message(overrides: Partial<CsmCaseComment> = {}): CsmCaseComment {
@@ -65,12 +64,12 @@ function message(overrides: Partial<CsmCaseComment> = {}): CsmCaseComment {
   };
 }
 
-describe("ConversationTranscriptDialog", () => {
+describe("ConversationPreviewContent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("renders the conversation's messages once loaded", () => {
+  it("renders the last few messages and the conversation summary", () => {
     mockUseGetCsmConversationMessages.mockReturnValue({
       data: [message()],
       isLoading: false,
@@ -79,14 +78,16 @@ describe("ConversationTranscriptDialog", () => {
 
     render(
       <MemoryRouter>
-        <ConversationTranscriptDialog conversation={conversation()} onClose={vi.fn()} />
+        <ConversationPreviewContent conversation={conversation()} onClose={vi.fn()} />
       </MemoryRouter>,
     );
 
     expect(screen.getByText("Message: Hi, need help")).toBeInTheDocument();
+    expect(screen.getByText("CONV0000001")).toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
   });
 
-  it("shows an empty state when the conversation has no messages", () => {
+  it("shows a 'View case' button when the conversation became a case", () => {
     mockUseGetCsmConversationMessages.mockReturnValue({
       data: [],
       isLoading: false,
@@ -95,66 +96,18 @@ describe("ConversationTranscriptDialog", () => {
 
     render(
       <MemoryRouter>
-        <ConversationTranscriptDialog conversation={conversation()} onClose={vi.fn()} />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("No messages in this conversation.")).toBeInTheDocument();
-  });
-
-  it("shows an error state when messages fail to load", () => {
-    mockUseGetCsmConversationMessages.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: true,
-    });
-
-    render(
-      <MemoryRouter>
-        <ConversationTranscriptDialog conversation={conversation()} onClose={vi.fn()} />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("Could not load this conversation.")).toBeInTheDocument();
-  });
-
-  it("does not show a 'View case' link when the conversation never became a case", () => {
-    mockUseGetCsmConversationMessages.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isError: false,
-    });
-
-    render(
-      <MemoryRouter>
-        <ConversationTranscriptDialog conversation={conversation({ case: null })} onClose={vi.fn()} />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByText("View case")).not.toBeInTheDocument();
-  });
-
-  it("shows a 'View case' link to the linked case when one exists", () => {
-    mockUseGetCsmConversationMessages.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isError: false,
-    });
-
-    render(
-      <MemoryRouter>
-        <ConversationTranscriptDialog
+        <ConversationPreviewContent
           conversation={conversation({ case: { id: "case-1", name: "CS0000001" } })}
           onClose={vi.fn()}
         />
       </MemoryRouter>,
     );
 
-    const link = screen.getByText("View case").closest("a");
+    const link = screen.getByText("View case CS0000001").closest("a");
     expect(link).toHaveAttribute("href", "/cases/case-1");
   });
 
-  it("navigates to the linked case when 'View case' is clicked", () => {
+  it("links 'View full details' to the conversation's dedicated page", () => {
     mockUseGetCsmConversationMessages.mockReturnValue({
       data: [],
       isLoading: false,
@@ -162,28 +115,16 @@ describe("ConversationTranscriptDialog", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/projects/proj-1"]}>
-        <Routes>
-          <Route
-            path="/projects/proj-1"
-            element={
-              <ConversationTranscriptDialog
-                conversation={conversation({ case: { id: "case-1", name: "CS0000001" } })}
-                onClose={vi.fn()}
-              />
-            }
-          />
-          <Route path="/cases/:caseId" element={<LocationProbe />} />
-        </Routes>
+      <MemoryRouter>
+        <ConversationPreviewContent conversation={conversation()} onClose={vi.fn()} />
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByText("View case"));
-
-    expect(screen.getByTestId("location-probe")).toHaveTextContent("/cases/case-1");
+    const link = screen.getByText("View full details").closest("a");
+    expect(link).toHaveAttribute("href", "/conversations/conv-1");
   });
 
-  it("calls onClose when the Close button is clicked", () => {
+  it("calls onClose when the close button is clicked", () => {
     const onClose = vi.fn();
     mockUseGetCsmConversationMessages.mockReturnValue({
       data: [],
@@ -193,11 +134,11 @@ describe("ConversationTranscriptDialog", () => {
 
     render(
       <MemoryRouter>
-        <ConversationTranscriptDialog conversation={conversation()} onClose={onClose} />
+        <ConversationPreviewContent conversation={conversation()} onClose={onClose} />
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByText("Close"));
+    fireEvent.click(screen.getByLabelText("Close preview"));
 
     expect(onClose).toHaveBeenCalled();
   });

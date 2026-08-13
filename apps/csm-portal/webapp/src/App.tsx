@@ -145,6 +145,9 @@ const CsmProjectsPage = lazy(
 const CsmProjectDetailPage = lazy(
   () => import("@features/csm-projects/pages/CsmProjectDetailPage"),
 );
+const ConversationDetailPage = lazy(
+  () => import("@features/csm-projects/pages/ConversationDetailPage"),
+);
 const CsmUpdatesPage = lazy(
   () => import("@features/updates/pages/CsmUpdatesPage"),
 );
@@ -438,6 +441,14 @@ export default function App(): JSX.Element {
                   <Route path="cases" element={<CsmCasesPage />} />
                   <Route path="cases/new" element={<CsmCaseCreatePage />} />
                   <Route path="cases/:caseId" element={<CsmCaseDetailPage />} />
+
+                  {/* A project's chat sessions ("Conversations" sub-tab of
+                      Work items) each get a dedicated detail page, flat at
+                      the top level like /cases/:caseId rather than nested
+                      under /customers/projects/:id — matching how every
+                      other work-item type (service requests, change
+                      requests, engagements, ...) routes below. */}
+                  <Route path="conversations/:id" element={<ConversationDetailPage />} />
 
                   <Route path="operations" element={<OperationsPage />} />
                   <Route
