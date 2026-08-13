@@ -84,7 +84,13 @@ export default function ConversationsTab({ projectId }: ConversationsTabProps): 
   const { data, isLoading, isError, error } = useSearchConversations(
     projectId,
     { page, rowsPerPage },
-    { states: filters.states, searchQuery: filters.search, createdByMe: filters.createdByMe },
+    {
+      states: filters.states,
+      searchQuery: filters.search,
+      createdByMe: filters.createdByMe,
+      number: filters.number,
+      createdBy: filters.createdBy,
+    },
   );
   const conversations = data?.conversations ?? [];
   const total = data?.total ?? 0;

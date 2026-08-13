@@ -59,10 +59,30 @@ describe("countActiveConversationFilters", () => {
   it("counts states and createdByMe, but not search", () => {
     expect(
       countActiveConversationFilters({
+        ...DEFAULT_CONVERSATION_FILTERS,
         search: "billing",
         states: ["ACTIVE"],
         createdByMe: true,
       }),
     ).toBe(2);
+  });
+
+  it("counts a non-blank number and a non-empty createdBy list", () => {
+    expect(
+      countActiveConversationFilters({
+        ...DEFAULT_CONVERSATION_FILTERS,
+        number: "CHAT0000012345",
+        createdBy: ["jane.doe@example.com"],
+      }),
+    ).toBe(2);
+  });
+
+  it("does not count a blank/whitespace-only number", () => {
+    expect(
+      countActiveConversationFilters({
+        ...DEFAULT_CONVERSATION_FILTERS,
+        number: "   ",
+      }),
+    ).toBe(0);
   });
 });

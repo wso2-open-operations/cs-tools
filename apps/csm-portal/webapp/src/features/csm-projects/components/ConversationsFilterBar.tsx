@@ -29,6 +29,7 @@ import {
 import { ChevronDown, ChevronUp, ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
 import MultiSelectField from "@components/MultiSelectField";
+import AsyncInitiatorMultiSelect from "@features/csm-projects/components/AsyncInitiatorMultiSelect";
 import {
   ALL_CONVERSATION_STATES,
   CONVERSATION_STATE_LABEL,
@@ -47,12 +48,18 @@ interface ConversationsFilterBarProps {
 /**
  * Filter bar for a project's Conversations tab, scoped strictly to what
  * `POST /conversations/search` supports for a project-scoped search: free
- * text (`searchQuery`), state (`states`), and "my conversations"
- * (`createdByMe`). Deliberately does not offer an assignee or date-range
- * control — those fields don't exist on this endpoint, unlike
+ * text (`searchQuery`), state (`states`), "my conversations" (`createdByMe`),
+ * an explicit exact-match chat number (`number`), and an explicit
+ * initiator-email multi-select (`createdBy`). Deliberately does not offer a
+ * date-range control — that field doesn't exist on this endpoint, unlike
  * `CasesFilterBar`. Visual/component patterns (search field, collapsible
  * filter grid, filters-toggle button) are copied from `CasesFilterBar` /
  * `IncidentsFilterBar` for a consistent feel across the app's filter bars.
+ *
+ * The top search box can also implicitly route a `CHAT`-number-shaped typed
+ * string to `filters.number` (see `classifyConversationQuery`, used in
+ * `useSearchConversations`) — the explicit Number field here is an
+ * additional, precise control, not a replacement for that.
  */
 export default function ConversationsFilterBar({
   filters,
@@ -131,12 +138,29 @@ export default function ConversationsFilterBar({
           <Divider />
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <TextField
+                id="conversations-filter-number"
+                fullWidth
+                size="small"
+                label="Number"
+                placeholder="e.g. CHAT0000012345"
+                value={filters.number}
+                onChange={(e) => onChange({ ...filters, number: e.target.value })}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
               <MultiSelectField
                 id="conversations-filter-state"
                 label="State"
                 values={filters.states}
                 options={stateOptions}
                 onChange={(next) => onChange({ ...filters, states: next })}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <AsyncInitiatorMultiSelect
+                values={filters.createdBy}
+                onChange={(next) => onChange({ ...filters, createdBy: next })}
               />
             </Grid>
             <Grid

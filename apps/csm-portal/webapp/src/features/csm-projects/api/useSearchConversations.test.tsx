@@ -156,7 +156,7 @@ describe("useSearchConversations", () => {
         useSearchConversations(
           "proj-1",
           { page: 0, rowsPerPage: 20 },
-          { states: [], searchQuery: "   ", createdByMe: false },
+          { states: [], searchQuery: "   ", createdByMe: false, number: "  ", createdBy: [] },
         ),
       { wrapper },
     );
@@ -167,6 +167,56 @@ describe("useSearchConversations", () => {
       "/conversations/search",
       expect.objectContaining({
         filters: { projectIds: ["proj-1"] },
+      }),
+    );
+  });
+
+  it("includes the explicit number and createdBy filters when set", async () => {
+    postMock.mockResolvedValue({ conversations: [], total: 0, limit: 20, offset: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useSearchConversations(
+          "proj-1",
+          { page: 0, rowsPerPage: 20 },
+          { number: "CHAT0000012345", createdBy: ["jane.doe@example.com"] },
+        ),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/conversations/search",
+      expect.objectContaining({
+        filters: {
+          projectIds: ["proj-1"],
+          number: "CHAT0000012345",
+          createdBy: ["jane.doe@example.com"],
+        },
+      }),
+    );
+  });
+
+  it("prefers the explicit number filter over a CHAT-number-shaped search box value", async () => {
+    postMock.mockResolvedValue({ conversations: [], total: 0, limit: 20, offset: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useSearchConversations(
+          "proj-1",
+          { page: 0, rowsPerPage: 20 },
+          { searchQuery: "CHAT0000099999", number: "CHAT0000012345" },
+        ),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/conversations/search",
+      expect.objectContaining({
+        filters: { projectIds: ["proj-1"], number: "CHAT0000012345" },
       }),
     );
   });

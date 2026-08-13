@@ -84,23 +84,36 @@ export function conversationStateChipMeta(
  * Filter state for `ConversationsFilterBar` — the subset of
  * `BeSearchConversationsFilters` exposed in the Conversations tab UI
  * (`projectIds` is fixed to the surrounding project, not a user-facing
- * control). No assignee/date-range fields: the conversations endpoint
- * doesn't filter on either.
+ * control). No date-range field: the conversations endpoint doesn't filter
+ * on it. `number` is an explicit exact-match field, distinct from `search`
+ * (which the top search box may also route to `filters.number` when it looks
+ * like a chat number — see `classifyConversationQuery`); `createdBy` is an
+ * explicit initiator-email multi-select, distinct from the `createdByMe`
+ * "my conversations" checkbox.
  */
 export interface ConversationsFilters {
   search: string;
   states: BeConversationState[];
   createdByMe: boolean;
+  number: string;
+  createdBy: string[];
 }
 
 export const DEFAULT_CONVERSATION_FILTERS: ConversationsFilters = {
   search: "",
   states: [],
   createdByMe: false,
+  number: "",
+  createdBy: [],
 };
 
 /** Count non-search active filters (used for the badge on the Filters button,
  * matching `countActiveIncidentFilters`'s convention). */
 export function countActiveConversationFilters(filters: ConversationsFilters): number {
-  return (filters.states.length > 0 ? 1 : 0) + (filters.createdByMe ? 1 : 0);
+  return (
+    (filters.states.length > 0 ? 1 : 0) +
+    (filters.createdByMe ? 1 : 0) +
+    (filters.number.trim() ? 1 : 0) +
+    (filters.createdBy.length > 0 ? 1 : 0)
+  );
 }

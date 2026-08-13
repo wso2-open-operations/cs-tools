@@ -1046,6 +1046,8 @@ export interface BeSearchConversationsFilters {
   /** When `true`, scopes results to conversations initiated by the
    * signed-in user. */
   createdByMe?: boolean;
+  /** Filter to conversations initiated by any of these email addresses. */
+  createdBy?: string[];
 }
 
 export interface BeSearchConversationsPayload {
