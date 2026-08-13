@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -78,19 +79,28 @@ type snConversationFilters struct {
 
 // snConversationStateKeyMap maps domain ConversationState enums to SN numeric state keys.
 var snConversationStateKeyMap = map[domain.ConversationState]int{
-	domain.ConversationStateActive:   2,
-	domain.ConversationStateResolved: 3,
+	domain.ConversationStateActive:    2,
+	domain.ConversationStateResolved:  3,
+	domain.ConversationStateConverted: 4,
+	domain.ConversationStateAbandoned: 5,
+	domain.ConversationStateClosed:    6,
 }
 
 // snConversationStateLabelMap maps SN numeric state keys to domain enum strings.
 var snConversationStateLabelMap = map[int]string{
 	2: "ACTIVE",
 	3: "RESOLVED",
+	4: "CONVERTED",
+	5: "ABANDONED",
+	6: "CLOSED",
 }
 
 var validConversationState = map[domain.ConversationState]bool{
-	domain.ConversationStateActive:   true,
-	domain.ConversationStateResolved: true,
+	domain.ConversationStateActive:    true,
+	domain.ConversationStateResolved:  true,
+	domain.ConversationStateConverted: true,
+	domain.ConversationStateAbandoned: true,
+	domain.ConversationStateClosed:    true,
 }
 
 var validConversationSortField = map[domain.ConversationSortField]bool{
@@ -123,6 +133,18 @@ func normalizeConversationPagination(p *domain.Pagination) error {
 		p.Offset = 0
 	}
 	return nil
+}
+
+// conversationCreatedByRef builds a UserReference from the conversation payload's
+// single createdBy string. The upstream integration carries only one identity
+// field here (unlike case search, which supplies separate email and full-name
+// fields), so there is no full name to populate: the value is treated as an
+// email when it looks like one, otherwise as a display name.
+func conversationCreatedByRef(createdBy string) *domain.UserReference {
+	if strings.Contains(createdBy, "@") {
+		return domain.NewUserReference("", createdBy, "")
+	}
+	return domain.NewUserReference("", "", createdBy)
 }
 
 type snConversationService struct {
@@ -200,7 +222,7 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 			InitialMessage: c.InitialMessage,
 			MessageCount:   c.MessageCount,
 			CreatedOn:      c.CreatedOn,
-			CreatedBy:      c.CreatedBy,
+			CreatedBy:      conversationCreatedByRef(c.CreatedBy),
 		}
 		if c.ID != nil && *c.ID != "" {
 			id := sysidToUUID(*c.ID)

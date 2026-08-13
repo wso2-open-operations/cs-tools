@@ -3647,8 +3647,11 @@ type CreateProblemRequest struct {
 type ConversationState string
 
 const (
-	ConversationStateActive   ConversationState = "ACTIVE"
-	ConversationStateResolved ConversationState = "RESOLVED"
+	ConversationStateActive    ConversationState = "ACTIVE"
+	ConversationStateResolved  ConversationState = "RESOLVED"
+	ConversationStateConverted ConversationState = "CONVERTED"
+	ConversationStateAbandoned ConversationState = "ABANDONED"
+	ConversationStateClosed    ConversationState = "CLOSED"
 )
 
 // ConversationSortField enumerates the columns available for sorting conversation search results.
@@ -3690,15 +3693,15 @@ type SearchConversationsRequest struct {
 
 // SearchConversationView is the conversation representation returned in search results.
 type SearchConversationView struct {
-	ID             *string    `json:"id"`
-	Number         *string    `json:"number"`
-	InitialMessage *string    `json:"initialMessage"`
-	MessageCount   int        `json:"messageCount"`
-	Project        *EntityRef `json:"project"`
-	Case           *EntityRef `json:"case"`
-	State          *string    `json:"state"`
-	CreatedOn      string     `json:"createdOn"`
-	CreatedBy      string     `json:"createdBy"`
+	ID             *string        `json:"id"`
+	Number         *string        `json:"number"`
+	InitialMessage *string        `json:"initialMessage"`
+	MessageCount   int            `json:"messageCount"`
+	Project        *EntityRef     `json:"project"`
+	Case           *EntityRef     `json:"case"`
+	State          *string        `json:"state"`
+	CreatedOn      string         `json:"createdOn"`
+	CreatedBy      *UserReference `json:"createdBy"`
 }
 
 // SearchConversationsResponse is the paginated result of a conversation search.
