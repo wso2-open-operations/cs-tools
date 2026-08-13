@@ -387,6 +387,24 @@ function NavigateToCaseTwoButton(): JSX.Element {
   );
 }
 
+const DASHED_ID = "56f49f0a-eb1e-c310-fcf5-f5dabad0cdab";
+const DASHLESS_ID = "56f49f0aeb1ec310fcf5f5dabad0cdab";
+
+// `useNavTransition` is mocked module-wide (above) so the rest of this
+// file's tests can assert on navigate-call arguments without a real router
+// transition. The tab strip is now a real URL path segment (`usePathTabs`),
+// so — same as the dashless-id tests below — the mock is bridged to the real
+// `useNavigate` from this render tree, and `LocationProbe` verifies the
+// resulting location, rather than mocking `useNavigate`/react-router
+// wholesale (a full mock can't reflect a URL-driven tab).
+function NavigateBridge(): null {
+  const navigate = useNavigate();
+  navigateMock.mockImplementation((to: To, options?: NavigateOptions) =>
+    navigate(to, options),
+  );
+  return null;
+}
+
 function renderPage(): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -394,32 +412,15 @@ function renderPage(): ReturnType<typeof render> {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/cases/case-1"]}>
+        <NavigateBridge />
         <NavigateToCaseTwoButton />
         <LocationProbe />
         <Routes>
-          <Route path="/cases/:caseId" element={<CsmCaseDetailPage />} />
+          <Route path="/cases/:caseId/:tab?" element={<CsmCaseDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
-}
-
-const DASHED_ID = "56f49f0a-eb1e-c310-fcf5-f5dabad0cdab";
-const DASHLESS_ID = "56f49f0aeb1ec310fcf5f5dabad0cdab";
-
-// `useNavTransition` is mocked module-wide (above) so the rest of this
-// file's tests can assert on navigate-call arguments without a real router
-// transition. For the dashless-id tests specifically we want to prove the
-// router's own location actually changes, not just that the mock was
-// invoked — so this bridges the mock to the real `useNavigate` from this
-// render tree, and `LocationProbe` (already used elsewhere in this file)
-// verifies the resulting location.
-function NavigateBridge(): null {
-  const navigate = useNavigate();
-  navigateMock.mockImplementation((to: To, options?: NavigateOptions) =>
-    navigate(to, options),
-  );
-  return null;
 }
 
 function renderPageAtCaseId(initialEntry: string): ReturnType<typeof render> {
@@ -432,7 +433,7 @@ function renderPageAtCaseId(initialEntry: string): ReturnType<typeof render> {
         <NavigateBridge />
         <LocationProbe />
         <Routes>
-          <Route path="/cases/:caseId" element={<CsmCaseDetailPage />} />
+          <Route path="/cases/:caseId/:tab?" element={<CsmCaseDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -507,5 +508,121 @@ describe("CsmCaseDetailPage — time-card edit dialog reset on case change", () 
     expect(
       screen.queryByTestId("log-time-card-dialog-probe"),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("CsmCaseDetailPage — tab is a real URL path segment", () => {
+  it("defaults to the Activities tab when the URL carries no tab segment", () => {
+    renderPage();
+    expect(screen.getByRole("tab", { name: /activities/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("clicking a tab navigates to that tab's own URL", () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("tab", { name: /details/i }));
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/cases/case-1/details",
+    );
+    expect(screen.getByRole("tab", { name: /details/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("loading the page directly at a tab's URL opens on that tab", () => {
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <MemoryRouter initialEntries={["/cases/case-1/attachments"]}>
+          <NavigateBridge />
+          <LocationProbe />
+          <Routes>
+            <Route path="/cases/:caseId/:tab?" element={<CsmCaseDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("tab", { name: /attachments/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("falls back to Activities for an unknown tab segment, without redirecting the URL", () => {
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <MemoryRouter initialEntries={["/cases/case-1/bogus-tab"]}>
+          <NavigateBridge />
+          <LocationProbe />
+          <Routes>
+            <Route path="/cases/:caseId/:tab?" element={<CsmCaseDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("tab", { name: /activities/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // No redirect loop / URL correction — the caller sees exactly the URL it
+    // asked for, just rendered as the default tab.
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/cases/case-1/bogus-tab",
+    );
+  });
+
+  it("preserves the case's own mount point (not /cases) when switching tabs from a non-canonical route", () => {
+    // Engagements render CsmCaseDetailPage too, under their own mount point —
+    // `usePathTabs`'s `basePath` is this page's already-resolved `detailPath`,
+    // not a hardcoded "/cases" prefix, so a tab switch from an engagement must
+    // stay under /engagements rather than jumping to the case's own path.
+    // `mockImplementationOnce` isn't enough here: the page re-renders (and
+    // re-calls this hook) more than once before the first paint settles, so a
+    // one-shot override would revert to the default (non-engagement) case on
+    // a later render and trip the page's own case-type/route mismatch
+    // redirect. Set it for the duration of this test and restore the shared
+    // default afterward so later tests in this file aren't affected.
+    const defaultImpl = useGetCsmCaseDetailMock.getMockImplementation();
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id ? { ...buildCase(id), caseType: "engagement" } : undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: 0,
+    }));
+
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <MemoryRouter initialEntries={["/engagements/case-1"]}>
+          <NavigateBridge />
+          <LocationProbe />
+          <Routes>
+            <Route path="/engagements/:caseId/:tab?" element={<CsmCaseDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /details/i }));
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/engagements/case-1/details",
+    );
+
+    if (defaultImpl) useGetCsmCaseDetailMock.mockImplementation(defaultImpl);
   });
 });

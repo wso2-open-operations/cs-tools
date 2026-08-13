@@ -19,13 +19,16 @@
  * tabs a deployment is allowed to see are decided in one place
  * (`CSM_PORTAL_FEATURE_OVERRIDES`) rather than per page.
  *
- * Two flavours, matching the two tab idioms in the app: `useQueryTabs` for
- * sections that keep the selection in `?tab=` (Operations, Security Center) and
+ * Three flavours, matching the tab idioms in the app: `useQueryTabs` for
+ * sections that keep the selection in `?tab=` (Operations, Security Center),
  * `useRouteTabs` for sections whose tabs are child routes (Customers,
- * Settings).
+ * Settings), and `usePathTabs` for a single detail page whose own sub-tabs
+ * are real URL path segments (Case/Incident/Change-Request detail) so a tab
+ * can be linked and reopens directly on it.
  */
 
-import { useLocation, useSearchParams } from "react-router";
+import { useCallback } from "react";
+import { useLocation, useParams, useSearchParams } from "react-router";
 import {
   type CsmNavNode,
   navNodeById,
@@ -121,6 +124,62 @@ export function useRouteTabs(sectionId: string): SectionTabsState {
     activeKey,
     select: (key: string) => void navigate(key),
   };
+}
+
+/** `usePathTabs`'s return shape: the resolved tab plus how to switch it. */
+export interface PathTabsState<TId extends string> {
+  /** The URL's tab segment when it names one of `tabs`, otherwise
+   * `defaultTabId` — always a member of `tabs`, never a raw/unknown segment. */
+  activeTab: TId;
+  /**
+   * Navigates to `${basePath}/${id}`, preserving the current hash (so a
+   * permalink fragment like `#comment-5` survives a tab correction) but not
+   * the search string. `replace` is for a programmatic correction (e.g.
+   * falling back off a tab this data/gating doesn't allow) so it doesn't
+   * grow history the way a genuine tab click should.
+   */
+  setActiveTab: (id: TId, options?: { replace?: boolean }) => void;
+}
+
+/**
+ * Tab strip for a single detail page whose tabs are real URL path segments,
+ * e.g. `/cases/:caseId/:tab?` — a bookmarked or shared link reopens on the
+ * exact tab. Unlike `useQueryTabs`/`useRouteTabs` above (which read the
+ * *section* nav tree), this is generic over any caller-supplied tab id list,
+ * for a single page's own sub-tabs rather than a nav-driven section strip.
+ *
+ * `basePath` is passed in already resolved (e.g. a case detail page computes
+ * it per mount point — `/cases/:id`, `/engagements/:id`, etc.) rather than
+ * hardcoded here, so this hook has no opinion on the route pattern it's used
+ * under — including a later two-level nesting like
+ * `/projects/:id/work-items/:subTab`, where `basePath` would itself already
+ * contain the resolved `:subTab`.
+ *
+ * An unknown or missing tab segment resolves to `defaultTabId` for rendering
+ * only — this never itself navigates/redirects the URL, so there's no risk of
+ * a redirect loop; callers that want the URL corrected (e.g. a tab that
+ * turns out to be gated once data loads) do so explicitly via `setActiveTab`.
+ */
+export function usePathTabs<TId extends string>(
+  basePath: string,
+  tabs: readonly TId[],
+  defaultTabId: TId,
+): PathTabsState<TId> {
+  const { tab } = useParams<{ tab?: string }>();
+  const { hash } = useLocation();
+  const navigate = useNavTransition();
+
+  const activeTab: TId =
+    tab && (tabs as readonly string[]).includes(tab) ? (tab as TId) : defaultTabId;
+
+  const setActiveTab = useCallback(
+    (id: TId, options?: { replace?: boolean }) => {
+      navigate({ pathname: `${basePath}/${id}`, hash }, { replace: options?.replace });
+    },
+    [basePath, hash, navigate],
+  );
+
+  return { activeTab, setActiveTab };
 }
 
 /**

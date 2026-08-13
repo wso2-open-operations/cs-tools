@@ -168,6 +168,7 @@ import type {
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
+import { usePathTabs } from "@hooks/useSectionTabs";
 
 function MetaCell({
   label,
@@ -308,6 +309,11 @@ const TAB_DEFS: Array<{
   // it's just unreachable via tab navigation while hidden.
   { id: "tasks", label: "Tasks", icon: <CheckSquare size={16} />, hidden: true },
 ];
+
+// Every known tab id, for `usePathTabs` to validate an incoming URL segment
+// against — includes hidden ones (still a real, if unreachable via the tab
+// bar, destination) so a hidden tab's URL isn't treated as unknown.
+const CASE_TAB_IDS = TAB_DEFS.map((t) => t.id);
 
 export default function CsmCaseDetailPage(): JSX.Element {
   const caseId = useNormalizedIdParam("caseId");
@@ -498,11 +504,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const { showSuccess } = useSuccessBanner();
   const isDarkMode = useDarkMode();
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
+  // Tab is a real URL path segment (`${detailPath}/<tab>`) so a link to a
+  // specific tab is shareable/bookmarkable — `detailPath` already resolves
+  // to this case's canonical mount point (cases/engagements/service-requests/
+  // security-reports/announcements), so the same hook covers every one of
+  // them without each needing its own basePath logic.
+  const { activeTab, setActiveTab } = usePathTabs<CaseTabId>(
+    detailPath,
+    CASE_TAB_IDS,
+    "activities",
+  );
   // Permalink fragment (`/cases/:id#<entry-id>`), consumed by the scroll and
-  // highlight effect further down. Hoisted up here because two render-time
-  // state adjustments below both need it: the per-case reset and the
-  // per-fragment Activities-tab force.
+  // highlight effect further down, and by the Activities-tab force effect
+  // right after it.
   const permalinkFragment = location.hash?.replace(/^#/, "") ?? "";
   // Tracked separately from patchCase.isPending: that flag is shared with the
   // lifecycle transitions, and reusing it would spin the state button whenever
@@ -589,29 +603,33 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setCreateTaskOpen(false);
     setFixEtaOpen(false);
     setAddTagOpen(false);
-    // Following a permalink from one case to another keeps this page mounted and
-    // can carry the *same* fragment (e.g. #description → #description), so the
-    // fragment-keyed force below won't fire. Force it here instead, otherwise
-    // the new case would open on whatever tab the previous one was left on.
-    if (permalinkFragment) setActiveTab("activities");
+    // No tab reset needed here anymore: `activeTab` is now derived from the
+    // URL (see `usePathTabs` above), and every in-app link between cases
+    // (related case, child case, sidebar recent-cases, etc.) navigates to the
+    // bare `${detailPath}` with no tab segment, which already resolves to the
+    // default "activities" tab — so switching cases can't leak a leftover tab
+    // selection the way the old local `useState` could.
   }
 
   // isAnnouncement can only be confirmed once `data` loads (see its
   // definition above) — if a case reached via /cases/:id turns out to be an
   // announcement and the active tab is one hidden for announcements, fall
-  // back to Activities. Same render-time adjustment pattern as the reset
-  // above rather than an effect, to avoid an extra render pass.
-  if (
-    isAnnouncement &&
-    (activeTab === "related" ||
-      activeTab === "watchers" ||
-      activeTab === "sla" ||
-      activeTab === "time" ||
-      activeTab === "call-requests" ||
-      activeTab === "tasks")
-  ) {
-    setActiveTab("activities");
-  }
+  // back to Activities. This now has to run as an effect rather than a
+  // render-time adjustment: `setActiveTab` is a navigation (URL change), not
+  // local state, and issuing a navigate() mid-render is unsafe.
+  useEffect(() => {
+    if (
+      isAnnouncement &&
+      (activeTab === "related" ||
+        activeTab === "watchers" ||
+        activeTab === "sla" ||
+        activeTab === "time" ||
+        activeTab === "call-requests" ||
+        activeTab === "tasks")
+    ) {
+      setActiveTab("activities", { replace: true });
+    }
+  }, [isAnnouncement, activeTab, setActiveTab]);
 
   // Twitter-style permalinks: when the URL has a fragment matching an entry id,
   // jump to the Activities tab and hand off to `scrollToFragmentWithRetry`,
@@ -630,24 +648,25 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // fragment link is followed, which is why the bug reads as "new tab only."
   const activitiesFeedReady =
     !isCommentsLoading && !isChatLoading && !isActivityLoading;
-  // Forcing the Activities tab is a state adjustment, done during render like
-  // the prevCaseId reset above — not in the effect below. It has to be keyed on
-  // the fragment *changing*: the effect's other dependency
-  // (`activitiesFeedReady`) flips false → true as the three feed sources
-  // settle, so a setActiveTab living inside the effect re-ran on that flip and
-  // dragged a user who had switched tabs while the feed loaded back to
-  // Activities. Keyed on the fragment, the tab is forced once per link.
-  //
-  // No adjustment is needed on first mount: `activeTab` already starts at
-  // "activities", so initialising prevFragment to the current fragment is
-  // correct rather than a missed force. Following a permalink to a *different*
-  // case with the same fragment is handled by the prevCaseId block above,
-  // since the fragment itself does not change there.
-  const [prevFragment, setPrevFragment] = useState(permalinkFragment);
-  if (permalinkFragment !== prevFragment) {
-    setPrevFragment(permalinkFragment);
-    if (permalinkFragment) setActiveTab("activities");
-  }
+  // Forcing the Activities tab has to be keyed on the fragment *changing*
+  // only, not on `activitiesFeedReady`: that flips false → true as the three
+  // feed sources settle, and a setActiveTab re-running on that flip would drag
+  // a user who had switched tabs while the feed loaded back to Activities.
+  // Deliberately excludes `activeTab`/`setActiveTab` from the deps below so it
+  // doesn't re-fire just because the user switches tabs afterward — it only
+  // needs to run once per distinct fragment (including a permalink into a
+  // *different* case with the same fragment, e.g. #description → #description
+  // — the effect still reruns there since this page stays mounted across a
+  // case-to-case navigation and `permalinkFragment` is read straight off the
+  // current location on every render). `setActiveTab` navigates with
+  // `replace` and preserves the current hash (see `usePathTabs`), so the
+  // fragment itself survives this correction for the scroll effect below.
+  useEffect(() => {
+    if (permalinkFragment && activeTab !== "activities") {
+      setActiveTab("activities", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permalinkFragment]);
   useEffect(() => {
     // Wait for the feed to actually be able to render the target before
     // attempting to find it — see the comment above.

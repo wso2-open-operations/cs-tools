@@ -76,6 +76,7 @@ import type {
 } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
+import { usePathTabs } from "@hooks/useSectionTabs";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations?tab=incidents";
 
@@ -159,6 +160,9 @@ const TAB_DEFS: Array<{ id: IncidentTabId; label: string; icon: JSX.Element }> =
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
 ];
 
+// Every known tab id, for `usePathTabs` to validate an incoming URL segment.
+const INCIDENT_TAB_IDS = TAB_DEFS.map((t) => t.id);
+
 /**
  * Detail for a single incident (`GET /incidents/{id}`), tabbed to match
  * `CsmCaseDetailPage`'s structural pattern — Activities / Details / Related /
@@ -182,7 +186,13 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const patchIncident = usePatchIncident();
   const [editOpen, setEditOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<IncidentTabId>("activities");
+  // Tab is a real URL path segment (`/operations/incidents/:id/:tab?`) so a
+  // link to a specific tab is shareable/bookmarkable.
+  const { activeTab, setActiveTab } = usePathTabs<IncidentTabId>(
+    `/operations/incidents/${id}`,
+    INCIDENT_TAB_IDS,
+    "activities",
+  );
   const [resolutionTarget, setResolutionTarget] = useState<
     Extract<BeIncidentState, "RESOLVED" | "CLOSED"> | null
   >(null);

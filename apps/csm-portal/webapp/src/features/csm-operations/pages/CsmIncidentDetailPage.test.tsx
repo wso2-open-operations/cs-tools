@@ -17,6 +17,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import type { JSX } from "react";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  type NavigateOptions,
+  type To,
+} from "react-router";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeIncidentDetail } from "@api/backend/types";
 
@@ -41,10 +51,6 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ get: vi.fn(), patch: vi.fn() }),
 }));
 
-vi.mock("react-router", () => ({
-  useParams: () => ({ id: "inc-1" }),
-  useLocation: () => ({ pathname: "/operations/incidents/inc-1", search: "", state: undefined }),
-}));
 vi.mock("@hooks/useNavTransition", () => ({
   useNavTransition: () => navigateMock,
 }));
@@ -82,6 +88,43 @@ vi.mock("@api/useSearchUsersByName", () => ({
 
 // Imported after the mocks above so the module picks them up.
 import CsmIncidentDetailPage from "@features/csm-operations/pages/CsmIncidentDetailPage";
+
+// `useNavTransition` is mocked module-wide (above) so most of this file's
+// tests can assert on navigate-call arguments without a real router
+// transition ever needing to happen. But this page's tab strip is now a real
+// URL path segment (`usePathTabs`), and `goToTab` below simulates clicking a
+// tab, so the mock has to actually drive the router — bridge it to the real
+// `useNavigate` from this render tree, same pattern as
+// CsmCaseDetailPage.test.tsx's `NavigateBridge`.
+function NavigateBridge(): null {
+  const navigate = useNavigate();
+  navigateMock.mockImplementation((to: To, options?: NavigateOptions) =>
+    navigate(to, options),
+  );
+  return null;
+}
+
+// Renders the real route pathname, so a test can assert the router itself
+// actually transitioned to a given tab's URL segment, not just that the page
+// re-rendered.
+function LocationProbe(): JSX.Element {
+  const location = useLocation();
+  return <div data-testid="location-probe">{location.pathname}</div>;
+}
+
+function renderPage(
+  initialEntry = "/operations/incidents/inc-1",
+): ReturnType<typeof render> {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <NavigateBridge />
+      <LocationProbe />
+      <Routes>
+        <Route path="/operations/incidents/:id/:tab?" element={<CsmIncidentDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
 
 const BASE_INCIDENT: BeIncidentDetail = {
   id: "inc-1",
@@ -132,7 +175,7 @@ afterEach(() => {
 describe("CsmIncidentDetailPage — tabs", () => {
   it("renders all five tabs and defaults to Activities", () => {
     mockQueryResult({ data: BASE_INCIDENT });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
 
     expect(screen.getByRole("tab", { name: /activities/i })).toHaveAttribute(
       "aria-selected",
@@ -146,7 +189,7 @@ describe("CsmIncidentDetailPage — tabs", () => {
 
   it("switches to the Details tab and shows classification fields", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, category: "INQUIRY" } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/details/i);
     expect(screen.getByText("Classification")).toBeInTheDocument();
     expect(screen.getByText("INQUIRY")).toBeInTheDocument();
@@ -154,7 +197,7 @@ describe("CsmIncidentDetailPage — tabs", () => {
 
   it("renders parent incident, change request, and problem as clickable references under Related", () => {
     mockQueryResult({ data: BASE_INCIDENT });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/related/i);
 
     clickChip("INC0011111");
@@ -169,7 +212,7 @@ describe("CsmIncidentDetailPage — tabs", () => {
 
   it("renders 'Caused by' as plain, non-navigable text since its target type is unconfirmed", () => {
     mockQueryResult({ data: BASE_INCIDENT });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/related/i);
 
     const causedByText = screen.getByText("Some obscure record");
@@ -183,7 +226,7 @@ describe("CsmIncidentDetailPage — tabs", () => {
         watchList: [{ id: "u1", name: "Jane Doe", email: "jane.doe@example.com" }],
       },
     });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/watchers/i);
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
   });
@@ -196,11 +239,59 @@ describe("CsmIncidentDetailPage — tabs", () => {
         workNotes: "Checked the gateway logs.",
       },
     });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/details/i);
     expect(screen.queryByText("Comments & notes")).not.toBeInTheDocument();
     expect(screen.queryByText("Customer says the issue recurred.")).not.toBeInTheDocument();
     expect(screen.queryByText("Checked the gateway logs.")).not.toBeInTheDocument();
+  });
+});
+
+describe("CsmIncidentDetailPage — tab is a real URL path segment", () => {
+  it("clicking a tab navigates to that tab's own URL", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+
+    goToTab(/details/i);
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/operations/incidents/inc-1/details",
+    );
+    expect(screen.getByRole("tab", { name: /details/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("loading the page directly at a tab's URL opens on that tab", () => {
+    mockQueryResult({
+      data: {
+        ...BASE_INCIDENT,
+        watchList: [{ id: "u1", name: "Jane Doe", email: "jane.doe@example.com" }],
+      },
+    });
+    renderPage("/operations/incidents/inc-1/watchers");
+
+    expect(screen.getByRole("tab", { name: /watchers/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+  });
+
+  it("falls back to Activities for an unknown tab segment, without redirecting the URL", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage("/operations/incidents/inc-1/bogus-tab");
+
+    expect(screen.getByRole("tab", { name: /activities/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // No redirect loop / URL correction — the caller sees exactly the URL it
+    // asked for, just rendered as the default tab.
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/operations/incidents/inc-1/bogus-tab",
+    );
   });
 });
 
@@ -212,7 +303,7 @@ describe("CsmIncidentDetailPage — Watchers tab is read-only (watchList PATCH i
         watchList: [{ id: "u1", name: "Jane Doe", email: "jane.doe@example.com" }],
       },
     });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/watchers/i);
 
     const chip = screen.getByText("Jane Doe").closest(".MuiChip-root");
@@ -221,7 +312,7 @@ describe("CsmIncidentDetailPage — Watchers tab is read-only (watchList PATCH i
 
   it("disables the 'Add watcher' button", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, watchList: [] } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     goToTab(/watchers/i);
 
     expect(screen.getByRole("button", { name: /add watcher/i })).toBeDisabled();
@@ -240,7 +331,7 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
 
   it("dispatches a direct PATCH for a simple transition (IN_PROGRESS -> ON_HOLD)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     openChangeState();
     fireEvent.click(screen.getByRole("menuitem", { name: /on hold/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
@@ -251,7 +342,7 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
 
   it("opens the resolution dialog for RESOLVED instead of PATCHing immediately", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     openChangeState();
     fireEvent.click(screen.getByRole("menuitem", { name: /resolved/i }));
     expect(patchMutateMock).not.toHaveBeenCalled();
@@ -263,7 +354,7 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
 
   it("submits the resolution dialog with state + resolutionCode + resolutionNotes", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     openChangeState();
     fireEvent.click(screen.getByRole("menuitem", { name: /resolved/i }));
 
@@ -293,7 +384,7 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
 
   it("renders no state-transition buttons for a terminal incident (CLOSED)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "CLOSED" } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     expect(screen.queryByRole("button", { name: /in progress/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /cancelled/i })).not.toBeInTheDocument();
@@ -301,7 +392,7 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
 
   it("renders no state-transition buttons for a terminal incident (CANCELLED)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "CANCELLED" } });
-    render(<CsmIncidentDetailPage />);
+    renderPage();
     expect(screen.queryByRole("button", { name: /in progress/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
   });

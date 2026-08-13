@@ -81,6 +81,7 @@ import {
 import type { BeEntityRef } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
+import { usePathTabs } from "@hooks/useSectionTabs";
 
 const OPERATIONS_CR_PATH = "/operations?tab=change_requests";
 
@@ -177,6 +178,9 @@ const TAB_DEFS: Array<{
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
 ];
 
+// Every known tab id, for `usePathTabs` to validate an incoming URL segment.
+const CHANGE_REQUEST_TAB_IDS = TAB_DEFS.map((t) => t.id);
+
 /**
  * Read-only detail for a single change request (`GET /change-requests/{id}`):
  * its references, the change window, approval state, and the implementation /
@@ -194,7 +198,13 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const patchCr = usePatchChangeRequest();
   const [editOpen, setEditOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<ChangeRequestTabId>("approval");
+  // Tab is a real URL path segment (`/operations/change-requests/:id/:tab?`)
+  // so a link to a specific tab is shareable/bookmarkable.
+  const { activeTab, setActiveTab } = usePathTabs<ChangeRequestTabId>(
+    `/operations/change-requests/${id}`,
+    CHANGE_REQUEST_TAB_IDS,
+    "approval",
+  );
   const engineerName = useEngineerDisplayName();
 
   const { data: comments } = useGetCsmChangeRequestComments(id);
