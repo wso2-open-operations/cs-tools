@@ -25,7 +25,7 @@ import {
   Paper,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Search } from "@wso2/oxygen-ui-icons-react";
+import { MessageSquare, Search } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useSearchParams } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
@@ -64,12 +64,18 @@ import {
   QUICK_PROBLEM_MIN_QUERY_LEN,
   useQuickProblemSearch,
 } from "@features/csm-operations/api/useQuickProblemSearch";
+import {
+  classifyQuickConversationQuery,
+  QUICK_CONVERSATION_MIN_QUERY_LEN,
+  useQuickConversationSearch,
+} from "@features/csm-projects/api/useQuickConversationSearch";
 
 type Section =
   | "Cases"
   | "Incidents"
   | "Change Requests"
   | "Problems"
+  | "Conversations"
   | "Pinned"
   | "Recents"
   | "Pages";
@@ -92,7 +98,7 @@ interface Result {
   section: Section;
   /** Present only for "Cases" results — renders as a rich card instead of a plain row. */
   caseHit?: QuickCaseHit;
-  /** Present only for Incident/Change-request/Problem results — see {@link EntityCardHit}. */
+  /** Present only for Incident/Change-request/Problem/Conversation results — see {@link EntityCardHit}. */
   entityHit?: EntityCardHit;
 }
 
@@ -102,7 +108,9 @@ const RECENT_LIMIT = 8;
  * Which entity kind's exact-match search actually ran for the current query
  * — drives the shared "showing an exact match" banner. A typed query only
  * ever matches one of these shapes (CS/INC/PRB/CHG are distinct prefixes,
- * all followed by exactly 7 digits), so at most one is ever non-null.
+ * all followed by exactly 7 digits; CHAT is its own distinct prefix, just
+ * without a fixed digit count — see `classifyConversationQuery`), so at most
+ * one is ever non-null.
  */
 type ExactMatchKind =
   | "caseNumber"
@@ -110,6 +118,7 @@ type ExactMatchKind =
   | "incidentNumber"
   | "problemNumber"
   | "changeRequestNumber"
+  | "conversationNumber"
   | null;
 
 const EXACT_MATCH_LABELS: Record<Exclude<ExactMatchKind, null>, string> = {
@@ -118,6 +127,7 @@ const EXACT_MATCH_LABELS: Record<Exclude<ExactMatchKind, null>, string> = {
   incidentNumber: "incident number",
   problemNumber: "problem number",
   changeRequestNumber: "change request number",
+  conversationNumber: "conversation number",
 };
 
 const isMac =
@@ -135,15 +145,16 @@ export default function QuickNav(): JSX.Element | null {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   // Set only via the "Search in subject and description too" affordance below — opts a
-  // query that matched one of the case/incident/problem/change-request
-  // exact-match number (or WSO2-id) patterns back into free-text search for
-  // all four entity searches at once. Cleared whenever the query text itself
-  // changes, so widening one search never silently sticks for the next one
-  // typed. Shared across all four rather than one flag per type: a typed
-  // query only ever matches one of the four exact-match shapes (they have
-  // distinct prefixes — CS/INC/PRB/CHG — so widening always targets exactly
-  // the one search that was actually scoped; passing it to the other three
-  // hooks is a no-op since they're already on the free-text path).
+  // query that matched one of the case/incident/problem/change-request/
+  // conversation exact-match number (or WSO2-id) patterns back into
+  // free-text search for all five entity searches at once. Cleared whenever
+  // the query text itself changes, so widening one search never silently
+  // sticks for the next one typed. Shared across all five rather than one
+  // flag per type: a typed query only ever matches one of the five
+  // exact-match shapes (they have distinct prefixes — CS/INC/PRB/CHG/CHAT —
+  // so widening always targets exactly the one search that was actually
+  // scoped; passing it to the other four hooks is a no-op since they're
+  // already on the free-text path).
   const [forceFreeText, setForceFreeText] = useState(false);
 
   // Shareable-link support: `?q=` opens the palette pre-filled with a search
@@ -167,7 +178,7 @@ export default function QuickNav(): JSX.Element | null {
 
   // Whether the query the API actually ran (the debounced one) would be
   // routed as an exact-match filter rather than free-text search, for each
-  // of the four searchable entity kinds — drives the shared "showing an
+  // of the five searchable entity kinds — drives the shared "showing an
   // exact match" banner below. Computed off the debounced (not live) query
   // so the banner only reflects the search that actually ran, not what's
   // mid-typing.
@@ -177,11 +188,14 @@ export default function QuickNav(): JSX.Element | null {
   const changeRequestSearchScope = classifyQuickChangeRequestQuery(
     debouncedQuery.trim(),
   );
+  const conversationSearchScope = classifyQuickConversationQuery(
+    debouncedQuery.trim(),
+  );
 
-  // This picks whichever of the four searches would run in exact-match mode
+  // This picks whichever of the five searches would run in exact-match mode
   // (see {@link ExactMatchKind}), to drive both a single shared banner
-  // instead of one per entity kind (the palette is one search box, not four)
-  // and — below — which of the four hooks actually get to search at all.
+  // instead of one per entity kind (the palette is one search box, not five)
+  // and — below — which of the five hooks actually get to search at all.
   // Computed off the classifications above (themselves off the debounced
   // query), so this doesn't depend on any of the hooks' own results.
   const exactMatchKind: ExactMatchKind =
@@ -195,18 +209,20 @@ export default function QuickNav(): JSX.Element | null {
             ? "problemNumber"
             : changeRequestSearchScope === "number"
               ? "changeRequestNumber"
-              : null;
+              : conversationSearchScope === "number"
+                ? "conversationNumber"
+                : null;
 
-  // Whether each of the four searches should actually run for the current
+  // Whether each of the five searches should actually run for the current
   // debounced query. When the query matches exactly one entity kind's
   // exact-match shape (`exactMatchKind !== null`), only that one kind's hook
-  // runs — the other three would otherwise burn a free-text request against
+  // runs — the other four would otherwise burn a free-text request against
   // entity types the query obviously doesn't belong to (e.g. typing a CHG
-  // number shouldn't also run a case/incident/problem search for the literal
-  // string "CHG0038721"). `forceFreeText` (the "Search in subject and description too" widen
-  // affordance) overrides this for all four at once, since widening is
-  // meant to broaden the search across every entity kind, not just the one
-  // that was originally scoped.
+  // number shouldn't also run a case/incident/problem/conversation search for
+  // the literal string "CHG0038721"). `forceFreeText` (the "Search in
+  // subject and description too" widen affordance) overrides this for all
+  // five at once, since widening is meant to broaden the search across every
+  // entity kind, not just the one that was originally scoped.
   const caseSearchShouldRun =
     forceFreeText ||
     exactMatchKind === null ||
@@ -220,6 +236,10 @@ export default function QuickNav(): JSX.Element | null {
     forceFreeText ||
     exactMatchKind === null ||
     exactMatchKind === "changeRequestNumber";
+  const conversationSearchShouldRun =
+    forceFreeText ||
+    exactMatchKind === null ||
+    exactMatchKind === "conversationNumber";
 
   // API-backed case lookup: a CS/WSO2 id (or any subject text) resolves to real
   // cases. Routed to an exact-match field filter when the debounced query
@@ -236,14 +256,15 @@ export default function QuickNav(): JSX.Element | null {
 
   // Same debounced query string fans out to the other searchable entity
   // kinds — one shared debounce (above) rather than each hook debouncing its
-  // own copy, so a keystroke costs at most one query-string change, not four.
+  // own copy, so a keystroke costs at most one query-string change, not five.
   // Each is routed to its own exact-match number filter the same way cases
   // are (see `classifyQuickIncidentQuery`/`classifyQuickProblemQuery`/
-  // `classifyQuickChangeRequestQuery`), also gated on the same shared
-  // `forceFreeText` widen flag and the same should-run suppression as cases
-  // above. Incidents/CRs/problems are ServiceNow-only and comparatively rare
-  // hits, so — unlike Cases — these don't get a dedicated skeleton: their
-  // sections simply appear once data lands, same as Pinned/Recent/Pages.
+  // `classifyQuickChangeRequestQuery`/`classifyQuickConversationQuery`), also
+  // gated on the same shared `forceFreeText` widen flag and the same
+  // should-run suppression as cases above. Incidents/CRs/problems/
+  // conversations are comparatively rare hits, so — unlike Cases — these
+  // don't get a dedicated skeleton: their sections simply appear once data
+  // lands, same as Pinned/Recent/Pages.
   const incidentSearch = useQuickIncidentSearch(
     open && incidentSearchShouldRun ? debouncedQuery : "",
     { forceFreeText },
@@ -254,6 +275,13 @@ export default function QuickNav(): JSX.Element | null {
   );
   const problemSearch = useQuickProblemSearch(
     open && problemSearchShouldRun ? debouncedQuery : "",
+    { forceFreeText },
+  );
+  // Global (unscoped) conversation search — no `projectIds` is passed (see
+  // `useQuickConversationSearch`), unlike the project Work-items "Chats"
+  // tab's own search, which is fixed to the surrounding project.
+  const conversationSearch = useQuickConversationSearch(
+    open && conversationSearchShouldRun ? debouncedQuery : "",
     { forceFreeText },
   );
 
@@ -267,7 +295,8 @@ export default function QuickNav(): JSX.Element | null {
     !caseSearch.isFetching &&
     !incidentSearch.isFetching &&
     !changeRequestSearch.isFetching &&
-    !problemSearch.isFetching;
+    !problemSearch.isFetching &&
+    !conversationSearch.isFetching;
   // True while a case search is in flight (or its result is for a stale
   // query) — drives the "Cases" section's skeleton independently of whether
   // Pinned/Recent/Pages already have matches to show.
@@ -280,7 +309,7 @@ export default function QuickNav(): JSX.Element | null {
   // `caseSearch.data` still holds the previous results. Without this,
   // the skeleton block and the real "Cases" section would render together.
   const showCasesSkeleton = casesLoading && !caseSearch.data;
-  // True while any of the four searches this query feeds is actually
+  // True while any of the five searches this query feeds is actually
   // in-flight — used below to show a quiet "didn't match a known number
   // pattern" hint only for the duration of the wait, not once results have
   // settled (settled-with-nothing already gets the "No matches." empty
@@ -293,14 +322,15 @@ export default function QuickNav(): JSX.Element | null {
     caseSearch.isFetching ||
     incidentSearch.isFetching ||
     changeRequestSearch.isFetching ||
-    problemSearch.isFetching;
+    problemSearch.isFetching ||
+    conversationSearch.isFetching;
   // Gates the "No matches." empty state below. `casesLoading` alone isn't
   // enough here: it only reflects the case search, so when the query is
   // scoped to (say) a CHG number — case search suppressed entirely per
   // `caseSearchShouldRun` — `caseSearch.isFetching` goes false almost
   // immediately (it isn't even running), and "No matches." would render
   // while the change-request search that's actually relevant is still in
-  // flight. Reuses `anySearchFetching` (any of the four still fetching,
+  // flight. Reuses `anySearchFetching` (any of the five still fetching,
   // which for a suppressed hook is trivially false) alongside the shared
   // `caseHitsSettled` debounce check, so the empty state waits for BOTH
   // "the debounce settled" AND "nothing still fetching" before it can
@@ -309,7 +339,7 @@ export default function QuickNav(): JSX.Element | null {
     trimmedQuery.length >= QUICK_CASE_MIN_QUERY_LEN &&
     (!caseHitsSettled || anySearchFetching);
   // Passive, low-key heads-up shown for genuinely free-text queries (none of
-  // the four exact-match patterns matched) — mutually exclusive with
+  // the five exact-match patterns matched) — mutually exclusive with
   // `showExactMatchBanner` by construction: this requires
   // `exactMatchKind === null`, that requires `exactMatchKind !== null`.
   // Deliberately NOT gated on `anySearchFetching`/`resultsSettling`: it
@@ -319,7 +349,7 @@ export default function QuickNav(): JSX.Element | null {
   // which would leave "No matches." with no explanation of why a plain-
   // looking query didn't get the fast exact-match path.
   //
-  // Gated on the free-text path's minimum query length (all four hooks'
+  // Gated on the free-text path's minimum query length (all five hooks'
   // MIN_QUERY_LEN happen to be the same value, 2 — using the case one as
   // the representative constant), not just `> 0`: below that length every
   // hook is disabled (`enabled: q.length >= MIN_LEN`) and no search runs at
@@ -458,6 +488,37 @@ export default function QuickNav(): JSX.Element | null {
           }))
         : [];
 
+    // Conversations render as a plain `EntityCardHit` row too, same as
+    // Incidents/Change Requests/Problems above — no case-style rich card.
+    // The "subject" line is whatever's most useful to identify the chat by:
+    // who started it if known, otherwise a truncated initial message (the
+    // data source doesn't always resolve an initiator to a name/email).
+    const conversations: Result[] =
+      caseHitsSettled && trimmedQuery.length >= QUICK_CONVERSATION_MIN_QUERY_LEN
+        ? (conversationSearch.data ?? []).map((c) => {
+            const truncatedMessage =
+              c.initialMessage && c.initialMessage.length > 80
+                ? `${c.initialMessage.slice(0, 80)}…`
+                : c.initialMessage;
+            const subject = c.initiatorName
+              ? `Started by ${c.initiatorName}`
+              : truncatedMessage || "(no initial message)";
+            return {
+              key: `conversation-${c.id}`,
+              icon: <MessageSquare size={16} />,
+              label: c.number || subject,
+              sublabel: c.number ? subject : undefined,
+              href: `/conversations/${c.id}`,
+              section: "Conversations" as const,
+              entityHit: {
+                icon: <MessageSquare size={16} />,
+                idLabel: c.number,
+                subject,
+              },
+            };
+          })
+        : [];
+
     // A pinned/recent entry for a case carries a severity/status snapshot
     // from when it was last visited — render it as the same rich card a live
     // case search hit gets, instead of a plain icon+label row.
@@ -515,6 +576,7 @@ export default function QuickNav(): JSX.Element | null {
       ...incidents,
       ...changeRequests,
       ...problems,
+      ...conversations,
       ...pinned,
       ...recent,
       ...pages,
@@ -527,6 +589,7 @@ export default function QuickNav(): JSX.Element | null {
     incidentSearch.data,
     changeRequestSearch.data,
     problemSearch.data,
+    conversationSearch.data,
   ]);
 
   // Clamp at render so a stale index from shrinking results never points past
@@ -567,14 +630,14 @@ export default function QuickNav(): JSX.Element | null {
   };
 
   // `?goto=` resolution: once every search this query feeds has settled (not
-  // just the case search — an incident/CR/problem number should auto-jump
-  // too), look for an exact (case-insensitive) match on whichever identifier
-  // a person would actually paste into a link — a display number
-  // (`CS0440883`/`INC0012345`/...), the internal WSO2 case id, or a raw
-  // record id — across all four result sets combined. Exactly one match
-  // navigates straight there; zero or multiple matches leave the palette
-  // open on its normal search results so the user can pick, since a forced
-  // jump would be wrong (or arbitrary) either way.
+  // just the case search — an incident/CR/problem/conversation number should
+  // auto-jump too), look for an exact (case-insensitive) match on whichever
+  // identifier a person would actually paste into a link — a display number
+  // (`CS0440883`/`INC0012345`/`CHAT0000012345`/...), the internal WSO2 case
+  // id, or a raw record id — across all five result sets combined. Exactly
+  // one match navigates straight there; zero or multiple matches leave the
+  // palette open on its normal search results so the user can pick, since a
+  // forced jump would be wrong (or arbitrary) either way.
   useEffect(() => {
     if (!gotoTarget) return;
     const allSettled =
@@ -582,7 +645,8 @@ export default function QuickNav(): JSX.Element | null {
       !caseSearch.isFetching &&
       !incidentSearch.isFetching &&
       !changeRequestSearch.isFetching &&
-      !problemSearch.isFetching;
+      !problemSearch.isFetching &&
+      !conversationSearch.isFetching;
     if (!allSettled) return;
 
     const target = gotoTarget.toLowerCase();
@@ -601,12 +665,16 @@ export default function QuickNav(): JSX.Element | null {
     const problemHref = (problemSearch.data ?? []).find((p) =>
       matchesTarget(p.id, p.number),
     );
+    const conversationHref = (conversationSearch.data ?? []).find((c) =>
+      matchesTarget(c.id, c.number),
+    );
 
     const matches = [
       caseHref && `/cases/${caseHref.id}`,
       incidentHref && `/operations/incidents/${incidentHref.id}`,
       crHref && `/operations/change-requests/${crHref.id}`,
       problemHref && `/operations/problems/${problemHref.id}`,
+      conversationHref && `/conversations/${conversationHref.id}`,
     ].filter((href): href is string => !!href);
 
     /* eslint-disable react-hooks/set-state-in-effect -- syncs palette state to the external goto/search resolution outcome, a one-shot action once the search settles */
@@ -638,6 +706,8 @@ export default function QuickNav(): JSX.Element | null {
     changeRequestSearch.data,
     problemSearch.isFetching,
     problemSearch.data,
+    conversationSearch.isFetching,
+    conversationSearch.data,
     navigate,
     setSearchParams,
   ]);
@@ -759,7 +829,7 @@ export default function QuickNav(): JSX.Element | null {
                 autoFocus
                 inputRef={inputRef}
                 fullWidth
-                placeholder="Search cases, incidents, change requests, problems, or jump to pinned, recent, pages…"
+                placeholder="Search cases, incidents, change requests, problems, conversations, or jump to pinned, recent, pages…"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);

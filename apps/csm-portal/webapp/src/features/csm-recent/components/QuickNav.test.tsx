@@ -80,6 +80,17 @@ vi.mock("@features/csm-operations/api/useQuickProblemSearch", () => ({
     /^PRB\d{7}$/.test(query) ? "number" : "text",
 }));
 
+const quickConversationSearchMock = vi.fn();
+vi.mock("@features/csm-projects/api/useQuickConversationSearch", () => ({
+  QUICK_CONVERSATION_MIN_QUERY_LEN: 2,
+  useQuickConversationSearch: (
+    q: string,
+    options?: { forceFreeText?: boolean },
+  ) => quickConversationSearchMock(q, options),
+  classifyQuickConversationQuery: (query: string): "number" | "text" =>
+    /^CHAT\d+$/.test(query) ? "number" : "text",
+}));
+
 const navigateMock = vi.fn();
 vi.mock("@hooks/useNavTransition", () => ({
   useNavTransition: () => navigateMock,
@@ -109,6 +120,7 @@ function primaryMockFor(query: string) {
   if (/^INC\d{7}$/.test(query)) return quickIncidentSearchMock;
   if (/^PRB\d{7}$/.test(query)) return quickProblemSearchMock;
   if (/^CHG\d{7}$/.test(query)) return quickChangeRequestSearchMock;
+  if (/^CHAT\d+$/.test(query)) return quickConversationSearchMock;
   return quickCaseSearchMock;
 }
 
@@ -136,6 +148,7 @@ describe("QuickNav", () => {
     quickIncidentSearchMock.mockReturnValue(idleResult);
     quickChangeRequestSearchMock.mockReturnValue(idleResult);
     quickProblemSearchMock.mockReturnValue(idleResult);
+    quickConversationSearchMock.mockReturnValue(idleResult);
   });
 
   it("renders an 'Incidents' section for a live incident hit and links to the incident route", async () => {
@@ -185,11 +198,35 @@ describe("QuickNav", () => {
     expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/cr-1");
   });
 
+  it("renders a 'Conversations' section for a live conversation hit and links to the conversation route", async () => {
+    quickConversationSearchMock.mockReturnValue({
+      data: [
+        {
+          id: "conv-1",
+          number: "CHAT0000012345",
+          initiatorName: "Jane Doe",
+          initialMessage: "How do I reset my API key?",
+        },
+      ],
+      isFetching: false,
+    });
+
+    await openAndType("reset");
+
+    expect(await screen.findByText("Conversations")).toBeInTheDocument();
+    expect(screen.getByText("CHAT0000012345")).toBeInTheDocument();
+    expect(screen.getByText("Started by Jane Doe")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Started by Jane Doe"));
+    expect(navigateMock).toHaveBeenCalledWith("/conversations/conv-1");
+  });
+
   it("shows no entity sections beyond Pages while nothing has matched", async () => {
     await openAndType("zz");
     expect(screen.queryByText("Incidents")).not.toBeInTheDocument();
     expect(screen.queryByText("Change Requests")).not.toBeInTheDocument();
     expect(screen.queryByText("Problems")).not.toBeInTheDocument();
+    expect(screen.queryByText("Conversations")).not.toBeInTheDocument();
     expect(screen.getByText("No matches.")).toBeInTheDocument();
   });
 
@@ -334,14 +371,24 @@ describe("QuickNav", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows an exact-match banner for a conversation-number-shaped query", async () => {
+    await openAndType("CHAT0000012345");
+
+    expect(
+      await screen.findByText(/Showing an exact match for conversation number/),
+    ).toBeInTheDocument();
+  });
+
   it.each([
     ["INC0090472", quickIncidentSearchMock, "incident"],
     ["PRB0040192", quickProblemSearchMock, "problem"],
     ["CHG0038721", quickChangeRequestSearchMock, "change request"],
     ["CS0441174", quickCaseSearchMock, "case"],
+    ["CHAT0000012345", quickConversationSearchMock, "conversation"],
   ] as const)(
-    "routes a %s-shaped query only to the %s search, suppressing the other three entirely",
-    async (query, matchingMock, _label) => {
+    "routes a %s-shaped query only to the %s search, suppressing the other four entirely",
+    async (query, matchingMock, label) => {
+      void label;
       await openAndType(query);
 
       // The matching type gets the real query, in exact-match mode.
@@ -350,7 +397,7 @@ describe("QuickNav", () => {
         expect.objectContaining({ forceFreeText: false }),
       );
 
-      // The other three are passed an empty query — not the typed text, not
+      // The other four are passed an empty query — not the typed text, not
       // even as a free-text search — so their own `enabled` gate (`q.length
       // >= MIN_LEN`) keeps them from firing at all.
       const allMocks = [
@@ -358,6 +405,7 @@ describe("QuickNav", () => {
         quickIncidentSearchMock,
         quickProblemSearchMock,
         quickChangeRequestSearchMock,
+        quickConversationSearchMock,
       ];
       for (const mock of allMocks) {
         if (mock === matchingMock) continue;
@@ -369,7 +417,7 @@ describe("QuickNav", () => {
     },
   );
 
-  it("runs all four searches as free text for a query that matches none of the exact-match patterns", async () => {
+  it("runs all five searches as free text for a query that matches none of the exact-match patterns", async () => {
     await openAndType("printer jam");
 
     for (const mock of [
@@ -377,6 +425,7 @@ describe("QuickNav", () => {
       quickIncidentSearchMock,
       quickProblemSearchMock,
       quickChangeRequestSearchMock,
+      quickConversationSearchMock,
     ]) {
       expect(mock).toHaveBeenLastCalledWith(
         "printer jam",
