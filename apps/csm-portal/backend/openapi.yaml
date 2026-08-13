@@ -9168,6 +9168,11 @@ components:
               type: string
             createdByMe:
               type: boolean
+            createdBy:
+              type: array
+              items:
+                type: string
+              description: Filter to conversations initiated by any of these email addresses.
         sortBy:
           type: object
           properties:
