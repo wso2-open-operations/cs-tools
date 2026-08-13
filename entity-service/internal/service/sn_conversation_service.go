@@ -74,6 +74,7 @@ type snConversationFilters struct {
 	ProjectIDs  []string `json:"projectIds,omitempty"`
 	StateKeys   []int    `json:"stateKeys,omitempty"`
 	SearchQuery string   `json:"searchQuery,omitempty"`
+	Number      string   `json:"number,omitempty"`
 	CreatedByMe bool     `json:"createdByMe,omitempty"`
 }
 
@@ -163,6 +164,9 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchConversationsResponse{}, err
 	}
+	if err := validateExactNumber("number", &req.Filters.Number); err != nil {
+		return domain.SearchConversationsResponse{}, err
+	}
 	if req.SortBy.Field != "" && !validConversationSortField[req.SortBy.Field] {
 		return domain.SearchConversationsResponse{}, &apierror.ValidationError{Msg: "sortBy.field contains invalid value: " + string(req.SortBy.Field)}
 	}
@@ -199,6 +203,7 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 			ProjectIDs:  uuidsToSysids(req.Filters.ProjectIDs),
 			StateKeys:   stateKeys,
 			SearchQuery: req.Filters.SearchQuery,
+			Number:      req.Filters.Number,
 			CreatedByMe: req.Filters.CreatedByMe,
 		},
 		SortBy:     snSortBy,

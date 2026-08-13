@@ -3681,7 +3681,12 @@ type SearchConversationsFilters struct {
 	ProjectIDs  []string            `json:"projectIds"`
 	States      []ConversationState `json:"states"`
 	SearchQuery string              `json:"searchQuery"`
-	CreatedByMe bool                `json:"createdByMe"`
+	// Number filters to the conversation whose human-readable number (e.g.
+	// "CHAT0000012345") exactly matches (optional). Exact match against the
+	// backing data source's number field, routed as a first-class filter
+	// rather than through the free-text SearchQuery scan.
+	Number      string `json:"number,omitempty"`
+	CreatedByMe bool   `json:"createdByMe"`
 }
 
 // SearchConversationsRequest is the input for POST /conversations/search.
