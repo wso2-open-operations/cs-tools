@@ -9158,6 +9158,12 @@ components:
               items:
                 type: string
                 enum: [ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
+            number:
+              type: string
+              description: >-
+                A single conversation number (e.g. "CHAT0000012345"); matches
+                exactly. Routed as a first-class filter rather than through
+                the free-text searchQuery scan.
             searchQuery:
               type: string
             createdByMe:
