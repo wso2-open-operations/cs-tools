@@ -82,10 +82,13 @@ export function isCaseFieldFilterArray(value: unknown): value is WidgetCaseField
  * Builds the URL a dashboard widget tile's "View more" link points at — a
  * real, bookmarkable/shareable/refresh-safe URL (no router state): the
  * resource type is the path segment (`previewSlug`, from
- * `WIDGET_RESOURCE_CONFIG`), the widget's own id/display name are `w`/`n`
- * query params, and each filter field is its own readable query param
- * (e.g. `severities=critical`) rather than one opaque JSON blob — and the
- * signed-in user's own id, wherever it appears, is masked to `@me` (see
+ * `WIDGET_RESOURCE_CONFIG`), under the dashboard route's own static
+ * `preview` prefix (`/dashboard/preview/:previewSlug` — see `App.tsx`, kept
+ * distinct from `/dashboard/:dashboardId`'s open, BE-driven id space rather
+ * than risking the two colliding), the widget's own id/display name are
+ * `w`/`n` query params, and each filter field is its own readable query
+ * param (e.g. `severities=critical`) rather than one opaque JSON blob — and
+ * the signed-in user's own id, wherever it appears, is masked to `@me` (see
  * `CURRENT_USER_SENTINEL`). Read back by `parseWidgetPreviewFilters` /
  * `resolveCurrentUserSentinels` in `DashboardWidgetPreviewPage`.
  */
@@ -141,7 +144,7 @@ export function buildWidgetPreviewHref(params: {
     }
   }
   if (usesCaseFieldFilterShape) q.set(CASE_FILTER_MARKER, "1");
-  return `/dashboard/${params.previewSlug}?${q.toString()}`;
+  return `/dashboard/preview/${params.previewSlug}?${q.toString()}`;
 }
 
 /** One human-readable "what's actually being queried" entry — a single

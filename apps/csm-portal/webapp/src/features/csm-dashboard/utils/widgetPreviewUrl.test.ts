@@ -33,7 +33,7 @@ describe("widgetPreviewUrl", () => {
       filters: { severities: ["critical", "high"], states: ["open"] },
     });
 
-    expect(href.startsWith("/dashboard/cases?")).toBe(true);
+    expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
     const params = new URLSearchParams(href.split("?")[1]);
     expect(params.get("w")).toBe("my_critical_open");
     expect(params.get("n")).toBe("My Critical & High Cases");

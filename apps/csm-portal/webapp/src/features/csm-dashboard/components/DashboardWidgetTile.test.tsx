@@ -429,7 +429,7 @@ describe("DashboardWidgetTile", () => {
     const href = viewMoreLink.getAttribute("href") ?? "";
     // Goes to the widget's own preview page (real, bookmarkable URL — see
     // widgetPreviewUrl.ts), not straight to the resource's own tab.
-    expect(href.startsWith("/dashboard/cases?")).toBe(true);
+    expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
     const params = new URLSearchParams(href.split("?")[1]);
     expect(params.get("w")).toBe("my_critical_open_2");
     expect(params.get("n")).toBe("My Critical & High Cases");

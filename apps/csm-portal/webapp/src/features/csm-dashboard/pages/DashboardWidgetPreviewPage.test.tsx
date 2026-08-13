@@ -52,7 +52,10 @@ function renderAt(initialEntry: string) {
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/dashboard" element={<div>Dashboard landing</div>} />
-          <Route path="/dashboard/:previewSlug" element={<DashboardWidgetPreviewPage />} />
+          <Route
+            path="/dashboard/preview/:previewSlug"
+            element={<DashboardWidgetPreviewPage />}
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -65,7 +68,7 @@ describe("DashboardWidgetPreviewPage", () => {
   });
 
   it("prompts to open from a widget's View more link when the URL carries no widget params", () => {
-    renderAt("/dashboard/cases");
+    renderAt("/dashboard/preview/cases");
     expect(
       screen.getByText(/open this page from a dashboard widget/i),
     ).toBeInTheDocument();

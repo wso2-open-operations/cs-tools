@@ -437,14 +437,43 @@ export default function App(): JSX.Element {
                     element={<UserProfilePage />}
                   />
 
+                  {/* Dashboard selection: :dashboardId/:teamId are real URL
+                      path segments (not a hash fragment) so a specific
+                      dashboard/team view is shareable/bookmarkable — see
+                      CsmDashboardPage. Three routes, same convention as the
+                      two-level Project detail nesting below (an id-only
+                      route plus an id+extra-segment route pointing at the
+                      same element), rather than one route with two chained
+                      optional segments. Deliberately NOT nested under the
+                      widget-preview route's own static "preview" segment
+                      below or vice versa: :dashboardId is an open,
+                      BE/config-driven id (no fixed enum in this codebase),
+                      so it cannot be proven disjoint from
+                      WIDGET_RESOURCE_CONFIG's previewSlug values (e.g. a
+                      future dashboard id of "cases" or "tasks" is a
+                      plausible name) — two sibling routes shaped
+                      `dashboard/:x` would in any case only ever let ONE of
+                      them match for every value of `:x`, not just a
+                      colliding one, since React Router can't disambiguate
+                      two routes with an identical path pattern. Giving the
+                      preview page its own static "preview" prefix removes
+                      the ambiguity structurally instead of relying on the
+                      two id spaces staying disjoint by convention. */}
                   <Route path="dashboard" element={<CsmDashboardPage />} />
+                  <Route path="dashboard/:dashboardId" element={<CsmDashboardPage />} />
+                  <Route
+                    path="dashboard/:dashboardId/:teamId"
+                    element={<CsmDashboardPage />}
+                  />
                   {/* Dashboard widget "View more" preview — :previewSlug is
                       one of WIDGET_RESOURCE_CONFIG's own previewSlug values
                       (e.g. "cases"), resolved back to a resourceType by
                       resourceTypeForPreviewSlug. Distinct from the resource's
-                      own real list route (e.g. /cases). */}
+                      own real list route (e.g. /cases). Under its own static
+                      "preview" prefix — see the dashboard-selection routes'
+                      comment above for why. */}
                   <Route
-                    path="dashboard/:previewSlug"
+                    path="dashboard/preview/:previewSlug"
                     element={<DashboardWidgetPreviewPage />}
                   />
                   <Route path="cases" element={<CsmCasesPage />} />

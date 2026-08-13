@@ -81,8 +81,8 @@ export interface WidgetResourceConfig {
    * hover treatment) is colored with. */
   iconColor: "primary" | "secondary" | "success" | "error" | "info" | "warning";
   /** Friendly plural URL segment for this resource type's dashboard-widget
-   * "View more" preview page, e.g. `/dashboard/cases`. Distinct from that
-   * resource's own tab path (`buildHref`'s destination) — this route is
+   * "View more" preview page, e.g. `/dashboard/preview/cases`. Distinct from
+   * that resource's own tab path (`buildHref`'s destination) — this route is
    * dashboard-widget-scoped, not the resource's real list page. */
   previewSlug: string;
   /** One search-result item's own detail-page href, given the raw item —
@@ -656,8 +656,9 @@ export const WIDGET_RESOURCE_CONFIG: Record<
 };
 
 /** Reverse lookup of `previewSlug` back to its `resourceType`, for the
- * dashboard widget "View more" preview page's own `/dashboard/:previewSlug`
- * route — the only place a URL segment needs mapping back to a resourceType. */
+ * dashboard widget "View more" preview page's own
+ * `/dashboard/preview/:previewSlug` route — the only place a URL segment
+ * needs mapping back to a resourceType. */
 export function resourceTypeForPreviewSlug(
   slug: string | undefined,
 ): BeWidgetResourceType | undefined {
