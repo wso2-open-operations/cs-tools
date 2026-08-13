@@ -9157,7 +9157,7 @@ components:
               type: array
               items:
                 type: string
-                enum: [ACTIVE, RESOLVED]
+                enum: [ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
             searchQuery:
               type: string
             createdByMe:
@@ -9204,7 +9204,7 @@ components:
         state:
           type: string
           nullable: true
-          enum: [ACTIVE, RESOLVED]
+          enum: [ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
         createdOn:
           type: string
         createdBy:

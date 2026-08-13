@@ -179,7 +179,7 @@ func TestSearchConversations(t *testing.T) {
 
 	t.Run("rejects unknown state enum value", func(t *testing.T) {
 		h := NewConversationHandler(&mockEntityConversationClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{"filters":{"states":["CLOSED"]}}`)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/conversations/search", strings.NewReader(`{"filters":{"states":["ARCHIVED"]}}`)))
 		w := httptest.NewRecorder()
 		h.SearchConversations(w, r)
 		assertStatus(t, w, http.StatusBadRequest)

@@ -54,7 +54,7 @@ type searchConversationsRequest struct {
 }
 
 var (
-	validConversationStates     = map[string]bool{"ACTIVE": true, "RESOLVED": true}
+	validConversationStates     = map[string]bool{"ACTIVE": true, "RESOLVED": true, "CONVERTED": true, "ABANDONED": true, "CLOSED": true}
 	validConversationSortFields = map[string]bool{"createdOn": true, "updatedOn": true}
 	validConversationSortOrders = map[string]bool{"asc": true, "desc": true}
 )
