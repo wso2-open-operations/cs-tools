@@ -14,12 +14,45 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 import "@testing-library/jest-dom/vitest";
+
+// CaseActionBar renders `UserRefLink` (assignee), which resolves an unknown
+// id through `useResolvedUserId`, which needs the real API client — same
+// approach as CaseMetaBand.test.tsx.
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ post: vi.fn().mockResolvedValue({ users: [] }) }),
+}));
+
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
+
+/**
+ * Local `render` override: every case in this file renders `CaseActionBar`,
+ * which (via `UserRefLink`) needs both a `QueryClientProvider` (for
+ * `useResolvedUserId`'s `useQuery`) and a router context (for the profile
+ * `<Link>`) — wrapping here keeps every existing `render(<CaseActionBar ... />)`
+ * call site unchanged.
+ */
+function render(ui: ReactElement): ReturnType<typeof rtlRender> {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return rtlRender(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 /** A complete, minimal case-detail fixture; tests override state/nextStates. */
 const BASE_CASE: CsmCaseDetail = {
@@ -79,10 +112,14 @@ function caseInState(
 }
 
 describe("CaseActionBar — nextStates-driven buttons", () => {
-  it("renders one button per backend nextState, labelled by the target state", () => {
+  it("renders one menu item per backend nextState, labelled by the target state", () => {
     // The reported bug: a solution_proposed case returns
     // nextStates [closed, waiting_on_wso2] but only one button showed. Both
-    // must appear, each named after the backend state it moves into.
+    // must appear, each named after the backend state it moves into. With
+    // more than one reachable state the bar now consolidates them behind a
+    // single "Change state" trigger (see the "advisory close-gate" describe
+    // block below), so both are asserted as menu items, not top-level
+    // buttons.
     render(
       <CaseActionBar
         caseDetail={caseInState("solution_proposed", [
@@ -92,8 +129,9 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^close$/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /change state/i }));
+    expect(screen.getByRole("menuitem", { name: /wait on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^close$/i })).toBeInTheDocument();
   });
 
   it("shows exactly the transitions the backend permits, nothing more", () => {
@@ -106,10 +144,11 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /propose solution/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /request information/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^close$/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /change state/i }));
+    expect(screen.getByRole("menuitem", { name: /propose solution/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /request information/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /wait on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^close$/i })).not.toBeInTheDocument();
   });
 
   it("labels a target the same regardless of source state (no UI-invented verbs)", () => {
@@ -363,20 +402,33 @@ describe("CaseActionBar — create related case (closed-case reopen replacement)
   });
 });
 
-describe("CaseActionBar — unbuilt roadmap items stay disabled, not silently mock", () => {
-  // Create incident / Link to incident have no backend flow yet. They must
-  // never be clickable — a click that reaches onAction would surface a mock
-  // toast to a real user — and they must never depend on case state, since
-  // it isn't state that's missing, it's the feature itself.
-  const ROADMAP_ITEMS = [/create incident from case/i, /link to incident/i];
+describe("CaseActionBar — Create incident from case / Link to incident (ISSU-021)", () => {
+  // Both now have a real backend flow (CsmCaseDetailPage.tsx dispatches
+  // "create_incident" to CreateIncidentPage's nav state, and "link_incident"
+  // opens LinkIncidentDialog), so they follow the same closed-case
+  // read-only gate as every other secondary item rather than staying
+  // permanently disabled.
+  const ITEMS = [/create incident from case/i, /link to incident/i];
 
-  it.each(ROADMAP_ITEMS)("keeps %s disabled and inert", (name) => {
+  it.each(ITEMS)("dispatches %s as a secondary action when the case is open", (name) => {
     const onAction = vi.fn();
     render(
       <CaseActionBar
         caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
         onAction={onAction}
       />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    const item = screen.getByRole("menuitem", { name });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(ITEMS)("disables %s once the case is closed", (name) => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar caseDetail={caseInState("closed", [])} onAction={onAction} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /more/i }));
     const item = screen.getByRole("menuitem", { name });

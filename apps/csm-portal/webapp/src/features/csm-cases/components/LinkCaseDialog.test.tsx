@@ -98,7 +98,10 @@ describe("LinkCaseDialog — search-and-select", () => {
       />,
     );
     typeAndDebounce("CS-2002");
+    // Picking a hit only selects it into the confirm panel — the actual
+    // PATCH fires from the dialog's own "Link" action, not the row click.
     fireEvent.click(screen.getByText(/CS-2002 — Related latency issue/i));
+    fireEvent.click(screen.getByRole("button", { name: /^link$/i }));
     expect(onLink).toHaveBeenCalledWith("case-2002", "parent");
   });
 
@@ -116,6 +119,7 @@ describe("LinkCaseDialog — search-and-select", () => {
     fireEvent.click(screen.getByRole("radio", { name: /as related case/i }));
     typeAndDebounce("CS-2002");
     fireEvent.click(screen.getByText(/CS-2002 — Related latency issue/i));
+    fireEvent.click(screen.getByRole("button", { name: /^link$/i }));
     expect(onLink).toHaveBeenCalledWith("case-2002", "related");
   });
 

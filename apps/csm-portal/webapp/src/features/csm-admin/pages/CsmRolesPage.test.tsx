@@ -59,9 +59,19 @@ describe("CsmRolesPage", () => {
     });
     renderPage();
 
-    const agentLink = await screen.findByRole("link", { name: "Agent" });
+    // DirectoryEntityTable renders each row as a full-cell "stretched click"
+    // link (an absolutely-positioned, visually empty anchor over the row) so
+    // the whole row is click-through; its accessible name is the deliberately
+    // descriptive `aria-label="View members of {name}"`, not the bare row
+    // name, since a screen-reader user tabbing through the row-level anchors
+    // needs to know what activating one does.
+    const agentLink = await screen.findByRole("link", {
+      name: "View members of Agent",
+    });
     expect(agentLink).toHaveAttribute("href", "/admin/roles/agent");
-    const adminLink = await screen.findByRole("link", { name: "Admin" });
+    const adminLink = await screen.findByRole("link", {
+      name: "View members of Admin",
+    });
     expect(adminLink).toHaveAttribute("href", "/admin/roles/admin");
   });
 

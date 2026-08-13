@@ -14,8 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { MemoryRouter } from "react-router";
 import "@testing-library/jest-dom/vitest";
 import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncementsPage";
 import { useSearchAnnouncements } from "@features/csm-announcements/api/useSearchAnnouncements";
@@ -41,6 +48,12 @@ vi.mock("@features/csm-cases/components/AsyncProjectMultiSelect", () => ({
 }));
 
 const mockedUseSearch = vi.mocked(useSearchAnnouncements);
+
+/** `CsmAnnouncementsPage` renders a `RouterLink` per row, so every render
+ * here needs router context. */
+function render(ui: ReactElement): ReturnType<typeof rtlRender> {
+  return rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 const ROW: CsmAnnouncementRow = {
   id: "a-1",
