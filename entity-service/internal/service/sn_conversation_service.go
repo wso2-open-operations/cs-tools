@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -76,6 +77,7 @@ type snConversationFilters struct {
 	SearchQuery string   `json:"searchQuery,omitempty"`
 	Number      string   `json:"number,omitempty"`
 	CreatedByMe bool     `json:"createdByMe,omitempty"`
+	CreatedBy   []string `json:"createdBy,omitempty"`
 }
 
 // snConversationStateKeyMap maps domain ConversationState enums to SN numeric state keys.
@@ -136,6 +138,28 @@ func normalizeConversationPagination(p *domain.Pagination) error {
 	return nil
 }
 
+// maxConversationCreatedByEntries and maxConversationCreatedByEntryLen bound the
+// initiator (createdBy) filter before it reaches the backing integration. Length
+// caps only, not email-format validation -- mirrors validateExactNumber's
+// deliberate "don't hardcode format assumptions this layer shouldn't own" style.
+const (
+	maxConversationCreatedByEntries  = 20
+	maxConversationCreatedByEntryLen = 254
+)
+
+// validateConversationCreatedBy checks an optional initiator-email filter list.
+func validateConversationCreatedBy(emails []string) error {
+	if len(emails) > maxConversationCreatedByEntries {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("createdBy cannot contain more than %d entries", maxConversationCreatedByEntries)}
+	}
+	for _, e := range emails {
+		if utf8.RuneCountInString(e) > maxConversationCreatedByEntryLen {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("createdBy entry %q exceeds %d characters", e, maxConversationCreatedByEntryLen)}
+		}
+	}
+	return nil
+}
+
 // conversationCreatedByRef builds a UserReference from the conversation payload's
 // single createdBy string. The upstream integration carries only one identity
 // field here (unlike case search, which supplies separate email and full-name
@@ -165,6 +189,9 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 		return domain.SearchConversationsResponse{}, err
 	}
 	if err := validateExactNumber("number", &req.Filters.Number); err != nil {
+		return domain.SearchConversationsResponse{}, err
+	}
+	if err := validateConversationCreatedBy(req.Filters.CreatedBy); err != nil {
 		return domain.SearchConversationsResponse{}, err
 	}
 	if req.SortBy.Field != "" && !validConversationSortField[req.SortBy.Field] {
@@ -205,6 +232,7 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 			SearchQuery: req.Filters.SearchQuery,
 			Number:      req.Filters.Number,
 			CreatedByMe: req.Filters.CreatedByMe,
+			CreatedBy:   req.Filters.CreatedBy,
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},

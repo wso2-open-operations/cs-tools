@@ -3685,8 +3685,12 @@ type SearchConversationsFilters struct {
 	// "CHAT0000012345") exactly matches (optional). Exact match against the
 	// backing data source's number field, routed as a first-class filter
 	// rather than through the free-text SearchQuery scan.
-	Number      string `json:"number,omitempty"`
-	CreatedByMe bool   `json:"createdByMe"`
+	Number      string   `json:"number,omitempty"`
+	CreatedByMe bool     `json:"createdByMe"`
+	// CreatedBy filters to conversations initiated by any of these email
+	// addresses (optional). Independent of CreatedByMe, which always scopes
+	// to the caller.
+	CreatedBy []string `json:"createdBy,omitempty"`
 }
 
 // SearchConversationsRequest is the input for POST /conversations/search.
