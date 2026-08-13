@@ -51,7 +51,7 @@ export default function WorkItemsTab({ projectId }: WorkItemsTabProps): JSX.Elem
         <Tab value="serviceRequests" label="Service requests" />
         <Tab value="securityReports" label="Security reports" />
         <Tab value="engagements" label="Engagements" />
-        <Tab value="conversations" label="Conversations" />
+        <Tab value="conversations" label="Chats" />
       </Tabs>
 
       {subTab === "cases" && (

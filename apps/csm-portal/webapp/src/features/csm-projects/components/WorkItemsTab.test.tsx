@@ -95,7 +95,7 @@ describe("WorkItemsTab", () => {
   it("switches to the Conversations sub-tab", () => {
     render(<WorkItemsTab projectId="proj-1" />);
 
-    fireEvent.click(screen.getByText("Conversations"));
+    fireEvent.click(screen.getByText("Chats"));
 
     expect(screen.getByText("Conversations for proj-1")).toBeInTheDocument();
   });
