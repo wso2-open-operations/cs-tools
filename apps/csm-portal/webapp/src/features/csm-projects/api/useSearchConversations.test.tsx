@@ -125,6 +125,29 @@ describe("useSearchConversations", () => {
     );
   });
 
+  it("routes a CHAT-number-shaped search to filters.number, not searchQuery", async () => {
+    postMock.mockResolvedValue({ conversations: [], total: 0, limit: 20, offset: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useSearchConversations(
+          "proj-1",
+          { page: 0, rowsPerPage: 20 },
+          { searchQuery: "CHAT0000012345" },
+        ),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/conversations/search",
+      expect.objectContaining({
+        filters: { projectIds: ["proj-1"], number: "CHAT0000012345" },
+      }),
+    );
+  });
+
   it("omits empty filter fields from the request payload", async () => {
     postMock.mockResolvedValue({ conversations: [], total: 0, limit: 20, offset: 0 });
 

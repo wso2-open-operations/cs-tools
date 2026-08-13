@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { classifyConversationQuery } from "@features/csm-projects/utils/conversationQueryScope";
 import type {
   BeConversationState,
   BeConversationView,
@@ -53,6 +54,12 @@ export interface ConversationSearchResult {
  * recently active first. `rowsPerPage` is capped at {@link BE_MAX_PAGE_LIMIT}
  * (the entity service's own documented max for this endpoint). Disabled until
  * a project id is provided.
+ *
+ * The search text is classified (see {@link classifyConversationQuery}): a
+ * `CHAT`-number-shaped query is routed as the exact-match `filters.number`
+ * field instead of the free-text `filters.searchQuery` scan, mirroring how
+ * the global quick-nav palette (`useQuickConversationSearch`) resolves the
+ * same typed string.
  */
 export function useSearchConversations(
   projectId: string | undefined,
@@ -64,6 +71,7 @@ export function useSearchConversations(
   const offset = pagination.page * limit;
   const { states, searchQuery, createdByMe } = filters;
   const trimmedSearch = searchQuery?.trim() || undefined;
+  const searchScope = trimmedSearch ? classifyConversationQuery(trimmedSearch) : "text";
 
   return useQuery<ConversationSearchResult, Error>({
     queryKey: [
@@ -73,6 +81,7 @@ export function useSearchConversations(
       limit,
       states ?? [],
       trimmedSearch ?? "",
+      searchScope,
       createdByMe ?? false,
     ],
     queryFn: async (): Promise<ConversationSearchResult> => {
@@ -83,7 +92,12 @@ export function useSearchConversations(
         filters: {
           projectIds: [projectId ?? ""],
           ...(states && states.length > 0 ? { states } : {}),
-          ...(trimmedSearch ? { searchQuery: trimmedSearch } : {}),
+          ...(trimmedSearch && searchScope === "number"
+            ? { number: trimmedSearch }
+            : {}),
+          ...(trimmedSearch && searchScope === "text"
+            ? { searchQuery: trimmedSearch }
+            : {}),
           ...(createdByMe ? { createdByMe: true } : {}),
         },
         sortBy: { field: "updatedOn", order: "desc" },

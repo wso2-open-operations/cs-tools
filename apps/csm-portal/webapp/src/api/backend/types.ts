@@ -1039,6 +1039,10 @@ export interface BeSearchConversationsFilters {
   /** Free-text search across the conversation (matches the same fields the
    * data source indexes for it — number, initiator, initial message). */
   searchQuery?: string;
+  /** A single conversation number (e.g. "CHAT0000012345"), matched exactly —
+   * a first-class indexed filter rather than the free-text `searchQuery`
+   * scan. See `classifyConversationQuery`. */
+  number?: string;
   /** When `true`, scopes results to conversations initiated by the
    * signed-in user. */
   createdByMe?: boolean;
