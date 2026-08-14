@@ -151,12 +151,12 @@ describe("WorkItemsTab — sub-tab is a real URL path segment", () => {
   it("clicking a sub-tab navigates to that sub-tab's own URL", () => {
     renderWorkItemsTab();
 
-    fireEvent.click(screen.getByText("Conversations"));
+    fireEvent.click(screen.getByText("Chats"));
 
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/customers/projects/proj-1/work-items/conversations",
     );
-    expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Chats" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
