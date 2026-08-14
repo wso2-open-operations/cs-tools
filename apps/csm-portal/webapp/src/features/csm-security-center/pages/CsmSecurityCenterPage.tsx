@@ -16,25 +16,27 @@
 
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
-import { useLocation } from "react-router";
+import { type JSX, useEffect } from "react";
+import { useLocation, useParams, useSearchParams } from "react-router";
 import SectionTabs from "@components/section-tabs/SectionTabs";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ProductVulnerabilitiesTab from "@features/csm-security-center/components/ProductVulnerabilitiesTab";
 import { useNavTransition } from "@hooks/useNavTransition";
-import { useQueryTabs } from "@hooks/useSectionTabs";
+import { usePathSectionTabs } from "@hooks/useSectionTabs";
+
+const BASE_PATH = "/security-center";
 
 /**
  * Security Center landing — the home for the customer-security entities, split
  * into Security Reports (SRA) / Vulnerabilities tabs. The active tab lives in
- * the URL (`?tab=`) so the vulnerability detail page can link back to the right
- * tab, and the selection survives a refresh or share.
+ * the URL path (`/security-center/:tab`) so the vulnerability detail page can
+ * link back to the right tab, and the selection survives a refresh or share.
  *
  * Which tabs exist comes from the navigation tree, so a deployment can restrict
  * one through `CSM_PORTAL_FEATURE_OVERRIDES` without touching this page.
  */
 export default function CsmSecurityCenterPage(): JSX.Element {
-  const tabs = useQueryTabs("security-center");
+  const tabs = usePathSectionTabs("security-center", BASE_PATH);
   const activeTab = tabs.activeKey;
   const navigate = useNavTransition();
   // Set by a dashboard widget's click-through, since this page has no
@@ -42,6 +44,19 @@ export default function CsmSecurityCenterPage(): JSX.Element {
   // Back button instead (via CsmIssuesView, which reads this same state) —
   // skip here to avoid a duplicate.
   const backState = useLocation().state as { from?: string } | undefined;
+
+  // Legacy `?tab=` links (this page's URL shape before the path-segment
+  // migration) still land here on the tab-less "security-center" route — send
+  // them on to the equivalent `/security-center/<key>` path so a bookmark or
+  // an old share link doesn't silently lose the selection. Only fires when
+  // there is no path-segment tab already, so it can't fight a real
+  // navigation.
+  const { tab: routeTab } = useParams<{ tab?: string }>();
+  const [searchParams] = useSearchParams();
+  const legacyTab = routeTab ? null : searchParams.get("tab");
+  useEffect(() => {
+    if (legacyTab) navigate(`${BASE_PATH}/${legacyTab}`, { replace: true });
+  }, [legacyTab, navigate]);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>

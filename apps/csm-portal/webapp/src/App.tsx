@@ -489,6 +489,19 @@ export default function App(): JSX.Element {
                   <Route path="conversations/:id" element={<ConversationDetailPage />} />
 
                   <Route path="operations" element={<OperationsPage />} />
+                  {/* Selected Operations tab as a real path segment
+                      (`/operations/change_requests`) rather than `?tab=` —
+                      keys match the nav tree's `tab` values (underscored),
+                      not the hyphenated static prefixes the detail/create
+                      routes below own, so this single dynamic segment can't
+                      collide with any of them (they're all two-plus segments
+                      deep). A bare `?tab=` URL still lands on the plain
+                      "operations" route above and is redirected forward by
+                      OperationsPage itself. */}
+                  <Route
+                    path="operations/:tab"
+                    element={<OperationsPage />}
+                  />
                   <Route
                     path="operations/service-requests/new"
                     element={<CreateServiceRequestPage />}
@@ -527,6 +540,12 @@ export default function App(): JSX.Element {
                   <Route path="engagements/:caseId/:tab?" element={<CsmCaseDetailPage />} />
                   <Route path="updates" element={<CsmUpdatesPage />} />
                   <Route path="security-center" element={<CsmSecurityCenterPage />} />
+                  {/* Same convention as Operations' tab route above — see
+                      that comment. */}
+                  <Route
+                    path="security-center/:tab"
+                    element={<CsmSecurityCenterPage />}
+                  />
                   <Route
                     path="security-center/reports/new"
                     element={<CreateSecurityReportPage />}

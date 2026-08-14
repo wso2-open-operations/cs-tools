@@ -19,12 +19,14 @@
  * tabs a deployment is allowed to see are decided in one place
  * (`CSM_PORTAL_FEATURE_OVERRIDES`) rather than per page.
  *
- * Three flavours, matching the tab idioms in the app: `useQueryTabs` for
- * sections that keep the selection in `?tab=` (Operations, Security Center),
- * `useRouteTabs` for sections whose tabs are child routes (Customers,
- * Settings), and `usePathTabs` for a single detail page whose own sub-tabs
- * are real URL path segments (Case/Incident/Change-Request detail) so a tab
- * can be linked and reopens directly on it.
+ * Four flavours, matching the tab idioms in the app: `useQueryTabs` for
+ * sections that still keep the selection in `?tab=`, `usePathSectionTabs` for
+ * a nav-tree-driven section whose selection lives in a real URL path segment
+ * instead (Operations, Security Center), `useRouteTabs` for sections whose
+ * tabs are child routes (Customers, Settings), and `usePathTabs` for a single
+ * detail page whose own sub-tabs are real URL path segments
+ * (Case/Incident/Change-Request detail) so a tab can be linked and reopens
+ * directly on it.
  */
 
 import { useCallback } from "react";
@@ -105,6 +107,37 @@ export function useQueryTabs(sectionId: string): SectionTabsState {
         prev.set("tab", key);
         return prev;
       }),
+  };
+}
+
+/**
+ * Tab strip for a section whose selection lives in a URL path segment rather
+ * than in `?tab=` (Operations, Security Center) — a bookmarked or shared link
+ * reopens on the exact tab. Unlike `usePathTabs`, the tab list itself still
+ * comes from the nav tree via `tabsFor`/`resolveActiveKey`, same as
+ * `useQueryTabs`, so WIP/hidden gating and the fallback-to-first-enabled-tab
+ * behaviour are identical between the two — only where the selection is read
+ * from and written to differs.
+ *
+ * `basePath` is the section's own route root (e.g. `/operations`); the tab
+ * segment is expected directly under it, matching a `${basePath}/:tab?`
+ * route registered in `App.tsx`. Keys match `useQueryTabs`'s (`node.tab ??
+ * node.id`) so a caller can translate a legacy `?tab=<key>` value straight
+ * into `${basePath}/<key>` without any remapping.
+ */
+export function usePathSectionTabs(
+  sectionId: string,
+  basePath: string,
+): SectionTabsState {
+  const { tab } = useParams<{ tab?: string }>();
+  const navigate = useNavTransition();
+  const tabs = tabsFor(sectionId, (node) => node.tab ?? node.id);
+  const activeKey = resolveActiveKey(tabs, tab ?? null);
+
+  return {
+    tabs,
+    activeKey,
+    select: (key: string) => void navigate(`${basePath}/${key}`),
   };
 }
 

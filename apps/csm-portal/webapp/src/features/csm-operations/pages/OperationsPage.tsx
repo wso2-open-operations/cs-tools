@@ -16,15 +16,17 @@
 
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
-import { useLocation } from "react-router";
+import { type JSX, useEffect } from "react";
+import { useLocation, useParams, useSearchParams } from "react-router";
 import SectionTabs from "@components/section-tabs/SectionTabs";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import { useNavTransition } from "@hooks/useNavTransition";
-import { useQueryTabs } from "@hooks/useSectionTabs";
+import { usePathSectionTabs } from "@hooks/useSectionTabs";
+
+const BASE_PATH = "/operations";
 
 /**
  * Operations landing — the home for the managed-cloud operational entities,
@@ -36,9 +38,10 @@ import { useQueryTabs } from "@hooks/useSectionTabs";
  * one through `CSM_PORTAL_FEATURE_OVERRIDES` without touching this page.
  */
 export default function OperationsPage(): JSX.Element {
-  // Active tab lives in the URL (`?tab=`) so the change-request detail page can
-  // link back to the right tab, and the tab survives a refresh / share.
-  const tabs = useQueryTabs("operations");
+  // Active tab lives in the URL path (`/operations/:tab`) so the
+  // change-request detail page can link back to the right tab, and the tab
+  // survives a refresh / share.
+  const tabs = usePathSectionTabs("operations", BASE_PATH);
   const activeTab = tabs.activeKey;
   const navigate = useNavTransition();
   // Set by a dashboard widget's click-through (see DashboardWidgetTile /
@@ -47,6 +50,18 @@ export default function OperationsPage(): JSX.Element {
   // CsmIssuesView, which reads this same state) — skip here to avoid a
   // duplicate.
   const backState = useLocation().state as { from?: string } | undefined;
+
+  // Legacy `?tab=` links (this page's URL shape before the path-segment
+  // migration) still land here on the tab-less "operations" route — send them
+  // on to the equivalent `/operations/<key>` path so a bookmark or an old
+  // share link doesn't silently lose the selection. Only fires when there is
+  // no path-segment tab already, so it can't fight a real navigation.
+  const { tab: routeTab } = useParams<{ tab?: string }>();
+  const [searchParams] = useSearchParams();
+  const legacyTab = routeTab ? null : searchParams.get("tab");
+  useEffect(() => {
+    if (legacyTab) navigate(`${BASE_PATH}/${legacyTab}`, { replace: true });
+  }, [legacyTab, navigate]);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
