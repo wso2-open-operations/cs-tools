@@ -400,8 +400,31 @@ export default function CsmCaseDetailPage(): JSX.Element {
     // requests, engagements, security reports) lands on its dedicated route with
     // empty state, and Back then falls through to the bare route-specific path,
     // dropping the filters, search and sort that got the user here.
-    navigate(canonicalDetailPath, { replace: true, state: { from: resolvedBackPath } });
-  }, [isMisrouted, canonicalDetailPath, caseId, navigate, resolvedBackPath]);
+    //
+    // Also carry the tab segment and hash: a link into a specific tab
+    // (`${detailPath}/<tab>`) or a permalink fragment (`#<entry-id>`) must
+    // still land on that tab/entry after the canonical rewrite, not silently
+    // reset to the default tab.
+    const currentTabSegment = location.pathname
+      .slice(detailPath.length)
+      .replace(/^\//, "");
+    const canonicalTarget = currentTabSegment
+      ? `${canonicalDetailPath}/${currentTabSegment}`
+      : canonicalDetailPath;
+    navigate(`${canonicalTarget}${location.hash}`, {
+      replace: true,
+      state: { from: resolvedBackPath },
+    });
+  }, [
+    isMisrouted,
+    canonicalDetailPath,
+    caseId,
+    navigate,
+    resolvedBackPath,
+    detailPath,
+    location.pathname,
+    location.hash,
+  ]);
 
   const {
     data: comments,

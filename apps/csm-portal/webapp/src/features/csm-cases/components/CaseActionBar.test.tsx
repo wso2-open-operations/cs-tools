@@ -408,22 +408,29 @@ describe("CaseActionBar — Create incident from case / Link to incident (ISSU-0
   // opens LinkIncidentDialog), so they follow the same closed-case
   // read-only gate as every other secondary item rather than staying
   // permanently disabled.
-  const ITEMS = [/create incident from case/i, /link to incident/i];
+  const ITEMS: [RegExp, string][] = [
+    [/create incident from case/i, "create_incident"],
+    [/link to incident/i, "link_incident"],
+  ];
 
-  it.each(ITEMS)("dispatches %s as a secondary action when the case is open", (name) => {
-    const onAction = vi.fn();
-    render(
-      <CaseActionBar
-        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
-        onAction={onAction}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: /more/i }));
-    const item = screen.getByRole("menuitem", { name });
-    expect(item).not.toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(item);
-    expect(onAction).toHaveBeenCalledTimes(1);
-  });
+  it.each(ITEMS)(
+    "dispatches %s as a secondary action when the case is open",
+    (name, expectedAction) => {
+      const onAction = vi.fn();
+      render(
+        <CaseActionBar
+          caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
+          onAction={onAction}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /more/i }));
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(item);
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(onAction).toHaveBeenCalledWith({ secondary: expectedAction });
+    },
+  );
 
   it.each(ITEMS)("disables %s once the case is closed", (name) => {
     const onAction = vi.fn();
