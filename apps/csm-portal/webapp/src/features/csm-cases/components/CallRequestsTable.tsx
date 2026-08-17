@@ -81,9 +81,20 @@ const GRID =
 export interface CallRequestsTableProps {
   requests: BeCallRequestView[];
   onAction: (action: CallRequestAgentAction, cr: BeCallRequestView) => void;
-  /** True when the parent case is closed — existing call requests stay visible
-   * but can no longer be updated (scheduled, rejected, etc.). */
-  isClosed?: boolean;
+  /**
+   * Non-null when the case's current state doesn't accept a schedule/create
+   * (see `callRequestCaseStateBlockReason` — this always includes a closed
+   * case, since `closed` is never one of the 5 allowed states). Disables only
+   * the `schedule`/`reschedule` actions, with this as the tooltip reason.
+   *
+   * Reject/Cancel/Send call notes are NOT gated by this: nothing in our own
+   * stack (the Go BFF and entity-service are both pass-throughs to
+   * ServiceNow's PATCH) restricts them by case state, so they stay available
+   * even on a closed case — the only way to resolve a call request that
+   * outlived its case, rather than leaving it stuck showing as active
+   * indefinitely.
+   */
+  scheduleBlockReason?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +104,7 @@ export interface CallRequestsTableProps {
 export function CallRequestsTable({
   requests,
   onAction,
-  isClosed,
+  scheduleBlockReason,
 }: CallRequestsTableProps): JSX.Element {
   const [detailTarget, setDetailTarget] = useState<BeCallRequestView | null>(null);
 
@@ -258,25 +269,26 @@ export function CallRequestsTable({
                   >
                     <Eye size={16} />
                   </IconButton>
-                  {actions.map((action, i) => (
-                    <Tooltip
-                      key={action}
-                      title={isClosed ? "This case is closed — it's read-only." : ""}
-                    >
-                      <span>
-                        <Button
-                          size="small"
-                          variant={i === 0 && action !== "cancel" ? "contained" : "outlined"}
-                          color={action === "reject" || action === "cancel" ? "error" : "primary"}
-                          onClick={() => onAction(action, cr)}
-                          disabled={isClosed}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {ACTION_LABEL[action]}
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  ))}
+                  {actions.map((action, i) => {
+                    const isScheduleAction = action === "schedule" || action === "reschedule";
+                    const blocked = isScheduleAction && !!scheduleBlockReason;
+                    return (
+                      <Tooltip key={action} title={blocked ? scheduleBlockReason : ""}>
+                        <span>
+                          <Button
+                            size="small"
+                            variant={i === 0 && action !== "cancel" ? "contained" : "outlined"}
+                            color={action === "reject" || action === "cancel" ? "error" : "primary"}
+                            onClick={() => onAction(action, cr)}
+                            disabled={blocked}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {ACTION_LABEL[action]}
+                          </Button>
+                        </span>
+                      </Tooltip>
+                    );
+                  })}
                 </Box>
                 {cr.assignee && (
                   <Typography
