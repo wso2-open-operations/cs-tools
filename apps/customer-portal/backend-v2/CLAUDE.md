@@ -636,12 +636,18 @@ constants).
 `{offset, limit, totalRecords}`, and the large majority of this backend's paginated responses were
 renamed to match it during a full request/response type-alignment pass against the old Ballerina
 backend and the live frontend (see git history for `fix/customer-portal-v2-align-response-types`).
-The last three stragglers (`internal/dto/account.go`, `attachment.go`, `escalation.go`) were
-renamed from `total` to `totalRecords` after the legacy key silently broke the case-detail
-Attachments tab: `useGetCaseAttachments` destructures `totalRecords` with **no** array-length
-fallback (unlike the calls and escalations panels, which fall back to `data.length` and so masked
-the same drift), so `attachmentCount` stayed `undefined` and the tab rendered "Attachments (0)"
-against a perfectly good 200 response.
+The last three stragglers — `SearchAttachmentsResponse` (`internal/dto/attachment.go`, the
+*generic* `POST /attachments/search` envelope), `EscalationSearchResponse` and
+`SearchAccountsResponse` — were renamed from `total` to `totalRecords` as drift cleanup. No consumer
+read `.total` on any of them.
+
+Note which struct backs which route before attributing a count bug to this drift: the case-detail
+Attachments tab calls `GET /cases/{id}/attachments`, which returns `CaseAttachmentsResponse` — that
+one already used `totalRecords`, so the legacy key was never the cause of an
+"Attachments (0)" reading there. The count is still worth guarding, though, because
+`useGetCaseAttachments` destructures `totalRecords` with **no** array-length fallback, unlike the
+calls and escalations panels which fall back to `data.length`; on that hook a wrong key silently
+yields `undefined` rather than an error.
 
 `internal/dto/project_stats.go`'s `ResolvedCountBreakdown.total` is **not** part of this drift and
 must keep its name — it is a stats breakdown (`{total, currentMonth, pastThirtyDays}`), not a
