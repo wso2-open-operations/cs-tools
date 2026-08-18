@@ -19,10 +19,11 @@ import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import { tierLabel, tierColor } from "@features/csm-cases/utils/caseTier";
-import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
+import type { CaseSla, CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import { parentRecordPath } from "@features/csm-cases/utils/parentRecordRoute";
 import SemanticChip from "@components/SemanticChip";
 import UserRefLink from "@components/UserRefLink";
+import CaseSlaStrip from "@features/csm-cases/components/CaseSlaStrip";
 import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
 import type { BeDeploymentType } from "@api/backend/types";
 import { announcementStateRole } from "@features/csm-announcements/utils/announcementState";
@@ -33,6 +34,9 @@ interface CaseMetaBandProps {
   detail: CsmCaseDetail;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** The case's SLA records, for the compact strip below the header —
+   * undefined for case types with no SLA tab (e.g. announcements). */
+  slas?: CaseSla[];
 }
 
 function Cell({
@@ -182,6 +186,7 @@ export default function CaseMetaBand({
   detail: c,
   collapsed,
   onToggleCollapsed,
+  slas,
 }: CaseMetaBandProps): JSX.Element {
   const product = c.productContext;
   const tier = c.customerContext.tier;
@@ -257,6 +262,11 @@ export default function CaseMetaBand({
         )}
         {collapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
       </Box>
+
+      {/* Shown regardless of `collapsed` — SLA breach risk is high-attention
+       * and shouldn't disappear along with the rest of the Overview body. */}
+      <CaseSlaStrip slas={slas} />
+
       {!collapsed && (
         <Box
           sx={[

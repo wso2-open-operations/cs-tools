@@ -1885,6 +1885,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         detail={c}
         collapsed={metaCollapsed}
         onToggleCollapsed={() => setMetaCollapsed((v) => !v)}
+        slas={slaList?.slas}
       />
 
       {feedback && (

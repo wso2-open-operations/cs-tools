@@ -28,7 +28,7 @@ vi.mock("@api/backend/client", () => ({
 }));
 
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
-import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
+import type { CaseSla, CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 
 /** A complete, minimal case-detail fixture; tests override the fix-ETA fields. */
 const BASE_CASE: CsmCaseDetail = {
@@ -77,7 +77,10 @@ const BASE_CASE: CsmCaseDetail = {
   isWatching: false,
 };
 
-function renderBand(overrides: Partial<CsmCaseDetail>): ReturnType<typeof render> {
+function renderBand(
+  overrides: Partial<CsmCaseDetail>,
+  options?: { collapsed?: boolean; slas?: CaseSla[] },
+): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -86,13 +89,28 @@ function renderBand(overrides: Partial<CsmCaseDetail>): ReturnType<typeof render
       <MemoryRouter>
         <CaseMetaBand
           detail={{ ...BASE_CASE, ...overrides }}
-          collapsed={false}
+          collapsed={options?.collapsed ?? false}
           onToggleCollapsed={() => {}}
+          slas={options?.slas}
         />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+const IN_PROGRESS_SLA: CaseSla = {
+  id: "sla-1",
+  definition: "S1 - Response",
+  target: "1 Business Hour",
+  stage: "in_progress",
+  stageLabel: "In progress",
+  hasBreached: false,
+  businessTimeLeftLabel: "30 minutes",
+  businessElapsedLabel: "30 minutes",
+  businessElapsedPercent: 50,
+  startTime: "2026-07-01T10:00:00Z",
+  stopTime: null,
+};
 
 describe("CaseMetaBand — fix ETA cells", () => {
   it("renders all three fix ETA cells when all three values are set", () => {
@@ -133,5 +151,25 @@ describe("CaseMetaBand — fix ETA cells", () => {
     expect(screen.getByText("Aug 1, 2026")).toBeInTheDocument();
     expect(screen.queryByText("Most likely fix ETA")).not.toBeInTheDocument();
     expect(screen.queryByText("Worst case fix ETA")).not.toBeInTheDocument();
+  });
+});
+
+describe("CaseMetaBand — SLA strip", () => {
+  it("shows an active SLA's summary line", () => {
+    renderBand({}, { slas: [IN_PROGRESS_SLA] });
+    expect(screen.getByText("S1 - Response")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("renders nothing extra when there are no SLAs", () => {
+    renderBand({}, { slas: [] });
+    expect(screen.queryByText("S1 - Response")).not.toBeInTheDocument();
+  });
+
+  it("stays visible even while the band is collapsed", () => {
+    renderBand({}, { collapsed: true, slas: [IN_PROGRESS_SLA] });
+    expect(screen.getByText("S1 - Response")).toBeInTheDocument();
+    // The rest of the Overview body is hidden while collapsed.
+    expect(screen.queryByText("Account")).not.toBeInTheDocument();
   });
 });

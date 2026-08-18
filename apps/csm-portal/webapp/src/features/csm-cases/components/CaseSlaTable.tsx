@@ -35,6 +35,7 @@ import type { JSX } from "react";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
 import { useGetCsmCaseSlas } from "@features/csm-cases/api/useGetCsmCaseSlas";
+import { slaProgressColor } from "@features/csm-cases/utils/caseSlaMapping";
 import type { CaseSla } from "@features/csm-cases/types/csmCases";
 
 /** The known, closed set of SLA stages that map to a curated chip color. */
@@ -72,13 +73,6 @@ function stageColor(sla: CaseSla): "info" | "warning" | "success" | "default" | 
   return sla.hasBreached
     ? "error"
     : (SLA_STAGE_COLOR[sla.stage as KnownSlaStage] ?? "default");
-}
-
-/** Progress bar color for a row: redder as more of the SLA target is consumed. */
-function slaProgressColor(sla: CaseSla): "error" | "warning" | "success" {
-  if (sla.hasBreached || sla.businessElapsedPercent >= 100) return "error";
-  if (sla.businessElapsedPercent >= 75) return "warning";
-  return "success";
 }
 
 interface CaseSlaTableProps {

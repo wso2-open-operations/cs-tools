@@ -65,6 +65,15 @@ export function normalizeStage(raw: string | null): { stage: SlaStage; label: st
   return { stage: normalized, label: trimmed };
 }
 
+/** Progress-fill color for an SLA: redder as more of the target is consumed.
+ * Shared by {@link CaseSlaTable} and {@link CaseSlaStrip} so both the full
+ * table and the compact Overview summary agree on the same thresholds. */
+export function slaProgressColor(sla: CaseSla): "error" | "warning" | "success" {
+  if (sla.hasBreached || sla.businessElapsedPercent >= 100) return "error";
+  if (sla.businessElapsedPercent >= 75) return "warning";
+  return "success";
+}
+
 /** Maps one wire-shape SLA record onto the row model {@link CaseSlaTable} renders. */
 export function toCaseSla(view: TaskSlaView): CaseSla {
   const { stage, label } = normalizeStage(view.stage);
