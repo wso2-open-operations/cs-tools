@@ -195,6 +195,25 @@ Missing a `sysidToUUID()` call on a response ID means callers receive a bare sys
 - Never log request bodies, passwords, or tokens; log only IDs and sanitised error summaries
 - All SQL uses parameterized queries; never interpolate user input into query strings
 - Validate and reject unexpected input at the handler boundary before it reaches the service or repository
+- **Ballerina-to-Go field parity** (`internal/parity`) — the migration's dominant
+  bug class is silent: Ballerina's records are open (`json...;`) while these `sn*`
+  structs are closed by omission, so a field ServiceNow sends that no Go struct
+  declares is dropped by `encoding/json` with no error and a screen just renders
+  empty. `parity_test.go` compares a frozen inventory of Ballerina's response
+  fields (`ballerina_response_fields.json`) against the `sn_*.go` decode layer and
+  fails on anything unaccounted for.
+
+  Two layers, because one is not enough: the module-wide check compares a flat set
+  of names, so a field removed from one struct still looks present when a sibling
+  decodes the same name. `critical_fields.json` therefore pins the decode site for
+  fields already known to break a page. **When a merge conflict touches
+  `sn_case_service.go`, `sn_project_service.go`, `sn_deployment_service.go` or
+  `domain/entity.go`, resolve by union — taking one side wholesale deletes struct
+  tags, and nothing else will tell you.**
+
+  A genuine new gap goes in `known_gaps.json` with a reason; the tests also fail on
+  a stale entry that has since been implemented, so the list cannot rot.
+
 - **Running gosec** — this module's `go.mod` floor is newer than the Go bundled in
   `securego/gosec:latest`, and that image sets `GOTOOLCHAIN=local`, so the scan
   silently loads **zero files** and reports `Issues: 0` — a pass that examined

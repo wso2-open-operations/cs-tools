@@ -1,0 +1,80 @@
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Build, vet and test the Go services.
+#
+# Added alongside the Ballerina-to-Go response-field parity check
+# (entity-service/internal/parity). That check is only useful if something runs
+# it: before this workflow there was no CI for either Go module, so `go test`
+# ran only when someone remembered to. The parity guard exists to catch a class
+# of regression that produces no compile error and no failing behaviour — a
+# dropped struct tag that silently blanks a screen — which is exactly the kind of
+# thing a manual gate misses.
+name: GO CHECKS
+
+on:
+  pull_request:
+    paths:
+      - "entity-service/**"
+      - "apps/customer-portal/backend-v2/**"
+      - ".github/workflows/go-checks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-checks:
+    name: ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - entity-service
+          - apps/customer-portal/backend-v2
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          # Read the floor from the module rather than pinning here, so a go.mod
+          # bump does not silently keep building against an older toolchain.
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...

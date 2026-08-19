@@ -1,0 +1,19 @@
+{
+  "_comment": "Per-file guard for fields whose loss has already caused a production incident. The module-wide parity check cannot see these: it compares a flat set of field names, so a field removed from one struct still looks present if any other struct decodes the same name (deployedProductCount is decoded in both sn_deployment_service.go and sn_project_stats_service.go). This file pins the decode site itself. Regenerate deliberately, never to make a red build green.",
+  "files": {
+    "../service/sn_deployment_service.go": ["deployedProductCount", "url"],
+    "../service/sn_project_stats_service.go": ["deployedProductCount"],
+    "../service/sn_case_service.go": [
+      "slaResponseTime", "closedBy", "hasAutoClosed",
+      "engagementStartDate", "engagementEndDate",
+      "acknowledgedBy", "engagementPaymentType",
+      "hasInlineAttachments", "inlineAttachments"
+    ],
+    "../service/sn_project_service.go": [
+      "totalQueryHours", "consumedQueryHours", "remainingQueryHours",
+      "totalOnboardingHours", "goLiveDate", "goLivePlanDate",
+      "onboardingExpiryDate", "onboardingStatus",
+      "ownerEmail", "technicalOwnerEmail", "activeCasesCount"
+    ]
+  }
+}

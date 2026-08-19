@@ -1,0 +1,23 @@
+{
+  "_comment": "Response fields present in the Ballerina entity-service but not decoded anywhere in this service. Every entry needs a reason. parity_test.go fails on an unlisted gap AND on a stale entry that has since been implemented, so this file cannot rot.",
+  "gaps": {
+    "abbreviation": "Tracked: digiops-cs#2811. On ReferenceTableItem; the portal's TypeScript declares it, so this is a real gap awaiting implementation.",
+    "categories": "Tracked: digiops-cs#2811. On ChangeRequestMetadataResponse; the portal's TypeScript declares it.",
+    "choices": "Tracked: digiops-cs#2811. On CatalogItemVariable, alongside `text` on CatalogVariableChoice.",
+    "text": "Tracked: digiops-cs#2811. On CatalogVariableChoice. The name also occurs in unrelated portal types, so the 7 frontend matches are not all this field.",
+
+    "impacts": "Not decoded from a single ServiceNow field. Declared on the domain view and assembled in the service layer from other sources, so it is absent from the sn_* decode structs by design.",
+    "priorities": "Not decoded from a single ServiceNow field. Assembled in the service layer, same as impacts.",
+    "teams": "Not decoded from a single ServiceNow field. Assembled in the service layer, same as impacts.",
+
+    "fixEta": "Deliberate, do not implement. CSM-internal. backend-v2's CLAUDE.md documents the fix-ETA quartet as intentionally trimmed from customer-facing DTOs; it must never reach the portal. Could be decoded here for other consumers, but only with that trimming still enforced downstream.",
+
+    "alreadyAcknowledged": "No consumer. On CaseUpdateResponse; no portal type declares it.",
+    "inlineImageCount": "No consumer. On CommentCreateResponse; the portal reads hasInlineAttachments/inlineAttachments instead, which are implemented.",
+    "deletedBy": "No consumer. On delete responses; no portal type declares it.",
+    "deletedOn": "No consumer. On delete responses; no portal type declares it.",
+    "risks": "No consumer. No portal type declares it.",
+
+    "details": "Likely a name collision rather than a gap. The bare name appears in 12 portal types, but none of them is the Ballerina record this field belongs to. Re-check before implementing."
+  }
+}
