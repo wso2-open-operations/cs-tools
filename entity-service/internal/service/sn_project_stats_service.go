@@ -74,15 +74,21 @@ type snReferenceTableItem struct {
 	Number     *string `json:"number,omitempty"`
 	InternalID *string `json:"internalId,omitempty"`
 	Count      *int    `json:"count,omitempty"`
+	// Abbreviation is the short product/reference name ServiceNow carries
+	// alongside the display name — e.g. "APIM" for "API Manager". Ballerina
+	// declares it on this record too (types.bal ReferenceTableItem); it was the
+	// only field of that record this service did not decode.
+	Abbreviation *string `json:"abbreviation,omitempty"`
 }
 
 func (i snReferenceTableItem) toDomain() domain.ReferenceTableItem {
 	return domain.ReferenceTableItem{
-		ID:         sysidToUUID(i.ID),
-		Name:       i.Name,
-		Number:     i.Number,
-		InternalID: i.InternalID,
-		Count:      i.Count,
+		ID:           sysidToUUID(i.ID),
+		Name:         i.Name,
+		Number:       i.Number,
+		InternalID:   i.InternalID,
+		Count:        i.Count,
+		Abbreviation: i.Abbreviation,
 	}
 }
 

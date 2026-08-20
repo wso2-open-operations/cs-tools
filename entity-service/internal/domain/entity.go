@@ -609,6 +609,9 @@ type ReferenceTableItem struct {
 	Number     *string `json:"number,omitempty"`
 	InternalID *string `json:"internalId,omitempty"`
 	Count      *int    `json:"count,omitempty"`
+	// Abbreviation is the short reference name (e.g. "APIM" for "API Manager"),
+	// present when the backing record carries one.
+	Abbreviation *string `json:"abbreviation,omitempty"`
 }
 
 // ProjectFeatures is the feature-access configuration for a project.

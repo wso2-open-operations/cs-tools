@@ -27,6 +27,13 @@ type ReferenceItem struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Count *int   `json:"count,omitempty"`
+	// Abbreviation is the short reference name (e.g. "APIM" for "API Manager").
+	// The frontend declares it on its shared IdLabelRef and prefers it over the
+	// label where a compact name is wanted — see recommendedLevelsProductKey in
+	// ManageProductModal.tsx, which falls back to the label when it is absent.
+	// Only entity-service's ReferenceTableItem carries it; ChoiceListItem has no
+	// equivalent, so it stays nil on that path.
+	Abbreviation *string `json:"abbreviation,omitempty"`
 }
 
 func mapChoiceListItem(i entity.ChoiceListItem) ReferenceItem {
@@ -44,7 +51,7 @@ func mapChoiceListItems(items []entity.ChoiceListItem) []ReferenceItem {
 func mapReferenceTableItems(items []entity.ReferenceTableItem) []ReferenceItem {
 	out := make([]ReferenceItem, 0, len(items))
 	for _, i := range items {
-		out = append(out, ReferenceItem{ID: i.ID, Label: i.Name, Count: i.Count})
+		out = append(out, ReferenceItem{ID: i.ID, Label: i.Name, Count: i.Count, Abbreviation: i.Abbreviation})
 	}
 	return out
 }

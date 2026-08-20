@@ -179,6 +179,9 @@ type ReferenceTableItem struct {
 	Number     *string `json:"number,omitempty"`
 	InternalID *string `json:"internalId,omitempty"`
 	Count      *int    `json:"count,omitempty"`
+	// Abbreviation is the short reference name; entity-service decodes it from
+	// ServiceNow's ReferenceTableItem.
+	Abbreviation *string `json:"abbreviation,omitempty"`
 }
 
 // ProjectFeatures is the feature-access configuration for a project.
