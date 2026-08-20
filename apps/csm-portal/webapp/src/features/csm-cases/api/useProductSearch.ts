@@ -15,7 +15,7 @@
 // under the License.
 
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type { BeProductSearchPayload, BeProductSearchResponse } from "@api/backend/types";
@@ -28,6 +28,21 @@ import type { BeProductSearchPayload, BeProductSearchResponse } from "@api/backe
  * would risk the first page surfacing only a couple of distinct names.
  */
 export const PRODUCT_PAGE_SIZE = BE_MAX_PAGE_LIMIT;
+
+/**
+ * Hard cap on pages auto-fetched in the background per open/query (see the
+ * effect in {@link useInfiniteProductSearch}), so a future catalogue size
+ * increase can't turn this into an unbounded fetch loop. `/products/search`
+ * rows aren't deduplicated or sorted by family name — live-verified against
+ * the DEV tenant, a single family ("API Manager") occupies the first 117 of
+ * 367 rows before any other distinct name appears — so relying on
+ * scroll-to-load-more alone can leave the dropdown stuck: with only 1-2
+ * distinct names rendered, the listbox has nothing to scroll, so the
+ * scroll-triggered fetch of {@link ProductNameMultiSelect} never fires. 20
+ * pages (1,000 rows) comfortably covers today's 367-row, 65-family catalogue
+ * with headroom to spare.
+ */
+const MAX_AUTO_PAGES = 20;
 
 /** Flattened, deduplicated, paginated result for the lazy-loaded product filter. */
 export interface InfiniteProductSearch {
@@ -45,11 +60,14 @@ export interface InfiniteProductSearch {
 /**
  * Paginated product-family-name search for the cases product filter. Loads
  * the first {@link PRODUCT_PAGE_SIZE} product rows as soon as it is enabled
- * (the dropdown opens) — no typing required — and pages through the rest on
- * demand via {@link InfiniteProductSearch.fetchNextPage} (wired to the
- * listbox scroll). An empty query lists the whole catalogue a page at a
- * time; a typed query narrows it (`searchQuery` matches ServiceNow's
- * `product.name`) and re-pages from the first match.
+ * (the dropdown opens) — no typing required — the dropdown shows this page
+ * immediately. Further pages then continue loading in the background (see
+ * the effect below, capped at {@link MAX_AUTO_PAGES}) without blocking the
+ * UI, so the option list fills in progressively; {@link
+ * InfiniteProductSearch.fetchNextPage} (wired to the listbox scroll) remains
+ * as a fallback for paging past the cap. An empty query lists the whole
+ * catalogue a page at a time; a typed query narrows it (`searchQuery`
+ * matches ServiceNow's `product.name`) and re-pages from the first match.
  *
  * Pagination tracks raw rows (matching the backend's own `hasMore`/offset
  * contract), while the returned `productNames` is a deduplicated view over
@@ -88,6 +106,27 @@ export function useInfiniteProductSearch(
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });
+
+  const pageCount = result.data?.pages.length ?? 0;
+  const { hasNextPage, isFetching, isFetchingNextPage, fetchNextPage: fetchNext } = result;
+
+  // Keep paging in the background — without blocking the dropdown, which
+  // already renders the first page — until the catalogue is exhausted or
+  // MAX_AUTO_PAGES is hit. Needed because scroll-triggered paging alone can
+  // never fire when the accumulated distinct names are too few to make the
+  // listbox scrollable in the first place (the exact symptom this hook
+  // exists to fix).
+  useEffect(() => {
+    if (
+      enabled &&
+      hasNextPage &&
+      !isFetching &&
+      !isFetchingNextPage &&
+      pageCount < MAX_AUTO_PAGES
+    ) {
+      void fetchNext();
+    }
+  }, [enabled, hasNextPage, isFetching, isFetchingNextPage, pageCount, fetchNext]);
 
   const productNames = useMemo(() => {
     const names = new Set<string>();
