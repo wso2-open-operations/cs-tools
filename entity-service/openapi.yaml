@@ -8496,9 +8496,11 @@ components:
             - assignmentGroupId
             - businessServiceId
             - createdOn
+            - slaViolated
+            - productName
         op:
           type: string
-          enum: [in, gte, lte]
+          enum: [in, gte, lte, eq]
         values:
           type: array
           items:
@@ -8519,6 +8521,13 @@ components:
           timestamp, a YYYY-MM-DD date, or a relative-date placeholder (e.g.
           "__daysAgo:90__"), same syntax as case search's own createdOn
           filter.
+        - **slaViolated** (eq): a single boolean value ("true"/"false").
+          Restricts to incidents with (or without) at least one breached SLA
+          record.
+        - **productName** (in): one or more product names to match as a
+          union (an incident matching any one of them is returned). Only a
+          minority of incidents carry a product association, so this filter
+          narrows rather than guarantees full coverage.
 
     SearchIncidentsRequest:
       type: object

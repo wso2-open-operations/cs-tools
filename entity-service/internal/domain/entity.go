@@ -3523,6 +3523,10 @@ type SearchIncidentsFilters struct {
 	//   - "createdOn" (op gte/lte): RFC3339 timestamp, YYYY-MM-DD date, or a
 	//     relative-date placeholder (e.g. "__daysAgo:90__"), same syntax as
 	//     case search's own "createdOn" filter.
+	//   - "slaViolated" (op eq): a single boolean value; restricts to
+	//     incidents with (or without) at least one breached SLA record.
+	//   - "productName" (op in): one or more product names, matched as a
+	//     union against the incident's backing business_service name.
 	// See service.ParseIncidentFieldFilters.
 	Filters []IncidentFieldFilter `json:"filters,omitempty"`
 }

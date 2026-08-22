@@ -102,6 +102,13 @@ type snIncidentFilters struct {
 	// contract on the Ballerina/SN side).
 	StartCreatedDate string `json:"startCreatedDate,omitempty"`
 	EndCreatedDate   string `json:"endCreatedDate,omitempty"`
+	// SlaViolated: see domain.SearchIncidentsFilters Filters "slaViolated" doc
+	// comment. nil (omitted) means the filter was not supplied.
+	SlaViolated *bool `json:"slaViolated,omitempty"`
+	// ProductNames: see domain.SearchIncidentsFilters Filters "productName"
+	// doc comment. Matched as a union against the incident's backing
+	// business_service name.
+	ProductNames []string `json:"productNames,omitempty"`
 }
 
 // snIncidentPriorityKeyMap maps domain IncidentPriority enums to SN numeric priority keys.
@@ -244,6 +251,8 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 			BusinessServiceIDs: uuidsToSysids(parsedFilters.BusinessServiceIDs),
 			StartCreatedDate:   formatSNDateTimeUTC(parsedFilters.StartCreatedDate),
 			EndCreatedDate:     formatSNDateTimeUTC(parsedFilters.EndCreatedDate),
+			SlaViolated:        parsedFilters.SlaViolated,
+			ProductNames:       parsedFilters.ProductNames,
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -386,6 +395,8 @@ func (s *snIncidentService) AggregateIncidents(ctx context.Context, req domain.A
 			BusinessServiceIDs: uuidsToSysids(parsedFilters.BusinessServiceIDs),
 			StartCreatedDate:   formatSNDateTimeUTC(parsedFilters.StartCreatedDate),
 			EndCreatedDate:     formatSNDateTimeUTC(parsedFilters.EndCreatedDate),
+			SlaViolated:        parsedFilters.SlaViolated,
+			ProductNames:       parsedFilters.ProductNames,
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,
