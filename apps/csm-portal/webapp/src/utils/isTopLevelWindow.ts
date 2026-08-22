@@ -15,23 +15,51 @@
 // under the License.
 
 /**
- * Whether this document is the top-level page rather than a frame.
+ * Whether this document is the SDK's own hidden silent-auth iframe rather than
+ * the real page.
  *
- * The IdP SDK runs its silent re-auth in a hidden iframe whose redirect_uri is
- * this app's own origin, so that iframe boots the whole app a second time —
- * sharing sessionStorage with the real page. Anything that assumes "this
- * document is what the user navigated to" has to be gated on this: recording
- * the entry deep link (main.tsx) and starting a sign-in redirect (AuthGuard)
- * are both meaningless, and actively harmful, from inside that frame.
+ * `signInSilently()` recovers an expired token by loading the IdP's authorize
+ * URL with `prompt=none` inside a hidden iframe. Because this app is served at
+ * the same redirect_uri as the top-level app, that iframe's document is a full
+ * second load of this same bundle, sharing this origin's `sessionStorage`. Two
+ * things must therefore be gated on this:
  *
- * @returns {boolean} `true` for the top-level page, `false` inside a frame.
+ * - Nothing below `AsgardeoProvider` should mount there (`AppWithConfig`), or
+ *   the router and `AuthGuard` mount too, notice "not signed in" inside the
+ *   frame, and start their own silent sign-in — nesting another frame inside
+ *   this one. Observed live: one token expiry cascading into 7 nested loads,
+ *   dropping an in-flight POST.
+ * - Nothing may record the entry deep link (`main.tsx`) or start a sign-in
+ *   redirect (`AuthGuard`), since the frame's URL is not a user navigation and
+ *   `sessionStorage` is shared with the page that does have one.
+ *
+ * This app is never legitimately embedded by anything else, so being framed
+ * unambiguously means "I am the SDK's hidden auth iframe", not a real embedding
+ * to support.
+ *
+ * @returns {boolean} `true` for the real top-level page, `false` inside a frame.
  */
 export function isTopLevelWindow(): boolean {
-  try {
-    return window.top === window.self;
-  } catch {
-    // Cross-origin parent: not our own silent-auth frame, but not a page the
-    // user deep-linked to either. Treat it as framed.
-    return false;
-  }
+  // Comparing WindowProxy references is allowed cross-origin and never throws;
+  // only reaching into the other window's properties would.
+  return typeof window === "undefined" || window.self === window.top;
+}
+
+/**
+ * Whether this silent-auth frame can still complete the SDK's handshake.
+ *
+ * The SDK detects its silent-sign-in state in the frame's URL and hands the
+ * authorization code back to the opener, so `AsgardeoProvider` does have to
+ * mount in a frame carrying `?code=`. A frame carrying `?error=` instead (the
+ * IdP answering `prompt=none` with `login_required`, which is what every
+ * browser that blocks cross-site cookies will produce) has nothing to hand
+ * back. Mounting the provider there only lets its own start-up effect call
+ * `signIn()` on a URL it then rejects, surfacing as an uncaught
+ * `login_required` in the console on every signed-out visit.
+ *
+ * @returns {boolean} `true` if this frame still has a handshake to finish.
+ */
+export function silentAuthFrameCanComplete(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.has("code") || !params.has("error");
 }
