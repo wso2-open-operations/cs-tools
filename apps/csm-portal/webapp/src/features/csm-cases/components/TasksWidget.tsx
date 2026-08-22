@@ -34,7 +34,8 @@ import { useState, type JSX } from "react";
 import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { taskStateColor, taskStateLabel } from "@features/csm-cases/utils/taskState";
 import { formatAbsoluteForUser } from "@utils/dateTime";
-import RelativeTime from "@components/RelativeTime";
+import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime, { useRelativeTimeTick } from "@components/RelativeTime";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 
 const TASKS_TABLE_COLUMNS = ["Subject", "State", "Due date", "Assignee", "Updated"];
@@ -50,8 +51,25 @@ interface TasksWidgetProps {
  * small read-only detail dialog rather than a full separate detail page.
  */
 export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
-  const { data, isLoading, isError, isFetching, refetch } = useSearchCaseTasks(caseId);
+  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
+    useSearchCaseTasks(caseId);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Re-render exactly when "Last refreshed …" text would next change
+  // (adaptive shared scheduler — see RelativeTime.tsx), without requiring
+  // another fetch or unrelated state change. `now` is passed explicitly
+  // into `formatRelativeTime` below (rather than relying on its internal
+  // `Date.now()` default) so the React Compiler's auto-memoization sees it
+  // as a dependency and recomputes the label.
+  const now = useRelativeTimeTick(dataUpdatedAt);
+  // The "Last refreshed" hint only appears after the user has manually
+  // clicked refresh at least once — not from the tab's initial data load,
+  // which also sets `dataUpdatedAt`.
+  const [hasManuallyRefreshed, setHasManuallyRefreshed] = useState(false);
+
+  const handleRefreshClick = (): void => {
+    setHasManuallyRefreshed(true);
+    void refetch();
+  };
 
   const tasks = data?.tasks ?? [];
   const total = data?.total ?? tasks.length;
@@ -77,14 +95,22 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
               <Chip size="small" variant="outlined" label={`${total} total`} />
             )}
           </Box>
-          <IconButton
-            size="small"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            aria-label="Refresh tasks"
-          >
-            <RefreshCw size={14} />
-          </IconButton>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {hasManuallyRefreshed && dataUpdatedAt ? (
+              <Typography variant="caption" color="text.secondary">
+                Last refreshed{" "}
+                {formatRelativeTime(new Date(dataUpdatedAt).toISOString(), now)}
+              </Typography>
+            ) : null}
+            <IconButton
+              size="small"
+              onClick={handleRefreshClick}
+              disabled={isFetching}
+              aria-label="Refresh tasks"
+            >
+              <RefreshCw size={14} />
+            </IconButton>
+          </Box>
         </Box>
 
         {isTruncated ? (
@@ -111,7 +137,7 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
               size="small"
               variant="outlined"
               startIcon={<RefreshCw size={14} />}
-              onClick={() => void refetch()}
+              onClick={handleRefreshClick}
               sx={{ textTransform: "none" }}
             >
               Retry

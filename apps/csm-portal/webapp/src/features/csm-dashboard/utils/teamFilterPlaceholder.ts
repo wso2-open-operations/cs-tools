@@ -116,6 +116,39 @@ export const SRE_TEAM_FILTER_FIELD = "sreTeam";
  * already present in `assignmentTeamIds` (i.e. not the placeholder) is left
  * alone, same as a literal value alongside the placeholder in the case DSL.
  */
+/**
+ * Whether `filters` carries {@link CURRENT_TEAM_PLACEHOLDER} anywhere
+ * {@link resolveTeamPlaceholder} would actually resolve it — a `creTeam` or
+ * `sreTeam` case-field-filter entry's `values`, or a flat
+ * `assignmentTeamIds` array. Deliberately mirrors that function's own two
+ * detection checks (`values?.includes(CURRENT_TEAM_PLACEHOLDER)` for the
+ * case DSL, `assignmentTeamIds.includes(CURRENT_TEAM_PLACEHOLDER)` for the
+ * flat shape) rather than re-deriving its own notion of "team-scoped" —
+ * the two must never disagree about which filters objects carry the
+ * placeholder, since callers use this to decide whether a widget's own
+ * `queryKey` actually changes across a team switch (see
+ * `shouldRetryWidgetFetch` in `widgetFetchConcurrency.ts`), while
+ * `resolveTeamPlaceholder` is what actually performs that substitution.
+ *
+ * Existence-only, unlike `resolveTeamPlaceholder` — this never needs to
+ * know which group id would replace the placeholder, only whether one
+ * could.
+ */
+export function hasTeamPlaceholder(filters: Record<string, unknown>): boolean {
+  const fieldFilters = filters.filters;
+  if (isCaseFieldFilterArray(fieldFilters)) {
+    const hasCaseFieldPlaceholder = fieldFilters.some((entry) => {
+      const isCreEntry = entry.field === CRE_TEAM_FILTER_FIELD;
+      const isSreEntry = entry.field === SRE_TEAM_FILTER_FIELD;
+      return (isCreEntry || isSreEntry) && (entry.values?.includes(CURRENT_TEAM_PLACEHOLDER) ?? false);
+    });
+    if (hasCaseFieldPlaceholder) return true;
+  }
+
+  const assignmentTeamIds = filters.assignmentTeamIds;
+  return Array.isArray(assignmentTeamIds) && assignmentTeamIds.includes(CURRENT_TEAM_PLACEHOLDER);
+}
+
 export function resolveTeamPlaceholder(
   filters: Record<string, unknown>,
   selectedTeamCreGroupId: string | string[] | undefined,

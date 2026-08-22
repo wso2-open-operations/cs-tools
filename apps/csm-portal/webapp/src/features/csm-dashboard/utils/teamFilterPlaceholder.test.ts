@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CURRENT_TEAM_PLACEHOLDER,
+  hasTeamPlaceholder,
   resolveTeamPlaceholder,
 } from "./teamFilterPlaceholder";
 
@@ -333,5 +334,59 @@ describe("resolveTeamPlaceholder", () => {
       expect(resolveTeamPlaceholder(filters, "team-group-id", "team-group-id")).toBe(filters);
       expect(resolveTeamPlaceholder(filters, undefined, undefined)).toBe(filters);
     });
+  });
+});
+
+describe("hasTeamPlaceholder", () => {
+  it("returns true when a creTeam entry's values carry the placeholder", () => {
+    const filters = {
+      filters: [
+        { field: "state", op: "in", values: ["open"] },
+        { field: "creTeam", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] },
+      ],
+    };
+
+    expect(hasTeamPlaceholder(filters)).toBe(true);
+  });
+
+  it("returns true when an sreTeam entry's values carry the placeholder", () => {
+    const filters = {
+      filters: [{ field: "sreTeam", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] }],
+    };
+
+    expect(hasTeamPlaceholder(filters)).toBe(true);
+  });
+
+  it("returns true when a flat assignmentTeamIds array carries the placeholder", () => {
+    const filters = { assignmentTeamIds: ["some-literal-group-id", CURRENT_TEAM_PLACEHOLDER] };
+
+    expect(hasTeamPlaceholder(filters)).toBe(true);
+  });
+
+  it("returns false when filters.filters carries no creTeam/sreTeam entry with the placeholder", () => {
+    const filters = {
+      filters: [
+        { field: "state", op: "in", values: ["open"] },
+        { field: "creTeam", op: "in", values: ["some-literal-group-id"] },
+      ],
+    };
+
+    expect(hasTeamPlaceholder(filters)).toBe(false);
+  });
+
+  it("returns false when the placeholder appears on a field other than creTeam/sreTeam", () => {
+    const filters = {
+      filters: [{ field: "assignedUserId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] }],
+    };
+
+    expect(hasTeamPlaceholder(filters)).toBe(false);
+  });
+
+  it("returns false for a flat assignmentTeamIds array with only literal ids", () => {
+    expect(hasTeamPlaceholder({ assignmentTeamIds: ["some-literal-group-id"] })).toBe(false);
+  });
+
+  it("returns false for a filters object with neither filters.filters nor assignmentTeamIds", () => {
+    expect(hasTeamPlaceholder({ states: ["open"], severities: ["critical"] })).toBe(false);
   });
 });

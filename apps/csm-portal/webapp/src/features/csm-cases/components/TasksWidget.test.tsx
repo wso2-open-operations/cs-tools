@@ -52,6 +52,7 @@ function mockListResult(overrides: Partial<ReturnType<typeof useSearchCaseTasks>
     isLoading: false,
     isError: false,
     isFetching: false,
+    dataUpdatedAt: 0,
     refetch: vi.fn(),
     ...overrides,
   } as unknown as ReturnType<typeof useSearchCaseTasks>);
@@ -147,6 +148,25 @@ describe("TasksWidget", () => {
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
     // dueDate is null on this row — rendered as a plain dash, not a broken cell.
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("shows the 'Last refreshed' hint only after a manual refresh click, not on initial load", () => {
+    const refetch = vi.fn();
+    const list: BeListCaseTasksResponse = { tasks: [TASK_ROW], total: 1, offset: 0, limit: 20 };
+    mockListResult({ data: list, refetch, dataUpdatedAt: Date.now() });
+    render(
+      <MemoryRouter>
+        <TasksWidget caseId="case-1" />
+      </MemoryRouter>,
+    );
+
+    // Initial load already set `dataUpdatedAt`, but the hint must stay hidden.
+    expect(screen.queryByText(/last refreshed/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh tasks/i }));
+
+    expect(refetch).toHaveBeenCalled();
+    expect(screen.getByText(/last refreshed/i)).toBeInTheDocument();
   });
 
   it("renders a neutral badge for an OTHER/null state instead of assuming only OPEN/CLOSED", () => {

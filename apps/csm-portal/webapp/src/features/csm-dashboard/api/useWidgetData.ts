@@ -19,7 +19,10 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type { BeWidgetResourceType, BeWidgetShape } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
-import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
+import {
+  hasTeamPlaceholder,
+  resolveTeamPlaceholder,
+} from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
   hasCurrentUserPlaceholder,
@@ -111,6 +114,20 @@ export function useWidgetData(
   // records. Hold the request instead; the query re-enables itself on the
   // render after `/users/me` resolves.
   const awaitingCurrentUser = hasCurrentUserPlaceholder(resolvedFilters);
+  // Derived, not threaded down as its own prop: a stable serialization of
+  // both team-group-id params already reaching this hook, so
+  // `withWidgetFetchSlot` can drop this widget's queued fetch when the
+  // selected team changes out from under it (see
+  // widgetFetchConcurrency.ts's own `teamKey` doc). Constant for a
+  // non-team-based dashboard (both undefined) — never drops anything
+  // there.
+  const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
+  // Whether THIS widget's own filters reference `__current_team__` — see
+  // `shouldRetryWidgetFetch`'s own doc comment for why a queue-drop retry
+  // is only worth anything when they don't (team-independent). Derived
+  // from the raw, pre-resolution `filters`, not `resolvedFilters` — by the
+  // time resolution runs the placeholder is already gone.
+  const isTeamIndependent = !hasTeamPlaceholder(filters);
 
   return useQuery<WidgetData, Error>({
     queryKey: [
@@ -162,14 +179,17 @@ export function useWidgetData(
           ? (rawItems as Record<string, unknown>[])
           : [];
         return { total, items };
-      });
+      }, teamKey);
     },
     // Explicit per-query retry (not inherited from AppWithConfig's global
     // default) so a widget whose fetch timed out gets one retry — see
     // shouldRetryWidgetFetch's own doc comment for why a timeout must not
     // be a same-tick terminal failure, and why the retry needs no separate
-    // "back of the queue" bookkeeping of its own.
-    retry: shouldRetryWidgetFetch,
+    // "back of the queue" bookkeeping of its own. Wrapped rather than
+    // passed directly: react-query's own `retry` option only ever calls
+    // the 2-arg `(failureCount, error)` form, so `isTeamIndependent` has to
+    // be closed over here instead of threaded through react-query itself.
+    retry: (failureCount, error) => shouldRetryWidgetFetch(failureCount, error, isTeamIndependent),
     staleTime: 60_000,
   });
 }

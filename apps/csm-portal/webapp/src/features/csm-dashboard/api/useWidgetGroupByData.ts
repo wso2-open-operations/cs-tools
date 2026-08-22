@@ -23,7 +23,10 @@ import type {
   BeWidgetResourceType,
 } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
-import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
+import {
+  hasTeamPlaceholder,
+  resolveTeamPlaceholder,
+} from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
   hasCurrentUserPlaceholder,
@@ -94,6 +97,13 @@ export function useWidgetGroupByData(
   // signed-in user's profile hasn't landed yet, so the query holds rather
   // than searching unscoped.
   const awaitingCurrentUser = hasCurrentUserPlaceholder(resolvedFilters);
+  // See useWidgetData's own comment — same derivation, same reasoning.
+  const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
+  // See useWidgetData's own comment — same derivation (off the raw,
+  // pre-resolution `baseFilters`), same reasoning; there's no per-slice
+  // query to merge under here, so this is the widget's whole filters
+  // object, same as useWidgetData.
+  const isTeamIndependent = !hasTeamPlaceholder(baseFilters);
 
   const query = useQuery({
     queryKey: [
@@ -127,12 +137,14 @@ export function useWidgetGroupByData(
           },
           { signal },
         );
-      });
+      }, teamKey);
     },
     enabled: enabled && !!groupBy && !awaitingCurrentUser,
     // Same per-query retry override as useWidgetPieData's own slice
-    // fetches, same reasoning (see shouldRetryWidgetFetch).
-    retry: shouldRetryWidgetFetch,
+    // fetches, same reasoning (see shouldRetryWidgetFetch). Wrapped for the
+    // same reason useWidgetData wraps it — react-query's own `retry` option
+    // only calls the 2-arg form.
+    retry: (failureCount, error) => shouldRetryWidgetFetch(failureCount, error, isTeamIndependent),
     staleTime: 60_000,
   });
 

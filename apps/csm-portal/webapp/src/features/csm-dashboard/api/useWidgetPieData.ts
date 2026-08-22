@@ -20,7 +20,10 @@ import { useBackendApi } from "@api/backend/client";
 import type { BeDashboardPieSlice, BeWidgetResourceType } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
-import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
+import {
+  hasTeamPlaceholder,
+  resolveTeamPlaceholder,
+} from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
   hasCurrentUserPlaceholder,
@@ -114,10 +117,22 @@ export function useWidgetPieData(
   // "loading" to react-query, and a pie/bar tile must not paint an empty
   // chart while it is really still waiting on identity.
   const awaitingCurrentUser = resolvedSliceFilters.some(hasCurrentUserPlaceholder);
+  // See useWidgetData's own comment — same derivation, same reasoning.
+  const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
+  // Whether EACH slice's own merged filters (base `query` + that slice's
+  // own `query`, pre-resolution — a slice's own `query` may carry the
+  // placeholder even when the widget's base `query` doesn't) reference
+  // `__current_team__` — see useWidgetData's own comment for why this must
+  // be computed off the raw filters, not the resolved ones, and
+  // `shouldRetryWidgetFetch`'s own doc comment for how it's used.
+  const sliceIsTeamIndependent = slices.map(
+    (slice) => !hasTeamPlaceholder(mergeWidgetFilters(baseFilters, slice.query)),
+  );
 
   const queries = useQueries({
     queries: slices.map((_slice, index) => {
       const filters = resolvedSliceFilters[index];
+      const isTeamIndependent = sliceIsTeamIndependent[index];
       return {
         queryKey: [
           ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA,
@@ -147,13 +162,16 @@ export function useWidgetPieData(
               { signal },
             );
             return typeof res.total === "number" ? res.total : 0;
-          });
+          }, teamKey);
         },
         enabled: enabled && !awaitingCurrentUser,
         // Same per-query retry override as useWidgetData, same reasoning
         // (see shouldRetryWidgetFetch) — a pie/bar slice fetch that timed
-        // out gets one retry too.
-        retry: shouldRetryWidgetFetch,
+        // out gets one retry too. Wrapped for the same reason useWidgetData
+        // wraps it — react-query's own `retry` option only calls the 2-arg
+        // form.
+        retry: (failureCount: number, error: Error) =>
+          shouldRetryWidgetFetch(failureCount, error, isTeamIndependent),
         staleTime: 60_000,
       };
     }),

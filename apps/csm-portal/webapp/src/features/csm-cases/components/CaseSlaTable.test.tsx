@@ -101,6 +101,21 @@ describe("CaseSlaTable", () => {
     expect(refetch).toHaveBeenCalled();
   });
 
+  it("shows the 'Last refreshed' hint only after a manual refresh click, not on initial load", () => {
+    const refetch = vi.fn();
+    const list: CaseSlaList = { caseId: "case-1", count: 1, slas: [SLA_ROW] };
+    mockResult({ data: list, refetch, dataUpdatedAt: Date.now() });
+    render(<CaseSlaTable caseId="case-1" />);
+
+    // Initial load already set `dataUpdatedAt`, but the hint must stay hidden.
+    expect(screen.queryByText(/last refreshed/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh slas/i }));
+
+    expect(refetch).toHaveBeenCalled();
+    expect(screen.getByText(/last refreshed/i)).toBeInTheDocument();
+  });
+
   it("shows a truncation notice when fewer rows are rendered than the total count", () => {
     const list: CaseSlaList = { caseId: "case-1", count: 51, slas: [SLA_ROW] };
     mockResult({ data: list });
