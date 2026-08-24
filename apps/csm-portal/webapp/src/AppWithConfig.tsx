@@ -20,6 +20,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import AppErrorBoundary from "@components/error/AppErrorBoundary";
 import { AsgardeoProvider } from "@asgardeo/react";
+import {
+  isTopLevelWindow,
+  silentAuthFrameCanComplete,
+} from "@utils/isTopLevelWindow";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ThemePreferenceProvider } from "@context/theme/ThemePreferenceContext";
@@ -49,25 +53,14 @@ function shouldRetryQuery(failureCount: number, error: Error): boolean {
   return statusCode === 502 || statusCode === 503;
 }
 
-// `signInSilently()` (from `@asgardeo/react`) recovers an expired access
-// token by loading the IdP's authorize URL, with prompt=none, inside a
-// hidden, invisible iframe. Because this app's own SPA is served at the
-// same redirect_uri as the top-level app, that hidden iframe's document is
-// a full second load of THIS SAME bundle — `AsgardeoProvider` needs to
-// mount and initialize there to complete the SDK's internal handshake
-// (it detects the silent-sign-in state in the URL and short-circuits), but
-// nothing below it should. Without this guard, the router/`AuthGuard`/page
-// tree fully mounts inside that hidden iframe too, and `AuthGuard`'s own
-// (correct, needed) recovery logic then notices "not signed in yet" INSIDE
-// that iframe and starts its own silent sign-in — recursively nesting
-// another hidden iframe inside this one. Observed live: a single token
-// expiry cascaded into 7 nested iframe loads and dropped an in-flight POST
-// (a case comment was never created) somewhere in that churn. This app is
-// never legitimately embedded by anything else, so `window.self !==
-// window.top` unambiguously means "I am the SDK's own hidden recovery
-// iframe," not a real embedding scenario to support.
-const isInsideHiddenAuthIframe =
-  typeof window !== "undefined" && window.self !== window.top;
+// See `isTopLevelWindow` for why the SDK's hidden silent-auth iframe is a full
+// second load of this bundle, and why nothing below `AsgardeoProvider` may
+// mount inside it. When that frame carries an IdP error rather than a code
+// there is no handshake left to finish, so the provider is skipped too — see
+// `silentAuthFrameCanComplete`.
+const isInsideHiddenAuthIframe = !isTopLevelWindow();
+const isDeadAuthIframe =
+  isInsideHiddenAuthIframe && !silentAuthFrameCanComplete();
 
 const queryClient: QueryClient = new QueryClient({
   defaultOptions: {
@@ -87,6 +80,10 @@ const queryClient: QueryClient = new QueryClient({
 });
 
 export default function AppWithConfig(): JSX.Element {
+  // Nothing to mount: this frame's silent attempt already failed, and the SDK's
+  // own start-up would only reject on the error URL and log it.
+  if (isDeadAuthIframe) return <></>;
+
   return (
     <AsgardeoProvider
       baseUrl={authConfig.baseUrl}
