@@ -380,6 +380,13 @@ export default function CsmCaseCommentBubble({
           sx={{
             minWidth: 0,
             maxWidth: "100%",
+            // Newly generated comments no longer carry a per-run
+            // `white-space: pre-wrap` inline style (digiops-cs#2933) — this
+            // container declares it once instead, so multi-space runs and
+            // leading/trailing spaces the user typed still aren't collapsed.
+            // Older comments still carry their own inline style and are
+            // unaffected either way.
+            whiteSpace: "pre-wrap",
             // Backend HTML can put an explicit pixel width on *any* element — a
             // Word/Excel paste arrives as `<div style="width:2400px">`, and a
             // `<pre>`/`<p>` can carry one just as easily — so the per-tag rules

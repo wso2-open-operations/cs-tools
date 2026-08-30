@@ -2388,6 +2388,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   maxWidth: "100%",
                   contain: "inline-size",
                   overflowX: "auto",
+                  // Newly generated descriptions no longer carry a per-run
+                  // `white-space: pre-wrap` inline style (digiops-cs#2933) —
+                  // declared once here instead. Older descriptions carry
+                  // their own inline style and are unaffected either way.
+                  whiteSpace: "pre-wrap",
                   "& p": { mb: 0.5 },
                   "& p:last-child": { mb: 0 },
                 }}

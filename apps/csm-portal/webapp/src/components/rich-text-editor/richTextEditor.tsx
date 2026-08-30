@@ -324,3 +324,64 @@ export function collapseEmptyParagraphElements(dom: Document): boolean {
 
   return changed;
 }
+
+/**
+ * Removes the `white-space: pre-wrap` inline style that Lexical's default
+ * `TextNode.exportDOM()` adds to the exported element of *every* text run
+ * (`node_modules/lexical/Lexical.dev.mjs`: `element.style.whiteSpace =
+ * 'pre-wrap'`, set unconditionally before any format-specific wrapping).
+ * Then unwraps any `<span>` left with no remaining attributes -- a plain
+ * text run has no other reason to be wrapped in a span once that style is
+ * gone.
+ *
+ * Per digiops-cs#2933: this HTML is only ever read by renderers we control
+ * (CSM Portal, Customer Portal), both via `dangerouslySetInnerHTML` in
+ * components we own -- Lexical's own source comment says the per-span style
+ * exists "for headless mode where people might use Lexical to generate HTML
+ * content and not have the ability to use CSS classes," which doesn't apply
+ * here. The same guarantee (don't collapse multiple consecutive spaces the
+ * user typed) is declared once on the render container's own CSS instead.
+ *
+ * IMPORTANT -- this is an unconditional strip, unlike
+ * {@link unwrapNestedPreCodeElements} and friends: it is only safe to call
+ * this on the generation side once *every* consumer that renders this HTML
+ * declares `white-space: pre-wrap` on its own container CSS. A consumer that
+ * doesn't will silently collapse multi-space runs and leading/trailing
+ * spaces in newly generated comments. See digiops-cs#2933 for the full
+ * rollout requirement across both apps.
+ */
+export function stripWhitespaceStyleAndUnwrapSpans(dom: Document): boolean {
+  const body = dom.body;
+  if (!body) return false;
+
+  let changed = false;
+  for (const el of Array.from(body.querySelectorAll<HTMLElement>("[style]"))) {
+    if (!el.style.whiteSpace) continue;
+    el.style.removeProperty("white-space");
+    if (el.getAttribute("style") === "") {
+      el.removeAttribute("style");
+    }
+    changed = true;
+
+    if (el.tagName === "SPAN" && el.attributes.length === 0) {
+      el.replaceWith(...Array.from(el.childNodes));
+    }
+  }
+
+  return changed;
+}
+
+/**
+ * String-level convenience wrapper around
+ * {@link stripWhitespaceStyleAndUnwrapSpans} for the composer's
+ * HTML-generation path, which only has the serialized
+ * `$generateHtmlFromNodes` output, not a `Document`.
+ */
+export function stripWhitespaceStyleFromHtml(html: string): string {
+  if (!html.includes("white-space")) return html;
+
+  const dom = new DOMParser().parseFromString(html, "text/html");
+  if (!stripWhitespaceStyleAndUnwrapSpans(dom)) return html;
+
+  return dom.body.innerHTML;
+}
