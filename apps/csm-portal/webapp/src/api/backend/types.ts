@@ -647,10 +647,29 @@ export interface BeCatalogItemVariableChoice {
 }
 
 /**
+ * A single resolved validation rule for a catalog variable (`question_regex`),
+ * or `null`/absent when the variable declares no `validate_regex`, or the
+ * referenced rule is inactive.
+ */
+export interface BeCatalogItemVariableValidation {
+  name: string;
+  regex: string;
+  /** Human-readable message to show when the pattern doesn't match. */
+  message: string;
+}
+
+/**
  * A catalog-item variable (form field). The contract carries the question
  * text, display order, a free-form `type` hint and, for choice-type
- * variables, the list of selectable options. There is still no mandatory
- * flag, so the portal decides required-ness client-side.
+ * variables, the list of selectable options.
+ *
+ * The nine keys from `name` down are additive (2026-08-21) — see
+ * `CHANGES-sr-variable-metadata.md`. `hasMandatory` (above) is a
+ * pre-existing, permanently-broken flag (`getValue('mandatory') === 'true'`
+ * on a boolean column never actually matches) and is NOT the field to use;
+ * `mandatory` below is. `active`/`hidden` are surfaced as read data (the
+ * endpoint has always returned inactive/hidden variables; now a caller can
+ * tell), so the form should skip rendering a variable where either is true.
  */
 export interface BeCatalogItemVariable {
   id: string;
@@ -662,6 +681,36 @@ export interface BeCatalogItemVariable {
    * `null`, never `[]`) on non-choice variables.
    */
   choices?: BeCatalogItemVariableChoice[];
+  /** Always broken — see the doc comment above. Present for completeness only. */
+  hasMandatory?: boolean;
+
+  /** The key this variable writes into the case payload's `variables[].id`
+   * mapping is still `id` above; `name` is the underlying SN field name,
+   * informational only. */
+  name?: string;
+  /** Correct required-ness flag — use this, not `hasMandatory`. */
+  mandatory?: boolean;
+  /** `false` for an inactive variable; the endpoint still returns these. */
+  active?: boolean;
+  /** `read_only` in ServiceNow — render disabled, not hidden. */
+  readOnly?: boolean;
+  /** `hidden` in ServiceNow — do not render this variable at all. */
+  hidden?: boolean;
+  defaultValue?: string | null;
+  /** Declared max length for a text-type variable, parsed from ServiceNow's
+   * `attributes` string; `null` when not declared. */
+  maxLength?: number | null;
+  /**
+   * The referenced table name for a reference-type variable (e.g.
+   * `sys_user_group`), or `null`. There is no dedicated reference-picker
+   * component in this portal yet — a variable carrying this key still
+   * renders through the existing type/choice heuristics (a plain text input
+   * if it has no `choices`), same as before this field existed. Building a
+   * real searchable picker keyed off `referenceTable` is a follow-up, not
+   * done here — see this feature's `/help` note.
+   */
+  referenceTable?: string | null;
+  validation?: BeCatalogItemVariableValidation | null;
 }
 
 /** `GET /catalogs/{catalogId}/items/{catalogItemId}/variables` response. */
@@ -2176,6 +2225,55 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * transition added on the backend needs no frontend change to appear.
    */
   legalNextStates?: string[];
+
+  // --- CR field parity (2026-08-20) -----------------------------------
+  // 20 keys the ServiceNow layer newly exposes on `GET /change-requests/{id}`
+  // (and therefore also the PATCH receipt, which returns the same mapper).
+  // Deliberately absent from the search/list view — the summary mapper was
+  // left untouched so the list endpoint pays nothing for them.
+  //
+  // `priority`/`category` are read-only here on purpose: the live
+  // ServiceNow CR form has no fine-grained Priority control the portal
+  // should offer, and `category`/`categoryKey` must never get an editable
+  // control (see `notes/2026-08-19-sn-prod-cr-form-spec.md` in the planning
+  // repo) — confirmed multiple times across this workstream's decisions.
+
+  /** Rich-text implementation plan. Also present (write-only) on
+   * {@link BeCreateChangeRequestPayload}; this is the read-back. */
+  implementationPlan?: string | null;
+  priority?: { id: number; label: string } | null;
+  category?: { id: string; label: string } | null;
+  requestedBy?: BeEntityRef | null;
+
+  /** Real SRE content the ServiceNow layer previously never surfaced. */
+  affectedServicesText?: string | null;
+  affectedComponentsText?: string | null;
+  /** Free-form; e.g. `"10 mins"`. Parsing into a structured duration, if
+   * ever needed, is CSM policy, not something ServiceNow enforces. */
+  rollbackDurationText?: string | null;
+  environments?: BeEntityRef[];
+  deploymentProducts?: BeEntityRef[];
+  customerGroup?: BeEntityRef | null;
+
+  /**
+   * Read-through only — no write path is exposed anywhere in the stack for
+   * this group (see `CHANGES-cr-field-parity.md`'s "group C2"). Do not add
+   * editable controls for these without first adding the write support at
+   * every lower layer.
+   */
+  changeRequestType?: { id: number; label: string } | null;
+  likelihood?: { id: number; label: string } | null;
+  isPlanningVisibleToCustomers?: boolean;
+  confirmCustomerUpdatedDate?: string | null;
+  customerUpdatedOn?: string | null;
+  /** `read_only` in the ServiceNow dictionary — inherently read-only. */
+  labels?: string[];
+  deployments?: BeEntityRef[];
+
+  /** System-maintained, `read_only` in the ServiceNow dictionary. */
+  workStart?: string | null;
+  workEnd?: string | null;
+  gitReference?: string | null;
 }
 
 /** An approval stage seen on a change request, e.g. Assess, Authorize. */
@@ -2465,6 +2563,36 @@ export interface BePatchChangeRequestPayload {
    * the link is set by a follow-up PATCH once the change request exists.
    */
   caseId?: string;
+
+  // --- CR field parity (2026-08-20) — bypass-branch-only write keys ---
+  // The regular (non-bypass) branch on `PATCH /change-requests/{id}` still
+  // only accepts `plannedStartOn`/`isCustomerApproved`/`isCustomerReviewed`/
+  // `requestApproval`, unchanged; every CSM engineer using this portal is a
+  // bypass user, so these six reach the backend. `categoryKey`/`priorityKey`,
+  // `environmentIds`/`deploymentProductIds`, `comment`/`workNote` and
+  // `durationInput` are also accepted by the backend but are deliberately
+  // NOT modeled here yet:
+  //   - `categoryKey` never gets an editable control (see the doc comment on
+  //     `BeChangeRequestDetail.category`).
+  //   - `priorityKey` has no picker in this portal yet (no metadata endpoint
+  //     for the 4 SN priority choices) — left for a follow-up.
+  //   - `environmentIds`/`deploymentProductIds` have no search endpoint at
+  //     this BFF (`/environments/search`, `/deployment-products/search` do
+  //     not exist) — a picker cannot be built until one does.
+  //   - `comment`/`workNote` are journal fields; the existing CR comments
+  //     feature (`useCsmChangeRequestComments`, `/change-requests/{id}/comments`)
+  //     already covers that surface — this dialog should not duplicate it.
+  //   - `durationInput` only succeeds when it exactly matches the effective
+  //     planned window in whole seconds (see `CHANGES-cr-field-parity.md`
+  //     §"durationInput"); building that validation is deferred rather than
+  //     shipped half-right.
+  /** Rich-text implementation plan; `""` clears it. */
+  implementationPlan?: string;
+  affectedServicesText?: string;
+  affectedComponentsText?: string;
+  rollbackDurationText?: string;
+  customerGroupId?: string;
+  requestedById?: string;
 }
 
 /** `PATCH /change-requests/{id}` response — the touched identifiers. */
@@ -2655,6 +2783,13 @@ export interface BeIncidentDetail extends BeIncident {
   watchList?: BeIncidentWatchListItem[];
   /** Service-request cases whose parent points to this incident. */
   linkedServiceRequests?: BeLinkedServiceRequestRef[] | null;
+  /**
+   * Present once this incident has been handed off to a specialist group
+   * (via `POST /incidents/{id}/specialist-handoffs` or the equivalent
+   * ServiceNow UI action), `null` otherwise. See
+   * {@link BeSpecialistHandoffSummary}.
+   */
+  specialistHandoff?: BeSpecialistHandoffSummary | null;
 }
 
 /**
@@ -3770,5 +3905,310 @@ export interface BeSmartAlertDetail {
   fireCount?: number;
   /** ID of the linked incident, if any. */
   incidentId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Outages (ServiceNow data source only, `cmdb_ci_outage`). Seven resources —
+// see `entity-service/internal/domain/entity.go`'s "Outages" section, which
+// this mirrors field-for-field since the BFF is a raw passthrough here.
+// `status` is always derived (never stored/sent): `in_progress` while `end`
+// is unset, `resolved` once it is. Closing an outage is `PATCH { end: … }` —
+// there is no separate close verb or state field.
+// ---------------------------------------------------------------------------
+
+export type BeOutageType = "outage" | "degradation" | "planned";
+export type BeOutageStatus = "in_progress" | "resolved";
+export type BeOutageCommunicationChannel = "external" | "internal" | "additional";
+export type BeOutageSortField = "begin" | "end" | "number" | "createdOn" | "updatedOn";
+export type BeOutageSortOrder = "asc" | "desc";
+
+/**
+ * A configuration item as seen from an outage. `className` is carried
+ * alongside `id`/`name` because whether an outage is publicly visible
+ * depends on the CI's class (only `service_offering` is linkable at all) —
+ * see {@link BeOutage.publishesToStatusPage}.
+ */
+export interface BeOutageConfigurationItemRef {
+  id: string;
+  name: string;
+  className: string;
+}
+
+export interface BeOutageIncidentRef {
+  id: string;
+  number: string;
+  shortDescription: string;
+  state: string | null;
+}
+
+/**
+ * The full outage representation returned on create, update and search.
+ * `publishesToStatusPage`/`statusPageCloud` are computed by the backing data
+ * source, never stored — they are the single most important fields here:
+ * the only thing that makes an outage's communications public is which CI it
+ * points at. Always render them, and warn the user about publication
+ * *before* save using `BeOutageMetadataResponse.statusPageClouds` — after a
+ * `409` is too late.
+ */
+export interface BeOutage {
+  id: string;
+  number: string;
+  type: BeOutageType | string | null;
+  status: BeOutageStatus | string | null;
+  /** Raw backend timestamp, `YYYY-MM-DD HH:mm:ss` UTC. */
+  begin: string;
+  /** `null` while the outage is ongoing. */
+  end: string | null;
+  /** Derived; `null` only if not yet computable. */
+  duration: string | null;
+  shortDescription: string;
+  configurationItem: BeOutageConfigurationItemRef | null;
+  incident: BeOutageIncidentRef | null;
+  /** Maintained by the backing data source's own business rules; can be `null`, not just empty. */
+  affectedConfigurationItems: BeOutageConfigurationItemRef[] | null;
+  publishesToStatusPage: boolean;
+  statusPageCloud: string | null;
+  createdOn: string;
+  createdBy: string;
+  updatedOn: string;
+  updatedBy: string;
+}
+
+export interface BeOutageCommunicationCounts {
+  external: number;
+  internal: number;
+  additional: number;
+}
+
+/** `GET /outages/{id}` response — the full outage plus per-channel counts. */
+export interface BeOutageDetail extends BeOutage {
+  communicationCounts: BeOutageCommunicationCounts;
+}
+
+/**
+ * `POST /outages` body. `type`, `begin` and `shortDescription` are required.
+ * `end` is intentionally omittable — an open-ended create is the normal
+ * case; close later with a PATCH. `acknowledgePublicPublication` is required
+ * only when `configurationItemId` resolves to a monitored cloud (a `409`
+ * names the cloud if it's missing) — check
+ * `BeOutageMetadataResponse.statusPageClouds` client-side first so the
+ * checkbox can be surfaced proactively instead of reactively.
+ */
+export interface BeCreateOutagePayload {
+  type: BeOutageType;
+  /** `YYYY-MM-DD HH:mm:ss` UTC (ISO-8601 also accepted by the backend). */
+  begin: string;
+  /** Omit for an open/ongoing outage. */
+  end?: string;
+  shortDescription: string;
+  configurationItemId?: string;
+  incidentId?: string;
+  /** Seeds the PUBLIC communications journal. */
+  externalCommunication?: string;
+  internalCommunication?: string;
+  acknowledgePublicPublication?: boolean;
+}
+
+/** `POST /outages` response. */
+export interface BeCreateOutageResponse {
+  message: string;
+  outage: BeOutage;
+}
+
+/**
+ * `PATCH /outages/{id}` body. At least one field required. `end` is
+ * genuinely tri-state on the wire — omit to leave unchanged, send `null` to
+ * reopen a closed outage, send a value to close (or move) it — so it must
+ * always be sent as an explicit key when the caller means to touch it, never
+ * defaulted away by `JSON.stringify` dropping `undefined`.
+ */
+export interface BePatchOutagePayload {
+  type?: BeOutageType;
+  begin?: string;
+  end?: string | null;
+  shortDescription?: string;
+  configurationItemId?: string | null;
+  incidentId?: string | null;
+  acknowledgePublicPublication?: boolean;
+}
+
+/** `PATCH /outages/{id}` response. */
+export interface BePatchOutageResponse {
+  message: string;
+  outage: BeOutage;
+}
+
+export interface BeSearchOutagesFilters {
+  types?: BeOutageType[];
+  statuses?: BeOutageStatus[];
+  configurationItemIds?: string[];
+  incidentIds?: string[];
+  /** UTC bound; defaults to six months back when omitted (see
+   * `BeSearchOutagesResponse.beginFromDefaulted`). */
+  beginFrom?: string;
+  beginTo?: string;
+  publishedOnly?: boolean;
+  searchTerm?: string;
+}
+
+export interface BeSearchOutagesPayload {
+  filters?: BeSearchOutagesFilters;
+  sortBy?: { field: BeOutageSortField; order: BeOutageSortOrder };
+  pagination?: BePagination;
+}
+
+/**
+ * Paginated outage search result. `appliedBeginFrom`/`beginFromDefaulted`
+ * report what bound was actually used so the list never has to guess whether
+ * an implicit six-month default was applied.
+ */
+export interface BeSearchOutagesResponse {
+  outages: BeOutage[];
+  total: number;
+  limit: number;
+  offset: number;
+  appliedBeginFrom: string;
+  beginFromDefaulted: boolean;
+}
+
+export interface BeAddOutageCommunicationPayload {
+  channel: BeOutageCommunicationChannel;
+  body: string;
+}
+
+/** A single communication journal entry. `isPublic` is true only for the
+ * `external` channel — those entries are echoed verbatim on the public
+ * status page when the outage publishes. */
+export interface BeOutageCommunication {
+  id: string;
+  channel: BeOutageCommunicationChannel;
+  body: string;
+  isPublic: boolean;
+  createdOn: string;
+  createdBy: string;
+}
+
+export interface BeAddOutageCommunicationResponse {
+  message: string;
+  communication: BeOutageCommunication;
+}
+
+export interface BeSearchOutageCommunicationsPayload {
+  channels?: BeOutageCommunicationChannel[];
+  pagination?: BePagination;
+}
+
+export interface BeSearchOutageCommunicationsResponse {
+  communications: BeOutageCommunication[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BeOutageChoice {
+  value: string;
+  label: string;
+}
+
+export interface BeOutageCommunicationChannelMeta {
+  value: BeOutageCommunicationChannel | string;
+  label: string;
+  isPublic: boolean;
+}
+
+/**
+ * `GET /outages/metadata` response — the live choice lists needed to render
+ * an outage create/edit form, including the monitored-cloud list
+ * (`statusPageClouds`) so the caller can warn about public visibility
+ * *before* a save rather than after a `409`.
+ */
+export interface BeOutageMetadataResponse {
+  types: BeOutageChoice[];
+  statuses: BeOutageChoice[];
+  communicationChannels: BeOutageCommunicationChannelMeta[];
+  statusPageClouds: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Incident specialist handoff (`POST /incidents/{id}/specialist-handoffs`).
+// Reproduces the "Escalate to Special Ops" workflow: hands an in-progress
+// incident (Choreo or Asgardeo only — anything else is a 409) to the
+// specialist group for that service, opens a `[Runbook Task]` incident task,
+// and files an internal GitHub issue. The GitHub step is best-effort: it
+// never gates the ServiceNow state, so a 200 can still carry
+// `githubIssueError` — always check it and surface it distinctly rather than
+// reporting a clean success.
+// ---------------------------------------------------------------------------
+
+export type BeHandoffReasonCode = "no-runbook" | "runbook-not-working";
+export type BeHandoffEscalationTeam = "choreo-runtime-team" | "choreo-apim-team";
+
+export interface BeHandOffIncidentPayload {
+  reasonCode: BeHandoffReasonCode;
+  /** Choreo only; ignored (but not rejected) for any other service. */
+  escalationTeam?: BeHandoffEscalationTeam;
+  /** Defaults to `true` on the backend when omitted. */
+  createGithubIssue?: boolean;
+}
+
+export interface BeHandoffTaskRef {
+  id: string;
+  number: string;
+  subject: string;
+}
+
+export interface BeHandoffGithubIssueRef {
+  url: string;
+  number: number;
+  repo: string;
+}
+
+export interface BeIncidentHandoffResult {
+  assignmentGroup: BeEntityRef;
+  previousAssignmentGroup: BeEntityRef | null;
+  reasonCode: BeHandoffReasonCode | string;
+  reasonDescription: string;
+  escalationTeam: BeHandoffEscalationTeam | string | null;
+  task: BeHandoffTaskRef;
+  githubIssue: BeHandoffGithubIssueRef | null;
+  /**
+   * Non-null when the ServiceNow state committed successfully but the
+   * internal GitHub issue could not be created (e.g. `"GitHub issue creation
+   * failed (401)"`). The handoff itself still succeeded — never treat this
+   * response as a failure — but the receiving specialist team's GitHub
+   * intake was missed, so this must be surfaced distinctly, not silently
+   * swallowed.
+   */
+  githubIssueError: string | null;
+  incident: BeIncidentDetail;
+}
+
+/** `POST /incidents/{id}/specialist-handoffs` response. */
+export interface BeHandOffIncidentResponse {
+  message: string;
+  handoff: BeIncidentHandoffResult;
+}
+
+/**
+ * Summary of a specialist handoff, embedded on `GET /incidents/{id}` as
+ * `specialistHandoff` (`null` when the incident was never handed off — either
+ * through this API or the ServiceNow UI button; the read side derives it from
+ * the incident's own journal/assignment-group state either way).
+ */
+export interface BeSpecialistHandoffSummary {
+  reasonCode: BeHandoffReasonCode | string;
+  reasonDescription: string;
+  escalationTeam: BeHandoffEscalationTeam | string | null;
+  handedOffAt: string;
+  handedOffBy: string;
+  assignmentGroup: BeEntityRef;
+  task: {
+    id?: string;
+    number: string;
+    subject: string;
+    state?: string | null;
+    stateLabel?: string | null;
+  };
+  githubIssueUrl: string | null;
 }
 

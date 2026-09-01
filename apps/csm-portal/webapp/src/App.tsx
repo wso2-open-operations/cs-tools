@@ -70,6 +70,8 @@ import CreateChangeRequestPage from "@features/csm-operations/pages/CreateChange
 import CreateIncidentPage from "@features/csm-operations/pages/CreateIncidentPage";
 import ProblemDetailPage from "@features/csm-operations/pages/ProblemDetailPage";
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
+import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
+import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
 import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
 import CsmUserManagementLandingPage from "@features/csm-admin/pages/CsmUserManagementLandingPage";
 import CsmUsersPage from "@features/csm-users/pages/CsmUsersPage";
@@ -468,6 +470,8 @@ export default function App(): JSX.Element {
                     />
                     <Route path="problems/new" element={<CreateProblemPage />} />
                     <Route path="problems/:id" element={<ProblemDetailPage />} />
+                    <Route path="outages/new" element={<CreateOutagePage />} />
+                    <Route path="outages/:id" element={<OutageDetailPage />} />
                   </Route>
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />

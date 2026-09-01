@@ -59,8 +59,6 @@ import {
   SUPPORTED_TRANSFER_TARGETS,
   TRANSFERABLE_CASE_TYPES,
 } from "@features/csm-cases/utils/caseTypeTransfer";
-import type { SubscriptionType } from "@features/csm-projects/types/csmProjects";
-import { isCloudSupportSubscription } from "@features/csm-projects/utils/subscriptionType";
 
 const SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
 
@@ -123,11 +121,6 @@ interface ChangeCaseTypeDialogProps {
    * target type — shown as disabled dropdowns on the fields step so the
    * user sees what's staying the same alongside what still needs filling. */
   currentProjectName?: string;
-  /** The case's project subscription type — gates whether Service Request is
-   * offered as a transfer target (entity-service only accepts it for Managed
-   * Cloud and Cloud Support projects). Absent renders the option disabled,
-   * same as any other non-qualifying subscription type. */
-  currentProjectSubscriptionType?: SubscriptionType;
   currentDeploymentName?: string;
   currentProductName?: string;
   currentWatchers?: { id: string; name: string }[];
@@ -154,18 +147,19 @@ interface ChangeCaseTypeDialogProps {
  * Service Request. Three steps: pick the target type (a
  * single-row radio choice of the other 3 — the case's current type isn't
  * offered as a target), fill in whatever the target needs, then review
- * what's retained/lost and confirm. All four targets fully submit — the
- * entity-service `caseType` validator accepts every type on update. Service
- * Request is additionally gated client-side on the case's project
- * subscription type (Managed Cloud or Cloud Support only), approximating —
- * not replacing — the backend's own entitlement check.
+ * what's retained/lost and confirm. Only Case <-> Engagement submits today —
+ * SRA/Service Request are still selectable and their own field step is
+ * fully previewable (SRA's attachment uploader really uploads; Service
+ * Request's catalog picker is real), so the whole proposal is explorable —
+ * but the confirm button on step 3 stays disabled for them until
+ * entity-service's `caseType` validator accepts them as
+ * targets.
  */
 export default function ChangeCaseTypeDialog({
   currentType,
   currentSeverity,
   hasAttachments,
   currentProjectName = "—",
-  currentProjectSubscriptionType,
   currentDeploymentName = "—",
   currentProductName = "—",
   currentWatchers = [],
@@ -197,12 +191,6 @@ export default function ChangeCaseTypeDialog({
 
   const preview = computeTransferPreview(currentType, targetType, hasAttachments);
   const isSupportedTarget = SUPPORTED_TRANSFER_TARGETS.includes(targetType);
-  // Approximates the backend's ProjectTypeFeatureManager entitlement check
-  // (which also weighs SR product category, not just subscription type) —
-  // client-side UX only, the entity-service still enforces the real rule.
-  const serviceRequestAllowed =
-    currentProjectSubscriptionType === "managed_cloud_subscription" ||
-    isCloudSupportSubscription(currentProjectSubscriptionType);
   const engagementTypeMissing = targetType === "engagement" && engagementType === "";
   const engagementPaymentTypeMissing =
     targetType === "engagement" && engagementPaymentType === "";
@@ -241,10 +229,7 @@ export default function ChangeCaseTypeDialog({
       : targetType === "security_report_analysis"
         ? hasAttachments
         : targetType === "service_request"
-          ? serviceRequestAllowed &&
-            !!catalogId &&
-            !!catalogItemId &&
-            firstEmptyRequired === null
+          ? !!catalogId && !!catalogItemId && firstEmptyRequired === null
           : true;
 
   // fieldsStepValid already carries each target's own requirements (catalog +
@@ -337,23 +322,16 @@ export default function ChangeCaseTypeDialog({
                 value={targetType}
                 onChange={(e) => handleTargetChange(e.target.value as BeCaseType)}
               >
-                {TRANSFERABLE_CASE_TYPES.filter((t) => t !== currentType).map((t) => {
-                  const srBlocked = t === "service_request" && !serviceRequestAllowed;
-                  return (
-                    <FormControlLabel
-                      key={t}
-                      value={t}
-                      disabled={isSubmitting || srBlocked}
-                      control={<Radio size="small" />}
-                      label={
-                        srBlocked
-                          ? `${caseTypeTransferLabel(t)} (Managed Cloud / Cloud Support only)`
-                          : caseTypeTransferLabel(t)
-                      }
-                      sx={{ flex: 1, mx: 0, whiteSpace: "nowrap" }}
-                    />
-                  );
-                })}
+                {TRANSFERABLE_CASE_TYPES.filter((t) => t !== currentType).map((t) => (
+                  <FormControlLabel
+                    key={t}
+                    value={t}
+                    disabled={isSubmitting}
+                    control={<Radio size="small" />}
+                    label={caseTypeTransferLabel(t)}
+                    sx={{ flex: 1, mx: 0, whiteSpace: "nowrap" }}
+                  />
+                ))}
               </RadioGroup>
             </FormControl>
           </DialogContent>

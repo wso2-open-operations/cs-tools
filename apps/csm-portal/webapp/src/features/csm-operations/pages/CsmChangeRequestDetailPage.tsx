@@ -90,6 +90,7 @@ import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContex
 import { useReportCaseTabMeta } from "@features/case-tabs/hooks/useReportCaseTabMeta";
 import { useReportCaseTabDraft } from "@features/case-tabs/hooks/useReportCaseTabDraft";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
+import { isHttpUrl } from "@utils/isHttpUrl";
 
 const OPERATIONS_CR_PATH = "/operations/change-requests";
 
@@ -725,37 +726,154 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
       )}
 
       {activeTab === "plan" && (
-        // Field order here mirrors the SRE change-review packet's reading
-        // order (description/justification first, then the impact and
-        // rollback/test detail, then the two fields the field-usage census
-        // found most often left "N/A" — service outage and communication
-        // plan — grouped last so a mostly-empty CR doesn't bury the fields
-        // that usually carry real content). This is a relabel/reorder only:
-        // the same seven fields the tab already showed, nothing added.
-        [
-          cr.description,
-          cr.justification,
-          cr.impactDescription,
-          cr.rollbackPlan,
-          cr.testPlan,
-          cr.serviceOutage,
-          cr.communicationPlan,
-        ].some((v) => v && !isBlankHtml(v)) ? (
-          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2.5 }}>
-            <Typography variant="subtitle2">Plan</Typography>
-            <PlanSection title="Description" html={cr.description} />
-            <PlanSection title="Justification" html={cr.justification} />
-            <PlanSection title="Impact description" html={cr.impactDescription} />
-            <PlanSection title="Rollback plan" html={cr.rollbackPlan} />
-            <PlanSection title="Test plan" html={cr.testPlan} />
-            <PlanSection title="Service outage" html={cr.serviceOutage} />
-            <PlanSection title="Communication plan" html={cr.communicationPlan} />
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+          {/*
+            Field order here mirrors the SRE change-review packet's reading
+            order (description/justification first, then the impact and
+            rollback/test detail, then the two fields the field-usage census
+            found most often left "N/A" — service outage and communication
+            plan — grouped last so a mostly-empty CR doesn't bury the fields
+            that usually carry real content), plus the field-parity fields
+            added 2026-08-20 (`implementationPlan`, the affected-services/
+            components text, and the rollback-duration text) appended after
+            them — see `CHANGES-cr-field-parity.md`.
+          */}
+          {[
+            cr.description,
+            cr.justification,
+            cr.impactDescription,
+            cr.rollbackPlan,
+            cr.testPlan,
+            cr.serviceOutage,
+            cr.communicationPlan,
+            cr.implementationPlan,
+            cr.affectedServicesText,
+            cr.affectedComponentsText,
+          ].some((v) => v && !isBlankHtml(v)) ||
+          cr.rollbackDurationText ? (
+            <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2.5 }}>
+              <Typography variant="subtitle2">Plan</Typography>
+              <PlanSection title="Description" html={cr.description} />
+              <PlanSection title="Justification" html={cr.justification} />
+              <PlanSection title="Impact description" html={cr.impactDescription} />
+              <PlanSection title="Rollback plan" html={cr.rollbackPlan} />
+              <PlanSection title="Test plan" html={cr.testPlan} />
+              <PlanSection title="Service outage" html={cr.serviceOutage} />
+              <PlanSection title="Communication plan" html={cr.communicationPlan} />
+              <PlanSection title="Implementation plan" html={cr.implementationPlan} />
+              <PlanSection title="Affected services" html={cr.affectedServicesText} />
+              <PlanSection title="Affected components" html={cr.affectedComponentsText} />
+              {cr.rollbackDurationText && (
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                  <Typography variant="subtitle2">Rollback duration</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {cr.rollbackDurationText}
+                  </Typography>
+                </Box>
+              )}
+            </Card>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No plan has been recorded for this change request.
+            </Typography>
+          )}
+
+          {/*
+            Read-only SRE metadata (`CHANGES-cr-field-parity.md`'s "group
+            C2"/"group D" plus the extra read-only refs from "group C1").
+            None of these get an editable control here — `category` never
+            gets one at all (see `BeChangeRequestDetail.category`'s doc
+            comment), and the rest have no write path anywhere in the stack
+            yet (`EditChangeRequestDialog`'s doc comment on
+            `BePatchChangeRequestPayload` explains why each is missing).
+          */}
+          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+            <Typography variant="subtitle2">SRE details</Typography>
+            <Box
+              sx={{
+                display: "grid",
+                gap: 2,
+                gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", md: "repeat(3, minmax(0, 1fr))" },
+              }}
+            >
+              <MetaCell label="Priority">
+                <Typography variant="body2">{cr.priority?.label || "—"}</Typography>
+              </MetaCell>
+              <MetaCell label="Category">
+                <Typography variant="body2">{cr.category?.label || "—"}</Typography>
+              </MetaCell>
+              <MetaCell label="Requested by"><RefText value={cr.requestedBy} /></MetaCell>
+              <MetaCell label="Customer group"><RefText value={cr.customerGroup} /></MetaCell>
+              <MetaCell label="Change request type">
+                <Typography variant="body2">{cr.changeRequestType?.label || "—"}</Typography>
+              </MetaCell>
+              <MetaCell label="Likelihood">
+                <Typography variant="body2">{cr.likelihood?.label || "—"}</Typography>
+              </MetaCell>
+              <MetaCell label="Planning visible to customers">
+                <YesNo value={cr.isPlanningVisibleToCustomers} />
+              </MetaCell>
+              <MetaCell label="Customer updated">
+                <Typography variant="body2">{formatDateTime(cr.customerUpdatedOn)}</Typography>
+              </MetaCell>
+              <MetaCell label="Work start">
+                <Typography variant="body2">{formatDateTime(cr.workStart)}</Typography>
+              </MetaCell>
+              <MetaCell label="Work end">
+                <Typography variant="body2">{formatDateTime(cr.workEnd)}</Typography>
+              </MetaCell>
+              <MetaCell label="Git reference">
+                {cr.gitReference && isHttpUrl(cr.gitReference) ? (
+                  <Typography variant="body2" sx={{ wordBreak: "break-all" }}>
+                    <a href={cr.gitReference} target="_blank" rel="noreferrer">
+                      {cr.gitReference}
+                    </a>
+                  </Typography>
+                ) : (
+                  <Typography variant="body2" sx={{ wordBreak: "break-all" }}>
+                    {cr.gitReference || "—"}
+                  </Typography>
+                )}
+              </MetaCell>
+            </Box>
+            {!!cr.environments?.length && (
+              <MetaCell label="Environments">
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                  {cr.environments.map((e) => (
+                    <Chip key={e.id} size="small" variant="outlined" label={e.name} />
+                  ))}
+                </Box>
+              </MetaCell>
+            )}
+            {!!cr.deploymentProducts?.length && (
+              <MetaCell label="Deployment products">
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                  {cr.deploymentProducts.map((p) => (
+                    <Chip key={p.id} size="small" variant="outlined" label={p.name} />
+                  ))}
+                </Box>
+              </MetaCell>
+            )}
+            {!!cr.deployments?.length && (
+              <MetaCell label="Deployments">
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                  {cr.deployments.map((d) => (
+                    <Chip key={d.id} size="small" variant="outlined" label={d.name} />
+                  ))}
+                </Box>
+              </MetaCell>
+            )}
+            {!!cr.labels?.length && (
+              <MetaCell label="Labels">
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                  {cr.labels.map((label) => (
+                    <Chip key={label} size="small" label={label} />
+                  ))}
+                </Box>
+              </MetaCell>
+            )}
           </Card>
-        ) : (
-          <Typography variant="body2" color="text.secondary">
-            No plan has been recorded for this change request.
-          </Typography>
-        )
+        </Box>
       )}
 
       {activeTab === "comments" && (

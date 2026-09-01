@@ -22,6 +22,7 @@ import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
+import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePathSectionTabs } from "@hooks/useSectionTabs";
 
@@ -98,6 +99,8 @@ export default function OperationsPage(): JSX.Element {
       {activeTab === "incidents" && <IncidentsTab />}
 
       {activeTab === "problems" && <ProblemsTab />}
+
+      {activeTab === "outages" && <OutagesTab />}
     </Box>
   );
 }

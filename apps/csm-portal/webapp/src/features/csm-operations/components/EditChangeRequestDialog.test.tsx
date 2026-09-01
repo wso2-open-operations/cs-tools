@@ -28,6 +28,13 @@ vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: (...args: unknown[]) => useSearchGroupsMock(...(args as [])),
 }));
 
+// The "Requested by" picker (added for CR field parity) goes through the
+// same kind of backend-client-backed hook — stub it out identically.
+const useSearchUsersByNameMock = vi.fn(() => ({ data: [], isFetching: false, isError: false }));
+vi.mock("@api/useSearchUsersByName", () => ({
+  useSearchUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
+}));
+
 /**
  * Stand-in for the rich-text editor: a textarea whose value is the HTML.
  *

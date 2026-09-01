@@ -2655,10 +2655,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
           currentSeverity={c.severity}
           hasAttachments={attachmentList.length > 0}
           currentProjectName={c.projectName}
-          // Service Request is gated to Managed Cloud / Cloud Support projects —
-          // caseProject is the same project fetch already used above (Customer
-          // card, ChangeSeverityDialog's isManagedCloud, showRepoField).
-          currentProjectSubscriptionType={caseProject?.subscriptionType}
           currentDeploymentName={c.productContext.deployment}
           currentProductName={c.productContext.product}
           currentWatchers={c.watchers}

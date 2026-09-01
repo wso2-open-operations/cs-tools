@@ -56,6 +56,8 @@ import QueryErrorState from "@components/QueryErrorState";
 import {
   encodeVariableValue,
   getFirstEmptyRequiredField,
+  getFirstFieldExceedingMaxLength,
+  getFirstFieldFailingValidation,
   getUserEditableVariables,
   isAttachmentField,
 } from "@features/csm-operations/utils/catalogVariables";
@@ -161,6 +163,21 @@ export default function CreateServiceRequestPage(): JSX.Element {
     () => getFirstEmptyRequiredField(allVariables, answers),
     [allVariables, answers],
   );
+  // Checked in this order — empty-required first, since a field that's both
+  // empty and has a maxLength/validation rule should report the more
+  // actionable "fill this in" message, not a pattern mismatch on nothing.
+  const firstExceedingMaxLength = useMemo(
+    () =>
+      firstEmptyRequired ? null : getFirstFieldExceedingMaxLength(allVariables, answers),
+    [allVariables, answers, firstEmptyRequired],
+  );
+  const firstFailingValidation = useMemo(
+    () =>
+      firstEmptyRequired || firstExceedingMaxLength
+        ? null
+        : getFirstFieldFailingValidation(allVariables, answers),
+    [allVariables, answers, firstEmptyRequired, firstExceedingMaxLength],
+  );
 
 
   // A deployed product with no catalogs is the common non-ServiceNow case;
@@ -219,8 +236,13 @@ export default function CreateServiceRequestPage(): JSX.Element {
       !!catalogItemId &&
       !variables.isLoading &&
       !variables.isError &&
-      // Hot fix (mirrors the customer portal): all typable variables required.
+      // Required-ness now comes from each variable's own `mandatory` flag
+      // where the backend supplies one (see `isVariableRequired`), falling
+      // back to the old "every typable field required" hot fix only where
+      // it doesn't.
       firstEmptyRequired === null &&
+      firstExceedingMaxLength === null &&
+      firstFailingValidation === null &&
       !isIneligibleForSr &&
       // Fail closed while a selected project's eligibility is still loading
       // or couldn't be confirmed at all — see projectLoadFailed above.
@@ -235,6 +257,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
       variables.isLoading,
       variables.isError,
       firstEmptyRequired,
+      firstExceedingMaxLength,
+      firstFailingValidation,
       isIneligibleForSr,
       selectedProject.isLoading,
       projectLoadFailed,
@@ -556,9 +580,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
             mt: 2.5,
           }}
         >
-          {firstEmptyRequired && !variables.isLoading && (
+          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation) && (
             <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>
-              Required field: {firstEmptyRequired}
+              {firstEmptyRequired
+                ? `Required field: ${firstEmptyRequired}`
+                : firstExceedingMaxLength
+                  ? `${firstExceedingMaxLength.label} exceeds ${firstExceedingMaxLength.maxLength} characters`
+                  : firstFailingValidation
+                    ? `${firstFailingValidation.label}: ${firstFailingValidation.message}`
+                    : null}
             </Typography>
           )}
           <Button variant="outlined" onClick={() => navigate(backTarget)}>

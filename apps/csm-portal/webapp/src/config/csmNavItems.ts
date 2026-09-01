@@ -147,6 +147,14 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         routes: ["/operations/problems"],
         icon: AlertOctagon,
       },
+      {
+        id: "operations.outages",
+        label: "Outages",
+        href: "/operations?tab=outages",
+        tab: "outages",
+        routes: ["/operations/outages"],
+        icon: Megaphone,
+      },
     ],
   },
   {
