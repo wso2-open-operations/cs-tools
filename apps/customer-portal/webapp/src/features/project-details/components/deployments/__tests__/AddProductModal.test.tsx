@@ -301,10 +301,20 @@ describe("AddProductModal", () => {
       />,
     );
 
-    // After reset, Product Name should be cleared (empty selection)
+    // After reset, Product Name should be cleared (empty selection)...
     expect(
       screen.getByRole("combobox", { name: /Product Name/ }),
     ).not.toHaveTextContent("WSO2 API Manager");
+
+    // ...but the option list itself must still be populated, not wiped -
+    // regression check for the "resetForm cleared products without a
+    // matching refetch" bug (useGetProducts is keyed on [offset, limit]
+    // alone, so an unchanged offset never triggers a new fetch to
+    // repopulate an emptied list).
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Product Name/ }));
+    expect(
+      await screen.findByRole("option", { name: /WSO2 API Manager/, hidden: true }),
+    ).toBeInTheDocument();
   });
 
   it("should show a fresh product list when remounted with a new key after close", async () => {

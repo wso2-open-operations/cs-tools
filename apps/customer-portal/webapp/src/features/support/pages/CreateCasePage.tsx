@@ -59,6 +59,8 @@ import {
   getBaseProductOptions,
   getDeploymentDisplayLabelForEnvironment,
   getDeploymentProductDisplayLabel,
+  isDeploymentDropdownEmpty,
+  isProductDropdownEmpty,
   isUnknownPlaceholderProductLabel,
   resolveDeploymentMatch,
   resolveIssueTypeKey,
@@ -88,6 +90,9 @@ import {
 import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
 import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
+import AddProductModal from "@features/project-details/components/deployments/AddProductModal";
+import AddDeploymentWizardModal from "@features/project-details/components/deployments/AddDeploymentWizardModal";
+import { isDeploymentSetupDuringCaseCreationEnabled } from "@config/caseCreationConfig";
 import type {
   ProductCategory,
   ProjectDeploymentItem,
@@ -174,6 +179,8 @@ export default function CreateCasePage(): JSX.Element {
   const isSubmittingRef = useRef(false);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [isDeploymentWizardOpen, setIsDeploymentWizardOpen] = useState(false);
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
     projectId || "",
     {
@@ -277,6 +284,18 @@ export default function CreateCasePage(): JSX.Element {
   const classificationDescriptionRef = useRef<string>("");
   const [isDeploymentManuallySet, setIsDeploymentManuallySet] = useState(false);
   const [isProductManuallySet, setIsProductManuallySet] = useState(false);
+  // Set when the deployment/product dropdown was auto-filled because it had
+  // exactly one option (as opposed to a manual pick or an AI-classification
+  // match). Drives the same "Auto detected" affordance as classification so
+  // the pre-fill isn't silent.
+  const [
+    isDeploymentSingleOptionAutoSelected,
+    setIsDeploymentSingleOptionAutoSelected,
+  ] = useState(false);
+  const [
+    isProductSingleOptionAutoSelected,
+    setIsProductSingleOptionAutoSelected,
+  ] = useState(false);
   const [isIssueTypeFromClassification, setIsIssueTypeFromClassification] =
     useState(false);
   const [isSeverityFromClassification, setIsSeverityFromClassification] =
@@ -292,6 +311,10 @@ export default function CreateCasePage(): JSX.Element {
 
   const skipChatMode = skipChat;
   const noAiMode = !!relatedCase || skipChatMode;
+  // Kill switch for the whole "add deployment/product inline" feature
+  // (empty-state alert, in-menu add-new, wizard, singleton auto-select).
+  // Defaults to enabled - see caseCreationConfig.ts.
+  const isDeploymentSetupEnabled = isDeploymentSetupDuringCaseCreationEnabled();
   const queryClient = useQueryClient();
 
   const locationState = location.state as {
@@ -435,6 +458,8 @@ export default function CreateCasePage(): JSX.Element {
     setIsDeploymentFromClassification(false);
     setClassificationDeploymentLabel("");
     setIsProductManuallySet(true);
+    setIsDeploymentSingleOptionAutoSelected(false);
+    setIsProductSingleOptionAutoSelected(false);
   }, []);
 
   // For Cloud Support / Cloud Evaluation Support: auto-pick the first primary
@@ -452,6 +477,7 @@ export default function CreateCasePage(): JSX.Element {
   const handleProductChange = useCallback((value: string) => {
     setProduct(value);
     setIsProductManuallySet(true);
+    setIsProductSingleOptionAutoSelected(false);
   }, []);
 
   const handleIssueTypeChange = useCallback((value: string) => {
@@ -539,7 +565,16 @@ export default function CreateCasePage(): JSX.Element {
     queueMicrotask(() => {
       if (noAiMode) {
         if (!relatedCase) {
-          setDeployment("");
+          // Blank by default (the user picks consciously since there's no
+          // AI-classification signal to justify a guess) - EXCEPT when
+          // there's exactly one deployment: forcing a manual pick from a
+          // single-item dropdown isn't a real choice, just an extra click.
+          if (isDeploymentSetupEnabled && baseDeploymentOptions.length === 1) {
+            setDeployment(baseDeploymentOptions[0]);
+            setIsDeploymentSingleOptionAutoSelected(true);
+          } else {
+            setDeployment("");
+          }
           setTitle("");
           setDescription("");
         }
@@ -563,6 +598,7 @@ export default function CreateCasePage(): JSX.Element {
     isDeploymentsLoading,
     issueTypesList,
     isFiltersLoading,
+    isDeploymentSetupEnabled,
     noAiMode,
     relatedCase,
     severityLevelsList,
@@ -620,6 +656,96 @@ export default function CreateCasePage(): JSX.Element {
       hasRelatedCaseDeploymentInitializedRef.current = true;
     }
   }, [relatedCase, projectDeployments, baseDeploymentOptions]);
+
+  // Auto-select the deployment when there is exactly one option, so the
+  // customer isn't forced to click through a single-item dropdown. This is
+  // deliberately narrow: it only fills gaps left by the flows above, it
+  // never fights them.
+  //   - `noAiMode && !relatedCase` (skipChat) is the one flow that explicitly
+  //     clears deployment to "" on init (see the init effect above) as a
+  //     defensive reset; that reset owns the blank state, so this effect
+  //     stays out of it.
+  //   - A related case that names a deployment (`deploymentId`/
+  //     `deploymentLabel`) is resolved by the effect above from the parent
+  //     case, not from option count, so this effect defers to it entirely
+  //     even if that resolution hasn't landed yet.
+  //   - Everything else (no related case, or a related case with no
+  //     deployment hint, or the AI-classification flow once a
+  //     classificationResponse exists) is fair game: `!deployment` guards
+  //     against re-firing once a value lands from any source, so this can
+  //     only ever run once per "became a singleton" transition.
+  useEffect(() => {
+    if (!isDeploymentSetupEnabled) return;
+    if (deployment) return;
+    if (isDeploymentsLoading) return;
+    if (baseDeploymentOptions.length !== 1) return;
+    if (noAiMode && !relatedCase) return;
+    if (relatedCase?.deploymentId || relatedCase?.deploymentLabel) return;
+
+    setDeployment(baseDeploymentOptions[0]);
+    setIsDeploymentSingleOptionAutoSelected(true);
+  }, [
+    isDeploymentSetupEnabled,
+    deployment,
+    isDeploymentsLoading,
+    baseDeploymentOptions,
+    noAiMode,
+    relatedCase,
+  ]);
+
+  // Same "undo if it turns out not to be a real singleton" guard as the
+  // product effect below - covers the same query-timing race for the
+  // deployments list.
+  useEffect(() => {
+    if (!isDeploymentSingleOptionAutoSelected) return;
+    if (baseDeploymentOptions.length <= 1) return;
+
+    setDeployment("");
+    setIsDeploymentSingleOptionAutoSelected(false);
+  }, [isDeploymentSingleOptionAutoSelected, baseDeploymentOptions]);
+
+  // Auto-select the product/version when the currently selected deployment
+  // resolves to exactly one product option. Mirrors the deployment effect
+  // above, but product has no "intentionally left blank" flow to defer to:
+  // every path clears `product` to "" on init and relies on either the
+  // related-case/classification sync effect (below) or this effect to fill
+  // it back in. A related case that names a product
+  // (`deployedProductId`/`deployedProductLabel`) is resolved there, not from
+  // option count, so this effect steps aside for it.
+  useEffect(() => {
+    if (!isDeploymentSetupEnabled) return;
+    if (!selectedDeploymentId) return;
+    if (product) return;
+    if (deploymentProductsLoading) return;
+    if (sortedBaseProductOptions.length !== 1) return;
+    if (relatedCase?.deployedProductId || relatedCase?.deployedProductLabel)
+      return;
+
+    setProduct(sortedBaseProductOptions[0].id);
+    setIsProductSingleOptionAutoSelected(true);
+  }, [
+    isDeploymentSetupEnabled,
+    selectedDeploymentId,
+    product,
+    deploymentProductsLoading,
+    sortedBaseProductOptions,
+    relatedCase,
+  ]);
+
+  // Undoes the auto-select above if the option list later turns out to have
+  // more than one item after all (e.g. the wizard's product query resolves
+  // incrementally right after adding two products, and the singleton effect
+  // fired on a transient one-item view before the second one caught up).
+  // Only ever reverses a value THIS effect's sibling actually auto-picked
+  // (`isProductSingleOptionAutoSelected`) - a manual selection is never
+  // touched, even if the list happens to change afterward.
+  useEffect(() => {
+    if (!isProductSingleOptionAutoSelected) return;
+    if (sortedBaseProductOptions.length <= 1) return;
+
+    setProduct("");
+    setIsProductSingleOptionAutoSelected(false);
+  }, [isProductSingleOptionAutoSelected, sortedBaseProductOptions]);
 
   useEffect(() => {
     if (noAiMode) return;
@@ -1139,6 +1265,10 @@ export default function CreateCasePage(): JSX.Element {
     return [classificationProductLabel];
   }, [classificationProductLabel, sortedBaseProductOptions]);
 
+  // "Auto detected" means the AI classification suggested this value - it
+  // is misleading for a singleton auto-select (there was nothing to
+  // detect, it was just the only option), so that case intentionally
+  // shows no chip at all rather than reusing this one.
   const isProductAutoDetected =
     !noAiMode &&
     !!classificationProductLabel?.trim() &&
@@ -1173,6 +1303,91 @@ export default function CreateCasePage(): JSX.Element {
   const isProductDropdownDisabled =
     !selectedDeploymentId || deploymentProductsLoading;
 
+  // These mirror the loading/disabled flags handed to BasicInformationSection
+  // below so the "no options configured" empty-state check stays consistent
+  // between what the dropdown shows and whether the rest of the form is
+  // blocked from submission.
+  //
+  // The *ClassificationPending flags only mean "still paging through
+  // results looking for the AI-suggested match" - once at least one real
+  // option has actually arrived, that search continuing in the background
+  // must not keep masking the dropdown as loading. Without this guard, a
+  // deployment/product added while classification's search was still
+  // in-flight (e.g. right after using "Add Deployment"/"Add Product" from
+  // an empty list) stayed hidden behind a loading skeleton until something
+  // else (like re-picking the deployment) reset the classification state.
+  const deploymentFieldLoading =
+    isProjectLoading ||
+    isDeploymentsLoading ||
+    (isDeploymentClassificationPending && baseDeploymentOptions.length === 0);
+  const productFieldLoading =
+    (!!selectedDeploymentId && deploymentProductsLoading) ||
+    (isProductClassificationPending && sortedBaseProductOptions.length === 0);
+
+  const hasNoDeployments =
+    !isPrimaryProductionOnly &&
+    isDeploymentDropdownEmpty(baseDeploymentOptions, deploymentFieldLoading, false);
+  // Same exclusion as hasNoDeployments above: these project types have no
+  // self-service add-product affordance (see onAddProduct below), so
+  // treating an empty product list as a blocking dead end here would leave
+  // the customer with no way out.
+  const hasNoProductsForDeployment =
+    !isPrimaryProductionOnly &&
+    isProductDropdownEmpty(
+      sortedBaseProductOptions.length > 0,
+      isProductDropdownDisabled,
+      productFieldLoading,
+    );
+  // Nothing valid can be submitted while either dropdown is a dead end.
+  const isFormBlockedByMissingOptions =
+    isDeploymentSetupEnabled && (hasNoDeployments || hasNoProductsForDeployment);
+
+  const handleAddDeployment = useCallback(() => {
+    if (!projectId) return;
+    // Always the combined deployment+product wizard: EVERY newly created
+    // deployment starts with zero products of its own, whether it's the
+    // project's first deployment or an additional one added via the
+    // persistent "add another" affordance - there's no case where chaining
+    // into the product step isn't the right next step.
+    setIsDeploymentWizardOpen(true);
+  }, [projectId]);
+
+  const handleAddProduct = useCallback(() => {
+    if (!projectId || !selectedDeploymentId) return;
+    setIsAddProductModalOpen(true);
+  }, [projectId, selectedDeploymentId]);
+
+  const handleProductAdded = useCallback(() => {
+    showSuccess("Product added successfully.");
+  }, [showSuccess]);
+
+  // The wizard's own usePostCreateDeployment mutation response returns the
+  // newly created deployment's id directly, so its product step doesn't
+  // need to wait on `selectedDeploymentId` resolving through a query
+  // refetch the way the old two-dialog chaining did. All this callback
+  // needs to do is make sure the case-creation form's own deployment
+  // dropdown reflects the new deployment once the deployments list
+  // refetches - the same singleton auto-select signal the previous
+  // implementation relied on, just applied immediately instead of via a
+  // watcher effect.
+  const handleWizardDeploymentCreated = useCallback(
+    (name: string) => {
+      showSuccess("Deployment created successfully.");
+      // Reuses the same "manual selection" path a dropdown change goes
+      // through (resets product + both singleton-auto-select flags) rather
+      // than a bare setDeployment: the user just explicitly created THIS
+      // deployment, so it must win over whatever was selected before (even
+      // a previous singleton auto-select) and the undo-guard above must not
+      // later revert it just because the list now has more than one item.
+      handleDeploymentChange(name);
+    },
+    [showSuccess, handleDeploymentChange],
+  );
+
+  const handleWizardProductAdded = useCallback(() => {
+    showSuccess("Product added successfully.");
+  }, [showSuccess]);
+
   const renderContent = () => (
     <Grid container spacing={3}>
       {/* left column - form content (full width when skipChat or no sidebar content) */}
@@ -1198,20 +1413,29 @@ export default function CreateCasePage(): JSX.Element {
             isProductAutoDetected={isProductAutoDetected}
             isDeploymentAutoDetected={isDeploymentAutoDetected}
             metadata={sectionMetadata}
-            isDeploymentLoading={
-              isProjectLoading ||
-              isDeploymentsLoading ||
-              isDeploymentClassificationPending
-            }
+            isDeploymentLoading={deploymentFieldLoading}
             isProductDropdownDisabled={isProductDropdownDisabled}
-            isProductLoading={
-              (!!selectedDeploymentId && deploymentProductsLoading) ||
-              isProductClassificationPending
-            }
+            isProductLoading={productFieldLoading}
             isRelatedCaseMode={noAiMode}
             extraProductOptions={extraProductOptions}
             isDeploymentDisabled={false}
             hideDeploymentField={isPrimaryProductionOnly}
+            onAddDeployment={
+              isDeploymentSetupEnabled && !isPrimaryProductionOnly
+                ? handleAddDeployment
+                : undefined
+            }
+            // Cloud Support / Cloud Evaluation Support projects are locked
+            // to a single "Primary Production" deployment (the field itself
+            // is hidden via hideDeploymentField below) - since we don't
+            // offer these projects self-service deployment setup, offering
+            // to add a product under that fixed deployment would be
+            // inconsistent.
+            onAddProduct={
+              isDeploymentSetupEnabled && !isPrimaryProductionOnly
+                ? handleAddProduct
+                : undefined
+            }
             onLoadMoreDeployments={() => {
               if (
                 deploymentsQuery.hasNextPage &&
@@ -1235,83 +1459,88 @@ export default function CreateCasePage(): JSX.Element {
             projectTypeLabel={projectDetails?.type?.label}
           />
 
-          <CaseDetailsSection
-            title={title}
-            setTitle={handleTitleChange}
-            description={description}
-            setDescription={handleDescriptionChange}
-            issueType={issueType}
-            setIssueType={handleIssueTypeChange}
-            severity={severity}
-            setSeverity={handleSeverityChange}
-            isIssueTypeAutoDetected={isIssueTypeAutoDetected}
-            isSeverityAutoDetected={isSeverityAutoDetected}
-            isTitleFromChat={isTitleFromClassification}
-            isDescriptionFromConversation={isDescriptionFromClassification}
-            metadata={undefined}
-            filters={filters}
-            isLoading={isFiltersLoading}
-            attachments={attachments.map((a) => a.file)}
-            onAttachmentClick={handleAttachmentClick}
-            onAttachmentRemove={handleAttachmentRemove}
-            storageKey={
-              !relatedCase && projectId
-                ? `create-case-draft-${projectId}`
-                : undefined
-            }
-            isRelatedCaseMode={noAiMode}
-            isTitleDisabled={false}
-            relatedCaseNumber={relatedCase?.number ?? ""}
-            isSecurityReport={isSecurityReport}
-            excludeS0={excludeS0}
-            isSeverityDisabled={forceSeverityS4}
-          />
+          {!isFormBlockedByMissingOptions && (
+            <>
+              <CaseDetailsSection
+                title={title}
+                setTitle={handleTitleChange}
+                description={description}
+                setDescription={handleDescriptionChange}
+                issueType={issueType}
+                setIssueType={handleIssueTypeChange}
+                severity={severity}
+                setSeverity={handleSeverityChange}
+                isIssueTypeAutoDetected={isIssueTypeAutoDetected}
+                isSeverityAutoDetected={isSeverityAutoDetected}
+                isTitleFromChat={isTitleFromClassification}
+                isDescriptionFromConversation={isDescriptionFromClassification}
+                metadata={undefined}
+                filters={filters}
+                isLoading={isFiltersLoading}
+                attachments={attachments.map((a) => a.file)}
+                onAttachmentClick={handleAttachmentClick}
+                onAttachmentRemove={handleAttachmentRemove}
+                storageKey={
+                  !relatedCase && projectId
+                    ? `create-case-draft-${projectId}`
+                    : undefined
+                }
+                isRelatedCaseMode={noAiMode}
+                isTitleDisabled={false}
+                relatedCaseNumber={relatedCase?.number ?? ""}
+                isSecurityReport={isSecurityReport}
+                excludeS0={excludeS0}
+                isSeverityDisabled={forceSeverityS4}
+              />
 
-          <WatchListSection
-            contacts={(projectContacts ?? []).filter(
-              (c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact,
-            )}
-            selectedEmails={watchList}
-            onChange={setWatchList}
-            isLoading={isContactsLoading}
-          />
+              <WatchListSection
+                contacts={(projectContacts ?? []).filter(
+                  (c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact,
+                )}
+                selectedEmails={watchList}
+                onChange={setWatchList}
+                isLoading={isContactsLoading}
+              />
 
-          {/* form actions container */}
-          <Box sx={{ display: "flex", justifyContent: "right" }}>
-            {/* submit button */}
-            <Button
-              type="submit"
-              variant="contained"
-              startIcon={<CircleCheck size={18} />}
-              color="primary"
-              disabled={
-                isProjectLoading ||
-                isProjectFeaturesLoading ||
-                isFiltersLoading ||
-                isCreatePending ||
-                isNavigatingAfterCreate ||
-                isPreparingAttachments ||
-                !projectId ||
-                !selectedDeploymentId ||
-                deploymentProductsLoading ||
-                deploymentProductsError
-              }
-            >
-              {isPreparingAttachments
-                ? "Uploading attachments..."
-                : isCreatePending
-                  ? isSecurityReport
-                    ? "Submitting..."
-                    : "Creating..."
-                  : isNavigatingAfterCreate
-                    ? "Opening case..."
-                    : isSecurityReport
-                      ? "Submit Security Report"
-                      : relatedCase
-                        ? "Create Related Case"
-                        : "Create Support Case"}
-            </Button>
-          </Box>
+              {/* form actions container */}
+              <Box sx={{ display: "flex", justifyContent: "right" }}>
+                {/* submit button */}
+                <Button
+                  type="submit"
+                  variant="contained"
+                  startIcon={<CircleCheck size={18} />}
+                  color="primary"
+                  disabled={
+                    isProjectLoading ||
+                    isProjectFeaturesLoading ||
+                    isFiltersLoading ||
+                    isCreatePending ||
+                    isNavigatingAfterCreate ||
+                    isPreparingAttachments ||
+                    !projectId ||
+                    !selectedDeploymentId ||
+                    deploymentProductsLoading ||
+                    deploymentProductsError ||
+                    isFormBlockedByMissingOptions
+                  }
+                >
+                  {isPreparingAttachments
+                    ? "Uploading attachments..."
+                    : isCreatePending
+                      ? isSecurityReport
+                        ? "Submitting..."
+                        : "Creating..."
+                      : isNavigatingAfterCreate
+                        ? "Opening case..."
+                        : isSecurityReport
+                          ? "Submit Security Report"
+                          : relatedCase
+                            ? "Create Related Case"
+                            : "Create Support Case"}
+                </Button>
+              </Box>
+            </>
+          )}
         </Box>
       </Grid>
 
@@ -1363,6 +1592,28 @@ export default function CreateCasePage(): JSX.Element {
         onClose={() => setIsAttachmentModalOpen(false)}
         onSelect={handleSelectAttachment}
       />
+
+      {projectId && (
+        <AddProductModal
+          open={isAddProductModalOpen}
+          deploymentId={selectedDeploymentId}
+          projectId={projectId}
+          onClose={() => setIsAddProductModalOpen(false)}
+          onSuccess={handleProductAdded}
+          onError={showError}
+        />
+      )}
+
+      {projectId && (
+        <AddDeploymentWizardModal
+          open={isDeploymentWizardOpen}
+          projectId={projectId}
+          onClose={() => setIsDeploymentWizardOpen(false)}
+          onDeploymentCreated={handleWizardDeploymentCreated}
+          onProductAdded={handleWizardProductAdded}
+          onError={showError}
+        />
+      )}
 
       <PiiWarningDialog {...piiGuard.dialogProps} />
     </Box>

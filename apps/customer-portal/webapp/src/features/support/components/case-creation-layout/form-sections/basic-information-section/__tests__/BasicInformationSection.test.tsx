@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
@@ -68,5 +68,194 @@ describe("BasicInformationSection", () => {
       isProductLoading: false,
     });
     expect(screen.getByText("Not available")).toBeInTheDocument();
+  });
+
+  it("should show an Add Deployment alert instead of the dropdown when there are no deployments and onAddDeployment is provided", () => {
+    const onAddDeployment = vi.fn();
+    renderSection({
+      metadata: { deploymentTypes: [] },
+      productOptionList: [{ id: "prod-1", label: "API Manager 4.2.0" }],
+      onAddDeployment,
+    });
+
+    // The dropdown is hidden entirely in favor of the empty-state Alert.
+    expect(screen.queryByText("Not available")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "No deployments configured for this project. Add a deployment to continue creating your case.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This information helps us provide you with better support.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Deployment" }));
+    expect(onAddDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it("should render the Add Deployment alert with warning severity", () => {
+    renderSection({
+      metadata: { deploymentTypes: [] },
+      productOptionList: [{ id: "prod-1", label: "API Manager 4.2.0" }],
+      onAddDeployment: vi.fn(),
+    });
+
+    const alertMessage = screen.getByText(
+      "No deployments configured for this project. Add a deployment to continue creating your case.",
+    );
+    const alertRoot = alertMessage.closest(".MuiAlert-root");
+    expect(alertRoot).not.toBeNull();
+    expect(alertRoot).toHaveClass("MuiAlert-standardWarning");
+  });
+
+  it("should show an Add Deployment option inside the dropdown menu when deployments exist, reachable while the menu is open", () => {
+    const onAddDeployment = vi.fn();
+    renderSection({
+      metadata: { deploymentTypes: ["Prod", "Staging"] },
+      onAddDeployment,
+    });
+
+    // The dropdown remains visible; the "add new" row lives inside its menu
+    // (not a button below the field, which an open menu's overlay would cover).
+    expect(screen.getByText("Deployment")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add Deployment" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    const addOption = screen.getByRole("option", { name: /add deployment/i });
+    expect(addOption).toBeInTheDocument();
+
+    fireEvent.click(addOption);
+    expect(onAddDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not show an Add Deployment option in the menu when the deployment field is disabled", () => {
+    renderSection({
+      metadata: { deploymentTypes: ["Prod"] },
+      isDeploymentDisabled: true,
+      onAddDeployment: vi.fn(),
+    });
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    expect(
+      screen.queryByRole("option", { name: /add deployment/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should keep the legacy disabled dropdown when there are no deployments and onAddDeployment is not provided", () => {
+    renderSection({
+      metadata: { deploymentTypes: [] },
+      productOptionList: [{ id: "prod-1", label: "API Manager 4.2.0" }],
+    });
+
+    expect(
+      screen.queryByText(
+        "No deployments configured for this project. Add a deployment to continue creating your case.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Not available")).toBeInTheDocument();
+  });
+
+  it("should show an Add Product alert instead of the dropdown when the selected deployment has no products and onAddProduct is provided", () => {
+    const onAddProduct = vi.fn();
+    renderSection({
+      deployment: "Prod",
+      productOptionList: [],
+      isProductDropdownDisabled: false,
+      isProductLoading: false,
+      onAddProduct,
+    });
+
+    expect(screen.queryByText("Not available")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "No products found for this deployment. Add a product to proceed.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This information helps us provide you with better support.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Product" }));
+    expect(onAddProduct).toHaveBeenCalledTimes(1);
+  });
+
+  it("should render the Add Product alert with warning severity", () => {
+    renderSection({
+      deployment: "Prod",
+      productOptionList: [],
+      isProductDropdownDisabled: false,
+      isProductLoading: false,
+      onAddProduct: vi.fn(),
+    });
+
+    const alertMessage = screen.getByText(
+      "No products found for this deployment. Add a product to proceed.",
+    );
+    const alertRoot = alertMessage.closest(".MuiAlert-root");
+    expect(alertRoot).not.toBeNull();
+    expect(alertRoot).toHaveClass("MuiAlert-standardWarning");
+  });
+
+  it("should show an Add Product option inside the dropdown menu when products exist, reachable while the menu is open", () => {
+    const onAddProduct = vi.fn();
+    renderSection({
+      deployment: "Prod",
+      productOptionList: [{ id: "prod-1", label: "API Manager 4.2.0" }],
+      isProductDropdownDisabled: false,
+      isProductLoading: false,
+      onAddProduct,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Add Product" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[1]);
+    const addOption = screen.getByRole("option", { name: /add product/i });
+    expect(addOption).toBeInTheDocument();
+
+    fireEvent.click(addOption);
+    expect(onAddProduct).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not show an Add Product option in the menu while the product dropdown is disabled (no deployment selected)", () => {
+    renderSection({
+      deployment: "",
+      productOptionList: [],
+      isProductDropdownDisabled: true,
+      isProductLoading: false,
+      onAddProduct: vi.fn(),
+    });
+
+    // The disabled Select can't be opened, so the menu (and its "add new"
+    // row) never renders.
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[1]);
+    expect(
+      screen.queryByRole("option", { name: /add product/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should not show the product empty-state while a deployment has not been selected yet", () => {
+    const onAddProduct = vi.fn();
+    renderSection({
+      deployment: "",
+      productOptionList: [],
+      isProductDropdownDisabled: true,
+      isProductLoading: false,
+      onAddProduct,
+    });
+
+    expect(
+      screen.queryByText(
+        "No products found for this deployment. Add a product to proceed.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Select deployment first")).toBeInTheDocument();
   });
 });

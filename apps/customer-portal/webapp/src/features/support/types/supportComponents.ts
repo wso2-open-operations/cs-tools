@@ -184,6 +184,19 @@ export type BasicInformationSectionProps = {
   onLoadMoreProducts?: () => void;
   hasMoreProducts?: boolean;
   isFetchingMoreProducts?: boolean;
+  /**
+   * Called when the customer has no deployments configured and clicks the
+   * "Add Deployment" call-to-action shown in place of the empty dropdown.
+   * When omitted, the legacy disabled-dropdown placeholder is shown instead.
+   */
+  onAddDeployment?: () => void;
+  /**
+   * Called when the selected deployment has no products configured and the
+   * customer clicks the "Add Product" call-to-action shown in place of the
+   * empty dropdown. When omitted, the legacy disabled-dropdown placeholder
+   * is shown instead.
+   */
+  onAddProduct?: () => void;
   children?: React.ReactNode;
 };
 

@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -23,41 +22,20 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  MenuItem,
-  Skeleton,
-  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type JSX,
-  type UIEvent,
-} from "react";
-import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
-import { paginatedSelectMenuListProps } from "@utils/common";
-import { useGetProducts } from "@features/project-details/api/useGetProducts";
-import { useSearchProductVersions } from "@features/project-details/api/useSearchProductVersions";
-import { usePostDeploymentProduct } from "@features/project-details/api/usePostDeploymentProduct";
-import type {
-  ProductItem,
-  ProductVersionItem,
-} from "@features/project-details/types/products";
-import {
-  ADD_PRODUCT_MODAL_INITIAL_FORM,
-  parseValidNumber,
-  type AddProductModalFormState,
-} from "@features/project-details/utils/addProductModal";
+import { useCallback, type JSX } from "react";
+import { useProductForm } from "@features/project-details/components/deployments/useProductForm";
+import { ProductFormFields } from "@features/project-details/components/deployments/ProductFormFields";
 import type { AddProductModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Modal for adding a WSO2 product to a deployment environment.
  * Product Name and Version come from paginated APIs; Description and optional metrics are user-entered.
+ * The actual paginated form fields + mutation logic live in useProductForm/ProductFormFields, shared with
+ * the add-deployment wizard's product step - this component only owns the dialog chrome and the
+ * close-on-success behavior standalone callers rely on.
  *
  * @param {AddProductModalProps} props - open, deploymentId, projectId, onClose, optional onSuccess/onError.
  * @returns {JSX.Element} The add product modal.
@@ -70,360 +48,19 @@ export default function AddProductModal({
   onSuccess,
   onError,
 }: AddProductModalProps): JSX.Element {
-  const [form, setForm] = useState<AddProductModalFormState>(() => ({
-    ...ADD_PRODUCT_MODAL_INITIAL_FORM,
-  }));
-  const [productOffset, setProductOffset] = useState(0);
-  const [versionOffset, setVersionOffset] = useState(0);
-  const [products, setProducts] = useState<ProductItem[]>([]);
-  const [versions, setVersions] = useState<ProductVersionItem[]>([]);
-  const previousProductIdRef = useRef<string>("");
-  const [cachedProductsTotalRecords, setCachedProductsTotalRecords] = useState<
-    number | null
-  >(null);
-  const [cachedVersionsTotalRecords, setCachedVersionsTotalRecords] = useState<
-    number | null
-  >(null);
-
-  const [productsLoadMorePending, setProductsLoadMorePending] = useState(false);
-  const [versionsLoadMorePending, setVersionsLoadMorePending] = useState(false);
-  const accumulatedProductsLengthRef = useRef(0);
-  const accumulatedVersionsLengthRef = useRef(0);
-
-  const productsRef = useRef<ProductItem[]>([]);
-  const versionsRef = useRef<ProductVersionItem[]>([]);
-
-  useLayoutEffect(() => {
-    productsRef.current = products;
-    accumulatedProductsLengthRef.current = products.length;
-  }, [products]);
-
-  useLayoutEffect(() => {
-    versionsRef.current = versions;
-    accumulatedVersionsLengthRef.current = versions.length;
-  }, [versions]);
-
-  const resetModalState = useCallback(() => {
-    setForm({ ...ADD_PRODUCT_MODAL_INITIAL_FORM });
-    setProductOffset(0);
-    setProducts([]);
-    setVersionOffset(0);
-    setVersions([]);
-    previousProductIdRef.current = "";
-    setProductsLoadMorePending(false);
-    setVersionsLoadMorePending(false);
-    setCachedProductsTotalRecords(null);
-    setCachedVersionsTotalRecords(null);
-  }, []);
-
-  const {
-    data: productsPage,
-    isLoading: isLoadingProducts,
-    isFetching: isFetchingProducts,
-  } = useGetProducts({
-    offset: productOffset,
-    limit: 10,
-  });
-
-  /* eslint-disable react-hooks/set-state-in-effect -- paginated Select: load-more flags + merged list rows */
-  useEffect(() => {
-    if (!isFetchingProducts) {
-      setProductsLoadMorePending(false);
-    }
-  }, [isFetchingProducts]);
-
-  const {
-    data: versionsPage,
-    isLoading: isLoadingVersions,
-    isFetching: isFetchingVersions,
-  } = useSearchProductVersions(form.productId, {
-    limit: 10,
-    offset: versionOffset,
-  });
-
-  useEffect(() => {
-    if (!isFetchingVersions) {
-      setVersionsLoadMorePending(false);
-    }
-  }, [isFetchingVersions]);
-
-  useEffect(() => {
-    if (!productsPage) return;
-
-    const pageItems = productsPage.products ?? [];
-    const offset = productsPage.offset ?? 0;
-    const pageLimit =
-      typeof productsPage.limit === "number" && productsPage.limit > 0
-        ? productsPage.limit
-        : 10;
-
-    const applyServerProductsTotal = (): void => {
-      if (
-        typeof productsPage.totalRecords === "number" &&
-        !Number.isNaN(productsPage.totalRecords)
-      ) {
-        setCachedProductsTotalRecords(productsPage.totalRecords);
-      }
-    };
-
-    if (offset > 0 && pageItems.length === 0) {
-      setCachedProductsTotalRecords(accumulatedProductsLengthRef.current);
-      return;
-    }
-
-    if (offset === 0) {
-      setProducts(pageItems);
-      if (pageItems.length < pageLimit) {
-        setCachedProductsTotalRecords(pageItems.length);
-      } else {
-        applyServerProductsTotal();
-      }
-      return;
-    }
-
-    const prevProducts = productsRef.current;
-    const prevProductIds = new Set(
-      prevProducts.map((p) => p.id).filter((id): id is string => Boolean(id)),
-    );
-    const newProductItems = pageItems.filter(
-      (p) =>
-        typeof p.id === "string" &&
-        p.id.length > 0 &&
-        !prevProductIds.has(p.id),
-    );
-    const mergedProductsLen = prevProducts.length + newProductItems.length;
-
-    if (newProductItems.length === 0) {
-      setCachedProductsTotalRecords(prevProducts.length);
-      return;
-    }
-
-    if (pageItems.length < pageLimit) {
-      setCachedProductsTotalRecords(mergedProductsLen);
-    } else {
-      applyServerProductsTotal();
-    }
-    setProducts([...prevProducts, ...newProductItems]);
-  }, [productsPage]);
-
-  const productsTotalRecords = Number.isFinite(cachedProductsTotalRecords)
-    ? (cachedProductsTotalRecords as number)
-    : Number.isFinite(productsPage?.totalRecords)
-      ? (productsPage!.totalRecords as number)
-      : products.length;
-  const canLoadMoreProducts = products.length < productsTotalRecords;
-
-  const handleProductsScroll = useCallback(
-    (event: UIEvent<HTMLElement>) => {
-      const target = event.currentTarget;
-      if (
-        productsLoadMorePending ||
-        !canLoadMoreProducts ||
-        isLoadingProducts ||
-        isFetchingProducts ||
-        products.length === 0
-      ) {
-        return;
-      }
-
-      const threshold = 24; // px from bottom to trigger load
-      if (
-        target.scrollHeight - target.scrollTop - target.clientHeight <
-        threshold
-      ) {
-        setProductsLoadMorePending(true);
-        setProductOffset((prev) => prev + 10);
-      }
-    },
-    [
-      productsLoadMorePending,
-      canLoadMoreProducts,
-      isLoadingProducts,
-      isFetchingProducts,
-      products.length,
-    ],
-  );
-
-  useEffect(() => {
-    if (previousProductIdRef.current !== form.productId) {
-      previousProductIdRef.current = form.productId;
-      setVersionOffset(0);
-      setVersions([]);
-      setCachedVersionsTotalRecords(null);
-    }
-
-    if (!form.productId) {
-      return;
-    }
-
-    if (!versionsPage) {
-      return;
-    }
-
-    const pageItems = versionsPage.versions ?? [];
-    const offset = versionsPage.offset ?? 0;
-    const pageLimit =
-      typeof versionsPage.limit === "number" && versionsPage.limit > 0
-        ? versionsPage.limit
-        : 10;
-
-    const applyServerVersionsTotal = (): void => {
-      if (
-        typeof versionsPage.totalRecords === "number" &&
-        !Number.isNaN(versionsPage.totalRecords)
-      ) {
-        setCachedVersionsTotalRecords(versionsPage.totalRecords);
-      }
-    };
-
-    if (offset > 0 && pageItems.length === 0) {
-      setCachedVersionsTotalRecords(accumulatedVersionsLengthRef.current);
-      return;
-    }
-
-    if (offset === 0) {
-      setVersions(pageItems);
-      if (pageItems.length < pageLimit) {
-        setCachedVersionsTotalRecords(pageItems.length);
-      } else {
-        applyServerVersionsTotal();
-      }
-      return;
-    }
-
-    const prevVersions = versionsRef.current;
-    const prevVersionIds = new Set(
-      prevVersions.map((v) => v.id).filter((id): id is string => Boolean(id)),
-    );
-    const newVersionItems = pageItems.filter(
-      (v) =>
-        typeof v.id === "string" &&
-        v.id.length > 0 &&
-        !prevVersionIds.has(v.id),
-    );
-    const mergedVersionsLen = prevVersions.length + newVersionItems.length;
-
-    if (newVersionItems.length === 0) {
-      setCachedVersionsTotalRecords(prevVersions.length);
-      return;
-    }
-
-    if (pageItems.length < pageLimit) {
-      setCachedVersionsTotalRecords(mergedVersionsLen);
-    } else {
-      applyServerVersionsTotal();
-    }
-    setVersions([...prevVersions, ...newVersionItems]);
-  }, [form.productId, versionsPage]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const versionsTotalRecords = Number.isFinite(cachedVersionsTotalRecords)
-    ? (cachedVersionsTotalRecords as number)
-    : Number.isFinite(versionsPage?.totalRecords)
-      ? (versionsPage!.totalRecords as number)
-      : versions.length;
-  const canLoadMoreVersions = versions.length < versionsTotalRecords;
-
-  /**
-   * Footer spinner only after the user scrolls to load more (pending flag), not for
-   * background refetches or inflated API totalRecords.
-   */
-  const isFetchingMoreProducts =
-    productsLoadMorePending &&
-    isFetchingProducts &&
-    productOffset > 0 &&
-    products.length > 0;
-  const isFetchingMoreVersions =
-    versionsLoadMorePending &&
-    isFetchingVersions &&
-    versionOffset > 0 &&
-    versions.length > 0;
-
-  const handleVersionsScroll = useCallback(
-    (event: UIEvent<HTMLElement>) => {
-      const target = event.currentTarget;
-      if (
-        versionsLoadMorePending ||
-        !canLoadMoreVersions ||
-        isLoadingVersions ||
-        isFetchingVersions ||
-        versions.length === 0
-      ) {
-        return;
-      }
-
-      const threshold = 24;
-      if (
-        target.scrollHeight - target.scrollTop - target.clientHeight <
-        threshold
-      ) {
-        setVersionsLoadMorePending(true);
-        setVersionOffset((prev) => prev + 10);
-      }
-    },
-    [
-      versionsLoadMorePending,
-      canLoadMoreVersions,
-      isLoadingVersions,
-      isFetchingVersions,
-      versions.length,
-    ],
-  );
-
-  const postProduct = usePostDeploymentProduct();
-
-  const isSubmitting = postProduct.isPending;
-  const isValid =
-    !!form.productId &&
-    !!form.versionId &&
-    !!projectId &&
-    deploymentId.length > 0;
+  const productForm = useProductForm(deploymentId, projectId);
+  const { isValid, isSubmitting, submit, resetForm } = productForm;
 
   const handleClose = useCallback(() => {
-    resetModalState();
+    resetForm();
     onClose();
-  }, [onClose, resetModalState]);
-
-  const handleProductChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      const productId = event.target.value;
-      setForm((prev) => ({
-        ...prev,
-        productId,
-        versionId: "",
-      }));
-    },
-    [],
-  );
-
-  const handleVersionChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setForm((prev) => ({ ...prev, versionId: event.target.value }));
-    },
-    [],
-  );
-
-  const handleTextChange =
-    (field: "cores" | "tps" | "description") =>
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setForm((prev) => ({ ...prev, [field]: event.target.value }));
-    };
+  }, [onClose, resetForm]);
 
   const handleSubmit = useCallback(async () => {
     if (!isValid) return;
 
     try {
-      await postProduct.mutateAsync({
-        deploymentId,
-        body: {
-          productId: form.productId,
-          versionId: form.versionId,
-          projectId,
-          cores: parseValidNumber(form.cores),
-          tps: parseValidNumber(form.tps),
-          description: form.description || undefined,
-        },
-      });
+      await submit();
       handleClose();
       onSuccess?.();
     } catch (error) {
@@ -431,20 +68,7 @@ export default function AddProductModal({
         error instanceof Error ? error.message : "Failed to add product",
       );
     }
-  }, [
-    isValid,
-    form.productId,
-    form.versionId,
-    form.cores,
-    form.tps,
-    form.description,
-    deploymentId,
-    projectId,
-    postProduct,
-    handleClose,
-    onSuccess,
-    onError,
-  ]);
+  }, [isValid, submit, handleClose, onSuccess, onError]);
 
   return (
     <Dialog
@@ -487,143 +111,7 @@ export default function AddProductModal({
           },
         }}
       >
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 2,
-            mt: 2,
-            mb: 2,
-          }}
-        >
-          <TextField
-            select
-            fullWidth
-            size="small"
-            id="product-name"
-            label="Product Name *"
-            value={form.productId}
-            onChange={handleProductChange}
-            disabled={isSubmitting || isLoadingProducts}
-            sx={{
-              "& .MuiSelect-select": {
-                color: !form.productId ? "text.secondary" : undefined,
-              },
-            }}
-            SelectProps={{
-              MenuProps: {
-                MenuListProps:
-                  paginatedSelectMenuListProps(handleProductsScroll),
-                PaperProps: {
-                  sx: { zIndex: 1400 },
-                },
-              },
-            }}
-          >
-            <MenuItem value="">Select</MenuItem>
-            {products.map((p) => (
-              <MenuItem key={p.id} value={p.id}>
-                {p.label ?? p.name ?? p.id}
-              </MenuItem>
-            ))}
-            <SelectMenuLoadMoreRow
-              visible={Boolean(canLoadMoreProducts && isFetchingMoreProducts)}
-            />
-            {(isLoadingProducts || isFetchingProducts) &&
-              products.length === 0 && (
-                <MenuItem disabled>
-                  <Skeleton variant="text" width="100%" />
-                </MenuItem>
-              )}
-          </TextField>
-          <TextField
-            select
-            fullWidth
-            size="small"
-            id="product-version"
-            label="Version *"
-            value={form.versionId}
-            onChange={handleVersionChange}
-            disabled={isSubmitting || !form.productId || isLoadingVersions}
-            sx={{
-              "& .MuiSelect-select": {
-                color: !form.versionId ? "text.secondary" : undefined,
-              },
-            }}
-            SelectProps={{
-              MenuProps: {
-                MenuListProps:
-                  paginatedSelectMenuListProps(handleVersionsScroll),
-                PaperProps: {
-                  sx: { zIndex: 1400 },
-                },
-              },
-            }}
-          >
-            <MenuItem value="">Select</MenuItem>
-            {versions.map((v) => (
-              <MenuItem key={v.id} value={v.id}>
-                {v.version}
-              </MenuItem>
-            ))}
-            <SelectMenuLoadMoreRow
-              visible={Boolean(canLoadMoreVersions && isFetchingMoreVersions)}
-            />
-            {(isLoadingVersions || isFetchingVersions) &&
-              versions.length === 0 && (
-                <MenuItem disabled>
-                  <Skeleton variant="text" width="100%" />
-                </MenuItem>
-              )}
-          </TextField>
-        </Box>
-
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 2,
-            mb: 2,
-          }}
-        >
-          <TextField
-            id="product-cores"
-            label="Core Count"
-            placeholder="e.g., 8"
-            type="number"
-            value={form.cores}
-            onChange={handleTextChange("cores")}
-            fullWidth
-            size="small"
-            disabled={isSubmitting}
-            inputProps={{ min: 0 }}
-          />
-          <TextField
-            id="product-tps"
-            label="TPS (Transactions Per Second)"
-            placeholder="e.g., 5000"
-            type="number"
-            value={form.tps}
-            onChange={handleTextChange("tps")}
-            fullWidth
-            size="small"
-            disabled={isSubmitting}
-            inputProps={{ min: 0 }}
-          />
-        </Box>
-
-        <TextField
-          id="product-description"
-          label="Description"
-          placeholder="Enter Description..."
-          fullWidth
-          size="small"
-          multiline
-          rows={2}
-          value={form.description}
-          onChange={handleTextChange("description")}
-          disabled={isSubmitting}
-        />
+        <ProductFormFields {...productForm} isSubmitting={isSubmitting} />
       </DialogContent>
 
       <DialogActions

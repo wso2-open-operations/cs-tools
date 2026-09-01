@@ -104,4 +104,39 @@ describe("ProjectDetails", () => {
     expect(screen.getByRole("tab", { name: /overview/i })).toBeInTheDocument();
     expect(screen.getByTestId("project-information-card")).toBeInTheDocument();
   });
+
+  it("renders the deployments tab when navigated with an initialTab location state", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/projects/proj-1/project-details",
+            state: { initialTab: "deployments" },
+          },
+        ]}
+      >
+        <ProjectDetails />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("project-deployments")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("project-information-card"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls back to the overview tab for an unrecognized initialTab value", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/projects/proj-1/project-details",
+            state: { initialTab: "not-a-real-tab" },
+          },
+        ]}
+      >
+        <ProjectDetails />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("project-information-card")).toBeInTheDocument();
+  });
 });

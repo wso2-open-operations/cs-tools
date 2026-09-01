@@ -436,3 +436,44 @@ export function getBaseDeploymentOptions(
     []
   );
 }
+
+/**
+ * Determines whether the deployment dropdown has resolved with zero options,
+ * i.e. the project has no self-service deployments configured yet. Used to
+ * show a helpful empty-state instead of a blank `<select>` during case
+ * creation.
+ *
+ * @param {string[]} deploymentOptions - Resolved deployment options.
+ * @param {boolean} isDeploymentLoading - Whether deployments are still loading.
+ * @param {boolean} isDeploymentDisabled - Whether the deployment field is intentionally disabled (e.g. locked to a single value).
+ * @returns {boolean} True when the deployment list has resolved empty.
+ */
+export function isDeploymentDropdownEmpty(
+  deploymentOptions: string[],
+  isDeploymentLoading: boolean,
+  isDeploymentDisabled: boolean,
+): boolean {
+  return (
+    !isDeploymentLoading &&
+    deploymentOptions.length === 0 &&
+    !isDeploymentDisabled
+  );
+}
+
+/**
+ * Determines whether the product dropdown has resolved with zero options for
+ * the currently selected deployment. Used to show a helpful empty-state
+ * instead of a blank `<select>` during case creation.
+ *
+ * @param {boolean} hasProductOptions - Whether the resolved product option list is non-empty.
+ * @param {boolean} isProductDropdownDisabled - Whether the product field is disabled (e.g. no deployment selected yet, or still loading).
+ * @param {boolean} isProductLoading - Whether products are still loading.
+ * @returns {boolean} True when the product list has resolved empty for the selected deployment.
+ */
+export function isProductDropdownEmpty(
+  hasProductOptions: boolean,
+  isProductDropdownDisabled: boolean,
+  isProductLoading: boolean,
+): boolean {
+  return !hasProductOptions && !isProductDropdownDisabled && !isProductLoading;
+}

@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Typography, Grid } from "@wso2/oxygen-ui";
-import { useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 import { useState, useEffect, useMemo, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import TabBar from "@components/tab-bar/TabBar";
@@ -47,8 +47,17 @@ import {
  * @returns {JSX.Element} The ProjectDetails component.
  */
 export default function ProjectDetails(): JSX.Element {
+  const location = useLocation();
+  const initialTabFromState = (
+    location.state as { initialTab?: string } | null
+  )?.initialTab;
   const [activeTab, setActiveTab] = useState<string>(
-    ProjectDetailsTabId.OVERVIEW,
+    initialTabFromState &&
+      Object.values(ProjectDetailsTabId).includes(
+        initialTabFromState as ProjectDetailsTabId,
+      )
+      ? initialTabFromState
+      : ProjectDetailsTabId.OVERVIEW,
   );
 
   const { projectId } = useParams<{ projectId: string }>();

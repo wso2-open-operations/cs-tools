@@ -54,6 +54,12 @@ export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_MOBILE_APP_IOS_STORE_URL?: string;
   CUSTOMER_PORTAL_MOBILE_APP_ANDROID_STORE_URL?: string;
   CUSTOMER_PORTAL_MOBILE_APP_INCLUDE_TABLETS?: boolean;
+  /**
+   * Enables the case-creation "add deployment/product inline" empty-state
+   * (alert + in-menu add-new row + wizard + singleton auto-select). Default
+   * ON when unset - this is a kill switch, not an opt-in.
+   */
+  CUSTOMER_PORTAL_ALLOW_DEPLOYMENT_SETUP_DURING_CASE_CREATION?: boolean;
 }
 
 declare global {

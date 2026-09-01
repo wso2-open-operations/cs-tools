@@ -30,4 +30,36 @@ describe("EmptyState", () => {
     expect(screen.getByTestId("empty-icon")).toBeInTheDocument();
     expect(screen.getByText(description)).toBeInTheDocument();
   });
+
+  it("should not render an action when none is provided", () => {
+    render(<EmptyState description="Nothing to see here" />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("should render the provided action below the description", () => {
+    render(
+      <EmptyState
+        description="Nothing to see here"
+        action={<button type="button">Do something</button>}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Do something" }),
+    ).toBeInTheDocument();
+  });
+
+  it("should render a secondary description when provided", () => {
+    render(
+      <EmptyState
+        description="Nothing to see here"
+        secondaryDescription="More context about why"
+      />,
+    );
+    expect(screen.getByText("More context about why")).toBeInTheDocument();
+  });
+
+  it("should not render a secondary description when not provided", () => {
+    render(<EmptyState description="Nothing to see here" />);
+    expect(screen.queryByText("More context about why")).not.toBeInTheDocument();
+  });
 });
