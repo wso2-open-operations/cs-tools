@@ -523,6 +523,14 @@ type snCreateChangeRequestPayload struct {
 	PlannedEndDate      *string `json:"plannedEndDate,omitempty"`
 	Comment             *string `json:"comment,omitempty"`
 	WorkNote            *string `json:"workNote,omitempty"`
+	// Field-parity additions -- see domain.CreateChangeRequestRequest.
+	AffectedServicesText   *string  `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText *string  `json:"affectedComponentsText,omitempty"`
+	RollbackDurationText   *string  `json:"rollbackDurationText,omitempty"`
+	CustomerGroupID        *string  `json:"customerGroupId,omitempty"`
+	EnvironmentIDs         []string `json:"environmentIds,omitempty"`
+	DeploymentProductIDs   []string `json:"deploymentProductIds,omitempty"`
+	DurationInput          *int     `json:"durationInput,omitempty"`
 }
 
 // snCreateChangeRequestResponse mirrors the Choreo POST /change-requests response.
@@ -602,6 +610,72 @@ var snCRCategoryIDMap = map[domain.ChangeRequestCategory]string{
 
 func strPtr(s string) *string { return &s }
 
+// snCRPriorityLabelMap maps SN numeric priority ids (as returned by GET) to
+// domain ChangeRequestPriority enum strings. The inverse of snCRPriorityIDMap.
+var snCRPriorityLabelMap = map[int]string{
+	1: string(domain.ChangeRequestPriorityCritical),
+	2: string(domain.ChangeRequestPriorityHigh),
+	3: string(domain.ChangeRequestPriorityModerate),
+	4: string(domain.ChangeRequestPriorityLow),
+}
+
+// snCRCategoryLabelMap maps SN category string ids (as returned by GET) to
+// domain ChangeRequestCategory enum strings. The inverse of snCRCategoryIDMap.
+var snCRCategoryLabelMap = map[string]string{
+	"Hardware":                string(domain.ChangeRequestCategoryHardware),
+	"Software":                string(domain.ChangeRequestCategorySoftware),
+	"Service":                 string(domain.ChangeRequestCategoryService),
+	"System Software":         string(domain.ChangeRequestCategorySystemSoftware),
+	"Applications Software":   string(domain.ChangeRequestCategoryApplicationsSoftware),
+	"Network":                 string(domain.ChangeRequestCategoryNetwork),
+	"Telecom":                 string(domain.ChangeRequestCategoryTelecom),
+	"Documentation":           string(domain.ChangeRequestCategoryDocumentation),
+	"Other":                   string(domain.ChangeRequestCategoryOther),
+	"Regular Release - Cloud": string(domain.ChangeRequestCategoryRegularReleaseCloud),
+	"Hotfix Release - Cloud":  string(domain.ChangeRequestCategoryHotfixReleaseCloud),
+	"DevOps":                  string(domain.ChangeRequestCategoryDevOps),
+	"cloud computing":         string(domain.ChangeRequestCategoryCloudComputing),
+}
+
+// validChangeRequestPriority is the allow-list for CreateChangeRequestRequest.Priority
+// and PatchChangeRequestRequest.Priority.
+var validChangeRequestPriority = map[domain.ChangeRequestPriority]bool{
+	domain.ChangeRequestPriorityCritical: true,
+	domain.ChangeRequestPriorityHigh:     true,
+	domain.ChangeRequestPriorityModerate: true,
+	domain.ChangeRequestPriorityLow:      true,
+}
+
+// validChangeRequestCategory is the allow-list for CreateChangeRequestRequest.Category
+// and PatchChangeRequestRequest.Category.
+var validChangeRequestCategory = map[domain.ChangeRequestCategory]bool{
+	domain.ChangeRequestCategoryHardware:             true,
+	domain.ChangeRequestCategorySoftware:             true,
+	domain.ChangeRequestCategoryService:              true,
+	domain.ChangeRequestCategorySystemSoftware:       true,
+	domain.ChangeRequestCategoryApplicationsSoftware: true,
+	domain.ChangeRequestCategoryNetwork:              true,
+	domain.ChangeRequestCategoryTelecom:              true,
+	domain.ChangeRequestCategoryDocumentation:        true,
+	domain.ChangeRequestCategoryOther:                true,
+	domain.ChangeRequestCategoryRegularReleaseCloud:  true,
+	domain.ChangeRequestCategoryHotfixReleaseCloud:   true,
+	domain.ChangeRequestCategoryDevOps:               true,
+	domain.ChangeRequestCategoryCloudComputing:       true,
+}
+
+// snCRIntChoice mirrors a Choreo {id: <int>, label: <string>} choice-field shape.
+type snCRIntChoice struct {
+	ID    int    `json:"id"`
+	Label string `json:"label"`
+}
+
+// snCRStrChoice mirrors a Choreo {id: <string>, label: <string>} choice-field shape.
+type snCRStrChoice struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
 // snUTCDateTimeLayout is the layout the downstream create endpoint requires for
 // planned start/end timestamps. The platform's own API accepts a single datetime
 // format everywhere (snCreatedOnLayout, "YYYY-MM-DD HH:mm:ss"); the downstream
@@ -667,6 +741,7 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 		"groupId":             req.GroupID,
 		"assignedEngineerId":  req.AssignedEngineerID,
 		"requestedById":       req.RequestedByID,
+		"customerGroupId":     req.CustomerGroupID,
 	}
 	for field, val := range uuidFields {
 		if val != nil {
@@ -675,19 +750,41 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 			}
 		}
 	}
+	if req.EnvironmentIDs != nil {
+		if err := validateUUIDs("environmentIds", req.EnvironmentIDs); err != nil {
+			return domain.CreateChangeRequestResponse{}, err
+		}
+	}
+	if req.DeploymentProductIDs != nil {
+		if err := validateUUIDs("deploymentProductIds", req.DeploymentProductIDs); err != nil {
+			return domain.CreateChangeRequestResponse{}, err
+		}
+	}
+	if req.DurationInput != nil && *req.DurationInput < 0 {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "durationInput must be a non-negative integer"}
+	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snCreateChangeRequestPayload{
-		Subject:            req.Subject,
-		Description:        req.Description,
-		Justification:      req.Justification,
-		ImplementationPlan: req.ImplementationPlan,
-		RiskImpactAnalysis: req.RiskImpactAnalysis,
-		BackoutPlan:        req.BackoutPlan,
-		TestPlan:           req.TestPlan,
-		Comment:            req.Comment,
-		WorkNote:           req.WorkNote,
+		Subject:                req.Subject,
+		Description:            req.Description,
+		Justification:          req.Justification,
+		ImplementationPlan:     req.ImplementationPlan,
+		RiskImpactAnalysis:     req.RiskImpactAnalysis,
+		BackoutPlan:            req.BackoutPlan,
+		TestPlan:               req.TestPlan,
+		Comment:                req.Comment,
+		WorkNote:               req.WorkNote,
+		AffectedServicesText:   req.AffectedServicesText,
+		AffectedComponentsText: req.AffectedComponentsText,
+		RollbackDurationText:   req.RollbackDurationText,
+		EnvironmentIDs:         uuidsToSysids(req.EnvironmentIDs),
+		DeploymentProductIDs:   uuidsToSysids(req.DeploymentProductIDs),
+		DurationInput:          req.DurationInput,
+	}
+	if req.CustomerGroupID != nil {
+		payload.CustomerGroupID = strPtr(uuidToSysid(*req.CustomerGroupID))
 	}
 	if req.PlannedStartDate != nil {
 		v, err := toDownstreamUTCDateTime("plannedStartDate", *req.PlannedStartDate)
@@ -809,6 +906,42 @@ type snPatchChangeRequestPayload struct {
 	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
 	RequestApproval    *bool   `json:"requestApproval,omitempty"`
+
+	// Field-parity additions. Except Comment/WorkNote, every one of these is
+	// json.RawMessage so an explicit null ("field": null) can be distinguished
+	// from an omitted field -- omitempty drops a nil RawMessage entirely, while
+	// json.RawMessage("null") is sent through unchanged. See
+	// domain.PatchChangeRequestRequest for the tri-state contract.
+	ImplementationPlan     json.RawMessage `json:"implementationPlan,omitempty"`
+	PriorityKey            json.RawMessage `json:"priorityKey,omitempty"`
+	CategoryKey            json.RawMessage `json:"categoryKey,omitempty"`
+	RequestedByID          json.RawMessage `json:"requestedById,omitempty"`
+	AffectedServicesText   json.RawMessage `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText json.RawMessage `json:"affectedComponentsText,omitempty"`
+	RollbackDurationText   json.RawMessage `json:"rollbackDurationText,omitempty"`
+	CustomerGroupID        json.RawMessage `json:"customerGroupId,omitempty"`
+	EnvironmentIDs         json.RawMessage `json:"environmentIds,omitempty"`
+	DeploymentProductIDs   json.RawMessage `json:"deploymentProductIds,omitempty"`
+	DurationInput          json.RawMessage `json:"durationInput,omitempty"`
+	// Comment and WorkNote append a journal entry; they are never null (the
+	// backing API rejects an empty/whitespace value with 400) so a plain
+	// pointer is enough.
+	Comment  *string `json:"comment,omitempty"`
+	WorkNote *string `json:"workNote,omitempty"`
+}
+
+// rawJSONOrNull marshals v (or emits the JSON literal null when v is nil) into
+// a json.RawMessage, for building a tri-state PATCH payload field from a
+// **T domain pointer-to-pointer.
+func rawJSONOrNull(v any) (json.RawMessage, error) {
+	if v == nil {
+		return json.RawMessage("null"), nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 // snPatchChangeRequestResponse mirrors the Choreo PATCH /change-requests/{id} response.
@@ -830,7 +963,12 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		req.Impact == nil && req.State == nil && req.Type == nil && req.Justification == nil &&
 		req.ImpactDescription == nil && req.ServiceOutage == nil && req.CommunicationPlan == nil &&
 		req.RollbackPlan == nil && req.TestPlan == nil && req.IsCustomerApproved == nil &&
-		req.IsCustomerReviewed == nil && req.RequestApproval == nil {
+		req.IsCustomerReviewed == nil && req.RequestApproval == nil &&
+		req.ImplementationPlan == nil && req.Priority == nil && req.Category == nil &&
+		req.RequestedByID == nil && req.AffectedServicesText == nil && req.AffectedComponentsText == nil &&
+		req.RollbackDurationText == nil && req.CustomerGroupID == nil && req.EnvironmentIDs == nil &&
+		req.DeploymentProductIDs == nil && req.Comment == nil && req.WorkNote == nil &&
+		req.DurationInput == nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 
@@ -876,6 +1014,21 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedEndOn must follow the format: YYYY-MM-DD HH:mm:ss"}
 		}
 	}
+	if req.Priority != nil && *req.Priority != nil && !validChangeRequestPriority[**req.Priority] {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid priority %q", **req.Priority)}
+	}
+	if req.Category != nil && *req.Category != nil && !validChangeRequestCategory[**req.Category] {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid category %q", **req.Category)}
+	}
+	if req.Comment != nil && strings.TrimSpace(*req.Comment) == "" {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "comment cannot be empty"}
+	}
+	if req.WorkNote != nil && strings.TrimSpace(*req.WorkNote) == "" {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "workNote cannot be empty"}
+	}
+	if req.DurationInput != nil && *req.DurationInput != nil && **req.DurationInput < 0 {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "durationInput must be a non-negative integer"}
+	}
 
 	uuidFields := map[string]*string{
 		"projectId":          req.ProjectID,
@@ -890,6 +1043,29 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 			if err := validateUUIDs(field, []string{*val}); err != nil {
 				return domain.PatchChangeRequestResponse{}, err
 			}
+		}
+	}
+	// Tri-state UUID fields: only validate when a non-null value is being set;
+	// an explicit null (clear) or an omitted field needs no UUID validation.
+	triStateUUIDFields := map[string]**string{
+		"requestedById":   req.RequestedByID,
+		"customerGroupId": req.CustomerGroupID,
+	}
+	for field, val := range triStateUUIDFields {
+		if val != nil && *val != nil {
+			if err := validateUUIDs(field, []string{**val}); err != nil {
+				return domain.PatchChangeRequestResponse{}, err
+			}
+		}
+	}
+	if req.EnvironmentIDs != nil {
+		if err := validateUUIDs("environmentIds", *req.EnvironmentIDs); err != nil {
+			return domain.PatchChangeRequestResponse{}, err
+		}
+	}
+	if req.DeploymentProductIDs != nil {
+		if err := validateUUIDs("deploymentProductIds", *req.DeploymentProductIDs); err != nil {
+			return domain.PatchChangeRequestResponse{}, err
 		}
 	}
 
@@ -907,6 +1083,105 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		IsCustomerApproved: req.IsCustomerApproved,
 		IsCustomerReviewed: req.IsCustomerReviewed,
 		RequestApproval:    req.RequestApproval,
+		Comment:            req.Comment,
+		WorkNote:           req.WorkNote,
+	}
+	if req.ImplementationPlan != nil {
+		v, err := rawJSONOrNull(*req.ImplementationPlan)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal implementationPlan: %w", err)
+		}
+		payload.ImplementationPlan = v
+	}
+	if req.Priority != nil {
+		var v any
+		if *req.Priority != nil {
+			v = snCRPriorityIDMap[**req.Priority]
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal priority: %w", err)
+		}
+		payload.PriorityKey = raw
+	}
+	if req.Category != nil {
+		var v any
+		if *req.Category != nil {
+			v = snCRCategoryIDMap[**req.Category]
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal category: %w", err)
+		}
+		payload.CategoryKey = raw
+	}
+	if req.RequestedByID != nil {
+		var v any
+		if *req.RequestedByID != nil {
+			v = uuidToSysid(**req.RequestedByID)
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal requestedById: %w", err)
+		}
+		payload.RequestedByID = raw
+	}
+	if req.AffectedServicesText != nil {
+		v, err := rawJSONOrNull(*req.AffectedServicesText)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal affectedServicesText: %w", err)
+		}
+		payload.AffectedServicesText = v
+	}
+	if req.AffectedComponentsText != nil {
+		v, err := rawJSONOrNull(*req.AffectedComponentsText)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal affectedComponentsText: %w", err)
+		}
+		payload.AffectedComponentsText = v
+	}
+	if req.RollbackDurationText != nil {
+		v, err := rawJSONOrNull(*req.RollbackDurationText)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal rollbackDurationText: %w", err)
+		}
+		payload.RollbackDurationText = v
+	}
+	if req.CustomerGroupID != nil {
+		var v any
+		if *req.CustomerGroupID != nil {
+			v = uuidToSysid(**req.CustomerGroupID)
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal customerGroupId: %w", err)
+		}
+		payload.CustomerGroupID = raw
+	}
+	if req.EnvironmentIDs != nil {
+		b, err := json.Marshal(uuidsToSysids(*req.EnvironmentIDs))
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal environmentIds: %w", err)
+		}
+		payload.EnvironmentIDs = b
+	}
+	if req.DeploymentProductIDs != nil {
+		b, err := json.Marshal(uuidsToSysids(*req.DeploymentProductIDs))
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal deploymentProductIds: %w", err)
+		}
+		payload.DeploymentProductIDs = b
+	}
+	if req.DurationInput != nil {
+		var v any
+		if *req.DurationInput != nil {
+			v = **req.DurationInput
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, fmt.Errorf("sn patch change request: marshal durationInput: %w", err)
+		}
+		payload.DurationInput = raw
 	}
 	if req.ProjectID != nil {
 		payload.ProjectID = strPtr(uuidToSysid(*req.ProjectID))
@@ -979,6 +1254,31 @@ type snChangeRequestDetail struct {
 	ApprovedBy          *snCREntityRef `json:"approvedBy"`
 	ApprovedOn          *string        `json:"approvedOn"`
 	LegalNextStates     []string       `json:"legalNextStates"`
+
+	// Field-parity additions -- see domain.ChangeRequest for the grouping.
+	ImplementationPlan *string        `json:"implementationPlan"`
+	Priority           *snCRIntChoice `json:"priority"`
+	Category           *snCRStrChoice `json:"category"`
+	RequestedBy        *snCREntityRef `json:"requestedBy"`
+
+	AffectedServicesText   *string         `json:"affectedServicesText"`
+	AffectedComponentsText *string         `json:"affectedComponentsText"`
+	RollbackDurationText   *string         `json:"rollbackDurationText"`
+	Environments           []snCREntityRef `json:"environments"`
+	DeploymentProducts     []snCREntityRef `json:"deploymentProducts"`
+	CustomerGroup          *snCREntityRef  `json:"customerGroup"`
+
+	ChangeRequestType            *snCRIntChoice  `json:"changeRequestType"`
+	Likelihood                   *snCRIntChoice  `json:"likelihood"`
+	IsPlanningVisibleToCustomers bool            `json:"isPlanningVisibleToCustomers"`
+	ConfirmCustomerUpdatedDate   *string         `json:"confirmCustomerUpdatedDate"`
+	CustomerUpdatedOn            *string         `json:"customerUpdatedOn"`
+	Labels                       []string        `json:"labels"`
+	Deployments                  []snCREntityRef `json:"deployments"`
+
+	WorkStart    *string `json:"workStart"`
+	WorkEnd      *string `json:"workEnd"`
+	GitReference *string `json:"gitReference"`
 }
 
 func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error) {
@@ -1174,9 +1474,69 @@ func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeReque
 		HasCustomerReviewed:     cr.HasCustomerReviewed,
 		ApprovedOn:              cr.ApprovedOn,
 		LegalNextStates:         cr.LegalNextStates,
+
+		// Field-parity additions.
+		ImplementationPlan:           cr.ImplementationPlan,
+		AffectedServicesText:         cr.AffectedServicesText,
+		AffectedComponentsText:       cr.AffectedComponentsText,
+		RollbackDurationText:         cr.RollbackDurationText,
+		IsPlanningVisibleToCustomers: cr.IsPlanningVisibleToCustomers,
+		ConfirmCustomerUpdatedDate:   cr.ConfirmCustomerUpdatedDate,
+		CustomerUpdatedOn:            cr.CustomerUpdatedOn,
+		Labels:                       cr.Labels,
+		WorkStart:                    cr.WorkStart,
+		WorkEnd:                      cr.WorkEnd,
+		GitReference:                 cr.GitReference,
 	}
 	if cr.ApprovedBy != nil {
 		result.ApprovedBy = &domain.EntityRef{ID: sysidToUUID(cr.ApprovedBy.ID), Name: cr.ApprovedBy.Name}
+	}
+	if cr.Priority != nil {
+		if label, ok := snCRPriorityLabelMap[cr.Priority.ID]; ok {
+			result.Priority = &label
+		} else {
+			result.Priority = &cr.Priority.Label
+		}
+	}
+	if cr.Category != nil {
+		if label, ok := snCRCategoryLabelMap[cr.Category.ID]; ok {
+			result.Category = &label
+		} else {
+			result.Category = &cr.Category.Label
+		}
+	}
+	if cr.RequestedBy != nil {
+		result.RequestedBy = &domain.EntityRef{ID: sysidToUUID(cr.RequestedBy.ID), Name: cr.RequestedBy.Name}
+	}
+	if cr.CustomerGroup != nil {
+		result.CustomerGroup = &domain.EntityRef{ID: sysidToUUID(cr.CustomerGroup.ID), Name: cr.CustomerGroup.Name}
+	}
+	if cr.ChangeRequestType != nil {
+		result.ChangeRequestType = &cr.ChangeRequestType.Label
+	}
+	if cr.Likelihood != nil {
+		result.Likelihood = &cr.Likelihood.Label
+	}
+	if len(cr.Environments) > 0 {
+		envs := make([]domain.EntityRef, 0, len(cr.Environments))
+		for _, e := range cr.Environments {
+			envs = append(envs, domain.EntityRef{ID: sysidToUUID(e.ID), Name: e.Name})
+		}
+		result.Environments = envs
+	}
+	if len(cr.DeploymentProducts) > 0 {
+		products := make([]domain.EntityRef, 0, len(cr.DeploymentProducts))
+		for _, p := range cr.DeploymentProducts {
+			products = append(products, domain.EntityRef{ID: sysidToUUID(p.ID), Name: p.Name})
+		}
+		result.DeploymentProducts = products
+	}
+	if len(cr.Deployments) > 0 {
+		deployments := make([]domain.EntityRef, 0, len(cr.Deployments))
+		for _, d := range cr.Deployments {
+			deployments = append(deployments, domain.EntityRef{ID: sysidToUUID(d.ID), Name: d.Name})
+		}
+		result.Deployments = deployments
 	}
 
 	return result

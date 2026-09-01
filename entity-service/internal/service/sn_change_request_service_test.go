@@ -402,3 +402,316 @@ func TestSNChangeRequestService_SearchChangeRequests_AssignmentGroupIdInvalidUUI
 		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Field parity (CHANGES-cr-field-parity.md)
+// ---------------------------------------------------------------------------
+
+func strPtrPtr(s string) **string {
+	p := &s
+	return &p
+}
+
+func nullStrPtrPtr() **string {
+	var p *string
+	return &p
+}
+
+func priorityPtrPtr(p domain.ChangeRequestPriority) **domain.ChangeRequestPriority {
+	pp := &p
+	return &pp
+}
+
+func intPtrPtr(i int) **int {
+	p := &i
+	return &p
+}
+
+func nullIntPtrPtr() **int {
+	var p *int
+	return &p
+}
+
+// TestSNChangeRequestService_PatchChangeRequest_ExplicitNullClearsFields verifies
+// that an explicit null on a tri-state field is sent through as a literal JSON
+// null (clear), distinct from an omitted field (leave unchanged) -- the
+// contract documented in CHANGES-cr-field-parity.md.
+func TestSNChangeRequestService_PatchChangeRequest_ExplicitNullClearsFields(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/change-requests/"+uuidToSysid(testCaseUUID), func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message": "Change request updated", "changeRequest": {"id": "` + uuidToSysid(testCaseUUID) + `", "number": "CHG0001", "project": {"id": "` + uuidToSysid(testCaseUUID) + `", "name": "p"}, "createdOn": "2026-01-01 00:00:00"}}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowChangeRequestService(client)
+
+	req := domain.PatchChangeRequestRequest{
+		ImplementationPlan: nullStrPtrPtr(),
+		Priority:           nullPriorityPtrPtr(),
+		CustomerGroupID:    nullStrPtrPtr(),
+		DurationInput:      nullIntPtrPtr(),
+	}
+
+	if _, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), testCaseUUID, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, key := range []string{"implementationPlan", "priorityKey", "customerGroupId", "durationInput"} {
+		raw, ok := gotBody[key]
+		if !ok {
+			t.Errorf("expected key %q to be present in the outgoing payload (explicit null), but it was omitted", key)
+			continue
+		}
+		if raw != nil {
+			t.Errorf("expected %q to be sent as JSON null, got %v", key, raw)
+		}
+	}
+}
+
+func nullPriorityPtrPtr() **domain.ChangeRequestPriority {
+	var p *domain.ChangeRequestPriority
+	return &p
+}
+
+// TestSNChangeRequestService_PatchChangeRequest_SetsNewWritableFields verifies
+// every one of the 13 field-parity writable keys reaches the outgoing payload
+// with the expected wire value, including sysid conversion for id-valued
+// fields and key mapping for priority/category.
+func TestSNChangeRequestService_PatchChangeRequest_SetsNewWritableFields(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/change-requests/"+uuidToSysid(testCaseUUID), func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message": "Change request updated", "changeRequest": {"id": "` + uuidToSysid(testCaseUUID) + `", "number": "CHG0001", "project": {"id": "` + uuidToSysid(testCaseUUID) + `", "name": "p"}, "createdOn": "2026-01-01 00:00:00"}}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowChangeRequestService(client)
+
+	comment := "a comment"
+	workNote := "a work note"
+	req := domain.PatchChangeRequestRequest{
+		ImplementationPlan:     strPtrPtr("<p>plan</p>"),
+		Priority:               priorityPtrPtr(domain.ChangeRequestPriorityHigh),
+		Category:               categoryPtrPtr(domain.ChangeRequestCategoryNetwork),
+		RequestedByID:          strPtrPtr(testCaseUUID),
+		AffectedServicesText:   strPtrPtr("services"),
+		AffectedComponentsText: strPtrPtr("components"),
+		RollbackDurationText:   strPtrPtr("10 mins"),
+		CustomerGroupID:        strPtrPtr(testCaseUUID),
+		EnvironmentIDs:         &[]string{testCaseUUID},
+		DeploymentProductIDs:   &[]string{testCaseUUID},
+		Comment:                &comment,
+		WorkNote:               &workNote,
+		DurationInput:          intPtrPtr(21600),
+	}
+
+	if _, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), testCaseUUID, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody["implementationPlan"] != "<p>plan</p>" {
+		t.Errorf("implementationPlan: got %v", gotBody["implementationPlan"])
+	}
+	if gotBody["priorityKey"] != "2" {
+		t.Errorf("priorityKey: got %v, want \"2\" (high)", gotBody["priorityKey"])
+	}
+	if gotBody["categoryKey"] != "Network" {
+		t.Errorf("categoryKey: got %v, want \"Network\"", gotBody["categoryKey"])
+	}
+	if gotBody["requestedById"] != uuidToSysid(testCaseUUID) {
+		t.Errorf("requestedById: got %v, want a sysid, not a raw UUID", gotBody["requestedById"])
+	}
+	if gotBody["customerGroupId"] != uuidToSysid(testCaseUUID) {
+		t.Errorf("customerGroupId: got %v, want a sysid, not a raw UUID", gotBody["customerGroupId"])
+	}
+	envIDs, ok := gotBody["environmentIds"].([]any)
+	if !ok || len(envIDs) != 1 || envIDs[0] != uuidToSysid(testCaseUUID) {
+		t.Errorf("environmentIds: got %v, want [%q] (raw UUID must not be sent to SN)", gotBody["environmentIds"], uuidToSysid(testCaseUUID))
+	}
+	if gotBody["comment"] != "a comment" || gotBody["workNote"] != "a work note" {
+		t.Errorf("comment/workNote: got comment=%v workNote=%v", gotBody["comment"], gotBody["workNote"])
+	}
+	if gotBody["durationInput"] != float64(21600) {
+		t.Errorf("durationInput: got %v", gotBody["durationInput"])
+	}
+}
+
+func categoryPtrPtr(c domain.ChangeRequestCategory) **domain.ChangeRequestCategory {
+	pp := &c
+	return &pp
+}
+
+// TestSNChangeRequestService_PatchChangeRequest_RejectsEmptyJournalFields
+// verifies comment/workNote reject an empty or whitespace-only value: a
+// journal entry is not a clearable field value, per CHANGES-cr-field-parity.md.
+func TestSNChangeRequestService_PatchChangeRequest_RejectsEmptyJournalFields(t *testing.T) {
+	svc := NewServiceNowChangeRequestService(nil)
+
+	blank := "   "
+	for _, req := range []domain.PatchChangeRequestRequest{
+		{Comment: &blank},
+		{WorkNote: &blank},
+	} {
+		_, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), testCaseUUID, req)
+		if _, ok := err.(*apierror.ValidationError); !ok {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	}
+}
+
+// TestSNChangeRequestService_PatchChangeRequest_RejectsInvalidPriorityAndCategory
+// verifies the new priority/category writable keys are validated the same way
+// the pre-existing create-path enums are.
+func TestSNChangeRequestService_PatchChangeRequest_RejectsInvalidPriorityAndCategory(t *testing.T) {
+	svc := NewServiceNowChangeRequestService(nil)
+
+	invalidPriority := domain.ChangeRequestPriority("urgent")
+	_, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), testCaseUUID, domain.PatchChangeRequestRequest{
+		Priority: priorityPtrPtr(invalidPriority),
+	})
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("priority: expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+
+	invalidCategory := domain.ChangeRequestCategory("not-a-category")
+	_, err = svc.PatchChangeRequest(contextWithUserIDToken("token"), testCaseUUID, domain.PatchChangeRequestRequest{
+		Category: categoryPtrPtr(invalidCategory),
+	})
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("category: expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
+// TestSNChangeRequestService_CreateChangeRequest_SendsNewCreateFields verifies
+// the 7 field-parity keys newly added to create reach the outgoing payload.
+func TestSNChangeRequestService_CreateChangeRequest_SendsNewCreateFields(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/change-requests", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"message": "Change request created", "changeRequest": {"id": "` + uuidToSysid(testCaseUUID) + `", "number": "CHG0001", "createdOn": "2026-01-01 00:00:00", "createdBy": "engineer@example.com"}}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowChangeRequestService(client)
+
+	duration := 21600
+	req := domain.CreateChangeRequestRequest{
+		Subject:                "subject",
+		AffectedServicesText:   strPtr("services"),
+		AffectedComponentsText: strPtr("components"),
+		RollbackDurationText:   strPtr("2 hours"),
+		CustomerGroupID:        strPtr(testCaseUUID),
+		EnvironmentIDs:         []string{testCaseUUID},
+		DeploymentProductIDs:   []string{testCaseUUID},
+		DurationInput:          &duration,
+	}
+
+	if _, err := svc.CreateChangeRequest(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody["customerGroupId"] != uuidToSysid(testCaseUUID) {
+		t.Errorf("customerGroupId: got %v, want a sysid, not a raw UUID", gotBody["customerGroupId"])
+	}
+	envIDs, ok := gotBody["environmentIds"].([]any)
+	if !ok || len(envIDs) != 1 || envIDs[0] != uuidToSysid(testCaseUUID) {
+		t.Errorf("environmentIds: got %v", gotBody["environmentIds"])
+	}
+	if gotBody["durationInput"] != float64(21600) {
+		t.Errorf("durationInput: got %v", gotBody["durationInput"])
+	}
+}
+
+// TestSNChangeRequestService_GetChangeRequest_MapsFieldParityKeys verifies the
+// 20 new read keys are mapped from the Choreo detail payload into the domain
+// view, including priority/category key-to-domain-enum mapping.
+func TestSNChangeRequestService_GetChangeRequest_MapsFieldParityKeys(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/change-requests/"+uuidToSysid(testCaseUUID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "` + uuidToSysid(testCaseUUID) + `", "number": "CHG0038839",
+			"project": {"id": "` + uuidToSysid(testCaseUUID) + `", "name": "p"},
+			"createdOn": "2026-01-01 00:00:00", "createdBy": "engineer@example.com",
+			"implementationPlan": "<p>plan</p>",
+			"priority": {"id": 4, "label": "4 - Low"},
+			"category": {"id": "Other", "label": "Other"},
+			"requestedBy": {"id": "` + uuidToSysid(testCaseUUID) + `", "name": "Jane Doe"},
+			"affectedServicesText": "<p>services</p>",
+			"affectedComponentsText": "<p>components</p>",
+			"rollbackDurationText": "10 mins",
+			"environments": [{"id": "` + uuidToSysid(testCaseUUID) + `", "name": "UAT"}],
+			"deploymentProducts": [{"id": "` + uuidToSysid(testCaseUUID) + `", "name": "WSO2 EI 6.6.0"}],
+			"customerGroup": {"id": "` + uuidToSysid(testCaseUUID) + `", "name": "customer group"},
+			"changeRequestType": {"id": 1, "label": "General"},
+			"likelihood": {"id": 3, "label": "3 - Low"},
+			"isPlanningVisibleToCustomers": false,
+			"confirmCustomerUpdatedDate": null,
+			"customerUpdatedOn": "2024-08-31 03:46:13",
+			"labels": ["CRType/Emergency", "impact-3"],
+			"deployments": [{"id": "` + uuidToSysid(testCaseUUID) + `", "name": "Production"}],
+			"workStart": "2026-02-17 04:58:00",
+			"workEnd": "2026-02-17 04:59:18",
+			"gitReference": "https://github.com/example/repo/issues/491"
+		}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowChangeRequestService(client)
+
+	got, err := svc.GetChangeRequest(contextWithUserIDToken("token"), testCaseUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.ImplementationPlan == nil || *got.ImplementationPlan != "<p>plan</p>" {
+		t.Errorf("implementationPlan: got %v", got.ImplementationPlan)
+	}
+	if got.Priority == nil || *got.Priority != string(domain.ChangeRequestPriorityLow) {
+		t.Errorf("priority: got %v, want %q", got.Priority, domain.ChangeRequestPriorityLow)
+	}
+	if got.Category == nil || *got.Category != string(domain.ChangeRequestCategoryOther) {
+		t.Errorf("category: got %v, want %q", got.Category, domain.ChangeRequestCategoryOther)
+	}
+	if got.RequestedBy == nil || got.RequestedBy.ID != testCaseUUID {
+		t.Errorf("requestedBy: got %v", got.RequestedBy)
+	}
+	if len(got.Environments) != 1 || got.Environments[0].ID != testCaseUUID {
+		t.Errorf("environments: got %v", got.Environments)
+	}
+	if len(got.DeploymentProducts) != 1 {
+		t.Errorf("deploymentProducts: got %v", got.DeploymentProducts)
+	}
+	if got.CustomerGroup == nil || got.CustomerGroup.ID != testCaseUUID {
+		t.Errorf("customerGroup: got %v", got.CustomerGroup)
+	}
+	if got.ChangeRequestType == nil || *got.ChangeRequestType != "General" {
+		t.Errorf("changeRequestType: got %v", got.ChangeRequestType)
+	}
+	if len(got.Labels) != 2 {
+		t.Errorf("labels: got %v", got.Labels)
+	}
+	if len(got.Deployments) != 1 {
+		t.Errorf("deployments: got %v", got.Deployments)
+	}
+	if got.WorkStart == nil || *got.WorkStart != "2026-02-17 04:58:00" {
+		t.Errorf("workStart: got %v", got.WorkStart)
+	}
+	if got.GitReference == nil || *got.GitReference != "https://github.com/example/repo/issues/491" {
+		t.Errorf("gitReference: got %v", got.GitReference)
+	}
+}

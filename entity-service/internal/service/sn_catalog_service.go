@@ -64,6 +64,25 @@ type snCatalogItemVariable struct {
 	// for free-text variable types, which are the majority, so this must tolerate
 	// absence.
 	Choices []snCatalogVariableChoice `json:"choices"`
+	// Name/Mandatory/Active/ReadOnly/Hidden/DefaultValue/MaxLength/ReferenceTable/Validation:
+	// see domain.CatalogItemVariable doc comments.
+	Name           *string                      `json:"name"`
+	Mandatory      bool                         `json:"mandatory"`
+	Active         bool                         `json:"active"`
+	ReadOnly       bool                         `json:"readOnly"`
+	Hidden         bool                         `json:"hidden"`
+	DefaultValue   *string                      `json:"defaultValue"`
+	MaxLength      *int                         `json:"maxLength"`
+	ReferenceTable *string                      `json:"referenceTable"`
+	Validation     *snCatalogVariableValidation `json:"validation"`
+}
+
+// snCatalogVariableValidation mirrors a named validation rule the backing data source
+// declares for a catalog item variable's value.
+type snCatalogVariableValidation struct {
+	Name    string `json:"name"`
+	Regex   string `json:"regex"`
+	Message string `json:"message"`
 }
 
 // snCatalogVariableChoice mirrors one option on a choice-based catalog item
@@ -171,10 +190,23 @@ func (s *snCatalogService) GetCatalogItemVariables(ctx context.Context, catalogI
 	variables := make([]domain.CatalogItemVariable, 0, len(snResp.Variables))
 	for _, v := range snResp.Variables {
 		variable := domain.CatalogItemVariable{
-			ID:           sysidToUUID(v.ID),
-			QuestionText: v.QuestionText,
-			Order:        v.Order,
-			Type:         v.Type,
+			ID:             sysidToUUID(v.ID),
+			QuestionText:   v.QuestionText,
+			Order:          v.Order,
+			Type:           v.Type,
+			Name:           v.Name,
+			Mandatory:      v.Mandatory,
+			Active:         v.Active,
+			ReadOnly:       v.ReadOnly,
+			Hidden:         v.Hidden,
+			DefaultValue:   v.DefaultValue,
+			MaxLength:      v.MaxLength,
+			ReferenceTable: v.ReferenceTable,
+		}
+		if v.Validation != nil {
+			variable.Validation = &domain.CatalogVariableValidation{
+				Name: v.Validation.Name, Regex: v.Validation.Regex, Message: v.Validation.Message,
+			}
 		}
 		if len(v.Choices) > 0 {
 			// Choice order is the backing data source's own, and drives how the

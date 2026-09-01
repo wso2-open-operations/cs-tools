@@ -3284,6 +3284,68 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents/{id}/specialist-handoffs:
+    post:
+      summary: >-
+        Hand an incident off to its specialist group (ServiceNow data source only). One
+        atomic call: moves the incident to the specialist group for its business service,
+        clears the assignee, opens a runbook-gap task, and (by default) files an internal
+        issue for the receiving team. Not routed through any case-escalation path -- this is
+        a distinct contract sharing no vocabulary with it.
+      operationId: handOffIncidentToSpecialist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandOffIncidentToSpecialistRequest'
+      responses:
+        "200":
+          description: Specialist handoff result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandOffIncidentToSpecialistResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            Incident not eligible for a specialist handoff (wrong business service, not in
+            progress, or already with the specialist group for this service).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents:
     post:
       summary: Create a new incident (ServiceNow data source only).
@@ -3383,6 +3445,324 @@ paths:
                 $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /outages:
+    post:
+      summary: Create a new outage (ServiceNow data source only).
+      operationId: createOutage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOutageRequest'
+      responses:
+        "201":
+          description: Outage created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOutageResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Referenced resource not found (e.g. configuration item or incident).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Public-publication acknowledgement was required but not supplied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /outages/search:
+    post:
+      summary: Search outages (ServiceNow data source only).
+      operationId: searchOutages
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchOutagesRequest'
+      responses:
+        "200":
+          description: Paginated list of outages matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchOutagesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /outages/metadata:
+    get:
+      summary: >-
+        Live choice lists (types, statuses, communication channels, and
+        monitored status-page clouds) for rendering an outage create/edit form
+        (ServiceNow data source only).
+      operationId: getOutageMetadata
+      responses:
+        "200":
+          description: Outage metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutageMetadataResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /outages/{id}:
+    get:
+      summary: Get the full detail of a single outage by id (ServiceNow data source only).
+      operationId: getOutage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Outage detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutageDetail'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Outage not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: >-
+        Partially update an outage (ServiceNow data source only). Closing an
+        outage is done by setting `end`; there is no separate state field or
+        close verb. Passing `end: null` reopens the outage.
+      operationId: patchOutage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchOutageRequest'
+      responses:
+        "200":
+          description: Outage updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchOutageResponse'
+        "400":
+          description: Bad request, or no updatable field supplied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Outage, configuration item, or incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Public-publication acknowledgement was required but not supplied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: The resulting date range is invalid (end before begin).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /outages/{id}/communications:
+    post:
+      summary: >-
+        Append a communication journal entry to an outage (ServiceNow data
+        source only). An external entry is a publishing action: the public
+        status page returns it verbatim when the outage's configuration item
+        publishes.
+      operationId: addOutageCommunication
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddOutageCommunicationRequest'
+      responses:
+        "201":
+          description: Communication added successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddOutageCommunicationResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Outage not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Public-publication acknowledgement was required but not supplied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /outages/{id}/communications/search:
+    post:
+      summary: Search an outage's communication journal entries (ServiceNow data source only).
+      operationId: searchOutageCommunications
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchOutageCommunicationsRequest'
+      responses:
+        "200":
+          description: Paginated list of communications matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchOutageCommunicationsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Outage not found.
           content:
             application/json:
               schema:
@@ -7120,6 +7500,83 @@ components:
             approvedOn:
               type: string
               nullable: true
+            legalNextStates:
+              type: array
+              items:
+                type: string
+            implementationPlan:
+              type: string
+              nullable: true
+            priority:
+              type: string
+              enum: [critical, high, moderate, low]
+              nullable: true
+            category:
+              type: string
+              enum: [hardware, software, service, system_software, applications_software,
+                     network, telecom, documentation, other, regular_release_cloud,
+                     hotfix_release_cloud, devops, cloud_computing]
+              nullable: true
+            requestedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            affectedServicesText:
+              type: string
+              nullable: true
+            affectedComponentsText:
+              type: string
+              nullable: true
+            rollbackDurationText:
+              type: string
+              nullable: true
+              description: Raw, unvalidated free text (e.g. "10 mins").
+            environments:
+              type: array
+              items:
+                $ref: '#/components/schemas/EntityRef'
+            deploymentProducts:
+              type: array
+              items:
+                $ref: '#/components/schemas/EntityRef'
+            customerGroup:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            changeRequestType:
+              type: string
+              nullable: true
+              description: Read-through only; no write path is exposed for this field.
+            likelihood:
+              type: string
+              nullable: true
+              description: Read-through only; no write path is exposed for this field.
+            isPlanningVisibleToCustomers:
+              type: boolean
+            confirmCustomerUpdatedDate:
+              type: string
+              nullable: true
+            customerUpdatedOn:
+              type: string
+              nullable: true
+            labels:
+              type: array
+              items:
+                type: string
+            deployments:
+              type: array
+              items:
+                $ref: '#/components/schemas/EntityRef'
+            workStart:
+              type: string
+              nullable: true
+              description: System-maintained, read-only.
+            workEnd:
+              type: string
+              nullable: true
+              description: System-maintained, read-only.
+            gitReference:
+              type: string
+              nullable: true
+              description: System-maintained, read-only.
 
     ChangeRequestApprover:
       type: object
@@ -7482,6 +7939,53 @@ components:
             Selectable options for a choice-based variable, in the backing data
             source's own order. Absent for free-text variable types, which are the
             majority.
+        name:
+          type: string
+          nullable: true
+          description: The key this variable writes into the case's variable data.
+        mandatory:
+          type: boolean
+          description: >-
+            Whether the backing data source marks this variable mandatory. Not
+            enforced on case create -- a caller intending to require it must check
+            this client-side.
+        active:
+          type: boolean
+          description: Whether the variable is active on the catalog item.
+        readOnly:
+          type: boolean
+          description: Whether the variable is read-only on the form.
+        hidden:
+          type: boolean
+          description: Whether the variable is hidden on the form.
+        defaultValue:
+          type: string
+          nullable: true
+        maxLength:
+          type: integer
+          nullable: true
+          description: Declared maximum length for a text-type variable, or null if undeclared.
+        referenceTable:
+          type: string
+          nullable: true
+          description: Backing table name, for a reference-type variable.
+        validation:
+          allOf:
+            - $ref: '#/components/schemas/CatalogVariableValidation'
+          nullable: true
+          description: A named validation rule the backing data source declares for this variable's value.
+
+    CatalogVariableValidation:
+      type: object
+      description: A named validation rule the backing data source declares for a catalog item variable's value.
+      required: [name, regex, message]
+      properties:
+        name:
+          type: string
+        regex:
+          type: string
+        message:
+          type: string
 
     CatalogVariableChoice:
       type: object
@@ -7615,6 +8119,32 @@ components:
           type: string
         workNote:
           type: string
+        affectedServicesText:
+          type: string
+        affectedComponentsText:
+          type: string
+        rollbackDurationText:
+          type: string
+          description: Raw, unvalidated free text (e.g. "2 hours").
+        customerGroupId:
+          type: string
+          format: uuid
+        environmentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        deploymentProductIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        durationInput:
+          type: integer
+          description: >-
+            Calendar duration in whole seconds. Accepted only when it exactly
+            matches the effective planned window (plannedStartDate to
+            plannedEndDate in this same request).
 
     CreateChangeRequestResponse:
       type: object
@@ -7716,6 +8246,72 @@ components:
           type: boolean
         isCustomerReviewed:
           type: boolean
+        requestApproval:
+          type: boolean
+        implementationPlan:
+          type: string
+          nullable: true
+          description: Explicit null clears the field.
+        priority:
+          type: string
+          nullable: true
+          enum: [critical, high, moderate, low]
+          description: Explicit null clears the field.
+        category:
+          type: string
+          nullable: true
+          enum: [hardware, software, service, system_software, applications_software,
+                 network, telecom, documentation, other, regular_release_cloud,
+                 hotfix_release_cloud, devops, cloud_computing]
+          description: Explicit null clears the field.
+        requestedById:
+          type: string
+          format: uuid
+          nullable: true
+          description: Explicit null clears the field.
+        affectedServicesText:
+          type: string
+          nullable: true
+          description: Explicit null clears the field.
+        affectedComponentsText:
+          type: string
+          nullable: true
+          description: Explicit null clears the field.
+        rollbackDurationText:
+          type: string
+          nullable: true
+          description: Raw, unvalidated free text. Explicit null clears the field.
+        customerGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Explicit null clears the field.
+        environmentIds:
+          type: array
+          nullable: true
+          items:
+            type: string
+            format: uuid
+          description: Replaces the whole list; an explicitly empty array clears it.
+        deploymentProductIds:
+          type: array
+          nullable: true
+          items:
+            type: string
+            format: uuid
+          description: Replaces the whole list; an explicitly empty array clears it.
+        comment:
+          type: string
+          description: Appends a journal entry. Cannot be empty and cannot clear anything.
+        workNote:
+          type: string
+          description: Appends a journal entry. Cannot be empty and cannot clear anything.
+        durationInput:
+          type: integer
+          nullable: true
+          description: >-
+            Calendar duration in whole seconds. Accepted only when it exactly
+            matches the effective planned window. Explicit null clears the field.
 
     PatchChangeRequestResponse:
       type: object
@@ -9759,6 +10355,166 @@ components:
           type: string
           nullable: true
           description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        specialistHandoff:
+          allOf:
+            - $ref: '#/components/schemas/IncidentSpecialistHandoffSummary'
+          nullable: true
+          description: >-
+            Derived summary of a specialist-group handoff, null when the incident has never
+            been handed off. Nothing is persisted for it: it is recomputed at read time, so a
+            handoff performed through the backing data source's own native UI reads
+            identically to one performed through HandOffIncidentToSpecialist.
+
+    IncidentSpecialistHandoffTask:
+      type: object
+      description: The runbook-gap task opened for the specialist team as part of a handoff.
+      required: [id, number, subject]
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        subject:
+          type: string
+
+    IncidentSpecialistHandoffGithubIssue:
+      type: object
+      description: >-
+        The internal issue filed for the receiving specialist team, present only when
+        creation was requested and succeeded.
+      required: [url, number, repo]
+      properties:
+        url:
+          type: string
+        number:
+          type: integer
+        repo:
+          type: string
+
+    IncidentSpecialistHandoffSummaryTask:
+      type: object
+      required: [number, subject]
+      properties:
+        number:
+          type: string
+        subject:
+          type: string
+        state:
+          type: string
+          nullable: true
+        stateLabel:
+          type: string
+          nullable: true
+
+    IncidentSpecialistHandoffSummary:
+      type: object
+      description: >-
+        Derived summary of a specialist handoff, surfaced on the incident detail response.
+        Nothing is persisted for it -- it is recomputed at read time from the incident's own
+        journal, assignment group, and linked runbook task.
+      required:
+        - reasonCode
+        - reasonDescription
+        - escalationTeam
+        - handedOffAt
+        - handedOffBy
+        - assignmentGroup
+        - task
+        - githubIssueUrl
+      properties:
+        reasonCode:
+          type: string
+          enum: [no-runbook, runbook-not-working]
+        reasonDescription:
+          type: string
+        escalationTeam:
+          type: string
+          nullable: true
+          enum: [choreo-runtime-team, choreo-apim-team]
+        handedOffAt:
+          type: string
+        handedOffBy:
+          type: string
+          nullable: true
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+        task:
+          $ref: '#/components/schemas/IncidentSpecialistHandoffSummaryTask'
+        githubIssueUrl:
+          type: string
+          nullable: true
+
+    HandOffIncidentToSpecialistRequest:
+      type: object
+      description: >-
+        Hands an incident off to its specialist group in one atomic call: moves the incident
+        to the specialist group for its business service, clears the assignee, opens a
+        runbook-gap task, and (by default) files an internal issue for the receiving team.
+      required: [reasonCode]
+      properties:
+        reasonCode:
+          type: string
+          enum: [no-runbook, runbook-not-working]
+        escalationTeam:
+          type: string
+          description: Only meaningful for a Choreo-routed handoff.
+          enum: [choreo-runtime-team, choreo-apim-team]
+        createGithubIssue:
+          type: boolean
+          default: true
+          description: >-
+            Whether to also file an internal issue for the receiving team. Set false to
+            suppress it, e.g. on a re-handoff or when one already exists.
+
+    HandOffIncidentToSpecialistResponse:
+      type: object
+      required: [message, handoff]
+      properties:
+        message:
+          type: string
+        handoff:
+          type: object
+          required:
+            - assignmentGroup
+            - previousAssignmentGroup
+            - reasonCode
+            - reasonDescription
+            - escalationTeam
+            - task
+            - githubIssue
+            - githubIssueError
+            - incident
+          properties:
+            assignmentGroup:
+              $ref: '#/components/schemas/EntityRef'
+            previousAssignmentGroup:
+              allOf:
+                - $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            reasonCode:
+              type: string
+              enum: [no-runbook, runbook-not-working]
+            reasonDescription:
+              type: string
+            escalationTeam:
+              type: string
+              nullable: true
+              enum: [choreo-runtime-team, choreo-apim-team]
+            task:
+              $ref: '#/components/schemas/IncidentSpecialistHandoffTask'
+            githubIssue:
+              allOf:
+                - $ref: '#/components/schemas/IncidentSpecialistHandoffGithubIssue'
+              nullable: true
+            githubIssueError:
+              type: string
+              nullable: true
+              description: >-
+                Why the internal issue could not be created, if creation was requested but
+                failed. The handoff itself still succeeds -- callers must surface this rather
+                than report a clean success when it is non-null.
+            incident:
+              $ref: '#/components/schemas/IncidentView'
 
     UpdateIncidentRequest:
       type: object
@@ -10432,3 +11188,354 @@ components:
           type: integer
         limit:
           type: integer
+
+    OutageConfigurationItemRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        className:
+          type: string
+
+    OutageIncidentRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        shortDescription:
+          type: string
+        state:
+          type: string
+          nullable: true
+
+    Outage:
+      type: object
+      description: >-
+        publishesToStatusPage/statusPageCloud are computed by the backing data
+        source, never stored, and are the only signal that an outage is
+        publicly visible on the status page.
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        type:
+          type: string
+          enum: [outage, degradation, planned]
+          nullable: true
+        status:
+          type: string
+          enum: [in_progress, resolved]
+          nullable: true
+          description: Derived from whether the outage has an end time; never stored or accepted as input.
+        begin:
+          type: string
+        end:
+          type: string
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        shortDescription:
+          type: string
+        configurationItem:
+          $ref: '#/components/schemas/OutageConfigurationItemRef'
+          nullable: true
+        incident:
+          $ref: '#/components/schemas/OutageIncidentRef'
+          nullable: true
+        affectedConfigurationItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutageConfigurationItemRef'
+        publishesToStatusPage:
+          type: boolean
+        statusPageCloud:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+        updatedBy:
+          type: string
+
+    OutageCommunicationCounts:
+      type: object
+      properties:
+        external:
+          type: integer
+        internal:
+          type: integer
+        additional:
+          type: integer
+
+    OutageDetail:
+      allOf:
+        - $ref: '#/components/schemas/Outage'
+        - type: object
+          properties:
+            communicationCounts:
+              $ref: '#/components/schemas/OutageCommunicationCounts'
+
+    CreateOutageRequest:
+      type: object
+      required: [type, begin, shortDescription]
+      properties:
+        type:
+          type: string
+          enum: [outage, degradation, planned]
+        begin:
+          type: string
+          description: UTC datetime, "YYYY-MM-DD HH:mm:ss" (ISO-8601 also accepted).
+        end:
+          type: string
+          nullable: true
+          description: Omit for an open outage.
+        shortDescription:
+          type: string
+          maxLength: 160
+        configurationItemId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Must resolve to a service_offering-class configuration item. This is the publish switch.
+        incidentId:
+          type: string
+          format: uuid
+          nullable: true
+        externalCommunication:
+          type: string
+          nullable: true
+          description: Seeds the public communication journal.
+        internalCommunication:
+          type: string
+          nullable: true
+        acknowledgePublicPublication:
+          type: boolean
+          nullable: true
+          description: Required when configurationItemId resolves to a monitored status-page cloud.
+
+    CreateOutageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        outage:
+          $ref: '#/components/schemas/Outage'
+
+    PatchOutageRequest:
+      type: object
+      description: At least one field must be provided.
+      properties:
+        type:
+          type: string
+          enum: [outage, degradation, planned]
+        begin:
+          type: string
+        end:
+          type: string
+          nullable: true
+          description: Explicit null reopens the outage; omit to leave it unchanged.
+        shortDescription:
+          type: string
+        configurationItemId:
+          type: string
+          format: uuid
+        incidentId:
+          type: string
+          format: uuid
+        acknowledgePublicPublication:
+          type: boolean
+
+    PatchOutageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        outage:
+          $ref: '#/components/schemas/Outage'
+
+    SearchOutagesFilters:
+      type: object
+      properties:
+        types:
+          type: array
+          items:
+            type: string
+            enum: [outage, degradation, planned]
+        statuses:
+          type: array
+          items:
+            type: string
+            enum: [in_progress, resolved]
+        configurationItemIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        incidentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        beginFrom:
+          type: string
+          nullable: true
+          description: Defaults to six months back when omitted; the response reports the bound actually applied.
+        beginTo:
+          type: string
+          nullable: true
+        publishedOnly:
+          type: boolean
+          nullable: true
+        searchTerm:
+          type: string
+
+    OutageSort:
+      type: object
+      properties:
+        field:
+          type: string
+          enum: [begin, end, number, createdOn, updatedOn]
+        order:
+          type: string
+          enum: [asc, desc]
+
+    SearchOutagesRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchOutagesFilters'
+        sortBy:
+          $ref: '#/components/schemas/OutageSort'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchOutagesResponse:
+      type: object
+      properties:
+        outages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Outage'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        appliedBeginFrom:
+          type: string
+        beginFromDefaulted:
+          type: boolean
+
+    OutageCommunication:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [external, internal, additional]
+        body:
+          type: string
+        isPublic:
+          type: boolean
+          description: True only for the external channel.
+        createdOn:
+          type: string
+        createdBy:
+          type: string
+
+    AddOutageCommunicationRequest:
+      type: object
+      required: [channel, body]
+      properties:
+        channel:
+          type: string
+          enum: [external, internal, additional]
+        body:
+          type: string
+
+    AddOutageCommunicationResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        communication:
+          $ref: '#/components/schemas/OutageCommunication'
+
+    SearchOutageCommunicationsRequest:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            type: string
+            enum: [external, internal, additional]
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchOutageCommunicationsResponse:
+      type: object
+      properties:
+        communications:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutageCommunication'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    OutageChoice:
+      type: object
+      properties:
+        value:
+          type: string
+        label:
+          type: string
+
+    OutageCommunicationChannelMeta:
+      type: object
+      properties:
+        value:
+          type: string
+          enum: [external, internal, additional]
+        label:
+          type: string
+        isPublic:
+          type: boolean
+
+    OutageMetadataResponse:
+      type: object
+      properties:
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutageChoice'
+        statuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutageChoice'
+        communicationChannels:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutageCommunicationChannelMeta'
+        statusPageClouds:
+          type: array
+          items:
+            type: string

@@ -2414,6 +2414,24 @@ type CreateChangeRequestRequest struct {
 	PlannedEndDate      *string                `json:"plannedEndDate,omitempty"`
 	Comment             *string                `json:"comment,omitempty"`
 	WorkNote            *string                `json:"workNote,omitempty"`
+	// AffectedServicesText, AffectedComponentsText, RollbackDurationText,
+	// CustomerGroupID, EnvironmentIDs, DeploymentProductIDs, and DurationInput
+	// are field-parity additions -- see PatchChangeRequestRequest for the
+	// shared documentation of each. On create there is no prior value to
+	// clear, so none of them need tri-state handling here.
+	AffectedServicesText   *string  `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText *string  `json:"affectedComponentsText,omitempty"`
+	RollbackDurationText   *string  `json:"rollbackDurationText,omitempty"`
+	CustomerGroupID        *string  `json:"customerGroupId,omitempty"`
+	EnvironmentIDs         []string `json:"environmentIds,omitempty"`
+	DeploymentProductIDs   []string `json:"deploymentProductIds,omitempty"`
+	// DurationInput is the calendar duration in whole seconds. It is accepted
+	// only when it exactly matches the effective planned window (PlannedStartDate
+	// to PlannedEndDate, in this same request): the backing data source derives
+	// calendar_duration nowhere else, and a divergent value would silently
+	// disagree with the planned window on a column a customer-facing calendar
+	// view reads.
+	DurationInput *int `json:"durationInput,omitempty"`
 }
 
 // CreateChangeRequestResponse is the output for POST /change-requests.
@@ -2581,6 +2599,37 @@ type CatalogItemVariable struct {
 	// and carry none, so the field is omitted entirely rather than emitted as
 	// an empty list on every variable.
 	Choices []CatalogVariableChoice `json:"choices,omitempty"`
+	// Name is the key this variable writes into the case's variable data.
+	Name *string `json:"name"`
+	// Mandatory reports whether the backing data source marks this variable
+	// mandatory. Not enforced on case create -- a caller intending to require it
+	// must check this client-side.
+	Mandatory bool `json:"mandatory"`
+	// Active reports whether the variable is active on the catalog item.
+	Active bool `json:"active"`
+	// ReadOnly reports whether the variable is read-only on the form.
+	ReadOnly bool `json:"readOnly"`
+	// Hidden reports whether the variable is hidden on the form.
+	Hidden bool `json:"hidden"`
+	// DefaultValue is the variable's declared default, or nil if it has none.
+	DefaultValue *string `json:"defaultValue"`
+	// MaxLength is the declared maximum length for a text-type variable, or nil
+	// if undeclared.
+	MaxLength *int `json:"maxLength"`
+	// ReferenceTable is the backing table name for a reference-type variable, or
+	// nil for any other type.
+	ReferenceTable *string `json:"referenceTable"`
+	// Validation is the named validation rule the backing data source declares
+	// for this variable's value, or nil if it declares none.
+	Validation *CatalogVariableValidation `json:"validation"`
+}
+
+// CatalogVariableValidation is a named validation rule the backing data source declares for a
+// catalog item variable's value.
+type CatalogVariableValidation struct {
+	Name    string `json:"name"`
+	Regex   string `json:"regex"`
+	Message string `json:"message"`
 }
 
 // CatalogVariableChoice is one selectable option on a choice-based catalog item
@@ -2702,6 +2751,39 @@ type PatchChangeRequestRequest struct {
 	IsCustomerApproved *bool                `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool                `json:"isCustomerReviewed,omitempty"`
 	RequestApproval    *bool                `json:"requestApproval,omitempty"`
+
+	// The fields below are the change-request field-parity additions. Except
+	// Comment and WorkNote (journal entries, append-only, cannot be cleared),
+	// every one of them uses a pointer-to-pointer to distinguish three states:
+	//   - nil outer pointer: field omitted -- leave the value unchanged
+	//   - non-nil outer, nil inner: explicit null -- clear the value
+	//   - non-nil outer, non-nil inner: set the value
+	// EnvironmentIDs/DeploymentProductIDs use a single pointer instead: nil
+	// means omitted, and any non-nil slice (including an explicitly empty one)
+	// replaces the whole list -- the same convention CreateIncidentRequest's
+	// WatchList already uses, since an array field has no separate "null" state
+	// worth distinguishing from "empty".
+	ImplementationPlan     **string                `json:"implementationPlan"`
+	Priority               **ChangeRequestPriority `json:"priority"`
+	Category               **ChangeRequestCategory `json:"category"`
+	RequestedByID          **string                `json:"requestedById"`
+	AffectedServicesText   **string                `json:"affectedServicesText"`
+	AffectedComponentsText **string                `json:"affectedComponentsText"`
+	// RollbackDurationText is a raw, unvalidated string (e.g. "2 hours");
+	// parsing or normalizing it is a decision for the layer above, not this one.
+	RollbackDurationText **string  `json:"rollbackDurationText"`
+	CustomerGroupID      **string  `json:"customerGroupId"`
+	EnvironmentIDs       *[]string `json:"environmentIds"`
+	DeploymentProductIDs *[]string `json:"deploymentProductIds"`
+	// Comment and WorkNote append a new journal entry; they reject an empty or
+	// whitespace-only value, and neither can be used to clear anything.
+	Comment  *string `json:"comment,omitempty"`
+	WorkNote *string `json:"workNote,omitempty"`
+	// DurationInput is the calendar duration in whole seconds. It is accepted
+	// only when it exactly matches the effective planned window: PlannedStartOn
+	// if provided in this same request, else the change request's stored start,
+	// and likewise for the end. See CreateChangeRequestRequest.DurationInput.
+	DurationInput **int `json:"durationInput"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
@@ -2880,6 +2962,43 @@ type ChangeRequest struct {
 	ApprovedBy          *EntityRef `json:"approvedBy"`
 	ApprovedOn          *string    `json:"approvedOn"`
 	LegalNextStates     []string   `json:"legalNextStates"`
+
+	// The fields below are change-request field-parity additions. All 20 are
+	// present on GET /change-requests/{id} and the PATCH receipt (both share
+	// the same mapper); none are on the search response, which was
+	// deliberately left untouched.
+
+	// Group B -- the create path already writes these; this is the first time
+	// they are read back.
+	ImplementationPlan *string    `json:"implementationPlan"`
+	Priority           *string    `json:"priority"`
+	Category           *string    `json:"category"`
+	RequestedBy        *EntityRef `json:"requestedBy"`
+
+	// Group C1 -- real content the shared API did not surface before.
+	AffectedServicesText   *string     `json:"affectedServicesText"`
+	AffectedComponentsText *string     `json:"affectedComponentsText"`
+	RollbackDurationText   *string     `json:"rollbackDurationText"`
+	Environments           []EntityRef `json:"environments"`
+	DeploymentProducts     []EntityRef `json:"deploymentProducts"`
+	CustomerGroup          *EntityRef  `json:"customerGroup"`
+
+	// Group C2 -- carried for parity, read-through only; no write path is
+	// exposed for any of these seven.
+	// ChangeRequestType is named to avoid colliding with the ChangeRequestType
+	// enum type; it is a distinct, unvalidated choice-list value.
+	ChangeRequestType            *string     `json:"changeRequestType"`
+	Likelihood                   *string     `json:"likelihood"`
+	IsPlanningVisibleToCustomers bool        `json:"isPlanningVisibleToCustomers"`
+	ConfirmCustomerUpdatedDate   *string     `json:"confirmCustomerUpdatedDate"`
+	CustomerUpdatedOn            *string     `json:"customerUpdatedOn"`
+	Labels                       []string    `json:"labels"`
+	Deployments                  []EntityRef `json:"deployments"`
+
+	// Group D -- system-maintained, read-only in the dictionary.
+	WorkStart    *string `json:"workStart"`
+	WorkEnd      *string `json:"workEnd"`
+	GitReference *string `json:"gitReference"`
 }
 
 // ChangeRequestApproverType is a string enum for the kind of approver assigned to an
@@ -3936,6 +4055,110 @@ type IncidentView struct {
 	ResolvedBy      *string `json:"resolvedBy"`
 	ResolvedOn      *string `json:"resolvedOn"`
 	IncidentReport  *string `json:"incidentReport"`
+	// SpecialistHandoff is the derived summary of a specialist-group handoff, null when the
+	// incident has never been handed off. Nothing is persisted for it: the backing data
+	// source recomputes it at read time, so a handoff performed through its own native UI
+	// reads identically to one performed through HandOffIncidentToSpecialist.
+	SpecialistHandoff *IncidentSpecialistHandoffSummary `json:"specialistHandoff"`
+}
+
+// IncidentSpecialistHandoffReasonCode is why an incident could not be resolved through the
+// runbook, supplied on a specialist handoff request.
+type IncidentSpecialistHandoffReasonCode string
+
+const (
+	IncidentSpecialistHandoffReasonNoRunbook         IncidentSpecialistHandoffReasonCode = "no-runbook"
+	IncidentSpecialistHandoffReasonRunbookNotWorking IncidentSpecialistHandoffReasonCode = "runbook-not-working"
+)
+
+// IncidentSpecialistHandoffEscalationTeam is a specialist sub-team; only meaningful when the
+// incident routes to the specialist group family that has sub-teams, ignored otherwise.
+type IncidentSpecialistHandoffEscalationTeam string
+
+const (
+	IncidentSpecialistHandoffTeamChoreoRuntime IncidentSpecialistHandoffEscalationTeam = "choreo-runtime-team"
+	IncidentSpecialistHandoffTeamChoreoAPIM    IncidentSpecialistHandoffEscalationTeam = "choreo-apim-team"
+)
+
+// HandOffIncidentToSpecialistRequest is the input for
+// POST /incidents/{id}/specialist-handoffs: hands the incident off to its specialist group in
+// one atomic call -- moves the incident to the specialist group for its business service,
+// clears the assignee, opens a runbook-gap task, and (by default) files an internal issue for
+// the receiving team.
+type HandOffIncidentToSpecialistRequest struct {
+	IncidentID string `json:"-"`
+	// ReasonCode is required: why the incident could not be resolved through the runbook.
+	ReasonCode IncidentSpecialistHandoffReasonCode `json:"reasonCode"`
+	// EscalationTeam is optional and only meaningful for a Choreo-routed handoff.
+	EscalationTeam *IncidentSpecialistHandoffEscalationTeam `json:"escalationTeam,omitempty"`
+	// CreateGithubIssue defaults to true upstream when omitted; set false to suppress the
+	// internal issue, e.g. on a re-handoff or when one already exists.
+	CreateGithubIssue *bool `json:"createGithubIssue,omitempty"`
+}
+
+// IncidentSpecialistHandoffTask is the runbook-gap task opened for the specialist team as
+// part of a handoff.
+type IncidentSpecialistHandoffTask struct {
+	ID      string `json:"id"`
+	Number  string `json:"number"`
+	Subject string `json:"subject"`
+}
+
+// IncidentSpecialistHandoffGithubIssue is the internal issue filed for the receiving
+// specialist team, present only when creation was requested and succeeded.
+type IncidentSpecialistHandoffGithubIssue struct {
+	URL    string `json:"url"`
+	Number int    `json:"number"`
+	Repo   string `json:"repo"`
+}
+
+// IncidentSpecialistHandoffResult is the "handoff" object within
+// HandOffIncidentToSpecialistResponse.
+type IncidentSpecialistHandoffResult struct {
+	AssignmentGroup         EntityRef                                `json:"assignmentGroup"`
+	PreviousAssignmentGroup *EntityRef                               `json:"previousAssignmentGroup"`
+	ReasonCode              IncidentSpecialistHandoffReasonCode      `json:"reasonCode"`
+	ReasonDescription       string                                   `json:"reasonDescription"`
+	EscalationTeam          *IncidentSpecialistHandoffEscalationTeam `json:"escalationTeam"`
+	Task                    IncidentSpecialistHandoffTask            `json:"task"`
+	GithubIssue             *IncidentSpecialistHandoffGithubIssue    `json:"githubIssue"`
+	// GithubIssueError explains why the internal issue could not be created, when creation
+	// was requested but failed. The handoff itself still succeeds -- callers must surface
+	// this rather than report a clean success when it is non-nil.
+	GithubIssueError *string      `json:"githubIssueError"`
+	Incident         IncidentView `json:"incident"`
+}
+
+// HandOffIncidentToSpecialistResponse is the response for
+// POST /incidents/{id}/specialist-handoffs.
+type HandOffIncidentToSpecialistResponse struct {
+	Message string                          `json:"message"`
+	Handoff IncidentSpecialistHandoffResult `json:"handoff"`
+}
+
+// IncidentSpecialistHandoffSummaryTask is the linked runbook-gap task referenced from
+// IncidentSpecialistHandoffSummary.
+type IncidentSpecialistHandoffSummaryTask struct {
+	Number     string  `json:"number"`
+	Subject    string  `json:"subject"`
+	State      *string `json:"state"`
+	StateLabel *string `json:"stateLabel"`
+}
+
+// IncidentSpecialistHandoffSummary is the derived summary of a specialist handoff, surfaced
+// on IncidentView.SpecialistHandoff. Nothing is persisted for it: it is recomputed at read
+// time from the incident's own journal, assignment group, and linked runbook task, so a
+// handoff performed through the backing data source's own native UI reads identically to one
+// performed through HandOffIncidentToSpecialist.
+type IncidentSpecialistHandoffSummary struct {
+	ReasonCode        IncidentSpecialistHandoffReasonCode      `json:"reasonCode"`
+	ReasonDescription string                                   `json:"reasonDescription"`
+	EscalationTeam    *IncidentSpecialistHandoffEscalationTeam `json:"escalationTeam"`
+	HandedOffAt       string                                   `json:"handedOffAt"`
+	HandedOffBy       *string                                  `json:"handedOffBy"`
+	AssignmentGroup   EntityRef                                `json:"assignmentGroup"`
+	Task              IncidentSpecialistHandoffSummaryTask     `json:"task"`
+	GithubIssueURL    *string                                  `json:"githubIssueUrl"`
 }
 
 // ProblemFieldFilter is a single predicate in a problem search's generic
@@ -4297,4 +4520,275 @@ type SearchConversationsResponse struct {
 	Total         int                      `json:"total"`
 	Offset        int                      `json:"offset"`
 	Limit         int                      `json:"limit"`
+}
+
+// ---------------------------------------------------------------------------
+// Outages
+// ---------------------------------------------------------------------------
+
+// OutageType classifies an outage record. The backing data source keeps its
+// list of choices live (configurable independently of this platform), but
+// only these three are documented and supported today; an unrecognized
+// value returned by the backing service is passed through as a plain label
+// rather than mapped to one of these constants.
+type OutageType string
+
+const (
+	OutageTypeOutage      OutageType = "outage"
+	OutageTypeDegradation OutageType = "degradation"
+	OutageTypePlanned     OutageType = "planned"
+)
+
+// OutageStatus is derived by the backing data source from whether an outage
+// has an end time -- it is never stored or accepted as input.
+type OutageStatus string
+
+const (
+	OutageStatusInProgress OutageStatus = "in_progress"
+	OutageStatusResolved   OutageStatus = "resolved"
+)
+
+// OutageCommunicationChannel is the audience for a single outage communication
+// entry. "external" is the only publishing channel: when the outage's
+// configuration item resolves to a monitored cloud, an external communication
+// is echoed verbatim on the public status page.
+type OutageCommunicationChannel string
+
+const (
+	OutageCommunicationChannelExternal   OutageCommunicationChannel = "external"
+	OutageCommunicationChannelInternal   OutageCommunicationChannel = "internal"
+	OutageCommunicationChannelAdditional OutageCommunicationChannel = "additional"
+)
+
+// OutageSortField enumerates the columns available for sorting outage search results.
+type OutageSortField string
+
+const (
+	OutageSortFieldBegin     OutageSortField = "begin"
+	OutageSortFieldEnd       OutageSortField = "end"
+	OutageSortFieldNumber    OutageSortField = "number"
+	OutageSortFieldCreatedOn OutageSortField = "createdOn"
+	OutageSortFieldUpdatedOn OutageSortField = "updatedOn"
+)
+
+// OutageSortOrder controls the sort direction for an outage search.
+type OutageSortOrder string
+
+const (
+	OutageSortOrderAsc  OutageSortOrder = "asc"
+	OutageSortOrderDesc OutageSortOrder = "desc"
+)
+
+// OutageSort specifies the sort field and direction for outage search results.
+type OutageSort struct {
+	Field OutageSortField `json:"field"`
+	Order OutageSortOrder `json:"order"`
+}
+
+// OutageConfigurationItemRef is a compact reference to a configuration item as
+// seen from an outage: it carries ClassName in addition to id/name because the
+// publication-safety logic (see Outage.PublishesToStatusPage) depends on the
+// CI's class, and callers benefit from seeing it without a second lookup.
+type OutageConfigurationItemRef struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ClassName string `json:"className"`
+}
+
+// OutageIncidentRef is a compact reference to the incident an outage is linked to.
+type OutageIncidentRef struct {
+	ID               string  `json:"id"`
+	Number           string  `json:"number"`
+	ShortDescription string  `json:"shortDescription"`
+	State            *string `json:"state"`
+}
+
+// Outage is the full outage representation returned on create, update, and
+// search. PublishesToStatusPage and StatusPageCloud are computed by the
+// backing data source, never stored, and must be surfaced exactly as
+// received -- they are the only signal that an outage is publicly visible.
+type Outage struct {
+	ID                         string                       `json:"id"`
+	Number                     string                       `json:"number"`
+	Type                       *string                      `json:"type"`
+	Status                     *string                      `json:"status"`
+	Begin                      string                       `json:"begin"`
+	End                        *string                      `json:"end"`
+	Duration                   *string                      `json:"duration"`
+	ShortDescription           string                       `json:"shortDescription"`
+	ConfigurationItem          *OutageConfigurationItemRef  `json:"configurationItem"`
+	Incident                   *OutageIncidentRef           `json:"incident"`
+	AffectedConfigurationItems []OutageConfigurationItemRef `json:"affectedConfigurationItems"`
+	PublishesToStatusPage      bool                         `json:"publishesToStatusPage"`
+	StatusPageCloud            *string                      `json:"statusPageCloud"`
+	CreatedOn                  string                       `json:"createdOn"`
+	CreatedBy                  string                       `json:"createdBy"`
+	UpdatedOn                  string                       `json:"updatedOn"`
+	UpdatedBy                  string                       `json:"updatedBy"`
+}
+
+// OutageCommunicationCounts summarizes the number of communication entries on
+// an outage per channel. Only present on the single-outage detail view.
+type OutageCommunicationCounts struct {
+	External   int `json:"external"`
+	Internal   int `json:"internal"`
+	Additional int `json:"additional"`
+}
+
+// OutageDetail is the response for GET /outages/{id}: the full outage shape
+// plus per-channel communication counts.
+type OutageDetail struct {
+	Outage
+	CommunicationCounts OutageCommunicationCounts `json:"communicationCounts"`
+}
+
+// CreateOutageRequest is the input for POST /outages. Type, Begin, and
+// ShortDescription are required. AcknowledgePublicPublication is required
+// only when ConfigurationItemID resolves to a monitored cloud; the backing
+// data source enforces that, not this layer.
+type CreateOutageRequest struct {
+	Type                         OutageType `json:"type"`
+	Begin                        string     `json:"begin"`
+	End                          *string    `json:"end,omitempty"`
+	ShortDescription             string     `json:"shortDescription"`
+	ConfigurationItemID          *string    `json:"configurationItemId,omitempty"`
+	IncidentID                   *string    `json:"incidentId,omitempty"`
+	ExternalCommunication        *string    `json:"externalCommunication,omitempty"`
+	InternalCommunication        *string    `json:"internalCommunication,omitempty"`
+	AcknowledgePublicPublication *bool      `json:"acknowledgePublicPublication,omitempty"`
+}
+
+// CreateOutageResponse is the response for POST /outages.
+type CreateOutageResponse struct {
+	Message string `json:"message"`
+	Outage  Outage `json:"outage"`
+}
+
+// PatchOutageRequest is the input for PATCH /outages/{id}. At least one field
+// must be provided. End uses a pointer-to-pointer to distinguish three states:
+//   - nil outer pointer: field omitted -- leave end unchanged
+//   - non-nil outer, nil inner (*End == nil): explicit null -- reopen the outage
+//   - non-nil outer, non-nil inner: close (or move) the end time
+//
+// Closing an outage is done by setting End; there is no separate state field
+// or close verb.
+type PatchOutageRequest struct {
+	ID                           string      `json:"-"`
+	Type                         *OutageType `json:"type,omitempty"`
+	Begin                        *string     `json:"begin,omitempty"`
+	End                          **string    `json:"end"`
+	ShortDescription             *string     `json:"shortDescription,omitempty"`
+	ConfigurationItemID          *string     `json:"configurationItemId,omitempty"`
+	IncidentID                   *string     `json:"incidentId,omitempty"`
+	AcknowledgePublicPublication *bool       `json:"acknowledgePublicPublication,omitempty"`
+}
+
+// PatchOutageResponse is the response for PATCH /outages/{id}.
+type PatchOutageResponse struct {
+	Message string `json:"message"`
+	Outage  Outage `json:"outage"`
+}
+
+// SearchOutagesFilters holds the optional filter criteria for an outage search.
+type SearchOutagesFilters struct {
+	Types                []OutageType   `json:"types,omitempty"`
+	Statuses             []OutageStatus `json:"statuses,omitempty"`
+	ConfigurationItemIDs []string       `json:"configurationItemIds,omitempty"`
+	IncidentIDs          []string       `json:"incidentIds,omitempty"`
+	// BeginFrom/BeginTo bound the search window. When BeginFrom is omitted, the
+	// backing data source defaults it to six months back and reports the
+	// applied bound on SearchOutagesResponse -- the table is otherwise
+	// dominated by a historical bulk load.
+	BeginFrom     *string `json:"beginFrom,omitempty"`
+	BeginTo       *string `json:"beginTo,omitempty"`
+	PublishedOnly *bool   `json:"publishedOnly,omitempty"`
+	SearchTerm    string  `json:"searchTerm,omitempty"`
+}
+
+// SearchOutagesRequest is the input for POST /outages/search.
+type SearchOutagesRequest struct {
+	Filters    SearchOutagesFilters `json:"filters"`
+	SortBy     OutageSort           `json:"sortBy"`
+	Pagination Pagination           `json:"pagination"`
+}
+
+// SearchOutagesResponse is the paginated result of an outage search.
+// AppliedBeginFrom and BeginFromDefaulted report what begin-date bound was
+// actually used, so a caller never has to guess whether an implicit default
+// was applied.
+type SearchOutagesResponse struct {
+	Outages            []Outage `json:"outages"`
+	Total              int      `json:"total"`
+	Limit              int      `json:"limit"`
+	Offset             int      `json:"offset"`
+	AppliedBeginFrom   string   `json:"appliedBeginFrom"`
+	BeginFromDefaulted bool     `json:"beginFromDefaulted"`
+}
+
+// AddOutageCommunicationRequest is the input for POST /outages/{id}/communications.
+type AddOutageCommunicationRequest struct {
+	OutageID string                     `json:"-"`
+	Channel  OutageCommunicationChannel `json:"channel"`
+	Body     string                     `json:"body"`
+}
+
+// OutageCommunication is a single communication journal entry on an outage.
+// IsPublic is true only for the external channel, whose entries are echoed
+// verbatim on the public status page when the outage publishes.
+type OutageCommunication struct {
+	ID        string                     `json:"id"`
+	Channel   OutageCommunicationChannel `json:"channel"`
+	Body      string                     `json:"body"`
+	IsPublic  bool                       `json:"isPublic"`
+	CreatedOn string                     `json:"createdOn"`
+	CreatedBy string                     `json:"createdBy"`
+}
+
+// AddOutageCommunicationResponse is the response for POST /outages/{id}/communications.
+type AddOutageCommunicationResponse struct {
+	Message       string              `json:"message"`
+	Communication OutageCommunication `json:"communication"`
+}
+
+// SearchOutageCommunicationsRequest is the input for POST /outages/{id}/communications/search.
+type SearchOutageCommunicationsRequest struct {
+	OutageID   string                       `json:"-"`
+	Channels   []OutageCommunicationChannel `json:"channels,omitempty"`
+	Pagination Pagination                   `json:"pagination"`
+}
+
+// SearchOutageCommunicationsResponse is the paginated result of an outage
+// communication search.
+type SearchOutageCommunicationsResponse struct {
+	Communications []OutageCommunication `json:"communications"`
+	Total          int                   `json:"total"`
+	Limit          int                   `json:"limit"`
+	Offset         int                   `json:"offset"`
+}
+
+// OutageChoice is a single selectable value in outage metadata, e.g. a type or
+// status choice.
+type OutageChoice struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// OutageCommunicationChannelMeta describes one communication channel and
+// whether entries written to it are publicly visible. Value carries the same
+// wire value as OutageCommunicationChannel (external/internal/additional).
+type OutageCommunicationChannelMeta struct {
+	Value    string `json:"value"`
+	Label    string `json:"label"`
+	IsPublic bool   `json:"isPublic"`
+}
+
+// OutageMetadataResponse is the response for GET /outages/metadata: the live
+// choice lists a caller needs to render an outage create/edit form, including
+// the monitored-cloud list so the caller can warn about public visibility
+// before a save rather than after a 409.
+type OutageMetadataResponse struct {
+	Types                 []OutageChoice                   `json:"types"`
+	Statuses              []OutageChoice                   `json:"statuses"`
+	CommunicationChannels []OutageCommunicationChannelMeta `json:"communicationChannels"`
+	StatusPageClouds      []string                         `json:"statusPageClouds"`
 }

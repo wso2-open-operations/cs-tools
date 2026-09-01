@@ -177,6 +177,16 @@ var snIncidentCategoryLabelMap = map[string]string{
 	"security":             "SECURITY",
 }
 
+var validIncidentSpecialistHandoffReasonCode = map[domain.IncidentSpecialistHandoffReasonCode]bool{
+	domain.IncidentSpecialistHandoffReasonNoRunbook:         true,
+	domain.IncidentSpecialistHandoffReasonRunbookNotWorking: true,
+}
+
+var validIncidentSpecialistHandoffEscalationTeam = map[domain.IncidentSpecialistHandoffEscalationTeam]bool{
+	domain.IncidentSpecialistHandoffTeamChoreoRuntime: true,
+	domain.IncidentSpecialistHandoffTeamChoreoAPIM:    true,
+}
+
 var validIncidentSortField = map[domain.IncidentSortField]bool{
 	domain.IncidentSortFieldCreatedOn: true,
 	domain.IncidentSortFieldUpdatedOn: true,
@@ -865,6 +875,29 @@ type snGetIncidentResponse struct {
 	ResolvedOn            *string                     `json:"resolved"`
 	IncidentReport        *string                     `json:"incidentReport"`
 	LinkedServiceRequests []snLinkedServiceRequestRef `json:"linkedServiceRequests"`
+	// SpecialistHandoff: see domain.IncidentSpecialistHandoffSummary doc comment. Null when
+	// the incident has never been handed off to its specialist group.
+	SpecialistHandoff *snIncidentSpecialistHandoffSummary `json:"specialistHandoff"`
+}
+
+// snIncidentSpecialistHandoffSummary mirrors the Choreo incident detail response's
+// "specialistHandoff" block.
+type snIncidentSpecialistHandoffSummary struct {
+	ReasonCode        string                                 `json:"reasonCode"`
+	ReasonDescription string                                 `json:"reasonDescription"`
+	EscalationTeam    *string                                `json:"escalationTeam"`
+	HandedOffAt       string                                 `json:"handedOffAt"`
+	HandedOffBy       *string                                `json:"handedOffBy"`
+	AssignmentGroup   snIncidentEntityRef                    `json:"assignmentGroup"`
+	Task              snIncidentSpecialistHandoffSummaryTask `json:"task"`
+	GithubIssueURL    *string                                `json:"githubIssueUrl"`
+}
+
+type snIncidentSpecialistHandoffSummaryTask struct {
+	Number     string  `json:"number"`
+	Subject    string  `json:"subject"`
+	State      *string `json:"state"`
+	StateLabel *string `json:"stateLabel"`
 }
 
 type snIncidentWatchListItem struct {
@@ -1007,7 +1040,35 @@ func mapSNIncidentToView(sn snGetIncidentResponse) domain.IncidentView {
 		view.LinkedServiceRequests = lsr
 	}
 
+	if sn.SpecialistHandoff != nil {
+		view.SpecialistHandoff = mapSNIncidentSpecialistHandoffSummary(*sn.SpecialistHandoff)
+	}
+
 	return view
+}
+
+// mapSNIncidentSpecialistHandoffSummary maps a Choreo incident detail's "specialistHandoff"
+// block to the domain representation.
+func mapSNIncidentSpecialistHandoffSummary(sn snIncidentSpecialistHandoffSummary) *domain.IncidentSpecialistHandoffSummary {
+	summary := &domain.IncidentSpecialistHandoffSummary{
+		ReasonCode:        domain.IncidentSpecialistHandoffReasonCode(sn.ReasonCode),
+		ReasonDescription: sn.ReasonDescription,
+		HandedOffAt:       sn.HandedOffAt,
+		HandedOffBy:       sn.HandedOffBy,
+		AssignmentGroup:   domain.EntityRef{ID: sysidToUUID(sn.AssignmentGroup.ID), Name: sn.AssignmentGroup.Name},
+		Task: domain.IncidentSpecialistHandoffSummaryTask{
+			Number:     sn.Task.Number,
+			Subject:    sn.Task.Subject,
+			State:      sn.Task.State,
+			StateLabel: sn.Task.StateLabel,
+		},
+		GithubIssueURL: sn.GithubIssueURL,
+	}
+	if sn.EscalationTeam != nil {
+		v := domain.IncidentSpecialistHandoffEscalationTeam(*sn.EscalationTeam)
+		summary.EscalationTeam = &v
+	}
+	return summary
 }
 
 // snUpdateIncidentPayload is the Choreo PATCH /incidents/{id} request body.
@@ -1264,4 +1325,112 @@ func (s *snIncidentService) SearchIncidentActivities(ctx context.Context, req do
 		Offset:   req.Pagination.Offset,
 		HasMore:  req.Pagination.Offset+len(activities) < total,
 	}, nil
+}
+
+// snHandOffIncidentPayload is the Choreo POST /incidents/{id}/specialist-handoffs request body.
+type snHandOffIncidentPayload struct {
+	ReasonCode        string  `json:"reasonCode"`
+	EscalationTeam    *string `json:"escalationTeam,omitempty"`
+	CreateGithubIssue *bool   `json:"createGithubIssue,omitempty"`
+}
+
+// snIncidentSpecialistHandoffTask mirrors the Choreo handoff response's "handoff.task" object.
+type snIncidentSpecialistHandoffTask struct {
+	ID      string `json:"id"`
+	Number  string `json:"number"`
+	Subject string `json:"subject"`
+}
+
+// snIncidentSpecialistHandoffGithubIssue mirrors the Choreo handoff response's
+// "handoff.githubIssue" object, present only when creation was requested and succeeded.
+type snIncidentSpecialistHandoffGithubIssue struct {
+	URL    string `json:"url"`
+	Number int    `json:"number"`
+	Repo   string `json:"repo"`
+}
+
+// snHandOffIncidentResponse mirrors the Choreo POST /incidents/{id}/specialist-handoffs response.
+type snHandOffIncidentResponse struct {
+	Message string `json:"message"`
+	Handoff struct {
+		AssignmentGroup         snIncidentEntityRef                     `json:"assignmentGroup"`
+		PreviousAssignmentGroup *snIncidentEntityRef                    `json:"previousAssignmentGroup"`
+		ReasonCode              string                                  `json:"reasonCode"`
+		ReasonDescription       string                                  `json:"reasonDescription"`
+		EscalationTeam          *string                                 `json:"escalationTeam"`
+		Task                    snIncidentSpecialistHandoffTask         `json:"task"`
+		GithubIssue             *snIncidentSpecialistHandoffGithubIssue `json:"githubIssue"`
+		GithubIssueError        *string                                 `json:"githubIssueError"`
+		Incident                snGetIncidentResponse                   `json:"incident"`
+	} `json:"handoff"`
+}
+
+// HandOffIncidentToSpecialist implements IncidentService by calling the Choreo
+// POST /incidents/{id}/specialist-handoffs operation. Deliberately not routed through any
+// case-escalation code path: this is a distinct contract sharing no vocabulary with it.
+func (s *snIncidentService) HandOffIncidentToSpecialist(ctx context.Context, req domain.HandOffIncidentToSpecialistRequest) (domain.HandOffIncidentToSpecialistResponse, error) {
+	if err := validateUUIDs("id", []string{req.IncidentID}); err != nil {
+		return domain.HandOffIncidentToSpecialistResponse{}, err
+	}
+	if req.ReasonCode == "" {
+		return domain.HandOffIncidentToSpecialistResponse{}, &apierror.ValidationError{Msg: "reasonCode is required"}
+	}
+	if !validIncidentSpecialistHandoffReasonCode[req.ReasonCode] {
+		return domain.HandOffIncidentToSpecialistResponse{}, &apierror.ValidationError{Msg: "invalid reasonCode: " + string(req.ReasonCode)}
+	}
+	if req.EscalationTeam != nil && !validIncidentSpecialistHandoffEscalationTeam[*req.EscalationTeam] {
+		return domain.HandOffIncidentToSpecialistResponse{}, &apierror.ValidationError{Msg: "invalid escalationTeam: " + string(*req.EscalationTeam)}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	payload := snHandOffIncidentPayload{
+		ReasonCode:        string(req.ReasonCode),
+		CreateGithubIssue: req.CreateGithubIssue,
+	}
+	if req.EscalationTeam != nil {
+		v := string(*req.EscalationTeam)
+		payload.EscalationTeam = &v
+	}
+
+	raw, err := s.client.Post(ctx, "/incidents/"+uuidToSysid(req.IncidentID)+"/specialist-handoffs", token, payload)
+	if err != nil {
+		return domain.HandOffIncidentToSpecialistResponse{}, err
+	}
+
+	var snResp snHandOffIncidentResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.HandOffIncidentToSpecialistResponse{}, fmt.Errorf("sn hand off incident to specialist: parse response: %w", err)
+	}
+
+	result := domain.IncidentSpecialistHandoffResult{
+		AssignmentGroup: domain.EntityRef{
+			ID: sysidToUUID(snResp.Handoff.AssignmentGroup.ID), Name: snResp.Handoff.AssignmentGroup.Name,
+		},
+		ReasonCode:        domain.IncidentSpecialistHandoffReasonCode(snResp.Handoff.ReasonCode),
+		ReasonDescription: snResp.Handoff.ReasonDescription,
+		Task: domain.IncidentSpecialistHandoffTask{
+			ID:      sysidToUUID(snResp.Handoff.Task.ID),
+			Number:  snResp.Handoff.Task.Number,
+			Subject: snResp.Handoff.Task.Subject,
+		},
+		GithubIssueError: snResp.Handoff.GithubIssueError,
+		Incident:         mapSNIncidentToView(snResp.Handoff.Incident),
+	}
+	if snResp.Handoff.PreviousAssignmentGroup != nil {
+		result.PreviousAssignmentGroup = &domain.EntityRef{
+			ID: sysidToUUID(snResp.Handoff.PreviousAssignmentGroup.ID), Name: snResp.Handoff.PreviousAssignmentGroup.Name,
+		}
+	}
+	if snResp.Handoff.EscalationTeam != nil {
+		v := domain.IncidentSpecialistHandoffEscalationTeam(*snResp.Handoff.EscalationTeam)
+		result.EscalationTeam = &v
+	}
+	if snResp.Handoff.GithubIssue != nil {
+		result.GithubIssue = &domain.IncidentSpecialistHandoffGithubIssue{
+			URL: snResp.Handoff.GithubIssue.URL, Number: snResp.Handoff.GithubIssue.Number, Repo: snResp.Handoff.GithubIssue.Repo,
+		}
+	}
+
+	return domain.HandOffIncidentToSpecialistResponse{Message: snResp.Message, Handoff: result}, nil
 }

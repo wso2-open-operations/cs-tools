@@ -483,3 +483,227 @@ func TestSNIncidentService_SearchIncidents_BusinessServiceIdInvalidUUID(t *testi
 		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 	}
 }
+
+// TestSNIncidentService_HandOffIncidentToSpecialist_PayloadAndResponseMapping
+// verifies the outgoing payload carries reasonCode/escalationTeam/createGithubIssue
+// under their exact wire names, and that every part of the response -- including
+// the nested incident detail -- is mapped back to the domain representation, with
+// previousAssignmentGroup/githubIssue/githubIssueError staying nil when the backing
+// data source omits them rather than becoming a zero value.
+func TestSNIncidentService_HandOffIncidentToSpecialist_PayloadAndResponseMapping(t *testing.T) {
+	var gotBody map[string]any
+	specialistGroupSysid := sysid32('7')
+	taskSysid := sysid32('8')
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/"+testIncidentSysid+"/specialist-handoffs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Incident handed off to specialist group",
+			"handoff": {
+				"assignmentGroup": {"id": "` + specialistGroupSysid + `", "name": "Choreo APIM Special Ops"},
+				"previousAssignmentGroup": null,
+				"reasonCode": "no-runbook",
+				"reasonDescription": "Runbook is not available",
+				"escalationTeam": "choreo-apim-team",
+				"task": {"id": "` + taskSysid + `", "number": "TASK0082504", "subject": "[Runbook Task] No entry available for INC0091926"},
+				"githubIssue": null,
+				"githubIssueError": null,
+				"incident": {"id": "` + testIncidentSysid + `", "number": "INC0091926"}
+			}
+		}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client)
+
+	createGithubIssue := false
+	team := domain.IncidentSpecialistHandoffTeamChoreoAPIM
+	req := domain.HandOffIncidentToSpecialistRequest{
+		IncidentID:        testIncidentUUID,
+		ReasonCode:        domain.IncidentSpecialistHandoffReasonNoRunbook,
+		EscalationTeam:    &team,
+		CreateGithubIssue: &createGithubIssue,
+	}
+	resp, err := svc.HandOffIncidentToSpecialist(contextWithUserIDToken("token"), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody["reasonCode"] != "no-runbook" {
+		t.Fatalf("reasonCode: got %v, want no-runbook", gotBody["reasonCode"])
+	}
+	if gotBody["escalationTeam"] != "choreo-apim-team" {
+		t.Fatalf("escalationTeam: got %v, want choreo-apim-team", gotBody["escalationTeam"])
+	}
+	if gotBody["createGithubIssue"] != false {
+		t.Fatalf("createGithubIssue: got %v, want false", gotBody["createGithubIssue"])
+	}
+
+	if resp.Message != "Incident handed off to specialist group" {
+		t.Fatalf("Message = %q", resp.Message)
+	}
+	h := resp.Handoff
+	if h.AssignmentGroup.ID != sysidToUUID(specialistGroupSysid) || h.AssignmentGroup.Name != "Choreo APIM Special Ops" {
+		t.Fatalf("AssignmentGroup = %+v", h.AssignmentGroup)
+	}
+	if h.PreviousAssignmentGroup != nil {
+		t.Fatalf("PreviousAssignmentGroup = %+v, want nil", h.PreviousAssignmentGroup)
+	}
+	if h.ReasonCode != domain.IncidentSpecialistHandoffReasonNoRunbook || h.ReasonDescription != "Runbook is not available" {
+		t.Fatalf("ReasonCode/ReasonDescription = %v/%v", h.ReasonCode, h.ReasonDescription)
+	}
+	if h.EscalationTeam == nil || *h.EscalationTeam != domain.IncidentSpecialistHandoffTeamChoreoAPIM {
+		t.Fatalf("EscalationTeam = %v", h.EscalationTeam)
+	}
+	if h.Task.ID != sysidToUUID(taskSysid) || h.Task.Number != "TASK0082504" ||
+		h.Task.Subject != "[Runbook Task] No entry available for INC0091926" {
+		t.Fatalf("Task = %+v", h.Task)
+	}
+	if h.GithubIssue != nil {
+		t.Fatalf("GithubIssue = %+v, want nil", h.GithubIssue)
+	}
+	if h.GithubIssueError != nil {
+		t.Fatalf("GithubIssueError = %v, want nil", *h.GithubIssueError)
+	}
+	if h.Incident.ID == nil || *h.Incident.ID != sysidToUUID(testIncidentSysid) || h.Incident.Number == nil || *h.Incident.Number != "INC0091926" {
+		t.Fatalf("Incident = %+v", h.Incident)
+	}
+}
+
+// TestSNIncidentService_HandOffIncidentToSpecialist_ValidatesInput verifies that
+// a missing/invalid reasonCode or an invalid escalationTeam is rejected before any
+// call reaches the backing data source.
+func TestSNIncidentService_HandOffIncidentToSpecialist_ValidatesInput(t *testing.T) {
+	invalidTeam := domain.IncidentSpecialistHandoffEscalationTeam("not-a-team")
+
+	tests := []struct {
+		name string
+		req  domain.HandOffIncidentToSpecialistRequest
+	}{
+		{
+			name: "missing reasonCode",
+			req:  domain.HandOffIncidentToSpecialistRequest{IncidentID: testIncidentUUID},
+		},
+		{
+			name: "invalid reasonCode",
+			req: domain.HandOffIncidentToSpecialistRequest{
+				IncidentID: testIncidentUUID,
+				ReasonCode: domain.IncidentSpecialistHandoffReasonCode("bogus"),
+			},
+		},
+		{
+			name: "invalid escalationTeam",
+			req: domain.HandOffIncidentToSpecialistRequest{
+				IncidentID:     testIncidentUUID,
+				ReasonCode:     domain.IncidentSpecialistHandoffReasonNoRunbook,
+				EscalationTeam: &invalidTeam,
+			},
+		},
+		{
+			name: "invalid incident id",
+			req: domain.HandOffIncidentToSpecialistRequest{
+				IncidentID: "not-a-uuid",
+				ReasonCode: domain.IncidentSpecialistHandoffReasonNoRunbook,
+			},
+		},
+	}
+
+	// client is intentionally nil: validation must fail before touching it.
+	svc := NewServiceNowIncidentService(nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.HandOffIncidentToSpecialist(contextWithUserIDToken("token"), tt.req)
+			if _, ok := err.(*apierror.ValidationError); !ok {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestSNIncidentService_GetIncidentByID_MapsSpecialistHandoff verifies the
+// specialistHandoff block on incident detail is mapped through, and stays nil
+// when the backing data source omits it (an incident never handed off).
+func TestSNIncidentService_GetIncidentByID_MapsSpecialistHandoff(t *testing.T) {
+	groupSysid := sysid32('9')
+
+	tests := []struct {
+		name           string
+		responseJSON   string
+		wantHandoffNil bool
+	}{
+		{
+			name: "handed-off incident carries a summary",
+			responseJSON: `{"id": "` + testIncidentSysid + `", "number": "INC0091926",
+				"specialistHandoff": {
+					"reasonCode": "no-runbook",
+					"reasonDescription": "Runbook is not available",
+					"escalationTeam": null,
+					"handedOffAt": "2026-08-21 04:02:48",
+					"handedOffBy": "sajithe@wso2.com",
+					"assignmentGroup": {"id": "` + groupSysid + `", "name": "Choreo Special Ops"},
+					"task": {"number": "TASK0082502", "subject": "[Runbook Task] No entry available for INC0091926", "state": "0", "stateLabel": "Open"},
+					"githubIssueUrl": "https://github.com/wso2-enterprise/asgardeo-product/issues/36771"
+				}}`,
+		},
+		{
+			name:           "never handed off incident carries no summary",
+			responseJSON:   `{"id": "` + testIncidentSysid + `", "number": "INC0091927", "specialistHandoff": null}`,
+			wantHandoffNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/incidents/"+testIncidentSysid, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
+			client := newTestSNClient(t, mux)
+			svc := NewServiceNowIncidentService(client)
+
+			view, err := svc.GetIncidentByID(contextWithUserIDToken("token"), testIncidentUUID)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantHandoffNil {
+				if view.SpecialistHandoff != nil {
+					t.Fatalf("SpecialistHandoff = %+v, want nil", view.SpecialistHandoff)
+				}
+				return
+			}
+			if view.SpecialistHandoff == nil {
+				t.Fatalf("SpecialistHandoff = nil, want non-nil")
+			}
+			sh := view.SpecialistHandoff
+			if sh.ReasonCode != domain.IncidentSpecialistHandoffReasonNoRunbook || sh.ReasonDescription != "Runbook is not available" {
+				t.Fatalf("ReasonCode/ReasonDescription = %v/%v", sh.ReasonCode, sh.ReasonDescription)
+			}
+			if sh.EscalationTeam != nil {
+				t.Fatalf("EscalationTeam = %v, want nil", sh.EscalationTeam)
+			}
+			if sh.HandedOffAt != "2026-08-21 04:02:48" || sh.HandedOffBy == nil || *sh.HandedOffBy != "sajithe@wso2.com" {
+				t.Fatalf("HandedOffAt/HandedOffBy = %v/%v", sh.HandedOffAt, sh.HandedOffBy)
+			}
+			if sh.AssignmentGroup.ID != sysidToUUID(groupSysid) || sh.AssignmentGroup.Name != "Choreo Special Ops" {
+				t.Fatalf("AssignmentGroup = %+v", sh.AssignmentGroup)
+			}
+			if sh.Task.Number != "TASK0082502" || sh.Task.State == nil || *sh.Task.State != "0" ||
+				sh.Task.StateLabel == nil || *sh.Task.StateLabel != "Open" {
+				t.Fatalf("Task = %+v", sh.Task)
+			}
+			if sh.GithubIssueURL == nil || *sh.GithubIssueURL != "https://github.com/wso2-enterprise/asgardeo-product/issues/36771" {
+				t.Fatalf("GithubIssueURL = %v", sh.GithubIssueURL)
+			}
+		})
+	}
+}
