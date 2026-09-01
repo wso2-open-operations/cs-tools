@@ -222,6 +222,13 @@ func (c *CustomerEntityClient) SearchIncidentActivities(ctx context.Context, id 
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/incidents/%s/activities/search", url.PathEscape(id)), body)
 }
 
+// HandOffIncidentToSpecialist calls POST /incidents/{id}/specialist-handoffs on the entity
+// service: hands the incident off to its specialist group in one atomic call. Response is
+// returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) HandOffIncidentToSpecialist(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/incidents/%s/specialist-handoffs", url.PathEscape(id)), body)
+}
+
 // SearchProblems calls POST /problems/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *CustomerEntityClient) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
@@ -581,4 +588,46 @@ func (c *CustomerEntityClient) GetAlert(ctx context.Context, id string) ([]byte,
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) GetSmartAlert(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/smart-alerts/%s", url.PathEscape(id)), nil)
+}
+
+// CreateOutage calls POST /outages on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) CreateOutage(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/outages", body)
+}
+
+// SearchOutages calls POST /outages/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) SearchOutages(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/outages/search", body)
+}
+
+// GetOutage calls GET /outages/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) GetOutage(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/outages/%s", url.PathEscape(id)), nil)
+}
+
+// PatchOutage calls PATCH /outages/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) PatchOutage(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/outages/%s", url.PathEscape(id)), body)
+}
+
+// AddOutageCommunication calls POST /outages/{id}/communications on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) AddOutageCommunication(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/outages/%s/communications", url.PathEscape(id)), body)
+}
+
+// SearchOutageCommunications calls POST /outages/{id}/communications/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) SearchOutageCommunications(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/outages/%s/communications/search", url.PathEscape(id)), body)
+}
+
+// GetOutageMetadata calls GET /outages/metadata on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) GetOutageMetadata(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/outages/metadata", nil)
 }

@@ -524,6 +524,7 @@ type mockEntityIncidentClient struct {
 	createCommentFn            func(ctx context.Context, body []byte) ([]byte, error)
 	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
 	searchIncidentActivitiesFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	handOffIncidentFn          func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
@@ -580,6 +581,13 @@ func (m *mockEntityIncidentClient) SearchIncidentActivities(ctx context.Context,
 		return m.searchIncidentActivitiesFn(ctx, id, body)
 	}
 	return []byte(`{"activity":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
+}
+
+func (m *mockEntityIncidentClient) HandOffIncidentToSpecialist(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.handOffIncidentFn != nil {
+		return m.handOffIncidentFn(ctx, id, body)
+	}
+	return []byte(`{"message":"Incident handed off to specialist group","handoff":{"assignmentGroup":{"id":"11111111-1111-1111-1111-111111111111","name":"Specialist Group"},"previousAssignmentGroup":null,"reasonCode":"no-runbook","reasonDescription":"Runbook is not available","escalationTeam":null,"task":{"id":"22222222-2222-2222-2222-222222222222","number":"TASK0000001","subject":"[Runbook Task] test"},"githubIssue":{"url":"https://github.com/example/repo/issues/1","number":1,"repo":"repo"},"githubIssueError":null,"incident":{}}}`), nil
 }
 
 // ----- mock entity problem client -----
@@ -752,6 +760,67 @@ func (m *mockEntityChangeRequestClient) DecideChangeRequestApproval(ctx context.
 		return m.decideChangeRequestApprovalFn(ctx, id, body)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"approved"}`), nil
+}
+
+// ----- mock entity outage client -----
+
+type mockEntityOutageClient struct {
+	createOutageFn               func(ctx context.Context, body []byte) ([]byte, error)
+	searchOutagesFn              func(ctx context.Context, body []byte) ([]byte, error)
+	getOutageFn                  func(ctx context.Context, id string) ([]byte, error)
+	patchOutageFn                func(ctx context.Context, id string, body []byte) ([]byte, error)
+	addOutageCommunicationFn     func(ctx context.Context, id string, body []byte) ([]byte, error)
+	searchOutageCommunicationsFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	getOutageMetadataFn          func(ctx context.Context) ([]byte, error)
+}
+
+func (m *mockEntityOutageClient) CreateOutage(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createOutageFn != nil {
+		return m.createOutageFn(ctx, body)
+	}
+	return []byte(`{"message":"Outage created successfully","outage":{"id":"11111111-1111-1111-1111-111111111111","number":"OUT0001881"}}`), nil
+}
+
+func (m *mockEntityOutageClient) SearchOutages(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchOutagesFn != nil {
+		return m.searchOutagesFn(ctx, body)
+	}
+	return []byte(`{"outages":[],"total":0,"limit":20,"offset":0,"appliedBeginFrom":"","beginFromDefaulted":false}`), nil
+}
+
+func (m *mockEntityOutageClient) GetOutage(ctx context.Context, id string) ([]byte, error) {
+	if m.getOutageFn != nil {
+		return m.getOutageFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityOutageClient) PatchOutage(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.patchOutageFn != nil {
+		return m.patchOutageFn(ctx, id, body)
+	}
+	return []byte(`{"message":"Outage updated successfully","outage":{"id":"` + id + `"}}`), nil
+}
+
+func (m *mockEntityOutageClient) AddOutageCommunication(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.addOutageCommunicationFn != nil {
+		return m.addOutageCommunicationFn(ctx, id, body)
+	}
+	return []byte(`{"message":"Communication added successfully","communication":{"id":"11111111-1111-1111-1111-111111111111"}}`), nil
+}
+
+func (m *mockEntityOutageClient) SearchOutageCommunications(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.searchOutageCommunicationsFn != nil {
+		return m.searchOutageCommunicationsFn(ctx, id, body)
+	}
+	return []byte(`{"communications":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityOutageClient) GetOutageMetadata(ctx context.Context) ([]byte, error) {
+	if m.getOutageMetadataFn != nil {
+		return m.getOutageMetadataFn(ctx)
+	}
+	return []byte(`{"types":[],"statuses":[],"communicationChannels":[],"statusPageClouds":[]}`), nil
 }
 
 // ----- mock entity IT service client -----

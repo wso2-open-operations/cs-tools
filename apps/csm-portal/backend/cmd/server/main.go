@@ -93,6 +93,7 @@ func main() {
 	problemHandler := handler.NewProblemHandler(customerEntityClient)
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
+	outageHandler := handler.NewOutageHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
 	// are read with os.Getenv (never mustEnv) — a missing or malformed value
@@ -233,6 +234,7 @@ func main() {
 	mux.HandleFunc("POST /incidents/{id}/comments", incidentHandler.CreateIncidentComment)
 	mux.HandleFunc("POST /incidents/{id}/comments/search", incidentHandler.SearchIncidentComments)
 	mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
+	mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", incidentHandler.HandOffIncidentToSpecialist)
 	mux.HandleFunc("GET /alerts/{id}", alertHandler.GetAlert)
 	mux.HandleFunc("GET /smart-alerts/{id}", alertHandler.GetSmartAlert)
 	mux.HandleFunc("POST /change-requests/{id}/comments", changeRequestHandler.CreateChangeRequestComment)
@@ -245,6 +247,16 @@ func main() {
 	mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
 	mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
 	mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
+	mux.HandleFunc("POST /outages", outageHandler.CreateOutage)
+	mux.HandleFunc("POST /outages/search", outageHandler.SearchOutages)
+	// Registered before the {id} wildcard purely for readability — net/http's
+	// ServeMux resolves by specificity, not registration order, so this
+	// literal path wins over the wildcard regardless.
+	mux.HandleFunc("GET /outages/metadata", outageHandler.GetOutageMetadata)
+	mux.HandleFunc("GET /outages/{id}", outageHandler.GetOutage)
+	mux.HandleFunc("PATCH /outages/{id}", outageHandler.PatchOutage)
+	mux.HandleFunc("POST /outages/{id}/communications", outageHandler.AddOutageCommunication)
+	mux.HandleFunc("POST /outages/{id}/communications/search", outageHandler.SearchOutageCommunications)
 	// Called manually today; not yet wired into real incident/case creation.
 	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
 
