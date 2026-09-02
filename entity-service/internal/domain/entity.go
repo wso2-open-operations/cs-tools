@@ -5281,3 +5281,60 @@ type ListScheduledTaskRunsResponse struct {
 type DeleteScheduledTaskRunsResponse struct {
 	DeletedCount int `json:"deletedCount"`
 }
+
+// AlertIncidentMappingView is the durable record of one monitoring alert
+// that was grouped onto a CSM incident — e.g. a firing event and a later
+// resolved event for the same underlying condition both map onto the same
+// incident rather than each creating its own. Like SLAClock and
+// ScheduledTaskRun, this is CSM-native data with no ServiceNow equivalent
+// and is always backed by Postgres regardless of DATA_SOURCE.
+//
+// Source/UniqueIdentifier together identify the correlation key a caller
+// uses to find prior alerts for the same underlying condition (see
+// LookupAlertIncidentMappingsRequest); which sources exist and how they
+// derive UniqueIdentifier is a policy decision made entirely by whatever
+// ingests the alert, not something this service tracks.
+type AlertIncidentMappingView struct {
+	ID          string `json:"id"`
+	AlertNumber string `json:"alertNumber"`
+	Source      string `json:"source"`
+	// UniqueIdentifier is the correlation key within Source used to group
+	// related alerts (e.g. the monitoring system's own alert group/fingerprint
+	// id) — optional, since not every source can supply one.
+	UniqueIdentifier *string `json:"uniqueIdentifier,omitempty"`
+	Service          *string `json:"service,omitempty"`
+	MetricName       *string `json:"metricName,omitempty"`
+	AlertStatus      string  `json:"alertStatus"`
+	IncidentID       string  `json:"incidentId"`
+	IncidentNumber   *string `json:"incidentNumber,omitempty"`
+	CreatedAt        string  `json:"createdAt"`
+}
+
+// CreateAlertIncidentMappingRequest is the request body for
+// POST /alert-incident-mappings.
+type CreateAlertIncidentMappingRequest struct {
+	AlertNumber      string  `json:"alertNumber"`
+	Source           string  `json:"source"`
+	UniqueIdentifier *string `json:"uniqueIdentifier,omitempty"`
+	Service          *string `json:"service,omitempty"`
+	MetricName       *string `json:"metricName,omitempty"`
+	AlertStatus      string  `json:"alertStatus"`
+	IncidentID       string  `json:"incidentId"`
+	IncidentNumber   *string `json:"incidentNumber,omitempty"`
+}
+
+// LookupAlertIncidentMappingsRequest is the request body for
+// POST /alert-incident-mappings/lookup — finds every alert already grouped
+// onto an incident for the same (Source, UniqueIdentifier) correlation key.
+type LookupAlertIncidentMappingsRequest struct {
+	Source           string `json:"source"`
+	UniqueIdentifier string `json:"uniqueIdentifier"`
+}
+
+// LookupAlertIncidentMappingsResponse is the response body for
+// POST /alert-incident-mappings/lookup. Mappings is most-recent-first
+// (ORDER BY created_at DESC) and empty (never null) when nothing matches —
+// absence is a valid result for a lookup, not a 404.
+type LookupAlertIncidentMappingsResponse struct {
+	Mappings []AlertIncidentMappingView `json:"mappings"`
+}

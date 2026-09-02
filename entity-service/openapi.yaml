@@ -433,6 +433,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /alert-incident-mappings:
+    post:
+      summary: >-
+        Record that a monitoring alert contributed to a CSM incident — e.g. a
+        firing event and a later resolved event for the same underlying
+        condition both map onto the same incident rather than each creating
+        its own. Has no ServiceNow equivalent — always backed by Postgres.
+      operationId: createAlertIncidentMapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertIncidentMappingRequest'
+      responses:
+        "201":
+          description: Mapping created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertIncidentMappingView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: alertNumber is already mapped to an incident.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alert-incident-mappings/lookup:
+    post:
+      summary: >-
+        Find every alert already grouped onto an incident for the same
+        (source, uniqueIdentifier) correlation key. Returns an empty
+        mappings array, not a 404, when nothing matches — absence is a
+        valid result for a lookup.
+      operationId: lookupAlertIncidentMappings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupAlertIncidentMappingsRequest'
+      responses:
+        "200":
+          description: Matching mappings, most-recent-first (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupAlertIncidentMappingsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/me:
     get:
       summary: Get the profile of the currently authenticated user.
@@ -13237,6 +13311,79 @@ components:
       properties:
         deletedCount:
           type: integer
+
+    AlertIncidentMappingView:
+      description: >
+        A monitoring alert that was grouped onto a CSM incident. Has no
+        ServiceNow equivalent — always backed by Postgres.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        alertNumber:
+          type: string
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+          nullable: true
+        service:
+          type: string
+          nullable: true
+        metricName:
+          type: string
+          nullable: true
+        alertStatus:
+          type: string
+        incidentId:
+          type: string
+        incidentNumber:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAlertIncidentMappingRequest:
+      type: object
+      required: [alertNumber, source, alertStatus, incidentId]
+      additionalProperties: false
+      properties:
+        alertNumber:
+          type: string
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+        service:
+          type: string
+        metricName:
+          type: string
+        alertStatus:
+          type: string
+        incidentId:
+          type: string
+        incidentNumber:
+          type: string
+
+    LookupAlertIncidentMappingsRequest:
+      type: object
+      required: [source, uniqueIdentifier]
+      additionalProperties: false
+      properties:
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+
+    LookupAlertIncidentMappingsResponse:
+      type: object
+      properties:
+        mappings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertIncidentMappingView'
 
     SearchEventPublishFailuresResponse:
       type: object
