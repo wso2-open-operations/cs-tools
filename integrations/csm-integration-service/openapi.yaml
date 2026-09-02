@@ -3,9 +3,10 @@ info:
   title: CSM Integration Service API
   version: 1.0.0
   description: >
-    Project/account search and their Contacts sub-resource, for third-party (M2M)
-    consumers. Fronted by Choreo's API Manager gateway (subscription + client
-    credentials) — this service performs no inbound auth of its own.
+    Project/account search and their Contacts sub-resource, incident
+    creation, and alert-incident mapping create/lookup, for third-party
+    (M2M) consumers. Fronted by Choreo's API Manager gateway (subscription +
+    client credentials) — this service performs no inbound auth of its own.
 security:
   - oauth2ClientCredentials: []
 servers:
@@ -341,6 +342,232 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents:
+    post:
+      summary: Create an incident.
+      description: >
+        ServiceNow-backed. The request body is forwarded to the entity service
+        verbatim. This operation requires a forwarded end-user identity token
+        on the entity-service side; this service is strictly M2M with no
+        mechanism to supply one, so every call here currently receives a
+        mapped 401. Kept for API-shape completeness, not because it currently
+        succeeds.
+      operationId: createIncident
+      requestBody:
+        description: Incident details.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        "201":
+          description: The incident was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIncidentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, for this operation, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /incidents/search:
+    post:
+      summary: Search incidents.
+      description: >
+        ServiceNow-backed, same as POST /incidents. This operation requires a
+        forwarded end-user identity token on the entity-service side; this
+        service is strictly M2M with no mechanism to supply one, so every
+        call here currently receives a mapped 401. Kept for API-shape
+        completeness, not because it currently succeeds.
+      operationId: searchIncidents
+      requestBody:
+        description: Incident search payload.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchIncidentsRequest'
+      responses:
+        "200":
+          description: Incidents matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchIncidentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, for this operation, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alert-incident-mappings:
+    post:
+      summary: Create an alert-incident mapping.
+      description: >
+        Postgres-only entity-service operation with no ServiceNow dependency —
+        unlike POST /incidents above, this does not require a forwarded
+        end-user identity token, so this service's M2M identity is sufficient
+        and the call is expected to actually succeed today. The request body
+        is forwarded to the entity service verbatim.
+      operationId: createAlertIncidentMapping
+      requestBody:
+        description: Alert-incident mapping details.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertIncidentMappingRequest'
+      responses:
+        "201":
+          description: The alert-incident mapping was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertIncidentMappingView'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (Choreo gateway rejected an unauthenticated M2M caller; not expected from the entity service itself for this operation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Conflict (an alert-incident mapping with this alertNumber already exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alert-incident-mappings/lookup:
+    post:
+      summary: Look up alert-incident mappings by source and unique identifier.
+      description: >
+        Postgres-only entity-service operation with no ServiceNow dependency —
+        same situation as POST /alert-incident-mappings above; expected to
+        actually succeed today. Returns an empty `mappings` array (not 404)
+        when nothing matches.
+      operationId: lookupAlertIncidentMappings
+      requestBody:
+        description: Lookup criteria.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupAlertIncidentMappingsRequest'
+      responses:
+        "200":
+          description: Alert-incident mappings matching the lookup criteria (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupAlertIncidentMappingsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (Choreo gateway rejected an unauthenticated M2M caller; not expected from the entity service itself for this operation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     oauth2ClientCredentials:
@@ -637,3 +864,277 @@ components:
           type: string
         project:
           $ref: '#/components/schemas/ProjectUpdateResult'
+
+    CreateIncidentRequest:
+      type: object
+      required:
+        - callerId
+        - category
+        - serviceId
+        - impact
+        - urgency
+        - subject
+      properties:
+        callerId:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          description: >
+            One of a large fixed set of subcategory codes (e.g. DHCP, MEMORY,
+            PHISHING). Not enumerated here in full; forwarded verbatim to the
+            entity service, which validates it.
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+        configurationItemId:
+          type: string
+          format: uuid
+        contactType:
+          type: string
+          enum:
+            - SELF_SERVICE
+            - EMAIL
+            - WALK_IN
+            - AZURE
+            - EMAIL_INTERNAL
+            - SITE_247
+            - DIRECT
+            - PHONE
+            - SENTINEL
+            - VIRTUAL_AGENT
+            - CHAT
+            - EMAIL_EXTERNAL
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        watchList:
+          type: array
+          items:
+            type: string
+        additionalComments:
+          type: string
+        workNotes:
+          type: string
+        parentId:
+          type: string
+        parentIncidentId:
+          type: string
+        changeRequestId:
+          type: string
+        problemId:
+          type: string
+        causedById:
+          type: string
+
+    CreateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          type: object
+          properties:
+            id:
+              type: string
+            number:
+              type: string
+            createdOn:
+              type: string
+              format: date-time
+            createdBy:
+              type: string
+
+    SearchIncidentsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Case-insensitive free-text match against incident fields.
+            priorities:
+              type: array
+              items:
+                type: string
+                enum: [HIGH, MEDIUM, LOW]
+            parentIds:
+              type: array
+              items:
+                type: string
+            number:
+              type: string
+              description: Exact match against the incident's human-readable number (e.g. "INC0010001").
+            filters:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  op:
+                    type: string
+                  values:
+                    type: array
+                    items:
+                      type: string
+              description: >
+                Generic field/op/values filter array. Forwarded verbatim; the
+                entity service validates the supported field/op combinations.
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn, openedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchIncidentView:
+      type: object
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        openedOn:
+          type: string
+          format: date-time
+        subject:
+          type: string
+        caller:
+          type: object
+          additionalProperties: true
+        priority:
+          type: string
+        state:
+          type: string
+        category:
+          type: string
+        parent:
+          type: object
+          additionalProperties: true
+        parentIncident:
+          type: object
+          additionalProperties: true
+        assignmentGroup:
+          type: object
+          additionalProperties: true
+        assignedTo:
+          type: object
+          additionalProperties: true
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+
+    SearchIncidentsResponse:
+      type: object
+      properties:
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchIncidentView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CreateAlertIncidentMappingRequest:
+      type: object
+      required:
+        - alertNumber
+        - source
+        - alertStatus
+        - incidentId
+      properties:
+        alertNumber:
+          type: string
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+        service:
+          type: string
+        metricName:
+          type: string
+        alertStatus:
+          type: string
+        incidentId:
+          type: string
+          format: uuid
+        incidentNumber:
+          type: string
+
+    LookupAlertIncidentMappingsRequest:
+      type: object
+      required:
+        - source
+        - uniqueIdentifier
+      properties:
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+
+    AlertIncidentMappingView:
+      type: object
+      properties:
+        id:
+          type: string
+        alertNumber:
+          type: string
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+        service:
+          type: string
+        metricName:
+          type: string
+        alertStatus:
+          type: string
+        incidentId:
+          type: string
+        incidentNumber:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    LookupAlertIncidentMappingsResponse:
+      type: object
+      properties:
+        mappings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertIncidentMappingView'

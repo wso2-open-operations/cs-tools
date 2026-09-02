@@ -73,3 +73,45 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
 }
+
+// CreateIncident calls POST /incidents on the entity service. This targets a
+// ServiceNow-backed operation that requires a forwarded end-user identity
+// token. This service is strictly M2M with no mechanism to carry one, so
+// entity-service is expected to reject this call with 401 — kept for
+// API-shape completeness so a real caller has somewhere stable to point at,
+// not because it currently succeeds. See UpdateProject's doc comment above
+// for the same situation. Response is returned as raw JSON; typed response
+// structs are deferred.
+func (c *Client) CreateIncident(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/incidents", body)
+}
+
+// SearchIncidents calls POST /incidents/search on the entity service. This
+// targets a ServiceNow-backed operation that requires a forwarded end-user
+// identity token, same as CreateIncident above — this service cannot supply
+// one, so entity-service is expected to reject this call with 401. Kept for
+// API-shape completeness, not because it currently succeeds. Response is
+// returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/incidents/search", body)
+}
+
+// CreateAlertIncidentMapping calls POST /alert-incident-mappings on the entity
+// service. Unlike CreateIncident/SearchIncidents above, this targets a
+// Postgres-only entity-service operation with no ServiceNow dependency and no
+// requirement for a forwarded end-user identity token — this service's M2M
+// identity to entity-service is sufficient, so this call is expected to
+// actually succeed today. Response is returned as raw JSON; typed response
+// structs are deferred.
+func (c *Client) CreateAlertIncidentMapping(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/alert-incident-mappings", body)
+}
+
+// LookupAlertIncidentMappings calls POST /alert-incident-mappings/lookup on
+// the entity service. Same Postgres-only, M2M-friendly situation as
+// CreateAlertIncidentMapping above — no forwarded end-user identity is
+// required, so this call is expected to actually succeed today. Response is
+// returned as raw JSON; typed response structs are deferred.
+func (c *Client) LookupAlertIncidentMappings(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/alert-incident-mappings/lookup", body)
+}
