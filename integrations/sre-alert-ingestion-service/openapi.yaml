@@ -1,0 +1,148 @@
+openapi: 3.0.1
+info:
+  title: SRE Alert Ingestion Service API
+  version: 1.0.0
+  description: >
+    Ingests normalized alerts from external monitoring/alerting tools and
+    turns each into a platform incident. Every accepted alert is durably
+    buffered before any delivery attempt is made, retried with backoff on
+    failure, and escalated via an independent voice-call channel if delivery
+    keeps failing — so this service is never a single point of failure on
+    the platform's own availability. Fronted by Choreo's API Manager gateway
+    (subscription + client credentials) — this service performs no inbound
+    auth of its own.
+security:
+  - oauth2ClientCredentials: []
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Liveness/readiness check — reports whether the buffer database is reachable.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+        "503":
+          description: Buffer database unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alerts:
+    post:
+      summary: Submit a normalized alert for incident creation.
+      description: >
+        Validates and durably persists the alert before responding — no
+        delivery attempt is made inline. A background worker retries
+        delivery with exponential backoff and escalates via an independent
+        notification channel once the retry budget is exhausted. The
+        returned id identifies the buffered alert, not a platform incident
+        (no incident may exist yet, or ever, depending on how delivery
+        resolves).
+      operationId: createAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+      responses:
+        "202":
+          description: Alert accepted and durably buffered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertAcceptedResponse'
+        "400":
+          description: BadRequest — missing a required field, or malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          # Placeholder — fill in with the actual token endpoint for this
+          # service's Choreo-managed API once it's provisioned.
+          tokenUrl: "<token_url>"
+          scopes: {}
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    AlertRequest:
+      type: object
+      required:
+        - source
+        - severity
+        - service
+        - metricName
+        - description
+      properties:
+        source:
+          type: string
+          description: >
+            The originating monitoring/alerting tool (e.g. "azure",
+            "site24x7", "grafana", "datadog", "prometheus"). Recognized
+            values map to an existing incident contact-type; unrecognized
+            values are accepted and simply omit that mapping.
+        severity:
+          type: string
+          description: >
+            One of "critical", "major", "minor", "warning", "ok" (case
+            insensitive). An unrecognized value maps to the same
+            classification as "ok" — see README.md's severity mapping table.
+        service:
+          type: string
+          description: The affected service, mapped to the created incident's serviceId.
+        metricName:
+          type: string
+        category:
+          type: string
+          description: >
+            One of "INQUIRY", "SERVICE_INTERRUPTION", "SECURITY" (case
+            insensitive, optional). Defaults to "SERVICE_INTERRUPTION" when
+            omitted or unrecognized.
+        environment:
+          type: string
+        uniqueIdentifier:
+          type: string
+          description: The source tool's own identifier for this alert, if any.
+        description:
+          type: string
+
+    AlertAcceptedResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The buffered alert's internal id (not a platform incident id).
