@@ -418,6 +418,7 @@ export default function CsmIssuesView({
     "createdBy",
     "customer",
     "createdAt",
+    "escalationLevel",
   ];
   const defaultVisibleOptionalColumns: CaseOptionalColumnId[] = [
     "product",

@@ -44,6 +44,18 @@ describe("mapCaseSearchViewToRow — Customer column", () => {
   });
 });
 
+describe("mapCaseSearchViewToRow — escalationLevel", () => {
+  it("carries the raw escalation-level id through unmapped", () => {
+    const view: BeCaseSearchView = { id: "c1", escalationLevel: "2" };
+    expect(mapCaseSearchViewToRow(view, undefined).escalationLevel).toBe("2");
+  });
+
+  it("defaults to null when the search response omits escalationLevel", () => {
+    const view: BeCaseSearchView = { id: "c1" };
+    expect(mapCaseSearchViewToRow(view, undefined).escalationLevel).toBeNull();
+  });
+});
+
 describe("buildCaseSearchFilters — new advanced-filter fields", () => {
   it("emits creTeam op:in for csTeams", () => {
     const filters: CasesFilters = { ...DEFAULT_CASES_FILTERS, csTeams: ["team-a"] };

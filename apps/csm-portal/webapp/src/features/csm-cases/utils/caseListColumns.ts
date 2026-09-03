@@ -51,7 +51,8 @@ export type CaseOptionalColumnId =
   | "assignee"
   | "createdBy"
   | "customer"
-  | "createdAt";
+  | "createdAt"
+  | "escalationLevel";
 
 export const CASE_OPTIONAL_COLUMNS: Record<
   CaseOptionalColumnId,
@@ -65,4 +66,7 @@ export const CASE_OPTIONAL_COLUMNS: Record<
   createdBy: { label: "Reporter", track: "minmax(140px, 1fr)" },
   customer: { label: "Customer", track: "minmax(140px, 1fr)" },
   createdAt: { label: "Created", track: "minmax(100px, 0.7fr)" },
+  // Blank (not a "not escalated" chip) for cases with no escalation level —
+  // see `renderOptionalCell`'s "escalationLevel" case in CasesList.tsx.
+  escalationLevel: { label: "Escalation", track: "auto" },
 };

@@ -76,6 +76,8 @@ type entityCaseClient interface {
 	PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
+	SearchCaseEscalations(ctx context.Context, caseID string) ([]byte, error)
+	CreateCaseEscalation(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCaseActivities(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	AggregateCases(ctx context.Context, body []byte) ([]byte, error)
@@ -106,11 +108,80 @@ type entityCaseClient interface {
 // entity service for data access.
 type CaseHandler struct {
 	entity entityCaseClient
+	// deescalationAllowedRoles is the set of platform roles (lowercased)
+	// permitted to de-escalate a case, set via SetDeescalationAllowedRoles.
+	// nil/empty means none are configured, which CreateCaseEscalation treats
+	// as "de-escalation disabled for everyone" (fail closed) rather than
+	// "unrestricted" -- see SetDeescalationAllowedRoles's doc comment.
+	deescalationAllowedRoles map[string]bool
 }
 
 // NewCaseHandler creates a CaseHandler backed by the given entity client.
 func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 	return &CaseHandler{entity: entity}
+}
+
+// SetDeescalationAllowedRoles configures the platform roles permitted to
+// de-escalate a case (escalating stays open to any authenticated user; only
+// de-escalation is role-gated). Role names are matched case-insensitively
+// against the caller's own GET /users/me roles.
+//
+// Deliberately fails closed: an empty or never-called configuration means no
+// role passes the check, so de-escalation is refused for everyone rather than
+// silently left unrestricted -- the same "fail closed when unconfigured"
+// convention this file already uses (see resolveCurrentUserID). A deployment
+// that wants de-escalation enabled must configure it explicitly.
+func (h *CaseHandler) SetDeescalationAllowedRoles(roles []string) {
+	set := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		r = strings.ToLower(strings.TrimSpace(r))
+		if r != "" {
+			set[r] = true
+		}
+	}
+	h.deescalationAllowedRoles = set
+}
+
+// isDeescalationAction reports whether a case-escalation request body's
+// "action" field is DEESCALATE (case-insensitive). A missing/empty action
+// defaults to ESCALATE per the entity service's own contract, so only an
+// explicit "DEESCALATE"/"deescalate"/etc. value counts.
+func isDeescalationAction(body []byte) bool {
+	var payload struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return strings.EqualFold(payload.Action, "DEESCALATE")
+}
+
+// callerHasDeescalationRole resolves the caller's platform roles via
+// GET /users/me and checks them against the configured allow-list. Fails
+// closed (returns false) on any lookup/parse error, same convention as
+// resolveCurrentUserID.
+func (h *CaseHandler) callerHasDeescalationRole(r *http.Request, user *middleware.UserInfo) bool {
+	if len(h.deescalationAllowedRoles) == 0 {
+		return false
+	}
+	raw, err := h.entity.GetUserMe(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetUserMe failed while checking de-escalation authorization", "userID", user.UserID, "err", err)
+		return false
+	}
+	var me struct {
+		Roles []string `json:"roles"`
+	}
+	if err := json.Unmarshal(raw, &me); err != nil {
+		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed while checking de-escalation authorization", "userID", user.UserID, "err", err)
+		return false
+	}
+	for _, role := range me.Roles {
+		if h.deescalationAllowedRoles[strings.ToLower(strings.TrimSpace(role))] {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveCurrentUserID returns the caller's platform user id — the id
@@ -1235,6 +1306,75 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// GetCaseEscalations handles GET /cases/{id}/escalations.
+func (h *CaseHandler) GetCaseEscalations(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.SearchCaseEscalations(r.Context(), caseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to retrieve case escalation history.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateCaseEscalation handles POST /cases/{id}/escalations.
+func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if len(body) > 0 && !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if isDeescalationAction(body) && !h.callerHasDeescalationRole(r, user) {
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
+		return
+	}
+
+	result, err := h.entity.CreateCaseEscalation(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateCaseEscalation failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to create case escalation.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // injectCaseIDField merges caseId into a JSON request body as {"caseId": "<id>"}.

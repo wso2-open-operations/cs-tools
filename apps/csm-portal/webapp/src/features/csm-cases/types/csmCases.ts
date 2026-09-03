@@ -113,6 +113,31 @@ export interface CsmCaseRow {
   /** Falls back to {@link createdAt} when the backend hasn't returned
    * `updatedOn` for this row; rendered unprefixed either way. */
   updatedAt: string;
+  /**
+   * The case's current escalation level: one of the raw escalation-level ids
+   * `"0"` through `"5"` (EL0 "not escalated" through EL5 "CEO"), carried
+   * through unmapped from `BeCaseView.escalationLevel` /
+   * `BeCaseSearchView.escalationLevel` — see
+   * `features/csm-cases/utils/escalationLevel.ts` for the display label/color
+   * ramp. Null/absent when the backing case carries no escalation level (e.g.
+   * non-ServiceNow-backed cases) or is not escalated (`"0"`).
+   */
+  escalationLevel?: string | null;
+}
+
+/**
+ * One escalation-level change recorded against a case, as returned by
+ * `GET /cases/{id}/escalations` (newest first). Mirrors the wire shape
+ * (`BeCaseEscalation`) closely — this is a read-mostly history list, not
+ * something the rest of the app maps into a different shape.
+ */
+export interface CaseEscalationRecord {
+  id: string;
+  currentLevel: string;
+  previousLevel: string;
+  createdBy: string;
+  createdOn: string;
+  reason?: string | null;
 }
 
 export interface CsmCasesListResponse {

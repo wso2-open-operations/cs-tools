@@ -29,6 +29,7 @@ describe("CASE_OPTIONAL_COLUMNS", () => {
       "createdBy",
       "customer",
       "createdAt",
+      "escalationLevel",
     ];
     expect(ids).toEqual([...expected].sort());
   });

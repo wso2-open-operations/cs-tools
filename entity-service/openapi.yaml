@@ -1346,6 +1346,96 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/escalations:
+    get:
+      summary: Get a case's full escalation history, newest first (ServiceNow data source only).
+      operationId: searchCaseEscalations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      responses:
+        "200":
+          description: The case's escalation history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchEscalationsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Escalate or de-escalate a case (ServiceNow data source only).
+      operationId: createCaseEscalation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEscalationRequest'
+      responses:
+        "201":
+          description: Escalation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Escalation'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments:
     post:
       summary: Upload a file attachment to a support case.
@@ -6263,6 +6353,14 @@ components:
           description: >-
             Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible to
             CSM engineers only. Populated for ServiceNow cases; null otherwise.
+        escalationLevel:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5"]
+          nullable: true
+          description: >-
+            The case's current escalation level ("0" = not escalated through "5" = highest),
+            the same id space accepted by the case search's escalationLevel filter. Null when
+            the backing case carries no escalation level (e.g. non-ServiceNow-backed cases).
         tags:
           type: array
           nullable: true
@@ -6390,6 +6488,13 @@ components:
             Internal-only worst-case fix-commitment date (date-only,
             YYYY-MM-DD), visible to CSM engineers only. Populated for the
             ServiceNow data source only; null otherwise.
+        escalationLevel:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5"]
+          nullable: true
+          description: >-
+            The case's current escalation level -- see CaseView.escalationLevel's
+            description.
 
     SearchCasesResponse:
       type: object
@@ -8300,6 +8405,88 @@ components:
           type: string
         issue:
           $ref: '#/components/schemas/CaseGithubIssueDetail'
+
+    EscalationNotifiedUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null when the backing data source could not resolve a platform user record.
+        userName:
+          type: string
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+
+    Escalation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        currentLevel:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5"]
+          description: The escalation level this step moved the case to.
+        previousLevel:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5"]
+          description: The escalation level this step moved the case from.
+        createdBy:
+          type: string
+          description: Email of the user who recorded this escalation step.
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          nullable: true
+          description: Required when the step escalated; optional when it de-escalated.
+        notifiedUsers:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/EscalationNotifiedUser'
+          description: Users notified of this escalation-level change.
+
+    SearchEscalationsResponse:
+      type: object
+      properties:
+        escalations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Escalation'
+          description: The case's full escalation history, newest first.
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    CreateEscalationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          description: Required when action is ESCALATE (the default); optional when DEESCALATE.
+        action:
+          type: string
+          enum: [ESCALATE, DEESCALATE]
+          default: ESCALATE
+          description: Whether to raise or lower the case's escalation level.
 
     SearchCallRequestsRequest:
       type: object

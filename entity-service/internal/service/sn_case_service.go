@@ -138,6 +138,24 @@ type snCase struct {
 	// request set includeExtendedFields — nil otherwise, so this must tolerate
 	// absence.
 	WorstCaseFixEta *string `json:"worstCaseFixEta"`
+	// EscalationLevel is the case's current escalation level as a ChoiceListItem
+	// (id "0" through "5", EL0 "not escalated" through EL5 "CEO"), confirmed
+	// present as a top-level field on the Choreo Case record. Nil for cases with
+	// no escalation history.
+	EscalationLevel *snCaseEscalationLevel `json:"escalationLevel"`
+	// IsEscalated indicates whether the case is currently escalated, confirmed
+	// present as a top-level field on the Choreo Case record. A *bool (not bool)
+	// so an absent field is distinguishable from an explicit false.
+	IsEscalated *bool `json:"isEscalated"`
+}
+
+// snCaseEscalationLevel mirrors the Choreo Case record's escalationLevel
+// ChoiceListItem field: {id, label}. Id is one of "0" through "5" (EL0
+// "not escalated" through EL5 "CEO"), the same ids accepted by the case
+// search's "escalationLevel" filter field.
+type snCaseEscalationLevel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 // snCaseVariableAnswer mirrors one answered catalog-item question on a service
@@ -1055,6 +1073,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if c.WorstCaseFixEta != nil && *c.WorstCaseFixEta != "" {
 		cv.WorstCaseFixEta = c.WorstCaseFixEta
 	}
+	cv.EscalationLevel = snEscalationLevelID(c.EscalationLevel)
 	// The Choreo GET /cases/{id} response (snCase above) still has no inline tags field,
 	// so the case's current tags are fetched separately via the case-scoped
 	// GET /cases/{id}/tags resource. A failure here must not fail the whole case read
@@ -2820,6 +2839,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			BestCaseFixEta:   c.BestCaseFixEta,
 			MostLikelyFixEta: c.MostLikelyFixEta,
 			WorstCaseFixEta:  c.WorstCaseFixEta,
+			EscalationLevel:  snEscalationLevelID(c.EscalationLevel),
 		}
 		if c.Account != nil {
 			cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
@@ -3084,6 +3104,17 @@ func snLabelStr(l *snCaseLabel) *string {
 		return nil
 	}
 	return &l.Label
+}
+
+// snEscalationLevelID returns the escalation-level id ("0" through "5") from
+// the Choreo ChoiceListItem-shaped escalationLevel field, or nil when the case
+// carries no escalation level. See domain.CaseView.EscalationLevel.
+func snEscalationLevelID(lvl *snCaseEscalationLevel) *string {
+	if lvl == nil {
+		return nil
+	}
+	id := lvl.ID
+	return &id
 }
 
 // snWorkStateLabelStr normalizes an SN work-state label to the lowercased

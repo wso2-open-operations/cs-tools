@@ -28,6 +28,7 @@ import { Eye } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
+import EscalationLevelChip from "@components/EscalationLevelChip";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
@@ -167,6 +168,18 @@ function renderOptionalCell(id: CaseOptionalColumnId, c: CsmCaseRow): JSX.Elemen
         <Typography variant="caption" color="text.secondary" noWrap>
           <RelativeTime iso={c.createdAt} />
         </Typography>
+      );
+    case "escalationLevel":
+      // Blank (not a "not escalated" chip, not even a "—" dash) for a
+      // non-escalated row — matches the work-state column's "only render for
+      // the rows it's relevant to" precedent, so a mostly-empty column
+      // doesn't clutter every non-escalated row.
+      return (
+        <Box sx={{ justifySelf: "start" }}>
+          {c.escalationLevel && c.escalationLevel !== "0" && (
+            <EscalationLevelChip level={c.escalationLevel} short />
+          )}
+        </Box>
       );
   }
 }

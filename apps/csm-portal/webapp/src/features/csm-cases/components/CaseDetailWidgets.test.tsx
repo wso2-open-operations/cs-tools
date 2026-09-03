@@ -32,6 +32,7 @@ vi.mock("@api/backend/client", () => ({
 import {
   AttachmentsWidget,
   CustomerContextWidget,
+  EscalationWidget,
   RequestDetailsWidget,
   TagsWidget,
   WatchersWidget,
@@ -41,6 +42,7 @@ import type { WatchListMember } from "@features/csm-cases/components/CaseDetailW
 import type {
   CaseAttachment,
   CaseCustomerContext,
+  CaseEscalationRecord,
   CaseRequestVariable,
   CaseTag,
 } from "@features/csm-cases/types/csmCases";
@@ -202,6 +204,138 @@ describe("TagsWidget", () => {
     render(<TagsWidget tags={TAGS} />);
     const chip = screen.getByText("micro-gw").closest(".MuiChip-root");
     expect(chip?.querySelector(".MuiChip-deleteIcon")).toBeFalsy();
+  });
+});
+
+const ESCALATION_HISTORY: CaseEscalationRecord[] = [
+  {
+    id: "esc-2",
+    currentLevel: "2",
+    previousLevel: "1",
+    createdBy: "jane.doe@example.com",
+    createdOn: "2026-08-02T00:00:00Z",
+    reason: "Still unresolved after 24h.",
+  },
+  {
+    id: "esc-1",
+    currentLevel: "1",
+    previousLevel: "0",
+    createdBy: "john.smith@example.com",
+    createdOn: "2026-08-01T00:00:00Z",
+    reason: "Customer escalated via phone.",
+  },
+];
+
+describe("EscalationWidget", () => {
+  it("renders the current level badge", () => {
+    render(<EscalationWidget currentLevel="2" history={[]} />);
+    expect(screen.getByText("EL2 — Technology Unit Head")).toBeInTheDocument();
+  });
+
+  it("renders 'Not escalated' when currentLevel is null", () => {
+    render(<EscalationWidget currentLevel={null} history={[]} />);
+    expect(screen.getByText("Not escalated")).toBeInTheDocument();
+  });
+
+  it("renders an empty state when there is no escalation history", () => {
+    render(<EscalationWidget currentLevel="0" history={[]} />);
+    expect(screen.getByText("No escalations on this case.")).toBeInTheDocument();
+  });
+
+  it("renders every history entry with its level transition, actor, and reason", () => {
+    render(<EscalationWidget currentLevel="2" history={ESCALATION_HISTORY} />);
+    expect(screen.getByText("EL1 → EL2")).toBeInTheDocument();
+    expect(screen.getByText("Not escalated → EL1")).toBeInTheDocument();
+    expect(screen.getByText(/jane.doe@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/john.smith@example.com/)).toBeInTheDocument();
+    expect(screen.getByText("Still unresolved after 24h.")).toBeInTheDocument();
+    expect(screen.getByText("Customer escalated via phone.")).toBeInTheDocument();
+  });
+
+  it("shows a loading state instead of the history while isHistoryLoading", () => {
+    render(
+      <EscalationWidget
+        currentLevel="1"
+        history={[]}
+        isHistoryLoading
+      />,
+    );
+    expect(screen.getByText("Loading escalation history…")).toBeInTheDocument();
+  });
+
+  it("shows an error state instead of the history when isHistoryError", () => {
+    render(
+      <EscalationWidget currentLevel="1" history={[]} isHistoryError />,
+    );
+    expect(
+      screen.getByText("Could not load the escalation history."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows only Escalate at EL0", () => {
+    const onEscalate = vi.fn();
+    render(
+      <EscalationWidget
+        currentLevel="0"
+        history={[]}
+        onEscalate={onEscalate}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Escalate" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "De-escalate" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows only De-escalate at EL5", () => {
+    const onDeescalate = vi.fn();
+    render(
+      <EscalationWidget
+        currentLevel="5"
+        history={[]}
+        onDeescalate={onDeescalate}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "De-escalate" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Escalate" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows both actions between EL1 and EL4, each firing its own callback", () => {
+    const onEscalate = vi.fn();
+    const onDeescalate = vi.fn();
+    render(
+      <EscalationWidget
+        currentLevel="2"
+        history={[]}
+        onEscalate={onEscalate}
+        onDeescalate={onDeescalate}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Escalate" }));
+    expect(onEscalate).toHaveBeenCalledTimes(1);
+    expect(onDeescalate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "De-escalate" }));
+    expect(onDeescalate).toHaveBeenCalledTimes(1);
+    expect(onEscalate).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables both actions with a tooltip reason when actionDisabledReason is set", () => {
+    render(
+      <EscalationWidget
+        currentLevel="2"
+        history={[]}
+        onEscalate={vi.fn()}
+        onDeescalate={vi.fn()}
+        actionDisabledReason="This case is closed — it's read-only."
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Escalate" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "De-escalate" })).toBeDisabled();
   });
 });
 

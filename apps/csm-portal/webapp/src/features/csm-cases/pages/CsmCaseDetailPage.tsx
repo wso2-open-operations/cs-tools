@@ -112,8 +112,15 @@ import { useRequestCaseUpdate } from "@features/csm-cases/api/useRequestCaseUpda
 import { deriveCaseUpdateRequestCategory } from "@features/csm-cases/utils/caseUpdateRequests";
 import CreateTaskDialog from "@features/csm-cases/components/CreateTaskDialog";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
+import EscalateCaseDialog from "@features/csm-cases/components/EscalateCaseDialog";
 import { useCreateCaseTask } from "@features/csm-cases/api/useCreateCaseTask";
 import { useAddCaseTag, useRemoveCaseTag } from "@features/csm-cases/api/useCaseTags";
+import { useGetCsmCaseEscalations } from "@features/csm-cases/api/useGetCsmCaseEscalations";
+import { usePostCsmCaseEscalation } from "@features/csm-cases/api/usePostCsmCaseEscalation";
+import {
+  canDeescalate,
+  canEscalateFurther,
+} from "@features/csm-cases/utils/escalationLevel";
 import { ChildCasesWidget } from "@features/csm-cases/components/ChildCasesWidget";
 import { LinkedServiceRequestsWidget } from "@features/csm-cases/components/LinkedServiceRequestsWidget";
 import { LinkedChangeRequestsWidget } from "@features/csm-cases/components/LinkedChangeRequestsWidget";
@@ -128,6 +135,7 @@ import RefreshButton from "@components/RefreshButton";
 import {
   AttachmentsWidget,
   CustomerContextWidget,
+  EscalationWidget,
   ProductContextWidget,
   RequestDetailsWidget,
   TagsWidget,
@@ -573,6 +581,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const createTask = useCreateCaseTask(caseId);
   const addTag = useAddCaseTag(caseId);
   const removeTag = useRemoveCaseTag(caseId);
+  const {
+    data: escalationHistory,
+    isLoading: isEscalationHistoryLoading,
+    isError: isEscalationHistoryError,
+  } = useGetCsmCaseEscalations(caseId);
+  const postEscalation = usePostCsmCaseEscalation(caseId);
   const requestCaseUpdate = useRequestCaseUpdate();
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
@@ -625,6 +639,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [fixEtaOpen, setFixEtaOpen] = useState(false);
   const [requestUpdateOpen, setRequestUpdateOpen] = useState(false);
   const [addTagOpen, setAddTagOpen] = useState(false);
+  // Which action the escalation confirm dialog is for, if open at all — null
+  // hides the dialog. Set by whichever of Escalate/De-escalate was clicked.
+  const [escalationDialogAction, setEscalationDialogAction] = useState<
+    "ESCALATE" | "DEESCALATE" | null
+  >(null);
+  const [escalationError, setEscalationError] = useState<string | null>(null);
   // ISSU-026: closing or proposing a solution opens this instead of PATCHing
   // immediately — it collects the Post Resolution Activity and doubles as
   // the confirmation step for these two customer-notifying transitions.
@@ -705,6 +725,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setFixEtaOpen(false);
     setRequestUpdateOpen(false);
     setAddTagOpen(false);
+    setEscalationDialogAction(null);
+    setEscalationError(null);
     // A new view of the page, distinct from every prior one even if it's a
     // return visit to the same caseId (A -> B -> A) — see caseViewTokenRef
     // below, which onRequestUpdate compares against instead of caseId itself.
@@ -1731,6 +1753,48 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [addTag, showError],
   );
 
+  const onSubmitEscalation = useCallback(
+    (reason: string | undefined) => {
+      if (!escalationDialogAction) return;
+      setEscalationError(null);
+      // Compared against caseViewTokenRef in the callbacks below, not caseId
+      // itself — see onRequestUpdate's identical guard above for why a plain
+      // caseId comparison can't distinguish this view's request from a
+      // still-pending one left over from an earlier visit to the same case.
+      const submittedViewToken = caseViewTokenRef.current;
+      postEscalation.mutate(
+        { action: escalationDialogAction, reason },
+        {
+          onSuccess: () => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            setEscalationDialogAction(null);
+            setFeedback({
+              message:
+                escalationDialogAction === "ESCALATE"
+                  ? "Case escalated."
+                  : "Case de-escalated.",
+              severity: "success",
+              sticky: false,
+            });
+          },
+          onError: (err) => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            // A 400 here is actionable (e.g. a reason missing while
+            // escalating, or already at the floor/ceiling level) — surface it
+            // instead of a generic fallback and keep the dialog open with the
+            // reason text preserved, same treatment as other case actions.
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not update the case's escalation level.";
+            setEscalationError(msg);
+          },
+        },
+      );
+    },
+    [escalationDialogAction, postEscalation],
+  );
+
   const onRemoveTag = useCallback(
     (tagId: string) => {
       removeTag.mutate(tagId, {
@@ -2476,6 +2540,25 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRemove={isClosed ? undefined : (t) => onRemoveTag(t.id)}
             removingId={removeTag.isPending ? removeTag.variables : null}
           />
+          <EscalationWidget
+            currentLevel={c.escalationLevel ?? null}
+            history={escalationHistory ?? []}
+            isHistoryLoading={isEscalationHistoryLoading}
+            isHistoryError={isEscalationHistoryError}
+            onEscalate={
+              !isClosed && canEscalateFurther(c.escalationLevel)
+                ? () => setEscalationDialogAction("ESCALATE")
+                : undefined
+            }
+            onDeescalate={
+              !isClosed && canDeescalate(c.escalationLevel)
+                ? () => setEscalationDialogAction("DEESCALATE")
+                : undefined
+            }
+            actionDisabledReason={
+              isClosed ? "This case is closed — it's read-only." : undefined
+            }
+          />
         </Box>
       )}
 
@@ -2726,6 +2809,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isSaving={patchCase.isPending}
           onClose={() => setAutocloseHoldOpen(false)}
           onSave={onSetAutocloseHold}
+        />
+      )}
+
+      {escalationDialogAction && (
+        <EscalateCaseDialog
+          action={escalationDialogAction}
+          currentLevel={c.escalationLevel ?? "0"}
+          isSaving={postEscalation.isPending}
+          errorMessage={escalationError}
+          onClose={() => {
+            setEscalationDialogAction(null);
+            setEscalationError(null);
+          }}
+          onSave={onSubmitEscalation}
         />
       )}
 

@@ -794,6 +794,124 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/escalations:
+    get:
+      summary: Get a case's escalation history.
+      description: >
+        Returns the full escalation history for a case (each escalate/de-escalate
+        step, newest first). Supported by the ServiceNow data source only.
+      operationId: getCasesIdEscalations
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseEscalationSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Escalate or de-escalate a case.
+      description: >
+        Raises or lowers a case's escalation level by one step. A work note
+        recording the change is added to the case automatically as a side
+        effect. Supported by the ServiceNow data source only.
+      operationId: postCasesIdEscalations
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Case escalation payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseEscalationCreatePayload'
+        required: false
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseEscalation'
+        "400":
+          description: BadRequest — an invalid action value, or reason missing while escalating.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /attachments:
     post:
       summary: Upload a file attachment to a case.
@@ -7676,6 +7794,19 @@ components:
           items:
             $ref: '#/components/schemas/Tag'
           description: Free-text labels attached to the case. null/absent when none are set.
+        escalationLevel:
+          type: string
+          nullable: true
+          enum:
+            - "0"
+            - "1"
+            - "2"
+            - "3"
+            - "4"
+            - "5"
+          description: >-
+            The case's current escalation level (EL0-EL5), or null when not yet known/populated
+            for this case's data source.
 
     CaseSearchView:
       type: object
@@ -7768,6 +7899,19 @@ components:
           $ref: '#/components/schemas/CaseNumberRef'
         account:
           $ref: '#/components/schemas/AccountRef'
+        escalationLevel:
+          type: string
+          nullable: true
+          enum:
+            - "0"
+            - "1"
+            - "2"
+            - "3"
+            - "4"
+            - "5"
+          description: >-
+            The case's current escalation level (EL0-EL5), or null when not yet known/populated
+            for this case's data source.
 
     UpdateDescriptionRequest:
       type: object
@@ -9484,6 +9628,85 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    CaseEscalationNotifiedUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        userName:
+          type: string
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+
+    CaseEscalation:
+      type: object
+      description: >
+        One escalation-level change recorded against a case: either an escalate
+        or a de-escalate step, with the level it moved from and to. Supported
+        by the ServiceNow data source only.
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        currentLevel:
+          type: string
+          description: >
+            The escalation-level id ("0" through "5": EL0 "not escalated"
+            through EL5 "CEO") after this change — the same id space the case
+            search's escalationLevel filter accepts and returns.
+        previousLevel:
+          type: string
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          nullable: true
+        notifiedUsers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalationNotifiedUser'
+
+    CaseEscalationSearchResponse:
+      type: object
+      description: The response for GET /cases/{id}/escalations — the case's full escalation history, newest first.
+      properties:
+        escalations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalation'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    CaseEscalationCreatePayload:
+      type: object
+      description: >
+        The case ID is taken from the URL path. action defaults to ESCALATE
+        when omitted. reason is required when escalating and optional when
+        de-escalating.
+      properties:
+        reason:
+          type: string
+        action:
+          type: string
+          enum: [ESCALATE, DEESCALATE]
 
     AssignedEngineerRef:
       type: object

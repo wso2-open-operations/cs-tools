@@ -72,6 +72,12 @@ func main() {
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
+	// CSM_DEESCALATION_ALLOWED_ROLES: comma-separated platform role names
+	// permitted to de-escalate a case (escalating stays open to any
+	// authenticated user). Unset/empty means de-escalation is disabled for
+	// everyone -- see CaseHandler.SetDeescalationAllowedRoles's doc comment
+	// for why this fails closed rather than defaulting to unrestricted.
+	caseHandler.SetDeescalationAllowedRoles(splitComma(os.Getenv("CSM_DEESCALATION_ALLOWED_ROLES")))
 	dashboardHandler := handler.NewDashboardHandler()
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
@@ -143,6 +149,8 @@ func main() {
 	mux.HandleFunc("GET /case-update-request-templates", caseHandler.GetCaseUpdateRequestTemplates)
 	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
 	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
+	mux.HandleFunc("GET /cases/{id}/escalations", caseHandler.GetCaseEscalations)
+	mux.HandleFunc("POST /cases/{id}/escalations", caseHandler.CreateCaseEscalation)
 	mux.HandleFunc("POST /attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)

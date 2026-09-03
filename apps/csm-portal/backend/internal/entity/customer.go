@@ -84,6 +84,20 @@ func (c *CustomerEntityClient) SearchCaseComments(ctx context.Context, caseID st
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/comments/search", url.PathEscape(caseID)), body)
 }
 
+// SearchCaseEscalations calls GET /cases/{id}/escalations on the entity service to fetch
+// a case's escalation history. Response is returned as raw JSON; typed response structs
+// are deferred.
+func (c *CustomerEntityClient) SearchCaseEscalations(ctx context.Context, caseID string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/cases/%s/escalations", url.PathEscape(caseID)), nil)
+}
+
+// CreateCaseEscalation calls POST /cases/{id}/escalations on the entity service to
+// escalate or de-escalate a case. The body is forwarded verbatim. Response is returned
+// as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) CreateCaseEscalation(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/escalations", url.PathEscape(caseID)), body)
+}
+
 // SearchCaseActivities calls POST /cases/{id}/activities/search on the entity service.
 // The path-scoped body is forwarded verbatim and the response is returned as raw JSON;
 // typed response structs are deferred.

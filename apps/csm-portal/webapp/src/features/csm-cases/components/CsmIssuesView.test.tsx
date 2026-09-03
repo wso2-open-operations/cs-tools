@@ -176,6 +176,7 @@ describe("CsmIssuesView column customization", () => {
     expect(screen.getByText("Reporter")).toBeInTheDocument();
     expect(screen.getByText("Customer")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
+    expect(screen.getByText("Escalation")).toBeInTheDocument();
     expect(screen.queryByText("Severity")).not.toBeInTheDocument();
   });
 
@@ -184,10 +185,10 @@ describe("CsmIssuesView column customization", () => {
     fireEvent.click(screen.getByRole("button", { name: "Customise engagements columns" }));
 
     // Order mirrors `CASE_OPTIONAL_COLUMNS`: Product, Type, Issue type, Assignee,
-    // Reporter, Customer, Created (Severity is excluded entirely here via
-    // hideSeverityColumn).
+    // Reporter, Customer, Created, Escalation (Severity is excluded entirely
+    // here via hideSeverityColumn).
     const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(7);
+    expect(checkboxes).toHaveLength(8);
     expect(checkboxes[0]).toBeChecked(); // Product — the one default-visible column
     expect(checkboxes[1]).not.toBeChecked(); // Type
     expect(checkboxes[2]).not.toBeChecked(); // Issue type
@@ -195,6 +196,7 @@ describe("CsmIssuesView column customization", () => {
     expect(checkboxes[4]).not.toBeChecked(); // Reporter
     expect(checkboxes[5]).not.toBeChecked(); // Customer
     expect(checkboxes[6]).not.toBeChecked(); // Created
+    expect(checkboxes[7]).not.toBeChecked(); // Escalation
   });
 
   it("persists a toggled column across a remount for the same user + view", () => {

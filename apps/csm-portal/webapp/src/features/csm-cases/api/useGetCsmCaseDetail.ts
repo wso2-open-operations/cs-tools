@@ -163,6 +163,7 @@ function detailFromBeCase(
     watchers,
     linkedItems: [],
     tags: (c.tags ?? []).map((t) => ({ id: t.id, label: t.label })),
+    escalationLevel: c.escalationLevel ?? null,
     timeLogs: [],
     audit: [],
     attachments: [],

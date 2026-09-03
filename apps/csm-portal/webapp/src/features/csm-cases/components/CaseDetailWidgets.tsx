@@ -27,6 +27,7 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   Activity,
+  ArrowDownRight,
   ArrowUpRight,
   Bell,
   BellOff,
@@ -70,12 +71,14 @@ import type {
   CaseAttachment,
   CaseAuditEntry,
   CaseCustomerContext,
+  CaseEscalationRecord,
   CaseProductContext,
   CaseRequestVariable,
   CaseTag,
   CaseTimeLogEntry,
 } from "@features/csm-cases/types/csmCases";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
+import { escalationLevelLabel } from "@features/csm-cases/utils/escalationLevel";
 import {
   deploymentTypeLabel,
   formatDeploymentDate,
@@ -84,6 +87,7 @@ import type { ProjectDetails } from "@features/csm-projects/types/csmProjects";
 import type { BeDeployment, BeUser } from "@api/backend/types";
 import type { UserReference } from "@/types/userReference";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import EscalationLevelChip from "@components/EscalationLevelChip";
 import RelativeTime from "@components/RelativeTime";
 import UserRefLink from "@components/UserRefLink";
 import RefreshButton from "@components/RefreshButton";
@@ -426,7 +430,151 @@ export function TagsWidget({
 }
 
 // ---------------------------------------------------------------------------
-// 3b. Watchers
+// 3b. Escalation
+// ---------------------------------------------------------------------------
+
+/**
+ * Current escalation level (as a badge) plus a read-only history of past
+ * escalate/de-escalate steps. Each of `onEscalate` / `onDeescalate` renders
+ * its own clearly-labeled button ("Escalate" / "De-escalate") independently —
+ * both can show at once (e.g. EL2, which can go either way), or just one
+ * (EL0 has only "Escalate"; EL5 has only "De-escalate"). Two distinctly
+ * labeled buttons are unambiguous about which action a click performs, unlike
+ * a single button whose label/target silently changes with the case's
+ * current level would be.
+ *
+ * No role/permission gate on either action button — deliberate, matches the
+ * backend, which has none either (see `usePostCsmCaseEscalation`'s doc
+ * comment). `onEscalate`/`onDeescalate` both open the caller's own confirm
+ * dialog (which collects the reason) rather than firing the mutation
+ * directly, so this widget never has to know the mutation's pending/error
+ * state itself.
+ */
+export function EscalationWidget({
+  currentLevel,
+  history,
+  isHistoryLoading,
+  isHistoryError,
+  onEscalate,
+  onDeescalate,
+  actionDisabledReason,
+}: {
+  /** Raw escalation-level id ("0"-"5"), or null when the data source doesn't
+   * track it (e.g. non-ServiceNow-backed case). */
+  currentLevel: string | null;
+  history: CaseEscalationRecord[];
+  isHistoryLoading?: boolean;
+  isHistoryError?: boolean;
+  /** Opens the escalate confirm dialog. Omit to hide the button entirely
+   * (e.g. already at EL5). */
+  onEscalate?: () => void;
+  /** Opens the de-escalate confirm dialog. Omit to hide the button entirely
+   * (e.g. already at EL0 / unset). */
+  onDeescalate?: () => void;
+  /** Disables both action buttons with an explanatory tooltip (e.g. "This
+   * case is closed — it's read-only.") without hiding them. */
+  actionDisabledReason?: string;
+}): JSX.Element {
+  const level = currentLevel ?? "0";
+
+  return (
+    <WidgetCard
+      title="Escalation"
+      icon={<ArrowUpRight size={16} />}
+      action={
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <EscalationLevelChip level={level} />
+          {(onEscalate || onDeescalate) && (
+            <Tooltip title={actionDisabledReason ?? ""}>
+              <Box component="span" sx={{ display: "flex", gap: 0.5 }}>
+                {onDeescalate && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={onDeescalate}
+                    disabled={!!actionDisabledReason}
+                  >
+                    De-escalate
+                  </Button>
+                )}
+                {onEscalate && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={onEscalate}
+                    disabled={!!actionDisabledReason}
+                  >
+                    Escalate
+                  </Button>
+                )}
+              </Box>
+            </Tooltip>
+          )}
+        </Box>
+      }
+    >
+      {isHistoryLoading ? (
+        <Typography variant="body2" color="text.secondary">
+          Loading escalation history…
+        </Typography>
+      ) : isHistoryError ? (
+        <Typography variant="body2" color="error">
+          Could not load the escalation history.
+        </Typography>
+      ) : history.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No escalations on this case.
+        </Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {history.map((h) => {
+            const isEscalate =
+              Number(h.currentLevel) > Number(h.previousLevel);
+            return (
+              <Box
+                key={h.id}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 0.25,
+                  p: 0.75,
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                  {isEscalate ? (
+                    <ArrowUpRight size={14} />
+                  ) : (
+                    <ArrowDownRight size={14} />
+                  )}
+                  <Typography variant="body2">
+                    {`${escalationLevelLabel(h.previousLevel, true)} → ${escalationLevelLabel(h.currentLevel, true)}`}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                  {h.createdBy} · <RelativeTime iso={h.createdOn} />
+                </Typography>
+                {h.reason && (
+                  <Typography
+                    variant="body2"
+                    sx={{ mt: 0.25, overflowWrap: "anywhere" }}
+                  >
+                    {h.reason}
+                  </Typography>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+    </WidgetCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 3c. Watchers
 // ---------------------------------------------------------------------------
 
 /**

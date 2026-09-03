@@ -395,6 +395,51 @@ describe("CasesList optional columns", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("renders the escalation level chip for an escalated row", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, escalationLevel: "2" }]}
+              isLoading={false}
+              optionalColumns={["escalationLevel"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Escalation")).toBeInTheDocument();
+    expect(screen.getByText("EL2")).toBeInTheDocument();
+  });
+
+  it("renders nothing (not a placeholder chip) in the escalation column for a non-escalated row", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, escalationLevel: "0" }]}
+              isLoading={false}
+              optionalColumns={["escalationLevel"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Escalation")).toBeInTheDocument();
+    expect(screen.queryByText(/^EL/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Not escalated")).not.toBeInTheDocument();
+  });
+
   it("keeps rendering the legacy fixed optional set when optionalColumns is omitted", () => {
     renderWithProviders(
       <Routes>

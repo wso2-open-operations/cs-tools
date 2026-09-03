@@ -137,6 +137,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		caseGithubIssueHandler = handler.NewCaseGithubIssueHandler(service.NewServiceNowCaseGithubIssueService(serviceNowIntegrationServiceClient, activeCaseSvc))
 	}
 
+	var escalationHandler *handler.EscalationHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		escalationHandler = handler.NewEscalationHandler(service.NewServiceNowEscalationService(serviceNowIntegrationServiceClient, activeCaseSvc))
+	}
+
 	var changeRequestHandler *handler.ChangeRequestHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		changeRequestHandler = handler.NewChangeRequestHandler(service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient))
@@ -321,6 +326,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	if caseGithubIssueHandler != nil {
 		mux.HandleFunc("POST /cases/{id}/github-issues", caseGithubIssueHandler.CreateCaseGithubIssue)
+	}
+
+	if escalationHandler != nil {
+		mux.HandleFunc("GET /cases/{id}/escalations", escalationHandler.SearchCaseEscalations)
+		mux.HandleFunc("POST /cases/{id}/escalations", escalationHandler.CreateCaseEscalation)
 	}
 
 	if changeRequestHandler != nil {

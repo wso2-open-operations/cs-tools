@@ -1318,6 +1318,12 @@ type CaseView struct {
 	// date-only "YYYY-MM-DD" string (ServiceNow u_worst_case_fix_eta).
 	// CSM-engineer-facing only, never shared with the customer.
 	WorstCaseFixEta *string `json:"worstCaseFixEta"`
+	// EscalationLevel is the case's current escalation level, one of the raw
+	// escalation-level ids ("0" through "5", EL0 "not escalated" through EL5
+	// "CEO") also accepted by the case search's "escalationLevel" filter field
+	// (ServiceNow data source only). Nil when the backing case carries no
+	// escalation level (e.g. non-ServiceNow-backed cases).
+	EscalationLevel *string `json:"escalationLevel"`
 	// Tags are the free-text labels attached to the case via ServiceNow's generic
 	// platform label/label_entry mechanism (not a case-specific column). Tags
 	// themselves are managed out-of-band via AddCaseTag/RemoveCaseTag/SearchTags.
@@ -1658,6 +1664,9 @@ type SearchCaseView struct {
 	// only; null otherwise. CSM-engineer-facing only, never shared with the
 	// customer.
 	WorstCaseFixEta *string `json:"worstCaseFixEta"`
+	// EscalationLevel is the case's current escalation level -- see
+	// CaseView.EscalationLevel's doc comment.
+	EscalationLevel *string `json:"escalationLevel"`
 }
 
 // SearchCasesResponse is the paginated result of a case search. When the
@@ -2219,6 +2228,65 @@ type CaseGithubIssueDetail struct {
 type CreateCaseGithubIssueResponse struct {
 	Message string                `json:"message"`
 	Issue   CaseGithubIssueDetail `json:"issue"`
+}
+
+// EscalationAction selects whether a POST /cases/{id}/escalations call raises
+// or lowers the case's escalation level.
+type EscalationAction string
+
+const (
+	EscalationActionEscalate   EscalationAction = "ESCALATE"
+	EscalationActionDeescalate EscalationAction = "DEESCALATE"
+)
+
+// EscalationNotifiedUser is a compact reference to a user notified about an
+// escalation-level change on a case. ID is nil when the backing data source
+// could not resolve a platform user record for the notified recipient.
+type EscalationNotifiedUser struct {
+	ID       *string `json:"id"`
+	UserName string  `json:"userName"`
+	Name     *string `json:"name"`
+	Email    *string `json:"email"`
+}
+
+// Escalation is one escalation-level change recorded against a case: either an
+// escalate or a de-escalate step, with the level it moved from and to.
+//
+// CurrentLevel and PreviousLevel are the raw escalation-level ids ("0" through
+// "5": EL0 "not escalated" through EL5 "CEO"), the same id space the case
+// search's "escalationLevel" filter field already accepts and returns — kept
+// as the raw id rather than mapped through a label enum for that reason.
+// Supported by the ServiceNow data source only.
+type Escalation struct {
+	ID            string                   `json:"id"`
+	CaseID        string                   `json:"caseId"`
+	CurrentLevel  string                   `json:"currentLevel"`
+	PreviousLevel string                   `json:"previousLevel"`
+	CreatedBy     string                   `json:"createdBy"`
+	CreatedOn     time.Time                `json:"createdOn"`
+	UpdatedOn     time.Time                `json:"updatedOn"`
+	Reason        *string                  `json:"reason"`
+	NotifiedUsers []EscalationNotifiedUser `json:"notifiedUsers,omitempty"`
+}
+
+// SearchEscalationsResponse is the response for GET /cases/{id}/escalations:
+// the case's full escalation history, newest first.
+type SearchEscalationsResponse struct {
+	Escalations []Escalation `json:"escalations"`
+	Total       int          `json:"total"`
+	Offset      int          `json:"offset"`
+	Limit       int          `json:"limit"`
+}
+
+// CreateEscalationRequest is the input for POST /cases/{id}/escalations.
+// CaseID is populated from the URL path parameter and is not part of the JSON
+// body. Action defaults to ESCALATE when omitted; Reason is required when
+// escalating and optional when de-escalating. Supported by the ServiceNow
+// data source only.
+type CreateEscalationRequest struct {
+	CaseID string            `json:"-"`
+	Reason *string           `json:"reason,omitempty"`
+	Action *EscalationAction `json:"action,omitempty"`
 }
 
 // Attachment represents a file attachment linked to a reference entity.
