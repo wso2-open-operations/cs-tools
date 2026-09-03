@@ -28,9 +28,17 @@ import type { BeDashboard } from "@api/backend/types";
  *
  * Disabled while `dashboardId` is `undefined`, e.g. before the dashboard
  * list has loaded and an initial selection has been made.
+ *
+ * @param refetchIntervalMs Background auto-refetch interval in
+ * milliseconds — `undefined` (the default) means no auto-refetch at all,
+ * the behavior every caller had before this parameter existed. Only the
+ * CS Overview dashboard (`WallboardDashboard`) passes a value here, to
+ * match `digiops-cs`'s own Wallboard.tsx 60s refresh; every other
+ * dashboard's own call site leaves it unset.
  */
 export function useDashboard(
   dashboardId: string | undefined,
+  refetchIntervalMs?: number,
 ): UseQueryResult<BeDashboard | null, Error> {
   const api = useBackendApi();
 
@@ -42,5 +50,6 @@ export function useDashboard(
     },
     enabled: dashboardId !== undefined,
     staleTime: 30_000,
+    refetchInterval: refetchIntervalMs,
   });
 }

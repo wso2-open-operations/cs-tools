@@ -75,7 +75,14 @@ import { ALL_TEAMS_SENTINEL } from "@features/csm-dashboard/utils/teamFilterPlac
  * Dashboards are selected purely by dropdown — there is no other
  * per-dashboard scoping control. Every dashboard in the registry has at
  * least one real (config-driven) widget, so this always renders the real
- * widget grid.
+ * widget grid, via `AgentsLandingPagePilot`.
+ *
+ * The Wallboard-styled full-screen dashboard (matching `digiops-cs`'s
+ * Wallboard.tsx — see `CS_Dashboard.png`) is NOT rendered here — it lives
+ * at its own route, `/cs-monitor-dashboard`
+ * (`CsMonitorDashboardPage.tsx`), outside this page and outside the
+ * normal CSM Portal chrome entirely. This page always renders the
+ * standard widget grid for every dashboard, cs-overview included.
  */
 
 export default function CsmDashboardPage(): JSX.Element {

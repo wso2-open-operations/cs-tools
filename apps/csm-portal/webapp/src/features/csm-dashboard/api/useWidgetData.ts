@@ -92,6 +92,14 @@ export function useWidgetData(
    * the user profile hasn't loaded yet, in which case any filter entry
    * carrying that placeholder is dropped rather than sent literally. */
   currentUserId?: string,
+  /** Background auto-refetch interval in milliseconds — `undefined` (the
+   * default) means no auto-refetch at all, the behavior every existing
+   * caller had before this parameter existed. Only the CS Overview
+   * dashboard's own tiles (`WallboardStatTile`/`WallboardSecondaryStat`)
+   * pass a value here, to match `digiops-cs`'s own Wallboard.tsx 60s
+   * refresh; `DashboardWidgetTile` and every other caller leaves it
+   * unset. */
+  refetchIntervalMs?: number,
 ): UseQueryResult<WidgetData, Error> {
   const api = useBackendApi();
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
@@ -123,6 +131,7 @@ export function useWidgetData(
       effectiveSortBy,
     ],
     enabled: enabled && !awaitingCurrentUser,
+    refetchInterval: refetchIntervalMs,
     queryFn: async (): Promise<WidgetData> => {
       if (!config) {
         // A widget's resourceType came back from the backend (now a

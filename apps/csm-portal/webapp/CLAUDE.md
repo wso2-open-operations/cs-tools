@@ -32,6 +32,7 @@ Feature-based: each `src/features/<name>/` folder owns its own `api/` (React Que
 - Every route page component is `React.lazy`-loaded individually (one `lazy(() => import(...))` call per page); only error pages and the coming-soon placeholder are eager.
 - Declared with `react-router` v7's JSX `<Routes>`/`<Route>` API, not a data router (`createBrowserRouter`).
 - Everything except `/401`/`/403`/`/404` sits under `<Route element={<AuthGuard />}>` → `<Route element={<FeatureRouteGuard />}>` (a runtime feature-flag/WIP gate keyed by `CSM_PORTAL_FEATURE_OVERRIDES`).
+  - **Exception**: `/cs-monitor-dashboard` sits under its own `<Route element={<AuthGuard bare />}>`, deliberately OUTSIDE `FeatureRouteGuard`. It's a standalone, full-screen kiosk/wallboard view with no nav entry of its own to be WIP-gated against — `FeatureRouteGuard`'s whole job is keeping a route's availability consistent with its nav entry's `CSM_PORTAL_FEATURE_OVERRIDES` state, which doesn't apply to a route that was never reachable from the nav in the first place. `AuthGuard`'s own `bare` prop still runs the exact same sign-in/redirect/token-refresh logic as every other route — it only skips rendering `AppLayout` (header/sidebar/banners) once authenticated, rendering a bare `<Outlet />` (in its own `Suspense` boundary, since `AppLayout` is otherwise the only place that provides one) instead.
 - Legacy paths (e.g. `/accounts`, `/projects`) are kept as `<Navigate>` redirects for backward compatibility rather than removed outright.
 
 ## Page conventions: Back navigation

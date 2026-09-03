@@ -15,8 +15,9 @@
 // under the License.
 
 import "@testing-library/jest-dom/vitest";
-import { act, render, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { lazy, type JSX } from "react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // `ProtectedRoute`'s real implementation polls `isSignedIn` on ~1s interval
@@ -29,11 +30,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // therefore its loader-swap behaviour) is even in the tree for a given render.
 const defaultSignInMock = vi.fn();
 const protectedRouteRenderCount = vi.fn();
+// Captures whichever `loader` element AuthGuard passed on the most recent
+// render — the mock below never renders `loader` itself (see its own
+// comment), so a test that cares about `bare`'s loader-swap has to inspect
+// this directly instead of looking for it in the rendered output.
+let capturedLoader: React.ReactNode;
 vi.mock("@asgardeo/react-router", () => ({
   ProtectedRoute: ({
+    loader,
     onSignIn,
     children,
   }: {
+    loader?: React.ReactNode;
     onSignIn?: (
       defaultSignIn: (options?: Record<string, unknown>) => void,
       signInOptions?: Record<string, unknown>,
@@ -41,6 +49,7 @@ vi.mock("@asgardeo/react-router", () => ({
     children?: React.ReactNode;
   }) => {
     protectedRouteRenderCount();
+    capturedLoader = loader;
     onSignIn?.(defaultSignInMock, { some: "option" });
     return children ?? null;
   },
@@ -60,7 +69,11 @@ vi.mock("@asgardeo/react", () => ({
 }));
 
 vi.mock("@layouts/AppLayout", () => ({
-  default: () => null,
+  default: () => <div data-testid="app-layout" />,
+}));
+
+vi.mock("@layouts/BareAuthLoader", () => ({
+  default: () => <div data-testid="bare-auth-loader" />,
 }));
 
 vi.mock("@context/current-user/CurrentUserContext", () => ({
@@ -73,6 +86,7 @@ vi.mock("@hooks/useLogger", () => ({
 }));
 
 const { default: AuthGuard } = await import("./AuthGuard");
+const { default: BareAuthLoader } = await import("./BareAuthLoader");
 
 function renderAuthGuard() {
   return render(
@@ -213,5 +227,117 @@ describe("AuthGuard after an initial successful sign-in (transient token-clock e
     // content — for the brief window before the browser actually navigates
     // away to the IdP's sign-out endpoint.
     expect(protectedRouteRenderCount).toHaveBeenCalled();
+  });
+});
+
+describe("AuthGuard bare mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sessionStorage.clear();
+    asgardeoState.isSignedIn = false;
+  });
+
+  function renderBareAuthGuard() {
+    return render(
+      <MemoryRouter initialEntries={["/cs-monitor-dashboard"]}>
+        <Routes>
+          <Route element={<AuthGuard bare />}>
+            <Route
+              path="cs-monitor-dashboard"
+              element={<div data-testid="bare-route-content" />}
+            />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("passes BareAuthLoader (not AppLayout) as ProtectedRoute's own loader before any sign-in", async () => {
+    signInSilentlyMock.mockResolvedValue(true);
+
+    await act(async () => {
+      renderBareAuthGuard();
+    });
+
+    // The mock ProtectedRoute above never renders `loader` itself (only
+    // `children`), so this checks the element type captured from the prop
+    // directly rather than looking for it in the DOM.
+    expect((capturedLoader as { type?: unknown } | undefined)?.type).toBe(BareAuthLoader);
+  });
+
+  it("renders a plain Outlet (the matched route's own element, not AppLayout) once signed in", async () => {
+    asgardeoState.isSignedIn = true;
+    let rerender!: ReturnType<typeof renderBareAuthGuard>["rerender"];
+
+    await act(async () => {
+      ({ rerender } = renderBareAuthGuard());
+    });
+    // Re-render to let the render-time `setHasSignedInOnce(true)` commit —
+    // same pattern the non-bare "after an initial successful sign-in"
+    // tests above use.
+    await act(async () => {
+      rerender(
+        <MemoryRouter initialEntries={["/cs-monitor-dashboard"]}>
+          <Routes>
+            <Route element={<AuthGuard bare />}>
+              <Route
+                path="cs-monitor-dashboard"
+                element={<div data-testid="bare-route-content" />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(screen.getByTestId("bare-route-content")).toBeInTheDocument();
+    expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
+  });
+
+  // Regression test: `bare` mode skips `AppLayout`, which is the ONLY
+  // place elsewhere in the app that provides a `Suspense` boundary around
+  // routed content (see App.tsx's own routing doc comment). Every route
+  // page in App.tsx — including CsMonitorDashboardPage — is
+  // `React.lazy`-loaded, so a `bare` route with no `Suspense` of its own
+  // would have nothing to suspend against. This uses a REAL lazy import
+  // (an artificially delayed one, so it actually suspends instead of
+  // resolving synchronously) rather than a plain element, specifically to
+  // exercise that gap.
+  it("renders its own Suspense fallback (not a crash) while a lazy-loaded route element is still loading, once signed in", async () => {
+    asgardeoState.isSignedIn = true;
+    const LazyRouteContent = lazy(
+      () =>
+        new Promise<{ default: () => JSX.Element }>((resolve) => {
+          setTimeout(
+            () => resolve({ default: () => <div data-testid="lazy-loaded-content" /> }),
+            10,
+          );
+        }),
+    );
+    let rerender!: ReturnType<typeof renderBareAuthGuard>["rerender"];
+
+    await act(async () => {
+      ({ rerender } = renderBareAuthGuard());
+    });
+    await act(async () => {
+      rerender(
+        <MemoryRouter initialEntries={["/cs-monitor-dashboard"]}>
+          <Routes>
+            <Route element={<AuthGuard bare />}>
+              <Route path="cs-monitor-dashboard" element={<LazyRouteContent />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // Immediately after the lazy element is first rendered, it's still
+    // suspended — AuthGuard's own Suspense fallback (BareAuthLoader) is
+    // what should show, not a blank tree or a thrown error.
+    expect(screen.getByTestId("bare-auth-loader")).toBeInTheDocument();
+    expect(screen.queryByTestId("lazy-loaded-content")).not.toBeInTheDocument();
+
+    // Once the lazy import resolves, the real content takes over.
+    await waitFor(() => expect(screen.getByTestId("lazy-loaded-content")).toBeInTheDocument());
   });
 });
