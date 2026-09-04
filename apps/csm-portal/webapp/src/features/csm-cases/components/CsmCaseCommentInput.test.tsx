@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -27,7 +28,9 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: vi.fn() }),
 }));
 
-import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import CsmCaseCommentInput, {
+  type CommentAttachmentDraft,
+} from "@features/csm-cases/components/CsmCaseCommentInput";
 
 // This component isn't under test here; stub it to a plain textarea (same
 // technique EditCaseDetailsDialog.test.tsx uses for the same dependency).
@@ -231,5 +234,114 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
 
     fireEvent.dragEnter(composer, { dataTransfer: { types: ["text/plain"], files: [] } });
     expect(screen.queryByText("Drop files to attach")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Stands in for the real parent (`CsmCaseDetailPage`), which lifts the draft
+ * out of this component so it survives the Activities tab body unmounting on
+ * a tab switch and remounting on switch-back. `mounted` toggles
+ * `CsmCaseCommentInput` itself, the same way the page conditionally renders
+ * the tab body — the draft state below lives in this harness the whole time,
+ * exactly as it would in the parent page.
+ */
+function DraftLiftingHarness({
+  onSubmit = vi.fn(),
+}: {
+  onSubmit?: (
+    html: string,
+    internal: boolean,
+    attachments: CommentAttachmentDraft[],
+  ) => Promise<unknown> | void;
+}) {
+  const [mounted, setMounted] = useState(true);
+  const [html, setHtml] = useState("");
+  const [attachments, setAttachments] = useState<CommentAttachmentDraft[]>([]);
+  const [internal, setInternal] = useState(false);
+  const [sourceMode, setSourceMode] = useState(false);
+
+  return (
+    <>
+      <button type="button" onClick={() => setMounted((m) => !m)}>
+        toggle tab
+      </button>
+      {mounted && (
+        <CsmCaseCommentInput
+          onSubmit={onSubmit}
+          draftHtml={html}
+          onDraftHtmlChange={setHtml}
+          draftAttachments={attachments}
+          onDraftAttachmentsChange={setAttachments}
+          draftInternal={internal}
+          onDraftInternalChange={setInternal}
+          draftSourceMode={sourceMode}
+          onDraftSourceModeChange={setSourceMode}
+        />
+      )}
+    </>
+  );
+}
+
+describe("CsmCaseCommentInput — lifted draft state survives unmount/remount", () => {
+  it("keeps typed text after the composer unmounts and remounts (e.g. a tab switch)", () => {
+    render(<DraftLiftingHarness />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: "a reply in progress" },
+    });
+    expect(screen.getByLabelText("comment-editor")).toHaveValue(
+      "a reply in progress",
+    );
+
+    // Simulate switching to another case-detail tab and back.
+    fireEvent.click(screen.getByRole("button", { name: "toggle tab" }));
+    expect(screen.queryByLabelText("comment-editor")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "toggle tab" }));
+
+    expect(screen.getByLabelText("comment-editor")).toHaveValue(
+      "a reply in progress",
+    );
+  });
+
+  it("keeps a staged attachment after unmount/remount", () => {
+    render(<DraftLiftingHarness />);
+    const composer = screen.getByTestId("csm-comment-composer");
+
+    fireEvent.drop(composer, fileDrop([makeFile("draft.txt", 100)]));
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "toggle tab" }));
+
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+  });
+
+  it("keeps the internal-note toggle state after unmount/remount", () => {
+    render(<DraftLiftingHarness />);
+
+    fireEvent.click(screen.getByRole("switch", { name: /Internal note/i }));
+    expect(
+      screen.getByRole("switch", { name: /Internal note/i }),
+    ).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "toggle tab" }));
+
+    expect(
+      screen.getByRole("switch", { name: /Internal note/i }),
+    ).toBeChecked();
+  });
+
+  it("clears the lifted draft on a successful submit", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<DraftLiftingHarness onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: "send this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await screen.findByText("Ctrl/Cmd + Enter to send.");
+    expect(screen.getByLabelText("comment-editor")).toHaveValue("");
   });
 });

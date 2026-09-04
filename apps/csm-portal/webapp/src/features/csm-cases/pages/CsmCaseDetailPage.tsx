@@ -84,7 +84,9 @@ import {
   useDeleteCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
-import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import CsmCaseCommentInput, {
+  type CommentAttachmentDraft,
+} from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar, {
   canAcknowledge,
 } from "@features/csm-cases/components/CaseActionBar";
@@ -621,6 +623,23 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // this case's tab from the tab strip can confirm first — see the hook's
   // own doc comment for what this signal does and doesn't guarantee.
   useReportCaseTabDraft(caseId, composerOpen);
+  // The reply composer's draft content, lifted out of CsmCaseCommentInput so
+  // it survives switching to another case-detail tab and back — the
+  // Activities tab body below (and the composer inside it) fully unmounts
+  // while a different tab is active. Cleared explicitly on Cancel and on a
+  // successful submit; a tab switch alone must not touch this.
+  const [draftHtml, setDraftHtml] = useState("");
+  const [draftAttachments, setDraftAttachments] = useState<
+    CommentAttachmentDraft[]
+  >([]);
+  const [draftInternal, setDraftInternal] = useState(false);
+  const [draftSourceMode, setDraftSourceMode] = useState(false);
+  const clearComposerDraft = useCallback(() => {
+    setDraftHtml("");
+    setDraftAttachments([]);
+    setDraftInternal(false);
+    setDraftSourceMode(false);
+  }, []);
   const [assignOpen, setAssignOpen] = useState(false);
   const [linkCaseOpen, setLinkCaseOpen] = useState(false);
   const [linkIncidentOpen, setLinkIncidentOpen] = useState(false);
@@ -687,6 +706,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setPrevCaseId(caseId);
     setFeedback(null);
     setComposerOpen(false);
+    // The lifted composer draft (see clearComposerDraft above) is per-case: a
+    // draft left over from the previous case must not appear — or be
+    // submittable — against the newly opened one.
+    clearComposerDraft();
     setAssignOpen(false);
     setResolutionDialog(null);
     setSeverityOpen(false);
@@ -2244,7 +2267,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   size="small"
                   variant="text"
                   color="inherit"
-                  onClick={() => setComposerOpen(false)}
+                  onClick={() => {
+                    setComposerOpen(false);
+                    clearComposerDraft();
+                  }}
                 >
                   Cancel
                 </Button>
@@ -2256,6 +2282,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onResumeWork={() => onAction({ secondary: "toggle_work_state" })}
                 isResumingWork={patchCase.isPending}
                 autoFocus
+                draftHtml={draftHtml}
+                onDraftHtmlChange={setDraftHtml}
+                draftAttachments={draftAttachments}
+                onDraftAttachmentsChange={setDraftAttachments}
+                draftInternal={draftInternal}
+                onDraftInternalChange={setDraftInternal}
+                draftSourceMode={draftSourceMode}
+                onDraftSourceModeChange={setDraftSourceMode}
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
                   // Post the comment only when there's text; an attachment-only
@@ -2283,9 +2317,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
                       uploadedBy: engineerName,
                     });
                   }
-                  // Collapse only on success; on error the input keeps its
-                  // draft + files and surfaces the failure.
+                  // Collapse and clear the draft only on success; on error the
+                  // input keeps its draft + files and surfaces the failure.
                   setComposerOpen(false);
+                  clearComposerDraft();
                 }}
               />
             </Card>
