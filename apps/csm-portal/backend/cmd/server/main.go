@@ -74,6 +74,7 @@ func main() {
 	}
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
+	roleResolver := middleware.NewRoleResolver(customerEntityClient, 5*time.Minute)
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
 	dashboardHandler := handler.NewDashboardHandler()
@@ -240,7 +241,7 @@ func main() {
 	mux.HandleFunc("POST /configuration-items/search", configurationItemHandler.SearchConfigurationItems)
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
 	mux.HandleFunc("POST /time-cards", timeCardHandler.CreateTimeCard)
-	mux.HandleFunc("PATCH /time-cards/{id}", timeCardHandler.UpdateTimeCard)
+	mux.Handle("PATCH /time-cards/{id}", middleware.RequireRoles(roleResolver, "timecard_approver", "admin")(http.HandlerFunc(timeCardHandler.UpdateTimeCard)))
 	mux.HandleFunc("DELETE /time-cards/{id}", timeCardHandler.DeleteTimeCard)
 	mux.HandleFunc("POST /catalogs/search", catalogHandler.SearchCatalogs)
 	mux.HandleFunc("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", catalogHandler.GetCatalogItemVariables)

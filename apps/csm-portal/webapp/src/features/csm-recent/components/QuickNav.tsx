@@ -30,8 +30,11 @@ import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useSearchParams } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
 
+import { navNodeById } from "@config/csmNavItems";
 import { navigableNavNodes } from "@config/featureFlags";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { usePermissions } from "@hooks/usePermissions";
+import { isNavNodeAuthorized } from "@layouts/navFilter";
 import {
   useRecentViews,
   type RecentView,
@@ -137,6 +140,7 @@ export default function QuickNav(): JSX.Element | null {
   const { isSignedIn } = useAsgardeo();
   const navigate = useNavTransition();
   const recents = useRecentViews();
+  const { roles: userRoles } = usePermissions();
   // Shrink the closed trigger (not the open palette) once something is
   // pinned, so PinnedTabs — which shares the header's flexible middle slot —
   // has room to actually show the pinned chips instead of getting squeezed.
@@ -560,7 +564,13 @@ export default function QuickNav(): JSX.Element | null {
     // "incidents" jumps straight into the tab rather than to Operations.
     const pages: Result[] = q
       ? navigableNavNodes()
-          .filter((i) => match(i.label, i.sublabel))
+          .filter((i) => {
+            const originalNode = navNodeById(i.id);
+            if (originalNode && !isNavNodeAuthorized(originalNode, userRoles)) {
+              return false;
+            }
+            return match(i.label, i.sublabel);
+          })
           .map((i) => ({
             key: `page-${i.id}`,
             icon: <i.icon size={16} />,
@@ -590,6 +600,7 @@ export default function QuickNav(): JSX.Element | null {
     changeRequestSearch.data,
     problemSearch.data,
     conversationSearch.data,
+    userRoles,
   ]);
 
   // Clamp at render so a stale index from shrinking results never points past

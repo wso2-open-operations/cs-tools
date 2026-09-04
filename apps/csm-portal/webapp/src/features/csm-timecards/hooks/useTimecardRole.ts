@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
+import { usePermissions } from "@hooks/usePermissions";
 import {
   TIMECARD_ADMIN_GROUP,
   TIMECARD_APPROVER_GROUP,
@@ -29,16 +29,11 @@ export interface TimecardRole {
 
 /**
  * The signed-in user's time-card role, resolved from `GET /users/me` roles
- * (platform-owned data from the entity service). `isApprover` and `isAdmin`
- * are deliberately independent — being a general portal admin no longer
- * implies time-card approval rights, and doesn't put the Approvals tab in
- * front of someone who isn't actually a time-card approver. Client-side
- * affordance only — the backend must enforce the same gates.
+ * via `usePermissions`. `isApprover` and `isAdmin` are deliberately independent.
  */
 export function useTimecardRole(): TimecardRole {
-  const { data: me } = useGetUsersMe();
-  const roles = (me?.roles ?? []).map((r) => r.toLowerCase());
-  const isAdmin = roles.includes(TIMECARD_ADMIN_GROUP.toLowerCase());
-  const isApprover = roles.includes(TIMECARD_APPROVER_GROUP.toLowerCase());
+  const { hasRole } = usePermissions();
+  const isAdmin = hasRole(TIMECARD_ADMIN_GROUP);
+  const isApprover = hasRole(TIMECARD_APPROVER_GROUP);
   return { isApprover, isAdmin };
 }

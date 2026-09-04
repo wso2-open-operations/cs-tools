@@ -25,6 +25,7 @@ import {
   useSearchParams,
 } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
+import RoleGuard from "@layouts/RoleGuard";
 import {
   LegacyQueryTabRedirect,
   SectionIndexRedirect,
@@ -291,82 +292,78 @@ export default function App(): JSX.Element {
                       Users/Roles/Groups/Teams/Permissions directory pages
                       (Users/Roles/Groups/Teams are real, Permissions is still
                       WIP) behind a tile-grid landing page; Dashboards is a
-                      sibling tab. */}
-                  <Route path="admin" element={<CsmAdminLayout />}>
-                    <Route
-                      index
-                      element={<SectionIndexRedirect sectionId="admin" />}
-                    />
-                    <Route
-                      path="user-management"
-                      element={<CsmUserManagementLandingPage />}
-                    />
-                    <Route path="user-management/users" element={<CsmUsersPage />} />
-                    <Route path="user-management/roles" element={<CsmRolesPage />} />
-                    <Route path="user-management/groups" element={<CsmGroupsPage />} />
-                    <Route path="user-management/teams" element={<CsmTeamsPage />} />
-                    <Route
-                      path="user-management/permissions"
-                      element={
-                        <CsmComingSoonPage
-                          title="Permissions"
-                          description="Fine-grained permission catalog and assignment view."
-                          blockedOn="csm-portal/backend permissions endpoints"
-                        />
-                      }
-                    />
-                    {/* Dashboard builder — admin-role-gated, unlike every
-                        sibling tab above (see DashboardBuilderRouteGuard's
-                        own doc comment for why). Persists to localStorage
-                        only; there is no backend behind this feature. */}
-                    <Route path="dashboards" element={<DashboardBuilderRouteGuard />}>
-                      <Route index element={<CsmDashboardBuilderListPage />} />
-                      {/* Before the ":draftId" wildcard: "shared" is a
-                          literal segment, and react-router would otherwise
-                          match it as a draft id. */}
-                      <Route path="shared" element={<CsmDashboardSharedConfigPage />} />
-                      <Route path="new" element={<CsmDashboardBuilderEditorPage />} />
-                      <Route path=":draftId" element={<CsmDashboardBuilderEditorPage />} />
+                      sibling tab. Gated by RoleGuard for admin users only. */}
+                  <Route element={<RoleGuard allowedRoles={["admin"]} />}>
+                    <Route path="admin" element={<CsmAdminLayout />}>
+                      <Route
+                        index
+                        element={<SectionIndexRedirect sectionId="admin" />}
+                      />
+                      <Route
+                        path="user-management"
+                        element={<CsmUserManagementLandingPage />}
+                      />
+                      <Route path="user-management/users" element={<CsmUsersPage />} />
+                      <Route path="user-management/roles" element={<CsmRolesPage />} />
+                      <Route path="user-management/groups" element={<CsmGroupsPage />} />
+                      <Route path="user-management/teams" element={<CsmTeamsPage />} />
+                      <Route
+                        path="user-management/permissions"
+                        element={
+                          <CsmComingSoonPage
+                            title="Permissions"
+                            description="Fine-grained permission catalog and assignment view."
+                            blockedOn="csm-portal/backend permissions endpoints"
+                          />
+                        }
+                      />
+                      {/* Dashboard builder — admin-role-gated, unlike every
+                          sibling tab above (see DashboardBuilderRouteGuard's
+                          own doc comment for why). Persists to localStorage
+                          only; there is no backend behind this feature. */}
+                      <Route path="dashboards" element={<DashboardBuilderRouteGuard />}>
+                        <Route index element={<CsmDashboardBuilderListPage />} />
+                        {/* Before the ":draftId" wildcard: "shared" is a
+                            literal segment, and react-router would otherwise
+                            match it as a draft id. */}
+                        <Route path="shared" element={<CsmDashboardSharedConfigPage />} />
+                        <Route path="new" element={<CsmDashboardBuilderEditorPage />} />
+                        <Route path=":draftId" element={<CsmDashboardBuilderEditorPage />} />
+                      </Route>
                     </Route>
+
+                    {/* Legacy Settings paths kept alive so a pinned/deep link to
+                        the pre-"User management" layout doesn't dead-end. Not
+                        requested explicitly — a judgment call to match the
+                        /accounts, /projects legacy-redirect convention above;
+                        revert this block alone if unwanted. */}
+                    <Route
+                      path="admin/users"
+                      element={<LegacySettingsRedirect to="/admin/user-management/users" />}
+                    />
+                    <Route
+                      path="admin/roles"
+                      element={<LegacySettingsRedirect to="/admin/user-management/roles" />}
+                    />
+                    <Route
+                      path="admin/groups"
+                      element={<LegacySettingsRedirect to="/admin/user-management/groups" />}
+                    />
+                    <Route
+                      path="admin/teams"
+                      element={<LegacySettingsRedirect to="/admin/user-management/teams" />}
+                    />
+                    <Route
+                      path="admin/permissions"
+                      element={<LegacySettingsRedirect to="/admin/user-management/permissions" />}
+                    />
+
+                    {/* Role/group/team member lists, one level below the
+                        directory pages above. */}
+                    <Route path="admin/roles/:id" element={<RoleMembersPage />} />
+                    <Route path="admin/groups/:id" element={<GroupMembersPage />} />
+                    <Route path="admin/teams/:id" element={<TeamMembersPage />} />
                   </Route>
-
-                  {/* Legacy Settings paths kept alive so a pinned/deep link to
-                      the pre-"User management" layout doesn't dead-end. Not
-                      requested explicitly — a judgment call to match the
-                      /accounts, /projects legacy-redirect convention above;
-                      revert this block alone if unwanted. */}
-                  <Route
-                    path="admin/users"
-                    element={<LegacySettingsRedirect to="/admin/user-management/users" />}
-                  />
-                  <Route
-                    path="admin/roles"
-                    element={<LegacySettingsRedirect to="/admin/user-management/roles" />}
-                  />
-                  <Route
-                    path="admin/groups"
-                    element={<LegacySettingsRedirect to="/admin/user-management/groups" />}
-                  />
-                  <Route
-                    path="admin/teams"
-                    element={<LegacySettingsRedirect to="/admin/user-management/teams" />}
-                  />
-                  <Route
-                    path="admin/permissions"
-                    element={<LegacySettingsRedirect to="/admin/user-management/permissions" />}
-                  />
-
-                  {/* Role/group/team member lists, one level below the
-                      directory pages above. Not admin-permission-gated:
-                      standing project rule is to show the action and let the
-                      backend reject it, never gate in the frontend. Left at
-                      their original /admin/<kind>/:id paths — out of scope
-                      for the User management nesting above — so every
-                      `routeBase="/admin/roles"` etc. link elsewhere in the app
-                      keeps working unchanged. */}
-                  <Route path="admin/roles/:id" element={<RoleMembersPage />} />
-                  <Route path="admin/groups/:id" element={<GroupMembersPage />} />
-                  <Route path="admin/teams/:id" element={<TeamMembersPage />} />
 
                   {/* Person profile — reachable by clicking any user reference
                       (case creator, assignee, watchers, comment authors,

@@ -14,13 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * The platform's own admin role key, as returned in `GET /users/me`'s
- * `roles` (see `UsersMeResponse.roles`) — the same catalogue `GET /roles`
- * offers (see `CsmRolesPage`). Matched case-insensitively, same as
- * `useTimecardRole` does for its own group keys.
- */
-const ADMIN_ROLE_KEY = "admin";
+import { ROLE_ADMIN } from "@hooks/usePermissions";
 
 /**
  * True when the given `GET /users/me` roles include the platform admin
@@ -28,10 +22,8 @@ const ADMIN_ROLE_KEY = "admin";
  * `csmNavItems.ts`'s own comment on `admin.dashboards`): unlike every other
  * `/admin` tab, this one has no privileged backend action to fall back on
  * for enforcement — everything the builder does is local to the browser
- * (`localStorage` only), so hiding it here IS the whole gate. Every other
- * `/admin` page deliberately does NOT do this (see App.tsx), so don't reuse
- * this helper to gate anything else without re-checking that reasoning.
+ * (`localStorage` only), so hiding it here IS the whole gate.
  */
 export function hasDashboardBuilderAccess(roles: string[] | undefined): boolean {
-  return (roles ?? []).some((r) => r.toLowerCase() === ADMIN_ROLE_KEY);
+  return (roles ?? []).some((r) => r.trim().toLowerCase() === ROLE_ADMIN);
 }
