@@ -1,51 +1,88 @@
-# git-internals-dashboard
+# Git Internals Dashboard
 
-SLA monitor for CS-originated GitHub issues, tracking product-team SLA
-compliance. Rewritten from the [`internal-sla-monitor-v2`](../internal-sla-monitor-v2)
-monorepo (Fastify API + Vite/React SPA) into a single Next.js 16 (App Router)
-application, so it deploys as **one** Choreo component instead of a separate
-frontend and backend.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/wso2-open-operations/cs-tools/main?path=apps%2Fgit-internals-dashboard)](https://github.com/wso2-open-operations/cs-tools/commits/main/?path=apps/git-internals-dashboard)
+[![GitHub issues](https://img.shields.io/github/issues/wso2-open-operations/cs-tools.svg)](https://github.com/wso2-open-operations/cs-tools/issues)
 
-UI is built on [Oxygen UI](https://github.com/wso2/oxygen-ui) (`@wso2/oxygen-ui`,
-WSO2's MUI-based design system), themed with **Acrylic Purple** — Oxygen UI's
-frosted-glass material theme (translucent surfaces, backdrop blur, purple
-gradient accent, `#646cff` primary). Set in `src/lib/theme.ts`. The
-dashboard's own design tokens (`--sla-*` in `src/app/globals.css`) alias
-Oxygen UI's live theme CSS variables (`--oxygen-palette-*`, `--oxygen-blur-*`)
-rather than hardcoding hex, so swapping the theme there (e.g. to
-`WSO2Theme`/`AcrylicOrangeTheme`) re-themes the whole app without touching
-component code — see the comments in `theme.ts` and `globals.css` for the one
-documented exception (`--sla-primary-gradient`) and why.
+Git Internals Dashboard is an open-source SLA monitor for customer-success-originated
+GitHub issues, tracking product-team SLA compliance from ingest through to
+reporting. It ships as a single Next.js application — API routes and UI in one
+process — so it deploys as one component with no separate frontend/backend to
+coordinate.
 
-## Architecture at a glance
+## Why Git Internals Dashboard?
 
-- **Frontend + API in one process.** Pages under `src/app/` (App Router,
-  client components) call Route Handlers under `src/app/api/**`, same origin
-  — no CORS needed (v2 needed `CORS_ORIGINS` because the Vite dev server and
-  Fastify API were different origins).
-- **Backend logic** (`src/server/`) is a near-verbatim port of v2's pure SLA
-  engine, config loader, GitHub client, and ingest/sync pipeline — same
-  privacy rules (no titles/assignees/labels/actors ever persisted or put on
-  the wire), same taxonomy-driven status categorization.
-- **Auth** (`src/server/auth`): `AUTH_MODE=stub` (no auth, default for local
-  dev) or `AUTH_MODE=asgardeo` (Bearer JWT verification against an Asgardeo
-  tenant + group check), applied via a `requireAuth()` wrapper around each
-  Route Handler — not `proxy.ts`/middleware, since that runs on the Edge
-  runtime by default and doesn't suit `jose`'s remote JWKS fetch or
-  Prisma-touching handlers.
-- **Background jobs** (`src/server/jobs/recompute.ts`) start from
-  `instrumentation.ts` (Next's boot hook), replacing Fastify's `app.listen`
-  callback.
-- **Cross-replica job lock** (`src/server/jobs/lock.ts`): a Postgres
-  `pg_try_advisory_lock`, not v2's in-process boolean. Choreo does **not**
-  guarantee single-instance deployment on paid/private-data-plane tiers with
-  autoscaling enabled, so the manual-sync/recompute mutex needed to become
-  real cross-process coordination.
+Customer success teams file GitHub issues on behalf of customers and need
+visibility into whether product teams are responding and resolving them
+within agreed SLAs. Tracking this by hand across repos and projects doesn't
+scale, and naively wiring a dashboard straight to the GitHub API risks
+leaking issue titles, assignees, or other customer-identifying detail into a
+tool with broader visibility than the source issue.
 
-See inline comments in `src/server/db/client.ts`, `src/server/jobs/lock.ts`,
-and `next.config.ts` for the specific deviations from v2 and why.
+Git Internals Dashboard addresses this by combining:
 
-## Local development
+- A sync pipeline that ingests GitHub issues and projects on a schedule,
+  computes SLA status against a configurable taxonomy, and persists only the
+  fields needed for SLA reporting — never titles, assignees, labels, or
+  actors,
+- A single Next.js app (App Router + Route Handlers) serving both the API
+  and the dashboard UI from the same origin.
+
+This setup lets teams monitor SLA compliance without exposing sensitive
+issue content or standing up separate infrastructure per environment.
+
+## Features
+
+- **Single-Process Architecture**
+  Dashboard UI and API share one Next.js app and one deployable unit — no
+  CORS configuration, no separate frontend/backend releases.
+- **Privacy-First Ingest**
+  The sync pipeline persists only SLA-relevant fields; issue titles,
+  assignees, labels, and actors are never stored or sent to the client.
+- **Configurable SLA Taxonomy**
+  SLA status categorization is driven by a YAML taxonomy file
+  ([`config/sla-config.yaml`](./config/sla-config.yaml)), not hardcoded
+  status strings.
+- **Pluggable Authentication**
+  A stub mode for local development and CI, or Bearer JWT verification
+  against an Asgardeo tenant with group-based access control.
+- **Background Recompute**
+  SLA status is recomputed on a schedule via a background job, coordinated
+  across replicas with a Postgres advisory lock rather than in-process
+  state.
+- **Container-Ready**
+  Ships with a multi-stage `Dockerfile` for standalone deployment behind any
+  container platform.
+
+## Project Structure
+
+```bash
+.
+├── src/app                  # Next.js App Router: pages + src/app/api Route Handlers
+├── src/server                # SLA engine, config loader, GitHub client, ingest/sync, auth, jobs
+├── src/components, src/views # Dashboard UI
+├── prisma                   # Database schema and migrations
+├── config/sla-config.yaml   # SLA taxonomy / status categorization config
+├── Dockerfile                # Multi-stage build for standalone deployment
+└── README.md                 # You're here
+```
+
+## Technologies Used
+
+- **Framework**: [Next.js](https://nextjs.org/) 16 (App Router) + React 19 + TypeScript
+- **UI**: [WSO2 Oxygen UI](https://github.com/wso2/oxygen-ui) (MUI-based design system)
+- **Data Layer**: TanStack Query, Prisma (Postgres)
+- **Authentication**: Stub mode, or Bearer JWT via an OIDC-compatible provider (Asgardeo)
+- **Charts**: Recharts / Oxygen UI Charts
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20.9+
+- Docker (for local Postgres)
+
+### Local Development
 
 ```bash
 npm install
@@ -56,39 +93,42 @@ npm run db:seed               # synthetic fixtures unless SEED_GITHUB_TOKEN is s
 npm run dev                   # http://localhost:3000
 ```
 
-Run `npm test` (Vitest) for the ported unit/integration test suite — the
-DB-backed tests need the same Postgres instance from `docker compose up`.
+Run `npm test` (Vitest) for the unit/integration test suite — the DB-backed
+tests need the same Postgres instance started above.
 
-## Deploying to Choreo
+### Deployment
 
-Choreo has no dedicated Next.js buildpack; this repo ships a `Dockerfile`
-(multi-stage, `next.config.ts`'s `output: 'standalone'`) for Choreo's
-"Bring your own Dockerfile" Web Application component path — see
-`.choreo/component.yaml` for the endpoint descriptor.
+This app has no framework-specific buildpack requirement; the included
+`Dockerfile` (multi-stage, Next.js `output: 'standalone'`) builds a
+self-contained image suitable for any container platform.
 
-Two things that don't just fall out of `docker build`:
+Two things worth knowing before deploying:
 
 1. **`NEXT_PUBLIC_*` vars are inlined at build time**, not read at container
-   startup. Pass them as Docker build args (Choreo: Build Configuration),
-   not just runtime env vars — see the `ARG`s in `Dockerfile`.
-2. **Database migrations aren't run by the container's `CMD`.** Run
-   `npx prisma migrate deploy` against the target database once per release
-   (a Choreo pre-deploy/init step, or manually), separately from starting
-   `node server.js`.
+   startup — pass them as Docker build args, not runtime env vars (see the
+   `ARG`s in `Dockerfile`).
+2. **Database migrations aren't run by the container's start command.** Run
+   `npx prisma migrate deploy` against the target database once per release,
+   separately from starting the app.
 
-If using Choreo's managed Postgres "Connection" feature instead of a plain
-`DATABASE_URL`, see the comment in `src/server/db/client.ts` — it injects
-five separate `CHOREO_<NAME>_*` env vars that get assembled into a connection
-string automatically.
+## Reporting Issues
 
-## Known gaps vs. v2 (not yet addressed)
+### 1. Opening an issue
 
-- **No global rate limiting.** v2 had `@fastify/rate-limit` (300 req/min per
-  IP, 60/min on the titles endpoint). A single-process in-memory limiter
-  would be incorrect once Choreo scales beyond one replica; this is better
-  enforced at the platform/gateway layer (Choreo policies, or WSO2 API
-  Manager in front) than reimplemented per-replica here.
-- **No CSP/nonce setup.** MUI/Emotion inject `<style>` tags at runtime;
-  supporting a strict `style-src` CSP needs a per-request nonce threaded
-  through `OxygenUIThemeProvider`'s `nonce`/`emotionCache` props. Not wired
-  up yet — flagged rather than shipped half-done.
+Please use this repository's issue tracker and include reproduction steps,
+expected behavior, actual behavior, and relevant logs.
+
+### 2. Reporting security issues
+
+Please do not report security issues through public issues. Follow the
+[WSO2 Security Vulnerability Reporting Guidelines](https://security.docs.wso2.com/en/latest/security-reporting/vulnerability-reporting-guidelines/).
+
+## Contributing
+
+Contributions are welcome. Create a feature branch, keep changes focused,
+and submit a pull request with a clear description and verification steps.
+
+## License
+
+Git Internals Dashboard is licensed under Apache 2.0. See the
+[LICENSE](../../LICENSE) file for details.
