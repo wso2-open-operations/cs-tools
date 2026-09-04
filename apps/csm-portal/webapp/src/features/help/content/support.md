@@ -122,6 +122,12 @@ preview of the exact wording that will be posted) or write a custom message inst
 offered while the case is **Awaiting info** or has a **Solution proposed**, since those are the
 states where a reply from the customer is actually expected.
 
+**Hold auto-closure…**, also in the case's **More** menu, exempts a case from the automated
+auto-closure sequence until the date you pick. Setting or extending the hold automatically
+posts an internal note in the timeline recording the hold and its date, so anyone on the case
+can see when a hold was set or moved — resending the same date (e.g. an accidental re-submit)
+doesn't post a duplicate note.
+
 ## Attachments
 
 Click an image or PDF attachment to preview it: images open inline in a dialog; PDFs open in a
