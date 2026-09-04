@@ -2342,60 +2342,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Update an attachment's name and/or description (ServiceNow data source only).
-      operationId: updateAttachment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateAttachmentRequest'
-      responses:
-        "200":
-          description: Attachment updated successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpdateAttachmentResponse'
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: Attachments are only supported for the ServiceNow data source.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
       summary: Update an attachment's reference, name, or description (ServiceNow data source only).
       operationId: updateAttachment
       parameters:
@@ -7187,10 +7133,8 @@ components:
           items:
             $ref: '#/components/schemas/WatchListUser'
         assignedTo:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
         assignedToUser:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         number:
           type: string
@@ -7202,7 +7146,6 @@ components:
             and `acknowledgedBy` names whoever claimed it first. Returned only when the
             update set `acknowledge`.
         acknowledgedBy:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
           description: |
             Engineer who now holds the acknowledgement, whether this request set it or
@@ -7361,7 +7304,6 @@ components:
           type: string
           format: email
         user:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
 
     CreateCaseRequest:
@@ -7433,10 +7375,6 @@ components:
             Optional even for `security_report_analysis` type — the frontend
             creates the case first, then uploads attachments in separate
             requests per file, so this may be omitted or empty.
-        engagementType:
-          type: string
-          enum: [migration, consultancy, new_feature_improvement, follow_up, onboarding]
-          description: Required for `engagement` type.
         engagementPaymentType:
           type: string
           enum: [paid, foc]
@@ -7862,6 +7800,9 @@ components:
 
     DeployedProductRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       description: >-
         A deployed product instance, together with the product catalogue entry it
         was deployed from. The two are different records with different ids; they
@@ -7971,7 +7912,6 @@ components:
           nullable: true
           description: Timestamp when the case was closed. null if not yet closed.
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         project:
           $ref: '#/components/schemas/EntityRef'
@@ -7980,7 +7920,6 @@ components:
           $ref: '#/components/schemas/EntityRef'
           description: Deployment associated with the case. null for ServiceNow cases with no deployment.
         deployedProduct:
-          nullable: true
           $ref: '#/components/schemas/DeployedProductRef'
           description: |
             Deployed product instance named by the case, together with the product
@@ -8004,11 +7943,9 @@ components:
           $ref: '#/components/schemas/EntityRef'
           description: Linked conversation. Populated for ServiceNow cases; null for Postgres cases.
         assignedEngineer:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
           description: Engineer assigned to the case, or null when unassigned.
         acknowledgedBy:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
           description: |
             Engineer who acknowledged the case, or null if nobody has. Cleared by the
@@ -8023,7 +7960,6 @@ components:
             cleared again on recall). Pauses the case's Workaround SLA clock while set
             (ServiceNow only).
         workaroundProvidedBy:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
           description: Engineer who marked the workaround as provided, or null until marked.
         parentCase:
@@ -8033,7 +7969,6 @@ components:
           nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
         account:
-          nullable: true
           $ref: '#/components/schemas/AccountRef'
         linkedChangeRequests:
           type: array
@@ -8138,7 +8073,6 @@ components:
           type: string
           description: Last-updated timestamp. RFC3339 for Postgres; raw SN timestamp string for ServiceNow.
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         subject:
           type: string
@@ -8195,7 +8129,6 @@ components:
         deployedProduct:
           $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
           description: Engineer assigned to the case, or null when unassigned.
         parentCase:
@@ -8209,7 +8142,6 @@ components:
           $ref: '#/components/schemas/EntityRef'
           description: Populated for ServiceNow data source only.
         account:
-          nullable: true
           $ref: '#/components/schemas/AccountRef'
           description: >-
             The case's account, including support tier (type). Populated for
@@ -8389,7 +8321,6 @@ components:
         content:
           type: string
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         createdOn:
           type: string
@@ -8466,7 +8397,6 @@ components:
         createdByLastName:
           type: string
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
           description: >-
             Actor behind this entry. Its name field is the actor's full display
@@ -8679,7 +8609,6 @@ components:
           type: string
           nullable: true
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         createdOn:
           type: string
@@ -10467,6 +10396,9 @@ components:
 
     GroupParentRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10486,7 +10418,6 @@ components:
           type: boolean
         parent:
           $ref: '#/components/schemas/GroupParentRef'
-          nullable: true
 
     SearchGroupsResponse:
       type: object
@@ -10524,6 +10455,9 @@ components:
 
     ServiceOfferingServiceRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10541,7 +10475,6 @@ components:
           type: string
         service:
           $ref: '#/components/schemas/ServiceOfferingServiceRef'
-          nullable: true
 
     SearchServiceOfferingsResponse:
       type: object
@@ -10636,7 +10569,6 @@ components:
           format: date-time
           description: Timestamp when the comment was created.
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
 
     SearchCommentsRequest:
@@ -10711,6 +10643,9 @@ components:
 
     TaskSlaDefinition:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10728,6 +10663,9 @@ components:
 
     TaskSlaTaskRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10749,13 +10687,11 @@ components:
           format: uuid
         slaDefinition:
           $ref: '#/components/schemas/TaskSlaDefinition'
-          nullable: true
         stage:
           type: string
           nullable: true
         task:
           $ref: '#/components/schemas/TaskSlaTaskRef'
-          nullable: true
         businessTimeLeft:
           type: string
           nullable: true
@@ -10789,6 +10725,9 @@ components:
 
     TaskSlaDefinitionDetail:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10863,6 +10802,9 @@ components:
 
     TaskSlaScheduleRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10884,10 +10826,8 @@ components:
           format: uuid
         task:
           $ref: '#/components/schemas/TaskSlaTaskRef'
-          nullable: true
         slaDefinition:
           $ref: '#/components/schemas/TaskSlaDefinitionDetail'
-          nullable: true
         stage:
           type: string
           nullable: true
@@ -10912,7 +10852,6 @@ components:
           nullable: true
         schedule:
           $ref: '#/components/schemas/TaskSlaScheduleRef'
-          nullable: true
 
     TaskSummary:
       type: object
@@ -12313,7 +12252,6 @@ components:
         createdOn:
           type: string
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
 
     SearchConversationsResponse:
@@ -13619,6 +13557,9 @@ components:
 
     InstanceSearchFilters:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       description: >
         projectIds, deploymentIds, and deployedProductIds are mutually exclusive — at most
         one may be non-empty.
@@ -13653,12 +13594,14 @@ components:
       properties:
         filters:
           $ref: '#/components/schemas/InstanceSearchFilters'
-          nullable: true
         pagination:
           $ref: '#/components/schemas/Pagination'
 
     InstanceMetadata:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       required: [id, createdOn, updatedOn]
       properties:
         id:
@@ -13715,7 +13658,6 @@ components:
           type: string
         metadata:
           $ref: '#/components/schemas/InstanceMetadata'
-          nullable: true
 
     SearchInstancesResponse:
       type: object
