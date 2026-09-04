@@ -1,0 +1,169 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum IssueState {
+  OPEN
+  CLOSED
+
+  @@map("igid_issue_state")
+}
+
+// ---------- Config-as-Data ----------
+
+model Project {
+  id              Int      @id @default(autoincrement())
+  githubProjectId String   @unique @map("github_project_id")
+  title           String?
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  repositories Repository[]
+  events       IssueStatusEvent[]
+
+  @@map("igid_projects")
+}
+
+model Repository {
+  id           Int       @id @default(autoincrement())
+  owner        String
+  name         String
+  githubNodeId String?   @map("github_node_id")
+  htmlUrl      String?   @map("html_url")
+  slaProjectId Int?      @map("sla_project_id")
+  issueQuery   String    @map("issue_query")
+  enabled      Boolean   @default(true)
+  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  slaProject Project?      @relation(fields: [slaProjectId], references: [id])
+  issues     Issue[]
+  snapshots  SlaSnapshot[]
+  syncRuns   SyncRun[]
+
+  @@unique([owner, name])
+  @@map("igid_repositories")
+}
+
+// ---------- Issues + Event Log ----------
+
+model Issue {
+  id              Int         @id @default(autoincrement())
+  repositoryId    Int         @map("repository_id")
+  githubNumber    Int         @map("github_number")
+  githubNodeId    String?     @map("github_node_id")
+  state           IssueState
+  htmlUrl         String?     @map("html_url")
+  priority        String? // derived from the Priority/* label at ingest; raw labels are discarded
+  currentStatus   String?     @map("current_status")
+  currentStatusAt DateTime?   @map("current_status_at") @db.Timestamptz(6)
+  githubCreatedAt DateTime?   @map("github_created_at") @db.Timestamptz(6)
+  githubClosedAt  DateTime?   @map("github_closed_at") @db.Timestamptz(6)
+  githubUpdatedAt DateTime?   @map("github_updated_at") @db.Timestamptz(6)
+  firstSeenAt     DateTime    @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSyncedAt    DateTime?   @map("last_synced_at") @db.Timestamptz(6)
+
+  repository Repository         @relation(fields: [repositoryId], references: [id])
+  events     IssueStatusEvent[]
+  sla        IssueSla?
+  snapshots  SlaSnapshot[]
+
+  @@unique([repositoryId, githubNumber])
+  @@index([githubNodeId])
+  @@index([state])                    // spark joins, base list scope
+  @@index([repositoryId, state])      // repo-filtered list scope
+  @@index([priority])
+  @@index([currentStatus])
+  @@index([githubCreatedAt])          // 12-week volume query
+  @@map("igid_issues")
+}
+
+model IssueStatusEvent {
+  id             Int      @id @default(autoincrement())
+  issueId        Int      @map("issue_id")
+  projectId      Int      @map("project_id")
+  previousStatus String?  @map("previous_status")
+  status         String?
+  occurredAt     DateTime @map("occurred_at") @db.Timestamptz(6)
+  source         String
+  dedupeKey      String   @unique @map("dedupe_key")
+  ingestedAt     DateTime @default(now()) @map("ingested_at") @db.Timestamptz(6)
+
+  issue   Issue   @relation(fields: [issueId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([issueId, occurredAt])
+  @@index([projectId])
+  @@map("igid_issue_status_events")
+}
+
+// ---------- Derived Projection + History ----------
+
+model IssueSla {
+  issueId         Int      @id @map("issue_id")
+  priority        String?
+  budgetHours     Float?   @map("budget_hours")
+  consumedHours   Float?   @map("consumed_hours")
+  remainingHours  Float?   @map("remaining_hours")
+  pctConsumed     Float?   @map("pct_consumed")
+  slaState        String?  @map("sla_state")
+  slaRunning      Boolean? @map("sla_running")
+  computedAt      DateTime @map("computed_at") @db.Timestamptz(6)
+  computedThrough DateTime @map("computed_through") @db.Timestamptz(6)
+
+  issue Issue @relation(fields: [issueId], references: [id])
+
+  @@index([slaState])
+  @@index([pctConsumed]) // budget_desc ordering on the issues list
+  @@map("igid_issue_sla")
+}
+
+model SlaSnapshot {
+  id             Int      @id @default(autoincrement())
+  snapshotDate   DateTime @map("snapshot_date") @db.Date
+  issueId        Int      @map("issue_id")
+  repositoryId   Int      @map("repository_id")
+  priority       String?
+  currentStatus  String?  @map("current_status")
+  budgetHours    Float?   @map("budget_hours")
+  consumedHours  Float?   @map("consumed_hours")
+  remainingHours Float?   @map("remaining_hours")
+  pctConsumed    Float?   @map("pct_consumed")
+  slaState       String?  @map("sla_state")
+  slaRunning     Boolean? @map("sla_running")
+
+  issue      Issue      @relation(fields: [issueId], references: [id])
+  repository Repository @relation(fields: [repositoryId], references: [id])
+
+  @@unique([snapshotDate, issueId])
+  @@index([snapshotDate])
+  @@index([repositoryId, snapshotDate])
+  @@index([slaState, snapshotDate])
+  @@map("igid_sla_snapshots")
+}
+
+// ---------- Operations ----------
+
+model SyncRun {
+  id              Int       @id @default(autoincrement())
+  repositoryId    Int?      @map("repository_id")
+  kind            String?
+  sinceTs         DateTime? @map("since_ts") @db.Timestamptz(6)
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+  status          String?
+  issuesProcessed Int?      @default(0) @map("issues_processed")
+  error           String?
+  triggeredBy     String?   @map("triggered_by")      // Asgardeo `sub` of the user who called POST /api/sync/manual;
+
+  repository Repository? @relation(fields: [repositoryId], references: [id])
+
+  @@map("igid_sync_runs")
+}

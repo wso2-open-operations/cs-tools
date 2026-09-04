@@ -1,0 +1,10 @@
+schemaVersion: "1.2"
+endpoints:
+    - name: git-internals-dashboard
+      displayName: Git Internals Dashboard
+      service:
+        basePath: /
+        port: 3000
+      type: REST
+      networkVisibilities:
+        - Public

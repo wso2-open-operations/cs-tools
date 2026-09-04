@@ -1,0 +1,54 @@
+{
+  "name": "git-internals-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:seed": "tsx src/server/db/seed/seed.ts",
+    "db:reset": "prisma migrate reset",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "next": "16.3.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-is": "19.0.0",
+    "@wso2/oxygen-ui": "0.13.1",
+    "@wso2/oxygen-ui-icons-react": "0.13.1",
+    "@wso2/oxygen-ui-charts-react": "0.13.1",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@emotion/cache": "11.14.0",
+    "@mui/material": "7.3.4",
+    "recharts": "3.3.0",
+    "@prisma/client": "6.19.3",
+    "@tanstack/react-query": "^5",
+    "@asgardeo/auth-react": "^5.6.2",
+    "jose": "^5",
+    "zod": "^3",
+    "yaml": "^2",
+    "pg": "^8"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "19.2.3",
+    "@types/react-dom": "19.2.3",
+    "@types/pg": "^8",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.1",
+    "prisma": "6.19.3",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}

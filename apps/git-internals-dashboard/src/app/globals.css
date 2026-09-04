@@ -1,0 +1,103 @@
+/* SLA Monitor design tokens.
+   These alias Oxygen UI's live theme CSS variables (--oxygen-palette-*,
+   --oxygen-blur-*, --oxygen-border-*), emitted by OxygenUIThemeProvider
+   (src/lib/theme.ts, currently Acrylic Purple) — NOT hardcoded hex — so every
+   component that references var(--sla-*) follows whatever theme is passed to
+   the provider without any component changes.
+
+   Exception: --sla-primary-gradient is hardcoded rather than aliasing
+   --oxygen-gradient-primary. That CSS var is baked once into Oxygen UI's
+   base theme at construction time and never refreshed for named sub-themes
+   (Acrylic Purple/Orange bolt their gradient onto the JS theme object
+   directly, read by MUI component styleOverrides at render time — so
+   Buttons etc. render the correct gradient — but never re-flow into the
+   CSS-var stylesheet). Confirmed by inspecting node_modules/@wso2/oxygen-ui;
+   verify against the value in Themes/AcrylicPurpleTheme.d.ts's neighbouring
+   .js if upgrading @wso2/oxygen-ui ever changes this. */
+:root {
+  --sla-bg: var(--oxygen-palette-background-default, #f5f5f5);
+  --sla-card: var(--oxygen-palette-background-acrylic, #ffffff40);
+  --sla-card-solid: var(--oxygen-palette-background-paper, #ffffffc5);
+  --sla-border: var(--oxygen-palette-divider, rgba(0, 0, 0, 0.12));
+  --sla-border-soft: var(--oxygen-palette-divider, rgba(0, 0, 0, 0.08));
+  --sla-fg: var(--oxygen-palette-text-primary, #40404b);
+  --sla-fg2: var(--oxygen-palette-text-secondary, #5b6473);
+  --sla-fg3: var(--oxygen-palette-text-disabled, rgba(0, 0, 0, 0.38));
+
+  --sla-primary: var(--oxygen-palette-primary-main, #646cff);
+  --sla-primary-light: var(--oxygen-palette-primary-light, #8187ff);
+  --sla-primary-gradient: linear-gradient(77.74deg, #5567d5 11.16%, #7155d5 99.55%);
+  --sla-blur: var(--oxygen-blur-light, blur(10px));
+
+  --sla-ok: var(--oxygen-palette-success-main, #2e7d32);
+  --sla-ok-tint: color-mix(in srgb, var(--sla-ok) 12%, transparent);
+  --sla-at-risk: var(--oxygen-palette-warning-main, #ed6c02);
+  --sla-at-risk-tint: color-mix(in srgb, var(--sla-at-risk) 14%, transparent);
+  --sla-violated: var(--oxygen-palette-error-main, #d32f2f);
+  --sla-violated-tint: color-mix(in srgb, var(--sla-violated) 12%, transparent);
+  --sla-cs: var(--sla-primary);
+  --sla-cs-lite: var(--sla-primary-light);
+  --sla-cs-tint: color-mix(in srgb, var(--sla-cs) 14%, transparent);
+  --sla-no-sla: var(--oxygen-palette-text-disabled, #aab2bf);
+  --sla-no-sla-tint: color-mix(in srgb, var(--sla-no-sla) 14%, transparent);
+  --sla-terminal: var(--sla-no-sla);
+  --sla-terminal-tint: color-mix(in srgb, var(--sla-terminal) 14%, transparent);
+
+  --sla-p1: var(--sla-violated);
+  --sla-p2: var(--sla-at-risk);
+  --sla-p3: var(--oxygen-palette-info-main, #0288d1);
+  --sla-p4: var(--sla-no-sla);
+
+  /* Structural/neutral surfaces — distinct from --sla-card (the page-level
+     Acrylic card surface). Added for the UI-theming fix pass: these replace
+     hardcoded near-white hex (#fafbfc, #f1f2f5, #f4f5f7, etc.) that never
+     referenced any theme token, so they stayed flat/white regardless of the
+     active Oxygen UI theme.
+       --sla-surface-muted : table headers, matrix "no data" cells, expanded
+         detail panels — a static shaded backdrop for non-interactive chrome.
+         Aliases action.hover, matching Oxygen UI's own precedent (see
+         AcrylicBaseTheme's MuiDataGrid override, which uses this exact token
+         for .MuiDataGrid-columnHeaders).
+       --sla-surface-track : progress-bar tracks, neutral status/priority
+         chip backgrounds — a flat "inactive" surface. Aliases
+         action.disabledBackground, MUI's own token family for this purpose
+         (the default LinearProgress track color with no color override).
+       --sla-contrast-text / --sla-ok-contrast-text : text/icon color for
+         content sitting on a solid --sla-primary / --sla-ok fill. */
+  --sla-surface-muted: var(--oxygen-palette-action-hover, rgba(0, 0, 0, 0.04));
+  --sla-surface-track: var(--oxygen-palette-action-disabledBackground, rgba(0, 0, 0, 0.12));
+  --sla-contrast-text: var(--oxygen-palette-primary-contrastText, #ffffff);
+  --sla-ok-contrast-text: var(--oxygen-palette-success-contrastText, #ffffff);
+
+  /* Floating overlay surfaces (tooltips, popovers) — distinct from
+     --sla-card's page-level 25%-opacity acrylic. Matches Oxygen UI's own
+     MuiPopover/MuiAutocomplete overlay treatment: background.paper (~77%
+     opacity) + blur.medium, the established precedent for small floating
+     surfaces as opposed to static page cards. */
+  --sla-overlay: var(--oxygen-palette-background-paper, #ffffffc5);
+  --sla-overlay-blur: var(--oxygen-blur-medium, blur(16px));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--sla-fg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* Background is intentionally NOT set here — Oxygen UI's MuiCssBaseline
+     override paints the Acrylic radial-gradient body backdrop; painting our
+     own solid color here (or on a wrapping element) would hide it. */
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}

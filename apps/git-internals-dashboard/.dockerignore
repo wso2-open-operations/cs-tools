@@ -1,0 +1,36 @@
+node_modules
+npm-debug.log*
+
+.next
+out
+
+.git
+.gitignore
+.github
+
+.env
+.env.*
+!.env.example
+
+.vscode
+.idea
+.DS_Store
+
+docs
+*.md
+!package.json
+
+coverage
+**/*.test.ts
+**/*.test.tsx
+vitest.config.ts
+
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Explicitly kept — both are needed inside the image:
+#   config/sla-config.yaml  (read via fs at runtime)
+#   prisma/                 (needed by `prisma migrate deploy`)
+!config/
+!prisma/

@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16
+    container_name: git-internals-dashboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gid}
+      POSTGRES_DB: ${POSTGRES_DB:-gid}
+    ports:
+      - "5433:5432"
+    volumes:
+      - git_internals_dashboard_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gid} -d ${POSTGRES_DB:-gid}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  git_internals_dashboard_pgdata:

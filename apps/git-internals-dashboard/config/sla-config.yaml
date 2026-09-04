@@ -1,0 +1,60 @@
+# =============================================================================
+# SLA monitor configuration — single source of truth.
+# Non-secret by rule: tokens, DB URLs, and Asgardeo values live in env vars.
+# Loaded once at process start; changes require a restart (Choreo restarts the
+# component on config-mount updates anyway).
+# =============================================================================
+
+repos:
+  - owner: sample-org
+    name: sample-repo
+    githubProjectId: xxxxxxxxxxx
+    projectTitle: Sample Repo
+    issueQuery: 'label:"Origin/CS" -label:"Type/Patch"'
+
+taxonomy:
+  statuses:
+    # Product Team Side — accrues SLA
+    - { name: "Open",                  category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 10 }
+    - { name: "In Progress",           category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 20 }
+    - { name: "WOW",                   category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 30 }
+    - { name: "Reopened",              category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 40 }
+    # CS Team Side — pauses (no accrual)
+    - { name: "WOC",                   category: CS_SIDE,      accruesSla: false, isTerminal: false, sortOrder: 50 }
+    - { name: "Pending Patch Queue",   category: CS_SIDE,      accruesSla: false, isTerminal: false, sortOrder: 60 }
+    # Other — pauses
+    - { name: "Added to Update Queue", category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 70 }
+    - { name: "ETA Shared",            category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 80 }
+    - { name: "Proactive Pending",     category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 90 }
+    - { name: "On Hold",               category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 100 }
+    # Other + terminal — pauses, excluded from alerts
+    - { name: "Resolved",              category: OTHER,        accruesSla: false, isTerminal: true,  sortOrder: 110 }
+    - { name: "Duplicate",             category: OTHER,        accruesSla: false, isTerminal: true,  sortOrder: 120 }
+    # Transient empty status (item briefly removed from board) — pauses
+    - { name: "",                      category: TRANSIENT,    accruesSla: false, isTerminal: false, sortOrder: 999 }
+    # Real-board statuses discovered in the real-data validation round.
+    # Decision A: the three "confirm with board owner" rows keep provisional
+    # OTHER/pause behavior (today's effective behavior). Data-only to change.
+    - { name: "Done",                  category: OTHER,        accruesSla: false, isTerminal: true,  sortOrder: 130 }
+    - { name: "Doc Pending",           category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 140 } # confirm with board owner
+    - { name: "Approved / Not Started", category: OTHER,       accruesSla: false, isTerminal: false, sortOrder: 150 } # confirm with board owner
+    - { name: "Pending Approval",      category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 160 } # confirm with board owner
+  aliases:
+    - { alias: "Re-Opened", canonical: "Reopened" }
+    - { alias: "On-Hold",   canonical: "On Hold" }
+
+# Budgets in coverage-clock hours (time accrues only inside the coverage window).
+# A 12x5 "business day" is the 12-hour 09:00–21:00 IST window, so
+# P2 "2 days" = 24h and P3 "4 days" = 48h. P4 omitted -> NO_SLA.
+budgets:
+  - { priority: "Critical(P1)", budgetHours: 24, coverage: "24x7",     rank: 1 }
+  - { priority: "High(P2)",     budgetHours: 24, coverage: "12x5_ist", rank: 2 }
+  - { priority: "Medium(P3)",   budgetHours: 48, coverage: "12x5_ist", rank: 3 }
+
+settings:
+  possibleThreshold: 0.75
+  recomputeIntervalMinutes: 10
+  syncOverlapMinutes: 15
+  snapshotHourUtc: 0
+  seedSnapshotDays: 90
+  seedClosedLookbackDays: 90
