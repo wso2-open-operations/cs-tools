@@ -173,55 +173,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /accounts/search:
-    post:
-      summary: Search accounts.
-      operationId: postAccountsSearch
-      requestBody:
-        description: Account search payload
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchAccountsRequest'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchAccountsResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /projects/{id}:
     get:
       summary: Get a project by ID.
@@ -1468,54 +1419,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/search:
-    post:
-      summary: Search attachments.
-      operationId: postAttachmentsSearch
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchAttachmentsRequest'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchAttachmentsResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /attachments/{id}/content:
     get:
       summary: Download an attachment's raw file content.
@@ -2610,57 +2513,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommentCreateResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /comments/search:
-    post:
-      summary: Search generic comments.
-      description: >
-        Results are always filtered server-side to type "comment" — internal
-        WSO2 work-note entries are never returned here.
-      operationId: postCommentsSearch
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CommentSearchRequest'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchCommentsResponse'
         "400":
           description: BadRequest
           content:
@@ -6212,67 +6064,6 @@ components:
 
     # ---- accounts ----
 
-    SearchAccountsRequest:
-      type: object
-      properties:
-        pagination:
-          $ref: '#/components/schemas/Pagination'
-        filters:
-          type: object
-          properties:
-            searchQuery:
-              type: string
-            active:
-              type: boolean
-            pod:
-              type: string
-            classification:
-              type: string
-
-    AccountSummary:
-      type: object
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        tier:
-          type: string
-        region:
-          type: string
-        supportTier:
-          type: string
-        owner:
-          $ref: '#/components/schemas/Ref'
-        technicalOwner:
-          $ref: '#/components/schemas/Ref'
-        activationDate:
-          type: string
-        deactivationDate:
-          type: string
-        hasAgent:
-          type: boolean
-        hasKbReferences:
-          type: boolean
-        createdOn:
-          type: string
-
-    SearchAccountsResponse:
-      type: object
-      properties:
-        accounts:
-          type: array
-          items:
-            $ref: '#/components/schemas/AccountSummary'
-        totalRecords:
-          type: integer
-        limit:
-          type: integer
-        offset:
-          type: integer
-        hasMore:
-          type: boolean
-
     AccountDetails:
       type: object
       properties:
@@ -7221,18 +7012,6 @@ components:
             Null for a CSM-native (Postgres) data source attachment. Always
             set for ServiceNow-sourced attachments.
 
-    SearchAttachmentsRequest:
-      type: object
-      required: [referenceId, referenceType]
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-        referenceType:
-          type: string
-        pagination:
-          $ref: '#/components/schemas/Pagination'
-
     AttachmentSummary:
       type: object
       properties:
@@ -7259,21 +7038,6 @@ components:
         previewUrl:
           type: string
 
-    SearchAttachmentsResponse:
-      type: object
-      properties:
-        attachments:
-          type: array
-          items:
-            $ref: '#/components/schemas/AttachmentSummary'
-        totalRecords:
-          type: integer
-        limit:
-          type: integer
-        offset:
-          type: integer
-        hasMore:
-          type: boolean
 
     CaseAttachmentsResponse:
       description: >
@@ -7411,25 +7175,9 @@ components:
         createdBy:
           type: string
 
-    CommentSearchRequest:
-      description: >
-        Results are always filtered server-side to type "comment" — internal
-        WSO2 work-note entries are never returned here.
-      type: object
-      required: [referenceId, referenceType]
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-        referenceType:
-          type: string
-          enum: [case, conversation, change_request, deployment, incident]
-        pagination:
-          $ref: '#/components/schemas/Pagination'
-
     CommentView:
       description: >
-        Shared by POST /comments/search and GET /conversations/{id}/messages.
+        Used by GET /conversations/{id}/messages.
         type/createdByFirstName/createdByLastName let the chat-history view
         distinguish the AI's replies from the customer's own messages.
       type: object
@@ -7452,8 +7200,7 @@ components:
     SearchCommentsResponse:
       description: >
         totalRecords (not total) to match the frontend's shared pagination
-        envelope. Shared by POST /comments/search and
-        GET /conversations/{id}/messages.
+        envelope. Used by GET /conversations/{id}/messages.
       type: object
       properties:
         comments:

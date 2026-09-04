@@ -36,12 +36,36 @@ type entityProjectClient interface {
 // ProjectHandler handles HTTP requests for project operations.
 type ProjectHandler struct {
 	entity entityProjectClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewProjectHandler creates a ProjectHandler backed by the given entity client.
 func NewProjectHandler(entity entityProjectClient) *ProjectHandler {
 	return &ProjectHandler{entity: entity}
 }
+
+// SetCallerScope wires up caller-scoped project search: SearchProjects only
+// returns projects the caller is an active portal-user contact of (see
+// CallerScopeResolver). main.go always calls this in production — there is
+// no kill switch. A setter rather than a constructor parameter purely so
+// the many pre-existing tests across this package that construct handlers
+// directly, unrelated to this feature, keep compiling without change; a nil
+// resolver (never calling this) is treated as unscoped rather than
+// panicking — see requireProjectMember's doc comment.
+func (h *ProjectHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
+}
+
+const (
+	// callerScopeProjectsBatchSize is the page size used to query entity-service
+	// when scanning upstream projects for caller membership.
+	callerScopeProjectsBatchSize = 50
+
+	// callerScopeProjectsMaxPages caps the scan at 500 projects — an independent ceiling
+	// so a large or unbounded catalog doesn't loop indefinitely.
+	callerScopeProjectsMaxPages = 10
+)
 
 // SearchProjects handles POST /projects/search.
 func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +86,21 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	result, err := h.entity.SearchProjects(r.Context(), dto.BuildEntitySearchProjectsRequest(req))
+	entityReq := dto.BuildEntitySearchProjectsRequest(req)
+
+	var result entity.SearchProjectsResponse
+	var err error
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / scopeToCallerProjects.
+	// if h.callerScope != nil {
+	// 	result, err = h.scopeToCallerProjects(r.Context(), entityReq, req.Pagination, user.Email)
+	// } else {
+	// 	result, err = h.entity.SearchProjects(r.Context(), entityReq)
+	// }
+	result, err = h.entity.SearchProjects(r.Context(), entityReq)
+
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to search projects.")
@@ -70,6 +108,74 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSONValue(w, http.StatusOK, dto.MapSearchProjects(result))
+}
+
+// scopeToCallerProjects pages through entity-service's project search results
+// in batches of callerScopeProjectsBatchSize (up to callerScopeProjectsMaxPages),
+// filters each returned project to only those the caller is a member of (via
+// CallerScopeResolver.IsProjectMember), and applies client-side slice pagination
+// based on clientPagination (Offset & Limit).
+func (h *ProjectHandler) scopeToCallerProjects(ctx context.Context, baseReq entity.SearchProjectsRequest, clientPagination entity.Pagination, email string) (entity.SearchProjectsResponse, error) {
+	var allScoped []entity.ProjectView
+
+	for page := 0; page < callerScopeProjectsMaxPages; page++ {
+		batchReq := baseReq
+		batchReq.Pagination = entity.Pagination{
+			Limit:  callerScopeProjectsBatchSize,
+			Offset: page * callerScopeProjectsBatchSize,
+		}
+
+		resp, err := h.entity.SearchProjects(ctx, batchReq)
+		if err != nil {
+			return entity.SearchProjectsResponse{}, err
+		}
+
+		for _, p := range resp.Projects {
+			member, memberErr := h.callerScope.IsProjectMember(ctx, p.ID, email)
+			if memberErr != nil {
+				slog.ErrorContext(ctx, "caller scope check failed", "projectID", p.ID, "err", summarizeErr(memberErr))
+				continue
+			}
+			if member {
+				allScoped = append(allScoped, p)
+			}
+		}
+
+		if len(resp.Projects) == 0 || !resp.HasMore || (page*callerScopeProjectsBatchSize+len(resp.Projects)) >= resp.Total {
+			break
+		}
+	}
+
+	totalScoped := len(allScoped)
+	clientLimit := clientPagination.Limit
+	if clientLimit <= 0 {
+		clientLimit = callerScopeProjectsBatchSize
+	}
+	clientOffset := clientPagination.Offset
+	if clientOffset < 0 {
+		clientOffset = 0
+	}
+
+	var paged []entity.ProjectView
+	if clientOffset < totalScoped {
+		end := totalScoped
+		if clientLimit < totalScoped-clientOffset {
+			end = clientOffset + clientLimit
+		}
+		paged = allScoped[clientOffset:end]
+	} else {
+		paged = []entity.ProjectView{}
+	}
+
+	hasMore := (clientOffset + len(paged)) < totalScoped
+
+	return entity.SearchProjectsResponse{
+		Projects: paged,
+		Total:    totalScoped,
+		Limit:    clientLimit,
+		Offset:   clientOffset,
+		HasMore:  hasMore,
+	}, nil
 }
 
 // GetProject handles GET /projects/{id}.

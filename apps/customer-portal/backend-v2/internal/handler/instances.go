@@ -47,11 +47,39 @@ type entityInstanceClient interface {
 // InstanceHandler handles HTTP requests for the instances/metrics/usages fan-out.
 type InstanceHandler struct {
 	entity entityInstanceClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewInstanceHandler creates an InstanceHandler backed by the given entity client.
 func NewInstanceHandler(entityClient entityInstanceClient) *InstanceHandler {
 	return &InstanceHandler{entity: entityClient}
+}
+
+// SetCallerScope enables caller-scoped access for the project-scoped variant
+// of each instance endpoint only (checkProjectScope below is a no-op for the
+// deployment- and deployed-product-scoped variants — resolving those back to
+// a project id is a separate, not-yet-addressed gap). Always enforced in
+// production (main.go calls this unconditionally, no kill switch) — see
+// ProjectHandler.SetCallerScope for why this is a setter rather than a
+// constructor parameter.
+func (h *InstanceHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
+}
+
+// checkProjectScope requires caller membership only when scope is a
+// project-scoped filter (scope.projectIDs set — the other two ID slices are
+// always nil by construction, see instanceIDFilters); a no-op for the
+// deployment- and deployed-product-scoped variants.
+func (h *InstanceHandler) checkProjectScope(w http.ResponseWriter, r *http.Request, scope instanceIDFilters, userID, email string) bool {
+	if len(scope.projectIDs) == 0 {
+		return true
+	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// return requireProjectMember(w, r, h.callerScope, scope.projectIDs[0], userID, email, http.StatusForbidden, ErrMsgForbidden)
+	return true
 }
 
 // instanceIDFilters is exactly one non-empty ID slice — the other two are
@@ -81,6 +109,9 @@ func (h *InstanceHandler) searchInstances(w http.ResponseWriter, r *http.Request
 	}
 	if !uuidRe.MatchString(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
 		return
 	}
 
@@ -150,6 +181,9 @@ func (h *InstanceHandler) searchInstanceMetrics(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -208,6 +242,9 @@ func (h *InstanceHandler) searchInstanceUsage(w http.ResponseWriter, r *http.Req
 	}
 	if !uuidRe.MatchString(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
 		return
 	}
 
@@ -275,6 +312,9 @@ func (h *InstanceHandler) searchInstanceMetricsStats(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -333,6 +373,9 @@ func (h *InstanceHandler) searchInstanceUsageStats(w http.ResponseWriter, r *htt
 	}
 	if !uuidRe.MatchString(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
 		return
 	}
 

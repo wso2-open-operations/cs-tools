@@ -98,7 +98,8 @@ func MapAttachmentCreate(r entity.CreateAttachmentResponse) AttachmentCreateResp
 	}
 }
 
-// AttachmentSummary is one item of the portal's response for POST /attachments/search.
+// AttachmentSummary is one item of an attachment list response (used by case and
+// deployment attachment listings).
 type AttachmentSummary struct {
 	ID            string    `json:"id"`
 	ReferenceID   string    `json:"referenceId"`
@@ -111,42 +112,6 @@ type AttachmentSummary struct {
 	CreatedOn     time.Time `json:"createdOn"`
 	DownloadURL   *string   `json:"downloadUrl,omitempty"`
 	PreviewURL    *string   `json:"previewUrl,omitempty"`
-}
-
-// SearchAttachmentsResponse is the portal's response for POST /attachments/search.
-type SearchAttachmentsResponse struct {
-	Attachments  []AttachmentSummary `json:"attachments"`
-	TotalRecords int                 `json:"totalRecords"`
-	Limit        int                 `json:"limit"`
-	Offset       int                 `json:"offset"`
-	HasMore      bool                `json:"hasMore"`
-}
-
-// MapSearchAttachments builds the portal response from entity-service's SearchAttachmentsResponse.
-func MapSearchAttachments(r entity.SearchAttachmentsResponse) SearchAttachmentsResponse {
-	items := make([]AttachmentSummary, 0, len(r.Attachments))
-	for _, a := range r.Attachments {
-		items = append(items, AttachmentSummary{
-			ID:            a.ID,
-			ReferenceID:   a.ReferenceID,
-			ReferenceType: string(a.ReferenceType),
-			Name:          a.Name,
-			Type:          a.Type,
-			SizeBytes:     a.SizeBytes,
-			Description:   a.Description,
-			CreatedBy:     attachmentCreatedByName(a.CreatedBy),
-			CreatedOn:     a.CreatedOn,
-			DownloadURL:   a.DownloadURL,
-			PreviewURL:    a.PreviewURL,
-		})
-	}
-	return SearchAttachmentsResponse{
-		Attachments:  items,
-		TotalRecords: r.Total,
-		Limit:        r.Limit,
-		Offset:       r.Offset,
-		HasMore:      r.HasMore,
-	}
 }
 
 // CaseAttachmentsResponse is the portal's response for

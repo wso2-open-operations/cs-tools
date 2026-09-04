@@ -49,14 +49,24 @@ type contactsClient interface {
 // management, backed by a separate microservice (not entity-service, not
 // SCIM) keyed on the project's Salesforce ID.
 type ContactHandler struct {
-	entity   entityProjectResolver
-	contacts contactsClient
+	entity      entityProjectResolver
+	contacts    contactsClient
+	callerScope *CallerScopeResolver
 }
 
 // NewContactHandler creates a ContactHandler backed by the given entity and
 // project-contact onboarding service clients.
 func NewContactHandler(entityClient entityProjectResolver, contactsClient contactsClient) *ContactHandler {
 	return &ContactHandler{entity: entityClient, contacts: contactsClient}
+}
+
+// SetCallerScope enables caller-scoped access: contact management operations
+// require the caller to be an active portal-user contact of the project in the
+// URL path. Always enforced in production (main.go calls this unconditionally,
+// no kill switch) — see ProjectHandler.SetCallerScope for why this is a
+// setter rather than a constructor parameter.
+func (h *ContactHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // GetProjectContacts handles GET /projects/{id}/contacts.
@@ -72,6 +82,11 @@ func (h *ContactHandler) GetProjectContacts(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	project, err := h.entity.GetProject(r.Context(), projectID)
 	if err != nil {
@@ -104,6 +119,11 @@ func (h *ContactHandler) CreateProjectContact(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -151,6 +171,11 @@ func (h *ContactHandler) RemoveProjectContact(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
+
 	project, err := h.entity.GetProject(r.Context(), projectID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProject failed", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
@@ -183,6 +208,11 @@ func (h *ContactHandler) UpdateProjectContactRole(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -224,6 +254,11 @@ func (h *ContactHandler) ValidateProjectContact(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

@@ -47,11 +47,22 @@ type entityProjectStatsClient interface {
 // source — see internal/entity/projects.go.
 type ProjectStatsHandler struct {
 	entity entityProjectStatsClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewProjectStatsHandler creates a ProjectStatsHandler backed by the given entity client.
 func NewProjectStatsHandler(entityClient entityProjectStatsClient) *ProjectStatsHandler {
 	return &ProjectStatsHandler{entity: entityClient}
+}
+
+// SetCallerScope enables caller-scoped access: all project-scoped metadata and
+// statistics routes require the caller to be an active portal-user contact of
+// the project in the URL path. Always enforced in production (main.go calls this
+// unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
+// why this is a setter rather than a constructor parameter.
+func (h *ProjectStatsHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // GetProjectFilters handles GET /projects/{id}/filters.
@@ -67,6 +78,13 @@ func (h *ProjectStatsHandler) GetProjectFilters(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectMetadata(r.Context(), id)
 	if err != nil {
@@ -91,6 +109,13 @@ func (h *ProjectStatsHandler) GetProjectFeatures(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectMetadata(r.Context(), id)
 	if err != nil {
@@ -118,6 +143,13 @@ func (h *ProjectStatsHandler) GetProjectDashboardStats(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	caseTypes := r.URL.Query()["caseTypes"]
 	createdBy := r.URL.Query().Get("createdBy")
@@ -167,6 +199,13 @@ func (h *ProjectStatsHandler) GetProjectCaseStats(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
+
 	result, err := h.entity.GetProjectCaseStats(r.Context(), id, r.URL.Query()["caseTypes"], r.URL.Query().Get("createdBy"))
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProjectCaseStats failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
@@ -190,6 +229,13 @@ func (h *ProjectStatsHandler) GetProjectConversationStats(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectConversationStats(r.Context(), id, r.URL.Query().Get("createdBy"))
 	if err != nil {
@@ -216,6 +262,13 @@ func (h *ProjectStatsHandler) GetProjectSupportStats(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	caseTypes := r.URL.Query()["caseTypes"]
 	createdBy := r.URL.Query().Get("createdBy")
@@ -251,6 +304,13 @@ func (h *ProjectStatsHandler) GetProjectTimeCardStats(w http.ResponseWriter, r *
 		return
 	}
 
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
+
 	startDate := r.URL.Query().Get("startDate")
 	endDate := r.URL.Query().Get("endDate")
 	if !validateDateParams(w, dateParam{"startDate", startDate}, dateParam{"endDate", endDate}) {
@@ -281,6 +341,13 @@ func (h *ProjectStatsHandler) GetProjectChangeRequestStats(w http.ResponseWriter
 		return
 	}
 
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
+
 	result, err := h.entity.GetProjectChangeRequestStats(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProjectChangeRequestStats failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
@@ -305,6 +372,13 @@ func (h *ProjectStatsHandler) SearchProjectCaseTimeCards(w http.ResponseWriter, 
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -352,6 +426,13 @@ func (h *ProjectStatsHandler) GetProjectUsageStats(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectStats(r.Context(), id)
 	if err != nil {

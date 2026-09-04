@@ -192,16 +192,16 @@ backend-v2/
 │   │   ├── client.go            # Config/Client/do()/getJSON()/postJSON()/patchJSON()
 │   │   ├── types.go             # entity-service's wire-format structs (internal to this package)
 │   │   ├── users.go             # GetMe, PatchMe
-│   │   ├── accounts.go          # SearchAccounts, GetAccount
+│   │   ├── accounts.go          # GetAccount
 │   │   ├── projects.go          # SearchProjects, GetProject
 │   │   ├── cases.go             # SearchCases, GetCase, CreateCase, UpdateCase, CreateCaseComment, SearchCaseActivities
 │   │   ├── deployments.go       # SearchDeployments, CreateDeployment
 │   │   ├── deployed_products.go # SearchDeployedProducts, CreateDeployedProduct, UpdateDeployedProduct
-│   │   ├── attachments.go       # CreateAttachment, SearchAttachments, GetAttachmentContent, DeleteAttachment
+│   │   ├── attachments.go       # CreateAttachment, GetAttachmentContent, DeleteAttachment
 │   │   ├── products.go          # SearchProducts, SearchProductVersions
 │   │   ├── change_requests.go   # create/search/get/update, approvals get/decide
 │   │   ├── call_requests.go     # CreateCallRequest, SearchCallRequests, UpdateCallRequest
-│   │   ├── comments.go          # CreateComment, SearchComments (generic, any reference entity)
+│   │   ├── comments.go          # CreateComment (generic, any reference entity)
 │   │   ├── conversations.go     # SearchConversations
 │   │   ├── product_vulnerabilities.go # SearchProductVulnerabilities, GetProductVulnerability, GetVulnerabilityMeta
 │   │   ├── catalogs.go          # SearchCatalogs, GetCatalogItemVariables
@@ -269,18 +269,18 @@ backend-v2/
 │   └── handler/
 │       ├── response.go          # writeJSON/writeError/mapUpstreamError shared helpers
 │       ├── users.go             # GET/PATCH /users/me
-│       ├── accounts.go          # POST /accounts/search, GET /accounts/{id}
+│       ├── accounts.go          # GET /accounts/{id}
 │       ├── projects.go          # POST /projects/search, GET /projects/{id}
 │       ├── project_stats.go     # project filters/features/dashboard-stats (composite, some graceful-degradation), case-grouped time-cards
 │       ├── cases.go             # cases search/get/create/update/comment/activities/feedback/escalations, case-scoped attachment update
 │       ├── deployments.go       # POST /projects/{id}/deployments/search, POST /projects/{id}/deployments, PATCH /projects/{projectId}/deployments/{id}, deployment-scoped attachment update
 │       ├── deployed_products.go # deployed-product search/create/update (scoped under /deployments/{deploymentId}/products) + per-deployed-product metrics/usage-counts
-│       ├── attachments.go       # attachment create/search/download/get/delete
+│       ├── attachments.go       # attachment create/download/get/delete
 │       ├── products.go          # GET /products, POST /products/search, POST /products/{id}/versions/search
 │       ├── product_vulnerabilities.go # vulnerability search/get
 │       ├── catalogs.go          # catalog search (scoped under /deployments/products/{deployedProductId}), catalog item variables
 │       ├── time_cards.go        # POST /projects/{id}/time-cards/search
-│       ├── comments.go          # generic comment create/search
+│       ├── comments.go          # generic comment create
 │       ├── ai_chat.go           # case classification, recommendations, conversation create/get/update/search/messages/summary
 │       ├── websocket.go         # GET /ws — real-time AI chat proxy
 │       ├── product_consumption.go # deployment license provisioning, deployment usage import
@@ -303,8 +303,7 @@ backend-v2/
 - `GET /users/me` — current user's profile; name/timezone/roles from entity-service (requires
   `DATA_SOURCE=servicenow`), phone number from SCIM
 - `PATCH /users/me` — update phone number (SCIM) and/or timezone (entity-service); at least one required
-- `POST /accounts/search` — search accounts (normalizes entity-service's Postgres/ServiceNow shapes into one)
-- `GET /accounts/{id}` — get account by ID (same normalization)
+- `GET /accounts/{id}` — get account by ID (normalizes entity-service's Postgres/ServiceNow shapes into one)
 - `POST /projects/search` — search projects
 - `GET /projects/{id}` — get project by ID
 - `GET /projects/{id}/filters` — get filter-dropdown options for a project (case states, severities, issue types, etc.)
@@ -340,7 +339,6 @@ backend-v2/
 - `POST /deployments/{deploymentId}/products/{productId}/metrics/search` — get core-count metrics for a deployed product over a date range (`productId` is the deployed product's own ID; ServiceNow data source only)
 - `POST /deployments/{deploymentId}/products/{productId}/metrics/usage-counts/search` — get usage-count metrics for a deployed product over a date range (ServiceNow data source only)
 - `POST /attachments` — create an attachment
-- `POST /attachments/search` — search attachments
 - `GET /attachments/{id}` — get an attachment's metadata plus base64-encoded content
 - `GET /attachments/{id}/content` — download an attachment's raw file content
 - `DELETE /attachments/{id}` — delete an attachment
@@ -365,7 +363,6 @@ backend-v2/
 - `POST /projects/{id}/time-cards/search` — search a project's time cards (read-only; ServiceNow data source only)
 - `POST /projects/{id}/cases/time-cards/search` — search time cards rolled up by case for a project (ServiceNow data source only)
 - `POST /comments` — add a comment to any reference entity (case, conversation, change_request, deployment, incident) — always a plain customer comment
-- `POST /comments/search` — search comments on a reference entity — always filtered to plain customer comments
 - `GET /metadata` — get system-wide reference data (time zones, project types, feedback emoji choices)
 - `POST /search` — global search across projects and cases
 - `GET /conversations/{id}` — get a conversation's details
@@ -425,10 +422,6 @@ curl -H "x-jwt-assertion: $JWT" http://localhost:8080/users/me
 curl -X PATCH http://localhost:8080/users/me \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
   -d '{"timeZone":"Asia/Colombo"}'
-
-curl -X POST http://localhost:8080/accounts/search \
-  -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"pagination":{"limit":10,"offset":0},"filters":{"searchQuery":"acme"}}'
 
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/accounts/<account-id>
 
@@ -497,10 +490,6 @@ curl -X PATCH http://localhost:8080/deployments/<deployment-id>/products/<deploy
 curl -X POST http://localhost:8080/attachments \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
   -d '{"referenceId":"<case-id>","referenceType":"case","name":"log.txt","type":"text/plain","file":"<base64>"}'
-
-curl -X POST http://localhost:8080/attachments/search \
-  -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"referenceId":"<case-id>","referenceType":"case","pagination":{"limit":10,"offset":0}}'
 
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/attachments/<attachment-id>/content -o downloaded-file
 
@@ -577,10 +566,6 @@ curl -X POST http://localhost:8080/projects/<project-id>/time-cards/search \
 curl -X POST http://localhost:8080/comments \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
   -d '{"referenceId":"<change-request-id>","referenceType":"change_request","content":"Any update?"}'
-
-curl -X POST http://localhost:8080/comments/search \
-  -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"referenceId":"<change-request-id>","referenceType":"change_request","pagination":{"limit":10,"offset":0}}'
 
 curl -X POST http://localhost:8080/cases/classify \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
