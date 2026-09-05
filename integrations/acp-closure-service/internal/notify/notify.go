@@ -89,8 +89,10 @@ type LoggingNotifier struct {
 	Logger *slog.Logger
 }
 
-// Send logs the notice and always succeeds.
-func (n *LoggingNotifier) Send(ctx context.Context, notice Notice) error {
+// Send logs the notice and always succeeds. Reports delivered=false always
+// — it only logs what would have been sent, it never actually delivers a
+// notice to anyone.
+func (n *LoggingNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	attrs := []any{
 		"subject", notice.Subject,
 		"window", notice.Window,
@@ -115,11 +117,5 @@ func (n *LoggingNotifier) Send(ctx context.Context, notice Notice) error {
 	}
 
 	n.Logger.InfoContext(ctx, "notice", attrs...)
-	return nil
-}
-
-// Delivers reports false: LoggingNotifier only logs what would have been
-// sent, it never actually delivers a notice to anyone.
-func (n *LoggingNotifier) Delivers() bool {
-	return false
+	return false, nil
 }

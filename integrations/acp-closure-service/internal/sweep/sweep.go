@@ -54,10 +54,11 @@ func processProject(ctx context.Context, reader entityReader, updater projectUpd
 	}
 
 	if decision.ShouldNotify {
-		if err := notifyForWindow(ctx, reader, ntf, proj, decision.Window); err != nil {
+		delivered, err := notifyForWindow(ctx, reader, ntf, proj, decision.Window)
+		if err != nil {
 			return fmt.Errorf("sweep: notify project %s: %w", proj.ID, err)
 		}
-		if err := recordNoticeSent(ctx, updater, proj, decision.Window, ntf.Delivers()); err != nil {
+		if err := recordNoticeSent(ctx, updater, proj, decision.Window, delivered); err != nil {
 			return fmt.Errorf("sweep: record notice for project %s: %w", proj.ID, err)
 		}
 	}
@@ -283,10 +284,16 @@ func accountName(proj project) string {
 // one — that's the tradeoff for keeping "skip contact-fetch entirely for
 // internal-only windows" (needsCustomerAudience) and "never send before
 // contacts resolve" both true at once; both sites wrap the error identically.
-func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, proj project, window closure.NoticeWindow) error {
+// notifyForWindow returns whether every notice it sent for this window was
+// actually delivered — false if any one of them (internal, customer,
+// nudge) wasn't, so the caller never records a window as fully handled
+// when part of it silently wasn't (e.g. a customer notice filtered out by
+// EmailNotifier's WSO2-only staging safeguard, even though the internal
+// notice sent fine).
+func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, proj project, window closure.NoticeWindow) (bool, error) {
 	contacts, err := resolveAccountContacts(ctx, reader, proj.accountID())
 	if err != nil {
-		return fmt.Errorf("resolve account contacts: %w", err)
+		return false, fmt.Errorf("resolve account contacts: %w", err)
 	}
 
 	internalRecipients := notify.Recipients{
@@ -301,20 +308,22 @@ func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, pro
 	internalNotice.Recipients = internalRecipients
 
 	if !needsCustomerAudience(window) {
-		if err := ntf.Send(ctx, internalNotice); err != nil {
-			return fmt.Errorf("send internal notice: %w", err)
+		delivered, err := ntf.Send(ctx, internalNotice)
+		if err != nil {
+			return false, fmt.Errorf("send internal notice: %w", err)
 		}
-		return nil
+		return delivered, nil
 	}
 
 	projectContacts, accountContactsList, err := fetchContacts(ctx, reader, proj)
 	if err != nil {
-		return err
+		return false, err
 	}
 	resolution := recipients.ResolveCustomerContact(projectContacts, accountContactsList)
 
-	if err := ntf.Send(ctx, internalNotice); err != nil {
-		return fmt.Errorf("send internal notice: %w", err)
+	internalDelivered, err := ntf.Send(ctx, internalNotice)
+	if err != nil {
+		return false, fmt.Errorf("send internal notice: %w", err)
 	}
 
 	if !resolution.NeedsAMNudge {
@@ -324,7 +333,11 @@ func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, pro
 		customerNotice.Recipients = internalRecipients
 		customerNotice.Recipients.Customer = resolution.CustomerContact
 		customerNotice.ResolvedVia = resolution.ResolvedVia
-		return ntf.Send(ctx, customerNotice)
+		customerDelivered, err := ntf.Send(ctx, customerNotice)
+		if err != nil {
+			return false, err
+		}
+		return internalDelivered && customerDelivered, nil
 	}
 
 	nudgeNotice := baseNotice(proj, window)
@@ -332,7 +345,11 @@ func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, pro
 	nudgeNotice.Body = noBusinessContactBody(proj, contacts.AccountOwner.Name)
 	nudgeNotice.Recipients = internalRecipients
 	nudgeNotice.ResolvedVia = resolution.ResolvedVia
-	return ntf.Send(ctx, nudgeNotice)
+	nudgeDelivered, err := ntf.Send(ctx, nudgeNotice)
+	if err != nil {
+		return false, err
+	}
+	return internalDelivered && nudgeDelivered, nil
 }
 
 // baseNotice builds the project-identity fields shared by every Notice sent

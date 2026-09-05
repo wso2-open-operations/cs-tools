@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/acp-closure-service/internal/emailservice"
 	"github.com/wso2-open-operations/cs-tools/integrations/acp-closure-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/acp-closure-service/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/integrations/acp-closure-service/internal/sweep"
@@ -44,15 +45,29 @@ type projectUpdater interface {
 	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
+// notifier is declared locally, mirroring projectUpdater above, so main can
+// hold either *notify.LoggingNotifier or *notify.EmailNotifier in one
+// variable depending on SEND_REAL_EMAILS.
+type notifier interface {
+	Send(ctx context.Context, n notify.Notice) (delivered bool, err error)
+}
+
 func main() {
 	loadDotEnv(".env")
 
 	dryRun := envBool("DRY_RUN", true)
+	sendRealEmails := envBool("SEND_REAL_EMAILS", false)
 	testProjectID := os.Getenv("TEST_PROJECT_ID")
 	excludedProjectIDs := parseExcludedProjectIDs(os.Getenv("EXCLUDED_PROJECT_IDS"))
 	runID := newRunID()
 
-	slog.Info("acp-closure-service starting", "runID", runID, "dryRun", dryRun, "testProjectID", testProjectID, "excludedProjectIDs", sortedKeys(excludedProjectIDs))
+	slog.Info("acp-closure-service starting",
+		"runID", runID,
+		"dryRun", dryRun,
+		"sendRealEmails", sendRealEmails,
+		"testProjectID", testProjectID,
+		"excludedProjectIDs", sortedKeys(excludedProjectIDs),
+	)
 
 	entityClient := entity.NewClient(entity.Config{
 		BaseURL:      mustEnv("CSM_INTEGRATION_BASE_URL"),
@@ -67,11 +82,29 @@ func main() {
 		updater = &sweep.DryRunProjectUpdater{}
 	}
 
-	notifier := &notify.LoggingNotifier{Logger: slog.Default()}
+	var ntf notifier = &notify.LoggingNotifier{Logger: slog.Default()}
+	if sendRealEmails {
+		emailClient, err := emailservice.NewClient(emailservice.Config{
+			BaseURL:      mustEnv("EMAIL_SERVICE_BASE_URL"),
+			TokenURL:     mustEnv("EMAIL_SERVICE_TOKEN_URL"),
+			ClientID:     mustEnv("EMAIL_SERVICE_CLIENT_ID"),
+			ClientSecret: mustEnv("EMAIL_SERVICE_CLIENT_SECRET"),
+			FromAddress:  mustEnv("EMAIL_SERVICE_FROM_ADDRESS"),
+		})
+		if err != nil {
+			slog.Error("invalid email service configuration", "err", err)
+			os.Exit(1)
+		}
+		ntf = &notify.EmailNotifier{
+			Sender:                 emailClient,
+			Logger:                 slog.Default(),
+			AllowNonWSO2Recipients: envBool("EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS", false),
+		}
+	}
 
 	ctx := entity.WithCorrelationID(context.Background(), runID)
 
-	result, err := sweep.Run(ctx, entityClient, updater, notifier, time.Now(), testProjectID, excludedProjectIDs)
+	result, err := sweep.Run(ctx, entityClient, updater, ntf, time.Now(), testProjectID, excludedProjectIDs)
 	if err != nil {
 		slog.Error("acp-closure-service sweep failed", "runID", runID, "err", err)
 		os.Exit(1)

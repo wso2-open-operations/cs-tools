@@ -109,7 +109,7 @@ func TestProcessProject_InternalOnlyWindowSkipsCustomerContactLookup(t *testing.
 func TestProcessProject_RecordsIgnoredWhenNotifierDoesNotDeliver(t *testing.T) {
 	reader := &mockEntityReader{}
 	updater := &mockProjectUpdater{}
-	ntf := &mockNotifier{deliversFn: func() bool { return false }}
+	ntf := &mockNotifier{}
 
 	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	endDate := now.AddDate(0, 0, 89) // fires the 90-day window
@@ -198,6 +198,61 @@ func TestProcessProject_CustomerAudienceWindowNotifiesBusinessContact(t *testing
 
 	if len(updater.calls) != 1 {
 		t.Fatalf("updater.calls = %d, want 1", len(updater.calls))
+	}
+}
+
+// TestProcessProject_RecordsIgnoredWhenOnlyCustomerNoticeWasntDelivered
+// covers the exact CodeRabbit-flagged bug: a 7-day window where the
+// internal notice genuinely delivers but the customer notice doesn't
+// (e.g. filtered out by EmailNotifier's WSO2-only staging safeguard).
+// recordNoticeSent must record "IGNORED" for the whole window, not
+// "SUCCESSFUL" — the old behavior (keyed off a blanket per-notifier
+// Delivers() signal) would have wrongly written "SUCCESSFUL" here, since
+// EmailNotifier is, in general, a real-sending notifier, even though this
+// specific customer notice never reached anyone.
+func TestProcessProject_RecordsIgnoredWhenOnlyCustomerNoticeWasntDelivered(t *testing.T) {
+	reader := &mockEntityReader{
+		searchProjectContactsFn: func(ctx context.Context, projectID string, body []byte) ([]byte, error) {
+			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["business_contact"]}]}`), nil
+		},
+	}
+	updater := &mockProjectUpdater{}
+	ntf := &mockNotifier{
+		sendFn: func(ctx context.Context, n notify.Notice) (bool, error) {
+			// Internal notice (no Customer) delivers; customer notice
+			// (Customer populated) gets filtered out — mirrors a real
+			// non-WSO2 customer address in staging.
+			return n.Recipients.Customer == nil, nil
+		},
+	}
+
+	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	endDate := now.AddDate(0, 0, 6) // fires the 7-day window
+	proj := project{ID: "p1", Name: "Acme - Subscription", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
+
+	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	if err != nil {
+		t.Fatalf("processProject() error = %v, want nil", err)
+	}
+	if len(ntf.sent) != 2 {
+		t.Fatalf("ntf.sent = %d, want 2 (internal + customer)", len(ntf.sent))
+	}
+
+	if len(updater.calls) != 1 {
+		t.Fatalf("updater.calls = %d, want 1", len(updater.calls))
+	}
+	var body struct {
+		SuspensionProcessState struct {
+			BasedOnSubscriptionEndDate struct {
+				ActionSendEmailNotification string `json:"actionSendEmailNotification"`
+			} `json:"based_on_subscription_end_date"`
+		} `json:"suspensionProcessState"`
+	}
+	if err := json.Unmarshal(updater.calls[0].body, &body); err != nil {
+		t.Fatalf("parse update body: %v", err)
+	}
+	if got := body.SuspensionProcessState.BasedOnSubscriptionEndDate.ActionSendEmailNotification; got != "IGNORED" {
+		t.Errorf("actionSendEmailNotification = %q, want %q (customer notice wasn't actually delivered)", got, "IGNORED")
 	}
 }
 
@@ -356,8 +411,8 @@ func TestProcessProject_NotifyFailureBlocksStateWrite(t *testing.T) {
 	reader := &mockEntityReader{}
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{
-		sendFn: func(ctx context.Context, n notify.Notice) error {
-			return errors.New("smtp relay unreachable")
+		sendFn: func(ctx context.Context, n notify.Notice) (bool, error) {
+			return false, errors.New("smtp relay unreachable")
 		},
 	}
 

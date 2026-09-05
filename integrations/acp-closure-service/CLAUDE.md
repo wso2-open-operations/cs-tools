@@ -55,10 +55,10 @@ session, ever, so that code path would be permanently dead here.
   `based_on_compliance` (Phase 2, legacy-owned) must survive every write
   byte-for-byte untouched — this is covered by a dedicated regression test
   using a realistic multi-section payload, not a trivial empty case.
-- `internal/notify` — `Notice` shape + `LoggingNotifier`. Real email sending
-  does not exist anywhere yet (deferred pending message-queue design on the
-  entity-service side) — `LoggingNotifier` is not a temporary stand-in for
-  this component specifically, it's genuinely the only option available.
+- `internal/notify` — `Notice`/`Recipients` shape, `LoggingNotifier`, and
+  `EmailNotifier` (real sending — see "Real email sending" below).
+- `internal/emailservice` — HTTP client for WSO2's internal email
+  notification service, satisfying `EmailNotifier`'s `Sender` interface.
 - `internal/sweep` — orchestration. `Run` paginates `/projects/search` (or,
   when `TEST_PROJECT_ID` is set, fetches exactly one project via
   `GetProject` and skips pagination entirely); `processProject` evaluates
@@ -75,16 +75,27 @@ decision logic cheaply testable without mocks.
 `DRY_RUN` never appears as an `if` inside `processProject` or `Run`. Both
 have exactly two side-effecting dependencies — `projectUpdater` (writes) and
 `notifier` (sends) — expressed as small interfaces. `main.go` decides which
-concrete implementation to inject based on `DRY_RUN`:
+concrete implementation to inject for `projectUpdater` based on `DRY_RUN`:
 `sweep.DryRunProjectUpdater` (silently no-ops, never calls `UpdateProject`
 — see the notice-content-redesign section below for why it deliberately
 doesn't log) vs. the real `*entity.Client`. Reads (`SearchProjects`, `GetAccount`,
 `SearchProjectContacts`, `SearchAccountContacts`) are never dry-run-gated —
 fetching and deciding has no write effect to protect against.
 
+`notifier` is chosen the same way — injection, not a branch inside
+`processProject`/`Run` — but on a **separate** flag, `SEND_REAL_EMAILS`, not
+`DRY_RUN`. This is deliberate: writing real project state and sending a
+real email to a real person are different risks, and conflating them into
+one flag would make it impossible to (for example) safely test the write
+path against a real project while emails stay log-only, or vice versa. See
+"Real email sending" below for `notify.EmailNotifier`, the real
+implementation `main.go` injects when `SEND_REAL_EMAILS=true`.
+
 If you add a new side-effecting call, give it the same treatment: define a
 minimal interface, inject the real implementation and a logging one, and
-never branch on `DRY_RUN` inside the orchestration logic itself.
+never branch on a config flag inside the orchestration logic itself. Give
+it its own flag rather than reusing `DRY_RUN`/`SEND_REAL_EMAILS` unless the
+risk it protects against is genuinely the same as one of theirs.
 
 ## TEST_PROJECT_ID scoping
 
@@ -286,8 +297,90 @@ wrong answer:
   testing against real data shows this role is rarely configured in
   practice regardless — most real resolutions land on `primary_contact` or
   `am_nudge`, not `business_contact`.
-- **Real email-sending mechanism** — deferred pending message-queue design
-  on the entity-service side, not blocked on this component's own work.
+- **`internal/entity.Client` doesn't validate its configured URLs use
+  `https`** — the same gap `internal/emailservice.Client.NewClient` was
+  given a fix for (CodeRabbit, PR #1657; see `requireHTTPS` there).
+  Deliberately not fixed here in the same PR — scoped out to keep that PR
+  focused on the email code it was actually about. `entity.Client` carries
+  the same category of risk (its `ClientSecret` flows through the same
+  kind of token request) and should get the equivalent check in its own
+  follow-up.
+
+## Real email sending
+
+`notify.EmailNotifier` calls WSO2's internal email notification service
+(owned by Rashmika's team) via `internal/emailservice.Client`, replacing
+`LoggingNotifier` when `SEND_REAL_EMAILS=true`. Confirmed directly with
+Rashmika, this superseded an earlier plan (referenced in older commit
+history) to publish an event/message onto a queue instead — "I don't think
+you need to publish an event to send an email for this use case, you could
+use our email service directly." No queue exists or is needed; this is a
+plain authenticated HTTP call.
+
+- **Wire contract confirmed against real code, not a spec document**:
+  `integrations/csm-notification-service/internal/notifications/email.go`
+  on the `dev-app-csm-portal` branch of this same repo is Rashmika's own
+  client for this service — `POST /send-email`, OAuth2 client-credentials
+  auth, `{to, cc, from, subject, template}` request body. `emailservice`'s
+  `sendEmailRequest` mirrors this exactly, including typing `Template` as
+  `[]byte` (not `string`) specifically so `encoding/json` base64-encodes it
+  the same way the real service expects — sending it as a plain string
+  would not match what the server decodes. `bcc`/`replyTo`/`attachments`
+  exist on the real API but have no ACP use case, so they're left out of
+  this component's client entirely rather than plumbed through unused.
+- **No OAuth2 scope is required** for this token endpoint — confirmed
+  explicitly with Rashmika, unlike `csm-integration-service`'s
+  `CSM_INTEGRATION_SCOPES`. Don't add a scopes config value here without
+  re-confirming that's changed.
+- **`FromAddress` is fixed at config level**, not a per-`Notice` value —
+  confirmed via a real received email to be `no-reply@wso2.com`.
+- **`EmailNotifier` maps `Recipients` onto to/cc**: when `Customer` is
+  present, the customer is the primary `to` and the three internal people
+  are `cc`'d; otherwise (internal-only notices, and the no-business-contact
+  notice) all populated internal recipients go in `to`. This is a design
+  decision made in this codebase, not something Rashmika's API dictates —
+  reconsider if it turns out wrong in practice.
+- **The WSO2-only staging safeguard is a hard requirement from Rashmika's
+  team**, not a suggestion: "make sure emails aren't being sent in staging
+  environment for any non-wso2 emails." `EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS`
+  defaults to `false`, filtering any recipient not ending in `@wso2.com`
+  before every send. If filtering leaves zero `to` recipients, `Send` skips
+  cleanly (logs, returns `nil`) rather than forcing a call the real API
+  would reject anyway (it requires at least one `to`) — a project with
+  nobody left to notify after filtering is treated the same as any other
+  legitimate-absence case already established throughout this codebase,
+  not an error.
+- **Notice bodies are plain text; the real API expects HTML** (its own
+  doc comment calls `SendEmail`'s content "an HTML email", and the Go
+  parameter is named `htmlBody`). `notify.plainTextToHTML` escapes special
+  characters first (so a project/account name containing `&`, `<`, etc.
+  can never break the resulting markup), then converts every newline to
+  `<br>`. The internal notice stops there — plain text, no further
+  wrapping, per its own confirmed reference design (real screenshots
+  Chamara shared). The customer-facing notice additionally gets wrapped in
+  `emailHTMLTemplate` (`renderEmailHTML`) — a real branded shell (WSO2
+  logo, orange accent border, footer disclaimer), also confirmed against
+  real received examples — only when `notice.Recipients.Customer != nil`.
+  The logo is a hosted URL (`wso2LogoURL`, WSO2's own public CDN), not an
+  embedded `data:` URI — confirmed via a real send that Gmail blocks
+  inline `data:` images in received mail.
+- **`notifier.Send` reports delivery per call, not per notifier.** The
+  interface is `Send(ctx, notice) (delivered bool, err error)` — no
+  separate `Delivers()` method. `LoggingNotifier.Send` always returns
+  `(false, nil)`; `EmailNotifier.Send` returns `(true, nil)` only when the
+  notice actually reached the real API, and `(false, nil)` when every
+  recipient got filtered out (e.g. the WSO2-only staging safeguard leaving
+  zero `to` addresses) — not an error, but not delivered either. This
+  replaced an earlier, blanket per-notifier `Delivers()` signal that had a
+  real bug (CodeRabbit, PR #1657): a customer notice silently filtered out
+  in staging was still recorded as `"SUCCESSFUL"` in
+  `suspensionProcessState`, since the blanket signal only reflected "is
+  this notifier type capable of real delivery," not "did this specific
+  notice actually go out." `sweep.notifyForWindow` now ANDs the delivered
+  result across every `Send` call it makes for a window (internal +
+  customer, or internal + nudge) before handing that combined result to
+  `recordNoticeSent` — a window is only recorded `"SUCCESSFUL"` if every
+  notice sent for it actually delivered.
 
 ## Testing conventions
 
@@ -305,10 +398,14 @@ wrong answer:
 - TDD throughout: red before green, one seam at a time. Seams under test:
   `closure.Decide`, `recipients.ResolveCustomerContact` /
   `AccountManagerEmail`, `suspensionstate.LastNoticeWindow` /
-  `WithSubscriptionEndDateState`, `sweep.processProject`, `sweep.Run`, and
-  the pure subject/body builders (`internalNoticeSubject`,
+  `WithSubscriptionEndDateState`, `sweep.processProject`, `sweep.Run`, the
+  pure subject/body builders (`internalNoticeSubject`,
   `customerNoticeSubject`, `internalNoticeBody`, `customerNoticeBody` in
-  `sweep.go`) tested directly rather than only through `processProject`.
+  `sweep.go`) tested directly rather than only through `processProject`,
+  `emailservice.Client.SendEmail` (against a real `httptest.Server`, same
+  pattern as `entity.Client`), and `notify.EmailNotifier.Send` (recipient
+  mapping, the WSO2-only filter, HTML conversion — via a hand-rolled
+  `mockEmailSender`, no real HTTP involved at that layer).
   `main.go` and the two logging/no-op implementations
   (`notify.LoggingNotifier`, `sweep.DryRunProjectUpdater`) are deliberately
   untested, matching this repo's convention that wiring-only code and

@@ -199,13 +199,12 @@ type projectUpdater interface {
 }
 
 // notifier is the minimal send surface processProject needs. Satisfied by
-// *notify.LoggingNotifier today; a real implementation will satisfy the same
-// interface once one exists.
+// *notify.LoggingNotifier and *notify.EmailNotifier. Send reports, per
+// call, whether that specific notice was actually delivered — not a
+// blanket "this notifier type sends for real" signal. recordNoticeSent
+// uses this per-call result to avoid claiming a notification succeeded
+// when this particular one didn't (e.g. a customer notice silently
+// filtered out by EmailNotifier's WSO2-only staging safeguard).
 type notifier interface {
-	Send(ctx context.Context, n notify.Notice) error
-	// Delivers reports whether this notifier actually delivers notices
-	// (real email) as opposed to only logging them. recordNoticeSent uses
-	// this to avoid claiming a notification succeeded when nothing was
-	// ever sent.
-	Delivers() bool
+	Send(ctx context.Context, n notify.Notice) (delivered bool, err error)
 }
