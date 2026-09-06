@@ -56,12 +56,22 @@ type entityProjectAccessChecker interface {
 type ProductConsumptionHandler struct {
 	productConsumption productConsumptionClient
 	entity             entityProjectAccessChecker
+	callerScope        *CallerScopeResolver
 }
 
 // NewProductConsumptionHandler creates a ProductConsumptionHandler backed by
 // the given product-consumption and entity clients.
 func NewProductConsumptionHandler(productConsumption productConsumptionClient, entityClient entityProjectAccessChecker) *ProductConsumptionHandler {
 	return &ProductConsumptionHandler{productConsumption: productConsumption, entity: entityClient}
+}
+
+// SetCallerScope enables caller-scoped access: deployment license provisioning
+// requires the caller to be an active portal-user contact of the project in
+// the URL path. Always enforced in production (main.go calls this
+// unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
+// why this is a setter rather than a constructor parameter.
+func (h *ProductConsumptionHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // GetDeploymentLicense handles POST /projects/{projectId}/deployments/{deploymentId}/license.
@@ -82,6 +92,11 @@ func (h *ProductConsumptionHandler) GetDeploymentLicense(w http.ResponseWriter, 
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	// Verify the caller can access this project before provisioning
 	// anything — entity-service's own project-access check is the

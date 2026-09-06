@@ -112,15 +112,15 @@ func TestDisplayLabels_UnknownValuePassesThrough(t *testing.T) {
 	}
 }
 
-// TestSearchAttachmentsResponse_EmitsTotalRecords is the key-name assertion that
+// TestCaseAttachmentsResponse_EmitsTotalRecords is the key-name assertion that
 // would have caught this class of bug at build time.
 //
 // useGetCaseAttachments destructures `totalRecords` with **no** array-length
 // fallback (unlike the calls and escalations panels), so emitting `total` left
 // attachmentCount undefined and the tab read "Attachments (0)" even though
 // entity-service returned 200 with a populated list.
-func TestSearchAttachmentsResponse_EmitsTotalRecords(t *testing.T) {
-	b, err := json.Marshal(SearchAttachmentsResponse{TotalRecords: 2, Limit: 10})
+func TestCaseAttachmentsResponse_EmitsTotalRecords(t *testing.T) {
+	b, err := json.Marshal(CaseAttachmentsResponse{TotalRecords: 2, Limit: 10})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

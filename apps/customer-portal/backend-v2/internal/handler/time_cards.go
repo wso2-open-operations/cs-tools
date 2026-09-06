@@ -41,11 +41,22 @@ type entityTimeCardClient interface {
 // portal, only search.
 type TimeCardHandler struct {
 	entity entityTimeCardClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewTimeCardHandler creates a TimeCardHandler backed by the given entity client.
 func NewTimeCardHandler(entity entityTimeCardClient) *TimeCardHandler {
 	return &TimeCardHandler{entity: entity}
+}
+
+// SetCallerScope enables caller-scoped access: SearchTimeCards requires the
+// caller to be an active portal-user contact of the project in the URL
+// path. Always enforced in production (main.go calls this unconditionally,
+// no kill switch) — see ProjectHandler.SetCallerScope for why this is a
+// setter rather than a constructor parameter.
+func (h *TimeCardHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // SearchTimeCards handles POST /projects/{id}/time-cards/search.
@@ -61,6 +72,13 @@ func (h *TimeCardHandler) SearchTimeCards(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

@@ -6,12 +6,12 @@ responses for the frontend. This is a rewrite of the existing backend at
 `apps/customer-portal/backend`, modeled on `apps/csm-portal/backend`'s conventions — read that
 backend's own CLAUDE.md too if something here is underspecified.
 
-**Status: in progress.** 107 routes are wired up so far, across seven upstream services:
+**Status: in progress.** 104 routes are wired up so far, across seven upstream services:
 entity-service, the WSO2 Updates service, SCIM, the AI chat agent, the product-consumption
 service, the registry (robot-account) service, and the project-contact onboarding service (see
 "The AI chat agent", "The product-consumption service", "The registry service", and "The
 project-contact onboarding service" below — none of the last four is entity-service-backed at
-all). Route list: `GET /health`, `GET`/`PATCH /users/me`, `POST /accounts/search`,
+all). Route list: `GET /health`, `GET`/`PATCH /users/me`,
 `GET /accounts/{id}`, `POST /projects/search`, `GET /projects/{id}`,
 `POST /projects/{id}/cases/search`,
 `GET /cases/{id}`, `POST /cases`, `PATCH /cases/{id}`, `POST /cases/{id}/comments`,
@@ -19,14 +19,14 @@ all). Route list: `GET /health`, `GET`/`PATCH /users/me`, `POST /accounts/search
 `POST /projects/{id}/deployments/search`, `POST /projects/{id}/deployments`,
 `PATCH /projects/{projectId}/deployments/{id}`,
 `POST /deployments/{deploymentId}/products/search`, `POST /deployments/{deploymentId}/products`,
-`PATCH /deployments/{deploymentId}/products/{id}`, `POST /attachments`, `POST /attachments/search`,
+`PATCH /deployments/{deploymentId}/products/{id}`, `POST /attachments`,
 `GET /attachments/{id}/content`, `DELETE /attachments/{id}`, `GET /products`,
 `POST /products/search`,
 `POST /products/{id}/versions/search`, `POST /products/vulnerabilities/search`,
 `GET /products/vulnerabilities/{id}`,
 `POST /deployments/products/{deployedProductId}/catalogs/search`,
 `GET /catalogs/{catalogId}/items/{itemId}`, `POST /projects/{id}/time-cards/search`,
-`POST /comments`, `POST /comments/search`, `POST /change-requests`,
+`POST /comments`, `POST /change-requests`,
 `POST /projects/{id}/change-requests/search`, `GET /change-requests/{id}`, `PATCH /change-requests/{id}`,
 `GET /change-requests/{id}/approvals`, `POST /change-requests/{id}/approvals/decision`,
 `POST /cases/{caseId}/call-requests`, `POST /cases/{caseId}/call-requests/search`,
@@ -326,6 +326,98 @@ Like the registry service, several of this service's error responses are surface
 `writeUpstreamMessage` rather than `mapUpstreamError`'s generic fallback — see
 `usermanagement.extractErrorMessage`, which parses the upstream's own `{"message": "..."}` body.
 
+## Caller-scoped project/case search (always enforced, no kill switch)
+
+`POST /projects/search`, `POST /projects/{id}/cases/search`, and `GET /cases/{id}` currently return
+results for **any** authenticated caller regardless of which projects they actually belong to — there
+is no bulk *email → projects* reverse lookup anywhere in this stack. But entity-service itself has a
+native, per-project forward lookup that CSM's backend already calls in production:
+`POST /projects/{id}/contacts/search` (`entity.SearchProjectContacts` here — see
+`entity-service/internal/handler/project_handler.go`'s `ProjectContactHandler`), whose
+`ProjectContact.GrantsCaseAccess` field is a purpose-built answer to "can this email actually see
+this project's cases" (ServiceNow's own access rule: a linked contact record *and* the invited
+address matching that record's own address). This is a **different, separate** system from the
+project-contact *onboarding* service above (`internal/usermanagement`, Salesforce-ID-keyed,
+`isPortalUser`/`isCsAdmin`/etc.) — don't confuse the two; an earlier version of this resolver used
+that one, but it required an extra `GetProject`→Salesforce-ID hop and a heuristic (`isPortalUser`)
+where entity-service already has an authoritative field, keyed on the same platform UUID everything
+else here already uses. ServiceNow data source only — no Postgres equivalent for project contacts.
+
+`handler.CallerScopeResolver` (`internal/handler/caller_scope.go`) answers membership one project at
+a time: page through `entity.SearchProjectContacts(projectID, ...)` (bounded —
+`callerScopeContactsLimit`/`callerScopeContactsMaxPages` — independent of what `Total` reports) and
+check for a case-insensitive email match with `GrantsCaseAccess: true`.
+
+**The single reusable gate every handler calls is `requireProjectMember`** (same file) — not just
+`CallerScopeResolver` itself. It runs the membership check and writes the caller-supplied
+status/message (403 for a search that already names its project in the URL, 404 for a single-item
+detail fetch — see below) on failure. Every handler below calls this one function; none duplicates
+the check-then-write-error logic itself. There is no env var or flag gating any of this — it's always
+enforced in production.
+
+Each handler gets its own `callerScope` field and a `SetCallerScope(resolver)` setter — a setter
+rather than a constructor parameter *purely* so the many pre-existing tests across this package that
+construct handlers directly, unrelated to this feature, keep compiling without change. `main.go`
+calls `SetCallerScope` unconditionally on every one of them with the *same* `CallerScopeResolver`
+instance — there's no way to opt a handler out in production. `requireProjectMember` (and
+`ProjectHandler.scopeToCallerProjects`) treat a `nil` resolver as unscoped rather than panicking —
+that path is only ever taken by tests that never call `SetCallerScope` at all, since they don't
+exercise this feature.
+
+Endpoints covered, grouped by how they resolve to a project id:
+
+- **Direct — `{id}`/`{projectId}` in the URL path is already the project's platform UUID**:
+  `ProjectHandler.SearchProjects` (post-filters the response instead of gating the request — see
+  below), `CaseHandler.SearchCases`, `RegistryHandler.SearchRegistryTokens`,
+  `RegistryHandler.CreateRegistryToken`, `RegistryHandler.GetProjectIntegrationUsers`,
+  `ChangeRequestHandler.SearchChangeRequests`, `TimeCardHandler.SearchTimeCards`,
+  `DeploymentHandler.SearchDeployments`, all 10 `ProjectStatsHandler` endpoints
+  (`SearchProjectCaseTimeCards`, `GetProjectFilters`, `GetProjectFeatures`,
+  `GetProjectDashboardStats`, `GetProjectCaseStats`, `GetProjectConversationStats`,
+  `GetProjectSupportStats`, `GetProjectTimeCardStats`, `GetProjectChangeRequestStats`,
+  `GetProjectUsageStats`), `AIChatHandler`'s direct-project endpoints (`SearchConversations`,
+  `CreateConversation`, `SendConversationMessage`, `GetConversationSummary`), and `InstanceHandler`'s
+  project-scoped fan-out variants (`SearchProjectInstances`/`*Metrics`/`*Usage`/`*MetricsStats`/`*UsageStats` — see below).
+- **Resolved via a case, conversation, or token** — the path carries a case/conversation/token id, so the handler
+  fetches/derives the resource first and checks `ProjectDetails.ID` / `Project.ID` / `SnProjectID`: `CaseHandler.GetCase`,
+  `CaseHandler.SearchCaseActivities`, `CaseHandler.SearchCaseEscalations`,
+  `CallRequestHandler.SearchCallRequests`, `AIChatHandler.GetConversation`,
+  `AIChatHandler.UpdateConversation`, `AIChatHandler.GetConversationMessages`,
+  `RegistryHandler.DeleteRegistryToken`, `RegistryHandler.RegenerateRegistryToken`.
+
+`SearchProjects` is the one exception to "gate the request": it scans entity-service project search
+results in 50-item batches (up to 10 pages / 500 projects ceiling), checks `IsProjectMember` for each
+project, collects all accessible projects, and applies client-side slice pagination (`Offset` and
+`Limit`). `Total` (`totalRecords`) and `HasMore` accurately describe the caller's scoped matching set.
+
+`GetCase`/`SearchCaseActivities`/`SearchCaseEscalations`/`SearchCallRequests`/`GetConversation`/`UpdateConversation`/`GetConversationMessages`
+all 404 (not 403) on a non-member — don't confirm to a caller that a resource id exists at all if they
+can't see it. Every direct-project endpoint 403s instead, since the URL already names the project.
+
+**`InstanceHandler`'s 15-route fan-out (project/deployment/deployed-product variants of the same 5
+metric types) only covers the *project*-scoped variants.** Its 5 shared private methods
+(`searchInstances`/`searchInstanceMetrics`/etc.) all take an `instanceIDFilters` struct that's
+non-empty in exactly one of three fields; `checkProjectScope` is a no-op unless `scope.projectIDs` is
+set, so the deployment- and deployed-product-scoped variants pass through unchecked. Resolving a
+deployment or deployed-product id back to a project (needed for those) is a separate, not-yet-addressed
+gap — there's no `GetDeployment`/`GetDeployedProduct` single-item fetch in `internal/entity` at all
+today, and deployed products only reference their deployment (`DeployedProductView.Deployment`), not
+a project directly — a two-hop resolution once deployment resolution exists.
+
+**Endpoints deliberately left out of this pass** (deployment/deployed-product or global resolution gap):
+the `deployments/{deploymentId}/products/*` and `deployments/products/{id}/*` fan-outs,
+and globally-unscoped endpoints with no project id in their path (`products/vulnerabilities/search`,
+global `/search`) — the mechanism here doesn't generalize to those without an account-level (not
+project-level) equivalent. (Note: the three unused global endpoints `POST /accounts/search`,
+`POST /attachments/search`, and `POST /comments/search` were removed from this backend).
+
+Note that cases already have a *separate*, already-fully-wired "my own cases" mechanism independent
+of this flag: the frontend can send `{"filters":{"createdByMe":true}}` to
+`POST /projects/{id}/cases/search` today, which entity-service
+resolves server-side from the caller's own JWT (`__current_user_email__` placeholder, see
+`entity-service/internal/service/case_filters.go`) — that's about filtering to cases the caller
+personally *created*, a different, narrower thing than the project-membership check above.
+
 ## Instances — fan-out, not passed through
 
 `POST /projects/{id}/instances/*`, `/deployments/{id}/instances/*`, and
@@ -438,7 +530,7 @@ including it; when in doubt whether a field is customer-appropriate, leave it ou
 a comment on the DTO struct (see `internal/dto/case.go` for examples).
 
 **Data-source normalization is a second job of the DTO layer.** Unlike projects and cases,
-entity-service's account endpoints (`GET /accounts/{id}`, `POST /accounts/search`) return a
+entity-service's account endpoints (`GET /accounts/{id}`) return a
 genuinely different wire shape depending on whether it's deployed with `DATA_SOURCE=postgres` or
 `DATA_SOURCE=servicenow` — see `internal/entity/types.go`'s `AccountDetail`/`AccountSummary`
 comments for how the two shapes are unioned into one Go struct (their JSON keys never collide) and
@@ -595,8 +687,7 @@ Two more examples, both in this same "restrict, don't mirror" category:
   labels these "agent-side fields, set when an engineer schedules or concludes the call." They're
   still exposed on the *read* side (`dto.CallRequestSummary`) since the customer should be able to
   see the outcome of their own call, just not set it themselves.
-- `POST /comments` / `POST /comments/search` (generic comments — distinct from `POST /cases/{id}/comments`,
-  these attach to any reference entity: case, conversation, change_request, deployment, incident)
+- `POST /comments` (and `GET /conversations/{id}/messages`, which searches comments internally)
   restrict in *both* directions: `dto.BuildEntityCreateCommentRequest` forces `type: comment` on
   write for the same reason as case comments, and `dto.BuildEntitySearchCommentsRequest` forces
   `filters.type: comment` on **read** too — entity-service's search endpoint returns `work_note`

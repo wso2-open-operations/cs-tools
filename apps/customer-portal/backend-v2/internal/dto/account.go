@@ -18,7 +18,7 @@ package dto
 
 import "github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 
-// AccountSummary is one item of the portal's response for POST /accounts/search.
+// AccountDetails is the portal's response for GET /accounts/{id}.
 //
 // Normalizes entity-service's two data-source-dependent shapes (Postgres
 // Account vs ServiceNow SNAccountView) into one: Tier prefers entity-service's
@@ -29,62 +29,6 @@ import "github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2
 // account routing), CreatedBy (internal user ID), and ArrToday — annual
 // recurring revenue is WSO2-internal financial data and must never reach the
 // customer portal frontend.
-type AccountSummary struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	Tier             *string `json:"tier,omitempty"`
-	Region           *string `json:"region,omitempty"`
-	SupportTier      *string `json:"supportTier,omitempty"`
-	Owner            *Ref    `json:"owner,omitempty"`
-	TechnicalOwner   *Ref    `json:"technicalOwner,omitempty"`
-	ActivationDate   *string `json:"activationDate,omitempty"`
-	DeactivationDate *string `json:"deactivationDate,omitempty"`
-	HasAgent         bool    `json:"hasAgent"`
-	HasKbReferences  bool    `json:"hasKbReferences"`
-	CreatedOn        *string `json:"createdOn,omitempty"`
-	UpdatedOn        *string `json:"updatedOn,omitempty"`
-}
-
-// SearchAccountsResponse is the portal's response for POST /accounts/search.
-type SearchAccountsResponse struct {
-	Accounts     []AccountSummary `json:"accounts"`
-	TotalRecords int              `json:"totalRecords"`
-	Limit        int              `json:"limit"`
-	Offset       int              `json:"offset"`
-	HasMore      bool             `json:"hasMore"`
-}
-
-// MapSearchAccounts builds the portal response from entity-service's SearchAccountsResponse.
-func MapSearchAccounts(r entity.SearchAccountsResponse) SearchAccountsResponse {
-	accounts := make([]AccountSummary, 0, len(r.Accounts))
-	for _, a := range r.Accounts {
-		accounts = append(accounts, AccountSummary{
-			ID:               a.ID,
-			Name:             a.Name,
-			Tier:             firstNonNil(a.Tier, a.Classification),
-			Region:           a.Region,
-			SupportTier:      a.SupportTier,
-			Owner:            accountOwnerRef(a.Owner, a.AccountManager),
-			TechnicalOwner:   mapAccountRef(a.TechnicalOwner),
-			ActivationDate:   a.ActivationDate,
-			DeactivationDate: a.DeactivationDate,
-			HasAgent:         boolValue(firstNonNilBool(a.HasAgent, a.AgentEnabled)),
-			HasKbReferences:  boolValue(firstNonNilBool(a.HasKbReferences, a.KbReferencesEnabled)),
-			CreatedOn:        a.CreatedOn,
-			UpdatedOn:        a.UpdatedOn,
-		})
-	}
-	return SearchAccountsResponse{
-		Accounts:     accounts,
-		TotalRecords: r.Total,
-		Limit:        r.Limit,
-		Offset:       r.Offset,
-		HasMore:      r.HasMore,
-	}
-}
-
-// AccountDetails is the portal's response for GET /accounts/{id}. See
-// AccountSummary's doc comment for the fields deliberately excluded here too.
 type AccountDetails struct {
 	ID               string  `json:"id"`
 	Name             string  `json:"name"`

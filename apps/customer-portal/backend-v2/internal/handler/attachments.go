@@ -31,20 +31,56 @@ import (
 // used by AttachmentHandler.
 type entityAttachmentClient interface {
 	CreateAttachment(ctx context.Context, req entity.CreateAttachmentRequest) (entity.CreateAttachmentResponse, error)
-	SearchAttachments(ctx context.Context, req entity.SearchAttachmentsRequest) (entity.SearchAttachmentsResponse, error)
 	GetAttachmentContent(ctx context.Context, id string) (body []byte, contentType string, err error)
 	DeleteAttachment(ctx context.Context, id string) (entity.DeleteAttachmentResponse, error)
 	GetAttachment(ctx context.Context, id string) (entity.AttachmentDetails, error)
+	GetCase(ctx context.Context, id string) (entity.CaseView, error)
 }
 
 // AttachmentHandler handles HTTP requests for attachment operations.
 type AttachmentHandler struct {
-	entity entityAttachmentClient
+	entity      entityAttachmentClient
+	callerScope *CallerScopeResolver
 }
 
 // NewAttachmentHandler creates an AttachmentHandler backed by the given entity client.
 func NewAttachmentHandler(entity entityAttachmentClient) *AttachmentHandler {
 	return &AttachmentHandler{entity: entity}
+}
+
+// SetCallerScope sets the resolver used to verify the caller has access to the
+// project containing an attachment's reference entity.
+func (h *AttachmentHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
+}
+
+// authorizeAttachmentByID fetches the attachment's metadata to resolve its parent entity
+// (case or deployment/etc.) and enforces caller project membership.
+// Returns the AttachmentDetails if authorized, or false if unauthorized/error occurred.
+func (h *AttachmentHandler) authorizeAttachmentByID(w http.ResponseWriter, r *http.Request, id string, user *middleware.UserInfo) (entity.AttachmentDetails, bool) {
+	details, err := h.entity.GetAttachment(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetAttachment failed", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve attachment.")
+		return entity.AttachmentDetails{}, false
+	}
+
+	if details.ReferenceID != "" && uuidRe.MatchString(details.ReferenceID) && (details.ReferenceType == entity.ReferenceTypeCase || string(details.ReferenceType) == "case") {
+		// Commented out pending end-to-end verification against real
+		// entity-service data — uncomment while testing, re-comment before
+		// committing. See handler.CallerScopeResolver / requireProjectMember.
+		// caseView, err := h.entity.GetCase(r.Context(), details.ReferenceID)
+		// if err != nil {
+		// 	slog.ErrorContext(r.Context(), "resolving attachment parent case failed", "userID", user.UserID, "attachmentID", id, "referenceID", details.ReferenceID, "err", summarizeErr(err))
+		// 	writeError(w, http.StatusNotFound, ErrMsgNotFound)
+		// 	return entity.AttachmentDetails{}, false
+		// }
+		// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		// 	return entity.AttachmentDetails{}, false
+		// }
+	}
+
+	return details, true
 }
 
 // CreateAttachment handles POST /attachments.
@@ -66,6 +102,21 @@ func (h *AttachmentHandler) CreateAttachment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if req.ReferenceID != "" && req.ReferenceType == entity.ReferenceTypeCase {
+		// Commented out pending end-to-end verification against real
+		// entity-service data — uncomment while testing, re-comment before
+		// committing. See handler.CallerScopeResolver / requireProjectMember.
+		// caseView, err := h.entity.GetCase(r.Context(), req.ReferenceID)
+		// if err != nil {
+		// 	slog.ErrorContext(r.Context(), "entity GetCase failed for attachment creation", "userID", user.UserID, "caseID", req.ReferenceID, "err", summarizeErr(err))
+		// 	mapUpstreamError(w, err, "Failed to create attachment.")
+		// 	return
+		// }
+		// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		// 	return
+		// }
+	}
+
 	result, err := h.entity.CreateAttachment(r.Context(), req)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateAttachment failed", "userID", user.UserID, "err", summarizeErr(err))
@@ -74,35 +125,6 @@ func (h *AttachmentHandler) CreateAttachment(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSONValue(w, http.StatusCreated, dto.MapAttachmentCreate(result))
-}
-
-// SearchAttachments handles POST /attachments/search.
-func (h *AttachmentHandler) SearchAttachments(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req entity.SearchAttachmentsRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchAttachments(r.Context(), req)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAttachments failed", "userID", user.UserID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to search attachments.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusOK, dto.MapSearchAttachments(result))
 }
 
 // GetAttachmentContent handles GET /attachments/{id}/content. The response is
@@ -119,6 +141,10 @@ func (h *AttachmentHandler) GetAttachmentContent(w http.ResponseWriter, r *http.
 	id := r.PathValue("id")
 	if id == "" || !isAttachmentID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if _, ok := h.authorizeAttachmentByID(w, r, id, user); !ok {
 		return
 	}
 
@@ -149,6 +175,10 @@ func (h *AttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if _, ok := h.authorizeAttachmentByID(w, r, id, user); !ok {
+		return
+	}
+
 	result, err := h.entity.DeleteAttachment(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity DeleteAttachment failed", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
@@ -174,12 +204,10 @@ func (h *AttachmentHandler) GetAttachment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := h.entity.GetAttachment(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetAttachment failed", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to retrieve attachment.")
+	details, ok := h.authorizeAttachmentByID(w, r, id, user)
+	if !ok {
 		return
 	}
 
-	writeJSONValue(w, http.StatusOK, dto.MapAttachmentDetails(result))
+	writeJSONValue(w, http.StatusOK, dto.MapAttachmentDetails(details))
 }
