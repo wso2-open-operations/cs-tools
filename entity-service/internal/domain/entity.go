@@ -1876,9 +1876,10 @@ type SearchCasesResponse struct {
 // each other and of every other field in this request. RelatedCaseID, AutocloseHoldUntil,
 // Subject, Description, DeploymentID, DeployedProductID, BestCaseFixEta, MostLikelyFixEta, and
 // WorstCaseFixEta may be combined with each other in any subset within a single request.
-// WatchList, AssigneeEmail, ParentID, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
+// WatchList, AssigneeEmail, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
 // DeploymentID, DeployedProductID, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta
-// are only supported for the ServiceNow data source.
+// are only supported for the ServiceNow data source. ParentID is supported by both the
+// ServiceNow and Postgres data sources.
 // An explicitly empty WatchList clears the case's watch list and counts as a provided field.
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
@@ -1918,10 +1919,12 @@ type UpdateCaseRequest struct {
 	Cause          *CaseCause          `json:"cause"`
 	CloseNotes     *string             `json:"closeNotes"`
 	// ParentID links this case (typically a service request) to another task-derived
-	// record (case, incident, change request, or problem) as its parent. Platform UUID,
-	// converted to the backing data source's internal id before dispatch. This is the
-	// native hierarchical "major case / child case" relationship — subject to the
-	// close-gating rule that rejects closing a case with open children.
+	// record as its parent — the native hierarchical "major case / child case"
+	// relationship the Prevent Closure Of Parent close-gate acts on. A case UUID sets
+	// the link; an empty string clears it. Supported by both data sources: on ServiceNow
+	// the UUID is converted to the backing internal id before dispatch and may point at
+	// a case, incident, change request, or problem; on Postgres it is written to
+	// cases.parent_case_id directly (case-to-case).
 	ParentID *string `json:"parentId"`
 	// RelatedCaseID links this case to another case via a looser, non-hierarchical
 	// cross-link, not subject to any close-gating rule. Platform UUID, converted to the

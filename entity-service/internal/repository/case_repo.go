@@ -56,6 +56,20 @@ type CaseRepository interface {
 	// closed_at is set to NOW() when transitioning to closed.
 	// Returns a NotFoundError if no matching row exists.
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
+	// CountNonClosedChildCases returns how many child cases (rows whose
+	// parent_case_id equals parentID) are not in the closed state. It backs the
+	// "Prevent Closure Of Parent" guard in CaseService.UpdateCase: a case may
+	// not be closed while it still has open children. Counts children in any
+	// non-closed state, mirroring the ServiceNow rule (state != closed), not
+	// only "open".
+	CountNonClosedChildCases(ctx context.Context, parentID string) (int, error)
+	// UpdateCaseParent sets or clears the parent link of the case identified by
+	// caseID. A non-nil parentID links this case to that parent (the native
+	// "major case / child case" relationship the Prevent Closure Of Parent guard
+	// acts on); a nil parentID clears the link. Returns a NotFoundError if the
+	// case does not exist, and a ValidationError if a non-nil parentID references
+	// a case that does not exist.
+	UpdateCaseParent(ctx context.Context, caseID string, parentID *string) (domain.Case, error)
 	// CreateCaseAttachment inserts a new attachment metadata row for the case
 	// identified by req.ReferenceID. req.StorageKey must be non-nil: this data
 	// source stores file bytes externally in SFTPGo, never inline in Postgres.
@@ -361,6 +375,63 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 	}
 	if err != nil {
 		return domain.Case{}, fmt.Errorf("update case: %w", err)
+	}
+	if workStateRaw != nil {
+		ws := domain.CaseWorkState(*workStateRaw)
+		c.WorkState = &ws
+	}
+	return c, nil
+}
+
+// CountNonClosedChildCases implements CaseRepository.
+func (r *caseRepo) CountNonClosedChildCases(ctx context.Context, parentID string) (int, error) {
+	// Counts this parent's children that are not closed. Served by the partial
+	// index idx_cases_open_children (parent_case_id WHERE state <> 'closed'),
+	// which holds exactly these rows -- see
+	// migrations/000015_add_cases_parent_case_id_index.up.sql.
+	const query = `SELECT COUNT(*) FROM cases WHERE parent_case_id = $1 AND state <> 'closed'::case_state_enum`
+	var count int
+	if err := r.db.QueryRow(ctx, query, parentID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count non-closed child cases: %w", err)
+	}
+	return count, nil
+}
+
+// UpdateCaseParent implements CaseRepository.
+func (r *caseRepo) UpdateCaseParent(ctx context.Context, caseID string, parentID *string) (domain.Case, error) {
+	// parentID is nil to clear the link or a case UUID to set it; $2::uuid
+	// encodes both (NULL::uuid stays NULL). The cases.parent_case_id foreign key
+	// enforces that a non-nil parent actually exists -- a dangling id surfaces as
+	// a foreign_key_violation, mapped to a ValidationError below rather than a 500.
+	const query = `
+		UPDATE cases
+		SET parent_case_id = $2::uuid,
+		    updated_at     = NOW()
+		WHERE id = $1
+		RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
+		          subject, description, severity, issue_type, state, work_state, created_at, updated_at, closed_at`
+
+	var c domain.Case
+	var workStateRaw *string
+	err := r.db.QueryRow(ctx, query, caseID, parentID).Scan(
+		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
+		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
+		&c.Subject, &c.Description, &c.Severity, &c.IssueType, &c.State, &workStateRaw,
+		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Case{}, &apierror.NotFoundError{Msg: "case not found"}
+	}
+	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23503": // foreign_key_violation -- parent_case_id references a case that does not exist
+				return domain.Case{}, &apierror.ValidationError{Msg: "parent case does not exist"}
+			case "P0001": // raise_exception from an integrity trigger
+				return domain.Case{}, &apierror.ValidationError{Msg: pgErr.Message}
+			}
+		}
+		return domain.Case{}, fmt.Errorf("update case parent: %w", err)
 	}
 	if workStateRaw != nil {
 		ws := domain.CaseWorkState(*workStateRaw)

@@ -6901,16 +6901,19 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`,
-        `acknowledge`, `type`, or the combinable group (`bestCaseFixEta`, `mostLikelyFixEta`,
-        `worstCaseFixEta`, `workaroundProvided`) must be provided. The single exception is
-        `severity`, which may accompany `type` and is required when `type` is `case`.
+        Exactly one of `state`, `severity`, `workState`, `parentId`, `watchList`,
+        `assigneeEmail`, `acknowledge`, `type`, or the combinable group (`bestCaseFixEta`,
+        `mostLikelyFixEta`, `worstCaseFixEta`, `workaroundProvided`) must be provided. The
+        single exception is `severity`, which may accompany `type` and is required when
+        `type` is `case`.
         The combinable group has no cross-field side effects, so any non-empty subset of its
         four fields may be sent together in one request (e.g. all three fix-ETA estimates plus
         `workaroundProvided` in the same call) — they must not be combined with any of the
         exclusive fields above, though.
         `watchList`, `assigneeEmail`, and the whole combinable group are supported only for the
-        ServiceNow data source.
+        ServiceNow data source; `parentId` is supported by both data sources.
+        Setting `state` to `closed` is rejected when the case still has non-closed child
+        cases (the "Prevent Closure Of Parent" rule).
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
         `type` transfers the case to another type and is supported only for the ServiceNow
@@ -6925,6 +6928,7 @@ components:
         - required: [state]
         - required: [severity]
         - required: [workState]
+        - required: [parentId]
         - required: [watchList]
         - required: [assigneeEmail]
         - required: [acknowledge]
@@ -6992,6 +6996,15 @@ components:
           type: string
           enum: [ongoing, paused]
           description: The new work sub-state of the case. Only applicable when the case state is work_in_progress.
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Link this case to a parent case (the native "major case / child case"
+            relationship). A case UUID sets the link; an empty string clears it. A case
+            cannot be its own parent, and the referenced parent must exist. Supported by
+            both the ServiceNow and Postgres data sources; must be sent on its own.
         watchList:
           type: array
           items:

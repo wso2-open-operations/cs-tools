@@ -20,6 +20,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -369,12 +370,23 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, err
 	}
 	if req.WatchList != nil || req.AssigneeEmail != nil ||
-		req.RelatedCaseID != nil || req.ParentID != nil || req.AutocloseHoldUntil != nil ||
+		req.RelatedCaseID != nil || req.AutocloseHoldUntil != nil ||
 		req.Subject != nil || req.Description != nil || req.DeploymentID != nil || req.DeployedProductID != nil ||
 		req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil ||
 		req.Type != nil || req.EngagementType != nil || req.CatalogID != nil ||
 		req.CatalogItemID != nil || len(req.Variables) > 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, bestCaseFixEta, mostLikelyFixEta, worstCaseFixEta, type, engagementType, catalogId, catalogItemId, and variables are only supported for the ServiceNow data source"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, relatedCaseId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, bestCaseFixEta, mostLikelyFixEta, worstCaseFixEta, type, engagementType, catalogId, catalogItemId, and variables are only supported for the ServiceNow data source"}
+	}
+	// Native parent-linking: parentId is a standalone update on the Postgres data
+	// source -- it links this case to a parent, or clears the link when empty --
+	// and is mutually exclusive with every other field, as on the ServiceNow path.
+	// This is the write counterpart to the Prevent Closure Of Parent guard below:
+	// it is how a parent link comes to exist natively in the first place.
+	if req.ParentID != nil {
+		if req.State != nil || req.Severity != nil || req.WorkState != nil {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "parentId cannot be combined with state, severity, or workState"}
+		}
+		return s.updateCaseParent(ctx, req.ID, *req.ParentID)
 	}
 	fieldCount := 0
 	if req.State != nil {
@@ -401,6 +413,32 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.WorkState != nil && !validCaseWorkState[*req.WorkState] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
 	}
+	// Prevent Closure Of Parent (ported from the ServiceNow `before` business
+	// rule of the same name, which called current.setAbortAction(true)): a case
+	// may not be closed while any of its child cases is still open. Only the
+	// transition to closed is gated -- every other state change, and severity or
+	// work-state edits, are unaffected. Enforced here in the service layer,
+	// matching the other case invariants, rather than in the UPDATE statement.
+	//
+	// The count and the close are not one transaction, so a child could be linked
+	// to this parent (via the parentId branch above) between them. That is not a
+	// correctness hole: as in ServiceNow, linking an open child under an
+	// already-closed parent is itself allowed, so "closed parent + open child" is a
+	// legitimately reachable state, not a strict invariant this guard promises to
+	// hold. The guard blocks the one path ServiceNow blocked -- closing a parent
+	// that currently has open children -- and nothing more. If the product later
+	// decides that state must never exist, gate the parentId branch too and make
+	// both atomic (an advisory lock keyed on the parent id, as in
+	// scheduled_task_run_repo.Attempt).
+	if req.State != nil && *req.State == domain.CaseStateClosed {
+		openChildren, err := s.repo.CountNonClosedChildCases(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if openChildren > 0 {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "cannot close this case while it has open child cases"}
+		}
+	}
 	c, err := s.repo.UpdateCase(ctx, req)
 	if err != nil {
 		return domain.UpdateCaseResponse{}, err
@@ -415,6 +453,80 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 			WorkState: c.WorkState,
 		},
 	}, nil
+}
+
+// updateCaseParent handles the parentId branch of UpdateCase: it validates the
+// requested parent link and applies it. An empty parentId clears the link; a
+// non-empty one must be a UUID other than the case's own id -- a case cannot be
+// its own parent. The parent's existence is enforced by the foreign key in the
+// repository, which maps a dangling reference to a ValidationError.
+//
+// Faithful to the ServiceNow "Prevent Closure Of Parent" rule, only closing a
+// parent is gated (see UpdateCase); linking an open child under an already-closed
+// parent is not rejected here, matching the source system. Closing that asymmetry
+// would be a deliberate product decision, not a bug fix.
+func (s *caseService) updateCaseParent(ctx context.Context, caseID, parentID string) (domain.UpdateCaseResponse, error) {
+	var parent *string
+	if parentID != "" {
+		if err := validateUUIDs("parentId", []string{parentID}); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if parentID == caseID {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "a case cannot be its own parent"}
+		}
+		parent = &parentID
+	}
+	c, err := s.repo.UpdateCaseParent(ctx, caseID, parent)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	// Add Work notes on Parent addition (ported from the ServiceNow business rule
+	// of the same name): when a parent is linked, record it on the case timeline
+	// as a work note. Fires only on link, not on clear -- matching the rule ("on
+	// addition"). ServiceNow ran this inside the write transaction; here the link
+	// is the committed result and the note is a best-effort follow-on write, so a
+	// failure to note it (a caller who isn't the internal user the work_note
+	// trigger requires, or who carries no identity token) is logged, never
+	// surfaced, and never undoes the link.
+	if parent != nil {
+		s.addParentLinkedWorkNote(ctx, caseID, parentID)
+	}
+	return domain.UpdateCaseResponse{
+		Message: "Case updated successfully",
+		Case: domain.UpdatedCase{
+			ID:        c.ID,
+			UpdatedOn: c.UpdatedOn,
+			State:     c.State,
+			Severity:  c.Severity,
+			WorkState: c.WorkState,
+		},
+	}, nil
+}
+
+// addParentLinkedWorkNote posts the "parent linked" work note for updateCaseParent.
+// It is deliberately side-effect-only (no error return): the parent link has already
+// committed, and per the rule's port the note must not be able to roll it back. It
+// resolves the acting user (the work_note DB trigger requires an internal author),
+// resolves the parent's human-readable number for a readable note, and logs — rather
+// than fails — if either step or the insert doesn't succeed.
+func (s *caseService) addParentLinkedWorkNote(ctx context.Context, caseID, parentID string) {
+	actor, err := s.resolveActor(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "parent-linked work note skipped: cannot resolve actor", "caseId", caseID, "parentId", parentID, "error", err)
+		return
+	}
+	parentRef := parentID
+	if pv, err := s.repo.GetCaseByID(ctx, parentID); err == nil && pv.Number != "" {
+		parentRef = pv.Number
+	}
+	if _, err := s.repo.CreateCaseComment(ctx, domain.CreateCaseCommentRequest{
+		CaseID:    caseID,
+		CreatedBy: actor.ID,
+		Type:      domain.CommentTypeWorkNote,
+		Content:   "Linked to parent case " + parentRef + ".",
+	}); err != nil {
+		slog.WarnContext(ctx, "parent-linked work note failed", "caseId", caseID, "parentId", parentID, "error", err)
+	}
 }
 
 // SearchCases implements CaseService.
