@@ -3461,7 +3461,7 @@ paths:
 
   /time-cards/search:
     post:
-      summary: Search time cards (ServiceNow data source only).
+      summary: Search time cards.
       operationId: searchTimeCards
       requestBody:
         required: true
@@ -3497,7 +3497,7 @@ paths:
 
   /time-cards:
     post:
-      summary: Create a time card in the submitted state (ServiceNow data source only).
+      summary: Create a time card in the submitted state.
       operationId: createTimeCard
       requestBody:
         required: true
@@ -3533,7 +3533,7 @@ paths:
 
   /time-cards/{id}:
     patch:
-      summary: Update an editable (submitted) time card (ServiceNow data source only).
+      summary: Update an editable (submitted) time card.
       operationId: updateTimeCard
       parameters:
         - name: id
@@ -3580,7 +3580,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
-      summary: Delete a time card (ServiceNow data source only).
+      summary: Delete a time card.
       description: >
         Only validates that id is a well-formed UUID; ServiceNow enforces
         that the caller is the card's own submitter and that it's still in

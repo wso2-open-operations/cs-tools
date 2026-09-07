@@ -219,9 +219,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		changeRequestHandler = handler.NewChangeRequestHandler(service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient))
 	}
 
+	timeCardRepo := repository.NewTimeCardRepository(db)
 	var timeCardHandler *handler.TimeCardHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		timeCardHandler = handler.NewTimeCardHandler(service.NewServiceNowTimeCardService(serviceNowIntegrationServiceClient))
+	} else {
+		timeCardHandler = handler.NewTimeCardHandler(service.NewTimeCardService(timeCardRepo, userRepo))
 	}
 
 	var catalogHandler *handler.CatalogHandler
