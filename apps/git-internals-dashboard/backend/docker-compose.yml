@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16
+    container_name: git-internals-dashboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gid}
+      POSTGRES_DB: ${POSTGRES_DB:-gid}
+    ports:
+      # Loopback-only (AUDIT-FINDINGS A7): unqualified "5433:5432" publishes
+      # on 0.0.0.0 with default gid/gid/gid credentials — on a laptop on an
+      # untrusted network or a shared dev VM, anyone on the LAN can connect.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - gid_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gid} -d ${POSTGRES_DB:-gid}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gid_pgdata:
