@@ -38,13 +38,31 @@ type stubCaseRepo struct {
 	updateAttachmentName  func(ctx context.Context, id, name, updatedBy string) (time.Time, error)
 	confirmCaseAttachment func(ctx context.Context, id string) (domain.Attachment, error)
 	searchCaseComments    func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
+	getCaseByID           func(ctx context.Context, id string) (domain.CaseView, error)
+	listCaseWatchers      func(ctx context.Context, caseID string) ([]domain.WatchListUser, error)
+	replaceCaseWatchers   func(ctx context.Context, caseID string, userIDs []string) ([]domain.WatchListUser, error)
 }
 
 func (s *stubCaseRepo) CreateCase(context.Context, domain.CreateCaseRequest) (domain.Case, error) {
 	panic("not implemented")
 }
-func (s *stubCaseRepo) GetCaseByID(context.Context, string) (domain.CaseView, error) {
+func (s *stubCaseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
+	if s.getCaseByID != nil {
+		return s.getCaseByID(ctx, id)
+	}
 	panic("not implemented")
+}
+func (s *stubCaseRepo) ListCaseWatchers(ctx context.Context, caseID string) ([]domain.WatchListUser, error) {
+	if s.listCaseWatchers != nil {
+		return s.listCaseWatchers(ctx, caseID)
+	}
+	panic("not implemented")
+}
+func (s *stubCaseRepo) ReplaceCaseWatchers(ctx context.Context, caseID string, userIDs []string) ([]domain.WatchListUser, error) {
+	if s.replaceCaseWatchers != nil {
+		return s.replaceCaseWatchers(ctx, caseID, userIDs)
+	}
+	panic("ReplaceCaseWatchers called unexpectedly: validation should have short-circuited before reaching the repository")
 }
 func (s *stubCaseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error) {
 	if s.searchCases != nil {
@@ -477,5 +495,146 @@ func TestCaseService_UpdateCase_RejectsTypeTransferFields(t *testing.T) {
 				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 			}
 		})
+	}
+}
+
+// testWatcherUUID is a platform user UUID used as a watch-list member. It is
+// local to these tests: the watch list is the only case field that takes a list
+// of user ids, so no shared fixture covers it.
+const testWatcherUUID = "66666666-6666-6666-6666-666666666666"
+
+// TestCaseService_UpdateCase_SetWatchList covers the native watch-list write
+// path: a lone watchList replaces or clears the list, its ids are validated as
+// UUIDs, and it is mutually exclusive with state/severity/workState. Repo
+// access is stubbed -- stubCaseRepo.ReplaceCaseWatchers panics unless a test
+// installs it, so a passing rejection case proves the short-circuit rather than
+// a repository that happened to accept the call.
+func TestCaseService_UpdateCase_SetWatchList(t *testing.T) {
+	ctx := context.Background()
+	watchers := func(ids ...string) *[]string { s := append([]string{}, ids...); return &s }
+	okCase := func(_ context.Context, id string) (domain.CaseView, error) {
+		return domain.CaseView{ID: id, State: domain.CaseStateOpen}, nil
+	}
+
+	t.Run("replaces the list with the given users", func(t *testing.T) {
+		var gotCase string
+		var gotIDs []string
+		repo := &stubCaseRepo{
+			replaceCaseWatchers: func(_ context.Context, caseID string, userIDs []string) ([]domain.WatchListUser, error) {
+				gotCase, gotIDs = caseID, userIDs
+				return []domain.WatchListUser{{ID: userIDs[0], Email: "w@example.com"}}, nil
+			},
+			getCaseByID: okCase,
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		resp, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{
+			ID: testCaseID, WatchList: watchers(testWatcherUUID),
+		})
+		if err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		if gotCase != testCaseID {
+			t.Errorf("case id: got %q, want %q", gotCase, testCaseID)
+		}
+		if len(gotIDs) != 1 || gotIDs[0] != testWatcherUUID {
+			t.Errorf("watcher ids: got %v, want [%s]", gotIDs, testWatcherUUID)
+		}
+		if resp.Case.ID != testCaseID {
+			t.Errorf("response case id: got %q, want %q", resp.Case.ID, testCaseID)
+		}
+	})
+
+	t.Run("an explicitly empty list clears the watch list", func(t *testing.T) {
+		called := false
+		repo := &stubCaseRepo{
+			replaceCaseWatchers: func(_ context.Context, _ string, userIDs []string) ([]domain.WatchListUser, error) {
+				called = true
+				if len(userIDs) != 0 {
+					t.Errorf("expected no watcher ids, got %v", userIDs)
+				}
+				return nil, nil
+			},
+			getCaseByID: okCase,
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testCaseID, WatchList: watchers()}); err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		if !called {
+			t.Fatal("expected an empty watchList to reach the repository as a clear, not be treated as absent")
+		}
+	})
+
+	t.Run("watchList cannot be combined with a state change", func(t *testing.T) {
+		closed := domain.CaseStateClosed
+		svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{})
+
+		_, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{
+			ID: testCaseID, WatchList: watchers(testWatcherUUID), State: &closed,
+		})
+		var ve *apierror.ValidationError
+		if !asValidationError(err, &ve) {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("a non-uuid watcher id is rejected", func(t *testing.T) {
+		svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{})
+
+		_, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{
+			ID: testCaseID, WatchList: watchers("not-a-uuid"),
+		})
+		var ve *apierror.ValidationError
+		if !asValidationError(err, &ve) {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("an unresolvable watcher surfaces the repo validation error", func(t *testing.T) {
+		repo := &stubCaseRepo{
+			replaceCaseWatchers: func(context.Context, string, []string) ([]domain.WatchListUser, error) {
+				return nil, &apierror.ValidationError{Msg: "watchList contains users that do not exist or have no email address: " + testWatcherUUID}
+			},
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		_, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{
+			ID: testCaseID, WatchList: watchers(testWatcherUUID),
+		})
+		var ve *apierror.ValidationError
+		if !asValidationError(err, &ve) {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
+}
+
+// TestCaseService_UpdateCase_WatchListNoLongerServiceNowOnly proves watchList is
+// no longer refused on the Postgres data source. It is the regression guard for
+// the field's removal from the ServiceNow-only rejection list: if that entry
+// creeps back, the request fails validation before reaching the repository and
+// this test fails.
+func TestCaseService_UpdateCase_WatchListNoLongerServiceNowOnly(t *testing.T) {
+	reached := false
+	repo := &stubCaseRepo{
+		replaceCaseWatchers: func(context.Context, string, []string) ([]domain.WatchListUser, error) {
+			reached = true
+			return nil, nil
+		},
+		getCaseByID: func(_ context.Context, id string) (domain.CaseView, error) {
+			return domain.CaseView{ID: id}, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{})
+
+	ids := []string{testWatcherUUID}
+	if _, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{
+		ID: testCaseID, WatchList: &ids,
+	}); err != nil {
+		t.Fatalf("expected watchList to be supported on this data source, got: %v", err)
+	}
+	if !reached {
+		t.Fatal("expected the update to reach ReplaceCaseWatchers")
 	}
 }

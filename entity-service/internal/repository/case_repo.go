@@ -56,6 +56,19 @@ type CaseRepository interface {
 	// closed_at is set to NOW() when transitioning to closed.
 	// Returns a NotFoundError if no matching row exists.
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
+	// ListCaseWatchers returns the case's watch list, in the order watchers were
+	// added. A watcher need not be a platform user, so an entry's user reference
+	// may carry a null id -- see migration 000017 and domain.WatchListUser.
+	// Returns an empty (non-nil) slice for a case with no watchers, and for a
+	// case that does not exist: the read is a projection, not an existence check.
+	ListCaseWatchers(ctx context.Context, caseID string) ([]domain.WatchListUser, error)
+	// ReplaceCaseWatchers replaces the case's watch list wholesale with the users
+	// named by userIDs, transactionally, and returns the resulting list. An empty
+	// userIDs clears the list. Returns a NotFoundError if the case does not
+	// exist, and a ValidationError if any id names no user or a user with no
+	// email address -- the request is rejected whole rather than partially
+	// applied, so a caller is never silently left with fewer watchers than asked.
+	ReplaceCaseWatchers(ctx context.Context, caseID string, userIDs []string) ([]domain.WatchListUser, error)
 	// CreateCaseAttachment inserts a new attachment metadata row for the case
 	// identified by req.ReferenceID. req.StorageKey must be non-nil: this data
 	// source stores file bytes externally in SFTPGo, never inline in Postgres.
@@ -222,6 +235,14 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	if rcID != nil {
 		cv.RelatedCase = &domain.CaseNumberRef{ID: *rcID, Number: *rcNum}
 	}
+	// The watch list lives in its own table, so it is a second query rather than
+	// another join: joining it would multiply the case row by the number of
+	// watchers and force every other scanned column to be de-duplicated.
+	watchers, err := listCaseWatchers(ctx, r.db, id)
+	if err != nil {
+		return domain.CaseView{}, err
+	}
+	cv.WatchList = watchers
 	return cv, nil
 }
 

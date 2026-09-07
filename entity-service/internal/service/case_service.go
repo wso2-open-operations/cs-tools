@@ -368,13 +368,24 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
-	if req.WatchList != nil || req.AssigneeEmail != nil ||
+	if req.AssigneeEmail != nil ||
 		req.RelatedCaseID != nil || req.ParentID != nil || req.AutocloseHoldUntil != nil ||
 		req.Subject != nil || req.Description != nil || req.DeploymentID != nil || req.DeployedProductID != nil ||
 		req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil ||
 		req.Type != nil || req.EngagementType != nil || req.CatalogID != nil ||
 		req.CatalogItemID != nil || len(req.Variables) > 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, bestCaseFixEta, mostLikelyFixEta, worstCaseFixEta, type, engagementType, catalogId, catalogItemId, and variables are only supported for the ServiceNow data source"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "assigneeEmail, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, bestCaseFixEta, mostLikelyFixEta, worstCaseFixEta, type, engagementType, catalogId, catalogItemId, and variables are only supported for the ServiceNow data source"}
+	}
+	// Native watch list: watchList is a standalone update on the Postgres data
+	// source, mutually exclusive with every other field exactly as on the
+	// ServiceNow path. It replaces the list wholesale -- a non-nil pointer to an
+	// empty slice clears it, which is why the branch keys on the pointer being
+	// non-nil rather than on the slice being non-empty.
+	if req.WatchList != nil {
+		if req.State != nil || req.Severity != nil || req.WorkState != nil {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList cannot be combined with state, severity, or workState"}
+		}
+		return s.updateCaseWatchList(ctx, req.ID, *req.WatchList)
 	}
 	fieldCount := 0
 	if req.State != nil {
@@ -402,6 +413,44 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
 	}
 	c, err := s.repo.UpdateCase(ctx, req)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	return domain.UpdateCaseResponse{
+		Message: "Case updated successfully",
+		Case: domain.UpdatedCase{
+			ID:        c.ID,
+			UpdatedOn: c.UpdatedOn,
+			State:     c.State,
+			Severity:  c.Severity,
+			WorkState: c.WorkState,
+		},
+	}, nil
+}
+
+// updateCaseWatchList handles the watchList branch of UpdateCase: it validates
+// the requested watcher ids and replaces the case's watch list with them.
+//
+// Each id must be a platform user UUID. Existence and the presence of an email
+// address are enforced by the repository in the same transaction as the write,
+// so a partially-applied watch list is not reachable: the request either lands
+// whole or is rejected whole. That matters more here than for most fields --
+// a watcher silently dropped from the list is a person who stops being
+// notified, and nobody observes the absence.
+func (s *caseService) updateCaseWatchList(ctx context.Context, caseID string, userIDs []string) (domain.UpdateCaseResponse, error) {
+	if len(userIDs) > 0 {
+		if err := validateUUIDs("watchList", userIDs); err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+	}
+	if _, err := s.repo.ReplaceCaseWatchers(ctx, caseID, userIDs); err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	// The watch list is not a column on cases, so the case row itself is
+	// unchanged and is re-read rather than returned by the write. A case that
+	// vanished between the two is reported as not found, matching every other
+	// update path.
+	c, err := s.repo.GetCaseByID(ctx, caseID)
 	if err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
