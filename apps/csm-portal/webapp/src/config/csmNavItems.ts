@@ -77,6 +77,11 @@ export interface CsmNavNode {
    */
   rendersOwnWipPage?: boolean;
   icon?: ComponentType<{ size?: number | string }>;
+  /**
+   * Platform roles required to access/view this navigation node (e.g. `["admin"]`).
+   * When omitted or empty, the node is accessible to any authenticated user.
+   */
+  roles?: string[];
   children?: CsmNavNode[];
 }
 
@@ -220,6 +225,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     label: "Settings",
     href: "/admin",
     icon: Settings,
+    roles: ["admin"],
     children: [
       {
         id: "admin.user-management",

@@ -74,6 +74,7 @@ func main() {
 	}
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
+	roleResolver := middleware.NewRoleResolver(customerEntityClient, 5*time.Minute)
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
 	dashboardHandler := handler.NewDashboardHandler()
@@ -209,8 +210,19 @@ func main() {
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
 	mux.HandleFunc("PATCH /users/me", usersHandler.PatchMe)
-	mux.HandleFunc("POST /users/search", usersHandler.SearchUsers)
+	// POST /users/search backs the webapp's admin section and the engineer
+	// picker dialogs (assignee, approvers). Gating on "agent", "admin" restricts
+	// directory search to internal staff with operational/admin roles while
+	// allowing dialog pickers to work.
+	mux.Handle("POST /users/search", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(usersHandler.SearchUsers)))
+	// GET /users/{id} is deliberately open to every authenticated caller so CS
+	// engineers can open linked person profiles from a case — see the commit
+	// that reopened it after the initial RBAC pass.
 	mux.HandleFunc("GET /users/{id}", usersHandler.GetUser)
+	// POST /roles/search and POST /teams/search are served entirely in-process
+	// from internal/directory at startup and make no upstream call (see CLAUDE.md).
+	// They remain open to all authenticated callers to avoid coupling local in-memory
+	// catalogues to upstream role resolution.
 	mux.HandleFunc("POST /roles/search", referenceHandler.SearchRoles)
 	mux.HandleFunc("POST /teams/search", referenceHandler.SearchTeams)
 	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
@@ -220,30 +232,33 @@ func main() {
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
 	mux.HandleFunc("GET /projects/{id}/contacts/{contactId}", projectHandler.GetProjectContact)
-	mux.HandleFunc("PATCH /projects/{id}", projectHandler.UpdateProject)
+	mux.Handle("PATCH /projects/{id}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(projectHandler.UpdateProject)))
 	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
-	mux.HandleFunc("POST /deployments", deploymentHandler.PostDeployment)
+	mux.Handle("POST /deployments", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(deploymentHandler.PostDeployment)))
 	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
-	mux.HandleFunc("PATCH /deployments/{id}", deploymentHandler.PatchDeployment)
-	mux.HandleFunc("POST /deployments/{id}/products", deploymentHandler.PostDeployedProduct)
+	mux.Handle("PATCH /deployments/{id}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(deploymentHandler.PatchDeployment)))
+	mux.Handle("POST /deployments/{id}/products", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(deploymentHandler.PostDeployedProduct)))
 	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
-	mux.HandleFunc("PATCH /deployments/{deploymentId}/products/{productId}", deploymentHandler.PatchDeployedProduct)
-	mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
+	mux.Handle("PATCH /deployments/{deploymentId}/products/{productId}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(deploymentHandler.PatchDeployedProduct)))
+	mux.Handle("POST /change-requests", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(changeRequestHandler.CreateChangeRequest)))
 	mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 	mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
-	mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
-	mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
+	mux.Handle("POST /change-requests/{id}/approvals/decision", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(changeRequestHandler.DecideChangeRequestApproval)))
+	mux.Handle("PATCH /change-requests/{id}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(changeRequestHandler.PatchChangeRequest)))
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 	mux.HandleFunc("POST /change-requests/aggregate", changeRequestHandler.AggregateChangeRequests)
 	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
 	mux.HandleFunc("POST /service-offerings/search", serviceOfferingHandler.SearchServiceOfferings)
-	mux.HandleFunc("POST /groups/search", groupHandler.SearchGroups)
+	mux.Handle("POST /groups/search", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(groupHandler.SearchGroups)))
 	mux.HandleFunc("POST /configuration-items/search", configurationItemHandler.SearchConfigurationItems)
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
-	mux.HandleFunc("POST /time-cards", timeCardHandler.CreateTimeCard)
-	mux.HandleFunc("PATCH /time-cards/{id}", timeCardHandler.UpdateTimeCard)
-	mux.HandleFunc("DELETE /time-cards/{id}", timeCardHandler.DeleteTimeCard)
+	mux.Handle("POST /time-cards", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(timeCardHandler.CreateTimeCard)))
+	// Submitting engineers (agent) can edit and delete their own submitted cards;
+	// approvers (timecard_approver, admin) can approve, reject, or delete cards.
+	// ServiceNow native ACLs enforce ownership and state validity.
+	mux.Handle("PATCH /time-cards/{id}", middleware.RequireRoles(roleResolver, "agent", "timecard_approver", "admin")(http.HandlerFunc(timeCardHandler.UpdateTimeCard)))
+	mux.Handle("DELETE /time-cards/{id}", middleware.RequireRoles(roleResolver, "agent", "timecard_approver", "admin")(http.HandlerFunc(timeCardHandler.DeleteTimeCard)))
 	mux.HandleFunc("POST /catalogs/search", catalogHandler.SearchCatalogs)
 	mux.HandleFunc("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", catalogHandler.GetCatalogItemVariables)
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
@@ -255,30 +270,30 @@ func main() {
 	mux.HandleFunc("POST /cases/{caseId}/tasks/search", taskHandler.SearchCaseTasks)
 	mux.HandleFunc("POST /tasks/search", taskHandler.SearchTasks)
 	mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
-	mux.HandleFunc("POST /cases/{caseId}/tasks", taskHandler.CreateCaseTask)
-	mux.HandleFunc("PATCH /tasks/{id}", taskHandler.UpdateTask)
+	mux.Handle("POST /cases/{caseId}/tasks", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(taskHandler.CreateCaseTask)))
+	mux.Handle("PATCH /tasks/{id}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(taskHandler.UpdateTask)))
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 	mux.HandleFunc("POST /incidents/aggregate", incidentHandler.AggregateIncidents)
-	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
+	mux.Handle("POST /incidents", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(incidentHandler.CreateIncident)))
 	mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)
-	mux.HandleFunc("PATCH /incidents/{id}", incidentHandler.PatchIncident)
-	mux.HandleFunc("POST /incidents/{id}/comments", incidentHandler.CreateIncidentComment)
+	mux.Handle("PATCH /incidents/{id}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(incidentHandler.PatchIncident)))
+	mux.Handle("POST /incidents/{id}/comments", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(incidentHandler.CreateIncidentComment)))
 	mux.HandleFunc("POST /incidents/{id}/comments/search", incidentHandler.SearchIncidentComments)
 	mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
 	mux.HandleFunc("GET /alerts/{id}", alertHandler.GetAlert)
 	mux.HandleFunc("GET /smart-alerts/{id}", alertHandler.GetSmartAlert)
-	mux.HandleFunc("POST /change-requests/{id}/comments", changeRequestHandler.CreateChangeRequestComment)
+	mux.Handle("POST /change-requests/{id}/comments", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(changeRequestHandler.CreateChangeRequestComment)))
 	mux.HandleFunc("POST /change-requests/{id}/comments/search", changeRequestHandler.SearchChangeRequestComments)
-	mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
+	mux.Handle("POST /problems", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(problemHandler.CreateProblem)))
 	mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
-	mux.HandleFunc("PATCH /problems/{id}", problemHandler.PatchProblem)
+	mux.Handle("PATCH /problems/{id}", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(problemHandler.PatchProblem)))
 	mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
 	mux.HandleFunc("POST /problems/aggregate", problemHandler.AggregateProblems)
 	mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
 	mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
 	mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
 	// Called manually today; not yet wired into real incident/case creation.
-	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
+	mux.Handle("POST /notifications/google-chat/alerts", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(notificationHandler.PostGoogleChatAlert)))
 
 	// Built once and reused on both listeners below: Auth() does a real JWKS
 	// fetch (when TokenValidatorEnabled), so calling it a second time would

@@ -15,7 +15,9 @@
 // under the License.
 
 // Base URL for the API service.
-export const BACKEND_BASE_URL = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
+export const BACKEND_BASE_URL =
+  window.config?.CSM_PORTAL_BACKEND_BASE_URL ??
+  (import.meta.env?.MODE === "test" ? "http://localhost:8080" : undefined);
 
 if (!BACKEND_BASE_URL) {
   throw new Error(
