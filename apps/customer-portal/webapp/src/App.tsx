@@ -18,6 +18,7 @@ import { type JSX } from "react";
 import { Route, Routes, Navigate } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
 import ProjectGuard from "@layouts/ProjectGuard";
+import CustomerRoleGuard from "@layouts/CustomerRoleGuard";
 import ProjectHubPage from "@features/project-hub/pages/ProjectHub";
 import ProjectDetailsPage from "@features/project-details/pages/ProjectDetails";
 import DashboardPage from "@features/dashboard/pages/DashboardPage";
@@ -145,7 +146,17 @@ export default function App(): JSX.Element {
                   />
                   {/* Operations */}
                   <Route path="operations">
-                    <Route index element={<OperationsPage />} />
+                    <Route
+                      index
+                      element={
+                        <CustomerRoleGuard
+                          module="change_requests"
+                          action="read"
+                        >
+                          <OperationsPage />
+                        </CustomerRoleGuard>
+                      }
+                    />
                     <Route path="service-requests">
                       <Route index element={<ServiceRequestsPage />} />
                       <Route
@@ -157,7 +168,15 @@ export default function App(): JSX.Element {
                         element={<ServiceRequestDetailsPage />}
                       />
                     </Route>
-                    <Route path="change-requests">
+                    <Route
+                      path="change-requests"
+                      element={
+                        <CustomerRoleGuard
+                          module="change_requests"
+                          action="read"
+                        />
+                      }
+                    >
                       <Route index element={<ChangeRequestsPage />} />
                       <Route
                         path=":changeRequestId"
@@ -172,7 +191,15 @@ export default function App(): JSX.Element {
                       <Route index element={<AllCasesPage />} />
                       <Route path=":caseId" element={<CaseDetailsPage />} />
                     </Route>
-                    <Route path="change-requests">
+                    <Route
+                      path="change-requests"
+                      element={
+                        <CustomerRoleGuard
+                          module="change_requests"
+                          action="read"
+                        />
+                      }
+                    >
                       <Route index element={<ChangeRequestsPage />} />
                       <Route
                         path=":changeRequestId"
@@ -205,16 +232,38 @@ export default function App(): JSX.Element {
                       />
                       <Route
                         path="describe-issue"
-                        element={<DescribeIssuePage />}
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <DescribeIssuePage />
+                          </CustomerRoleGuard>
+                        }
                       />
-                      <Route path="create-case" element={<CreateCasePage />} />
+                      <Route
+                        path="create-case"
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <CreateCasePage />
+                          </CustomerRoleGuard>
+                        }
+                      />
                       <Route
                         path="create-related-case"
-                        element={<CreateCasePage />}
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <CreateCasePage />
+                          </CustomerRoleGuard>
+                        }
                       />
                     </Route>
                     <Route path="security-report">
-                      <Route path="create" element={<CreateCasePage />} />
+                      <Route
+                        path="create"
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <CreateCasePage />
+                          </CustomerRoleGuard>
+                        }
+                      />
                     </Route>
                   </Route>
                   {/* Updates */}
@@ -229,7 +278,15 @@ export default function App(): JSX.Element {
                     </Route>
                   </Route>
                   {/* SecurityCenter */}
-                  <Route path="security-center">
+                  <Route
+                    path="security-center"
+                    element={
+                      <CustomerRoleGuard
+                        module="security_admin"
+                        action="read"
+                      />
+                    }
+                  >
                     <Route index element={<SecurityPage />} />
                     <Route
                       path="security-report-analysis/:caseId"

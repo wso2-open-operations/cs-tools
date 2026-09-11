@@ -76,32 +76,62 @@ vi.mock("@wso2/oxygen-ui", () => {
   };
 });
 
-// Mock icons - explicitly providing icons used in APP_SHELL_NAV_ITEMS and SideBar
+// Mock icons - explicitly providing icons used in APP_SHELL_NAV_ITEMS, SideBar, and transitive imports
 vi.mock("@wso2/oxygen-ui-icons-react", () => {
   const mockIcon = (name: string) => () => <svg data-testid={`icon-${name}`} />;
   return {
     BarChart3: mockIcon("BarChart3"),
+    Bell: mockIcon("Bell"),
     Briefcase: mockIcon("Briefcase"),
     CircleAlert: mockIcon("CircleAlert"),
+    ClipboardList: mockIcon("ClipboardList"),
     Clock: mockIcon("Clock"),
     Cog: mockIcon("Cog"),
+    Crown: mockIcon("Crown"),
     FileText: mockIcon("FileText"),
     FolderOpen: mockIcon("FolderOpen"),
+    GitMerge: mockIcon("GitMerge"),
     Headset: mockIcon("Headset"),
     Home: mockIcon("Home"),
     Info: mockIcon("Info"),
     LayoutDashboard: mockIcon("LayoutDashboard"),
     Megaphone: mockIcon("Megaphone"),
+    MessageSquare: mockIcon("MessageSquare"),
     RefreshCw: mockIcon("RefreshCw"),
     Rocket: mockIcon("Rocket"),
     Server: mockIcon("Server"),
+    Settings: mockIcon("Settings"),
     Shield: mockIcon("Shield"),
     User: mockIcon("User"),
     Users: mockIcon("Users"),
-    Settings: mockIcon("Settings"),
-    Crown: mockIcon("Crown"),
   };
 });
+
+const mockUseCustomerPermissions = vi.fn();
+vi.mock("@hooks/useCustomerPermissions", () => ({
+  default: () => mockUseCustomerPermissions(),
+  useCustomerPermissions: () => mockUseCustomerPermissions(),
+}));
+
+let mockProjectFeatures = {
+  hasServiceRequestReadAccess: true,
+  hasChangeRequestReadAccess: true,
+  hasEngagementsReadAccess: true,
+  hasUpdatesReadAccess: true,
+  hasSraReadAccess: true,
+  hasComponentAnalysisReadAccess: true,
+  hasUsageMetricsReadAccess: true,
+  acceptedSeverityValues: [] as any[],
+};
+
+vi.mock("@api/useGetProjectFeatures", () => ({
+  __esModule: true,
+  default: () => ({
+    data: mockProjectFeatures,
+    isLoading: false,
+    isError: false,
+  }),
+}));
 
 // Mock react-router
 const mockLocation = { pathname: "/projects/project-1/dashboard" };
@@ -180,10 +210,55 @@ describe("SideBar", () => {
     mockParams.projectId = "project-1";
     mockProjectTypeLabel = "Other";
     mockUsageMetricsEnabled = true;
+    mockProjectFeatures = {
+      hasServiceRequestReadAccess: true,
+      hasChangeRequestReadAccess: true,
+      hasEngagementsReadAccess: true,
+      hasUpdatesReadAccess: true,
+      hasSraReadAccess: true,
+      hasComponentAnalysisReadAccess: true,
+      hasUsageMetricsReadAccess: true,
+      acceptedSeverityValues: [],
+    };
+    mockUseCustomerPermissions.mockReturnValue({
+      canAccessSecurityAdmin: true,
+      isStakeholder: false,
+      can: vi.fn().mockReturnValue(true),
+    });
+  });
+
+  it("should hide Security Center when canAccessSecurityAdmin is false", () => {
+    mockUseCustomerPermissions.mockReturnValue({
+      canAccessSecurityAdmin: false,
+      isStakeholder: false,
+      can: vi.fn().mockReturnValue(false),
+    });
+    mockProjectTypeLabel = PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+    render(<SideBar collapsed={false} />);
+
+    expect(screen.queryByText("Security Center")).not.toBeInTheDocument();
+  });
+
+  it("should hide Operations when user is stakeholder", () => {
+    mockUseCustomerPermissions.mockReturnValue({
+      canAccessSecurityAdmin: false,
+      isStakeholder: true,
+      can: vi.fn().mockReturnValue(false),
+    });
+    mockProjectTypeLabel = PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+    render(<SideBar collapsed={false} />);
+
+    expect(screen.queryByText("Operations")).not.toBeInTheDocument();
   });
 
   it("should render all navigation items except Operations and Engagements when the project type is not supported", () => {
     mockProjectTypeLabel = "Other";
+    mockProjectFeatures = {
+      ...mockProjectFeatures,
+      hasServiceRequestReadAccess: false,
+      hasChangeRequestReadAccess: false,
+      hasEngagementsReadAccess: false,
+    };
     render(<SideBar collapsed={false} />);
 
     APP_SHELL_NAV_ITEMS.filter(
@@ -199,6 +274,11 @@ describe("SideBar", () => {
 
   it("should render the Operations item for Managed Cloud Subscription", () => {
     mockProjectTypeLabel = PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+    mockProjectFeatures = {
+      ...mockProjectFeatures,
+      hasServiceRequestReadAccess: true,
+      hasChangeRequestReadAccess: true,
+    };
     render(<SideBar collapsed={false} />);
 
     expect(screen.getByText("Operations")).toBeInTheDocument();
@@ -206,6 +286,11 @@ describe("SideBar", () => {
 
   it("should render the Operations item for Cloud Support (SR-only)", () => {
     mockProjectTypeLabel = PROJECT_TYPE_LABELS.CLOUD_SUPPORT;
+    mockProjectFeatures = {
+      ...mockProjectFeatures,
+      hasServiceRequestReadAccess: true,
+      hasChangeRequestReadAccess: false,
+    };
     render(<SideBar collapsed={false} />);
 
     expect(screen.getByText("Operations")).toBeInTheDocument();
@@ -213,6 +298,11 @@ describe("SideBar", () => {
 
   it("should not render Operations for Cloud Evaluation Support", () => {
     mockProjectTypeLabel = PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
+    mockProjectFeatures = {
+      ...mockProjectFeatures,
+      hasServiceRequestReadAccess: false,
+      hasChangeRequestReadAccess: false,
+    };
     render(<SideBar collapsed={false} />);
 
     expect(screen.queryByText("Operations")).not.toBeInTheDocument();
