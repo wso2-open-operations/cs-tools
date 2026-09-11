@@ -139,6 +139,27 @@ const CsmCustomersLayout = lazy(
 const CsmAccountsPage = lazy(
   () => import("@features/csm-accounts/pages/CsmAccountsPage"),
 );
+const CsmKBArticlesLayout = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBArticlesLayout"),
+);
+const CsmKBArticlesListPage = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBArticlesListPage"),
+);
+const CsmKBArticlesAllPage = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBArticlesAllPage"),
+);
+const CsmKBArticleEditorPage = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBArticleEditorPage"),
+);
+const CsmKBArticleHistoryDetailPage = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage"),
+);
+const CsmKBReviewQueuePage = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBReviewQueuePage"),
+);
+const CsmKBAdminPage = lazy(
+  () => import("@features/csm-kb-articles/pages/CsmKBAdminPage"),
+);
 const CsmAccountDetailPage = lazy(
   () => import("@features/csm-accounts/pages/CsmAccountDetailPage"),
 );
@@ -314,6 +335,18 @@ export default function App(): JSX.Element {
                     <Route path="accounts" element={<CsmAccountsPage />} />
                     <Route path="projects" element={<CsmProjectsPage />} />
                   </Route>
+
+                  <Route path="knowledge" element={<CsmKBArticlesLayout />}>
+                  <Route index element={<Navigate to="all" replace />} />
+                  <Route path="all" element={<CsmKBArticlesAllPage />} />
+                  <Route path="my-articles" element={<CsmKBArticlesListPage />} />
+                  <Route path="my-articles/new" element={<CsmKBArticleEditorPage />} />
+                  <Route path="my-articles/:id" element={<CsmKBArticleEditorPage />} />
+                  <Route path="my-articles/:id/history" element={<CsmKBArticleHistoryDetailPage />} />
+                  <Route path="to-review" element={<CsmKBReviewQueuePage />} />
+                  <Route path="admin" element={<CsmKBAdminPage />} />
+                </Route>
+                
                   <Route
                     path="customers/accounts/:id"
                     element={<CsmAccountDetailPage />}

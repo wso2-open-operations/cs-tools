@@ -43,6 +43,9 @@ type UserRepository interface {
 	// GetUserByEmail returns the user with the given email address, or a
 	// NotFoundError if no matching user exists.
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
+	// GetUsersByIDs returns every user matching the given ids. Unlike
+	// SearchUsers, this is not gated to the ServiceNow data source.
+	GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error)
 }
 
 type userRepo struct {
@@ -168,4 +171,30 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 	}
 
 	return users, total, nil
+}
+
+// GetUsersByIDs returns every user matching the given ids, in Postgres
+// mode. Unlike SearchUsers, this is not gated to ServiceNow -- ids are
+// this platform's own identifiers, so an id-based lookup is always safe
+// regardless of data source.
+func (r *userRepo) GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, user_name, first_name, last_name, email, phone, timezone, user_type, created_at, updated_at
+		 FROM users WHERE id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get users by ids: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]domain.User, 0, len(ids))
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(&u.ID, &u.UserName, &u.FirstName, &u.LastName, &u.Email, &u.Phone, &u.Timezone, &u.UserType, &u.CreatedOn, &u.UpdatedOn); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
 }

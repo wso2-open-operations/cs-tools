@@ -4517,14 +4517,14 @@ type AttachmentDetails struct {
 	// authorizing access per referenced resource must treat a nil value as
 	// unknown and fail closed.
 	ReferenceType *ReferenceType `json:"referenceType"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	SizeBytes     int           `json:"sizeBytes"`
-	Description   *string       `json:"description"`
-	CreatedBy     string        `json:"createdBy"`
-	CreatedOn     time.Time     `json:"createdOn"`
-	DownloadURL   *string       `json:"downloadUrl"`
-	PreviewURL    *string       `json:"previewUrl"`
+	Name          string         `json:"name"`
+	Type          string         `json:"type"`
+	SizeBytes     int            `json:"sizeBytes"`
+	Description   *string        `json:"description"`
+	CreatedBy     string         `json:"createdBy"`
+	CreatedOn     time.Time      `json:"createdOn"`
+	DownloadURL   *string        `json:"downloadUrl"`
+	PreviewURL    *string        `json:"previewUrl"`
 	// Content is nil for CSM-native (Postgres) data source attachments: this
 	// service holds no bytes for them -- see CaseService.GetCaseAttachmentContent.
 	// Always non-nil for ServiceNow-sourced attachments.
@@ -5280,4 +5280,155 @@ type ListScheduledTaskRunsResponse struct {
 // DELETE /scheduled-task-runs?resolvedBefore=<RFC3339 timestamp>.
 type DeleteScheduledTaskRunsResponse struct {
 	DeletedCount int `json:"deletedCount"`
+}
+
+// Kb articles are the knowledge-base articles that can be created, reviewed, and published in postgresql.
+
+type KBArticleState string
+
+const (
+	KBArticleStateDraft         KBArticleState = "draft"
+	KBArticleStatePendingReview KBArticleState = "pending_review"
+	KBArticleStatePublished     KBArticleState = "published"
+	KBArticleStateRetired       KBArticleState = "retired"
+)
+
+type KBArticle struct {
+	ID               string         `json:"id"`
+	KnowledgeBaseID  string         `json:"knowledgeBaseId"`
+	Title            string         `json:"title"`
+	Body             string         `json:"body"`
+	State            KBArticleState `json:"state"`
+	AuthorID         string         `json:"authorId"`
+	ReviewerID       *string        `json:"reviewerId"`
+	SourceCaseID     *string        `json:"sourceCaseId"`
+	RejectionComment *string        `json:"rejectionComment"`
+	// UpdatedBy is the user who most recently edited or transitioned this
+	// article -- null only for an article that has never been touched
+	// since creation (shouldn't normally happen, since create sets it too).
+	UpdatedBy *string `json:"updatedBy"`
+	// TeamKey is the org team this article is associated with -- optional
+	// on manual creation, and expected to be set automatically for the
+	// future case-closure auto-draft path. Matches a key from the team
+	// registry (CSM_TEAM_REGISTRY), not a foreign key -- teams are
+	// deployment configuration, not a database table.
+	TeamKey     *string    `json:"teamKey"`
+	CreatedOn   time.Time  `json:"createdOn"`
+	UpdatedOn   time.Time  `json:"updatedOn"`
+	SubmittedOn *time.Time `json:"submittedOn"`
+	PublishedOn *time.Time `json:"publishedOn"`
+	RetiredOn   *time.Time `json:"retiredOn"`
+}
+
+type CreateKBArticleRequest struct {
+	KnowledgeBaseID string  `json:"knowledgeBaseId"`
+	Title           string  `json:"title"`
+	Body            string  `json:"body"`
+	AuthorID        string  `json:"authorId"`
+	TeamKey         *string `json:"teamKey,omitempty"`
+}
+
+type UpdateKBArticleStateRequest struct {
+	State            KBArticleState `json:"state"`
+	RejectionComment *string        `json:"rejectionComment,omitempty"`
+	UpdatedBy        string         `json:"updatedBy"`
+}
+
+type SearchKBArticlesRequest struct {
+	KnowledgeBaseID string           `json:"knowledgeBaseId,omitempty"`
+	States          []KBArticleState `json:"states,omitempty"`
+	AuthorID        string           `json:"authorId,omitempty"`
+	TeamKeys        []string         `json:"teamKeys,omitempty"`
+	SearchQuery     string           `json:"searchQuery,omitempty"`
+	Pagination      Pagination       `json:"pagination"`
+}
+
+type SearchKBArticlesResponse struct {
+	Articles []KBArticle `json:"articles"`
+	Total    int         `json:"total"`
+	Limit    int         `json:"limit"`
+	Offset   int         `json:"offset"`
+	HasMore  bool        `json:"hasMore"`
+}
+
+type CreateKBArticleResponse struct {
+	Article KBArticle `json:"article"`
+}
+
+type UpdateKBArticleStateResponse struct {
+	Article KBArticle `json:"article"`
+}
+
+type KBManager struct {
+	ID              string    `json:"id"`
+	KnowledgeBaseID string    `json:"knowledgeBaseId"`
+	UserID          string    `json:"userId"`
+	CreatedOn       time.Time `json:"createdOn"`
+}
+
+type SearchKBManagersRequest struct {
+	KnowledgeBaseID string `json:"knowledgeBaseId,omitempty"`
+	UserID          string `json:"userId,omitempty"`
+}
+
+type SearchKBManagersResponse struct {
+	Managers []KBManager `json:"managers"`
+}
+
+type UpdateKBArticleContentRequest struct {
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	UpdatedBy string `json:"updatedBy"`
+}
+
+type KnowledgeBase struct {
+	ID        string    `json:"id"`
+	ProductID *string   `json:"productId"`
+	Name      string    `json:"name"`
+	IsActive  bool      `json:"isActive"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
+}
+
+type ListKnowledgeBasesResponse struct {
+	KnowledgeBases []KnowledgeBase `json:"knowledgeBases"`
+}
+
+type KBArticleHistoryEntry struct {
+	ID          string         `json:"id"`
+	KBArticleID string         `json:"kbArticleId"`
+	Title       string         `json:"title"`
+	Body        string         `json:"body"`
+	State       KBArticleState `json:"state"`
+	ChangedBy   string         `json:"changedBy"`
+	CreatedOn   time.Time      `json:"createdOn"`
+}
+
+type ListKBArticleHistoryResponse struct {
+	History []KBArticleHistoryEntry `json:"history"`
+}
+
+type GetUsersByIDsResponse struct {
+	Users []User `json:"users"`
+}
+
+type CreateKnowledgeBaseRequest struct {
+	// ProductID is optional -- a knowledge base doesn't have to be tied to
+	// a specific product (per the Sep 11 call, "we might have knowledge
+	// bases without the product or with multiple products").
+	ProductID *string `json:"productId,omitempty"`
+	Name      string  `json:"name"`
+}
+
+type UpdateKnowledgeBaseRequest struct {
+	Name string `json:"name"`
+}
+
+type UpdateKnowledgeBaseActiveRequest struct {
+	IsActive bool `json:"isActive"`
+}
+
+type CreateKBManagerRequest struct {
+	KnowledgeBaseID string `json:"knowledgeBaseId"`
+	UserID          string `json:"userId"`
 }

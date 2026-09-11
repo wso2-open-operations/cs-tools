@@ -43,6 +43,7 @@ type entityUserClient interface {
 	PatchUserMe(ctx context.Context, body []byte) ([]byte, error)
 	SearchUsers(ctx context.Context, body []byte) ([]byte, error)
 	GetUser(ctx context.Context, id string) ([]byte, error)
+	GetUsersByIDs(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // UsersHandler handles HTTP requests for user-related operations.
@@ -335,4 +336,56 @@ func (h *UsersHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	enriched = h.withExternalAccountStatus(r.Context(), enriched, user.UserID)
 
 	writeJSON(w, http.StatusOK, enriched)
+}
+
+// getUsersByIDsRequest is the request body for POST /users/by-ids.
+type getUsersByIDsRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// GetUsersByIDs handles POST /users/by-ids -- resolves a batch of user ids
+// to their profiles in one call (e.g. for showing names on a list of
+// records that each reference a user by id, rather than looking each one
+// up individually).
+func (h *UsersHandler) GetUsersByIDs(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	var req getUsersByIDsRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	forwardBody, err := json.Marshal(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.GetUsersByIDs(r.Context(), forwardBody)
+	if err != nil {
+		mapUpstreamErrorGeneric(w, err, "Failed to look up users.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
