@@ -127,3 +127,23 @@ func (h *SNUserHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// getUsersByIDsRequest is the request body for POST /users/by-ids.
+type getUsersByIDsRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// GetUsersByIDs handles POST /users/by-ids for the postgres data source.
+func (h *UserHandler) GetUsersByIDs(w http.ResponseWriter, r *http.Request) {
+	var req getUsersByIDsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.GetUsersByIDs(r.Context(), req.IDs)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
