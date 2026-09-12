@@ -179,7 +179,7 @@ export default function CsmDashboardSharedConfigPage(): JSX.Element {
           size="small"
           startIcon={<ArrowLeft size={16} />}
         >
-          Dashboards
+          Back
         </Button>
         <Typography variant="h6">Shared dashboard config</Typography>
       </Box>
