@@ -100,6 +100,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
 	}
 
+	// alert_incident_mapping has no ServiceNow equivalent either — same
+	// reasoning as sla_clocks/scheduled_task_run/event_publish_failures above,
+	// gated the same way: nil db means nil handler means the routes below are
+	// never registered, rather than panicking on a nil pool.
+	var alertIncidentMappingHandler *handler.AlertIncidentMappingHandler
+	if db != nil {
+		alertIncidentMappingRepo := repository.NewAlertIncidentMappingRepository(db)
+		alertIncidentMappingHandler = handler.NewAlertIncidentMappingHandler(service.NewAlertIncidentMappingService(alertIncidentMappingRepo))
+	}
+
 	accountRepo := repository.NewAccountRepository(db)
 	accountHandler := handler.NewAccountHandler(service.NewAccountService(accountRepo))
 
@@ -343,12 +353,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 
-	// event_publish_failures, sla_clocks and scheduled_task_run are not
-	// data-source specific, but all three are Postgres-backed, and the
-	// database is optional when DATA_SOURCE=servicenow — so unlike the role
-	// catalogue and team registry below, these are registered only when a
-	// pool exists. With no database they 404 rather than panicking on a nil
-	// pool.
+	// event_publish_failures, sla_clocks, scheduled_task_run and
+	// alert_incident_mapping are not data-source specific, but all four are
+	// Postgres-backed, and the database is optional when
+	// DATA_SOURCE=servicenow — so unlike the role catalogue and team
+	// registry below, these are registered only when a pool exists. With no
+	// database they 404 rather than panicking on a nil pool.
 	if eventPublishFailureHandler != nil {
 		mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
 		mux.HandleFunc("POST /event-publish-failures/search", eventPublishFailureHandler.SearchEventPublishFailures)
@@ -364,6 +374,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
 		mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
 		mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	}
+	if alertIncidentMappingHandler != nil {
+		mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
+		mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
 	}
 
 	if snUserHandler != nil {
