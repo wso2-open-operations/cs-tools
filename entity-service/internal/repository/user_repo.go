@@ -43,6 +43,14 @@ type UserRepository interface {
 	// GetUserByEmail returns the user with the given email address, or a
 	// NotFoundError if no matching user exists.
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
+	// GetUsersByIDs returns the users matching ids, in no particular order
+	// (whatever order Postgres returns rows in — callers needing a specific
+	// order must re-sort). An id in ids with no matching row is simply
+	// absent from the result rather than an error, so len(result) < len(ids)
+	// is the normal, expected way a caller detects unresolved ids — it is
+	// not itself a failure. Returns (nil, nil) for an empty ids, without a
+	// round trip.
+	GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error)
 }
 
 type userRepo struct {
@@ -72,6 +80,38 @@ func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (domain.Use
 		return domain.User{}, fmt.Errorf("get user by email: %w", err)
 	}
 	return u, nil
+}
+
+// GetUsersByIDs implements UserRepository.
+func (r *userRepo) GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.Query(ctx,
+		`SELECT id, user_name, first_name, last_name, email, phone, timezone, user_type, created_at, updated_at
+		 FROM users WHERE id = ANY($1::uuid[])`, ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get users by ids: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]domain.User, 0, len(ids))
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(
+			&u.ID, &u.UserName, &u.FirstName, &u.LastName,
+			&u.Email, &u.Phone, &u.Timezone, &u.UserType,
+			&u.CreatedOn, &u.UpdatedOn,
+		); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users: %w", err)
+	}
+	return users, nil
 }
 
 // SearchUsers implements UserRepository.

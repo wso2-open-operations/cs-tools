@@ -318,6 +318,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleCaseAcknowledged(ctx, record, env.Payload)
 	case events.TypeSeverityChanged:
 		return d.handleSeverityChanged(ctx, record, env.Payload)
+	case events.TypeCaseMentioned:
+		return d.handleCaseMentioned(ctx, record, env.Payload)
 	case events.TypeIncidentCreated:
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
 	case events.TypeSLAClockRegister, events.TypeSLATierReached:
@@ -505,6 +507,45 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, p.CaseComment, commentLinkFor(caseLink, p.CommentID), caseLink)
 		}
 		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, p.CaseComment, commentLinkFor(caseLink, p.CommentID), caseLink)
+	})
+	if record.NoMoreRetries {
+		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
+	} else if sendErr == nil {
+		d.forgetEmailGroups(baseKey, owned)
+	}
+	return sendErr
+}
+
+// handleCaseMentioned reacts to events.TypeCaseMentioned — email only, no
+// Chat/Twilio reaction, same shape as handleCommentAdded (its own doc
+// comment covers the idempotency tracking, which is identical here). The
+// audience is different, though: p.Recipients here is not the case's watch
+// list, it's specifically who the comment text @mentioned (resolved by the
+// publisher — see events.CaseMentionedPayload's own doc comment) — this
+// function still runs every recipient through groupByLink the same way,
+// since a mentioned person still needs their own portal-appropriate link,
+// regardless of how they ended up on the recipient list.
+func (d *Dispatcher) handleCaseMentioned(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
+	var p events.CaseMentionedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode case.mentioned payload: %w", err)
+	}
+	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
+	if err != nil {
+		return err
+	}
+	baseKey := recordBaseKey(record)
+	subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, p.CaseTitle)
+	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, func(caseLink string) string {
+		if p.IsInternalNote {
+			// See events.CommentAddedPayload.IsInternalNote's own doc
+			// comment (CaseMentionedPayload.IsInternalNote mirrors it): a
+			// distinct layout, and WSO2CaseID (not CaseNumber) as the case
+			// reference — same reasoning handleCommentAdded's own
+			// IsInternalNote branch uses.
+			return notifications.RenderInternalMentionEmail(p.MentionerName, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, p.CaseComment, commentLinkFor(caseLink, p.CommentID), caseLink)
+		}
+		return notifications.RenderMentionEmail(p.MentionerName, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, p.CaseComment, commentLinkFor(caseLink, p.CommentID), caseLink)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))

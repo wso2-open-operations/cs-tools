@@ -52,6 +52,12 @@ vi.mock("@api/backend/client", () => ({
       this.status = status;
     }
   },
+  // The comment composer's `@`-mention typeahead
+  // (rich-text-editor/MentionsPlugin) calls `useBackendApi()` directly to
+  // search the user directory — stub it out the same way the other
+  // page-level suites already do, so it doesn't reach the real client (which
+  // throws at call time under vitest's missing runtime config).
+  useBackendApi: () => ({ post: vi.fn() }),
 }));
 
 vi.mock("@hooks/useNavTransition", () => ({

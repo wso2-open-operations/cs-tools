@@ -19,6 +19,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -337,6 +339,7 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 	if err != nil {
 		return domain.CreateCaseCommentResponse{}, err
 	}
+	s.publishCaseMentioned(ctx, req, c.ID, user)
 	return domain.CreateCaseCommentResponse{
 		Message: "Comment created successfully",
 		Comment: domain.CaseCommentDetail{
@@ -345,6 +348,99 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 			CreatedBy: user.Email,
 		},
 	}, nil
+}
+
+// publishCaseMentionedTimeout bounds publishCaseMentioned's own mentioned-user
+// resolution, case lookup, and publish call — same reasoning as
+// snCaseService's publishCommentAddedTimeout (sn_case_service.go): a
+// notification-side hiccup must not hold up a comment-creation request that
+// has already succeeded.
+const publishCaseMentionedTimeout = 5 * time.Second
+
+// publishCaseMentioned best-effort resolves req.MentionedUserIDs and
+// publishes a case.mentioned event for them after a new comment is created —
+// called from CreateCaseComment right after the comment insert succeeds.
+// A mention must never fail the comment write itself: every failure path
+// below logs and returns rather than propagating an error, mirroring
+// snCaseService.publishCommentAdded's own convention. author is the
+// comment's already-resolved creator — CreateCaseComment already looked it
+// up via s.userRepo.GetUserByEmail to populate req.CreatedBy, so this reuses
+// that instead of querying the same row again.
+//
+// Recipients are the mentioned users' resolved emails, in whatever order
+// s.userRepo.GetUsersByIDs returns them (not necessarily
+// req.MentionedUserIDs' order) — any id that doesn't resolve to a user row
+// is simply absent from that result and therefore silently skipped here
+// (logged), not treated as a failure. When the comment is a work note (an
+// internal note, never meant for a customer to see), Recipients is further
+// filtered to wso2.com addresses only via filterWso2Emails
+// (sn_case_service.go), same as publishCommentAdded's own IsInternalNote
+// handling. An empty Recipients list after that filtering skips publishing
+// entirely (logged) rather than sending a payload
+// csm-notification-service's events.Validate would reject anyway.
+func (s *caseService) publishCaseMentioned(ctx context.Context, req domain.CreateCaseCommentRequest, commentID string, author domain.User) {
+	if s.publisher == nil {
+		return
+	}
+	if len(req.MentionedUserIDs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, publishCaseMentionedTimeout)
+	defer cancel()
+
+	users, err := s.userRepo.GetUsersByIDs(ctx, req.MentionedUserIDs)
+	if err != nil {
+		slog.ErrorContext(ctx, "create comment: resolve mentioned users for case.mentioned publish failed", "caseId", req.CaseID, "error", err)
+		return
+	}
+	if len(users) < len(req.MentionedUserIDs) {
+		slog.InfoContext(ctx, "create comment: some mentioned user ids did not resolve to a user, skipping them", "caseId", req.CaseID, "requested", len(req.MentionedUserIDs), "resolved", len(users))
+	}
+
+	recipients := make([]string, 0, len(users))
+	for _, u := range users {
+		recipients = append(recipients, u.Email)
+	}
+	if req.Type == domain.CommentTypeWorkNote {
+		recipients = filterWso2Emails(recipients)
+	}
+	if len(recipients) == 0 {
+		slog.InfoContext(ctx, "create comment: case.mentioned not published, no mentioned recipients resolved", "caseId", req.CaseID)
+		return
+	}
+
+	cv, err := s.repo.GetCaseByID(ctx, req.CaseID)
+	if err != nil {
+		slog.ErrorContext(ctx, "create comment: enrich case for case.mentioned publish failed", "caseId", req.CaseID)
+		return
+	}
+
+	mentionerName := strings.TrimSpace(author.FirstName + " " + author.LastName)
+	if mentionerName == "" {
+		mentionerName = author.Email
+	}
+
+	payload, err := json.Marshal(events.CaseMentionedPayload{
+		MentionerName:  mentionerName,
+		ProjectID:      cv.ProjectDetails.ID,
+		CaseID:         req.CaseID,
+		CaseNumber:     cv.Number,
+		WSO2CaseID:     cv.InternalID,
+		CaseTitle:      cv.Subject,
+		CaseComment:    req.Content,
+		CommentID:      commentID,
+		IsInternalNote: req.Type == domain.CommentTypeWorkNote,
+		Recipients:     recipients,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "create comment: encode case.mentioned payload failed", "caseId", req.CaseID, "error", err)
+		return
+	}
+	if err := s.publisher.Publish(ctx, events.TypeCaseMentioned, req.CaseID, payload); err != nil {
+		// Not logging err itself — see snCaseService.publishCaseCreated's
+		// matching log line for why.
+		slog.ErrorContext(ctx, "create comment: publish case.mentioned failed", "caseId", req.CaseID)
+	}
 }
 
 // SearchCaseComments implements CaseService.

@@ -2192,6 +2192,12 @@ type CreateCaseCommentRequest struct {
 	CreatedBy string      `json:"-"`
 	Type      CommentType `json:"type"`
 	Content   string      `json:"content"`
+	// MentionedUserIDs are the ids of users @mentioned in Content, supplied
+	// by the caller (the webapp resolves @mention text to user ids before
+	// submitting) rather than parsed from Content here. Optional — omitted
+	// or empty means no mentions. See caseService.publishCaseMentioned for
+	// how these are resolved and turned into a case.mentioned event.
+	MentionedUserIDs []string `json:"mentionedUserIds,omitempty"`
 }
 
 // AddCaseTagRequest is the request body for POST /cases/{id}/tags. SN's tagging is

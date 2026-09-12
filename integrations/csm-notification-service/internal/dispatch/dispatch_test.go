@@ -510,6 +510,120 @@ func TestDispatcher_Handle_CommentAdded_LinksToCommentFragment(t *testing.T) {
 	}
 }
 
+func TestDispatcher_Handle_CaseMentioned(t *testing.T) {
+	mock := &mockEmailSender{}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.mentioned","entityId":"CASE-1","payload":{"mentionerName":"Mentioner","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"hey @agent take a look","commentId":"C-1","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 email sent, got %d", len(mock.calls))
+	}
+	if !strings.Contains(mock.calls[0].htmlBody, "hey @agent take a look") {
+		t.Error("htmlBody does not contain the comment text")
+	}
+	if !strings.Contains(mock.calls[0].htmlBody, "Mentioner") {
+		t.Error("htmlBody does not contain the mentioner's name")
+	}
+}
+
+// TestDispatcher_Handle_CaseMentioned_InternalNote_UsesInternalMentionLayout
+// mirrors TestDispatcher_Handle_CommentAdded_InternalNote_UsesInternalNoteLayout:
+// isInternalNote:true routes through RenderInternalMentionEmail instead of
+// RenderMentionEmail — wso2CaseId (not caseNumber) as the case reference.
+func TestDispatcher_Handle_CaseMentioned_InternalNote_UsesInternalMentionLayout(t *testing.T) {
+	mock := &mockEmailSender{}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.mentioned","entityId":"CASE-1","payload":{"mentionerName":"Agent","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","caseComment":"@agent2 internal only","commentId":"C-1","isInternalNote":true,"recipients":["agent2@wso2.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 email sent, got %d", len(mock.calls))
+	}
+	body := mock.calls[0].htmlBody
+	if !strings.Contains(body, "mentioned you") {
+		t.Error("htmlBody does not use the internal-mention wording")
+	}
+	if !strings.Contains(body, "WSO2-1000") {
+		t.Error("htmlBody does not use wso2CaseId as the case reference")
+	}
+	if strings.Contains(body, "CS0001001") {
+		t.Error("htmlBody uses caseNumber as the case reference, want wso2CaseId for an internal note")
+	}
+	if !strings.Contains(body, "@agent2 internal only") {
+		t.Error("htmlBody does not contain the note's own content")
+	}
+}
+
+// TestDispatcher_Handle_CaseMentioned_LinksToCommentFragment mirrors
+// TestDispatcher_Handle_CommentAdded_LinksToCommentFragment.
+func TestDispatcher_Handle_CaseMentioned_LinksToCommentFragment(t *testing.T) {
+	mock := &mockEmailSender{}
+	links := &mockLinkResolver{linkFor: func(string) string { return "https://csm.example.com/cases/CASE-1" }}
+	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", "")
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.mentioned","entityId":"CASE-1","payload":{"mentionerName":"Mentioner","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"hey @agent","commentId":"C-1","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	want := "https://csm.example.com/cases/CASE-1#C-1"
+	if !strings.Contains(mock.calls[0].htmlBody, want) {
+		t.Errorf("htmlBody does not contain the comment permalink %q", want)
+	}
+}
+
+// TestDispatcher_Handle_CaseMentioned_RetryDoesNotResendSucceededGroup
+// mirrors TestDispatcher_Handle_CommentAdded_RetryDoesNotResendSucceededGroup
+// — case.mentioned's email step uses the same per-group idempotency tracking
+// (sendPerGroup), so it needs the same regression coverage.
+func TestDispatcher_Handle_CaseMentioned_RetryDoesNotResendSucceededGroup(t *testing.T) {
+	mock := &mockEmailSender{errFor: func(to []string) error {
+		if len(to) == 1 && to[0] == "agent@wso2.com" {
+			return errors.New("email service unreachable")
+		}
+		return nil
+	}}
+	links := &mockLinkResolver{linkFor: func(email string) string {
+		if email == "customer@acme.com" {
+			return "https://customer.example.com/projects/PROJ-1/support/cases/CASE-1"
+		}
+		return "https://csm.example.com/cases/CASE-1"
+	}}
+	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", "")
+
+	record := eventbus.Record{Topic: "case-events", Partition: 1, Offset: 42, Value: []byte(`{"type":"case.mentioned","entityId":"CASE-1","payload":{"mentionerName":"Mentioner","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"hey @customer @agent","commentId":"C-1","recipients":["customer@acme.com","agent@wso2.com"]}}`)}
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		record.NoMoreRetries = attempt == 3
+		if err := d.Handle(context.Background(), record); err == nil {
+			t.Fatalf("attempt %d: expected the agent group's error to still propagate", attempt)
+		}
+	}
+
+	customerSends, agentSends := 0, 0
+	for _, call := range mock.calls {
+		if len(call.to) == 1 && call.to[0] == "customer@acme.com" {
+			customerSends++
+		}
+		if len(call.to) == 1 && call.to[0] == "agent@wso2.com" {
+			agentSends++
+		}
+	}
+	if customerSends != 1 {
+		t.Errorf("customer group sent %d times across 3 retries, want exactly 1 (already succeeded, should not be resent)", customerSends)
+	}
+	if agentSends != 3 {
+		t.Errorf("agent group attempted %d times across 3 retries, want 3 (the genuinely failing group should keep retrying)", agentSends)
+	}
+}
+
 func TestDispatcher_Handle_StatusChanged(t *testing.T) {
 	mock := &mockEmailSender{}
 	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})

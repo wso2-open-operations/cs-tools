@@ -78,6 +78,8 @@ export interface PostCsmCaseCommentInput {
   authorName: string;
   /** If true, the entry is an internal work note (not customer-visible). */
   internal?: boolean;
+  /** Platform user ids `@`-mentioned in `bodyHtml`; omitted/empty when none. */
+  mentionedUserIds?: string[];
 }
 
 /**
@@ -99,6 +101,9 @@ export function usePostCsmCaseComment(): UseMutationResult<
         type: commentTypeFromInternal(input.internal ?? false),
         // BE stores rich-text HTML; send the editor output as-is.
         content: input.bodyHtml,
+        ...(input.mentionedUserIds?.length && {
+          mentionedUserIds: input.mentionedUserIds,
+        }),
       };
       const created = await api.post<
         BeCaseCommentCreatePayload,

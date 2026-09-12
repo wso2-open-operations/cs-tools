@@ -338,6 +338,12 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 
 // CreateCaseComment handles POST /cases/{id}/comments.
 // createdBy is resolved by the entity service from the forwarded x-user-id-token.
+// The request body (including an optional mentionedUserIds — see
+// CaseCommentCreatePayload in openapi.yaml) is forwarded to the entity
+// service verbatim; this handler has no typed request DTO for the comment
+// payload itself, so a new passthrough field needs no BFF struct change,
+// only inline-image handling above preserves unknown fields via
+// map[string]json.RawMessage — see processCommentInlineImages.
 func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
