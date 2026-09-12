@@ -297,6 +297,24 @@ describe("EditChangeRequestDialog — rollback and test plans", () => {
   });
 });
 
+describe("EditChangeRequestDialog — assigned engineer", () => {
+  it("renders an Assigned to picker alongside Assignment group", () => {
+    renderDialog();
+    expect(screen.getByLabelText(/^assigned to$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^assignment group$/i)).toBeInTheDocument();
+  });
+
+  it("seeds the known assignee's name when the CR already has one", () => {
+    renderDialog({ assignedEngineer: { id: "user-1", name: "Jane Doe" } });
+    expect(screen.getByLabelText(/^assigned to$/i)).toHaveValue("Jane Doe");
+  });
+
+  it("leaves Save disabled when nothing changed, even with an existing assignee", () => {
+    renderDialog({ assignedEngineer: { id: "user-1", name: "Jane Doe" } });
+    expect(saveButton()).toBeDisabled();
+  });
+});
+
 describe("EditChangeRequestDialog — planned end must be after planned start", () => {
   it("renders a Planned end picker alongside Planned start", () => {
     renderDialog();

@@ -122,6 +122,10 @@ type snIncidentFilters struct {
 	// doc comment. Matched as a union against the incident's backing
 	// business_service name.
 	ProductNames []string `json:"productNames,omitempty"`
+	// AssignedUserIDs: sys_user sys_ids (converted from UUIDs). Wire key is
+	// plural "assignedUserIds" to match Ballerina/SN's contract, even though
+	// the domain-facing filter field is singular "assignedUserId".
+	AssignedUserIDs []string `json:"assignedUserIds,omitempty"`
 }
 
 // snIncidentPriorityKeyMap maps domain IncidentPriority enums to SN numeric priority keys.
@@ -282,6 +286,7 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 			SlaViolated:        parsedFilters.SlaViolated,
 			MadeSla:            parsedFilters.MadeSla,
 			ProductNames:       parsedFilters.ProductNames,
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -427,6 +432,7 @@ func (s *snIncidentService) AggregateIncidents(ctx context.Context, req domain.A
 			SlaViolated:        parsedFilters.SlaViolated,
 			MadeSla:            parsedFilters.MadeSla,
 			ProductNames:       parsedFilters.ProductNames,
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,

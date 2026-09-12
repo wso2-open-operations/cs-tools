@@ -55,6 +55,49 @@ func TestParseChangeRequestFieldFilters_CreatedOnAbsoluteDateStillWorks(t *testi
 	}
 }
 
+// TestParseChangeRequestFieldFilters_AssignedUserId verifies "assignedUserId"
+// "in" UUIDs are collected into parsedChangeRequestFilters.AssignedUserIDs.
+func TestParseChangeRequestFieldFilters_AssignedUserId(t *testing.T) {
+	now := time.Now().UTC()
+	userID := "33333333-3333-3333-3333-333333333333"
+
+	parsed, err := ParseChangeRequestFieldFilters([]domain.ChangeRequestFieldFilter{
+		{Field: "assignedUserId", Op: "in", Values: []string{userID}},
+	}, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.AssignedUserIDs) != 1 || parsed.AssignedUserIDs[0] != userID {
+		t.Errorf("AssignedUserIDs = %v, want [%s]", parsed.AssignedUserIDs, userID)
+	}
+}
+
+// TestParseChangeRequestFieldFilters_AssignedUserIdInvalidUUIDRejected
+// verifies a non-UUID value is rejected.
+func TestParseChangeRequestFieldFilters_AssignedUserIdInvalidUUIDRejected(t *testing.T) {
+	now := time.Now().UTC()
+
+	_, err := ParseChangeRequestFieldFilters([]domain.ChangeRequestFieldFilter{
+		{Field: "assignedUserId", Op: "in", Values: []string{"not-a-uuid"}},
+	}, now)
+	if err == nil {
+		t.Fatal("expected an error for an invalid assignedUserId UUID, got nil")
+	}
+}
+
+// TestParseChangeRequestFieldFilters_AssignedUserIdWrongOpRejected verifies
+// "assignedUserId" only accepts op "in".
+func TestParseChangeRequestFieldFilters_AssignedUserIdWrongOpRejected(t *testing.T) {
+	now := time.Now().UTC()
+
+	_, err := ParseChangeRequestFieldFilters([]domain.ChangeRequestFieldFilter{
+		{Field: "assignedUserId", Op: "eq", Values: []string{"33333333-3333-3333-3333-333333333333"}},
+	}, now)
+	if err == nil {
+		t.Fatal("expected an error for op \"eq\" on field \"assignedUserId\", got nil")
+	}
+}
+
 // TestParseChangeRequestFieldFilters_ApprovalAccepted verifies each of
 // ServiceNow's four raw task.approval values is accepted via the "approval"
 // field / "eq" op and passed through into parsedChangeRequestFilters.Approval

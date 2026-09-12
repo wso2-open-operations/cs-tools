@@ -69,10 +69,10 @@ From the detail page a CS engineer can:
 - **Approve or reject** a pending approval stage, if the engineer is listed
   as an approver on it: the Approve/Reject buttons only appear on that
   engineer's own pending approval.
-- **Edit** the planned window, assignment group, requested by, customer
-  group, rollback duration, and the implementation/rollback/test/affected-
-  services/affected-components plans, or **Clone** the change request into a
-  new one pre-filled with this one's values (useful for promoting the same
+- **Edit** the planned window, assignment group, assigned engineer, requested
+  by, customer group, rollback duration, and the implementation/rollback/test/
+  affected-services/affected-components plans, or **Clone** the change request
+  into a new one pre-filled with this one's values (useful for promoting the same
   change through another environment). The customer-approved/reviewed flags
   aren't editable here — they reflect an automation-only stage of the
   change's lifecycle and have no manual UI action in the backing system

@@ -61,6 +61,10 @@ type snProblemFilters struct {
 	StateKeys []int `json:"stateKeys,omitempty"`
 	// AssignmentGroupIDs: sys_user_group sys_ids (converted from UUIDs).
 	AssignmentGroupIDs []string `json:"assignmentGroupIds,omitempty"`
+	// AssignedUserIDs: sys_user sys_ids (converted from UUIDs). Wire key is
+	// plural "assignedUserIds" to match Ballerina/SN's contract, even though
+	// the domain-facing filter field is singular "assignedUserId".
+	AssignedUserIDs []string `json:"assignedUserIds,omitempty"`
 }
 
 // snProblemStateKeyMap maps domain ProblemState enums to ServiceNow's raw
@@ -117,6 +121,7 @@ func (s *snProblemService) SearchProblems(ctx context.Context, req domain.Search
 			Number:             stringPtrValue(req.Filters.Number),
 			StateKeys:          parsedFilters.StateKeys,
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
@@ -205,6 +210,7 @@ func (s *snProblemService) AggregateProblems(ctx context.Context, req domain.Agg
 			Number:             stringPtrValue(req.Filters.Number),
 			StateKeys:          parsedFilters.StateKeys,
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,

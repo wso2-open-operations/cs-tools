@@ -43,6 +43,20 @@ func TestParseIncidentFieldFilters_StateGroupAndBusinessService(t *testing.T) {
 	}
 }
 
+func TestParseIncidentFieldFilters_AssignedUserId(t *testing.T) {
+	userID := "33333333-3333-3333-3333-333333333333"
+
+	parsed, err := ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "assignedUserId", Op: "in", Values: []string{userID}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.AssignedUserIDs) != 1 || parsed.AssignedUserIDs[0] != userID {
+		t.Errorf("AssignedUserIDs = %v, want [%s]", parsed.AssignedUserIDs, userID)
+	}
+}
+
 func TestParseIncidentFieldFilters_CreatedOnRelativeDate(t *testing.T) {
 	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 
@@ -151,6 +165,14 @@ func TestParseIncidentFieldFilters_Rejections(t *testing.T) {
 		{
 			name:    "invalid assignmentGroupId UUID",
 			filters: []domain.IncidentFieldFilter{{Field: "assignmentGroupId", Op: "in", Values: []string{"not-a-uuid"}}},
+		},
+		{
+			name:    "invalid assignedUserId UUID",
+			filters: []domain.IncidentFieldFilter{{Field: "assignedUserId", Op: "in", Values: []string{"not-a-uuid"}}},
+		},
+		{
+			name:    "assignedUserId with unsupported op",
+			filters: []domain.IncidentFieldFilter{{Field: "assignedUserId", Op: "eq", Values: []string{"11111111-1111-1111-1111-111111111111"}}},
 		},
 		{
 			name:    "createdOn with unsupported op",

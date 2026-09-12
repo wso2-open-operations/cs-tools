@@ -154,9 +154,10 @@ function useRichTextPlanField(storedHtml?: string | null): RichTextPlanField {
 
 /**
  * Edit the change-request fields the BE allows updating: the planned window,
- * the assignment group, requester, customer group, rollback duration, and
- * the implementation/rollback/test/affected-services/affected-components
- * plans (the last five added 2026-08-20, see `CHANGES-cr-field-parity.md`).
+ * the assignment group, the individual assignee, requester, customer group,
+ * rollback duration, and the implementation/rollback/test/affected-services/
+ * affected-components plans (the last five added 2026-08-20, see
+ * `CHANGES-cr-field-parity.md`).
  * Only changed fields are sent, and the BE requires at least one, so Save is
  * disabled until something differs.
  *
@@ -203,12 +204,14 @@ export default function EditChangeRequestDialog({
     [cr.plannedEndOn],
   );
   const initialAssignedTeamId = cr.assignedTeam?.id ?? "";
+  const initialAssignedEngineerId = cr.assignedEngineer?.id ?? "";
   const initialCustomerGroupId = cr.customerGroup?.id ?? "";
   const initialRequestedById = cr.requestedBy?.id ?? "";
   const initialRollbackDurationText = cr.rollbackDurationText ?? "";
   const [plannedStart, setPlannedStart] = useState(initialPlannedStart);
   const [plannedEnd, setPlannedEnd] = useState(initialPlannedEnd);
   const [assignedTeamId, setAssignedTeamId] = useState(initialAssignedTeamId);
+  const [assignedEngineerId, setAssignedEngineerId] = useState(initialAssignedEngineerId);
   const [customerGroupId, setCustomerGroupId] = useState(initialCustomerGroupId);
   const [requestedById, setRequestedById] = useState(initialRequestedById);
   const [rollbackDurationText, setRollbackDurationText] = useState(initialRollbackDurationText);
@@ -238,6 +241,9 @@ export default function EditChangeRequestDialog({
     if (assignedTeamId !== initialAssignedTeamId && assignedTeamId) {
       next.assignedTeamId = assignedTeamId;
     }
+    if (assignedEngineerId !== initialAssignedEngineerId && assignedEngineerId) {
+      next.assignedEngineerId = assignedEngineerId;
+    }
     // Unlike the pickers above, an emptied plan field is a real edit the BE
     // can accept, so "" is sent rather than skipped. Both plans are rich text
     // on both sides now — see `useRichTextPlanField` for why "changed" is not
@@ -264,6 +270,8 @@ export default function EditChangeRequestDialog({
     initialPlannedEnd,
     assignedTeamId,
     initialAssignedTeamId,
+    assignedEngineerId,
+    initialAssignedEngineerId,
     rollbackPlan.isDirty,
     rollbackPlan.outgoing,
     testPlan.isDirty,
@@ -394,6 +402,18 @@ export default function EditChangeRequestDialog({
             getLabel={(g) => g.name}
             knownLabel={cr.assignedTeam?.name}
             helperText="Required before approval can be requested."
+          />
+          <AsyncEntitySelect<BeUser>
+            id="cr-edit-assigned-engineer"
+            label="Assigned to"
+            placeholder="Search people…"
+            value={assignedEngineerId}
+            onChange={setAssignedEngineerId}
+            disabled={isSaving}
+            useSearch={useSearchUsersByName}
+            getId={(u) => u.id!}
+            getLabel={userLabel}
+            knownLabel={cr.assignedEngineer?.name}
           />
           <AsyncEntitySelect<BeUser>
             id="cr-edit-requested-by"

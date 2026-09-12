@@ -2784,6 +2784,9 @@ export interface BePatchChangeRequestPayload {
   isCustomerApproved?: boolean;
   isCustomerReviewed?: boolean;
   assignedTeamId?: string;
+  /** Individual assignee (portal user UUID). Distinct from `assignedTeamId`
+   * (the assignment group) — a CR can carry both, one, or neither. */
+  assignedEngineerId?: string;
   requestApproval?: true;
   /**
    * Target lifecycle state, for a transition listed in the record's own

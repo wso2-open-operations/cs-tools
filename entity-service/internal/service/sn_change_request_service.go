@@ -102,6 +102,10 @@ type snChangeRequestFilters struct {
 	// ("approval" field). ServiceNow's raw task.approval value, passed
 	// through as-is -- not a key/enum mapping.
 	Approval string `json:"approval,omitempty"`
+	// AssignedUserIDs: sys_user sys_ids (converted from UUIDs). Wire key is
+	// plural "assignedUserIds" to match Ballerina/SN's contract, even though
+	// the domain-facing filter field is singular "assignedUserId".
+	AssignedUserIDs []string `json:"assignedUserIds,omitempty"`
 }
 
 // snCRTypeIDMap maps domain ChangeRequestType enums to SN numeric type IDs.
@@ -327,6 +331,7 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 			CreatedEndDate:     formatSNDateTimeUTC(parsedFilters.CreatedEndDate),
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
 			Approval:           stringPtrValue(parsedFilters.Approval),
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -472,6 +477,7 @@ func (s *snChangeRequestService) AggregateChangeRequests(ctx context.Context, re
 			CreatedEndDate:     formatSNDateTimeUTC(parsedFilters.CreatedEndDate),
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
 			Approval:           stringPtrValue(parsedFilters.Approval),
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,

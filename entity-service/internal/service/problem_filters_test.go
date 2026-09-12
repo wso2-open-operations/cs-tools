@@ -48,6 +48,20 @@ func TestParseProblemFieldFilters_StateAndAssignmentGroup(t *testing.T) {
 	}
 }
 
+func TestParseProblemFieldFilters_AssignedUserId(t *testing.T) {
+	userID := "33333333-3333-3333-3333-333333333333"
+
+	parsed, err := ParseProblemFieldFilters([]domain.ProblemFieldFilter{
+		{Field: "assignedUserId", Op: "in", Values: []string{userID}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.AssignedUserIDs) != 1 || parsed.AssignedUserIDs[0] != userID {
+		t.Errorf("AssignedUserIDs = %v, want [%s]", parsed.AssignedUserIDs, userID)
+	}
+}
+
 func TestParseProblemFieldFilters_Rejections(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -72,6 +86,10 @@ func TestParseProblemFieldFilters_Rejections(t *testing.T) {
 		{
 			name:    "invalid assignmentGroupId uuid",
 			filters: []domain.ProblemFieldFilter{{Field: "assignmentGroupId", Op: "in", Values: []string{"not-a-uuid"}}},
+		},
+		{
+			name:    "invalid assignedUserId uuid",
+			filters: []domain.ProblemFieldFilter{{Field: "assignedUserId", Op: "in", Values: []string{"not-a-uuid"}}},
 		},
 	}
 
