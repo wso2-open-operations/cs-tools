@@ -4008,6 +4008,14 @@ export interface BeDashboardWidget {
    * valid for that resourceType's own search contract; an invalid one is
    * rejected by that search endpoint, not caught here. */
   sortBy?: Record<string, unknown>;
+  /** Only meaningful for shapes "pie"/"bar": opts this widget into rendering
+   * a clicked slice's filtered list inline, below the chart, on the same
+   * tile — instead of navigating away to that resourceType's own list page
+   * (the existing, still-default behavior for every widget that omits
+   * this). See `DashboardWidgetTile`'s own `inlineDrilldown` prop. Absent/
+   * `false` is a no-op — every existing pie/bar widget's navigate-away
+   * click-through is unchanged. */
+  inlineDrilldown?: boolean;
 }
 
 /**
