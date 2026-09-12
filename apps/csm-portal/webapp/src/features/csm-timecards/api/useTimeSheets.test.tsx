@@ -19,9 +19,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import {
+  clearPersistedRecentApprovers,
+  invalidateTimecards,
   mapTimeCard,
   searchTimeCards,
   useBulkApproveCards,
+  useRecentApprovers,
 } from "@features/csm-timecards/api/useTimeSheets";
 import { BackendApiError, type BackendApi } from "@api/backend/client";
 import type {
@@ -40,6 +43,7 @@ import type {
 // those tests — only the useBulkApproveCards tests further down actually
 // exercise this mocked patch.
 const patchMock = vi.fn();
+const postMock = vi.fn();
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
@@ -48,9 +52,18 @@ vi.mock("@api/backend/client", () => ({
       this.status = status;
     }
   },
-  useBackendApi: () => ({ patch: patchMock }),
+  useBackendApi: () => ({ patch: patchMock, post: postMock }),
 }));
 vi.mock("@config/apiConfig", () => ({ apiConfig: { backendUrl: "https://example.test" } }));
+
+// useRecentApprovers resolves the signed-in engineer via useCurrentEngineer,
+// which pulls GET /users/me and the ID-token claims — mocked so tests can
+// control `me.id` directly without a real auth/query round trip.
+let usersMeId: string | undefined = "eng-1";
+vi.mock("@features/settings/api/useGetUsersMe", () => ({
+  useGetUsersMe: () => ({ data: usersMeId ? { id: usersMeId, firstName: "Jane" } : undefined }),
+}));
+vi.mock("@hooks/useIdTokenClaims", () => ({ useIdTokenClaims: () => undefined }));
 
 function beCard(id: string, state: BeTimeCardState): BeTimeCardView {
   return {
@@ -273,5 +286,172 @@ describe("useBulkApproveCards", () => {
     expect(result.current.data?.failed).toEqual([
       { cardId: "tc-1", message: "Could not approve this time card." },
     ]);
+  });
+});
+
+describe("useRecentApprovers persisted cache", () => {
+  const storageKey = "csm-portal:time-cards:recent-approvers:v1:eng-1";
+
+  beforeEach(() => {
+    postMock.mockReset();
+    window.localStorage.clear();
+    usersMeId = "eng-1";
+  });
+
+  function cardWithApprovers(id: string, workDate: string, approvers: { id: string; name: string }[]): BeTimeCardView {
+    return { ...beCard(id, "submitted"), workDate, approvers };
+  }
+
+  it("reads a fresh persisted entry on mount and never calls the search endpoint", async () => {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        approvers: [{ id: "appr-1", name: "Ann Approver" }],
+        cachedAt: Date.now(),
+      }),
+    );
+
+    const { result } = renderHook(() => useRecentApprovers(true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: "appr-1", name: "Ann Approver" }]));
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches and writes the cache when there is no persisted entry", async () => {
+    postMock.mockResolvedValue(
+      bePage(
+        [cardWithApprovers("a", "2026-08-20", [{ id: "appr-2", name: "Bob Approver" }])],
+        1,
+        0,
+        20,
+      ),
+    );
+
+    const { result } = renderHook(() => useRecentApprovers(true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: "appr-2", name: "Bob Approver" }]));
+    expect(postMock).toHaveBeenCalledTimes(1);
+
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+    expect(stored.approvers).toEqual([{ id: "appr-2", name: "Bob Approver" }]);
+    expect(typeof stored.cachedAt).toBe("number");
+  });
+
+  it("ignores a stale (expired-TTL) persisted entry and refetches", async () => {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        approvers: [{ id: "old-approver", name: "Old Approver" }],
+        cachedAt: Date.now() - 25 * 60 * 60 * 1000, // 25h, past the 24h TTL
+      }),
+    );
+    postMock.mockResolvedValue(
+      bePage(
+        [cardWithApprovers("a", "2026-08-20", [{ id: "appr-3", name: "Carol Approver" }])],
+        1,
+        0,
+        20,
+      ),
+    );
+
+    const { result } = renderHook(() => useRecentApprovers(true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: "appr-3", name: "Carol Approver" }]));
+    expect(postMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a persisted entry with a future cachedAt and refetches", async () => {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        approvers: [{ id: "old-approver", name: "Old Approver" }],
+        cachedAt: Date.now() + 60 * 60 * 1000, // 1h in the future
+      }),
+    );
+    postMock.mockResolvedValue(
+      bePage(
+        [cardWithApprovers("a", "2026-08-20", [{ id: "appr-5", name: "Eve Approver" }])],
+        1,
+        0,
+        20,
+      ),
+    );
+
+    const { result } = renderHook(() => useRecentApprovers(true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: "appr-5", name: "Eve Approver" }]));
+    expect(postMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a malformed/garbage persisted entry and refetches instead of crashing", async () => {
+    window.localStorage.setItem(storageKey, "{not json");
+    postMock.mockResolvedValue(
+      bePage(
+        [cardWithApprovers("a", "2026-08-20", [{ id: "appr-4", name: "Dana Approver" }])],
+        1,
+        0,
+        20,
+      ),
+    );
+
+    const { result } = renderHook(() => useRecentApprovers(true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: "appr-4", name: "Dana Approver" }]));
+    expect(postMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to always-fetch when localStorage throws (e.g. private browsing/storage disabled)", async () => {
+    const getSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const setSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    postMock.mockResolvedValue(
+      bePage(
+        [cardWithApprovers("a", "2026-08-20", [{ id: "appr-5", name: "Erin Approver" }])],
+        1,
+        0,
+        20,
+      ),
+    );
+
+    const { result } = renderHook(() => useRecentApprovers(true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: "appr-5", name: "Erin Approver" }]));
+    expect(postMock).toHaveBeenCalledTimes(1);
+
+    getSpy.mockRestore();
+    setSpy.mockRestore();
+  });
+
+  it("drops the persisted cache when invalidateTimecards runs (e.g. after logging a new card)", () => {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({ approvers: [{ id: "appr-1", name: "Ann Approver" }], cachedAt: Date.now() }),
+    );
+    const queryClient = new QueryClient();
+
+    invalidateTimecards(queryClient);
+
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it("clearPersistedRecentApprovers removes every engineer's entry, not just one", () => {
+    window.localStorage.setItem(
+      "csm-portal:time-cards:recent-approvers:v1:eng-1",
+      JSON.stringify({ approvers: [], cachedAt: Date.now() }),
+    );
+    window.localStorage.setItem(
+      "csm-portal:time-cards:recent-approvers:v1:eng-2",
+      JSON.stringify({ approvers: [], cachedAt: Date.now() }),
+    );
+    window.localStorage.setItem("unrelated-key", "keep-me");
+
+    clearPersistedRecentApprovers();
+
+    expect(window.localStorage.getItem("csm-portal:time-cards:recent-approvers:v1:eng-1")).toBeNull();
+    expect(window.localStorage.getItem("csm-portal:time-cards:recent-approvers:v1:eng-2")).toBeNull();
+    expect(window.localStorage.getItem("unrelated-key")).toBe("keep-me");
   });
 });

@@ -29,6 +29,7 @@ export const INCIDENT_FILTER_PARAM_KEYS = [
   "incCreatedFrom",
   "incCreatedTo",
   "incProducts",
+  "incSreTeams",
 ] as const;
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -84,6 +85,21 @@ function parseProductsCsv(raw: string | null): string[] {
 }
 
 /**
+ * Comma-separated SRE team ids (`sreGroupId` UUIDs) — same shape as
+ * `parseProductsCsv`: not a fixed enum, blank entries dropped. A stale/
+ * hand-edited id that no longer matches a real team just yields an
+ * unexpectedly narrow (possibly empty) result set rather than an error, same
+ * as `parseProductsCsv`'s own tolerance.
+ */
+function parseTeamIdsCsv(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
  * Read incident filters from the URL. An unknown/malformed value (a
  * hand-edited or stale query string) is dropped rather than passed through,
  * so it falls back to the default (unfiltered) behaviour instead of being
@@ -111,6 +127,7 @@ export function readIncidentFiltersFromUrl(
     createdStartDate,
     createdEndDate,
     products: parseProductsCsv(params.get("incProducts")),
+    sreTeamIds: parseTeamIdsCsv(params.get("incSreTeams")),
   };
 }
 
@@ -126,5 +143,6 @@ export function writeIncidentFiltersToUrl(f: IncidentFilters): URLSearchParams {
   if (f.createdStartDate) out.set("incCreatedFrom", f.createdStartDate);
   if (f.createdEndDate) out.set("incCreatedTo", f.createdEndDate);
   if (f.products.length) out.set("incProducts", f.products.join(","));
+  if (f.sreTeamIds.length) out.set("incSreTeams", f.sreTeamIds.join(","));
   return out;
 }

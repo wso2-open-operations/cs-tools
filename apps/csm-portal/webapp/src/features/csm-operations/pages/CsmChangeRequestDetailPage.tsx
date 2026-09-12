@@ -22,12 +22,12 @@ import {
   Skeleton,
   Tab,
   Tabs,
-  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
   ArrowLeft,
   Check,
+  Clock,
   ClipboardCheck,
   CopyPlus,
   FileText,
@@ -35,7 +35,6 @@ import {
   MessageSquarePlus,
   Paperclip,
   Pencil,
-  Send,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -54,17 +53,23 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useGetChangeRequest } from "@features/csm-operations/api/useGetChangeRequest";
+import { useGetChangeRequestApprovals } from "@features/csm-operations/api/useGetChangeRequestApprovals";
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
 import {
   useGetCsmChangeRequestComments,
   usePostCsmChangeRequestComment,
 } from "@features/csm-operations/api/useCsmChangeRequestComments";
+import ChangeRequestActionBar from "@features/csm-operations/components/ChangeRequestActionBar";
 import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
+import ChangeRequestLifecycleStepper from "@features/csm-operations/components/ChangeRequestLifecycleStepper";
+import ChangeRequestTransitionReasonDialog from "@features/csm-operations/components/ChangeRequestTransitionReasonDialog";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import {
   buildCloneChangeRequestNavState,
+  changeRequestBlockingReason,
   changeRequestCommentGateReason,
+  changeRequestTransitionRequiresReason,
   changeRequestImpactColor,
   changeRequestImpactLabel,
   changeRequestStateColor,
@@ -78,9 +83,12 @@ import {
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
-import type { BeEntityRef } from "@api/backend/types";
+import type { BeEntityRef, BePatchChangeRequestPayload } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
+import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
+import { useReportCaseTabMeta } from "@features/case-tabs/hooks/useReportCaseTabMeta";
+import { useReportCaseTabDraft } from "@features/case-tabs/hooks/useReportCaseTabDraft";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
 
 const OPERATIONS_CR_PATH = "/operations/change-requests";
@@ -94,6 +102,30 @@ function backendErrorMessage(err: unknown, fallback: string): string {
   return err instanceof BackendApiError && err.status < 500 && err.message
     ? err.message
     : fallback;
+}
+
+/**
+ * The patch that performs a transition into `target`.
+ *
+ * Every target goes through the generic `state` field except `assess`: the
+ * New -> Assess move has its own `requestApproval` flag, which additionally
+ * raises the approval request that setting `state` alone does not. Both are
+ * accepted on the same endpoint; `state` is not mutually exclusive with
+ * anything (only `isCustomerApproved`/`isCustomerReviewed`/`requestApproval`
+ * are, with each other), but a transition is always sent on its own anyway so
+ * a rejection can only ever be about the transition.
+ */
+function buildTransitionPatch(target: string): BePatchChangeRequestPayload {
+  return target === "assess" ? { requestApproval: true } : { state: target };
+}
+
+/**
+ * Fallback message for a failed transition, used only when the backend gave
+ * no usable 4xx reason of its own.
+ */
+function transitionFallbackMessage(target: string): string {
+  if (target === "assess") return "Could not request approval for this change request.";
+  return `Could not move this change request to ${changeRequestStateLabel(target)}.`;
 }
 
 function formatDateTime(value?: string | null): string {
@@ -165,7 +197,7 @@ function PlanSection({ title, html }: { title: string; html?: string | null }): 
   );
 }
 
-type ChangeRequestTabId = "approval" | "details" | "comments" | "attachments";
+type ChangeRequestTabId = "approval" | "plan" | "comments" | "attachments";
 
 const TAB_DEFS: Array<{
   id: ChangeRequestTabId;
@@ -173,7 +205,7 @@ const TAB_DEFS: Array<{
   icon: JSX.Element;
 }> = [
   { id: "approval", label: "Approval", icon: <ClipboardCheck size={16} /> },
-  { id: "details", label: "Details", icon: <FileText size={16} /> },
+  { id: "plan", label: "Plan", icon: <FileText size={16} /> },
   { id: "comments", label: "Comments", icon: <MessageSquare size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
 ];
@@ -185,14 +217,44 @@ const CHANGE_REQUEST_TAB_IDS: readonly ChangeRequestTabId[] = TAB_DEFS.map((t) =
  * rollback / test / communication plans.
  */
 export default function CsmChangeRequestDetailPage(): JSX.Element {
-  const id = useNormalizedIdParam("id");
-  const navigate = useNavTransition();
+  // Real router hooks — called unconditionally regardless of `routeOverride`
+  // below (rules of hooks), but their VALUES are only actually used when
+  // this instance isn't part of an open in-app tab. See the identical
+  // pattern (and its own longer doc comment) at the top of
+  // `CsmCaseDetailPage`, which this mirrors: this page can be mounted
+  // several times at once (one per open tab, kept alive in the background —
+  // see `CaseTabIsolatedRouter`), while there is only ever one real matched
+  // route/location for the app as a whole.
+  const routedId = useNormalizedIdParam("id");
+  const routedNavigate = useNavTransition();
+  const routedLocationState = useLocation().state;
+  const routeOverride = useCaseRouteOverride();
+  const id = routeOverride?.caseId ?? routedId;
+  const navigate = routeOverride?.navigate ?? routedNavigate;
   // Prefer the list URL the row link captured (if any) so "back" returns to
   // the exact view the engineer came from, falling back to the bare tab path
   // for a bookmarked or directly-linked change request.
-  const backState = useLocation().state as { from?: string } | undefined;
+  const backState = (routeOverride ? routeOverride.state : routedLocationState) as
+    | { from?: string }
+    | undefined;
   const backTarget = backState?.from ?? OPERATIONS_CR_PATH;
   const { data, isLoading, isError } = useGetChangeRequest(id);
+  // Same label computation this page's own `recordView` call below uses —
+  // The CR number as the short chip label (matching `CsmCaseDetailPage`'s
+  // own `caseNumber`-only report); change requests have no separate
+  // project-scoped id the way cases do, so the tooltip's `internalId` reuses
+  // the same number, with the subject alongside it.
+  useReportCaseTabMeta(id, {
+    label: data?.number ?? undefined,
+    internalId: data?.number ?? undefined,
+    subject: data?.subject ?? undefined,
+  });
+  // Fetched here (not just inside the Approval tab's `ChangeRequestApprovals`)
+  // so the header's blocking-reason note has data on first render, even when
+  // the engineer lands on a different tab. Both call sites share the same
+  // query key, so react-query dedupes this into a single request rather than
+  // fetching twice.
+  const { data: approvalsData } = useGetChangeRequestApprovals(id);
   const { showError } = useErrorBanner();
   const patchCr = usePatchChangeRequest();
   const [editOpen, setEditOpen] = useState(false);
@@ -210,6 +272,20 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const postAttachment = usePostCsmCaseAttachment();
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const [composerOpen, setComposerOpen] = useState(false);
+  // Reports composerOpen up to the in-app case-tabs layer, purely so closing
+  // this change request's tab from the tab strip can confirm first — see
+  // CsmCaseDetailPage's identical call, and the hook's own doc comment for
+  // what this signal does and doesn't guarantee. Missing here was itself a
+  // bug: this tab's `hasDraft` never became true, so its close-confirm
+  // never fired for an unsent reply.
+  useReportCaseTabDraft(id, composerOpen);
+  // Destructive transition awaiting confirmation (`rollback`/`canceled`), the
+  // inline error for that attempt, and whether its reason comment already
+  // landed — the last one so a retry after a failed patch re-sends only the
+  // state change instead of duplicating the comment.
+  const [reasonTarget, setReasonTarget] = useState<string | null>(null);
+  const [reasonError, setReasonError] = useState<string | null>(null);
+  const [reasonRecorded, setReasonRecorded] = useState(false);
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
 
@@ -261,7 +337,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
       onClick={back}
       sx={{ alignSelf: "flex-start" }}
     >
-      Back to change requests
+      Back
     </Button>
   );
 
@@ -298,44 +374,102 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   }
 
   const cr = data;
-  // Data-driven, like CaseActionBar's nextStates handling: only "assess" is
-  // ever modeled today (New -> Assess), but this checks membership rather
-  // than hardcoding `cr.state === "new"` so a backend-added transition needs
-  // no FE change to show up. This is the state gate: the button renders at
-  // all only when the record's *current* state (as reflected by this list)
-  // legally transitions to "assess" — it is not offered from any other
-  // state. `usePatchChangeRequest` refetches this detail after every patch
-  // attempt, success or error, precisely so this list can't go stale after
-  // an ambiguous outcome (a write that commits upstream but is reported as
-  // a failure here) and re-offer an action that has already happened.
-  //
-  // The state machine alone isn't sufficient: the backing data source also
-  // enforces that an assigned team is set before this transition is allowed,
-  // so require `assignedTeam` too or the request round-trips and fails there.
-  // (A `plannedStartOn` requirement was proposed for this same gate, but the
-  // only confirmed rejection for this transition is the state-transition
-  // error below, and the contract for `requestApproval` documents only the
-  // state transition, not a planned-start dependency — so no gate is added
-  // for it here without stronger evidence.)
-  const stateAllowsRequestApproval = !!cr.legalNextStates?.includes("assess");
-  const requestApprovalBlockedReason = stateAllowsRequestApproval && !cr.assignedTeam
-    ? "Set an assigned team before requesting approval"
-    : null;
+  // Only meaningful while the CR is actively moving through approval —
+  // closed/canceled/rollback are terminal or off-ramp states where "awaiting
+  // approval" no longer describes what's happening.
+  const blockingReason =
+    cr.state === "closed" || cr.state === "canceled" || cr.state === "rollback"
+      ? null
+      : changeRequestBlockingReason(approvalsData?.approvals);
+  // A transition is in flight whenever either half of a destructive
+  // transition (the reason comment, then the patch) or a plain patch is
+  // running, so the bar stays disabled across both and a double-click can't
+  // fire two transitions.
+  const transitionPending = patchCr.isPending || postComment.isPending;
 
-  const requestApproval = (): void => {
+  /**
+   * Apply `target` to this change request. Destructive targets are diverted
+   * into the confirmation dialog first — see `confirmReasonTransition` for
+   * the comment-then-patch ordering they then follow.
+   */
+  const onTransition = (target: string): void => {
+    if (changeRequestTransitionRequiresReason(target)) {
+      setReasonError(null);
+      setReasonRecorded(false);
+      setReasonTarget(target);
+      return;
+    }
     patchCr.mutate(
-      { id: cr.id, patch: { requestApproval: true } },
+      { id: cr.id, patch: buildTransitionPatch(target) },
       {
         onError: (err) =>
-          showError(
-            backendErrorMessage(
-              err,
-              "Could not request approval for this change request.",
-            ),
-            err,
-          ),
+          showError(backendErrorMessage(err, transitionFallbackMessage(target)), err),
       },
     );
+  };
+
+  /**
+   * Confirmed destructive transition. The reason is recorded as an ordinary
+   * comment *before* the state changes, deliberately in that order: the PATCH
+   * contract carries no reason field, and a silent unexplained rollback or
+   * cancellation is worse than a failed one. So a failed comment aborts
+   * without touching the state.
+   *
+   * The reverse failure (comment recorded, patch rejected) is not rolled back
+   * — there is no comment-delete endpoint — so it reports exactly that, and
+   * `reasonRecorded` keeps the already-saved reason from being posted twice on
+   * a retry.
+   *
+   * Posted as an internal work note rather than a customer-visible comment:
+   * whether a rollback/cancellation reason should be shown to the customer
+   * hasn't been decided, and a work note is the choice that can't leak.
+   */
+  const confirmReasonTransition = async (reason: string): Promise<void> => {
+    const target = reasonTarget;
+    if (!target) return;
+    setReasonError(null);
+
+    if (!reasonRecorded) {
+      try {
+        await postComment.mutateAsync({
+          changeRequestId: cr.id,
+          // Posted verbatim, as plain text with real line breaks. The
+          // backing store for these notes is a plain-text journal field, not
+          // an HTML one: a sample of production entries carries raw newlines
+          // and no escaped entities, so wrapping the reason in markup would
+          // show literal tags to anyone reading the record at the source.
+          // The portal's own renderer treats the note as HTML, which renders
+          // `<` and line breaks imperfectly here; that mismatch is
+          // pre-existing, applies equally to notes authored outside the
+          // portal, and is being fixed on the render path, not by re-encoding
+          // on the way in.
+          bodyHtml: reason,
+          internal: true,
+        });
+        setReasonRecorded(true);
+      } catch (err) {
+        setReasonError(
+          backendErrorMessage(
+            err,
+            "Could not record the reason, so the state was left unchanged. Try again.",
+          ),
+        );
+        return;
+      }
+    }
+
+    try {
+      await patchCr.mutateAsync({ id: cr.id, patch: buildTransitionPatch(target) });
+      setReasonTarget(null);
+      setReasonRecorded(false);
+    } catch (err) {
+      setReasonError(
+        `Your reason was recorded as a comment, but the state did not change: ${backendErrorMessage(
+          err,
+          transitionFallbackMessage(target),
+        )} You don't need to retype it.`,
+      );
+    }
   };
 
   // Opens the create form pre-filled from this record, so promoting the same
@@ -355,87 +489,96 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       {BackButton}
 
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-          <Typography variant="h5">{cr.subject || cr.number || "Change request"}</Typography>
-          {cr.state && (
-            <Chip
-              size="small"
-              color={changeRequestStateColor(cr.state)}
-              label={changeRequestStateLabel(cr.state)}
-            />
-          )}
-          {cr.impact && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color={changeRequestImpactColor(cr.impact)}
-              label={`${changeRequestImpactLabel(cr.impact)} impact`}
-            />
-          )}
-          {stateAllowsRequestApproval && (
-            requestApprovalBlockedReason ? (
-              <Tooltip title={requestApprovalBlockedReason}>
-                <Box
-                  component="span"
-                  tabIndex={0}
-                  aria-label={`Request approval: ${requestApprovalBlockedReason}`}
-                  sx={{ ml: "auto", flexShrink: 0 }}
-                >
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    size="small"
-                    startIcon={<Send size={14} />}
-                    disabled
-                    sx={{ flexShrink: 0 }}
-                  >
-                    Request approval
-                  </Button>
-                </Box>
-              </Tooltip>
-            ) : (
-              <Button
-                variant="contained"
-                color="primary"
-                size="small"
-                startIcon={<Send size={14} />}
-                onClick={requestApproval}
-                loading={patchCr.isPending}
-                sx={{ ml: "auto", flexShrink: 0 }}
-              >
-                Request approval
-              </Button>
-            )
-          )}
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<CopyPlus size={14} />}
-            onClick={cloneChangeRequest}
-            sx={{ ml: stateAllowsRequestApproval ? 0 : "auto", flexShrink: 0 }}
-          >
-            Clone
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<Pencil size={14} />}
-            onClick={() => {
-              // Clear any error left over from a previous save (or from the
-              // Request approval button, which shares this mutation) so a
-              // stale rejection doesn't appear to belong to this edit.
-              patchCr.reset();
-              setEditOpen(true);
+      <Box
+        sx={{
+          display: "flex",
+          gap: 2,
+          alignItems: "flex-start",
+          flexWrap: { xs: "wrap", md: "nowrap" },
+          justifyContent: "space-between",
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1,
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <Typography
+            variant="h6"
+            sx={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              letterSpacing: 0.2,
+              lineHeight: 1.2,
             }}
-            sx={{ flexShrink: 0 }}
           >
-            Edit
-          </Button>
+            {cr.number || cr.id}
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            {cr.state && (
+              <Chip
+                size="small"
+                color={changeRequestStateColor(cr.state)}
+                label={changeRequestStateLabel(cr.state)}
+              />
+            )}
+            {cr.impact && (
+              <Chip
+                size="small"
+                variant="outlined"
+                color={changeRequestImpactColor(cr.impact)}
+                label={`${changeRequestImpactLabel(cr.impact)} impact`}
+              />
+            )}
+            {blockingReason && (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Clock size={14} />
+                <Typography variant="body2" color="text.secondary">
+                  {blockingReason}
+                </Typography>
+              </Box>
+            )}
+          </Box>
+          <Typography variant="h5">{cr.subject || "Change request"}</Typography>
+          <ChangeRequestLifecycleStepper state={cr.state} />
         </Box>
-        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-          {cr.number || cr.id}
-        </Typography>
+        <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <ChangeRequestActionBar
+              cr={cr}
+              isPending={transitionPending}
+              onAction={onTransition}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<CopyPlus size={14} />}
+              onClick={cloneChangeRequest}
+              sx={{ flexShrink: 0 }}
+            >
+              Clone
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<Pencil size={14} />}
+              onClick={() => {
+                // Clear any error left over from a previous save (or from a
+                // lifecycle transition, which shares this mutation) so a
+                // stale rejection doesn't appear to belong to this edit.
+                patchCr.reset();
+                setEditOpen(true);
+              }}
+              sx={{ flexShrink: 0 }}
+            >
+              Edit
+            </Button>
+          </Box>
+        </Box>
       </Box>
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -456,6 +599,18 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             <Typography variant="body2">{cr.type || "—"}</Typography>
           </MetaCell>
           <MetaCell label="Linked case"><EntityRefLink value={cr.case} routeBase="/cases" /></MetaCell>
+          <MetaCell label="Impact">
+            {cr.impact ? (
+              <Chip
+                size="small"
+                variant="outlined"
+                color={changeRequestImpactColor(cr.impact)}
+                label={changeRequestImpactLabel(cr.impact)}
+              />
+            ) : (
+              <Typography variant="body2">—</Typography>
+            )}
+          </MetaCell>
           <MetaCell label="Deployment"><RefText value={cr.deployment} /></MetaCell>
           <MetaCell label="Deployed product"><RefText value={cr.deployedProduct} /></MetaCell>
           <MetaCell label="Product"><RefText value={cr.product} /></MetaCell>
@@ -513,56 +668,92 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
       </Box>
 
       {activeTab === "approval" && (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-            <Typography variant="subtitle2">Approval</Typography>
-            <Box
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <Typography
+              variant="overline"
+              color="text.secondary"
+              sx={{ letterSpacing: 0.6 }}
+            >
+              Customer approval
+            </Typography>
+            <Card
               sx={{
-                display: "grid",
+                p: 2.5,
+                display: "flex",
+                flexDirection: "column",
                 gap: 2,
-                gridTemplateColumns: {
-                  xs: "1fr",
-                  sm: "repeat(2, minmax(0, 1fr))",
-                  md: "repeat(3, minmax(0, 1fr))",
-                },
+                borderLeft: 3,
+                borderColor: "info.main",
               }}
             >
-              <MetaCell label="Customer approved"><YesNo value={cr.hasCustomerApproved} /></MetaCell>
-              <MetaCell label="Customer reviewed"><YesNo value={cr.hasCustomerReviewed} /></MetaCell>
-              <MetaCell label="Approved by"><RefText value={cr.approvedBy} /></MetaCell>
-              <MetaCell label="Approved on">
-                <Typography variant="body2">{formatDateTime(cr.approvedOn)}</Typography>
-              </MetaCell>
-            </Box>
-          </Card>
+              <Typography variant="body2" color="text.secondary">
+                What the customer has confirmed on this change.
+              </Typography>
+              <Box
+                sx={{
+                  display: "grid",
+                  gap: 2,
+                  gridTemplateColumns: {
+                    xs: "1fr",
+                    sm: "repeat(2, minmax(0, 1fr))",
+                    md: "repeat(3, minmax(0, 1fr))",
+                  },
+                }}
+              >
+                <MetaCell label="Customer approved"><YesNo value={cr.hasCustomerApproved} /></MetaCell>
+                <MetaCell label="Customer reviewed"><YesNo value={cr.hasCustomerReviewed} /></MetaCell>
+                <MetaCell label="Approved by"><RefText value={cr.approvedBy} /></MetaCell>
+                <MetaCell label="Approved on">
+                  <Typography variant="body2">{formatDateTime(cr.approvedOn)}</Typography>
+                </MetaCell>
+              </Box>
+            </Card>
+          </Box>
 
-          <ChangeRequestApprovals id={cr.id} />
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <Typography
+              variant="overline"
+              color="text.secondary"
+              sx={{ letterSpacing: 0.6 }}
+            >
+              Internal approval workflow
+            </Typography>
+            <ChangeRequestApprovals id={cr.id} />
+          </Box>
         </Box>
       )}
 
-      {activeTab === "details" && (
+      {activeTab === "plan" && (
+        // Field order here mirrors the SRE change-review packet's reading
+        // order (description/justification first, then the impact and
+        // rollback/test detail, then the two fields the field-usage census
+        // found most often left "N/A" — service outage and communication
+        // plan — grouped last so a mostly-empty CR doesn't bury the fields
+        // that usually carry real content). This is a relabel/reorder only:
+        // the same seven fields the tab already showed, nothing added.
         [
           cr.description,
           cr.justification,
           cr.impactDescription,
-          cr.serviceOutage,
-          cr.communicationPlan,
           cr.rollbackPlan,
           cr.testPlan,
+          cr.serviceOutage,
+          cr.communicationPlan,
         ].some((v) => v && !isBlankHtml(v)) ? (
           <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2.5 }}>
-            <Typography variant="subtitle2">Details &amp; plans</Typography>
+            <Typography variant="subtitle2">Plan</Typography>
             <PlanSection title="Description" html={cr.description} />
             <PlanSection title="Justification" html={cr.justification} />
             <PlanSection title="Impact description" html={cr.impactDescription} />
-            <PlanSection title="Service outage" html={cr.serviceOutage} />
-            <PlanSection title="Communication plan" html={cr.communicationPlan} />
             <PlanSection title="Rollback plan" html={cr.rollbackPlan} />
             <PlanSection title="Test plan" html={cr.testPlan} />
+            <PlanSection title="Service outage" html={cr.serviceOutage} />
+            <PlanSection title="Communication plan" html={cr.communicationPlan} />
           </Card>
         ) : (
           <Typography variant="body2" color="text.secondary">
-            No details or plans have been recorded for this change request.
+            No plan has been recorded for this change request.
           </Typography>
         )
       )}
@@ -644,6 +835,22 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             onDownload={onDownloadAttachment}
           />
         </Card>
+      )}
+
+      {reasonTarget && (
+        <ChangeRequestTransitionReasonDialog
+          target={reasonTarget}
+          isSubmitting={transitionPending}
+          error={reasonError}
+          reasonRecorded={reasonRecorded}
+          onClose={() => {
+            if (transitionPending) return;
+            setReasonTarget(null);
+            setReasonError(null);
+            setReasonRecorded(false);
+          }}
+          onConfirm={(reason) => void confirmReasonTransition(reason)}
+        />
       )}
 
       {editOpen && (

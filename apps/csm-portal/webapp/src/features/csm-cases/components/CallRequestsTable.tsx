@@ -14,8 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Chip, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { Eye } from "@wso2/oxygen-ui-icons-react";
+import { Box, Chip, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
+import {
+  Ban,
+  CalendarCheck,
+  CalendarClock,
+  CircleX,
+  Eye,
+  MessageSquareText,
+} from "@wso2/oxygen-ui-icons-react";
 import { Fragment, useState, type JSX } from "react";
 import type { BeCallRequestView } from "@api/backend/types";
 import {
@@ -60,8 +67,22 @@ const ACTION_LABEL: Record<CallRequestAgentAction, string> = {
   cancel: "Cancel",
 };
 
-// Every column is left-aligned for a consistent scan line down the table.
+// Icon-only actions read faster in a dense row than a row of text buttons —
+// the label still surfaces on hover/focus via each button's own Tooltip, so
+// nothing here is unlabeled, just not spelled out until asked for.
+const ACTION_ICON: Record<CallRequestAgentAction, typeof CalendarCheck> = {
+  schedule: CalendarCheck,
+  reschedule: CalendarClock,
+  reject: CircleX,
+  sendNotes: MessageSquareText,
+  cancel: Ban,
+};
+
+// Every column is left-aligned for a consistent scan line down the table,
+// except "Actions" -- now a row of icon buttons rather than text, which
+// reads better centered under its own column.
 const HEADER_CELLS: string[] = [
+  "Preview",
   "Request",
   "State",
   "Duration",
@@ -72,7 +93,7 @@ const HEADER_CELLS: string[] = [
 ];
 
 const GRID =
-  "minmax(160px, 1.3fr) minmax(120px, 0.9fr) minmax(80px, 0.6fr) minmax(220px, 1.6fr) minmax(90px, 0.7fr) minmax(90px, 0.7fr) minmax(160px, 1.2fr)";
+  "minmax(56px, 0.4fr) minmax(160px, 1.3fr) minmax(120px, 0.9fr) minmax(80px, 0.6fr) minmax(220px, 1.6fr) minmax(90px, 0.7fr) minmax(90px, 0.7fr) minmax(140px, 1fr)";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,7 +152,7 @@ export function CallRequestsTable({
               key={label}
               variant="caption"
               color="text.secondary"
-              sx={{ fontWeight: 600, textAlign: "left" }}
+              sx={{ fontWeight: 600, textAlign: label === "Actions" ? "center" : "left" }}
             >
               {label}
             </Typography>
@@ -159,6 +180,20 @@ export function CallRequestsTable({
                 "&:last-of-type": { borderBottom: 0 },
               }}
             >
+              {/* Preview: view-detail eye icon, its own leading column so it
+                  reads as "inspect this row" rather than one of the row's
+                  actions. */}
+              <Box sx={{ justifySelf: "start" }}>
+                <IconButton
+                  size="small"
+                  aria-label={`View details for ${cr.number || `call request ${cr.id}`}`}
+                  data-testid={`call-request-view-${cr.id}`}
+                  onClick={() => setDetailTarget(cr)}
+                >
+                  <Eye size={16} />
+                </IconButton>
+              </Box>
+
               {/* Request: number + reason, with notes as a secondary line. */}
               <Box sx={{ minWidth: 0 }}>
                 {cr.number && (
@@ -246,37 +281,49 @@ export function CallRequestsTable({
                 {cr.updatedOn && <RelativeTime iso={cr.updatedOn} />}
               </Typography>
 
-              {/* Actions: view-detail eye icon plus any agent actions, with
-                  the assignee shown alongside once scheduled. */}
-              <Box sx={{ minWidth: 0 }}>
-                <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-                  <IconButton
-                    size="small"
-                    aria-label="View details"
-                    data-testid={`call-request-view-${cr.id}`}
-                    onClick={() => setDetailTarget(cr)}
-                  >
-                    <Eye size={16} />
-                  </IconButton>
-                  {actions.map((action, i) => (
-                    <Tooltip
-                      key={action}
-                      title={isClosed ? "This case is closed — it's read-only." : ""}
-                    >
-                      <span>
-                        <Button
-                          size="small"
-                          variant={i === 0 && action !== "cancel" ? "contained" : "outlined"}
-                          color={action === "reject" || action === "cancel" ? "error" : "primary"}
-                          onClick={() => onAction(action, cr)}
-                          disabled={isClosed}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {ACTION_LABEL[action]}
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  ))}
+              {/* Actions: any agent actions (schedule/reject/...), with the
+                  assignee shown alongside once scheduled. The view-detail
+                  eye icon has its own leading "Preview" column instead.
+                  Centered under the "Actions" header, matching its icon
+                  buttons rather than the left-aligned text every other
+                  column uses. */}
+              <Box sx={{ minWidth: 0, textAlign: "center" }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    gap: 0.5,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {actions.map((action) => {
+                    const ActionIcon = ACTION_ICON[action];
+                    return (
+                      <Tooltip
+                        key={action}
+                        title={
+                          isClosed
+                            ? "This case is closed — it's read-only."
+                            : ACTION_LABEL[action]
+                        }
+                      >
+                        <span>
+                          <IconButton
+                            size="small"
+                            aria-label={ACTION_LABEL[action]}
+                            color={
+                              action === "reject" || action === "cancel" ? "error" : "primary"
+                            }
+                            onClick={() => onAction(action, cr)}
+                            disabled={isClosed}
+                          >
+                            <ActionIcon size={16} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    );
+                  })}
                 </Box>
                 {cr.assignee && (
                   <Typography

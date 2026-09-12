@@ -16,7 +16,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
@@ -62,13 +62,28 @@ vi.mock("@components/RefreshButton", () => ({
 
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 
+/** Exposes the current URL search string so a test can assert on it
+ * directly -- `window.location` doesn't reflect MemoryRouter's history. */
+function LocationSearchProbe() {
+  const location = useLocation();
+  return <div data-testid="search-probe">{location.search}</div>;
+}
+
 function renderAt(initialUrl: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialUrl]}>
         <Routes>
-          <Route path="/cases" element={<CsmIssuesView title="Cases" />} />
+          <Route
+            path="/cases"
+            element={
+              <>
+                <CsmIssuesView title="Cases" />
+                <LocationSearchProbe />
+              </>
+            }
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -83,19 +98,47 @@ describe("CsmIssuesView + real CasesFilterBar — work state clears fully from t
   // rewriting from the next filter state) didn't include "workStates", so an
   // empty next.workStates never actually cleared the stale URL param, and
   // the next render read the stale value straight back in.
-  it("deselecting the only checked work state actually clears it, not just toggles it", () => {
+  //
+  // `workStates` no longer has its own bar control (see CasesFilterBar's
+  // "CRE Team" control, which replaced it) -- the State control's own onChange
+  // is what clears a stale `workStates` now, when the selection widens past
+  // "work_in_progress" alone. This exercises that same URL round trip
+  // (not just the in-memory filter object CasesFilterBar.test.tsx already
+  // covers) via the "Work state: Ongoing" chip that renders instead.
+  it("adding a second state clears the stale workStates chip and its URL param, not just the in-memory value", () => {
     renderAt("/cases?states=work_in_progress&workStates=ongoing");
 
-    const workState = screen.getByRole("combobox", { name: "Work state" });
-    expect(workState).toHaveTextContent("Ongoing");
+    expect(screen.getByText("Work state: Ongoing")).toBeInTheDocument();
 
-    // Open the dropdown and uncheck the only selected option.
-    fireEvent.mouseDown(workState);
-    fireEvent.click(screen.getByRole("option", { name: "Ongoing" }));
+    // Open the State dropdown and add a second state alongside
+    // work_in_progress -- CasesFilterBar's own onChange clears workStates
+    // as soon as the selection stops being exactly that one state.
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "State" }));
+    fireEvent.click(screen.getByRole("option", { name: "Open" }));
 
-    // The control must now show no selection -- not still "Ongoing", and not
-    // forced onto "Paused" either.
-    expect(workState).not.toHaveTextContent("Ongoing");
-    expect(workState).not.toHaveTextContent("Paused");
+    // The chip -- and so the URL param behind it -- must be gone, not just
+    // hidden while the stale value lingers underneath.
+    expect(screen.queryByText("Work state: Ongoing")).not.toBeInTheDocument();
+    expect(screen.getByTestId("search-probe").textContent).not.toContain("workStates");
+  });
+});
+
+describe("CsmIssuesView + real CasesFilterBar — onboarding status clears fully from the URL", () => {
+  // Same root cause as the workStates regression above, found live:
+  // FILTER_PARAM_KEYS was missing "excludeStates" -- a leftover from when
+  // this control briefly stored its selection as an exclude-flavored field.
+  // The control now edits the real `onboardingStatuses` field directly
+  // (already covered by FILTER_PARAM_KEYS), so this exercises the same URL
+  // round trip via that field's own real bar control rather than a separate
+  // exclude one.
+  it("unchecking the only selected onboarding status clears it from the URL, not just in memory", () => {
+    renderAt("/cases?onboardingStatuses=Completed");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Onboarding status" }));
+    fireEvent.click(screen.getByRole("option", { name: "Completed" }));
+
+    expect(screen.getByTestId("search-probe").textContent).not.toContain(
+      "onboardingStatuses",
+    );
   });
 });

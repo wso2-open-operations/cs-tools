@@ -17,9 +17,128 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CSM Portal</title>
     <script src="/config.js"></script>
+    <style>
+      /*
+       * Boot loading screen: styled inline (no framework, no external
+       * stylesheet) so it can render before any bundled CSS/JS has loaded.
+       * Removed by the inline script below once React has mounted.
+       */
+      #csm-boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        background: #ffffff;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        #csm-boot-loader {
+          background: #16181d;
+        }
+      }
+      #csm-boot-loader .csm-boot-track {
+        width: 220px;
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(127, 127, 127, 0.25);
+        overflow: hidden;
+      }
+      #csm-boot-loader .csm-boot-bar {
+        height: 100%;
+        width: 0%;
+        border-radius: 2px;
+        background: #ff7300;
+        transition: width 0.15s ease-out;
+      }
+      /* Indeterminate motion, not a real byte-progress percentage — see the
+         boot script's comment for why a duplicate-fetch progress tracker was
+         rejected. */
+      #csm-boot-loader .csm-boot-track.csm-boot-indeterminate .csm-boot-bar {
+        width: 40%;
+        transition: none;
+        animation: csm-boot-indeterminate 1.1s ease-in-out infinite;
+      }
+      @keyframes csm-boot-indeterminate {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(350%);
+        }
+      }
+      #csm-boot-loader .csm-boot-label {
+        font-size: 13px;
+        color: #6b7280;
+      }
+      #csm-boot-loader.csm-boot-hidden {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease-out;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+
+    <div id="csm-boot-loader" role="status" aria-live="polite">
+      <div class="csm-boot-track" id="csm-boot-track">
+        <div class="csm-boot-bar" id="csm-boot-bar"></div>
+      </div>
+      <div class="csm-boot-label" id="csm-boot-label">
+        We're getting things ready…
+      </div>
+    </div>
+
+    <script>
+      // Plain, framework-free boot script. Runs before the app's own JS has
+      // loaded, so it can't import anything from the app — everything it
+      // needs is inline here or in the <style> block above.
+      (function () {
+        var loader = document.getElementById("csm-boot-loader");
+        var bar = document.getElementById("csm-boot-bar");
+        var track = document.getElementById("csm-boot-track");
+        var label = document.getElementById("csm-boot-label");
+        if (!loader || !bar || !track || !label) return;
+
+        function goIndeterminate() {
+          track.classList.add("csm-boot-indeterminate");
+        }
+
+        function hideLoader() {
+          if (!loader) return;
+          loader.classList.add("csm-boot-hidden");
+          window.setTimeout(function () {
+            loader.remove();
+          }, 250);
+        }
+
+        // React signals it has mounted by dispatching this event (see
+        // src/utils/appMountedEvent.ts, useAppMountedSignal/APP_MOUNTED_EVENT,
+        // called from App.tsx). If that never
+        // fires (e.g. the app fails before mounting), the loader is left in
+        // place rather than hidden on a guess — an app that never mounted
+        // has nothing useful to show underneath it anyway.
+        window.addEventListener("csm:app-mounted", hideLoader, { once: true });
+
+        // A separate fetch() of the entry script (to track real byte
+        // progress) races the browser's own <script type="module"> fetch of
+        // the same URL — the Fetch API gives no guaranteed dedup of
+        // concurrent identical requests, so on a cold cache this could
+        // download the ~multi-MB single bundle twice, doubling load time and
+        // defeating the point of this loader (CodeRabbit catch on the PR
+        // that introduced it). Indeterminate motion plus the real
+        // csm:app-mounted completion signal is the correct tradeoff: still
+        // real activity, no risk of a duplicate transfer.
+        goIndeterminate();
+      })();
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

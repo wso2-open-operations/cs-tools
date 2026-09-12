@@ -172,10 +172,16 @@ export function LinkedChangeRequestsWidget({
                     aria-label={`View change request ${ref.number}`}
                     sx={{ cursor: "pointer" }}
                   >
-                    <TableCell>
+                    <TableCell sx={{ maxWidth: 360 }}>
                       {/* `name` is an empty string on records with no subject,
                        * so it can't be joined unconditionally. */}
-                      {[ref.number, ref.name].filter(Boolean).join(" — ")}
+                      <Typography
+                        variant="body2"
+                        noWrap
+                        title={[ref.number, ref.name].filter(Boolean).join(" — ")}
+                      >
+                        {[ref.number, ref.name].filter(Boolean).join(" — ")}
+                      </Typography>
                     </TableCell>
                     <TableCell>
                       {isRowLoading ? (

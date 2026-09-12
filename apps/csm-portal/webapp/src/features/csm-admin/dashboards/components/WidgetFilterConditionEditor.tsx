@@ -26,9 +26,13 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { BeWidgetResourceType } from "@api/backend/types";
+import type {
+  BeDashboardFilterPreset,
+  BeWidgetResourceType,
+} from "@api/backend/types";
 import {
   CASE_FIELD_OPTIONS,
+  isPresetCondition,
   operatorsForResourceType,
   usesCaseFieldFilterDsl,
   type FilterCondition,
@@ -51,6 +55,33 @@ interface WidgetFilterConditionEditorProps {
   resourceType: BeWidgetResourceType;
   conditions: FilterCondition[];
   onChange: (next: FilterCondition[]) => void;
+  /**
+   * The shared filter presets a row may reference. Omitted/empty hides the
+   * "Add preset" affordance entirely rather than offering an empty picker —
+   * a deployment with no presets file configured is legitimate.
+   */
+  presets?: readonly BeDashboardFilterPreset[];
+}
+
+/** Human-readable rendering of what a preset expands to, for the picker's
+ * helper text — an admin picking "activeCaseStates" from a list of names
+ * alone has no way to know which states that actually is. */
+function describePreset(preset: BeDashboardFilterPreset | undefined): string {
+  if (!preset) return "";
+  const { field, op, values } = preset.filter as {
+    field?: unknown;
+    op?: unknown;
+    values?: unknown;
+  };
+  if (typeof field !== "string" || typeof op !== "string") {
+    // A preset whose body is not the field/op/values shape this editor knows
+    // is still selectable — the backend, not this list, defines what is
+    // valid — it just cannot be summarized.
+    return JSON.stringify(preset.filter);
+  }
+  const label = OP_LABEL[op as FilterConditionOp] ?? op;
+  const rendered = Array.isArray(values) ? values.map(String).join(", ") : "";
+  return rendered.length > 0 ? `${field} ${label} ${rendered}` : `${field} ${label}`;
 }
 
 /**
@@ -64,6 +95,7 @@ export default function WidgetFilterConditionEditor({
   resourceType,
   conditions,
   onChange,
+  presets,
 }: WidgetFilterConditionEditorProps): JSX.Element {
   const isCaseLike = usesCaseFieldFilterDsl(resourceType);
   const fieldOptions = isCaseLike ? CASE_FIELD_OPTIONS : [];
@@ -87,6 +119,24 @@ export default function WidgetFilterConditionEditor({
     onChange([...conditions, { field: "", op: "eq", values: [] }]);
   };
 
+  // Presets only exist inside `query.filters`, which is the case field DSL —
+  // no other resourceType's search contract has that array at all, so a
+  // preset row there could not be serialized (see
+  // `queryFromFilterConditions`). Hidden rather than disabled: an
+  // affordance that can never work for this resourceType is noise.
+  // Array.isArray rather than a nullish check: this is a network-shaped
+  // value, and a 200 carrying something other than an array (a contract
+  // violation, or a caller passing the wrong thing) must degrade to "no
+  // presets offered" rather than throw and take the whole widget editor down
+  // with it. The filter rows themselves still work without a catalogue.
+  const presetOptions = isCaseLike && Array.isArray(presets) ? presets : [];
+  const canAddPreset = presetOptions.length > 0;
+  const presetByName = new Map(presetOptions.map((p) => [p.name, p]));
+
+  const addPresetRow = (): void => {
+    onChange([...conditions, { field: "", op: "eq", values: [], preset: "" }]);
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
       {conditions.length === 0 && (
@@ -104,16 +154,52 @@ export default function WidgetFilterConditionEditor({
         const rowOps = availableOps.includes(condition.op)
           ? availableOps
           : [...availableOps, condition.op];
+        const rowSx = {
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+          gap: 1,
+        } as const;
+
+        if (isPresetCondition(condition) || condition.preset !== undefined) {
+          const chosen = presetByName.get(condition.preset ?? "");
+          return (
+            <Box key={index} sx={rowSx}>
+              <Autocomplete
+                size="small"
+                options={presetOptions.map((p) => p.name)}
+                value={condition.preset ?? ""}
+                onChange={(_e, next) => updateRow(index, { preset: next ?? "" })}
+                sx={{ minWidth: 260, flex: "1 1 260px" }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Shared preset"
+                    // The name alone does not say what the preset filters
+                    // on, and getting that wrong silently changes what the
+                    // widget counts.
+                    helperText={describePreset(chosen)}
+                    slotProps={{
+                      htmlInput: { ...params.inputProps, "aria-label": "Filter preset" },
+                    }}
+                  />
+                )}
+              />
+              <Tooltip title="Remove this filter">
+                <IconButton
+                  size="small"
+                  onClick={() => removeRow(index)}
+                  aria-label="Remove filter"
+                >
+                  <Trash2 size={16} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          );
+        }
+
         return (
-          <Box
-            key={index}
-            sx={{
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "flex-start",
-              gap: 1,
-            }}
-          >
+          <Box key={index} sx={rowSx}>
             <Autocomplete
               freeSolo
               size="small"
@@ -136,6 +222,14 @@ export default function WidgetFilterConditionEditor({
               value={condition.op}
               onChange={(e) => updateRow(index, { op: e.target.value as FilterConditionOp })}
               sx={{ minWidth: 160 }}
+              slotProps={{
+                // `condition.op` always holds a real value (no empty
+                // option), so the label is always shrunk -- see
+                // MultiSelectField.tsx's doc comment for why this override
+                // is needed at all against oxygen-ui's own theme.
+                inputLabel: { shrink: true, sx: { top: "0px !important" } },
+                select: { notched: true },
+              }}
             >
               {rowOps.map((op) => (
                 <MenuItem key={op} value={op}>
@@ -172,15 +266,36 @@ export default function WidgetFilterConditionEditor({
           </Box>
         );
       })}
-      <Button
-        size="small"
-        variant="text"
-        startIcon={<Plus size={16} />}
-        onClick={addRow}
-        sx={{ alignSelf: "flex-start" }}
-      >
-        Add filter
-      </Button>
+      <Box sx={{ display: "flex", gap: 1, alignSelf: "flex-start" }}>
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<Plus size={16} />}
+          onClick={addRow}
+        >
+          Add filter
+        </Button>
+        {canAddPreset && (
+          // Deliberately NOT wrapped in a Tooltip: MUI's Tooltip takes over
+          // the child's accessible name, so the button would stop being
+          // findable as "Add preset" by assistive tech (and by its own
+          // tests). The explanation lives in the caption below instead.
+          <Button
+            size="small"
+            variant="text"
+            startIcon={<Plus size={16} />}
+            onClick={addPresetRow}
+          >
+            Add preset
+          </Button>
+        )}
+      </Box>
+      {canAddPreset && (
+        <Typography variant="caption" color="text.secondary">
+          A preset references a shared, named condition by name instead of
+          spelling it out, so every dashboard using it changes together.
+        </Typography>
+      )}
     </Box>
   );
 }

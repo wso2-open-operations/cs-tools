@@ -130,24 +130,70 @@ func (c *EntityClient) do(ctx context.Context, method, path string, body []byte)
 // Clock is the subset of entity-service's SLAClock response this engine
 // needs: PausedOn is checked by Tick before firing a tier (see engine.go);
 // nothing here reads the reached_*_at fields since SetTierReachedIfUnset's
-// own response already reports what's needed after a write. Field name
-// matches entity-service's own response naming (timestamps use the "On"
-// suffix there, not "At").
+// own response already reports what's needed after a write. Field names
+// match entity-service's own response naming (timestamps use the "On"
+// suffix there, not "At"). The eight display fields below are populated
+// once at registration time (see RegisterClockRequest) and read back here
+// so Engine.sendBreachAlert can build a Google Chat card from this one
+// GetClock call, with no second lookup — this service has no other way to
+// reach case data.
 type Clock struct {
-	PausedOn *time.Time `json:"pausedOn"`
+	PausedOn   *time.Time `json:"pausedOn"`
+	StartedOn  time.Time  `json:"startedOn"`
+	CaseNumber string     `json:"caseNumber"`
+	WSO2CaseID string     `json:"wso2CaseId"`
+	CaseTitle  string     `json:"caseTitle"`
+	CaseType   string     `json:"caseType"`
+	Product    string     `json:"product"`
+	Team       string     `json:"team"`
+	Priority   string     `json:"priority"`
+	State      string     `json:"state"`
+}
+
+// RegisterClockRequest is RegisterClock's request — a struct rather than a
+// growing positional-argument list, since registration now carries display
+// data (see Clock's own doc comment) alongside the scheduling fields.
+type RegisterClockRequest struct {
+	CaseID    string
+	ClockType string
+	StartedAt time.Time
+	DueAt     time.Time
+	// The seven fields below are optional display data — see Clock's own
+	// doc comment for what they're for.
+	CaseNumber string
+	WSO2CaseID string
+	CaseTitle  string
+	CaseType   string
+	Product    string
+	Team       string
+	Priority   string
+	State      string
 }
 
 // RegisterClock calls POST /cases/{caseId}/sla-clocks.
-func (c *EntityClient) RegisterClock(ctx context.Context, caseID, clockType string, startedAt, dueAt time.Time) error {
+func (c *EntityClient) RegisterClock(ctx context.Context, req RegisterClockRequest) error {
 	body, err := json.Marshal(struct {
-		ClockType string    `json:"clockType"`
-		StartedAt time.Time `json:"startedAt"`
-		DueAt     time.Time `json:"dueAt"`
-	}{ClockType: clockType, StartedAt: startedAt, DueAt: dueAt})
+		ClockType  string    `json:"clockType"`
+		StartedAt  time.Time `json:"startedAt"`
+		DueAt      time.Time `json:"dueAt"`
+		CaseNumber string    `json:"caseNumber,omitempty"`
+		WSO2CaseID string    `json:"wso2CaseId,omitempty"`
+		CaseTitle  string    `json:"caseTitle,omitempty"`
+		CaseType   string    `json:"caseType,omitempty"`
+		Product    string    `json:"product,omitempty"`
+		Team       string    `json:"team,omitempty"`
+		Priority   string    `json:"priority,omitempty"`
+		State      string    `json:"state,omitempty"`
+	}{
+		ClockType: req.ClockType, StartedAt: req.StartedAt, DueAt: req.DueAt,
+		CaseNumber: req.CaseNumber, WSO2CaseID: req.WSO2CaseID, CaseTitle: req.CaseTitle,
+		CaseType: req.CaseType, Product: req.Product, Team: req.Team, Priority: req.Priority,
+		State: req.State,
+	})
 	if err != nil {
 		return fmt.Errorf("slaengine: encode RegisterClock request: %w", err)
 	}
-	_, err = c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(caseID)+"/sla-clocks", body)
+	_, err = c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(req.CaseID)+"/sla-clocks", body)
 	return err
 }
 

@@ -18,23 +18,15 @@ import {
   AdapterDateFns,
   Box,
   Button,
-  Checkbox,
   DatePickers,
   Divider,
-  FormControl,
   Grid,
   IconButton,
   InputAdornment,
-  InputLabel,
-  ListItemText,
-  MenuItem,
   Paper,
-  Select,
   TextField,
-  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import {
   ChevronDown,
   ChevronUp,
@@ -43,6 +35,7 @@ import {
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
+import { useTeams } from "@features/csm-dashboard/api/useTeams";
 import {
   CHANGE_REQUEST_IMPACTS,
   CHANGE_REQUEST_STATES,
@@ -51,6 +44,7 @@ import {
   countActiveCRFilters,
   type ChangeRequestFilters,
 } from "@features/csm-operations/utils/changeRequests";
+import MultiSelectField from "@components/MultiSelectField";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
 
@@ -80,73 +74,6 @@ interface ChangeRequestsFilterBarProps {
   onFiltersToggle: () => void;
 }
 
-interface MultiSelectFieldProps<T extends string> {
-  id: string;
-  label: string;
-  values: T[];
-  options: { value: T; label: string }[];
-  onChange: (next: T[]) => void;
-}
-
-function MultiSelectField<T extends string>({
-  id,
-  label,
-  values,
-  options,
-  onChange,
-}: MultiSelectFieldProps<T>): JSX.Element {
-  const handleChange = (event: SelectChangeEvent<string[]>): void => {
-    const val = event.target.value;
-    onChange((Array.isArray(val) ? val : [val]) as T[]);
-  };
-  return (
-    <FormControl fullWidth size="small">
-      <InputLabel id={`${id}-label`}>{label}</InputLabel>
-      <Select
-        multiple
-        labelId={`${id}-label`}
-        id={id}
-        value={values as unknown as string[]}
-        label={label}
-        onChange={handleChange}
-        renderValue={(selected) => {
-          if (!Array.isArray(selected) || selected.length === 0) return "";
-          const labels = selected.map(
-            (v) => options.find((o) => o.value === v)?.label ?? v,
-          );
-          const text = labels.join(", ");
-          if (labels.length === 1) return text;
-          return (
-            <Tooltip title={text} placement="top">
-              <Box
-                component="span"
-                sx={{
-                  display: "block",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {text}
-              </Box>
-            </Tooltip>
-          );
-        }}
-      >
-        {options.map((opt) => (
-          <MenuItem key={opt.value} value={opt.value} sx={{ py: 0.5 }}>
-            <Checkbox
-              size="small"
-              checked={values.includes(opt.value)}
-              sx={{ mr: 1, p: 0.25 }}
-            />
-            <ListItemText primary={opt.label} />
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
-  );
-}
 
 export default function ChangeRequestsFilterBar({
   filters,
@@ -173,6 +100,22 @@ export default function ChangeRequestsFilterBar({
         label: changeRequestImpactLabel(i),
       })),
     [],
+  );
+
+  // Change requests are SRE-owned, so this control is scoped to the
+  // `sre-abt` team family — see `IncidentsFilterBar`'s equivalent note on
+  // why this isn't `cre-abt` (the cases list's own "SRE Team" control's
+  // family scoping).
+  const { data: teams } = useTeams(true, "sre-abt");
+  const sreTeamOptions = useMemo(
+    () =>
+      (teams ?? [])
+        .filter(
+          (t): t is typeof t & { sreGroupId: string } =>
+            Boolean(t.sreGroupId) && t.family === "sre-abt",
+        )
+        .map((t) => ({ value: t.sreGroupId, label: t.name })),
+    [teams],
   );
 
   return (
@@ -256,6 +199,15 @@ export default function ChangeRequestsFilterBar({
                 values={filters.impacts}
                 options={impactOptions}
                 onChange={(next) => onChange({ ...filters, impacts: next })}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MultiSelectField
+                id="cr-filter-sre-team"
+                label="SRE Team"
+                values={filters.sreTeamIds}
+                options={sreTeamOptions}
+                onChange={(next) => onChange({ ...filters, sreTeamIds: next })}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>

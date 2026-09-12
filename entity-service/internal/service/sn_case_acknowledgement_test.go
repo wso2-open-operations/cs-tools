@@ -58,7 +58,7 @@ func TestSNCaseService_GetCaseByID_MapsAcknowledgedBy(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(newBody(`{"id": "` + ackSysid + `", "name": "Jane Doe", "email": "jane.doe@example.com"}`)))
 		})
-		svc := NewServiceNowCaseService(client, nil, nil)
+		svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 		cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), sysidToUUID(testWLCaseSysid))
 		if err != nil {
@@ -85,7 +85,7 @@ func TestSNCaseService_GetCaseByID_MapsAcknowledgedBy(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(newBody(`null`)))
 		})
-		svc := NewServiceNowCaseService(client, nil, nil)
+		svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 		cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), sysidToUUID(testWLCaseSysid))
 		if err != nil {
@@ -119,7 +119,7 @@ func TestSNCaseService_UpdateCase_AcknowledgeSendsTrueAndEchoesBack(t *testing.T
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	acknowledge := true
 	resp, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, Acknowledge: &acknowledge})
@@ -169,7 +169,7 @@ func TestSNCaseService_UpdateCase_AcknowledgeAlreadyAcknowledgedIsNotAnError(t *
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	acknowledge := true
 	resp, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, Acknowledge: &acknowledge})
@@ -232,7 +232,7 @@ func TestSNCaseService_UpdateCase_AcknowledgePublishesCaseAcknowledged(t *testin
 
 	client := newTestSNClient(t, mux)
 	publisher := &mockEventPublisher{}
-	svc := NewServiceNowCaseService(client, nil, publisher)
+	svc := NewServiceNowCaseService(client, nil, publisher, noopSLAClockService{}, nil, "", nil)
 
 	acknowledge := true
 	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, Acknowledge: &acknowledge}); err != nil {
@@ -297,7 +297,7 @@ func TestSNCaseService_UpdateCase_AcknowledgeAlreadyAcknowledgedSkipsPublish(t *
 
 	client := newTestSNClient(t, mux)
 	publisher := &mockEventPublisher{}
-	svc := NewServiceNowCaseService(client, nil, publisher)
+	svc := NewServiceNowCaseService(client, nil, publisher, noopSLAClockService{}, nil, "", nil)
 
 	acknowledge := true
 	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, Acknowledge: &acknowledge}); err != nil {
@@ -310,7 +310,7 @@ func TestSNCaseService_UpdateCase_AcknowledgeAlreadyAcknowledgedSkipsPublish(t *
 
 func TestSNCaseService_UpdateCase_AcknowledgeRejectsFalseAndCombinations(t *testing.T) {
 	client := newTestSNClient(t, http.NewServeMux())
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	acknowledgeTrue, acknowledgeFalse := true, false
 	subject := "new subject"

@@ -22,6 +22,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
 
 const testProblemID = "aaaaaaaa-bbbb-cccc-dddd-ffffffffffff"
@@ -184,6 +186,182 @@ func TestGetProblem(t *testing.T) {
 	})
 }
 
+func TestUpdateProblem(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"transition":"assess"}`))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid UUID in path", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/not-a-uuid", strings.NewReader(`{"transition":"assess"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty body", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{}`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID assignedToId", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"assignedToId":"not-a-uuid"}`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID assignmentGroupId", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"assignmentGroupId":"not-a-uuid"}`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-string transition value", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"transition":5}`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("accepts any non-empty transition string without enum validation", func(t *testing.T) {
+		client := &mockEntityProblemClient{
+			updateProblemFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"problem updated","problem":{"id":"` + testProblemID + `","state":"in_review"}}`), nil
+			},
+		}
+		h := NewProblemHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"transition":"not-a-real-transition"}`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
+		const reqPayload = `{"transition":"assess","causeNotes":"Root cause under investigation."}`
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityProblemClient{
+			updateProblemFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedID = id
+				capturedBody = body
+				return []byte(`{"message":"problem updated","problem":{"id":"` + testProblemID + `","state":"assess"}}`), nil
+			},
+		}
+		h := NewProblemHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(reqPayload)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != testProblemID {
+			t.Errorf("upstream received id %q, want %q", capturedID, testProblemID)
+		}
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "problem updated" {
+			t.Errorf("message = %v, want %q", resp["message"], "problem updated")
+		}
+	})
+
+	t.Run("surfaces upstream 409 transition rejection message", func(t *testing.T) {
+		client := &mockEntityProblemClient{
+			updateProblemFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return nil, &apierror.Error{
+					StatusCode: http.StatusConflict,
+					Body:       `Invalid transition: bogus. Must be one of: assess, confirm, fix, resolve, close`,
+				}
+			},
+		}
+		h := NewProblemHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"transition":"bogus"}`)))
+		r.SetPathValue("id", testProblemID)
+		w := httptest.NewRecorder()
+		h.PatchProblem(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, "Invalid transition: bogus. Must be one of: assess, confirm, fix, resolve, close")
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update problem.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProblemClient{
+					updateProblemFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProblemHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/problems/"+testProblemID, strings.NewReader(`{"transition":"assess"}`)))
+				r.SetPathValue("id", testProblemID)
+				w := httptest.NewRecorder()
+				h.PatchProblem(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchProblems(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewProblemHandler(&mockEntityProblemClient{})
@@ -253,6 +431,83 @@ func TestSearchProblems(t *testing.T) {
 				r := withUser(httptest.NewRequest(http.MethodPost, "/problems/search", strings.NewReader(`{}`)))
 				w := httptest.NewRecorder()
 				h.SearchProblems(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestAggregateProblems(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := httptest.NewRequest(http.MethodPost, "/problems/aggregate", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.AggregateProblems(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/problems/aggregate", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.AggregateProblems(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewProblemHandler(&mockEntityProblemClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/problems/aggregate", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.AggregateProblems(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
+		const reqPayload = `{"filters":{},"groupBy":"state","maxGroups":12}`
+		var capturedBody []byte
+		client := &mockEntityProblemClient{
+			aggregateProblemsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"groups":[{"key":"open","label":"Open","count":5}],"othersCount":0,"totalRecords":5}`), nil
+			},
+		}
+		h := NewProblemHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/problems/aggregate", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.AggregateProblems(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["totalRecords"] != float64(5) {
+			t.Errorf("totalRecords = %v, want 5", resp["totalRecords"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to aggregate problems.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProblemClient{
+					aggregateProblemsFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProblemHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/problems/aggregate", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.AggregateProblems(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

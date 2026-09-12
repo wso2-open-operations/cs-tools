@@ -15,8 +15,10 @@
 // under the License.
 
 import type {
+  BeChangeRequestApproval,
   BeChangeRequestDetail,
   BeChangeRequestImpact,
+  BeChangeRequestSearchPayload,
   BeChangeRequestState,
   BeChangeRequestType,
 } from "@api/backend/types";
@@ -68,6 +70,23 @@ const IMPACT_COLOR: Record<BeChangeRequestImpact, ChipColor> = {
 
 /** All CR states, for a filter control. */
 export const CHANGE_REQUEST_STATES = Object.keys(STATE_LABEL) as BeChangeRequestState[];
+
+/**
+ * The 9 states that make up the CR's linear forward path, in order —
+ * `CHANGE_REQUEST_STATES` minus `rollback`/`canceled`. Those two are
+ * destructive off-ramps reachable from several points in the path (see
+ * `DESTRUCTIVE_TRANSITIONS` below), not sequential steps in it, so a lifecycle
+ * step indicator built from this array should render them separately rather
+ * than forcing them into the same line.
+ */
+export const CHANGE_REQUEST_FORWARD_STATES = CHANGE_REQUEST_STATES.filter(
+  (s) => s !== "rollback" && s !== "canceled",
+);
+
+/** True for `rollback`/`canceled`: an off-ramp from the linear forward path, not a step in it. */
+export function isChangeRequestOffRampState(state?: string | null): boolean {
+  return state === "rollback" || state === "canceled";
+}
 
 /** All CR impact levels, for a filter control. */
 export const CHANGE_REQUEST_IMPACTS = Object.keys(IMPACT_LABEL) as BeChangeRequestImpact[];
@@ -143,6 +162,96 @@ export function approvalStatusColor(status?: string | null): ChipColor {
   return APPROVAL_STATUS_COLOR[status.toUpperCase()] ?? "default";
 }
 
+/** Stage-level statuses that mean the stage is actively waiting on someone. */
+const WAITING_APPROVAL_STATUSES = new Set(["PENDING", "REQUESTED"]);
+
+/**
+ * Plain-language reason a change request isn't moving on its own right now,
+ * derived from its approval stages (`GET /change-requests/{id}/approvals`) —
+ * the same data `ChangeRequestApprovals` renders. Names the first stage still
+ * waiting on someone (in stage order, not necessarily severity order): e.g.
+ * "Awaiting Authorize approval" or, when the stage carries a named approver
+ * group, "Awaiting Devops Approval". Returns `null` when nothing is currently
+ * blocking on approval — no waiting stage, or the approvals haven't loaded
+ * yet — so callers should treat `null` as "no reason to show", not an error.
+ */
+export function changeRequestBlockingReason(
+  approvals: BeChangeRequestApproval[] | undefined,
+): string | null {
+  const waiting = approvals?.find((a) => WAITING_APPROVAL_STATUSES.has(a.status.trim().toUpperCase()));
+  if (!waiting) return null;
+  const who = waiting.approverName?.trim() || waiting.stage;
+  // Approver-group names sometimes already say "Approval" ("Devops
+  // Approval"); avoid a doubled "approval approval" in that case.
+  return /approval/i.test(who) ? `Awaiting ${who}` : `Awaiting ${who} approval`;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle transitions
+//
+// The backing system owns transition legality — a change request carries its
+// own `legalNextStates`, and nothing here re-derives or second-guesses it.
+// These maps only supply the *presentation* of a transition the record has
+// already declared legal.
+// ---------------------------------------------------------------------------
+
+/**
+ * Action-phrased label for a transition *into* a given state. Phrased as the
+ * action being taken ("Schedule", "Mark implemented"), not as the destination,
+ * because the state chip next to the action bar already names the state —
+ * same "no invented verbs for the state itself" convention as
+ * `IncidentActionBar`/`CaseActionBar`.
+ *
+ * Deliberately partial: `new`, `authorize` and `customer_approval` have no
+ * agreed action verb yet, and a state the backend adds later has none by
+ * definition. Both fall back to a sentence-cased version of the raw value via
+ * {@link changeRequestTransitionLabel}, so they still render and still work.
+ */
+const TRANSITION_LABEL: Record<string, string> = {
+  assess: "Request approval",
+  scheduled: "Schedule",
+  implement: "Start implementation",
+  review: "Mark implemented",
+  customer_review: "Send for customer review",
+  closed: "Close",
+  rollback: "Roll back",
+  canceled: "Cancel change",
+};
+
+/**
+ * Transitions that are destructive and effectively irreversible. These are
+ * never offered as a primary button, always render in the error colour, and
+ * require a stated reason before they fire.
+ */
+const DESTRUCTIVE_TRANSITIONS: readonly string[] = ["rollback", "canceled"];
+
+/** `customer_review` -> `Customer review`. */
+function sentenceCase(raw: string): string {
+  const words = raw.replace(/_/g, " ").trim();
+  if (!words) return raw;
+  return words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
+}
+
+/** The action-phrased label for a transition target, curated or generic. */
+export function changeRequestTransitionLabel(target: string): string {
+  return TRANSITION_LABEL[target] ?? sentenceCase(target);
+}
+
+/** True when this transition is destructive: menu-only, error-coloured. */
+export function isDestructiveChangeRequestTransition(target: string): boolean {
+  return DESTRUCTIVE_TRANSITIONS.includes(target);
+}
+
+/**
+ * True when moving to `target` must not happen without a stated reason. The
+ * reason is recorded as an ordinary comment on the change request *before*
+ * the state is patched — the PATCH contract has no reason or comment field of
+ * its own. See `ChangeRequestTransitionReasonDialog`.
+ */
+export function changeRequestTransitionRequiresReason(target: string): boolean {
+  return isDestructiveChangeRequestTransition(target);
+}
+
 export interface ChangeRequestFilters {
   search: string;
   states: BeChangeRequestState[];
@@ -151,6 +260,10 @@ export interface ChangeRequestFilters {
   closedStartDate: string;
   /** YYYY-MM-DD local date string, or empty. */
   closedEndDate: string;
+  /** Selected SRE team `sreGroupId`s — sent as a generic
+   * `{ field: "assignmentGroupId", op: "in" }` filter entry (see
+   * `buildChangeRequestSearchFilters`), not a named payload field. */
+  sreTeamIds: string[];
 }
 
 export const DEFAULT_CR_FILTERS: ChangeRequestFilters = {
@@ -159,6 +272,7 @@ export const DEFAULT_CR_FILTERS: ChangeRequestFilters = {
   impacts: [],
   closedStartDate: "",
   closedEndDate: "",
+  sreTeamIds: [],
 };
 
 /** Count non-search active filters (used for the badge on the Filters button). */
@@ -167,8 +281,46 @@ export function countActiveCRFilters(filters: ChangeRequestFilters): number {
     (filters.states.length > 0 ? 1 : 0) +
     (filters.impacts.length > 0 ? 1 : 0) +
     (filters.closedStartDate ? 1 : 0) +
-    (filters.closedEndDate ? 1 : 0)
+    (filters.closedEndDate ? 1 : 0) +
+    (filters.sreTeamIds.length > 0 ? 1 : 0)
   );
+}
+
+/** Convert a YYYY-MM-DD date picker value to an ISO 8601 string at midnight UTC. */
+export function crDateOnlyToISOStart(date: string): string {
+  return `${date}T00:00:00Z`;
+}
+
+/** Convert a YYYY-MM-DD date picker value to an ISO 8601 string at end-of-day UTC. */
+export function crDateOnlyToISOEnd(date: string): string {
+  return `${date}T23:59:59Z`;
+}
+
+/**
+ * Build `ChangeRequestSearchPayload.filters` from the UI's
+ * {@link ChangeRequestFilters} plus the (separately debounced) search text
+ * — mirrors `buildIncidentSearchFilters` in `incidents.ts`.
+ */
+export function buildChangeRequestSearchFilters(
+  filters: ChangeRequestFilters,
+  debouncedSearch: string,
+): NonNullable<BeChangeRequestSearchPayload["filters"]> {
+  return {
+    ...(debouncedSearch.length > 0 && { searchQuery: debouncedSearch }),
+    ...(filters.states.length > 0 && { states: filters.states }),
+    ...(filters.impacts.length > 0 && { impacts: filters.impacts }),
+    ...(filters.closedStartDate && {
+      closedStartDate: crDateOnlyToISOStart(filters.closedStartDate),
+    }),
+    ...(filters.closedEndDate && {
+      closedEndDate: crDateOnlyToISOEnd(filters.closedEndDate),
+    }),
+    ...(filters.sreTeamIds.length > 0 && {
+      filters: [
+        { field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds },
+      ],
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -183,9 +335,9 @@ export function countActiveCRFilters(filters: ChangeRequestFilters): number {
 // and several fields the detail page can show have no create-time
 // equivalent at all. Concretely (verified against the entity service's own
 // request/response structs, not just the two frontend types):
-//   - `category`, `priority`, and `risk` are write-only — accepted by create,
-//     never present on the read response — so there is no source value to
-//     copy from, ever, regardless of how the form is wired.
+//   - `priority` is write-only — accepted by create, never present on the
+//     read response — so there is no source value to copy from, ever,
+//     regardless of how the form is wired.
 //   - `implementationPlan` and `riskImpactAnalysis` are write-only for the
 //     same reason.
 //   - `impactDescription`, `serviceOutage`, `communicationPlan`, and
@@ -193,13 +345,15 @@ export function countActiveCRFilters(filters: ChangeRequestFilters): number {
 //     for any of them.
 //   - `project`, `case`, `deployment`, `deployedProduct`, and `product` are
 //     read-only refs with no create-time field to set them from at all.
-//   - `serviceId`, `serviceOfferingId`, and `configurationItemId` are the
-//     mirror image: create accepts all three, and the read response carries no
-//     equivalent, so a clone always leaves them blank.
 //   - `assignedTeam` is read-only; create's nearest-sounding field
 //     (`groupId`, "Assignment group") is a *different* underlying reference
 //     with no confirmed equivalence to `assignedTeam` — mapping one into the
 //     other would be a guess, not a verified carry-over, so it's left alone.
+// (`category` and `risk` aren't in this gap analysis at all: `category` has
+// no editable control anywhere in this portal — see
+// `BeCreateChangeRequestPayload`'s doc comment — and `risk`/`serviceId`/
+// `serviceOfferingId`/`configurationItemId` were removed from the create form
+// entirely, since none of them exist on the real ServiceNow CR form.)
 // None of the above can be safely carried over without either fabricating
 // data or guessing at an unconfirmed field mapping, so this only clones the
 // fields that are genuinely the same field on both sides: `subject`,
@@ -261,7 +415,6 @@ export function buildCloneChangeRequestNavState(
  */
 export const CLONE_SOURCE_GAP_MESSAGE =
   "Copied the subject, description, justification, test plan, type, impact, and assigned engineer. " +
-  "Category, priority, risk, implementation plan, risk/impact analysis, backout plan, assignment group, " +
-  "linked project/case, affected product, service, service offering, and configuration item aren't " +
-  "available to copy and need to be re-entered. " +
+  "Priority, implementation plan, risk/impact analysis, backout plan, assignment group, " +
+  "linked project/case, and affected product aren't available to copy and need to be re-entered. " +
   "Deployment, schedule, and approval fields are intentionally left blank for you to set for the new environment.";

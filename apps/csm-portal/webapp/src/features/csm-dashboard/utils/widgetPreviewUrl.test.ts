@@ -16,10 +16,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  appendWidgetTitleParam,
   buildWidgetPreviewHref,
   describeWidgetFilters,
   parseWidgetPreviewFilters,
+  readWidgetTitleParam,
   resolveCurrentUserSentinels,
+  WIDGET_TITLE_PARAM,
 } from "./widgetPreviewUrl";
 
 const CURRENT_USER_ID = "11111111-aaaa-bbbb-cccc-000000000001";
@@ -40,6 +43,26 @@ describe("widgetPreviewUrl", () => {
     expect(params.get("severities")).toBe("critical,high");
     expect(params.get("states")).toBe("open");
     expect(params.get("f")).toBeNull();
+  });
+
+  it("encodes a plain numeric filter value, not just string/string[]", () => {
+    // Regression: the rating-distribution pie's slice query is
+    // `{ rating: Math.round(avgRating) }` (see useCaseFeedbackTrendData) — a
+    // number, not a string. Before this branch existed, a numeric filter
+    // value was silently dropped from the URL entirely, so clicking a
+    // rating slice landed on the unfiltered feedback list.
+    const href = buildWidgetPreviewHref({
+      previewSlug: "case-feedback",
+      widgetId: "feedback_rating_distribution",
+      displayName: "Rating Distribution",
+      filters: { rating: 5 },
+    });
+
+    const params = new URLSearchParams(href.split("?")[1]);
+    expect(params.get("rating")).toBe("5");
+
+    const { filters } = parseWidgetPreviewFilters(params);
+    expect(filters.rating).toEqual(["5"]);
   });
 
   it("masks the current user's own id to @me instead of embedding it verbatim", () => {
@@ -207,6 +230,84 @@ describe("widget preview URL — filter op round-trip", () => {
   });
 });
 
+/**
+ * Regression (digiops-cs#2880): `anyOf` (cross-field OR branches) used to be
+ * silently dropped entirely by this file -- neither serialized into the
+ * preview URL nor read back out of it -- so a widget's "View more" click
+ * (and, separately, `WIDGET_RESOURCE_CONFIG`'s own count-tile `buildHref`)
+ * landed on a broader, unfiltered-by-`anyOf` result set than what the tile
+ * itself had counted.
+ */
+describe("widget preview URL — anyOf round-trip", () => {
+  const anyOf = [
+    { filters: [{ field: "severity", op: "in", values: ["catastrophic", "critical"] }] },
+    { filters: [{ field: "type", op: "in", values: ["security_report_analysis"] }] },
+  ];
+
+  it("round-trips anyOf branches through build + parse, alongside a flat filters object", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      widgetId: "w1",
+      displayName: "WOW P0/P1",
+      filters: { severities: ["critical"], anyOf },
+    });
+
+    const searchParams = new URLSearchParams(href.split("?")[1]);
+    const { filters } = parseWidgetPreviewFilters(searchParams);
+    expect(filters.severities).toEqual(["critical"]);
+    expect(filters.anyOf).toEqual(anyOf);
+  });
+
+  it("round-trips anyOf branches alongside the nested case field/op/values filter shape", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      widgetId: "w1",
+      displayName: "WOW P0/P1",
+      filters: {
+        filters: [{ field: "state", op: "in", values: ["open"] }],
+        anyOf,
+      },
+    });
+
+    const searchParams = new URLSearchParams(href.split("?")[1]);
+    const { filters } = parseWidgetPreviewFilters(searchParams);
+    expect(filters.filters).toEqual([{ field: "state", op: "in", values: ["open"] }]);
+    expect(filters.anyOf).toEqual(anyOf);
+  });
+
+  it("masks the current user's own id inside an anyOf branch, and resolveCurrentUserSentinels restores it", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      widgetId: "w1",
+      displayName: "My anyOf widget",
+      filters: {
+        anyOf: [{ filters: [{ field: "assignedUserId", op: "in", values: [CURRENT_USER_ID] }] }],
+      },
+      currentUserId: CURRENT_USER_ID,
+    });
+
+    expect(href).not.toContain(CURRENT_USER_ID);
+    const searchParams = new URLSearchParams(href.split("?")[1]);
+    const { filters, needsCurrentUser } = parseWidgetPreviewFilters(searchParams);
+    expect(needsCurrentUser).toBe(true);
+    expect(filters.anyOf).toEqual([
+      { filters: [{ field: "assignedUserId", op: "in", values: ["@me"] }] },
+    ]);
+
+    const resolved = resolveCurrentUserSentinels(filters, CURRENT_USER_ID);
+    expect(resolved.anyOf).toEqual([
+      { filters: [{ field: "assignedUserId", op: "in", values: [CURRENT_USER_ID] }] },
+    ]);
+  });
+
+  it("drops a malformed anyOf param rather than throwing", () => {
+    const searchParams = new URLSearchParams({ w: "id", n: "Name", _anyOf: "not json{{{" });
+    expect(() => parseWidgetPreviewFilters(searchParams)).not.toThrow();
+    const { filters } = parseWidgetPreviewFilters(searchParams);
+    expect(filters.anyOf).toBeUndefined();
+  });
+});
+
 describe("describeWidgetFilters", () => {
   it("flattens the flat resourceType filter shape into readable field: value entries", () => {
     expect(
@@ -261,5 +362,41 @@ describe("describeWidgetFilters", () => {
 
   it("returns an empty list for empty/absent filters", () => {
     expect(describeWidgetFilters({})).toEqual([]);
+  });
+});
+
+describe("appendWidgetTitleParam / readWidgetTitleParam", () => {
+  it("appends the widget's displayName as WIDGET_TITLE_PARAM to a bare path", () => {
+    const href = appendWidgetTitleParam("/engagements", "Total Outstanding");
+    expect(href).toBe(`/engagements?${WIDGET_TITLE_PARAM}=Total+Outstanding`);
+  });
+
+  it("appends to a path that already has query params, without disturbing them", () => {
+    const href = appendWidgetTitleParam(
+      "/cases?states=open&severities=S1",
+      "My Critical & High Cases",
+    );
+    const params = new URLSearchParams(href.split("?")[1]);
+    expect(href.startsWith("/cases?")).toBe(true);
+    expect(params.get("states")).toBe("open");
+    expect(params.get("severities")).toBe("S1");
+    expect(params.get(WIDGET_TITLE_PARAM)).toBe("My Critical & High Cases");
+  });
+
+  it("is a no-op when displayName is absent or empty", () => {
+    expect(appendWidgetTitleParam("/engagements", undefined)).toBe("/engagements");
+    expect(appendWidgetTitleParam("/engagements", "")).toBe("/engagements");
+    expect(appendWidgetTitleParam("/cases?states=open", undefined)).toBe("/cases?states=open");
+  });
+
+  it("round-trips through readWidgetTitleParam", () => {
+    const href = appendWidgetTitleParam("/engagements?types=engagement", "Migration Summary");
+    const params = new URLSearchParams(href.split("?")[1]);
+    expect(readWidgetTitleParam(params)).toBe("Migration Summary");
+  });
+
+  it("readWidgetTitleParam returns undefined when the param is absent or empty", () => {
+    expect(readWidgetTitleParam(new URLSearchParams("states=open"))).toBeUndefined();
+    expect(readWidgetTitleParam(new URLSearchParams(`${WIDGET_TITLE_PARAM}=`))).toBeUndefined();
   });
 });

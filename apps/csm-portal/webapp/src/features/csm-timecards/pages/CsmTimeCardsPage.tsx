@@ -81,6 +81,8 @@ import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardRev
 import BulkApproveDialog from "@features/csm-timecards/components/BulkApproveDialog";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import SearchableMultiSelect from "@components/SearchableMultiSelect";
+import AsyncUserIdMultiSelect from "@features/csm-cases/components/AsyncUserIdMultiSelect";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import { exportTimeCardsCsv } from "@features/csm-timecards/utils/timeCardCsvExport";
 import { cardActions, type TimecardAction, type TimecardRoleCtx } from "@features/csm-timecards/utils/timeSheetState";
 import type { TimeCardGroupBy } from "@features/csm-timecards/utils/timeCardGrouping";
@@ -90,23 +92,12 @@ import type {
   TimeCardState,
 } from "@features/csm-timecards/types/timeCards";
 
-/** Builds a `userId -> userName` lookup plus the option list a
- * `SearchableMultiSelect` engineer filter needs, scoped to whatever cards are
- * currently loaded for one tab (there's no engineer-search endpoint for time
- * cards, so — like the work-item filter — this only ever offers engineers
- * actually present on the current page, not the full directory). */
-function engineerOptionsFrom(cards: CsmTimeCard[] | undefined): {
-  ids: string[];
-  nameById: Map<string, string>;
-} {
-  const nameById = new Map<string, string>();
-  (cards ?? []).forEach((c) => nameById.set(c.userId, c.userName));
-  return { ids: [...nameById.keys()], nameById };
-}
-
 /** Distinct case numbers present in whatever cards are currently loaded for
- * one tab — the option list for the work-item filter. Same "current page
- * only" caveat as {@link engineerOptionsFrom}. */
+ * one tab — the option list for the work-item filter. There's no
+ * case-number search endpoint for time cards, so — unlike the Engineer
+ * filter (see `AsyncUserIdMultiSelect` below, which searches the real users
+ * directory) — this only ever offers case numbers actually present on the
+ * current page, not every case the viewer could filter by. */
 function workItemOptionsFrom(cards: CsmTimeCard[] | undefined): string[] {
   return Array.from(new Set((cards ?? []).map((c) => c.caseNumber)));
 }
@@ -117,6 +108,16 @@ function workItemOptionsFrom(cards: CsmTimeCard[] | undefined): string[] {
  * not a new fetch. */
 function projectNamesIn(cards: CsmTimeCard[] | undefined): [string, string][] {
   return (cards ?? []).map((c) => [c.projectId, c.projectName]);
+}
+
+/** `[userId, userName]` pairs present in a batch of cards — same role as
+ * {@link projectNamesIn}, but for the Engineer filter's chip-label cache
+ * (see `engineerNameCache` below): the filter itself now searches the real
+ * users directory via `AsyncUserIdMultiSelect`, but a selected engineer's
+ * name still needs a source before that search has run against the id
+ * already in the filter (e.g. right after switching tabs). */
+function engineerNamesIn(cards: CsmTimeCard[] | undefined): [string, string][] {
+  return (cards ?? []).map((c) => [c.userId, c.userName]);
 }
 
 const DEFAULT_ROWS_PER_PAGE = 20;
@@ -386,21 +387,28 @@ export default function CsmTimeCardsPage(): JSX.Element {
     () => workItemOptionsFrom(queue.data?.cards),
     [queue.data],
   );
-  // Persistent projectId -> projectName cache for the Project filter's chip
-  // labels, accumulated across every tab's loaded cards over the page's
-  // lifetime and never shrunk. Unlike workItemOptions/engineerOptions above
-  // (deliberately scoped to one tab's current page), this can't be a per-tab
-  // derivation: each tab's FilterBar/AsyncProjectMultiSelect instance
-  // unmounts on tab switch (conditional rendering below), which would
-  // otherwise drop a selected project's name the moment the newly active
-  // tab's own cards don't happen to include it — or are empty — leaving the
-  // chip showing a raw id until the dropdown is reopened and re-searched.
+  // Persistent projectId -> projectName / userId -> userName caches for the
+  // Project and Engineer filters' chip labels, accumulated across every tab's
+  // loaded cards over the page's lifetime and never shrunk. Unlike
+  // workItemOptions above (deliberately scoped to one tab's current page),
+  // these can't be a per-tab derivation: each tab's FilterBar/
+  // AsyncProjectMultiSelect/AsyncUserIdMultiSelect instance unmounts on tab
+  // switch (conditional rendering below), which would otherwise drop a
+  // selected project/engineer's name the moment the newly active tab's own
+  // cards don't happen to include it — or are empty — leaving the chip
+  // showing a raw id until the dropdown is reopened and re-searched. (The
+  // Engineer filter's own search always finds the name eventually, since it
+  // now queries the real users directory rather than only the current page —
+  // this cache just avoids a raw-UUID flash in the meantime.)
   //
   // Reconciled during render (React's "adjusting state when data changes"
   // pattern: https://react.dev/reference/react/useState#storing-information-from-previous-renders)
-  // rather than in an effect, so a fresh name is available in the same
+  // rather than in an effect, so fresh names are available in the same
   // render the data arrived in instead of one render later.
   const [projectNameCache, setProjectNameCache] = useState<Map<string, string>>(
+    () => new Map(),
+  );
+  const [engineerNameCache, setEngineerNameCache] = useState<Map<string, string>>(
     () => new Map(),
   );
   const [lastSeenCards, setLastSeenCards] = useState<{
@@ -414,28 +422,52 @@ export default function CsmTimeCardsPage(): JSX.Element {
     lastSeenCards.queue !== queue.data
   ) {
     setLastSeenCards({ mine: myCards.data, all: allCards.data, queue: queue.data });
-    const learned = [
+    const learnedProjects = [
       ...projectNamesIn(myCards.data?.cards),
       ...projectNamesIn(allCards.data?.cards),
       ...projectNamesIn(queue.data?.cards),
     ];
-    let next: Map<string, string> | undefined;
-    for (const [id, name] of learned) {
+    let nextProjects: Map<string, string> | undefined;
+    for (const [id, name] of learnedProjects) {
       if (projectNameCache.get(id) !== name) {
-        next ??= new Map(projectNameCache);
+        nextProjects ??= new Map(projectNameCache);
+        nextProjects.set(id, name);
+      }
+    }
+    if (nextProjects) setProjectNameCache(nextProjects);
+
+    const learnedEngineers = [
+      ...engineerNamesIn(myCards.data?.cards),
+      ...engineerNamesIn(allCards.data?.cards),
+      ...engineerNamesIn(queue.data?.cards),
+    ];
+    let nextEngineers: Map<string, string> | undefined;
+    for (const [id, name] of learnedEngineers) {
+      if (engineerNameCache.get(id) !== name) {
+        nextEngineers ??= new Map(engineerNameCache);
+        nextEngineers.set(id, name);
+      }
+    }
+    if (nextEngineers) setEngineerNameCache(nextEngineers);
+  }
+
+  // `AsyncUserIdMultiSelect` resolves a name the moment a directory search
+  // result is picked — earlier than `engineerNamesIn` above could ever know
+  // it (that only learns from cards already loaded on screen). Without
+  // this, an engineer picked purely from the directory (no card of theirs
+  // on the current page) would render as a raw UUID on the next tab, since
+  // that tab mounts a fresh `AsyncUserIdMultiSelect` instance with no
+  // memory of the pick.
+  const handleEngineerNamesResolved = (entries: [string, string][]): void => {
+    let next: Map<string, string> | undefined;
+    for (const [id, name] of entries) {
+      if (engineerNameCache.get(id) !== name) {
+        next ??= new Map(engineerNameCache);
         next.set(id, name);
       }
     }
-    if (next) setProjectNameCache(next);
-  }
-  const allEngineerOptions = useMemo(
-    () => engineerOptionsFrom(allCards.data?.cards),
-    [allCards.data],
-  );
-  const approvalsEngineerOptions = useMemo(
-    () => engineerOptionsFrom(queue.data?.cards),
-    [queue.data],
-  );
+    if (next) setEngineerNameCache(next);
+  };
 
   // Filtered cards per tab, computed once and shared between the FilterBar's
   // export action and the table rendering below — rather than recomputing
@@ -622,14 +654,15 @@ export default function CsmTimeCardsPage(): JSX.Element {
             setFilterTo={handleFilterToChange}
             onClear={clearFilters}
             engineerSlot={
-              <SearchableMultiSelect
+              <AsyncUserIdMultiSelect
                 id="timecards-filter-engineer-all"
                 label="Engineer"
-                placeholder="Search engineers…"
                 values={filterEngineer}
-                options={allEngineerOptions.ids}
-                formatOption={(id) => allEngineerOptions.nameById.get(id) ?? id}
                 onChange={handleFilterEngineerChange}
+                nameSeed={engineerNameCache}
+                onNamesResolved={handleEngineerNamesResolved}
+                roleIds={INTERNAL_USER_ROLES}
+                active
               />
             }
             engineerActive={filterEngineer.length > 0}
@@ -700,14 +733,15 @@ export default function CsmTimeCardsPage(): JSX.Element {
             onClear={clearFilters}
             hideStateFilter
             engineerSlot={
-              <SearchableMultiSelect
+              <AsyncUserIdMultiSelect
                 id="timecards-filter-engineer-approvals"
                 label="Engineer"
-                placeholder="Search engineers…"
                 values={filterEngineer}
-                options={approvalsEngineerOptions.ids}
-                formatOption={(id) => approvalsEngineerOptions.nameById.get(id) ?? id}
                 onChange={handleFilterEngineerChange}
+                nameSeed={engineerNameCache}
+                onNamesResolved={handleEngineerNamesResolved}
+                roleIds={INTERNAL_USER_ROLES}
+                active
               />
             }
             engineerActive={filterEngineer.length > 0}
@@ -1080,6 +1114,18 @@ function FilterBar({
                   label="State"
                   value={filterState}
                   onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+                  slotProps={{
+                    // oxygen-ui's own theme shifts an unshrunk label up by
+                    // `top: -7px` for any Select-backed field (see
+                    // `MultiSelectField.tsx`'s doc comment) -- tie `shrink`
+                    // to whether a state is actually picked, rather than
+                    // MUI's focus-driven default.
+                    inputLabel: {
+                      shrink: filterState !== "",
+                      sx: { top: "0px !important" },
+                    },
+                    select: { notched: filterState !== "" },
+                  }}
                 >
                   <MenuItem value="">All states</MenuItem>
                   {FILTER_STATES.map((s) => (

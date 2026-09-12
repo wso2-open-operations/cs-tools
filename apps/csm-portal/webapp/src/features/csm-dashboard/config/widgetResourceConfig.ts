@@ -28,18 +28,24 @@ import {
   Megaphone,
   Shield,
   ShieldAlert,
+  Star,
   Users,
   ListChecks,
   type LucideIcon,
 } from "@wso2/oxygen-ui-icons-react";
-import type { BeWidgetResourceType } from "@api/backend/types";
+import type { BeCallRequestStateKey, BeWidgetResourceType } from "@api/backend/types";
 import { humanizeState } from "@features/csm-dashboard/utils/abtDashboard";
+import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 import {
   casesHref,
   DEFAULT_CASES_FILTERS,
   writeCasesFiltersToUrl,
 } from "@features/csm-cases/utils/casesFiltersUrl";
 import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
+import {
+  ALL_ONBOARDING_STATUSES,
+  ONBOARDING_STATUS_NO_MATCH,
+} from "@features/csm-cases/utils/onboardingStatus";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import {
   DEFAULT_INCIDENT_FILTERS,
@@ -53,7 +59,11 @@ import {
 import { writeChangeRequestFiltersToUrl } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
 import { taskStateLabel } from "@features/csm-cases/utils/taskState";
 import type { BeTaskState } from "@api/backend/types";
-import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
+import {
+  appendWidgetTitleParam,
+  buildWidgetPreviewHref,
+  isAnyOfBranchArray,
+} from "@features/csm-dashboard/utils/widgetPreviewUrl";
 
 /** A resolved search-result row, typed loosely since its real shape depends
  * on `resourceType` — the label extractors below narrow what they read. */
@@ -110,6 +120,28 @@ export interface WidgetResourceConfig {
    * case instead, handled the same way the hardcoded `CallRequestWidgetList`
    * does) or when the item carries no usable id. */
   detailHref?: (item: WidgetItem) => string | undefined;
+  /** Only meaningful for shape "list". Overrides the default request body
+   * `useWidgetData` POSTs to `searchEndpoint` (`{ filters, pagination: {
+   * offset, limit }, sortBy? }`) — every resourceType's own search contract
+   * uses that shape EXCEPT `case_feedback`'s `POST /cases/feedback/search`,
+   * which takes flat `page`/`pageSize` instead of `pagination.offset/limit`
+   * (see that entry's own comment for why). Omitted (every other
+   * resourceType) keeps `useWidgetData`'s existing request shape untouched. */
+  buildSearchRequestBody?: (args: {
+    filters: Record<string, unknown>;
+    offset: number;
+    limit: number;
+    sortBy?: Record<string, unknown>;
+  }) => Record<string, unknown>;
+  /** Only meaningful for shape "list"/"count". Overrides how `useWidgetData`
+   * reads `total`/the item page off `searchEndpoint`'s own response (default:
+   * `res.total`, `res[itemsKey]`) — only `case_feedback`'s response diverges
+   * (`totalRecords`/`results`, not `total`/`itemsKey`). Omitted keeps the
+   * default reading untouched. */
+  parseSearchResponse?: (res: Record<string, unknown>) => {
+    total: number;
+    items: Record<string, unknown>[];
+  };
 }
 
 function asString(v: unknown): string | undefined {
@@ -196,10 +228,17 @@ function caseFilterEntry(
  * `projectType`, and the `createdOn`/`updatedOn`/`closedOn` date ranges,
  * which was the root cause of the click-through data-loss bug this function
  * exists to fix (a tile reading a filtered count landed on the org-wide
- * cases list because its filters had nowhere to go). Only `anyOf`,
- * `parentId`, and `resolutionNotes` remain genuinely dropped: no dashboard
- * widget uses them today, and `CasesFilters` has no equivalent to invent one
- * for without guessing at a UI treatment.
+ * cases list because its filters had nowhere to go). `parentId` and
+ * `resolutionNotes` remain genuinely dropped: no dashboard widget uses them
+ * today, and `CasesFilters` has no equivalent to invent one for without
+ * guessing at a UI treatment. `anyOf` (cross-field OR) is dropped here too —
+ * `CasesFilters` is an AND-only model with nothing to translate it into — but
+ * a widget carrying `anyOf` never reaches this function's output at all (see
+ * `caseFamilyBuildHref` below, and `DashboardWidgetPreviewPage.tsx`'s own
+ * `anyOf` routing check): its click-through routes to the generic,
+ * filter-faithful dashboard-widget preview page instead, the same fallback
+ * `incident_task` uses for a resourceType with no representable destination
+ * in its own list page.
  *
  * `assignedUserId` carries the current user's own UUID (every widget that
  * sets it does so via the current-user placeholder), and
@@ -208,23 +247,54 @@ function caseFilterEntry(
  * any non-empty `assignedUserId` maps to the `@me` sentinel rather than an
  * (unresolvable) literal UUID.
  *
- * `tag`'s two ops (`in`/`notIn`) map to the two distinct `CasesFilters`
- * fields `tags`/`excludeTags` — never a single field plus an inferred op —
- * so a `notIn` widget filter can never decode as `tags` (an inclusion) the
- * way the equivalent bug shipped once in the dashboard preview URL (see
- * `casesFiltersUrl.ts`'s `writeCasesFiltersToUrl` doc comment for the full
- * story). Likewise `escalation`'s value-less `isEmpty`/`isNotEmpty` map to
- * the explicit tri-state `hasEscalation` (`false`/`true`), never silently
- * defaulted when absent (`undefined`, i.e. not touched in `out`).
+ * `tag`, `state`, and `projectOnboardingStatus` — the only 3 case-search
+ * fields whose backend contract accepts `notIn` at all (`case_filters.go`'s
+ * per-field op table) — are each matched on field *and* op together via
+ * `caseFilterEntry`, never read op-blind via `caseFilterValues` plus an
+ * inferred op. A `notIn` widget filter on any of these can then never
+ * silently decode as its own opposite (an inclusion of exactly the values it
+ * meant to exclude) — which is exactly the bug once reported against a live
+ * `projectOnboardingStatus notIn` widget click-through, and the same bug the
+ * dashboard preview URL shipped once for `tag` (see `casesFiltersUrl.ts`'s
+ * `writeCasesFiltersToUrl` doc comment for that full story). `tag`/`state`
+ * map their two ops to two distinct `CasesFilters` fields (`tags`/
+ * `excludeTags`, `states`/`excludeStates`). `projectOnboardingStatus` is the
+ * exception: its domain is the 4 fixed values in `onboardingStatus.ts`, so
+ * instead of a third `excludeOnboardingStatuses` field, a `notIn` filter is
+ * folded into `onboardingStatuses`' own complement (every known value except
+ * the excluded ones) — `notIn(X)` and `in(all-but-X)` are equivalent over a
+ * closed, fixed set, and this keeps the field (and its URL param) singular
+ * so the "Onboarding status" bar control can show/edit it as plain selected
+ * values without a second, exclude-flavored param to collide with. Every
+ * other field this function reads is `in`-only per that same op table, so
+ * reading it op-blind carries no equivalent risk. Likewise `escalation`'s
+ * value-less `isEmpty`/`isNotEmpty` map to the explicit tri-state
+ * `hasEscalation` (`false`/`true`), never silently defaulted when absent
+ * (`undefined`, i.e. not touched in `out`).
+ *
+ * Exported (not just used internally for `buildHref`) so
+ * `DashboardWidgetPreviewPage.tsx` can seed a real, editable `CasesFilterBar`
+ * from a case-family widget's own opaque filters, rather than only ever
+ * building a one-shot click-through URL from them.
  */
-function translateCaseDashboardFilters(
+export function translateCaseDashboardFilters(
   filters: Record<string, unknown>,
 ): Partial<CasesFilters> {
   const out: Partial<CasesFilters> = {};
   const fieldFilters = asCaseFieldFilters(filters.filters);
 
-  const states = caseFilterValues(fieldFilters, "state");
+  // `state` in vs. notIn -> two distinct CasesFilters fields, same reasoning
+  // as `tag` below: `state` is one of only 3 case-search fields whose
+  // backend contract accepts `notIn` at all (`state`, `tag`,
+  // `projectOnboardingStatus` — see `case_filters.go`'s per-field op table),
+  // so a `notIn` widget filter must never be read op-blind and decoded as
+  // an inclusion of the very states it meant to exclude.
+  const states = caseFilterEntry(fieldFilters, "state", "in")?.values;
   if (states && states.length > 0) out.states = states as CasesFilters["states"];
+  const excludeStates = caseFilterEntry(fieldFilters, "state", "notIn")?.values;
+  if (excludeStates && excludeStates.length > 0) {
+    out.excludeStates = excludeStates as CasesFilters["excludeStates"];
+  }
   const severities = caseFilterValues(fieldFilters, "severity");
   if (severities && severities.length > 0) {
     out.severities = severities
@@ -258,8 +328,47 @@ function translateCaseDashboardFilters(
   const excludeTags = caseFilterEntry(fieldFilters, "tag", "notIn")?.values;
   if (excludeTags && excludeTags.length > 0) out.excludeTags = excludeTags;
 
-  const onboardingStatuses = caseFilterValues(fieldFilters, "projectOnboardingStatus");
-  if (onboardingStatuses && onboardingStatuses.length > 0) {
+  // `projectOnboardingStatus` in vs. notIn -> both fold into the single
+  // `onboardingStatuses` field (unlike `state`/`tag`, which each keep a
+  // separate exclude field) — its domain is the 4 fixed values in
+  // `onboardingStatus.ts`, so `notIn(X)` decodes to `in(all-but-X)`, its
+  // complement over that closed set, rather than a second field/URL param
+  // that could collide with (or be conflated with) this one. This is the
+  // field the click-through sign-flip bug was originally reported against:
+  // a widget's `notIn` was silently decoding as an inclusion of exactly the
+  // onboarding statuses it meant to exclude — reading it op-aware and
+  // complementing rather than passing the excluded values straight through
+  // is what keeps that bug from recurring.
+  const includedOnboardingStatuses = caseFilterEntry(
+    fieldFilters,
+    "projectOnboardingStatus",
+    "in",
+  )?.values;
+  const excludedOnboardingStatuses = caseFilterEntry(
+    fieldFilters,
+    "projectOnboardingStatus",
+    "notIn",
+  )?.values;
+  let onboardingStatuses = includedOnboardingStatuses;
+  let excludedAllStatuses = false;
+  if (excludedOnboardingStatuses && excludedOnboardingStatuses.length > 0) {
+    const complement: string[] = ALL_ONBOARDING_STATUSES.filter(
+      (v) => !excludedOnboardingStatuses.includes(v),
+    );
+    onboardingStatuses = onboardingStatuses
+      ? onboardingStatuses.filter((v) => complement.includes(v))
+      : complement;
+    excludedAllStatuses = onboardingStatuses.length === 0;
+  }
+  if (excludedAllStatuses) {
+    // `notIn` excluded every known value (or intersected down to none with
+    // an `in` list) -- the widget's own filter can never match any case.
+    // Falling through to the `length > 0` check below would drop
+    // `onboardingStatuses` entirely, which this app's convention reads as
+    // "unfiltered" and would show every case instead of none — the exact
+    // sign-flip bug this field exists to prevent. See `ONBOARDING_STATUS_NO_MATCH`.
+    out.onboardingStatuses = [ONBOARDING_STATUS_NO_MATCH];
+  } else if (onboardingStatuses && onboardingStatuses.length > 0) {
     out.onboardingStatuses = onboardingStatuses;
   }
 
@@ -340,13 +449,55 @@ function securityCenterHref(tab: string, params?: URLSearchParams): string {
  * output — always just this one type — doesn't need to be (and isn't)
  * dropped here; it's simply redundant with what the page already locks.
  */
-function caseTypeListHref(basePath: string, filters: Record<string, unknown>): string {
+function caseTypeListHref(
+  basePath: string,
+  filters: Record<string, unknown>,
+  displayName?: string,
+): string {
   const full: CasesFilters = {
     ...DEFAULT_CASES_FILTERS,
     ...translateCaseDashboardFilters(filters),
   };
   const qs = writeCasesFiltersToUrl(full).toString();
-  return qs ? `${basePath}?${qs}` : basePath;
+  const href = qs ? `${basePath}?${qs}` : basePath;
+  // `displayName`, when given, is appended as WIDGET_TITLE_PARAM so the
+  // destination page (a real, permanent nav page with its own hardcoded
+  // heading -- see CsmEngagementsPage.tsx) can show the originating
+  // widget's own name instead (digiops-cs#2914) -- see
+  // appendWidgetTitleParam's own doc comment for why this is a separate,
+  // cosmetic-only param from every CasesFilters field this function
+  // otherwise writes.
+  return appendWidgetTitleParam(href, displayName);
+}
+
+/**
+ * Shared `buildHref` wrapper for every case-family resourceType (`case`,
+ * `service_request`, `security_report_analysis`, `engagement` —
+ * `announcement` is excluded, see its own `buildHref` comment): a widget's
+ * `anyOf` cross-field-OR branches have no representation in `CasesFilters`
+ * (an AND-only model), so `fallback()` — which goes through
+ * `translateCaseDashboardFilters` one way or another — would silently drop
+ * them and land on a broader, unfiltered-by-`anyOf` list than what the tile
+ * actually counted (the bug this wrapper exists to close). Route through the
+ * generic, filter-faithful dashboard-widget preview page instead whenever
+ * `anyOf` is present, exactly mirroring `incident_task`'s own fallback for a
+ * resourceType with no representable destination of its own.
+ */
+function caseFamilyBuildHref(
+  previewSlug: string,
+  filters: Record<string, unknown>,
+  ctx: { widgetId: string; displayName: string } | undefined,
+  fallback: () => string,
+): string {
+  if (isAnyOfBranchArray(filters.anyOf)) {
+    return buildWidgetPreviewHref({
+      previewSlug,
+      widgetId: ctx?.widgetId ?? "",
+      displayName: ctx?.displayName ?? "",
+      filters,
+    });
+  }
+  return fallback();
 }
 
 /** Dashboard incident filters already use the real `BeIncidentPriority`
@@ -371,6 +522,103 @@ function translateChangeRequestDashboardFilters(
   if (states) out.states = states as ChangeRequestFilters["states"];
   const impacts = asStringArray(filters.impacts);
   if (impacts) out.impacts = impacts as ChangeRequestFilters["impacts"];
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// call_request — POST /call-requests/search, whose flat `filters` shape is
+// its own thing (assignee/state/case-state/team, not the case-search DSL).
+// ---------------------------------------------------------------------------
+
+/**
+ * Filter state for the call-requests "View more" landing page's own filter
+ * bar. Mirrors `SearchAllCallRequestsPayload.filters` (the CSM backend's
+ * `POST /call-requests/search` contract — confirmed directly against
+ * `apps/csm-portal/backend/openapi.yaml`, not inferred): `assignedUserIds`
+ * (the parent case's assigned user(s), platform UUIDs — this endpoint has no
+ * `@me` sentinel of its own; any `__current_user__`/`@me` placeholder in a
+ * widget's own filters is already resolved to a real id upstream, before
+ * `translateCallRequestDashboardFilters` below ever sees it — see
+ * `resolveCurrentUserSentinels` in `DashboardWidgetPreviewPage.tsx`),
+ * `states` (call-request state keys — `ALL_CALL_REQUEST_STATES` in
+ * `callRequestState.ts`), `caseStates`/`excludeCaseStates` (the parent
+ * case's state, in vs. not-in — confirmed independent fields on this
+ * contract, "either, both, or neither may be supplied", not one field with
+ * an inferred op), and `assignmentTeamIds` (the parent case's assigned CRE
+ * team, `creGroupId` values — confirmed CRE-only per digiops-cs#2732 "Calls
+ * To Attend"; this contract has no SRE-team equivalent field). Scoped here
+ * rather than exported alongside `CasesFilters` from a shared filter-bar
+ * component: call requests have no other list page of their own for this
+ * shape to be shared with.
+ */
+export interface CallRequestWidgetFilters {
+  assignedUserIds: string[];
+  states: BeCallRequestStateKey[];
+  caseStates: CaseState[];
+  excludeCaseStates: CaseState[];
+  assignmentTeamIds: string[];
+}
+
+export const DEFAULT_CALL_REQUEST_WIDGET_FILTERS: CallRequestWidgetFilters = {
+  assignedUserIds: [],
+  states: [],
+  caseStates: [],
+  excludeCaseStates: [],
+  assignmentTeamIds: [],
+};
+
+/**
+ * Translate a call-request widget's opaque flat filters (the same shape its
+ * own tile fetch already POSTs to `/call-requests/search` — see
+ * `WIDGET_RESOURCE_CONFIG.call_request`, which has no
+ * `buildSearchRequestBody` override, so `useWidgetData`'s default
+ * `{filters, pagination, sortBy?}` passthrough already matches this
+ * endpoint's own contract) into `CallRequestWidgetFilters`, the same "seed
+ * once, then fully editable" input `translateCaseDashboardFilters` builds
+ * for the case-family resourceTypes. No value remapping is needed here
+ * (unlike that translator's severity/state-code tables): every field this
+ * endpoint accepts already uses its own wire values, so this is a
+ * structural narrow, not a translation.
+ */
+export function translateCallRequestDashboardFilters(
+  filters: Record<string, unknown>,
+): Partial<CallRequestWidgetFilters> {
+  const out: Partial<CallRequestWidgetFilters> = {};
+  const assignedUserIds = asStringArray(filters.assignedUserIds);
+  if (assignedUserIds && assignedUserIds.length > 0) out.assignedUserIds = assignedUserIds;
+  const states = asStringArray(filters.states);
+  if (states && states.length > 0) out.states = states as BeCallRequestStateKey[];
+  const caseStates = asStringArray(filters.caseStates);
+  if (caseStates && caseStates.length > 0) out.caseStates = caseStates as CaseState[];
+  const excludeCaseStates = asStringArray(filters.excludeCaseStates);
+  if (excludeCaseStates && excludeCaseStates.length > 0) {
+    out.excludeCaseStates = excludeCaseStates as CaseState[];
+  }
+  const assignmentTeamIds = asStringArray(filters.assignmentTeamIds);
+  if (assignmentTeamIds && assignmentTeamIds.length > 0) {
+    out.assignmentTeamIds = assignmentTeamIds;
+  }
+  return out;
+}
+
+/**
+ * Inverse of `translateCallRequestDashboardFilters`: the filter bar's own
+ * `CallRequestWidgetFilters` state back into the flat `filters` object
+ * `useWidgetData` POSTs to `/call-requests/search`. Empty arrays are
+ * omitted rather than sent as `field: []` — same convention every other
+ * resourceType's own filter-building already follows (an empty array here
+ * would ask the backend to match zero call requests, not "unfiltered",
+ * which is the opposite of what an untouched control means).
+ */
+export function callRequestWidgetFiltersToQuery(
+  filters: CallRequestWidgetFilters,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (filters.assignedUserIds.length > 0) out.assignedUserIds = filters.assignedUserIds;
+  if (filters.states.length > 0) out.states = filters.states;
+  if (filters.caseStates.length > 0) out.caseStates = filters.caseStates;
+  if (filters.excludeCaseStates.length > 0) out.excludeCaseStates = filters.excludeCaseStates;
+  if (filters.assignmentTeamIds.length > 0) out.assignmentTeamIds = filters.assignmentTeamIds;
   return out;
 }
 
@@ -418,11 +666,17 @@ export const WIDGET_RESOURCE_CONFIG: Record<
 > = {
   case: {
     searchEndpoint: "/cases/search",
-    groupByEndpoint: "/cases/group-by",
+    groupByEndpoint: "/cases/aggregate",
     itemsKey: "cases",
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
-    buildHref: (filters) => casesHref(translateCaseDashboardFilters(filters)),
+    buildHref: (filters, ctx) =>
+      caseFamilyBuildHref("cases", filters, ctx, () =>
+        appendWidgetTitleParam(
+          casesHref(translateCaseDashboardFilters(filters)),
+          ctx?.displayName,
+        ),
+      ),
     icon: Briefcase,
     iconColor: "primary",
     previewSlug: "cases",
@@ -437,23 +691,25 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   // `case`'s own primaryLabel/secondaryLabel/list renderer verbatim; only the
   // icon/color/click-through destination differ per type, mirroring
   // `CASE_TYPE_COLOR`'s own per-type palette in `caseType.ts`. Same reasoning
-  // extends `groupByEndpoint`: they share `/cases/group-by` with `case` too
+  // extends `groupByEndpoint`: they share `/cases/aggregate` with `case` too
   // (the implied `type` filter is just another entry in the resolved
   // `filters` posted to that endpoint, same as it is for `/cases/search`).
   service_request: {
     searchEndpoint: "/cases/search",
-    groupByEndpoint: "/cases/group-by",
+    groupByEndpoint: "/cases/aggregate",
     itemsKey: "cases",
     detailHref: caseDetailHref,
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
-    buildHref: (filters) =>
-      operationsHref(
-        "service_requests",
-        writeCasesFiltersToUrl({
-          ...DEFAULT_CASES_FILTERS,
-          ...translateCaseDashboardFilters(filters),
-        }),
+    buildHref: (filters, ctx) =>
+      caseFamilyBuildHref("service-requests", filters, ctx, () =>
+        operationsHref(
+          "service_requests",
+          writeCasesFiltersToUrl({
+            ...DEFAULT_CASES_FILTERS,
+            ...translateCaseDashboardFilters(filters),
+          }),
+        ),
       ),
     icon: Cog,
     iconColor: "info",
@@ -461,18 +717,20 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   security_report_analysis: {
     searchEndpoint: "/cases/search",
-    groupByEndpoint: "/cases/group-by",
+    groupByEndpoint: "/cases/aggregate",
     itemsKey: "cases",
     detailHref: caseDetailHref,
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
-    buildHref: (filters) =>
-      securityCenterHref(
-        "security_reports",
-        writeCasesFiltersToUrl({
-          ...DEFAULT_CASES_FILTERS,
-          ...translateCaseDashboardFilters(filters),
-        }),
+    buildHref: (filters, ctx) =>
+      caseFamilyBuildHref("security-reports", filters, ctx, () =>
+        securityCenterHref(
+          "security_reports",
+          writeCasesFiltersToUrl({
+            ...DEFAULT_CASES_FILTERS,
+            ...translateCaseDashboardFilters(filters),
+          }),
+        ),
       ),
     icon: Shield,
     iconColor: "warning",
@@ -480,35 +738,43 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   announcement: {
     searchEndpoint: "/cases/search",
-    groupByEndpoint: "/cases/group-by",
+    groupByEndpoint: "/cases/aggregate",
     itemsKey: "cases",
     detailHref: caseDetailHref,
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
     // CsmAnnouncementsPage keeps its own filters in local component state,
     // not the URL (unlike /cases, /operations, /engagements) — there is no
-    // query-param scheme to land a filtered click-through on yet, so this
-    // stays unfiltered, same as `problem` above.
-    buildHref: () => "/announcements",
+    // query-param scheme to land a filtered click-through on for the plain
+    // case, so the fallback stays the unfiltered list, same as `problem`
+    // above. An `anyOf` filter still routes through `caseFamilyBuildHref` to
+    // the generic dashboard-widget preview page, though: that page resolves
+    // `resourceType` from `previewSlug` generically and posts raw filters
+    // straight to the search endpoint, so it needs no announcement-specific
+    // filtered route of its own to render this widget's exact result set.
+    buildHref: (filters, ctx) => caseFamilyBuildHref("announcements", filters, ctx, () => "/announcements"),
     icon: Megaphone,
     iconColor: "success",
     previewSlug: "announcements",
   },
   engagement: {
     searchEndpoint: "/cases/search",
-    groupByEndpoint: "/cases/group-by",
+    groupByEndpoint: "/cases/aggregate",
     itemsKey: "cases",
     detailHref: caseDetailHref,
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
-    buildHref: (filters) => caseTypeListHref("/engagements", filters),
+    buildHref: (filters, ctx) =>
+      caseFamilyBuildHref("engagements", filters, ctx, () =>
+        caseTypeListHref("/engagements", filters, ctx?.displayName),
+      ),
     icon: Handshake,
     iconColor: "secondary",
     previewSlug: "engagements",
   },
   incident: {
     searchEndpoint: "/incidents/search",
-    groupByEndpoint: "/incidents/group-by",
+    groupByEndpoint: "/incidents/aggregate",
     itemsKey: "incidents",
     primaryLabel: numberSubjectLabel,
     secondaryLabel: (item) => asString(item.priority),
@@ -528,7 +794,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   change_request: {
     searchEndpoint: "/change-requests/search",
-    groupByEndpoint: "/change-requests/group-by",
+    groupByEndpoint: "/change-requests/aggregate",
     itemsKey: "changeRequests",
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
@@ -548,7 +814,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   problem: {
     searchEndpoint: "/problems/search",
-    groupByEndpoint: "/problems/group-by",
+    groupByEndpoint: "/problems/aggregate",
     itemsKey: "problems",
     primaryLabel: numberSubjectLabel,
     secondaryLabel: stateSecondaryLabel,
@@ -573,7 +839,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   // same fallback `call_request` uses for landing on its owning case.
   incident_task: {
     searchEndpoint: "/incident-tasks/search",
-    groupByEndpoint: "/incident-tasks/group-by",
+    groupByEndpoint: "/incident-tasks/aggregate",
     itemsKey: "incidentTasks",
     primaryLabel: numberSubjectLabel,
     secondaryLabel: incidentTaskStateSecondaryLabel,
@@ -724,6 +990,105 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     // standalone detail page of its own, so rows link to the owning case.
     detailHref: (item) => {
       const caseId = nestedID(item.case);
+      return caseId ? `/cases/${caseId}` : undefined;
+    },
+  },
+  // Satisfaction-rating survey responses across cases (`POST
+  // /cases/feedback/search` / `POST /cases/feedback/aggregate`) — its own
+  // resourceType, not a case `type` variant like `service_request` etc.
+  // above, because a feedback record isn't a case row at all (no
+  // `number`/`subject`/`state`; see `BeCaseFeedback`). Its own two-endpoint
+  // request/response contract diverges from every other resourceType's
+  // shared `{pagination:{offset,limit}} -> {total, itemsKey}` shape
+  // (`page`/`pageSize` -> `totalRecords`/`results`, no `total` field at
+  // all), which is exactly what `buildSearchRequestBody`/
+  // `parseSearchResponse` exist to adapt — see those fields' own doc
+  // comments on `WidgetResourceConfig`. There is no standalone list page for
+  // feedback records (only the dashboard's own list-shape widget), so
+  // `buildHref`/`previewSlug` have nowhere real to land — same situation
+  // `task` is in above, same fallback.
+  case_feedback: {
+    searchEndpoint: "/cases/feedback/search",
+    groupByEndpoint: "/cases/feedback/aggregate",
+    itemsKey: "results",
+    buildSearchRequestBody: ({ filters, offset, limit }) => {
+      // `case_feedback` has no sortable columns exposed by its own search
+      // contract (no `sortBy` field on `CaseFeedbackSearchPayload`) — a
+      // `sortBy` passed down from a `shape: "list"` widget config is
+      // silently dropped rather than sent, the same "config is responsible
+      // for a field valid for that resourceType's own contract" convention
+      // `useWidgetData`'s own `sortBy` doc comment already documents for
+      // every other resourceType (an invalid field there gets rejected by
+      // the search endpoint itself; here there's no such endpoint-side
+      // rejection to fall back on, since the field would just be ignored by
+      // this request body entirely).
+      //
+      // `page` is 1-based (see openapi.yaml's CaseFeedbackSearchPayload) —
+      // `offset`/`limit` (0-based, from `useWidgetData`) convert via
+      // `Math.floor(offset / limit) + 1`, matching only the offsets
+      // `useWidgetData` itself ever actually requests (page-aligned:
+      // `offset` is always a multiple of `limit`, either 0 for a tile or
+      // `listLimit * pageIndex` for the preview page's own pager).
+      const page = limit > 0 ? Math.floor(offset / limit) + 1 : 1;
+      // The dashboard-widget preview page's own URL round-trip
+      // (`parseWidgetPreviewFilters`) decodes every query param as a
+      // comma-split string array — the shape every other resourceType's own
+      // filters actually use (case-search-DSL field values). `case_feedback`
+      // is one of the few resourceTypes whose filters are a flat scalar
+      // object instead (`dateFrom`/`dateTo`/`caseId`/`rating`, not arrays),
+      // so a preview-page click-through (e.g. a trend-bar bucket's date
+      // range, or the rating pie's `rating` slice) arrives here as
+      // `{dateFrom: ["2026-07-01"], rating: ["5"]}` rather than the scalar
+      // values this endpoint's own contract expects — sent as-is, the
+      // backing data source rejects the array shape outright. Unwrap known
+      // scalar fields back to their real type before forwarding; a
+      // tile-level fetch (whose filters
+      // never went through that round-trip) already has scalars here and is
+      // a no-op through this same unwrap.
+      const scalarFilters = { ...filters };
+      for (const key of ["caseId", "dateFrom", "dateTo"] as const) {
+        const v = scalarFilters[key];
+        if (Array.isArray(v)) scalarFilters[key] = v[0];
+      }
+      if (Array.isArray(scalarFilters.rating)) {
+        const parsed = Number(scalarFilters.rating[0]);
+        scalarFilters.rating = Number.isNaN(parsed) ? undefined : parsed;
+      }
+      return { filters: scalarFilters, page, pageSize: limit };
+    },
+    parseSearchResponse: (res) => {
+      const total = typeof res.totalRecords === "number" ? res.totalRecords : 0;
+      const rawItems = res.results;
+      const items = Array.isArray(rawItems) ? (rawItems as Record<string, unknown>[]) : [];
+      return { total, items };
+    },
+    primaryLabel: (item) => {
+      const ratingLabel = asString(item.ratingLabel);
+      const submittedAt = asString(item.submittedAt);
+      return [ratingLabel, submittedAt].filter(Boolean).join(" — ") || "—";
+    },
+    secondaryLabel: (item) => asString(item.comment) ?? undefined,
+    // No standalone case-feedback list page exists (only this dashboard's
+    // own widgets), so — like `incident_task` above — every click routes
+    // through the generic dashboard-widget preview page, the only
+    // destination that can render this resourceType's own filtered result
+    // set.
+    buildHref: (filters, ctx) =>
+      buildWidgetPreviewHref({
+        previewSlug: "case-feedback",
+        widgetId: ctx?.widgetId ?? "",
+        displayName: ctx?.displayName ?? "",
+        filters,
+      }),
+    icon: Star,
+    iconColor: "warning",
+    previewSlug: "case-feedback",
+    // The one link this resourceType's rows DO have: back to the owning
+    // case. `caseId` is a platform UUID already (see `BeCaseFeedback`), not
+    // a nested reference to resolve via `nestedID` the way `call_request`'s
+    // `item.case` is.
+    detailHref: (item) => {
+      const caseId = asString(item.caseId);
       return caseId ? `/cases/${caseId}` : undefined;
     },
   },

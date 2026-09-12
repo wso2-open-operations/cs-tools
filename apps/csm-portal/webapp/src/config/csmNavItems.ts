@@ -15,14 +15,21 @@
 // under the License.
 
 import {
+  AlertOctagon,
+  AlertTriangle,
   Briefcase,
   BookOpen,
+  Bug,
   Building2,
   ChartColumn,
   Clock,
+  ClipboardList,
   Cog,
+  FileWarning,
+  GitPullRequest,
   Headset,
   KeyRound,
+  LifeBuoy,
   Megaphone,
   RefreshCw,
   Settings,
@@ -115,6 +122,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/operations?tab=service_requests",
         tab: "service_requests",
         routes: ["/operations/service-requests"],
+        icon: ClipboardList,
       },
       {
         id: "operations.change-requests",
@@ -122,6 +130,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/operations?tab=change_requests",
         tab: "change_requests",
         routes: ["/operations/change-requests"],
+        icon: GitPullRequest,
       },
       {
         id: "operations.incidents",
@@ -129,6 +138,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/operations?tab=incidents",
         tab: "incidents",
         routes: ["/operations/incidents"],
+        icon: AlertTriangle,
       },
       {
         id: "operations.problems",
@@ -136,6 +146,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/operations?tab=problems",
         tab: "problems",
         routes: ["/operations/problems"],
+        icon: AlertOctagon,
       },
     ],
   },
@@ -157,6 +168,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/security-center?tab=security_reports",
         tab: "security_reports",
         routes: ["/security-center/reports"],
+        icon: FileWarning,
       },
       {
         id: "security-center.vulnerabilities",
@@ -164,6 +176,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/security-center?tab=vulnerabilities",
         tab: "vulnerabilities",
         routes: ["/security-center/vulnerabilities"],
+        icon: Bug,
       },
     ],
   },
@@ -294,6 +307,47 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       },
     ],
   },
+  {
+    id: "help",
+    label: "Help",
+    href: "/help",
+    icon: LifeBuoy,
+    // Every topic is an in-page anchor on the single `/help` route (see
+    // `HelpPage`), not its own route, so `href` carries a `#<topic>` fragment
+    // rather than a path segment — same anchor-vs-path split `navNodeRoutes`
+    // already makes for a query-param tab, and handled there the same way.
+    children: [
+      { id: "help.overview", label: "Overview", href: "/help#overview" },
+      {
+        id: "help.workspace-basics",
+        label: "Navigation & personalization",
+        href: "/help#workspace-basics",
+      },
+      { id: "help.dashboard", label: "Dashboard", href: "/help#dashboard" },
+      { id: "help.support", label: "Support", href: "/help#support" },
+      { id: "help.operations", label: "Operations", href: "/help#operations" },
+      { id: "help.engagements", label: "Engagements", href: "/help#engagements" },
+      {
+        id: "help.security-center",
+        label: "Security Center",
+        href: "/help#security-center",
+      },
+      { id: "help.updates", label: "Updates", href: "/help#updates" },
+      { id: "help.time-cards", label: "Time cards", href: "/help#time-cards" },
+      {
+        id: "help.announcements",
+        label: "Announcements",
+        href: "/help#announcements",
+      },
+      { id: "help.customers", label: "Customers", href: "/help#customers" },
+      {
+        id: "help.people-access",
+        label: "People & project access",
+        href: "/help#people-access",
+      },
+      { id: "help.settings", label: "Settings", href: "/help#settings" },
+    ],
+  },
 ];
 
 /** The pathname part of `href`, dropping any query string or hash. */
@@ -315,15 +369,23 @@ export function navNodeHref(node: CsmNavNode): string {
   return node.href;
 }
 
+/** True when `href` carries a `#` fragment rather than being a distinct path
+ * (a Help topic's `/help#operations`) — the node's pathname is only its
+ * parent's landing route, shared with every sibling anchor. */
+function isAnchorHref(node: CsmNavNode): boolean {
+  return node.href.includes("#");
+}
+
 /**
- * Route path prefixes a node owns. A query-param tab (`tab` set) owns only its
- * explicit {@link CsmNavNode.routes}: its `href` pathname is the *parent's*
- * landing route, which every sibling tab shares, so claiming it would make the
+ * Route path prefixes a node owns. A query-param tab (`tab` set) or an
+ * in-page anchor (`href` with a `#` fragment) owns only its explicit
+ * {@link CsmNavNode.routes}: its `href` pathname is the *parent's* landing
+ * route, which every sibling shares, so claiming it would make the
  * longest-prefix match in {@link navNodeForPath} ambiguous.
  */
 export function navNodeRoutes(node: CsmNavNode): string[] {
   const extra = node.routes ?? [];
-  return node.tab ? extra : [navNodePath(node), ...extra];
+  return node.tab || isAnchorHref(node) ? extra : [navNodePath(node), ...extra];
 }
 
 /** Depth-first walk of the tree, parents before their children. */

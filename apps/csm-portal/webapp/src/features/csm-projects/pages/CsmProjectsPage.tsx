@@ -197,8 +197,8 @@ export default function CsmProjectsPage(): JSX.Element {
                         },
                       }}
                     >
-                      <TableCell>
-                        <Typography variant="body2" noWrap>
+                      <TableCell sx={{ maxWidth: 320 }}>
+                        <Typography variant="body2" noWrap title={p.name}>
                           {p.name}
                         </Typography>
                       </TableCell>

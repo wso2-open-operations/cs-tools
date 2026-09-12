@@ -31,9 +31,16 @@ import {
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import {
+  getColumnPreferencesUserKey,
+  useColumnPreferences,
+} from "@hooks/useColumnPreferences";
 import QueryErrorState from "@components/QueryErrorState";
 import FilteredCsvExportButton from "@components/FilteredCsvExportButton";
+import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useBackendApi } from "@api/backend/client";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -52,12 +59,21 @@ import {
   readIncidentFiltersFromUrl,
   writeIncidentFiltersToUrl,
 } from "@features/csm-operations/utils/incidentsFiltersUrl";
+import {
+  DEFAULT_VISIBLE_INCIDENT_COLUMNS,
+  INCIDENT_OPTIONAL_COLUMNS,
+  type IncidentOptionalColumnId,
+} from "@features/csm-operations/utils/incidentListColumns";
 import IncidentsFilterBar from "@features/csm-operations/components/IncidentsFilterBar";
 import RefreshButton from "@components/RefreshButton";
 import type { BeIncident, BeIncidentSearchPayload, BeIncidentSearchResponse } from "@api/backend/types";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
+
+const INCIDENT_OPTIONAL_COLUMN_IDS = Object.keys(
+  INCIDENT_OPTIONAL_COLUMNS,
+) as IncidentOptionalColumnId[];
 
 function formatDate(value?: string | null): string {
   return (
@@ -67,6 +83,25 @@ function formatDate(value?: string | null): string {
       day: "numeric",
     }) ?? "—"
   );
+}
+
+function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident): JSX.Element {
+  switch (id) {
+    case "category":
+      return <>{incident.category || "—"}</>;
+    case "assignmentGroup":
+      return <>{incident.assignmentGroup?.name || "—"}</>;
+    case "assignedTo":
+      return <>{incident.assignedTo?.name || "Unassigned"}</>;
+    case "parent":
+      return <>{incident.parent?.name || "—"}</>;
+    case "createdBy":
+      return <>{incident.createdBy || "—"}</>;
+    case "updatedBy":
+      return <>{incident.updatedBy || "—"}</>;
+    case "createdOn":
+      return <>{formatDate(incident.createdOn)}</>;
+  }
 }
 
 /**
@@ -105,6 +140,26 @@ export default function IncidentsTab(): JSX.Element {
 
   const incidents = data?.incidents ?? [];
   const total = data?.total ?? 0;
+
+  // "Customise columns" — see `caseListColumns.ts`'s equivalent doc comment;
+  // the default visible set is empty since none of these were columns at
+  // all before this feature, so a returning user sees no change until they
+  // open the picker.
+  const currentUserEmail = useIdTokenClaims()?.email;
+  const currentUserId = useCurrentUser().user?.id;
+  const columnPrefs = useColumnPreferences({
+    viewId: "incidents",
+    userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    columns: INCIDENT_OPTIONAL_COLUMN_IDS.map((id) => ({
+      id,
+      label: INCIDENT_OPTIONAL_COLUMNS[id].label,
+    })),
+    defaultVisibleIds: DEFAULT_VISIBLE_INCIDENT_COLUMNS,
+  });
+  const visibleOptionalColumns = columnPrefs.visibleColumns.map(
+    (c) => c.id as IncidentOptionalColumnId,
+  );
+  const columnCount = 7 + visibleOptionalColumns.length; // Number, Subject, Caller, State, Priority, Opened, Updated + optional
 
   const setFilters = useCallback(
     (next: IncidentFilters) => {
@@ -205,6 +260,18 @@ export default function IncidentsTab(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen((prev) => !prev)}
       />
 
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <ColumnCustomizerButton
+          allColumns={columnPrefs.allColumns}
+          isVisible={columnPrefs.isVisible}
+          onToggle={columnPrefs.toggleColumn}
+          onMove={columnPrefs.moveColumn}
+          onReorder={columnPrefs.reorderColumn}
+          onReset={columnPrefs.resetToDefault}
+          label="Customise incident columns"
+        />
+      </Box>
+
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -215,6 +282,9 @@ export default function IncidentsTab(): JSX.Element {
                 <TableCell>Caller</TableCell>
                 <TableCell>State</TableCell>
                 <TableCell>Priority</TableCell>
+                {visibleOptionalColumns.map((id) => (
+                  <TableCell key={id}>{INCIDENT_OPTIONAL_COLUMNS[id].label}</TableCell>
+                ))}
                 <TableCell>Opened</TableCell>
                 <TableCell>Updated</TableCell>
               </TableRow>
@@ -228,13 +298,16 @@ export default function IncidentsTab(): JSX.Element {
                     <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={72} height={22} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
+                    {visibleOptionalColumns.map((id) => (
+                      <TableCell key={id}><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    ))}
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center">
+                  <TableCell colSpan={columnCount} align="center">
                     <QueryErrorState
                       message={error instanceof Error && error.message.trim() ? error.message : "Failed to load incidents."}
                       error={error}
@@ -243,7 +316,7 @@ export default function IncidentsTab(): JSX.Element {
                 </TableRow>
               ) : incidents.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={columnCount} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No incidents found.
                     </Typography>
@@ -296,6 +369,9 @@ export default function IncidentsTab(): JSX.Element {
                         "—"
                       )}
                     </TableCell>
+                    {visibleOptionalColumns.map((id) => (
+                      <TableCell key={id}>{renderOptionalCell(id, incident)}</TableCell>
+                    ))}
                     <TableCell>{formatDate(incident.openedOn)}</TableCell>
                     <TableCell>{formatDate(incident.updatedOn)}</TableCell>
                   </TableRow>

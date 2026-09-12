@@ -17,7 +17,6 @@
 import { useLayoutEffect } from "react";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
 import MainLayout from "@components/layout/MainLayout";
-import { ColorModeProvider } from "@context/theme";
 import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
 import { refreshToken } from "@src/services/auth";
 import { Logger } from "@utils/logger";
@@ -69,35 +68,33 @@ export default function App() {
 
   return (
     <Router>
-      <ColorModeProvider>
-        <Routes>
-          <Route element={<MainLayout />}>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/support" element={<SupportPage />} />
-            <Route path="/cases/new" element={<NewCasePage />} />
-            <Route path="/cases/:id" element={<CaseDetailPage />} />
-            <Route path="/operations" element={<OperationsPage />} />
-            <Route path="/operations/change-requests/new" element={<NewChangeRequestPage />} />
-            <Route path="/operations/service-requests/new" element={<NewServiceRequestPage />} />
-            <Route path="/operations/change-requests/:id" element={<ChangeRequestDetailPage />} />
-            <Route path="/operations/incidents/new" element={<NewIncidentPage />} />
-            <Route path="/operations/incidents/:id" element={<IncidentDetailPage />} />
-            <Route path="/more" element={<MorePage />} />
-            <Route path="/more/announcements" element={<AnnouncementsPage />} />
-            <Route path="/more/time-cards" element={<TimeCardsPage />} />
-            <Route path="/more/security-center" element={<SecurityCenterPage />} />
-            <Route path="/more/security-center/reports/new" element={<NewSecurityReportPage />} />
-            <Route path="/more/security-center/vulnerabilities/:id" element={<VulnerabilityDetailPage />} />
-            <Route path="/more/updates" element={<UpdatesPage />} />
-            <Route path="/more/engagements" element={<EngagementsPage />} />
-            <Route path="/more/customers" element={<CustomersPage />} />
-            <Route path="/more/customers/accounts/:id" element={<AccountDetailPage />} />
-            <Route path="/more/customers/projects/:id" element={<ProjectDetailPage />} />
-            <Route path="/more/settings" element={<SettingsPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-          </Route>
-        </Routes>
-      </ColorModeProvider>
+      <Routes>
+        <Route element={<MainLayout />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/support" element={<SupportPage />} />
+          <Route path="/cases/new" element={<NewCasePage />} />
+          <Route path="/cases/:id" element={<CaseDetailPage />} />
+          <Route path="/operations" element={<OperationsPage />} />
+          <Route path="/operations/change-requests/new" element={<NewChangeRequestPage />} />
+          <Route path="/operations/service-requests/new" element={<NewServiceRequestPage />} />
+          <Route path="/operations/change-requests/:id" element={<ChangeRequestDetailPage />} />
+          <Route path="/operations/incidents/new" element={<NewIncidentPage />} />
+          <Route path="/operations/incidents/:id" element={<IncidentDetailPage />} />
+          <Route path="/more" element={<MorePage />} />
+          <Route path="/more/announcements" element={<AnnouncementsPage />} />
+          <Route path="/more/time-cards" element={<TimeCardsPage />} />
+          <Route path="/more/security-center" element={<SecurityCenterPage />} />
+          <Route path="/more/security-center/reports/new" element={<NewSecurityReportPage />} />
+          <Route path="/more/security-center/vulnerabilities/:id" element={<VulnerabilityDetailPage />} />
+          <Route path="/more/updates" element={<UpdatesPage />} />
+          <Route path="/more/engagements" element={<EngagementsPage />} />
+          <Route path="/more/customers" element={<CustomersPage />} />
+          <Route path="/more/customers/accounts/:id" element={<AccountDetailPage />} />
+          <Route path="/more/customers/projects/:id" element={<ProjectDetailPage />} />
+          <Route path="/more/settings" element={<SettingsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+        </Route>
+      </Routes>
     </Router>
   );
 }

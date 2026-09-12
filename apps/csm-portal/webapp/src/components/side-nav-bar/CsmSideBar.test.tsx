@@ -92,6 +92,17 @@ function renderAt(path: string): ReturnType<typeof render> {
   );
 }
 
+function renderAtWithExpanded(
+  path: string,
+  expandedMenus: Record<string, boolean>,
+): ReturnType<typeof render> {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <CsmSideBar collapsed={false} expandedMenus={expandedMenus} />
+    </MemoryRouter>,
+  );
+}
+
 describe("CsmSideBar — active section on routes with no owning nav section", () => {
   beforeEach(() => {
     sidebarPropsSpy.mockClear();
@@ -136,6 +147,16 @@ describe("CsmSideBar — active section on routes with no owning nav section", (
     renderAt("/people/user-1");
     expect(lastActiveItem()).toBe("operations");
   });
+
+  // Regression test: sessionStorage survives a reload, so a tab open across the
+  // deploy that fixed the above can still hold a dotted child id written by the
+  // older build. Reading it back must yield the owning section, not the stale
+  // child id, on the very first render.
+  it("normalises a dotted child id left in storage by an older build", () => {
+    sessionStorage.setItem(LAST_SECTION_KEY, "operations.incidents");
+    renderAt("/people/user-1");
+    expect(lastActiveItem()).toBe("operations");
+  });
 });
 
 describe("CsmSideBar — Operations/Security Center submenu", () => {
@@ -157,6 +178,26 @@ describe("CsmSideBar — Operations/Security Center submenu", () => {
     renderAt("/dashboard");
     expect(screen.getByText("Security reports")).toBeInTheDocument();
     expect(screen.getByText("Vulnerabilities")).toBeInTheDocument();
+  });
+
+  // Regression test: a submenu child used to render its label only, with no
+  // icon at all -- unlike every top-level section and every admin.
+  // user-management tile, all of which carry one.
+  it("renders an icon for each Operations/Security Center submenu child, not just its label", () => {
+    const { container } = renderAt("/dashboard");
+    const childIds = [
+      "operations.service-requests",
+      "operations.change-requests",
+      "operations.incidents",
+      "operations.problems",
+      "security-center.reports",
+      "security-center.vulnerabilities",
+    ];
+    for (const id of childIds) {
+      const item = container.querySelector(`[data-item-id="${id}"]`);
+      expect(item).not.toBeNull();
+      expect(item?.querySelector("svg")).not.toBeNull();
+    }
   });
 
   it("does not extend the submenu treatment to Customers/Settings — their children stay out of the rail", () => {
@@ -186,6 +227,22 @@ describe("CsmSideBar — Operations/Security Center submenu", () => {
   it("does not force-expand Operations when a different section is active", () => {
     renderAt("/dashboard");
     expect(lastSidebarProps().expandedMenus?.operations).toBeFalsy();
+  });
+
+  // Regression: collapsing a submenu section while still on one of its own
+  // child pages used to be a no-op. `toggleMenu` correctly flipped
+  // `expandedMenus.operations` to `false`, but the auto-expand memo below
+  // re-derived it back to `true` on every render since `activeItem` still
+  // started with "operations." (the route hadn't changed) — the chevron
+  // click had no visible effect at all.
+  it("respects an explicit collapse even while one of the section's own children is still active", () => {
+    renderAtWithExpanded("/operations/incidents", { operations: false });
+    expect(lastSidebarProps().expandedMenus?.operations).toBe(false);
+  });
+
+  it("respects an explicit expand the same way, without needing the auto-expand fallback", () => {
+    renderAtWithExpanded("/operations/incidents", { operations: true });
+    expect(lastSidebarProps().expandedMenus?.operations).toBe(true);
   });
 
   it("navigates to the real path-segment route for a selected submenu child, not the legacy ?tab= href", () => {

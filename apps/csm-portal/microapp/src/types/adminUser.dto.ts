@@ -64,9 +64,11 @@ export interface SnUserDto {
 export interface UserSearchFiltersDto {
   searchQuery?: string;
   /** ServiceNow data source only. Named `roleIds` (not `roles`) to match the backend contract —
-   * a role's "id" is its key (e.g. "agent"), not a separate numeric identifier. Mirrors the
-   * webapp's UserSearchFilters.roleIds. */
-  roleIds?: AdminUserRole[];
+   * a role's "id" is its key (e.g. "agent"), not a separate numeric identifier. Plain `string[]`
+   * rather than `AdminUserRole[]` because this also carries permission-group ids (e.g.
+   * "timecard_approver" — see adminUsers.ts's approver search) that aren't part of the
+   * `AdminUserRole` enum. Mirrors the webapp's UserSearchFilters.roleIds. */
+  roleIds?: string[];
   /** ServiceNow data source only. */
   active?: boolean;
 }

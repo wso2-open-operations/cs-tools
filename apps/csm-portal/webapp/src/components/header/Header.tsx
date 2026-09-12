@@ -15,7 +15,7 @@
 // under the License.
 
 import { type JSX } from "react";
-import { Header as HeaderUI } from "@wso2/oxygen-ui";
+import { Box, Header as HeaderUI } from "@wso2/oxygen-ui";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
 import PinnedTabs from "@features/csm-recent/components/PinnedTabs";
@@ -38,9 +38,14 @@ export default function Header({
         <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
       )}
       <Brand />
-      <QuickNav />
-      <PinnedTabs />
-      <Actions />
+      {!hideProjectControls && <QuickNav />}
+      {!hideProjectControls && <PinnedTabs />}
+      {/* QuickNav/PinnedTabs normally occupy the middle space that pushes
+          Actions to the right edge; without them, Actions would collapse
+          next to Brand instead of staying right-aligned like every other
+          page's header. */}
+      {hideProjectControls && <Box sx={{ flexGrow: 1 }} />}
+      <Actions hideProjectControls={hideProjectControls} />
     </HeaderUI>
   );
 }

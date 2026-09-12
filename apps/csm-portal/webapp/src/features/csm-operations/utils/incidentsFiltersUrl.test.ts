@@ -31,7 +31,8 @@ describe("readIncidentFiltersFromUrl", () => {
   it("parses a fully-populated query string", () => {
     const params = new URLSearchParams(
       "incQ=timeout&incPriorities=HIGH,LOW&incSlaViolated=1" +
-        "&incCreatedFrom=2026-05-01&incCreatedTo=2026-05-31&incProducts=Choreo,Asgardeo",
+        "&incCreatedFrom=2026-05-01&incCreatedTo=2026-05-31&incProducts=Choreo,Asgardeo" +
+        "&incSreTeams=team-apollo,team-atlas",
     );
     expect(readIncidentFiltersFromUrl(params)).toEqual({
       search: "timeout",
@@ -40,7 +41,16 @@ describe("readIncidentFiltersFromUrl", () => {
       createdStartDate: "2026-05-01",
       createdEndDate: "2026-05-31",
       products: ["Choreo", "Asgardeo"],
+      sreTeamIds: ["team-apollo", "team-atlas"],
     });
+  });
+
+  it("drops blank/whitespace SRE team entries", () => {
+    const params = new URLSearchParams("incSreTeams=team-apollo,%20%20,,team-atlas");
+    expect(readIncidentFiltersFromUrl(params).sreTeamIds).toEqual([
+      "team-apollo",
+      "team-atlas",
+    ]);
   });
 
   it("drops values outside the allowed priority enum", () => {
@@ -125,8 +135,17 @@ describe("writeIncidentFiltersToUrl", () => {
       createdStartDate: "2026-05-01",
       createdEndDate: "2026-05-31",
       products: ["Choreo", "Asgardeo"],
+      sreTeamIds: ["team-apollo", "team-atlas"],
     };
     const round = readIncidentFiltersFromUrl(writeIncidentFiltersToUrl(filters));
     expect(round).toEqual(filters);
+  });
+
+  it("omits incSreTeams when no SRE team is selected", () => {
+    const params = writeIncidentFiltersToUrl({
+      ...DEFAULT_INCIDENT_FILTERS,
+      sreTeamIds: [],
+    });
+    expect(params.has("incSreTeams")).toBe(false);
   });
 });

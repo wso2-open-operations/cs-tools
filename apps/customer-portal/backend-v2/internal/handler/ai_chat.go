@@ -46,6 +46,10 @@ type entityConversationClient interface {
 	GetConversation(ctx context.Context, id string) (entity.ConversationDetails, error)
 	CreateConversation(ctx context.Context, req entity.CreateConversationRequest) (entity.CreateConversationResponse, error)
 	UpdateConversation(ctx context.Context, id string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error)
+	// GetProject resolves the project's owning account, so a chat message is
+	// billed to the account the caller belongs to rather than to the project.
+	// Same method and same reason as WebSocketHandler's entityCommentCreator.
+	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
 }
 
 // AIChatHandler handles HTTP requests for the AI chat feature: case
@@ -61,6 +65,25 @@ type AIChatHandler struct {
 // NewAIChatHandler creates an AIChatHandler backed by the given AI chat agent and entity clients.
 func NewAIChatHandler(ai aiChatAgentClient, entityClient entityConversationClient) *AIChatHandler {
 	return &AIChatHandler{ai: ai, entity: entityClient}
+}
+
+// resolveAccountID resolves the account that owns projectID, for the agent's
+// per-account token budget. The WebSocket path does this once per connection
+// (see HandleWebSocket); the REST paths have no connection to hang it on, so
+// they resolve per request instead.
+//
+// Falls back to the project ID when entity-service reports no account, which is
+// what the frontend does too (`projectDetails?.account?.id || projectId`) — the
+// agent rejects an empty accountId outright.
+func (h *AIChatHandler) resolveAccountID(ctx context.Context, projectID string) (string, error) {
+	project, err := h.entity.GetProject(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	if project.Account.ID == "" {
+		return projectID, nil
+	}
+	return project.Account.ID, nil
 }
 
 // ClassifyCase handles POST /cases/classify.
@@ -235,6 +258,15 @@ func (h *AIChatHandler) CreateConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Resolved before the conversation is created: if this fails, no orphaned
+	// conversation is left behind for a project we could not resolve.
+	accountID, err := h.resolveAccountID(r.Context(), projectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to resolve project account", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to create a new conversation.")
+		return
+	}
+
 	convResp, err := h.entity.CreateConversation(r.Context(), entity.CreateConversationRequest{
 		ProjectID:      projectID,
 		InitialMessage: req.Message,
@@ -248,7 +280,7 @@ func (h *AIChatHandler) CreateConversation(w http.ResponseWriter, r *http.Reques
 
 	chatResp, err := h.ai.CreateChat(r.Context(), aichatagent.ChatPayload{
 		Message:        req.Message,
-		AccountID:      projectID,
+		AccountID:      accountID,
 		ConversationID: conversationID,
 		EnvProducts:    req.EnvProducts,
 	})
@@ -337,9 +369,16 @@ func (h *AIChatHandler) SendConversationMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	accountID, err := h.resolveAccountID(r.Context(), projectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to resolve project account", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to process conversation message.")
+		return
+	}
+
 	chatResp, err := h.ai.CreateChat(r.Context(), aichatagent.ChatPayload{
 		Message:        req.Message,
-		AccountID:      projectID,
+		AccountID:      accountID,
 		ConversationID: conversationID,
 		EnvProducts:    req.EnvProducts,
 	})

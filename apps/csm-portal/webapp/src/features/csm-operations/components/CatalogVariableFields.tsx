@@ -35,6 +35,7 @@ import {
   isDescriptionField,
   isFileCopyPathField,
   isMultiLineField,
+  usableChoices,
   variableLabel,
 } from "@features/csm-operations/utils/catalogVariables";
 import { formatDateTimeLocal, parseDateTimeLocal } from "@utils/dateTime";
@@ -49,11 +50,12 @@ interface CatalogVariableFieldsProps {
 }
 
 /**
- * Renders a catalog item's user-editable variables, one input per variable,
- * picking the control from the ServiceNow variable `type`/label: Yes/No select,
- * multi-line text, datetime picker, rich-text Description, or single-line text.
- * File Copy Path fields are optional; attachment fields are handled by the
- * page's shared attachments section and are not rendered here.
+ * Renders a catalog item's user-editable variables, one input per variable.
+ * A variable that carries a usable choice list becomes a real select over
+ * those options; otherwise the control comes from the variable `type`/label:
+ * Yes/No select, multi-line text, datetime picker, rich-text Description, or
+ * single-line text. File Copy Path fields are optional; attachment fields are
+ * handled by the page's shared attachments section and are not rendered here.
  */
 export default function CatalogVariableFields({
   variables,
@@ -67,17 +69,59 @@ export default function CatalogVariableFields({
           const value = values[v.id] ?? "";
           const label = variableLabel(v);
 
-          if (isChoiceField(v)) {
+          // A supplied choice list wins over every type heuristic below: it
+          // is the backing data source's own answer set for this question, so
+          // the field must offer exactly those options. `choices` is omitted
+          // for non-choice variables, and an all-malformed list yields none —
+          // both fall through to the heuristics rather than rendering an
+          // empty dropdown.
+          const choices = usableChoices(v);
+          if (choices.length > 0) {
             const labelId = `sr-var-${v.id}-label`;
+            // Same required rule as the control this replaces for a given
+            // variable — File Copy Path stays optional, everything else is
+            // mandatory. No mandatory flag exists in the contract yet.
+            const required = !isFileCopyPathField(v);
             return (
               <Grid key={v.id} size={{ xs: 12, sm: 6 }}>
-                <FormControl fullWidth size="small" required>
-                  <InputLabel id={labelId}>{label}</InputLabel>
+                <FormControl fullWidth size="small" required={required}>
+                  <InputLabel id={labelId} shrink={value !== ""} sx={{ top: "0px !important" }}>
+                    {label}
+                  </InputLabel>
                   <Select
                     labelId={labelId}
                     label={label}
                     value={value}
                     onChange={(e) => onChange(v.id, String(e.target.value))}
+                    notched={value !== ""}
+                  >
+                    {choices.map((c) => (
+                      // The submitted value is the option's `value`; `text`
+                      // is display only.
+                      <MenuItem key={c.value} value={c.value}>
+                        {c.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            );
+          }
+
+          if (isChoiceField(v)) {
+            const labelId = `sr-var-${v.id}-label`;
+            return (
+              <Grid key={v.id} size={{ xs: 12, sm: 6 }}>
+                <FormControl fullWidth size="small" required>
+                  <InputLabel id={labelId} shrink={value !== ""} sx={{ top: "0px !important" }}>
+                    {label}
+                  </InputLabel>
+                  <Select
+                    labelId={labelId}
+                    label={label}
+                    value={value}
+                    onChange={(e) => onChange(v.id, String(e.target.value))}
+                    notched={value !== ""}
                   >
                     <MenuItem value="Yes">Yes</MenuItem>
                     <MenuItem value="No">No</MenuItem>

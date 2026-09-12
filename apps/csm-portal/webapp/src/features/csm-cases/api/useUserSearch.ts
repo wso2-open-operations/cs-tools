@@ -30,10 +30,27 @@ import {
 /** Page size for the lazy-loaded (scroll-to-load-more) assignee filter. */
 export const USER_PAGE_SIZE = 10;
 
-/** A single directory match: name (label) + email (the filter value). */
+/** A single directory match: name (label), email, and id — different callers
+ * filter on different ones (the assignee/`createdBy` pickers store the
+ * email; an `anyOf` branch's `assignedUserId` row stores the id). `id` is
+ * optional here: `POST /users/search` does not guarantee it on every row, and
+ * an id-less row is still perfectly usable by an email-keyed consumer — only
+ * an id-keyed consumer (`AsyncAssignedUserIdMultiSelect`/
+ * `AsyncUserIdMultiSelect`) needs to additionally filter for it. */
 export interface UserSearchOption {
+  id?: string;
   name: string;
   email: string;
+}
+
+/** Optional server-side scoping beyond the typed search term — e.g. an
+ * id-keyed picker that should only ever offer internal staff (see
+ * `AsyncUserIdMultiSelect`'s own `roleIds`/`active` props). Left unset, the
+ * search is unscoped, matching this hook's original assignee/`createdBy`
+ * behavior. */
+export interface UserSearchScope {
+  roleIds?: string[];
+  active?: boolean;
 }
 
 /** Flattened, paginated result for the lazy-loaded assignee filter. */
@@ -57,21 +74,30 @@ export interface InfiniteUserSearch {
  * empty query lists the directory a page at a time; a typed query sends
  * `searchQuery` to `POST /users/search` so anyone is findable, not just the
  * first page of users. The `oneOf` PG/SN response is normalized so the picker
- * never branches on the live data source.
+ * never branches on the live data source. An optional {@link UserSearchScope}
+ * narrows the search server-side (e.g. internal-only, active-only) for a
+ * caller that should never offer, say, a customer contact — left unset, the
+ * search stays unscoped.
  */
 export function useInfiniteUserSearch(
   query: string,
   enabled: boolean,
+  scope?: UserSearchScope,
 ): InfiniteUserSearch {
   const api = useBackendApi();
   const q = query.trim();
 
   const result = useInfiniteQuery<NormalizedUserSearchResult, Error>({
-    queryKey: ["csm-users", "assignee-search", q],
+    queryKey: ["csm-users", "assignee-search", q, scope?.roleIds, scope?.active],
     queryFn: async ({ pageParam }) => {
+      const filters: SearchUsersRequest["filters"] = {
+        ...(q.length > 0 && { searchQuery: q }),
+        ...(scope?.roleIds && { roleIds: scope.roleIds }),
+        ...(scope?.active !== undefined && { active: scope.active }),
+      };
       const request: SearchUsersRequest = {
         pagination: { offset: pageParam as number, limit: USER_PAGE_SIZE },
-        ...(q.length > 0 ? { filters: { searchQuery: q } } : {}),
+        ...(Object.keys(filters ?? {}).length > 0 && { filters }),
       };
       const res = await api.post<SearchUsersRequest, SearchUsersResponse>(
         "/users/search",
@@ -98,14 +124,17 @@ export function useInfiniteUserSearch(
 
   // Flatten every fetched page, keeping only rows with both a name (the label)
   // and an email (the filter value), de-duplicated by email so paging can't
-  // surface the same person twice.
+  // surface the same person twice. `id` is kept when present but never
+  // required here — `POST /users/search` doesn't guarantee it, and the
+  // email-keyed pickers (assignee/`createdBy`) don't need it at all; only an
+  // id-keyed consumer filters for `id` itself.
   const users = useMemo(() => {
     const seen = new Set<string>();
     const out: UserSearchOption[] = [];
     for (const u of (result.data?.pages ?? []).flatMap((p) => p.users)) {
       if (!u.email || !u.name || seen.has(u.email)) continue;
       seen.add(u.email);
-      out.push({ name: u.name, email: u.email });
+      out.push({ id: u.id, name: u.name, email: u.email });
     }
     return out;
   }, [result.data]);

@@ -60,6 +60,19 @@ type snCatalogItemVariable struct {
 	QuestionText string `json:"questionText"`
 	Order        int    `json:"order"`
 	Type         string `json:"type"`
+	// Choices carries the selectable options for a choice-based variable. Absent
+	// for free-text variable types, which are the majority, so this must tolerate
+	// absence.
+	Choices []snCatalogVariableChoice `json:"choices"`
+}
+
+// snCatalogVariableChoice mirrors one option on a choice-based catalog item
+// variable. Every field is nullable upstream, so all three are pointers and an
+// unset one stays null rather than becoming "" or 0.
+type snCatalogVariableChoice struct {
+	Value *string `json:"value"`
+	Text  *string `json:"text"`
+	Order *int    `json:"order"`
 }
 
 // snCatalogItemVariablesResponse mirrors the Choreo GET /catalogs/{id}/items/{id}/variables response.
@@ -157,12 +170,26 @@ func (s *snCatalogService) GetCatalogItemVariables(ctx context.Context, catalogI
 
 	variables := make([]domain.CatalogItemVariable, 0, len(snResp.Variables))
 	for _, v := range snResp.Variables {
-		variables = append(variables, domain.CatalogItemVariable{
+		variable := domain.CatalogItemVariable{
 			ID:           sysidToUUID(v.ID),
 			QuestionText: v.QuestionText,
 			Order:        v.Order,
 			Type:         v.Type,
-		})
+		}
+		if len(v.Choices) > 0 {
+			// Choice order is the backing data source's own, and drives how the
+			// options are listed on the form, so it is passed through untouched.
+			choices := make([]domain.CatalogVariableChoice, 0, len(v.Choices))
+			for _, c := range v.Choices {
+				choices = append(choices, domain.CatalogVariableChoice{
+					Value: c.Value,
+					Text:  c.Text,
+					Order: c.Order,
+				})
+			}
+			variable.Choices = choices
+		}
+		variables = append(variables, variable)
 	}
 
 	return domain.GetCatalogItemVariablesResponse{Variables: variables}, nil

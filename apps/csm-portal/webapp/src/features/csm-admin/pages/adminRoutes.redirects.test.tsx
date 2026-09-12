@@ -25,8 +25,18 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { MemoryRouter, Navigate, Route, Routes } from "react-router";
+import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import { SectionIndexRedirect } from "@components/section-tabs/SectionTabs";
+
+/** Mirrors App.tsx's own (unexported) `LegacySettingsRedirect` — forwards
+ * `location.state` through the legacy `/admin/<page>` -> `/admin/user-
+ * management/<page>` redirect hop, since a bare `<Navigate to={...}
+ * replace />` has no `state` prop bound to the incoming navigation and would
+ * silently drop it. */
+function LegacySettingsRedirect({ to }: { to: string }) {
+  const { state } = useLocation();
+  return <Navigate to={to} state={state} replace />;
+}
 
 vi.mock("@context/current-user/CurrentUserContext", () => ({
   useCurrentUser: () => ({
@@ -48,7 +58,7 @@ vi.mock("@config/apiConfig", () => ({
 
 import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
 
-function renderAdminRoutes(initialEntry: string) {
+function renderAdminRoutes(initialEntry: string | { pathname: string; state?: unknown }) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -70,23 +80,23 @@ function renderAdminRoutes(initialEntry: string) {
         </Route>
         <Route
           path="/admin/users"
-          element={<Navigate to="/admin/user-management/users" replace />}
+          element={<LegacySettingsRedirect to="/admin/user-management/users" />}
         />
         <Route
           path="/admin/roles"
-          element={<Navigate to="/admin/user-management/roles" replace />}
+          element={<LegacySettingsRedirect to="/admin/user-management/roles" />}
         />
         <Route
           path="/admin/groups"
-          element={<Navigate to="/admin/user-management/groups" replace />}
+          element={<LegacySettingsRedirect to="/admin/user-management/groups" />}
         />
         <Route
           path="/admin/teams"
-          element={<Navigate to="/admin/user-management/teams" replace />}
+          element={<LegacySettingsRedirect to="/admin/user-management/teams" />}
         />
         <Route
           path="/admin/permissions"
-          element={<Navigate to="/admin/user-management/permissions" replace />}
+          element={<LegacySettingsRedirect to="/admin/user-management/permissions" />}
         />
       </Routes>
     </MemoryRouter>,
@@ -115,5 +125,19 @@ describe("legacy /admin/<page> redirects", () => {
   ])("redirects %s to the new User management path", (oldPath, expectedContent) => {
     renderAdminRoutes(oldPath);
     expect(screen.getByText(expectedContent)).toBeInTheDocument();
+  });
+
+  // Regression: a bare `<Navigate to={...} replace />` has no `state` prop
+  // bound to the incoming navigation, so a dashboard widget's `resourceType:
+  // "user"` click-through (which sets `state.from`) would silently lose it
+  // on this exact hop -- landing on the new path with `CsmAdminLayout`'s
+  // Back button unable to tell it apart from a cold/direct link, forcing it
+  // back to the tile grid instead of the real origin.
+  it("forwards location.state through the legacy /admin/users redirect, so Back still knows its real origin", () => {
+    renderAdminRoutes({ pathname: "/admin/users", state: { from: "/dashboard" } });
+    expect(screen.getByText("Users content")).toBeInTheDocument();
+
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back).toBeInTheDocument();
   });
 });

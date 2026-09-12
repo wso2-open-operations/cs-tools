@@ -162,7 +162,7 @@ export default function AsyncProjectMultiSelect({
         const content = (
           <Box
             component="span"
-            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pl: 1 }}
           >
             {displayText}
           </Box>
@@ -178,9 +178,16 @@ export default function AsyncProjectMultiSelect({
         return (
           <li key={key} {...liProps} style={{ paddingTop: 2, paddingBottom: 2 }}>
             <Checkbox size="small" checked={selected} sx={{ mr: 1, p: 0.25 }} />
+            {/* A project name can run long with no space near the end
+                (e.g. a slash-joined account/subscription name) --
+                without `overflowWrap`, it only breaks at a space/hyphen,
+                then overflows and gets clipped by the popup's own
+                overflow instead of wrapping onto a further line. */}
             <ListItemText
               primary={option.name}
-              slotProps={{ primary: { style: { fontSize: 13 } } }}
+              slotProps={{
+                primary: { style: { fontSize: 13, overflowWrap: "anywhere" } },
+              }}
             />
           </li>
         );

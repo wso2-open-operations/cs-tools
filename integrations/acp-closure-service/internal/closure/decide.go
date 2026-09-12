@@ -121,7 +121,7 @@ func dueWindow(daysRemaining int, lastNoticeWindow *NoticeWindow) (NoticeWindow,
 // StubEndDate is the single seam through which callers will eventually read
 // a project's real subscription end date. entity-service's POST
 // /projects/search does not yet return endDate in its response (tracked:
-// digiops-cs#2524, entity-service team). Swap this function's body for a
+//, entity-service team). Swap this function's body for a
 // direct field read once it ships — no other code in this package needs to
 // change.
 func StubEndDate(projectID string) time.Time {

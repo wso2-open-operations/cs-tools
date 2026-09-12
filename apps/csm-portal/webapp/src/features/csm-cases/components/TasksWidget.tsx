@@ -19,7 +19,6 @@ import {
   Button,
   Card,
   Chip,
-  IconButton,
   Skeleton,
   Table,
   TableBody,
@@ -35,6 +34,7 @@ import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { taskStateColor, taskStateLabel } from "@features/csm-cases/utils/taskState";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import RelativeTime from "@components/RelativeTime";
+import RefreshButton from "@components/RefreshButton";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 
 const TASKS_TABLE_COLUMNS = ["Subject", "State", "Due date", "Assignee", "Updated"];
@@ -50,8 +50,16 @@ interface TasksWidgetProps {
  * small read-only detail dialog rather than a full separate detail page.
  */
 export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
-  const { data, isLoading, isError, isFetching, refetch } = useSearchCaseTasks(caseId);
+  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
+    useSearchCaseTasks(caseId);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  // The error-state Retry button below can't drive `RefreshButton`'s own
+  // internal "has been clicked" state (not exposed to the parent), so it
+  // gets its own minimal handler that just re-triggers the fetch.
+  const handleRetryClick = (): void => {
+    void refetch();
+  };
 
   const tasks = data?.tasks ?? [];
   const total = data?.total ?? tasks.length;
@@ -77,14 +85,12 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
               <Chip size="small" variant="outlined" label={`${total} total`} />
             )}
           </Box>
-          <IconButton
-            size="small"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            aria-label="Refresh tasks"
-          >
-            <RefreshCw size={14} />
-          </IconButton>
+          <RefreshButton
+            onRefresh={() => void refetch()}
+            isFetching={isFetching}
+            updatedAt={dataUpdatedAt}
+            label="Refresh tasks"
+          />
         </Box>
 
         {isTruncated ? (
@@ -111,7 +117,7 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
               size="small"
               variant="outlined"
               startIcon={<RefreshCw size={14} />}
-              onClick={() => void refetch()}
+              onClick={handleRetryClick}
               sx={{ textTransform: "none" }}
             >
               Retry
@@ -167,7 +173,11 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
                       aria-label={`View task ${task.subject}`}
                       sx={{ cursor: "pointer" }}
                     >
-                      <TableCell>{task.subject}</TableCell>
+                      <TableCell sx={{ maxWidth: 360 }}>
+                        <Typography variant="body2" noWrap title={task.subject}>
+                          {task.subject}
+                        </Typography>
+                      </TableCell>
                       <TableCell>
                         <Chip
                           size="small"

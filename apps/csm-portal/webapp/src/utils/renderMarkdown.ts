@@ -33,12 +33,32 @@ const md: MarkdownIt = new MarkdownIt({
   breaks: true,
 });
 
+/**
+ * Same as {@link md}, but with `breaks: false` for long-form prose (e.g. the
+ * in-app Help docs) that's hand-wrapped at a fixed column width in its
+ * Markdown source for readability — with `breaks: true`, every one of those
+ * source line-wraps renders as a forced `<br>`, breaking each line far short
+ * of its container's real width instead of reflowing normally.
+ */
+const mdProse: MarkdownIt = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: false,
+});
+
 // Wrap tables in a scrollable container instead of making the <table> itself a
 // scroll box: `display: block` on a <table> drops its implicit table/row/cell
 // roles for assistive tech. The wrapper scrolls; the table keeps native display.
-md.renderer.rules.table_open = () => '<div class="md-table-wrap">\n<table>\n';
-md.renderer.rules.table_close = () => "</table>\n</div>\n";
+for (const target of [md, mdProse]) {
+  target.renderer.rules.table_open = () => '<div class="md-table-wrap">\n<table>\n';
+  target.renderer.rules.table_close = () => "</table>\n</div>\n";
+}
 
 export function markdownToHtml(source: string | undefined | null): string {
   return md.render(source ?? "");
+}
+
+/** {@link markdownToHtml}, for hand-wrapped long-form prose — see {@link mdProse}. */
+export function markdownToHtmlProse(source: string | undefined | null): string {
+  return mdProse.render(source ?? "");
 }

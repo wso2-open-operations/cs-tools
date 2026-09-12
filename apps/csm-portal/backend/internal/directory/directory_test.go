@@ -188,6 +188,15 @@ func TestNew_RejectsDuplicates(t *testing.T) {
 	if _, err := New(dupGroupID, DefaultRoles); err == nil {
 		t.Error("duplicate creGroupId was accepted")
 	}
+	// Same reasoning, for the parallel SreGroupID/bySreGroupID map. The
+	// 5-field form (key|name|family||sreGroupId) is needed to land the id in
+	// SreGroupID's slot rather than CreGroupID's.
+	dupSreGroupID, _ := ParseTeamRegistry(
+		"alpha|Alpha Team|||bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb," +
+			"beta|Beta Team|||bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if _, err := New(dupSreGroupID, DefaultRoles); err == nil {
+		t.Error("duplicate sreGroupId was accepted")
+	}
 }
 
 // An unconfigured registry is legal: the deployment still has to start.
@@ -355,6 +364,29 @@ func TestTeamByUUID_ResolvesTheConfiguredTeam(t *testing.T) {
 	// unintended fallback.
 	if _, ok := dir.TeamByUUID(""); ok {
 		t.Error("TeamByUUID matched the empty string against an unconfigured group id")
+	}
+}
+
+// An SRE-only team -- no CreGroupID configured at all, e.g. a real SRE ABT
+// like Apollo -- must still resolve through TeamByUUID via its SreGroupID.
+// Before bySreGroupID existed, TeamByUUID only ever checked byCreGroupID, so
+// such a team's UUID could never be found regardless of how correctly its
+// SreGroupID was configured -- this is the regression this test guards.
+func TestTeamByUUID_ResolvesSreOnlyTeam(t *testing.T) {
+	dir := mustDirectory(t, "delta|Delta Team|sre-abt||bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
+
+	team, ok := dir.TeamByUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	if !ok {
+		t.Fatal("TeamByUUID missed the SRE-only delta team")
+	}
+	if team.Key != "delta" {
+		t.Fatalf("TeamByUUID resolved %+v, want the delta row", team)
+	}
+
+	// A well-formed UUID that matches no configured team's group id, CRE or
+	// SRE.
+	if _, ok := dir.TeamByUUID("ffffffff-ffff-ffff-ffff-ffffffffffff"); ok {
+		t.Error("TeamByUUID matched a UUID no team is configured with")
 	}
 }
 

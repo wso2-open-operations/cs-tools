@@ -17,27 +17,42 @@
 import { Button } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import { useSearchParams } from "react-router";
 
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+import { readWidgetTitleParam } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 /**
  * Cross-customer engagements list — filters the shared issues view to
  * `type: engagement` and surfaces the engagement-type sub-filter so engineers
  * can narrow by migration, consultancy, onboarding, etc.
+ *
+ * `title` defaults to "Engagements", the page's own real identity for a
+ * normal left-nav visit, but is overridden by a dashboard widget's own
+ * `displayName` when this page was reached via an `engagement`-resourceType
+ * widget's tile click (see `WIDGET_RESOURCE_CONFIG.engagement.buildHref` in
+ * `widgetResourceConfig.ts`, and `appendWidgetTitleParam`'s own doc comment)
+ * — digiops-cs#2914: several dashboard widgets all drill through to this one
+ * page, and a hardcoded "Engagements" heading made it unclear which widget's
+ * filtered result set was actually being shown.
  */
 export default function CsmEngagementsPage(): JSX.Element {
   const navigate = useNavTransition();
+  const [searchParams] = useSearchParams();
+  const title = readWidgetTitleParam(searchParams) ?? "Engagements";
 
   return (
     <CsmIssuesView
-      title="Engagements"
+      title={title}
       entityNoun="engagements"
       lockedFilters={{ caseTypes: ["engagement"] }}
       hideTypeFilter
       showEngagementTypeFilter
       detailBasePath="/engagements"
       hideSeverityColumn
+      enableColumnCustomization
+      columnsViewId="engagements"
       actions={
         <Button
           variant="contained"

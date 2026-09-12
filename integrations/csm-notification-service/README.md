@@ -142,7 +142,7 @@ Required — a record that exhausts the main consumer's retries is published her
 
 ### SLA timer engine
 
-Optional, gated on `REDIS_URL` or `REDIS_ADDR` — unset (both) means `internal/slaengine` neither consumes `sla.clock.register` nor ticks. Ported from a standalone POC: registers a per-case SLA clock (durable state on entity-service's new `sla_clocks` table) when it sees a `sla.clock.register` event, tracks 50%/75%/100% elapsed via a Redis wake index, and publishes `sla.tier_reached` when a ticker finds a due entry.
+Optional, gated on `REDIS_URL` or `REDIS_ADDR` — unset (both) means `internal/slaengine` neither consumes `sla.clock.register` nor ticks. Ported from a standalone POC: registers a per-case SLA clock (durable state on entity-service's `sla_clocks` table, with durations entity-service computes from case severity per WSO2's own [support policy](https://wso2.com/licenses/support-policy/6.0)) when it sees a `sla.clock.register` event, tracks 50%/75%/100% elapsed via a Redis wake index, publishes `sla.tier_reached`, and sends a Google Chat breach alert directly (not routed through `internal/dispatch`) when a ticker finds a due, still-unresolved entry. Pausing, resuming, and completing a clock early (e.g. a support engineer's first response) never touch this service at all — those are direct, in-process writes from entity-service's own case-handling code straight to its `sla_clocks` table; see that repo's `CLAUDE.md`.
 
 `REDIS_URL` (a `rediss://:<password>@<host>:<port>` connection string, parsed with `redis.ParseURL`) is how a managed, TLS-only Redis is configured — Azure Managed Redis, Azure Cache for Redis — since the `rediss` scheme makes go-redis dial with TLS automatically; takes priority over `REDIS_ADDR`/`REDIS_PASSWORD` when set. `REDIS_ADDR`/`REDIS_PASSWORD` remain the plain, non-TLS pair for a local Redis.
 
@@ -158,6 +158,17 @@ This engine's own narrow `sla_clocks` client talks to the same entity-service as
 | `SLA_CONSUMER_GROUP` | Consumer group ID this engine's own consumer instances join — independent from `EVENT_HUB_CONSUMER_GROUP`/`EVENT_HUB_DLQ_CONSUMER_GROUP`. Optional — defaults to `csm-notification-service-sla` |
 | `SLA_CONSUMER_COUNT` | How many concurrent consumer instances to run. Optional — defaults to `1` |
 | `SLA_TICK_INTERVAL` | How often the ticker scans the Redis wake index for due tiers. Optional — defaults to `15s` |
+
+### Billable status engine
+
+Always started (no Redis/state dependency, unlike the SLA timer engine above). `internal/timecardengine.Engine` consumes `case.billable_status_changed` — published by entity-service's Postgres data source when a case's severity crosses into or out of `LOW` — on its own dedicated consumer group, for the same reason the SLA timer engine has one: `eventbus.Consumer` processes one record at a time, fully sequentially, so a future bulk time-card update must not delay unrelated email/Chat delivery on `dispatch.Dispatcher`'s own consumer group.
+
+**Currently log-only.** Entity-service has no `time_cards` table on its Postgres data source yet (time cards are ServiceNow-only there), so there's no bulk-update reaction to perform — and entity-service's own `Publish` call for this event is itself still commented out. This consumer group exists ahead of need: the plumbing (topic wiring, retry/DLQ behavior, schema validation) is in place and ready for when that reaction is built.
+
+| Variable | Description |
+|---|---|
+| `TIME_CARD_CONSUMER_GROUP` | Consumer group ID this engine's own consumer instances join. Optional — defaults to `csm-notification-service-time-card` |
+| `TIME_CARD_CONSUMER_COUNT` | How many concurrent consumer instances to run. Optional — defaults to `1` |
 
 ### Server
 

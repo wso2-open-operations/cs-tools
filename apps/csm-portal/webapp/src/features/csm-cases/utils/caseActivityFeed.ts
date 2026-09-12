@@ -17,6 +17,7 @@
 import type {
   CaseAttachment,
   CaseAuditEntry,
+  CaseFeedbackEntry,
   CsmCaseComment,
 } from "@features/csm-cases/types/csmCases";
 
@@ -24,12 +25,14 @@ import type {
 export type FeedEntry =
   | { kind: "comment"; at: string; comment: CsmCaseComment }
   | { kind: "audit"; at: string; entry: CaseAuditEntry }
-  | { kind: "attachment"; at: string; attachment: CaseAttachment };
+  | { kind: "attachment"; at: string; attachment: CaseAttachment }
+  | { kind: "feedback"; at: string; feedback: CaseFeedbackEntry };
 
 export function feedEntryId(e: FeedEntry): string {
   if (e.kind === "comment") return e.comment.id;
   if (e.kind === "audit") return e.entry.id;
-  return e.attachment.id;
+  if (e.kind === "attachment") return e.attachment.id;
+  return e.feedback.id;
 }
 
 /**

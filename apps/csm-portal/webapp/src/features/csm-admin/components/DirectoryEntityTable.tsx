@@ -172,7 +172,7 @@ export default function DirectoryEntityTable({
                       hover
                       sx={{ position: "relative", cursor: "pointer" }}
                     >
-                      <TableCell sx={{ minWidth: 0, position: "relative" }}>
+                      <TableCell sx={{ minWidth: 0, maxWidth: 420, position: "relative" }}>
                         <Box
                           component={RouterLink}
                           to={destination}

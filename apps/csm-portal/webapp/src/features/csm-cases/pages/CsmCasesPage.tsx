@@ -17,24 +17,51 @@
 import { Button } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import { useSearchParams } from "react-router";
 
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+import { readWidgetTitleParam } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { useNavTransition } from "@hooks/useNavTransition";
 
-/** All-cases list — the shared issues view across every case type. */
+/**
+ * All-cases list — the shared issues view across every case type.
+ *
+ * `title` defaults to "Cases", the page's own real identity for a normal
+ * left-nav visit, but is overridden by a dashboard widget's own
+ * `displayName` when this page was reached via a `case`-resourceType
+ * widget's tile click (see `WIDGET_RESOURCE_CONFIG.case.buildHref` in
+ * `widgetResourceConfig.ts`, and `appendWidgetTitleParam`'s own doc comment)
+ * — digiops-cs#2914: several dashboard widgets all drill through to this one
+ * page, and a hardcoded "Cases" heading made it unclear which widget's
+ * filtered result set was actually being shown.
+ */
 export default function CsmCasesPage(): JSX.Element {
   const navigate = useNavTransition();
+  const [searchParams] = useSearchParams();
+  const title = readWidgetTitleParam(searchParams) ?? "Cases";
 
   return (
     <CsmIssuesView
-      title="Cases"
+      title={title}
       entityNoun="cases"
-      // Cases list is support cases only. The other issue types have dedicated
-      // homes — service requests under Operations, engagements under
-      // Engagements, security reports under Security Center — so they're locked
-      // out here (and the type filter is hidden since it's fixed to `case`).
+      // Cases list defaults to support cases (`caseTypes: ["case"]`) on a
+      // fresh visit, but, unlike the other issue-type pages (Operations/
+      // Security Center/Engagements, which exist purely to be locked to one
+      // type and hide the control), is the one unlocked, multi-type
+      // `CsmIssuesView`: the type control is left visible and fully
+      // changeable — `defaultCaseTypes` only seeds the initial selection
+      // when the URL carries no `types` param at all; picking a different
+      // type (or clearing back to no selection, which falls through to
+      // "every type" via `CsmIssuesView`'s own `ALL_CASE_TYPES` fallback)
+      // genuinely narrows/broadens the results, per digiops-cs#2907.
+      // `lockedFilters.caseTypes` is kept in lockstep purely so the severity
+      // filter/column stay visible (that hint is keyed off `lockedFilters`,
+      // not the live selection or `defaultCaseTypes` — see
+      // `CsmIssuesView`'s own `showSeverityFilter`).
+      defaultCaseTypes={["case"]}
       lockedFilters={{ caseTypes: ["case"] }}
-      hideTypeFilter
+      enableColumnCustomization
+      columnsViewId="cases"
       actions={
         <Button
           variant="contained"

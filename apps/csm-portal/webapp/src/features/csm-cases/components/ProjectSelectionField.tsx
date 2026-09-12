@@ -28,6 +28,7 @@ import { CheckCircle, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
+import type { BeProject } from "@api/backend/types";
 
 export interface ProjectSelectionFieldProps {
   /** Selected project id ("" when none picked yet). */
@@ -40,6 +41,12 @@ export interface ProjectSelectionFieldProps {
    */
   lockedProjectId?: string;
   required?: boolean;
+  /**
+   * Restricts the searchable picker to projects matching this predicate
+   * (see {@link AsyncProjectSelect}'s `filterProject`). Not applied to the
+   * locked-project display — a project arriving locked is trusted as-is.
+   */
+  filterProject?: (project: BeProject) => boolean;
 }
 
 /**
@@ -60,6 +67,7 @@ export default function ProjectSelectionField({
   onChange,
   lockedProjectId,
   required,
+  filterProject,
 }: ProjectSelectionFieldProps): JSX.Element {
   const isLocked = !!lockedProjectId;
   // Picked from the Autocomplete but not yet confirmed in the dialog below —
@@ -117,6 +125,7 @@ export default function ProjectSelectionField({
             if (next) setPendingProjectId(next);
           }}
           required={required}
+          filterProject={filterProject}
         />
         {/*
           A plain `Modal` + `Paper` rather than `Dialog` — `Dialog`'s paper is

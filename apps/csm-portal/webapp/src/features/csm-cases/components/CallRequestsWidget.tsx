@@ -292,11 +292,25 @@ export function CallRequestsWidget({
             />
             {/* State filter */}
             <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel id="cr-filter-label">Filter by state</InputLabel>
+              <InputLabel
+                id="cr-filter-label"
+                // oxygen-ui's own theme shifts an unshrunk label up by
+                // `top: -7px` for any Select-backed field (see
+                // `MultiSelectField.tsx`'s doc comment) -- tie `shrink` to
+                // whether a state is actually picked, rather than MUI's
+                // focus-driven default, and force the cascade with
+                // `!important` since a plain `sx={{ top: 0 }}` loses to that
+                // theme rule's higher specificity.
+                shrink={stateFilter !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Filter by state
+              </InputLabel>
               <Select
                 labelId="cr-filter-label"
                 value={stateFilter}
                 label="Filter by state"
+                notched={stateFilter !== ""}
                 onChange={(e) =>
                   setStateFilter(e.target.value as BeCallRequestStateKey | "")
                 }

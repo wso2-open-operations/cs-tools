@@ -89,6 +89,31 @@ export interface ProjectDetails {
   updatedOn: string;
   /** Free-form closure-state string; see {@link Project.closureState}. */
   closureState: string | null;
+  /** Whether this project is eligible to raise service requests, as
+   *  precomputed by the backing data source. */
+  hasSr?: boolean;
+  /** Onboarding engagement status (ServiceNow data source only; `null`/absent
+   *  elsewhere and when the project has no onboarding engagement at all).
+   *  Treat the project as onboarding-enabled — and only then show
+   *  {@link onboardingOwner} — when this is present and not `"Not-Applicable"`. */
+  onboardingStatus?:
+    | "Not-Started"
+    | "In-Progress"
+    | "OnHold"
+    | "Completed"
+    | "Expired"
+    | "Cancelled"
+    | "Not-Applicable"
+    | null;
+  /** The onboarding consultant/owner assigned to this project. `null` for
+   *  most projects — only set for onboarding-enabled ones. Only meaningful
+   *  when {@link onboardingStatus} indicates onboarding is enabled.
+   *  Mirrors the shared {@link UserReference} shape (id/name/email), except
+   *  `email` here can genuinely be `null` (unlike `UserReference.email`,
+   *  which the backend always populates with something, even a non-email
+   *  placeholder) — this is a raw ServiceNow-sourced contact and may have no
+   *  email on file. */
+  onboardingOwner?: { id: string; name: string; email: string | null } | null;
 }
 
 export interface SearchProjectsRequest {
@@ -107,4 +132,21 @@ export interface SearchProjectsResponse {
   limit: number;
   offset: number;
   hasMore: boolean;
+}
+
+/**
+ * A file attached to a deployment (`referenceType: "deployment"` on the
+ * shared, reference-generic `/attachments*` endpoints — see
+ * `BeAttachment` in `@api/backend/types`).
+ */
+export interface DeploymentAttachment {
+  id: string;
+  name: string;
+  /** MIME type (e.g. image/png, application/pdf). */
+  contentType: string;
+  sizeBytes: number;
+  description?: string | null;
+  uploadedBy: string;
+  uploadedOn: string;
+  downloadUrl?: string | null;
 }

@@ -27,6 +27,7 @@ import "@testing-library/jest-dom/vitest";
 import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncementsPage";
 import { useSearchAnnouncements } from "@features/csm-announcements/api/useSearchAnnouncements";
 import type { CsmAnnouncementRow } from "@features/csm-announcements/types/csmAnnouncements";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 // The backend client reads runtime config (`CSM_PORTAL_BACKEND_BASE_URL`) at
 // module load, which isn't present under vitest. QueryErrorState imports
@@ -47,7 +48,19 @@ vi.mock("@features/csm-cases/components/AsyncProjectMultiSelect", () => ({
   default: () => <div data-testid="project-filter" />,
 }));
 
+// The signed-in user's profile/id-token claims aren't relevant to this page's
+// own behavior — only the column picker's storage key derives from them
+// (see useColumnPreferences.test.ts for that logic).
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),
+}));
+vi.mock("@hooks/useIdTokenClaims", () => ({
+  useIdTokenClaims: () => ({ email: "user@example.test" }),
+}));
+
 const mockedUseSearch = vi.mocked(useSearchAnnouncements);
+// Number, Reference, Subject, Project, State, Created by, Created, Updated.
+const ANNOUNCEMENT_COLUMN_COUNT = 8;
 
 /** `CsmAnnouncementsPage` renders a `RouterLink` per row, so every render
  * here needs router context. */
@@ -81,6 +94,7 @@ function mockResult(
 
 beforeEach(() => {
   mockedUseSearch.mockReset();
+  window.localStorage.clear();
 });
 
 describe("CsmAnnouncementsPage — list states", () => {
@@ -134,6 +148,91 @@ describe("CsmAnnouncementsPage — filters default to show-all", () => {
     // The most recent render's filters carry the selected state.
     const lastCall = mockedUseSearch.mock.calls.at(-1)!;
     expect(lastCall[0].states).toContain("closed");
+  });
+});
+
+describe("CsmAnnouncementsPage — customise columns", () => {
+  it("shows the default columns and hides Created until the user adds it", () => {
+    mockResult({
+      data: { announcements: [ROW], total: 1, limit: 20, offset: 0, hasMore: false },
+    });
+    render(<CsmAnnouncementsPage />);
+
+    expect(screen.getByRole("columnheader", { name: "Number" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Updated" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Created" })).not.toBeInTheDocument();
+  });
+
+  it("adds the Created column when checked in the picker, and it renders the row's createdAt", () => {
+    mockResult({
+      data: { announcements: [ROW], total: 1, limit: 20, offset: 0, hasMore: false },
+    });
+    render(<CsmAnnouncementsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise announcements columns" }));
+    // Column order is Number, Reference, Subject, Project, State, Created by,
+    // Created, Updated — "Created" is the 7th checkbox, one of the two
+    // available-but-hidden columns (see DEFAULT_ANNOUNCEMENT_COLUMN_IDS).
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[6]);
+
+    // The open popover marks the rest of the page `aria-hidden` (MUI's Modal
+    // machinery) — `hidden: true` looks past that to the table underneath.
+    expect(
+      screen.getByRole("columnheader", { name: "Created", hidden: true }),
+    ).toBeInTheDocument();
+    // Same format the component's own formatDate() uses for createdAt/updatedAt.
+    const expectedCreatedAt = formatBackendTimestampForDisplay(ROW.createdAt, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+    expect(screen.getByText(expectedCreatedAt!)).toBeInTheDocument();
+  });
+
+  it("adds the Reference column when checked in the picker, and it renders the row's wso2CaseId", () => {
+    mockResult({
+      data: {
+        announcements: [{ ...ROW, wso2CaseId: "ACMESUB-42" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      },
+    });
+    render(<CsmAnnouncementsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise announcements columns" }));
+    // "Reference" is the 2nd checkbox — see the column order comment above.
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]);
+
+    expect(
+      screen.getByRole("columnheader", { name: "Reference", hidden: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("ACMESUB-42")).toBeInTheDocument();
+  });
+
+  it("never lets every column be unchecked", () => {
+    mockResult({
+      data: { announcements: [ROW], total: 1, limit: 20, offset: 0, hasMore: false },
+    });
+    render(<CsmAnnouncementsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise announcements columns" }));
+    // Uncheck every column in turn (re-query each time — a re-render can
+    // change stale element references — and skip whichever one the hook has
+    // disabled as the last remaining visible column).
+    for (let i = 0; i < ANNOUNCEMENT_COLUMN_COUNT; i++) {
+      const checkbox = screen.getAllByRole("checkbox")[i];
+      if (!checkbox.hasAttribute("disabled") && (checkbox as HTMLInputElement).checked) {
+        fireEvent.click(checkbox);
+      }
+    }
+
+    // At least one column (the last remaining) is still rendered underneath
+    // the (still open) popover.
+    expect(screen.getAllByRole("columnheader", { hidden: true }).length).toBeGreaterThan(0);
   });
 });
 

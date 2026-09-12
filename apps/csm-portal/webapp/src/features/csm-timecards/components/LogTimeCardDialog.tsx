@@ -47,6 +47,7 @@ import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import type { NormalizedUser } from "@features/csm-users/types/csmUsers";
+import { useRecentApprovers } from "@features/csm-timecards/api/useTimeSheets";
 import TimeCardStatusChip from "@features/csm-timecards/components/TimeCardStatusChip";
 import type { SeverityOrUnset } from "@features/csm-dashboard/types/abtDashboard";
 import {
@@ -123,6 +124,52 @@ interface ApproverOption {
 
 function fullName(u: NormalizedUser): string {
   return u.name.trim() || u.userName;
+}
+
+/** One clickable approver candidate — shared between the "recently selected"
+ * list (shown before typing) and the live search results (shown once typed),
+ * so the two never drift into rendering the row differently. */
+function ApproverCandidateButton({
+  option,
+  onSelect,
+}: {
+  option: ApproverOption;
+  onSelect: (option: ApproverOption) => void;
+}): JSX.Element {
+  return (
+    <Button
+      data-testid="approver-candidate"
+      variant="text"
+      color="inherit"
+      onClick={() => onSelect(option)}
+      sx={{
+        justifyContent: "flex-start",
+        textTransform: "none",
+        px: 1,
+        py: 0.5,
+        gap: 1,
+      }}
+    >
+      <Avatar sx={{ width: 24, height: 24, fontSize: "0.7rem" }}>
+        {initialsOf(option.name)}
+      </Avatar>
+      <Box sx={{ minWidth: 0, textAlign: "left" }}>
+        <Typography variant="body2" noWrap>
+          {option.name}
+        </Typography>
+        {option.email && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            noWrap
+            sx={{ display: "block" }}
+          >
+            {option.email}
+          </Typography>
+        )}
+      </Box>
+    </Button>
+  );
 }
 
 /** One activity row: a labelled whole-minutes input plus a proportion bar
@@ -252,7 +299,7 @@ export default function LogTimeCardDialog({
       // Approvers must hold the timecard_approver role — listing every
       // internal WSO2 account here (the old INTERNAL_USER_ROLES filter)
       // let a submitter pick literally anyone at the company, including
-      // people with no CS/team-lead involvement at all (digiops-cs#2821).
+      // people with no CS/team-lead involvement at all.
       roleIds: [TIMECARD_APPROVER_GROUP],
       active: true,
     },
@@ -278,6 +325,48 @@ export default function LogTimeCardDialog({
       )
       .map((u) => ({ id: u.id, name: fullName(u), email: u.email }));
   }, [data, hasApproverInput, me.email]);
+
+  // Previously-selected approvers (digiops-cs#2839) — surfaced before the
+  // engineer types anything, and prioritized within the typed results, so
+  // picking the same team lead again doesn't require retyping the same
+  // search every time. Only fetched in create mode: the approver field is
+  // read-only once editing, so there's nothing for this list to feed there.
+  const { data: rawRecentApprovers = [] } = useRecentApprovers(!isEditMode);
+  const recentApproverIds = useMemo(
+    () => rawRecentApprovers.map((a) => a.id),
+    [rawRecentApprovers],
+  );
+  // Re-checked against the same active/TIMECARD_APPROVER_GROUP eligibility as
+  // live search candidates: `rawRecentApprovers` is derived purely from past
+  // card submissions (see useRecentApprovers), so an approver deactivated or
+  // removed from the role since then would otherwise still show up here.
+  // Only queried once there's something to check (empty `userIds` would
+  // otherwise be an unscoped users search).
+  const { data: recentEligibility } = useSearchUsers(
+    {
+      filters: { userIds: recentApproverIds, roleIds: [TIMECARD_APPROVER_GROUP], active: true },
+      pagination: { limit: recentApproverIds.length || 1, offset: 0 },
+    },
+    recentApproverIds.length > 0,
+  );
+  const recentApprovers: ApproverOption[] = useMemo(() => {
+    if (recentApproverIds.length === 0) return [];
+    const eligibleIds = new Set((recentEligibility?.users ?? []).map((u) => u.id));
+    return rawRecentApprovers.filter((a) => eligibleIds.has(a.id));
+  }, [rawRecentApprovers, recentApproverIds, recentEligibility]);
+  // Merges recents matching the current query ahead of the live search's own
+  // candidates, deduped by id — a recent approver who still matches what was
+  // typed should stay at the top rather than getting buried in whatever order
+  // useSearchUsers's page happens to return.
+  const approverCandidates: ApproverOption[] = useMemo(() => {
+    if (!hasApproverInput) return recentApprovers;
+    const typed = approverInput.trim().toLowerCase();
+    const recentMatches = recentApprovers.filter((a) =>
+      a.name.toLowerCase().includes(typed),
+    );
+    const recentIds = new Set(recentMatches.map((a) => a.id));
+    return [...recentMatches, ...candidates.filter((c) => !recentIds.has(c.id))];
+  }, [approverInput, candidates, hasApproverInput, recentApprovers]);
 
   const setActivity = (key: ActivityKey, next: number): void =>
     setBreakdown((prev) => ({ ...prev, [key]: next }));
@@ -450,6 +539,14 @@ export default function LogTimeCardDialog({
               value={issueComplexity}
               onChange={(e) => setIssueComplexity(e.target.value as IssueComplexity)}
               sx={{ maxWidth: { sm: 220 }, minWidth: 160 }}
+              slotProps={{
+                // `issueComplexity` always holds a real value (no empty
+                // option), so the label is always shrunk -- see
+                // MultiSelectField.tsx's doc comment for why this override
+                // is needed at all against oxygen-ui's own theme.
+                inputLabel: { shrink: true, sx: { top: "0px !important" } },
+                select: { notched: true },
+              }}
             >
               {ISSUE_COMPLEXITY_OPTIONS.map((o) => (
                 <MenuItem key={o} value={o}>
@@ -570,14 +667,36 @@ export default function LogTimeCardDialog({
                   }}
                 >
                   {!hasApproverInput ? (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ p: 1 }}
-                    >
-                      Start typing to search for an approver.
-                    </Typography>
-                  ) : candidates.length === 0 ? (
+                    approverCandidates.length === 0 ? (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ p: 1 }}
+                      >
+                        Start typing to search for an approver.
+                      </Typography>
+                    ) : (
+                      <>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ px: 1, pt: 1 }}
+                        >
+                          Recently selected
+                        </Typography>
+                        {approverCandidates.map((u) => (
+                          <ApproverCandidateButton
+                            key={u.id}
+                            option={u}
+                            onSelect={(picked) => {
+                              setApprover({ id: picked.id, name: picked.name });
+                              setApproverInput("");
+                            }}
+                          />
+                        ))}
+                      </>
+                    )
+                  ) : approverCandidates.length === 0 ? (
                     <Typography
                       variant="caption"
                       color="text.secondary"
@@ -586,43 +705,15 @@ export default function LogTimeCardDialog({
                       No matching engineers.
                     </Typography>
                   ) : (
-                    candidates.map((u) => (
-                      <Button
+                    approverCandidates.map((u) => (
+                      <ApproverCandidateButton
                         key={u.id}
-                        data-testid="approver-candidate"
-                        variant="text"
-                        color="inherit"
-                        onClick={() => {
-                          setApprover({ id: u.id, name: u.name });
+                        option={u}
+                        onSelect={(picked) => {
+                          setApprover({ id: picked.id, name: picked.name });
                           setApproverInput("");
                         }}
-                        sx={{
-                          justifyContent: "flex-start",
-                          textTransform: "none",
-                          px: 1,
-                          py: 0.5,
-                          gap: 1,
-                        }}
-                      >
-                        <Avatar sx={{ width: 24, height: 24, fontSize: "0.7rem" }}>
-                          {initialsOf(u.name)}
-                        </Avatar>
-                        <Box sx={{ minWidth: 0, textAlign: "left" }}>
-                          <Typography variant="body2" noWrap>
-                            {u.name}
-                          </Typography>
-                          {u.email && (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              noWrap
-                              sx={{ display: "block" }}
-                            >
-                              {u.email}
-                            </Typography>
-                          )}
-                        </Box>
-                      </Button>
+                      />
                     ))
                   )}
                 </Box>

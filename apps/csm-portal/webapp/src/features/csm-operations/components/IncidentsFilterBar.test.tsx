@@ -32,6 +32,21 @@ vi.mock("@features/csm-operations/api/useIncidentProductNameOptions", () => ({
   useIncidentProductNameOptions: () => useIncidentProductNameOptionsMock(),
 }));
 
+// The SRE Team control's options come from the shared team registry query —
+// stub it out too, same rationale as the product options above.
+const useTeamsMock = vi.fn(() => ({
+  data: [
+    { id: "apollo", name: "Apollo SRE Team", family: "sre-abt", sreGroupId: "team-apollo" },
+    // Wrong family — must not surface as an SRE Team option here (that's
+    // the cases list's CRE Team control's job, not this one's).
+    { id: "atlas", name: "Atlas CRE Team", family: "cre-abt", creGroupId: "team-atlas" },
+  ],
+  isLoading: false,
+}));
+vi.mock("@features/csm-dashboard/api/useTeams", () => ({
+  useTeams: () => useTeamsMock(),
+}));
+
 /**
  * Render the filter bar over `DEFAULT_INCIDENT_FILTERS` with the given prop
  * overrides, returning the `onChange`/`onReset`/`onFiltersToggle` spies. The bar
@@ -82,6 +97,26 @@ describe("IncidentsFilterBar", () => {
     expect(screen.getByRole("checkbox", { name: /sla violated/i })).toBeChecked();
   });
 
+  // Regression: this control used to be a raw FormControl/InputLabel/Select
+  // with no `shrink`/`notched` override, which read wrong against
+  // oxygen-ui's own theme (its `MuiInputLabel` styleOverrides shift an
+  // unshrunk label up by `top: -7px` for any Select-backed field) --
+  // reported live as looking broken compared to the Cases tab's filter bar,
+  // which already routes through the shared, fixed `MultiSelectField`. This
+  // exercises the swap functionally: selecting a priority still updates the
+  // filter correctly.
+  it("selecting a priority sets it on the filter object", () => {
+    const { onChange } = renderFilterBar();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Priority" }));
+    fireEvent.click(screen.getByRole("option", { name: /critical/i }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_INCIDENT_FILTERS,
+      priorities: ["CRITICAL"],
+    });
+  });
+
   it("surfaces the product filter's coverage caveat as visible helper text", () => {
     renderFilterBar();
     expect(
@@ -99,6 +134,21 @@ describe("IncidentsFilterBar", () => {
     renderFilterBar();
     expect(screen.getByRole("button", { name: /^filters$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /clear filters/i })).not.toBeInTheDocument();
+  });
+
+  it("offers only sre-abt-family teams as SRE Team options, keyed by sreGroupId", () => {
+    const { onChange } = renderFilterBar();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Atlas CRE Team" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("option", { name: "Apollo SRE Team" }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_INCIDENT_FILTERS,
+      sreTeamIds: ["team-apollo"],
+    });
   });
 
   it("calls onReset when Clear filters is clicked", () => {

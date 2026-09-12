@@ -103,6 +103,7 @@ export function useSearchAnnouncements(
       const announcements: CsmAnnouncementRow[] = (res.cases ?? []).map((c) => ({
         id: c.id,
         number: c.number,
+        wso2CaseId: c.internalId,
         subject: c.subject ?? "(no subject)",
         projectName: c.project?.name ?? "—",
         // The search view returns display-cased states (e.g. "Closed"); normalize

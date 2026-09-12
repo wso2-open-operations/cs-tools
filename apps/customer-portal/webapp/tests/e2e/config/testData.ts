@@ -460,6 +460,52 @@ export const DEPLOYMENT_PRODUCT_INPUT = {
 } as const;
 
 /**
+ * The update-level search the updates suite runs.
+ *
+ * Product and version are the API's own identifiers as the selects render them,
+ * not display names — the options come from `GET /updates/product-update-levels`.
+ *
+ * Updates access is a per-project feature flag; Cloud Support does not have it
+ * (see SIDE_NAV_VISIBILITY), so this runs against Subscription.
+ */
+export const UPDATES_SEARCH_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  productName: "wso2am",
+  productVersion: "4.4.0",
+  startLevel: "0",
+  endLevel: "10",
+  /** The level whose details are opened from the results table. Must fall inside
+   * the range above. */
+  viewLevel: "1",
+} as const;
+
+/**
+ * The user whose roles the settings suite edits.
+ *
+ * ⚠️ This is the signed-in account itself — the only user the suite can safely
+ * change, since it can restore what it altered. The Lead role is removed and put
+ * back within one test.
+ *
+ * Lead matters beyond the settings page: it implies Portal User on save, and is
+ * required to escalate a case past EL3. A run that dies between the two saves
+ * leaves the account without it, so the restore runs from `finally`.
+ */
+export const SETTINGS_USER_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  email: "paraparan@wso2.com",
+  /** The role toggled off and back on. */
+  role: "Lead",
+  /**
+   * The backend refuses role changes on an account whose supported email domains
+   * are not configured, answering 500 with this message. Verified live on
+   * staging, where every role save fails this way — so the edit test recognises
+   * it and skips rather than reporting a product bug it cannot act on.
+   */
+  unconfiguredDomainsMessage:
+    "supported email domains list for your account has not been defined",
+} as const;
+
+/**
  * Project types whose Deployments tab is reachable.
  *
  * The tab is gated on `permissions.hasDeployments`
@@ -686,6 +732,18 @@ export const SERVICE_REQUEST_VIEWS: ServiceRequestView[] = [
   },
 ];
 
+/**
+ * Content the service-request comment and attachment suite adds.
+ *
+ * The comment text is fixed rather than stamped per run: comments cannot be
+ * deleted, so the spec recognises its own earlier one and does not post again.
+ * The attachment reuses the shared fixture file for the same reason the case
+ * suite does — one upload that stays put.
+ */
+export const SERVICE_REQUEST_ACTIVITY_INPUT = {
+  comment: "This is a test comment on a service request from Automation Test",
+} as const;
+
 /** Subject of the announcement published to all three automation projects. */
 export const SHARED_ANNOUNCEMENT_SUBJECT =
   "[SECURITY Announcement] Lack of access control in the keymanager-operations " +
@@ -742,8 +800,19 @@ export type SideNavVisibility = Record<string, boolean>;
  * the suite.
  *
  * Note "Settings" also renders for these projects but is deliberately not
- * asserted — it is outside the set under test.
+ * asserted per-item — it is outside the gated set. It is accounted for by
+ * SIDE_NAV_UNGATED_ITEMS when checking the list is exhaustive.
  */
+/**
+ * Sidebar items that render for every project, whatever its flags.
+ *
+ * "Settings" is a footer item with no permission filter in SideBar.tsx, so it is
+ * not part of the gated table above — but it *is* part of the rendered list, and
+ * an exhaustiveness check has to expect it or it would read as an unexpected
+ * extra.
+ */
+export const SIDE_NAV_UNGATED_ITEMS: string[] = ["Settings"];
+
 export const SIDE_NAV_VISIBILITY: Partial<
   Record<ProjectType, SideNavVisibility>
 > = {

@@ -30,6 +30,7 @@ import (
 // entityIncidentClient abstracts the entity service incident operations used by IncidentHandler.
 type entityIncidentClient interface {
 	SearchIncidents(ctx context.Context, body []byte) ([]byte, error)
+	AggregateIncidents(ctx context.Context, body []byte) ([]byte, error)
 	CreateIncident(ctx context.Context, body []byte) ([]byte, error)
 	GetIncident(ctx context.Context, id string) ([]byte, error)
 	PatchIncident(ctx context.Context, id string, body []byte) ([]byte, error)
@@ -363,6 +364,46 @@ func (h *IncidentHandler) SearchIncidents(w http.ResponseWriter, r *http.Request
 	}
 
 	// TODO: Unmarshal result and filter to only the fields required by the frontend.
+	writeJSON(w, http.StatusOK, result)
+}
+
+// AggregateIncidents handles POST /incidents/aggregate.
+// Server-side aggregation of incidents by a single field (e.g. state,
+// assignmentGroup, businessService), capped to the top maxGroups buckets
+// with the remainder folded into othersCount. The groupBy allowlist is
+// validated upstream by the entity service; this layer only forwards the
+// request and passes the response through as-is.
+func (h *IncidentHandler) AggregateIncidents(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.AggregateIncidents(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AggregateIncidents failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to aggregate incidents.")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 

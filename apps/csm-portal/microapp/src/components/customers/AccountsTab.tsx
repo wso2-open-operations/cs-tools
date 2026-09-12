@@ -43,7 +43,7 @@ function AccountCard({ item }: { item: Account }) {
           <Chip
             size="small"
             label={item.tier}
-            color={item.tier === "enterprise" ? "primary" : "default"}
+            color={item.tier?.toLowerCase() === "enterprise" ? "primary" : "default"}
             variant="outlined"
             sx={{ textTransform: "capitalize" }}
           />

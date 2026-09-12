@@ -1,124 +1,134 @@
-# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
-#
-# WSO2 LLC. licenses this file to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file except
-# in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# # Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+# #
+# # WSO2 LLC. licenses this file to you under the Apache License,
+# # Version 2.0 (the "License"); you may not use this file except
+# # in compliance with the License.
+# # You may obtain a copy of the License at
+# #
+# # http://www.apache.org/licenses/LICENSE-2.0
+# #
+# # Unless required by applicable law or agreed to in writing,
+# # software distributed under the License is distributed on an
+# # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# # KIND, either express or implied.  See the License for the
+# # specific language governing permissions and limitations
+# # under the License.
 
-# ⚠️ NOT RUNNABLE IN CI YET — session provisioning is unsolved.
-#
-# The specs authenticate by replaying a captured browser session from
-# apps/customer-portal/webapp/tests/e2e/storageState/session.json. That file
-# holds real tokens and is git-ignored, so it does not exist on a runner. Without
-# it withSession() skips every test and the job exits 0 — a green tick that means
-# "nothing ran", not "E2E passed". The guard step below turns that into an
-# explicit failure instead.
-#
-# Before enabling this on push/PR, three things need settling:
-#   1. Session provisioning — inject a bundle from a secret, or drive a real
-#      login. Access tokens expire in well under an hour, so a stored secret goes
-#      stale between runs.
-#   2. Target environment — .env.e2e points at staging with E2E_NO_WEBSERVER=1,
-#      so the build/preview steps below are currently inert: the tests never hit
-#      localhost:3000. (They could not anyway — public/config.js is git-ignored,
-#      so a preview build boots without runtime config.) Either drop those steps
-#      or capture a localhost session and override E2E_BASE_URL here.
-#   3. Test data — the creation specs write to a REAL backend and there is no
-#      delete endpoint, so every run leaves permanent cases and service requests.
-#      Only the "Create Case — validation" suite is side-effect free.
-#
-# Kept as workflow_dispatch-only until the above is resolved.
+# # ⚠️ NOT RUNNABLE IN CI YET — session provisioning is unsolved.
+# #
+# # The specs authenticate by replaying a captured browser session from
+# # apps/customer-portal/webapp/tests/e2e/storageState/session.json. That file
+# # holds real tokens and is git-ignored, so it does not exist on a runner. Without
+# # it withSession() skips every test and the job exits 0 — a green tick that means
+# # "nothing ran", not "E2E passed". The guard step below turns that into an
+# # explicit failure instead.
+# #
+# # Before enabling this on push/PR, three things need settling:
+# #   1. Session provisioning — inject a bundle from a secret, or drive a real
+# #      login. Access tokens expire in well under an hour, so a stored secret goes
+# #      stale between runs.
+# #   2. Target environment — .env.e2e points at staging with E2E_NO_WEBSERVER=1,
+# #      so the build/preview steps below are currently inert: the tests never hit
+# #      localhost:3000. (They could not anyway — public/config.js is git-ignored,
+# #      so a preview build boots without runtime config.) Either drop those steps
+# #      or capture a localhost session and override E2E_BASE_URL here.
+# #   3. Test data — the creation specs write to a REAL backend and there is no
+# #      delete endpoint, so every run leaves permanent cases and service requests.
+# #      Only the "Create Case — validation" suite is side-effect free.
+# #
+# # Kept as workflow_dispatch-only until the above is resolved.
 
-name: END TO END TESTS
+# name: END TO END TESTS
 
-on:
-  #push:
-    #branches:
-      #- customer-portal-milestone-1
-  workflow_dispatch:
+# on:
+#   #push:
+#     #branches:
+#       #- customer-portal-milestone-1
+#   workflow_dispatch:
 
-jobs:
-  e2e:
-    name: Run Playwright E2E tests
-    runs-on: ubuntu-latest
+# # The specs write to a single shared staging tenant: a service request comment, a
+# # kept attachment per case, a call request, deployments. Two runs overlapping
+# # would interleave those writes — two dispatches could both find a record absent
+# # and both create it. Serialised rather than cancelled, because a half-finished
+# # run leaves records behind either way and cancelling mid-write is worse than
+# # queueing.
+# concurrency:
+#   group: e2e-tests
+#   cancel-in-progress: false
 
-    defaults:
-      run:
-        working-directory: apps/customer-portal/webapp
+# jobs:
+#   e2e:
+#     name: Run Playwright E2E tests
+#     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+#     defaults:
+#       run:
+#         working-directory: apps/customer-portal/webapp
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: apps/customer-portal/webapp/pnpm-lock.yaml
+#       - name: Setup pnpm
+#         uses: pnpm/action-setup@v4
+#         with:
+#           version: 9
 
-      # Fail fast rather than reporting a green "all skipped" run. withSession()
-      # skips every spec when the bundle is absent, which Playwright counts as
-      # success — so without this check the job passes having tested nothing.
-      - name: Verify E2E session bundle is present
-        run: |
-          if [ ! -f tests/e2e/storageState/session.json ]; then
-            echo "::error::No tests/e2e/storageState/session.json on the runner."
-            echo "::error::Every spec would skip and this job would pass without testing anything."
-            echo "::error::See the header of .github/workflows/e2e-tests.yml — CI session provisioning is not solved yet."
-            exit 1
-          fi
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: 20
+#           cache: pnpm
+#           cache-dependency-path: apps/customer-portal/webapp/pnpm-lock.yaml
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+#       # Fail fast rather than reporting a green "all skipped" run. withSession()
+#       # skips every spec when the bundle is absent, which Playwright counts as
+#       # success — so without this check the job passes having tested nothing.
+#       - name: Verify E2E session bundle is present
+#         run: |
+#           if [ ! -f tests/e2e/storageState/session.json ]; then
+#             echo "::error::No tests/e2e/storageState/session.json on the runner."
+#             echo "::error::Every spec would skip and this job would pass without testing anything."
+#             echo "::error::See the header of .github/workflows/e2e-tests.yml — CI session provisioning is not solved yet."
+#             exit 1
+#           fi
 
-      - name: Install Playwright Chromium browser
-        run: pnpm exec playwright install --with-deps chromium
+#       - name: Install dependencies
+#         run: pnpm install --frozen-lockfile
 
-      - name: Build application
-        run: pnpm run build
+#       - name: Install Playwright Chromium browser
+#         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Start preview server
-        run: pnpm run preview -- --host 0.0.0.0 --port 3000 &
+#       - name: Build application
+#         run: pnpm run build
 
-      - name: Wait for preview server
-        run: |
-          for i in {1..30}; do
-            if curl -sSf http://localhost:3000 > /dev/null; then
-              echo "Server is up"
-              exit 0
-            fi
-            echo "Waiting for server to be ready..."
-            sleep 2
-          done
-          echo "Server did not start in time" >&2
-          exit 1
+#       - name: Start preview server
+#         run: pnpm run preview -- --host 0.0.0.0 --port 3000 &
 
-      - name: Run Playwright tests
-        env:
-          CI: true
-        run: pnpm run test:e2e
+#       - name: Wait for preview server
+#         run: |
+#           for i in {1..30}; do
+#             if curl -sSf http://localhost:3000 > /dev/null; then
+#               echo "Server is up"
+#               exit 0
+#             fi
+#             echo "Waiting for server to be ready..."
+#             sleep 2
+#           done
+#           echo "Server did not start in time" >&2
+#           exit 1
 
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: |
-            apps/customer-portal/webapp/playwright-report/
-            apps/customer-portal/webapp/test-results/
-          retention-days: 7
+#       - name: Run Playwright tests
+#         env:
+#           CI: true
+#         run: pnpm run test:e2e
+
+#       - name: Upload Playwright artifacts
+#         if: always()
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: playwright-report
+#           path: |
+#             apps/customer-portal/webapp/playwright-report/
+#             apps/customer-portal/webapp/test-results/
+#           retention-days: 7

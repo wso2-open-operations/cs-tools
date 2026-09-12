@@ -19,11 +19,11 @@ import { CHANGE_REQUEST_CREATE } from "../utils/selectors";
 
 /**
  * Page object for `/operations/change-requests/new`. Subject is the only
- * required field (Type/Category/Impact/Risk come pre-selected with sensible
- * defaults — see CreateChangeRequestPage.tsx), so the happy path only needs
- * to fill Subject and submit. There is no delete endpoint for change
- * requests, so every CR this creates is a permanent staging record — the
- * subject must always be E2E-tagged (see `e2eChangeRequestSubject`).
+ * required field (Type/Impact come pre-selected with sensible defaults —
+ * see CreateChangeRequestPage.tsx), so the happy path only needs to fill
+ * Subject and submit. There is no delete endpoint for change requests, so
+ * every CR this creates is a permanent staging record — the subject must
+ * always be E2E-tagged (see `e2eChangeRequestSubject`).
  */
 export class ChangeRequestCreatePage {
   constructor(private readonly page: Page) {}
@@ -43,7 +43,7 @@ export class ChangeRequestCreatePage {
   }
 
   /** Reads a pre-selected enum dropdown's current visible value (Type,
-   * Category, Impact, Risk, Priority) without opening it. */
+   * Impact, Priority) without opening it. */
   selectValue(label: string): Locator {
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return this.page.getByRole("combobox", { name: new RegExp(`^${escaped}\\s*\\*?$`) });

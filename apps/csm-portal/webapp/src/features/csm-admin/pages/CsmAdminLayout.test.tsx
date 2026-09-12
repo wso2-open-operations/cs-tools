@@ -22,7 +22,12 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location-probe">{location.pathname}</div>;
+  return (
+    <>
+      <div data-testid="location-probe">{location.pathname}</div>
+      <div data-testid="location-state-probe">{JSON.stringify(location.state ?? null)}</div>
+    </>
+  );
 }
 
 let mockRoles: string[] | undefined = ["admin"];
@@ -44,7 +49,9 @@ vi.mock("@config/apiConfig", () => ({
 
 import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
 
-function renderLayout(initialEntry: string) {
+function renderLayout(
+  initialEntry: string | { pathname: string; state?: unknown },
+) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -65,6 +72,7 @@ function renderLayout(initialEntry: string) {
           <Route path="user-management/permissions" element={<div>Permissions content</div>} />
           <Route path="dashboards" element={<div>Dashboards content</div>} />
         </Route>
+        <Route path="/dashboard" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -94,16 +102,14 @@ describe("CsmAdminLayout — back link to the User management tile grid", () => 
     mockRoles = ["admin"];
     renderLayout("/admin/user-management");
     expect(screen.getByText("User management tiles")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /back to user management/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
   });
 
-  it("shows a back link on each directory page reached via a tile, and it returns to the landing route", () => {
+  it("shows a back link on each directory page reached via a tile, and it returns to the landing route by default", () => {
     mockRoles = ["admin"];
     renderLayout("/admin/user-management/roles");
     expect(screen.getByText("Roles content")).toBeInTheDocument();
-    const back = screen.getByRole("button", { name: /back to user management/i });
+    const back = screen.getByRole("button", { name: "Back" });
 
     fireEvent.click(back);
 
@@ -116,9 +122,7 @@ describe("CsmAdminLayout — back link to the User management tile grid", () => 
     mockRoles = ["admin"];
     renderLayout("/admin/dashboards");
     expect(screen.getByText("Dashboards content")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /back to user management/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
   });
 
   // Regression test: the back link used to render below the tab strip,
@@ -128,11 +132,52 @@ describe("CsmAdminLayout — back link to the User management tile grid", () => 
   it("renders the back link above the Settings title and tab strip, not below them", () => {
     mockRoles = ["admin"];
     renderLayout("/admin/user-management/roles");
-    const back = screen.getByRole("button", { name: /back to user management/i });
+    const back = screen.getByRole("button", { name: "Back" });
     const heading = screen.getByRole("heading", { name: "Settings" });
     const tabStrip = screen.getByRole("tab", { name: "User management" });
 
     expect(back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(back.compareDocumentPosition(tabStrip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // Regression: reported live — a directory page reached from somewhere
+  // other than its own tile (e.g. a dashboard widget's `resourceType:
+  // "user"` click-through, which sets `state.from`) still forced Back to
+  // the tile grid regardless. The label used to be a fixed "Back to User
+  // management" too, which read wrong once the destination could vary.
+  it("prefers state.from over the tile-grid fallback, labeled plain 'Back'", () => {
+    mockRoles = ["admin"];
+    renderLayout({ pathname: "/admin/user-management/users", state: { from: "/dashboard" } });
+    expect(screen.getByText("Users content")).toBeInTheDocument();
+    const back = screen.getByRole("button", { name: "Back" });
+
+    fireEvent.click(back);
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/dashboard");
+  });
+
+  it("forwards state.parentState on Back, so a multi-hop chain restores correctly", () => {
+    mockRoles = ["admin"];
+    renderLayout({
+      pathname: "/admin/user-management/users",
+      state: { from: "/dashboard", parentState: { from: "/some/earlier/page" } },
+    });
+    const back = screen.getByRole("button", { name: "Back" });
+
+    fireEvent.click(back);
+
+    expect(screen.getByTestId("location-state-probe")).toHaveTextContent(
+      JSON.stringify({ from: "/some/earlier/page" }),
+    );
+  });
+
+  it("falls back to the tile grid when state is absent, same as a bookmarked/direct link", () => {
+    mockRoles = ["admin"];
+    renderLayout("/admin/user-management/users");
+    const back = screen.getByRole("button", { name: "Back" });
+
+    fireEvent.click(back);
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/admin/user-management");
   });
 });

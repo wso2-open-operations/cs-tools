@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -32,6 +33,7 @@ import { useMemo, useState, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { BackendApiError } from "@api/backend/client";
+import type { BeProject } from "@api/backend/types";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import {
   POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
@@ -40,6 +42,7 @@ import {
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
+import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
@@ -57,6 +60,14 @@ import {
   isAttachmentField,
 } from "@features/csm-operations/utils/catalogVariables";
 import type { CreateServiceRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
+
+// Service requests are a managed-cloud-only artefact — the underlying
+// catalog/deployment flow only makes sense for a managed-cloud subscription's
+// project. Module-level (not per-render) so `ProjectSelectionField`'s
+// `filterProject` prop keeps a stable identity across re-renders.
+function isManagedCloudProject(project: BeProject): boolean {
+  return project.subscriptionType === "managed_cloud_subscription";
+}
 
 export default function CreateServiceRequestPage(): JSX.Element {
   const navigate = useNavTransition();
@@ -104,6 +115,21 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // Variable answers, keyed by variable id.
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
+
+  // `hasSr` is precomputed by the backing data source, so an ineligible
+  // project is caught before the engineer fills out the rest of the form
+  // rather than on a rejected submit.
+  const selectedProject = useGetProject(projectId || undefined);
+  const isIneligibleForSr = projectId
+    ? selectedProject.data?.hasSr === false
+    : false;
+  // Fail closed: a project-load error or a 404 (data === null) means
+  // eligibility is unknown, not confirmed — canSubmit must not treat unknown
+  // as eligible.
+  const projectLoadFailed =
+    !!projectId &&
+    !selectedProject.isLoading &&
+    (selectedProject.isError || selectedProject.data === null);
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
@@ -195,6 +221,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
       !variables.isError &&
       // Hot fix (mirrors the customer portal): all typable variables required.
       firstEmptyRequired === null &&
+      !isIneligibleForSr &&
+      // Fail closed while a selected project's eligibility is still loading
+      // or couldn't be confirmed at all — see projectLoadFailed above.
+      (!projectId || (!selectedProject.isLoading && !projectLoadFailed)) &&
       !submitting,
     [
       projectId,
@@ -205,6 +235,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
       variables.isLoading,
       variables.isError,
       firstEmptyRequired,
+      isIneligibleForSr,
+      selectedProject.isLoading,
+      projectLoadFailed,
       submitting,
     ],
   );
@@ -294,6 +327,26 @@ export default function CreateServiceRequestPage(): JSX.Element {
           </Box>
         )}
 
+        {projectLoadFailed && (
+          <Alert
+            severity="error"
+            sx={{ mb: 2 }}
+            action={
+              <Button size="small" onClick={() => void selectedProject.refetch()}>
+                Retry
+              </Button>
+            }
+          >
+            Could not load this project. Its service-request eligibility can't be confirmed.
+          </Alert>
+        )}
+
+        {!!projectId && !selectedProject.isLoading && !projectLoadFailed && isIneligibleForSr && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            This project isn't eligible to raise service requests.
+          </Alert>
+        )}
+
         <Grid container spacing={2.5}>
           <Grid size={{ xs: 12, md: 4 }}>
             <ProjectSelectionField
@@ -301,18 +354,26 @@ export default function CreateServiceRequestPage(): JSX.Element {
               onChange={onProjectChange}
               lockedProjectId={lockedProjectId}
               required
+              filterProject={isManagedCloudProject}
             />
           </Grid>
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="sr-deployment-label">Deployment</InputLabel>
+              <InputLabel
+                id="sr-deployment-label"
+                shrink={deploymentId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Deployment
+              </InputLabel>
               <Select
                 labelId="sr-deployment-label"
                 label="Deployment"
                 value={deploymentId}
                 onChange={(e) => onDeploymentChange(String(e.target.value))}
                 disabled={!projectId || deployments.isLoading}
+                notched={deploymentId !== ""}
               >
                 {(deployments.data ?? []).map((d) => (
                   <MenuItem key={d.id} value={d.id}>
@@ -334,13 +395,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="sr-product-label">Deployed product</InputLabel>
+              <InputLabel
+                id="sr-product-label"
+                shrink={deployedProductId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Deployed product
+              </InputLabel>
               <Select
                 labelId="sr-product-label"
                 label="Deployed product"
                 value={deployedProductId}
                 onChange={(e) => onDeployedProductChange(String(e.target.value))}
                 disabled={!deploymentId || deployedProducts.isLoading}
+                notched={deployedProductId !== ""}
               >
                 {(deployedProducts.data ?? []).map((dp) => (
                   <MenuItem key={dp.id} value={dp.id}>
@@ -362,13 +430,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 6 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="sr-catalog-label">Catalog</InputLabel>
+              <InputLabel
+                id="sr-catalog-label"
+                shrink={catalogId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Catalog
+              </InputLabel>
               <Select
                 labelId="sr-catalog-label"
                 label="Catalog"
                 value={catalogId}
                 onChange={(e) => onCatalogChange(String(e.target.value))}
                 disabled={!deployedProductId || catalogs.isLoading || noCatalogs}
+                notched={catalogId !== ""}
               >
                 {(catalogs.data ?? []).map((c) => (
                   <MenuItem key={c.id} value={c.id}>
@@ -392,13 +467,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 6 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="sr-catalog-item-label">Catalog item</InputLabel>
+              <InputLabel
+                id="sr-catalog-item-label"
+                shrink={catalogItemId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Catalog item
+              </InputLabel>
               <Select
                 labelId="sr-catalog-item-label"
                 label="Catalog item"
                 value={catalogItemId}
                 onChange={(e) => onCatalogItemChange(String(e.target.value))}
                 disabled={!catalogId}
+                notched={catalogItemId !== ""}
               >
                 {catalogItems.map((ci) => (
                   <MenuItem key={ci.id} value={ci.id}>

@@ -100,6 +100,12 @@ export interface CreateGithubIssueDialogProps {
   onClose: () => void;
   /** Body for `POST /cases/{id}/github-issues` (caseId is added by the caller). */
   onSubmit: (payload: BeCreateCaseGithubIssuePayload) => void;
+  /** Fired when the confirm step is (re-)entered from "Create issue", before
+   * any submission happens. The parent should clear a stale `error` here —
+   * otherwise going Back from a failed confirm, editing the form, and
+   * clicking "Create issue" again re-shows the previous attempt's error on
+   * a confirm step for a payload that hasn't been submitted yet. */
+  onOpenConfirm?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +136,7 @@ export function CreateGithubIssueDialog({
   showRepoField,
   onClose,
   onSubmit,
+  onOpenConfirm,
 }: CreateGithubIssueDialogProps): JSX.Element {
   const [type, setType] = useState<IssueTypeValue>(UNSET);
   const [title, setTitle] = useState(defaultTitle ?? "");
@@ -200,6 +207,7 @@ export function CreateGithubIssueDialog({
     if (showHotFix && hotFix) payload.hotFixRequired = true;
     if (regression) payload.regression = true;
 
+    onOpenConfirm?.();
     setConfirmPayload(payload);
   };
 

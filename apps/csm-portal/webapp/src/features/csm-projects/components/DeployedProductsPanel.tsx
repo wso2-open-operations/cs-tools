@@ -47,6 +47,7 @@ import type {
   BeDeployedProduct,
   BeDeployedProductCreatePayload,
   BeDeployedProductDetailUpdatePayload,
+  BeProductUpdate,
 } from "@api/backend/types";
 import CreateDeployedProductDialog from "@features/csm-projects/components/CreateDeployedProductDialog";
 import EditDeployedProductDialog from "@features/csm-projects/components/EditDeployedProductDialog";
@@ -56,8 +57,8 @@ interface DeployedProductsPanelProps {
   /**
    * The project this deployment belongs to. Required for the create payload
    * (POST /deployments/{id}/products needs projectId). Derived from
-   * BeDeployment.projectId in the parent dialog. When absent (e.g. opened
-   * from a case context where projectId is not populated), the Add button is
+   * BeDeployment.project.id in the parent dialog. When absent (e.g. opened
+   * from a case context where project is not populated), the Add button is
    * hidden.
    */
   projectId?: string;
@@ -68,9 +69,9 @@ interface Feedback {
   severity: "success" | "error";
 }
 
-/** SN sizing fields arrive as strings; treat null/blank uniformly as "—". */
-function sizingValue(value?: string | null): string {
-  return value?.trim() ? value : "—";
+/** SN sizing fields are numeric; null/undefined render as "—". */
+function sizingValue(value?: number | null): string {
+  return value === null || value === undefined ? "—" : String(value);
 }
 
 /**
@@ -90,11 +91,17 @@ export default function DeployedProductsPanel({
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuTarget, setMenuTarget] = useState<BeDeployedProduct | null>(null);
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<BeDeployedProduct | null>(null);
+  // Store only the id, not the whole record: the Update History tab's saves
+  // refetch `products` (via the mutation's cache invalidation) without
+  // closing the dialog, so we re-derive the live record from the refreshed
+  // list below rather than freezing a stale snapshot at the time the menu
+  // was opened.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<BeDeployedProduct | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const products = data ?? [];
+  const editing = editingId ? (products.find((p) => p.id === editingId) ?? null) : null;
 
   const openMenu = (e: React.MouseEvent<HTMLElement>, p: BeDeployedProduct): void => {
     e.stopPropagation();
@@ -122,18 +129,18 @@ export default function DeployedProductsPanel({
     });
   };
 
-  const handleSaveEdit = (payload: BeDeployedProductDetailUpdatePayload): void => {
+  const handleSaveDetails = (payload: BeDeployedProductDetailUpdatePayload): void => {
     if (!editing) return;
     const productName = editing.product?.name ?? "this product";
     updateDeployedProduct.mutate(
       { deployedProductId: editing.id, payload },
       {
         onSuccess: () => {
-          setEditing(null);
+          setEditingId(null);
           setFeedback({ message: "Updated " + productName + ".", severity: "success" });
         },
         onError: (err) => {
-          setEditing(null);
+          setEditingId(null);
           setFeedback({
             message: "Could not update " + productName + ": " + err.message,
             severity: "error",
@@ -141,6 +148,20 @@ export default function DeployedProductsPanel({
         },
       },
     );
+  };
+
+  /**
+   * Update-history save: PATCHes the whole array immediately and, unlike
+   * {@link handleSaveDetails}, never closes the dialog either way — the
+   * caller ({@link UpdateHistoryPanel} via {@link EditDeployedProductDialog})
+   * shows its own inline success/error feedback and awaits this promise to
+   * drive its per-action "Adding…/Saving…/Deleting…" state.
+   */
+  const handleSaveHistory = (updates: BeProductUpdate[]): Promise<void> => {
+    if (!editing) return Promise.reject(new Error("No product selected."));
+    return updateDeployedProduct
+      .mutateAsync({ deployedProductId: editing.id, payload: { updates } })
+      .then(() => undefined);
   };
 
   const handleDeactivate = (): void => {
@@ -271,7 +292,7 @@ export default function DeployedProductsPanel({
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={closeMenu}>
         <MenuItem
           onClick={() => {
-            setEditing(menuTarget);
+            setEditingId(menuTarget?.id ?? null);
             closeMenu();
           }}
         >
@@ -303,8 +324,9 @@ export default function DeployedProductsPanel({
         <EditDeployedProductDialog
           deployedProduct={editing}
           isSaving={updateDeployedProduct.isPending}
-          onClose={() => setEditing(null)}
-          onSave={handleSaveEdit}
+          onClose={() => setEditingId(null)}
+          onSaveDetails={handleSaveDetails}
+          onSaveHistory={handleSaveHistory}
         />
       )}
 

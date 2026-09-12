@@ -93,6 +93,22 @@ interface CsmCaseCommentInputProps {
   isResumingWork?: boolean;
   /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
   autoFocus?: boolean;
+  /**
+   * Draft state, lifted to the parent so it survives this component
+   * unmounting (e.g. the case-detail page hides the Activities tab body on
+   * tab switch). All four are optional and independently controllable; any
+   * omitted pair falls back to this component's own local state, so callers
+   * that don't need cross-unmount persistence (e.g. the incident/change
+   * request detail pages) are unaffected.
+   */
+  draftHtml?: string;
+  onDraftHtmlChange?: (html: string) => void;
+  draftAttachments?: CommentAttachmentDraft[];
+  onDraftAttachmentsChange?: (attachments: CommentAttachmentDraft[]) => void;
+  draftInternal?: boolean;
+  onDraftInternalChange?: (internal: boolean) => void;
+  draftSourceMode?: boolean;
+  onDraftSourceModeChange?: (sourceMode: boolean) => void;
 }
 
 /** Stable identity for an attached File, used to dedupe re-picked files. */
@@ -114,6 +130,57 @@ function isEmpty(html: string): boolean {
   return text.length === 0;
 }
 
+/**
+ * A single piece of state that's either controlled by the parent (value +
+ * onChange both supplied) or managed locally (either omitted) — same
+ * "value"/"onChange" convention as a controlled `<input>`, but supporting a
+ * `setState`-style functional updater since several call sites below update
+ * off the previous value (e.g. toggling, appending an attachment).
+ *
+ * The returned setter has a **stable identity across renders**, exactly like
+ * `useState`'s own setter — several callers below memoize with an empty
+ * `useCallback` dep array, which would silently close over a stale value if
+ * the setter itself weren't stable (current value/mode are read from refs at
+ * call time instead of from the closure).
+ *
+ * `defaultValue` only seeds the local fallback's initial state; it isn't
+ * re-read on every render (mirrors `useState`'s own initial-value semantics).
+ */
+function useDraftState<T>(
+  controlledValue: T | undefined,
+  onChange: ((value: T) => void) | undefined,
+  defaultValue: T,
+): [T, (updater: T | ((prev: T) => T)) => void] {
+  const [localValue, setLocalValue] = useState<T>(defaultValue);
+  const isControlled = controlledValue !== undefined && onChange !== undefined;
+  const value = isControlled ? controlledValue : localValue;
+
+  // Refs are synced via effect (not written during render) so this stays
+  // compliant with the "no ref mutation during render" rule — the setter
+  // below is only ever invoked from event handlers, which always run after
+  // the effect for the render that produced them, so it never observes a
+  // stale value.
+  const valueRef = useRef(value);
+  const isControlledRef = useRef(isControlled);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    valueRef.current = value;
+    isControlledRef.current = isControlled;
+    onChangeRef.current = onChange;
+  });
+
+  const setValue = useCallback((updater: T | ((prev: T) => T)) => {
+    const next =
+      typeof updater === "function"
+        ? (updater as (prev: T) => T)(valueRef.current)
+        : updater;
+    if (isControlledRef.current) onChangeRef.current?.(next);
+    else setLocalValue(next);
+  }, []);
+
+  return [value, setValue];
+}
+
 export default function CsmCaseCommentInput({
   onSubmit,
   disabled = false,
@@ -122,19 +189,37 @@ export default function CsmCaseCommentInput({
   onResumeWork,
   isResumingWork = false,
   autoFocus = false,
+  draftHtml,
+  onDraftHtmlChange,
+  draftAttachments,
+  onDraftAttachmentsChange,
+  draftInternal,
+  onDraftInternalChange,
+  draftSourceMode,
+  onDraftSourceModeChange,
 }: CsmCaseCommentInputProps): JSX.Element {
-  const [html, setHtml] = useState<string>("");
+  const [html, setHtml] = useDraftState(draftHtml, onDraftHtmlChange, "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sourceMode, setSourceMode] = useState(false);
+  const [sourceMode, setSourceMode] = useDraftState(
+    draftSourceMode,
+    onDraftSourceModeChange,
+    false,
+  );
   // When customer replies are blocked, the only allowed entry is an internal
   // work note, so start in work-note mode and (below) lock the toggle there.
-  const [internal, setInternal] = useState<boolean>(
-    () => !!publicCommentDisabledReason,
+  const [internal, setInternal] = useDraftState(
+    draftInternal,
+    onDraftInternalChange,
+    !!publicCommentDisabledReason,
   );
   const [maximized, setMaximized] = useState(false);
   // Files attached to this comment; uploaded to the case on send.
-  const [attachments, setAttachments] = useState<CommentAttachmentDraft[]>([]);
+  const [attachments, setAttachments] = useDraftState<CommentAttachmentDraft[]>(
+    draftAttachments,
+    onDraftAttachmentsChange,
+    [],
+  );
   const [attachModalOpen, setAttachModalOpen] = useState(false);
 
   const onAttachmentClick = useCallback(() => setAttachModalOpen(true), []);
@@ -146,10 +231,10 @@ export default function CsmCaseCommentInput({
       }
       return [...prev, { file, name }];
     });
-  }, []);
+  }, [setAttachments]);
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  }, [setAttachments]);
   const onPasteError = useCallback((reason: "size" | "type") => {
     setError(
       reason === "type"
@@ -232,7 +317,7 @@ export default function CsmCaseCommentInput({
           )}.`
         : null,
     );
-  }, []);
+  }, [setAttachments]);
 
   const onDrop = useCallback(
     (e: DragEvent) => {
@@ -320,7 +405,9 @@ export default function CsmCaseCommentInput({
   }, [
     disabled,
     html,
+    setHtml,
     attachments,
+    setAttachments,
     internal,
     publicCommentDisabledReason,
     onSubmit,
@@ -335,7 +422,7 @@ export default function CsmCaseCommentInput({
   const publicReplyLocked = !!publicCommentDisabledReason;
   useEffect(() => {
     if (publicReplyLocked && !internal) setInternal(true);
-  }, [publicReplyLocked, internal]);
+  }, [publicReplyLocked, internal, setInternal]);
 
   // One reason, shown once. When resuming would unlock public replies, the
   // quick-fix next to Internal note covers it (with the actionable link) —
@@ -354,7 +441,7 @@ export default function CsmCaseCommentInput({
       // hand-edited) HTML as its initial value.
       if (!nextSource) setEditorMountKey((k) => k + 1);
     },
-    [],
+    [setSourceMode],
   );
 
   return (

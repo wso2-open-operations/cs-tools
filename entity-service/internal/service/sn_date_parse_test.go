@@ -91,7 +91,7 @@ func TestSNCaseService_UpdateCase_AlternateDateFormat(t *testing.T) {
 	})
 
 	subject := "Updated subject"
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 	resp, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
 		ID:      testDeploymentUUID, // any valid UUID; the request id is not asserted here
 		Subject: &subject,

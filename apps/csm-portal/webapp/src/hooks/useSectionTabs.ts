@@ -45,6 +45,7 @@ import {
   visibleNavChildren,
 } from "@config/featureFlags";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
 
 /** One rendered tab: the nav node plus the state that decides how it looks. */
 export interface SectionTab {
@@ -233,6 +234,18 @@ export interface QueryParamTabsState<TId extends string> {
  * param) whenever the tab itself changes, since a sub-tab selection made
  * under a *different* parent tab no longer means anything once you've
  * switched away from it.
+ *
+ * Override-aware: when called from inside an open in-app case tab (a
+ * `CaseTabIsolatedRouter` instance — see `CaseRouteOverrideContext`), this
+ * reads/writes that tab's OWN `search` string and navigates through its own
+ * `navigate`, instead of the real, single, app-wide `useSearchParams()`.
+ * Without this, every open tab shared the same real `?tab=` query param —
+ * two case tabs open on different sections (one on "Details", one on
+ * "Activities") would fight over it, and switching between them could reset
+ * whichever one wasn't just written to back to its default section. Outside
+ * a tab (the override is `undefined` — a directly-routed page, or any page
+ * that isn't part of the case-tabs mechanism at all) this behaves exactly as
+ * before, against the real router.
  */
 export function useQueryParamTabs<TId extends string>(
   tabs: readonly TId[],
@@ -240,14 +253,38 @@ export function useQueryParamTabs<TId extends string>(
   options: { paramName?: string; clearParamsOnChange?: readonly string[] } = {},
 ): QueryParamTabsState<TId> {
   const { paramName = "tab", clearParamsOnChange = [] } = options;
-  const [searchParams, setSearchParams] = useSearchParams();
-  const raw = searchParams.get(paramName);
+  const routeOverride = useCaseRouteOverride();
+  // Real router hooks — called unconditionally regardless of `routeOverride`
+  // (rules of hooks), same pattern as `CsmCaseDetailPage`'s own top-level
+  // override check; their values are simply unused when an override is
+  // present.
+  const [routedSearchParams, setRoutedSearchParams] = useSearchParams();
+
+  const activeSearchParams = routeOverride
+    ? new URLSearchParams(routeOverride.search)
+    : routedSearchParams;
+  const raw = activeSearchParams.get(paramName);
   const activeTab: TId =
     raw && (tabs as readonly string[]).includes(raw) ? (raw as TId) : defaultTab;
 
   const setActiveTab = useCallback(
     (next: TId, setOptions?: { replace?: boolean }): void => {
-      setSearchParams(
+      if (routeOverride) {
+        const params = new URLSearchParams(routeOverride.search);
+        params.set(paramName, next);
+        for (const dropped of clearParamsOnChange) params.delete(dropped);
+        const nextSearch = params.toString();
+        routeOverride.navigate(
+          {
+            pathname: routeOverride.pathname,
+            search: nextSearch ? `?${nextSearch}` : "",
+            hash: routeOverride.hash,
+          },
+          { replace: setOptions?.replace ?? true, state: routeOverride.state },
+        );
+        return;
+      }
+      setRoutedSearchParams(
         (prev) => {
           const params = new URLSearchParams(prev);
           params.set(paramName, next);
@@ -265,7 +302,7 @@ export function useQueryParamTabs<TId extends string>(
     // practice; a caller with a genuinely dynamic clear list should build one
     // itself rather than relying on this hook to react to it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setSearchParams, paramName],
+    [routeOverride, setRoutedSearchParams, paramName],
   );
 
   return { activeTab, setActiveTab };

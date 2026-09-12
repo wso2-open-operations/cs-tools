@@ -92,6 +92,25 @@ describe("mergeWidgetFilters", () => {
     expect(merged).toEqual({ states: ["pending"], approverIds: ["u1"] });
   });
 
+  // A slices-only widget (no top-level `query`, e.g. a shape "bar" widget
+  // where every slice supplies its own complete criteria) marshals its base
+  // as JSON `null`, not `{}` -- BeDashboardWidget.query is legally absent
+  // (see its own doc comment). Before this null-safety fix, `base.filters`
+  // threw straight out of `DashboardWidgetTile`.
+  it("treats a null or undefined base the same as an empty object", () => {
+    expect(mergeWidgetFilters(null, { filters: [{ field: "state", op: "in", values: ["open"] }] })).toEqual({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+    expect(mergeWidgetFilters(undefined, { filters: [{ field: "state", op: "in", values: ["open"] }] })).toEqual({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+  });
+
+  it("treats a null/undefined slice the same as an empty object", () => {
+    expect(mergeWidgetFilters({ states: ["pending"] }, null)).toEqual({ states: ["pending"] });
+    expect(mergeWidgetFilters({ states: ["pending"] }, undefined)).toEqual({ states: ["pending"] });
+  });
+
   // A plain object spread drops the base's `anyOf` wholesale the moment a
   // slice sets its own. That is not a hypothetical shape: the backend loader
   // actively PRODUCES `anyOf` by migrating the legacy `orGroups` key, so a

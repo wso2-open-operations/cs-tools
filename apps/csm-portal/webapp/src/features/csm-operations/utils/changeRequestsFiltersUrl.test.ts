@@ -30,7 +30,7 @@ describe("readChangeRequestFiltersFromUrl", () => {
 
   it("parses a fully-populated query string", () => {
     const params = new URLSearchParams(
-      "crQ=rollback&crStates=implement,review&crImpacts=high,low&crClosedFrom=2026-01-01&crClosedTo=2026-01-31",
+      "crQ=rollback&crStates=implement,review&crImpacts=high,low&crClosedFrom=2026-01-01&crClosedTo=2026-01-31&crSreTeams=team-apollo,team-atlas",
     );
     expect(readChangeRequestFiltersFromUrl(params)).toEqual({
       search: "rollback",
@@ -38,7 +38,16 @@ describe("readChangeRequestFiltersFromUrl", () => {
       impacts: ["high", "low"],
       closedStartDate: "2026-01-01",
       closedEndDate: "2026-01-31",
+      sreTeamIds: ["team-apollo", "team-atlas"],
     });
+  });
+
+  it("drops blank/whitespace SRE team entries", () => {
+    const params = new URLSearchParams("crSreTeams=team-apollo,%20%20,,team-atlas");
+    expect(readChangeRequestFiltersFromUrl(params).sreTeamIds).toEqual([
+      "team-apollo",
+      "team-atlas",
+    ]);
   });
 
   it("drops values outside the allowed state/impact enums", () => {
@@ -79,10 +88,19 @@ describe("writeChangeRequestFiltersToUrl", () => {
       impacts: ["high" as const],
       closedStartDate: "2026-01-01",
       closedEndDate: "2026-01-31",
+      sreTeamIds: ["team-apollo"],
     };
     const round = readChangeRequestFiltersFromUrl(
       writeChangeRequestFiltersToUrl(filters),
     );
     expect(round).toEqual(filters);
+  });
+
+  it("omits crSreTeams when no SRE team is selected", () => {
+    const params = writeChangeRequestFiltersToUrl({
+      ...DEFAULT_CR_FILTERS,
+      sreTeamIds: [],
+    });
+    expect(params.has("crSreTeams")).toBe(false);
   });
 });

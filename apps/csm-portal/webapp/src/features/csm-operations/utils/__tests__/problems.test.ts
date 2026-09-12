@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildProblemSearchFilters,
   countActiveProblemFilters,
   DEFAULT_PROBLEM_FILTERS,
   PROBLEM_STATES,
@@ -83,5 +84,54 @@ describe("countActiveProblemFilters", () => {
 
   it("is 1 when a state filter is set", () => {
     expect(countActiveProblemFilters({ ...DEFAULT_PROBLEM_FILTERS, states: ["NEW"] })).toBe(1);
+  });
+
+  it("is 1 when an SRE team filter is set", () => {
+    expect(
+      countActiveProblemFilters({ ...DEFAULT_PROBLEM_FILTERS, sreTeamIds: ["team-1"] }),
+    ).toBe(1);
+  });
+
+  it("is 2 when both state and SRE team filters are set", () => {
+    expect(
+      countActiveProblemFilters({
+        ...DEFAULT_PROBLEM_FILTERS,
+        states: ["NEW"],
+        sreTeamIds: ["team-1"],
+      }),
+    ).toBe(2);
+  });
+});
+
+describe("buildProblemSearchFilters", () => {
+  it("returns an empty object for the defaults with no search text", () => {
+    expect(buildProblemSearchFilters(DEFAULT_PROBLEM_FILTERS, "")).toEqual({});
+  });
+
+  it("includes searchQuery only when the debounced search text is non-empty", () => {
+    expect(buildProblemSearchFilters(DEFAULT_PROBLEM_FILTERS, "disk full")).toEqual({
+      searchQuery: "disk full",
+    });
+  });
+
+  it("includes states when set", () => {
+    expect(
+      buildProblemSearchFilters({ ...DEFAULT_PROBLEM_FILTERS, states: ["NEW", "ASSESS"] }, ""),
+    ).toEqual({ states: ["NEW", "ASSESS"] });
+  });
+
+  it("sends selected SRE teams as an assignmentGroupId/in generic filter entry", () => {
+    expect(
+      buildProblemSearchFilters(
+        { ...DEFAULT_PROBLEM_FILTERS, sreTeamIds: ["team-apollo", "team-atlas"] },
+        "",
+      ),
+    ).toEqual({
+      filters: [{ field: "assignmentGroupId", op: "in", values: ["team-apollo", "team-atlas"] }],
+    });
+  });
+
+  it("omits the generic filters array entirely when no SRE team is selected", () => {
+    expect(buildProblemSearchFilters(DEFAULT_PROBLEM_FILTERS, "")).not.toHaveProperty("filters");
   });
 });

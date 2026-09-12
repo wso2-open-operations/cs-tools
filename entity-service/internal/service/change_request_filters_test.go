@@ -54,3 +54,51 @@ func TestParseChangeRequestFieldFilters_CreatedOnAbsoluteDateStillWorks(t *testi
 		t.Fatal("CreatedEndDate = nil, want a resolved time")
 	}
 }
+
+// TestParseChangeRequestFieldFilters_ApprovalAccepted verifies each of
+// ServiceNow's four raw task.approval values is accepted via the "approval"
+// field / "eq" op and passed through into parsedChangeRequestFilters.Approval
+// unchanged.
+func TestParseChangeRequestFieldFilters_ApprovalAccepted(t *testing.T) {
+	now := time.Now().UTC()
+
+	for _, value := range []string{"not requested", "requested", "approved", "rejected"} {
+		parsed, err := ParseChangeRequestFieldFilters([]domain.ChangeRequestFieldFilter{
+			{Field: "approval", Op: "eq", Values: []string{value}},
+		}, now)
+		if err != nil {
+			t.Fatalf("value %q: unexpected error: %v", value, err)
+		}
+		if parsed.Approval == nil || *parsed.Approval != value {
+			t.Fatalf("value %q: Approval = %v, want %q", value, parsed.Approval, value)
+		}
+	}
+}
+
+// TestParseChangeRequestFieldFilters_ApprovalInvalidValueRejected verifies a
+// value outside ServiceNow's four-value task.approval set is rejected rather
+// than passed through as free text.
+func TestParseChangeRequestFieldFilters_ApprovalInvalidValueRejected(t *testing.T) {
+	now := time.Now().UTC()
+
+	_, err := ParseChangeRequestFieldFilters([]domain.ChangeRequestFieldFilter{
+		{Field: "approval", Op: "eq", Values: []string{"maybe"}},
+	}, now)
+	if err == nil {
+		t.Fatal("expected an error for an invalid approval value, got nil")
+	}
+}
+
+// TestParseChangeRequestFieldFilters_ApprovalWrongOpRejected verifies
+// "approval" only accepts op "eq" -- gte/lte/in (valid ops for other fields)
+// are rejected for this field.
+func TestParseChangeRequestFieldFilters_ApprovalWrongOpRejected(t *testing.T) {
+	now := time.Now().UTC()
+
+	_, err := ParseChangeRequestFieldFilters([]domain.ChangeRequestFieldFilter{
+		{Field: "approval", Op: "in", Values: []string{"approved"}},
+	}, now)
+	if err == nil {
+		t.Fatal("expected an error for op \"in\" on field \"approval\", got nil")
+	}
+}

@@ -31,6 +31,7 @@ import {
   User,
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseDetail } from "@src/types";
+import { ACTION_BAR_CONTROL_HEIGHT } from "./CaseActionBar";
 
 interface SecondaryItem {
   key: string;
@@ -180,7 +181,7 @@ export function CaseMoreMenu({ caseDetail, currentUserId, onChangeSeverity, onLo
         color="primary"
         endIcon={<ChevronDown size={16} />}
         onClick={(e) => setMenuAnchor(e.currentTarget)}
-        sx={{ borderRadius: 999, flexShrink: 0 }}
+        sx={{ borderRadius: 999, flexShrink: 0, height: ACTION_BAR_CONTROL_HEIGHT }}
       >
         More
       </Button>

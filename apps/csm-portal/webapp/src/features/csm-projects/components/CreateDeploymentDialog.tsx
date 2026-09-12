@@ -109,12 +109,19 @@ export default function CreateDeploymentDialog({
           />
 
           <FormControl size="small" fullWidth required error={type === "" && description.length > 0}>
-            <InputLabel id="create-deployment-type-label">Type</InputLabel>
+            <InputLabel
+              id="create-deployment-type-label"
+              shrink={type !== ""}
+              sx={{ top: "0px !important" }}
+            >
+              Type
+            </InputLabel>
             <Select
               labelId="create-deployment-type-label"
               label="Type"
               value={type}
               onChange={(e) => setType(e.target.value as BeDeploymentType)}
+              notched={type !== ""}
             >
               {DEPLOYMENT_TYPES.map((t) => (
                 <MenuItem key={t} value={t}>

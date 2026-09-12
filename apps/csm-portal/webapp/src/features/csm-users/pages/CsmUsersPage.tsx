@@ -16,7 +16,6 @@
 
 import {
   Box,
-  Button,
   Checkbox,
   FormControl,
   IconButton,
@@ -39,7 +38,7 @@ import {
   Typography,
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, X } from "@wso2/oxygen-ui-icons-react";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
@@ -83,7 +82,14 @@ export default function CsmUsersPage(): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
   // Set by a dashboard widget's click-through, since this page has no
-  // dashboard context of its own.
+  // dashboard context of its own. No Back button of its own reads this
+  // directly any more -- `CsmAdminLayout` (the parent route shell) renders
+  // the single Back button for every page it wraps and reads this exact
+  // same `location.state`, since a layout component sees the same route
+  // match's state as its child. Still needed here to forward `parentState`
+  // onward below, so a dashboard → here → profile → Back → Back chain
+  // restores correctly instead of landing back on the tile grid partway
+  // through.
   const backState = location.state as { from?: string } | undefined;
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => readUsersFiltersFromUrl(searchParams), [searchParams]);
@@ -161,18 +167,6 @@ export default function CsmUsersPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      {backState?.from && (
-        <Button
-          variant="text"
-          size="small"
-          startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(backState.from as string)}
-          sx={{ alignSelf: "flex-start" }}
-        >
-          Back
-        </Button>
-      )}
-
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Typography variant="body2" color="text.secondary">
           Search across username and email (case-insensitive). Filter by role, group, team and
@@ -198,10 +192,17 @@ export default function CsmUsersPage(): JSX.Element {
         />
 
         <FormControl size="small" sx={{ width: 200, flexShrink: 0 }}>
-          <InputLabel id="user-roles-label">Roles</InputLabel>
+          <InputLabel
+            id="user-roles-label"
+            shrink={filters.roleIds.length > 0}
+            sx={{ top: "0px !important" }}
+          >
+            Roles
+          </InputLabel>
           <Select
             labelId="user-roles-label"
             multiple
+            notched={filters.roleIds.length > 0}
             value={filters.roleIds}
             onChange={handleRoleChange}
             input={
@@ -269,10 +270,17 @@ export default function CsmUsersPage(): JSX.Element {
         </Box>
 
         <FormControl size="small" sx={{ width: 200, flexShrink: 0 }}>
-          <InputLabel id="user-teams-label">Teams</InputLabel>
+          <InputLabel
+            id="user-teams-label"
+            shrink={filters.teamIds.length > 0}
+            sx={{ top: "0px !important" }}
+          >
+            Teams
+          </InputLabel>
           <Select
             labelId="user-teams-label"
             multiple
+            notched={filters.teamIds.length > 0}
             value={filters.teamIds}
             onChange={handleTeamChange}
             input={
@@ -326,9 +334,16 @@ export default function CsmUsersPage(): JSX.Element {
         </FormControl>
 
         <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel id="user-active-label">Status</InputLabel>
+          <InputLabel
+            id="user-active-label"
+            shrink={filters.active !== "all"}
+            sx={{ top: "0px !important" }}
+          >
+            Status
+          </InputLabel>
           <Select
             labelId="user-active-label"
+            notched={filters.active !== "all"}
             value={filters.active}
             onChange={handleActiveChange}
             input={<OutlinedInput label="Status" />}
@@ -436,7 +451,7 @@ export default function CsmUsersPage(): JSX.Element {
                         },
                       }}
                     >
-                      <TableCell sx={{ minWidth: 0 }}>
+                      <TableCell sx={{ minWidth: 0, maxWidth: 320 }}>
                         <UserRefLink
                           name={primaryIdentity}
                           email={u.email}

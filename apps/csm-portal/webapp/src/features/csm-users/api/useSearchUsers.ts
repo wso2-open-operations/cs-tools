@@ -30,8 +30,13 @@ import {
  * (postgres `User` vs ServiceNow `SnUser`); the result is normalized into a
  * source-agnostic {@link NormalizedUserSearchResult} so callers don't branch
  * on the live data source.
+ *
+ * `enabled` (default `true`) skips the query entirely — for a caller that
+ * only wants to search once it has something to filter by (e.g. a `userIds`
+ * scope derived from another query), rather than firing against an empty or
+ * not-yet-known filter set.
  */
-export function useSearchUsers(request: SearchUsersRequest) {
+export function useSearchUsers(request: SearchUsersRequest, enabled = true) {
   const authFetch = useAuthApiClient();
 
   return useQuery<SearchUsersResponse, Error, NormalizedUserSearchResult>({
@@ -54,5 +59,6 @@ export function useSearchUsers(request: SearchUsersRequest) {
     select: normalizeUserSearchResponse,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+    enabled,
   });
 }

@@ -458,7 +458,8 @@ function DialogPaperWrapper({ children, onClose }: { children: ReactNode; onClos
       onClose={onClose}
       slots={{ paper: DialogPaper }}
       slotProps={{
-        paper: { sx: { bgcolor: "background.default", p: 2, gap: 2, m: 2, maxHeight: "85vh", overflowY: "auto" } },
+        // `dvh`, not `vh` — see LogTimeCardDialog's comment for why.
+        paper: { sx: { bgcolor: "background.default", p: 2, gap: 2, m: 2, maxHeight: "85dvh", overflowY: "auto" } },
       }}
     >
       {children}

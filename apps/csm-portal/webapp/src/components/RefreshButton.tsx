@@ -17,7 +17,9 @@
 import { Box, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { RefreshCw } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import { useState } from "react";
 import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import { useRelativeTimeTick } from "@components/RelativeTime";
 
 interface RefreshButtonProps {
   /** Re-runs the underlying query. Wire to the react-query `refetch`. */
@@ -41,12 +43,33 @@ export default function RefreshButton({
   updatedAt,
   label,
 }: RefreshButtonProps): JSX.Element {
+  // The "Last refreshed" hint only appears after the user has manually
+  // clicked this control at least once — not from the page's initial data
+  // load, which also sets `updatedAt`.
+  const [hasManuallyRefreshed, setHasManuallyRefreshed] = useState(false);
+
+  // Re-render exactly when "Last refreshed …" text would next change
+  // (adaptive shared scheduler — see RelativeTime.tsx), without requiring
+  // another fetch or unrelated state change. `now` is passed explicitly
+  // into `formatRelativeTime` below (rather than relying on its internal
+  // `Date.now()` default) so the React Compiler's auto-memoization sees it
+  // as a dependency and recomputes the label. Only registered with the
+  // shared scheduler once the label is actually going to render — before
+  // the first manual refresh, the hint is hidden, so there's nothing to
+  // tick for.
+  const now = useRelativeTimeTick(hasManuallyRefreshed ? updatedAt : null);
+
+  const handleRefreshClick = (): void => {
+    setHasManuallyRefreshed(true);
+    onRefresh();
+  };
+
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-      {updatedAt ? (
+      {hasManuallyRefreshed && updatedAt ? (
         <Typography variant="caption" color="text.secondary">
           Last refreshed{" "}
-          {formatRelativeTime(new Date(updatedAt).toISOString())}
+          {formatRelativeTime(new Date(updatedAt).toISOString(), now)}
         </Typography>
       ) : null}
       <Tooltip title={label}>
@@ -54,7 +77,7 @@ export default function RefreshButton({
         <span>
           <IconButton
             size="small"
-            onClick={onRefresh}
+            onClick={handleRefreshClick}
             disabled={isFetching}
             aria-label={label}
           >

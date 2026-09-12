@@ -25,7 +25,10 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
 }));
 
-import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
+import {
+  resolveWidgetRefetchInterval,
+  useWidgetData,
+} from "@features/csm-dashboard/api/useWidgetData";
 import {
   WIDGET_FETCH_CONCURRENCY_LIMIT,
   __resetWidgetFetchConcurrencyForTests,
@@ -42,7 +45,7 @@ function wrapper({ children }: { children: ReactNode }) {
 /** One dashboard tile: mounts its own independent useWidgetData query, same
  * as DashboardWidgetTile does per widget — the real fan-out this task caps. */
 function Widget({ id }: { id: string }) {
-  useWidgetData(id, "case", { states: ["open"] }, "count");
+  useWidgetData({ widgetId: id, resourceType: "case", filters: { states: ["open"] }, shape: "count" });
   return null;
 }
 
@@ -65,7 +68,7 @@ describe("useWidgetData", () => {
   it("issues one search for the widget's own filters, shape count uses limit 1", async () => {
     postMock.mockResolvedValue({ total: 7, items: [] });
 
-    renderHook(() => useWidgetData("w1", "case", { states: ["open"] }, "count"), { wrapper });
+    renderHook(() => useWidgetData({ widgetId: "w1", resourceType: "case", filters: { states: ["open"] }, shape: "count" }), { wrapper });
 
     await waitFor(() => expect(postMock).toHaveBeenCalled());
     expect(postMock).toHaveBeenCalledWith(
@@ -198,11 +201,11 @@ describe("useWidgetData", () => {
       });
 
       const first = renderHook(
-        () => useWidgetData("w-hung", "case", { states: ["open"] }, "count"),
+        () => useWidgetData({ widgetId: "w-hung", resourceType: "case", filters: { states: ["open"] }, shape: "count" }),
         { wrapper: wrapperWithFastRetry },
       );
       const second = renderHook(
-        () => useWidgetData("w-queued", "case", { states: ["open"] }, "count"),
+        () => useWidgetData({ widgetId: "w-queued", resourceType: "case", filters: { states: ["open"] }, shape: "count" }),
         { wrapper: wrapperWithFastRetry },
       );
 
@@ -253,11 +256,11 @@ describe("useWidgetData", () => {
       });
 
       const retrying = renderHook(
-        () => useWidgetData("w-retry", "case", { states: ["open"] }, "count"),
+        () => useWidgetData({ widgetId: "w-retry", resourceType: "case", filters: { states: ["open"] }, shape: "count" }),
         { wrapper: wrapperWithFastRetry },
       );
       const other = renderHook(
-        () => useWidgetData("w-other", "case", { severities: ["critical"] }, "count"),
+        () => useWidgetData({ widgetId: "w-other", resourceType: "case", filters: { severities: ["critical"] }, shape: "count" }),
         { wrapper: wrapperWithFastRetry },
       );
 
@@ -297,7 +300,7 @@ describe("useWidgetData", () => {
       });
 
       const { result } = renderHook(
-        () => useWidgetData("w-double-timeout", "case", {}, "count"),
+        () => useWidgetData({ widgetId: "w-double-timeout", resourceType: "case", filters: {}, shape: "count" }),
         { wrapper: wrapperWithFastRetry },
       );
 
@@ -319,5 +322,21 @@ describe("useWidgetData", () => {
       expect(events).toEqual(["attempt-1", "attempt-2"]);
       expect(result.current.isError).toBe(true);
     });
+  });
+});
+
+describe("resolveWidgetRefetchInterval", () => {
+  it("returns undefined (no auto-refetch) when the caller set no interval, regardless of queue depth", () => {
+    expect(resolveWidgetRefetchInterval(undefined, 0)).toBeUndefined();
+    expect(resolveWidgetRefetchInterval(undefined, 5)).toBeUndefined();
+  });
+
+  it("returns the configured interval when the shared fetch queue is idle", () => {
+    expect(resolveWidgetRefetchInterval(60_000, 0)).toBe(60_000);
+  });
+
+  it("suppresses the refetch (false) while the queue still has a wave draining, so ticks don't stack", () => {
+    expect(resolveWidgetRefetchInterval(60_000, 1)).toBe(false);
+    expect(resolveWidgetRefetchInterval(60_000, 12)).toBe(false);
   });
 });

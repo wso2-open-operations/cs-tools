@@ -98,9 +98,18 @@ export default function CreateIncidentPage(): JSX.Element {
   // carries over as the new incident's parent without a query-string round
   // trip or a full page load. See CsmCaseDetailPage.tsx's `create_incident`
   // handler.
-  const originCaseState = useLocation().state as
+  const location = useLocation();
+  const originCaseState = location.state as
     | CreateIncidentFromCaseNavState
     | undefined;
+
+  // Set when opened from a list/detail page's own "Create incident" action
+  // with `state: { from: ... }` (same convention as the case-type create
+  // pages), so Back/Cancel return there instead of the hardcoded incidents
+  // tab, and the newly created incident's own Back button (reading this
+  // same convention) returns there too.
+  const backState = location.state as { from?: string } | undefined;
+  const backTarget = backState?.from ?? OPERATIONS_INCIDENTS_PATH;
 
   const [shortDescription, setShortDescription] = useState(
     originCaseState?.subject
@@ -225,7 +234,10 @@ export default function CreateIncidentPage(): JSX.Element {
     if (causedById.trim()) payload.causedById = causedById.trim();
 
     postIncident.mutate(payload, {
-      onSuccess: (created) => navigate(`/operations/incidents/${created.incident.id}`),
+      onSuccess: (created) =>
+        navigate(`/operations/incidents/${created.incident.id}`, {
+          state: { from: backTarget },
+        }),
       onError: (err) => {
         // The backend surfaces real validation messages on 4xx (e.g. an
         // invalid UUID in one of the linking fields); show them.
@@ -289,10 +301,10 @@ export default function CreateIncidentPage(): JSX.Element {
       <Button
         variant="text"
         startIcon={<ArrowLeft size={16} />}
-        onClick={() => navigate(OPERATIONS_INCIDENTS_PATH)}
+        onClick={() => navigate(backTarget)}
         sx={{ mb: 1 }}
       >
-        Back to operations
+        Back
       </Button>
       <Typography variant="h5" sx={{ mb: originCaseState ? 0.5 : 2 }}>
         New incident
@@ -609,7 +621,7 @@ export default function CreateIncidentPage(): JSX.Element {
         </Box>
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
-          <Button variant="outlined" onClick={() => navigate(OPERATIONS_INCIDENTS_PATH)}>
+          <Button variant="outlined" onClick={() => navigate(backTarget)}>
             Cancel
           </Button>
           <Button

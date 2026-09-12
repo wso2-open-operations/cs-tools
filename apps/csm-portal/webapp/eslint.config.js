@@ -19,5 +19,12 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // The `const { omitted, ...rest } = obj` idiom is how fields are dropped
+      // from an object here. Both eslint core and typescript-eslint default
+      // `ignoreRestSiblings` to false, so the deliberately-unused binding is
+      // reported as an error; opting in is the option's intended use.
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+    },
   },
 ])

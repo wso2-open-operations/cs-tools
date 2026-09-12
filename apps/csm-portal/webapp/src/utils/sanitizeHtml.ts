@@ -235,3 +235,52 @@ export function stripHtmlTags(text: string): string {
   container.innerHTML = withoutTags;
   return container.textContent ?? "";
 }
+
+/**
+ * Plain-text form of an HTML string used for a loose content comparison —
+ * tags stripped, whitespace collapsed, case-folded. Not meant for display,
+ * only for deciding whether two HTML snippets carry the same text.
+ */
+function normalizeForComparison(html: string): string {
+  return stripHtmlTags(html).replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * True when `commentHtml` reproduces `descriptionHtml`'s text content —
+ * e.g. an origin comment that echoes the record's description, sometimes
+ * with extra wrapper text (a signature, a greeting) around it.
+ *
+ * Deliberately a plain substring check on normalized text, not a similarity
+ * score: cheap, legible, and matches the one real shape this needs to
+ * handle (an exact echo, possibly wrapped) rather than fuzzy near-matches.
+ * A blank description has nothing to echo, so it counts as "reproduced"
+ * (the caller should already be gating display on a non-blank description).
+ * A missing/absent comment can't reproduce anything.
+ */
+export function isDescriptionEchoedInComment(
+  descriptionHtml: string,
+  commentHtml: string | undefined,
+): boolean {
+  const normalizedDescription = normalizeForComparison(descriptionHtml);
+  if (!normalizedDescription) return true;
+  if (!commentHtml) return false;
+  const normalizedComment = normalizeForComparison(commentHtml);
+  return normalizedComment.includes(normalizedDescription);
+}
+
+/**
+ * Escape the five HTML-significant characters so a plain-text string can be
+ * embedded in markup verbatim.
+ *
+ * Canonical implementation for the app; `components/rich-text-editor` re-exports
+ * this rather than keeping its own copy, and nothing should hand-roll a third.
+ */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+

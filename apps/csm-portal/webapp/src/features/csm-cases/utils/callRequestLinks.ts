@@ -26,10 +26,14 @@ const CALL_REQUEST_URL = /sn_customerservice_customer_call\.do\?sys_id=([a-f0-9]
 
 // Matches an already-wrapped anchor whose href contains the call-request URL,
 // e.g. `<a href="https://host/sn_customerservice_customer_call.do?sys_id=...">
-// some label</a>`. Captures the sysid directly so the whole anchor (including
-// whatever label text the source system used) can be swapped for our marker.
+// CTASK0012345</a>`. Captures both the sysid and the anchor's inner (visible)
+// content so the whole anchor can be swapped for our marker while preserving
+// whatever text the source system actually put there — usually the task
+// number, which is real information the sentence around it depends on (see
+// `callRequestMarkup`'s doc comment for why we keep it rather than replacing
+// it with a generic label).
 const CALL_REQUEST_ANCHOR = new RegExp(
-  `<a\\b[^>]*href\\s*=\\s*(?:"[^"]*sn_customerservice_customer_call\\.do\\?sys_id=([a-f0-9]{32})[^"]*"|'[^']*sn_customerservice_customer_call\\.do\\?sys_id=([a-f0-9]{32})[^']*')[^>]*>[\\s\\S]*?<\\/a>`,
+  `<a\\b[^>]*href\\s*=\\s*(?:"[^"]*sn_customerservice_customer_call\\.do\\?sys_id=([a-f0-9]{32})[^"]*"|'[^']*sn_customerservice_customer_call\\.do\\?sys_id=([a-f0-9]{32})[^']*')[^>]*>([\\s\\S]*?)<\\/a>`,
   "gi",
 );
 
@@ -44,6 +48,10 @@ export function containsCallRequestLink(html: string): boolean {
   return CALL_REQUEST_URL.test(html);
 }
 
+// Fallback label when there's no original visible text to reuse — the bare
+// (non-anchor) URL case, which never carried a label in the first place.
+const DEFAULT_LABEL = "View call request";
+
 /**
  * Renders the clickable in-app marker for a converted call-request id. Uses a
  * `<span>` (not `<a>`) deliberately — an anchor would need a real `href` and
@@ -52,12 +60,19 @@ export function containsCallRequestLink(html: string): boolean {
  * behavior here (this should open the in-app popup, never navigate/new-tab).
  * `role="button"` + `tabindex="0"` mirror the existing inline-image click
  * affordance so it's keyboard operable without a dedicated a11y pass.
+ *
+ * `label` defaults to {@link DEFAULT_LABEL} for a bare URL, but the anchor
+ * case passes through the anchor's own inner content instead (typically the
+ * call-request task number, e.g. `CTASK0012345`) — substituting a generic
+ * label there discarded real information from the surrounding sentence
+ * (backend text like "Case Task CTASK0012345 has been created" rendered as
+ * "Case Task View call request has been created").
  */
-function callRequestMarkup(uuid: string): string {
+function callRequestMarkup(uuid: string, label: string = DEFAULT_LABEL): string {
   return (
     `<span data-call-request-sysid="${uuid}" role="button" tabindex="0" ` +
     `style="color:inherit;text-decoration:underline;cursor:pointer;font-weight:600;">` +
-    `View call request</span>`
+    `${label}</span>`
   );
 }
 
@@ -74,10 +89,17 @@ function callRequestMarkup(uuid: string): string {
 export function replaceCallRequestLinks(html: string): string {
   if (!html || typeof html !== "string") return html;
   return html
-    .replace(CALL_REQUEST_ANCHOR, (_full, sysidDouble, sysidSingle) => {
-      const sysid = sysidDouble ?? sysidSingle;
-      return callRequestMarkup(sysidToUuid(sysid));
-    })
+    .replace(
+      CALL_REQUEST_ANCHOR,
+      (_full, sysidDouble, sysidSingle, innerContent: string) => {
+        const sysid = sysidDouble ?? sysidSingle;
+        // An empty/whitespace-only anchor body (rare, but not impossible)
+        // has no real text to preserve — fall back to the generic label
+        // rather than rendering a blank clickable span.
+        const label = innerContent.trim() || DEFAULT_LABEL;
+        return callRequestMarkup(sysidToUuid(sysid), label);
+      },
+    )
     .replace(BARE_CALL_REQUEST_URL, (_full, sysid) =>
       callRequestMarkup(sysidToUuid(sysid)),
     );

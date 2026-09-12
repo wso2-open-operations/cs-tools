@@ -181,10 +181,13 @@ type UserGroupRef struct {
 //
 // Rows with no linked contact record make the project, and every case on it, silently
 // invisible to that user, so they are reported here with GrantsCaseAccess spelling out the
-// verdict instead of being dropped. GrantsCaseAccess mirrors ContactRecordPresent directly
-// -- deliberately not the stricter email-match rule the live access check enforces, since
-// that only diverges for integration/system accounts, which aren't the audience this
-// signals for.
+// verdict instead of being dropped. GrantsCaseAccess is the access rule applied per row:
+// ContactRecordPresent AND ContactEmail matching ContactRecordEmail, compared
+// case-insensitively. It is deliberately not a restatement of ContactRecordPresent -- a row
+// invited under one address but linked to a contact whose own address differs is invisible
+// to both people, and that does happen on genuine customer rows, not only on
+// integration/system accounts. Both halves of the comparison are fields on this struct, so
+// a false verdict can be explained from the row itself.
 type UserProjectAccess struct {
 	ProjectID   string `json:"projectId"`
 	ProjectName string `json:"projectName"`
@@ -459,7 +462,15 @@ type ProjectDetailsView struct {
 	CreatedOn        time.Time         `json:"createdOn"`
 	UpdatedOn        time.Time         `json:"updatedOn"`
 	ProjectEngagementFields
+	// HasSr is the backing data source's own precomputed answer to whether
+	// this project is eligible to raise service requests.
+	HasSr bool `json:"hasSr"`
 	ProjectClosureFields
+	// OnboardingOwner is the person assigned to run this project's
+	// onboarding. Nil when no owner is assigned — most projects, since only
+	// onboarding-enabled projects have one. Currently populated only from
+	// the ServiceNow data source.
+	OnboardingOwner *PersonRef `json:"onboardingOwner,omitempty"`
 }
 
 // ProjectUpdateRequest is the input for PATCH /projects/{id} (ServiceNow data
@@ -980,17 +991,31 @@ type DeployedProductVersionRef struct {
 
 // DeployedProductView is the enriched search result for a deployed product.
 // It embeds deployment, product, and version as named refs and uses createdOn/updatedOn naming.
-// Cores, TPS, and Category are SN-only fields; they are always null for the Postgres path.
+// Cores, TPS, Category, and Updates are SN-only fields; they are always null/empty for the
+// Postgres path.
 type DeployedProductView struct {
 	ID         string                     `json:"id"`
 	Deployment EntityRef                  `json:"deployment"`
 	Product    EntityRef                  `json:"product"`
 	Version    *DeployedProductVersionRef `json:"version"`
-	Cores      *string                    `json:"cores"`
-	TPS        *string                    `json:"tps"`
+	Cores      *int                       `json:"cores"`
+	TPS        *float64                   `json:"tps"`
 	Category   *string                    `json:"category"`
-	CreatedOn  time.Time                  `json:"createdOn"`
-	UpdatedOn  time.Time                  `json:"updatedOn"`
+	// Updates is the deployed product's update-level history, most-recent-first as
+	// returned by the backing data source. Nil/empty when none have been recorded.
+	Updates   []ProductUpdateEntry `json:"updates"`
+	CreatedOn time.Time            `json:"createdOn"`
+	UpdatedOn time.Time            `json:"updatedOn"`
+}
+
+// ProductUpdateEntry records a single update-level change applied to a deployed product
+// (e.g. a patch or upgrade applied to the running instance).
+type ProductUpdateEntry struct {
+	UpdateLevel int `json:"updateLevel"`
+	// Date is a date-only "YYYY-MM-DD" string, matching the backing data source's wire format.
+	Date string `json:"date"`
+	// Details is optional free-text describing the update.
+	Details *string `json:"details"`
 }
 
 // SearchDeployedProductsRequest is the input for a deployed-product search operation.
@@ -1036,17 +1061,22 @@ type CreatedDeployedProduct struct {
 }
 
 // UpdateDeployedProductRequest is the input for PATCH /deployed-products/{id}.
-// Either detail fields (Cores, TPS, Description) or Active=false must be provided, but not both.
+// Either detail fields (Cores, TPS, Description, Updates) or Active=false must be provided,
+// but not both.
 // Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear, `"value"` = set.
 // DeploymentID, when provided, scopes the update: the deployed product must belong to that
 // deployment or the operation returns a NotFoundError.
+// Updates, when non-nil, replaces the deployed product's entire update-history array (the
+// backing data source has whole-array replace semantics: the caller fetches the current
+// array, mutates it client-side, and PATCHes the full array back).
 type UpdateDeployedProductRequest struct {
-	ID           string          `json:"-"`
-	DeploymentID *string         `json:"deploymentId,omitempty"`
-	Cores        *int            `json:"cores"`
-	TPS          *float64        `json:"tps"`
-	Description  json.RawMessage `json:"description,omitempty"`
-	Active       *bool           `json:"active"`
+	ID           string               `json:"-"`
+	DeploymentID *string              `json:"deploymentId,omitempty"`
+	Cores        *int                 `json:"cores"`
+	TPS          *float64             `json:"tps"`
+	Description  json.RawMessage      `json:"description,omitempty"`
+	Updates      []ProductUpdateEntry `json:"updates,omitempty"`
+	Active       *bool                `json:"active"`
 }
 
 // UpdateDeployedProductResponse is the response for PATCH /deployed-products/{id}.
@@ -1060,6 +1090,10 @@ type UpdatedDeployedProduct struct {
 	ID        string    `json:"id"`
 	UpdatedOn time.Time `json:"updatedOn"`
 	UpdatedBy string    `json:"updatedBy"`
+	// Updates echoes back the deployed product's update-history array as it stands
+	// after the write, when the backing data source returns it. Nil when the write
+	// did not touch Updates and the data source omits it from the response.
+	Updates []ProductUpdateEntry `json:"updates,omitempty"`
 }
 
 // CaseIssueType classifies the nature of a support case.
@@ -1173,6 +1207,15 @@ const (
 	EngagementTypeNewFeatureImprovement EngagementType = "new_feature_improvement"
 	EngagementTypeFollowUp              EngagementType = "follow_up"
 	EngagementTypeOnboarding            EngagementType = "onboarding"
+)
+
+// EngagementPaymentType classifies whether an engagement case is paid or
+// covered free of charge.
+type EngagementPaymentType string
+
+const (
+	EngagementPaymentTypePaid EngagementPaymentType = "paid"
+	EngagementPaymentTypeFOC  EngagementPaymentType = "foc"
 )
 
 // CaseSortField enumerates the columns available for sorting case search results.
@@ -1390,8 +1433,13 @@ type CaseView struct {
 	DeployedProductDetails *DeployedProductRef `json:"deployedProduct"`
 	Catalog                *EntityRef          `json:"catalog"`
 	CatalogItem            *EntityRef          `json:"catalogItem"`
-	AssignedTeam           *EntityRef          `json:"assignedTeam"`
-	Conversation           *EntityRef          `json:"conversation"`
+	// Variables are the answers given to the catalog item's questions when the
+	// service request was raised, in the order the backing data source returns
+	// them. Only service-request cases carry them; the field is omitted
+	// entirely for every other case type.
+	Variables    []CaseVariable `json:"variables,omitempty"`
+	AssignedTeam *EntityRef     `json:"assignedTeam"`
+	Conversation *EntityRef     `json:"conversation"`
 	// AssignedEngineer is the canonical user reference for the assigned
 	// engineer. Its id is populated: the assignee's own id already arrives with
 	// the response, so no extra lookup is involved. Null when the case is
@@ -1403,9 +1451,16 @@ type CaseView struct {
 	// backing data source when the case's type or severity changes or it is
 	// reopened, so that a materially changed case has to be re-acknowledged.
 	AcknowledgedBy *AssignedEngineerRef `json:"acknowledgedBy"`
-	ParentCase     *CaseNumberRef       `json:"parentCase"`
-	RelatedCase    *CaseNumberRef       `json:"relatedCase"`
-	AccountDetails *AccountRef          `json:"account"`
+	// WorkaroundProvidedOn is when the case's workaround was marked provided, null
+	// until marked (and cleared again on recall). Pauses the case's Workaround SLA
+	// clock in the backing data source while set (ServiceNow data source only).
+	WorkaroundProvidedOn *time.Time `json:"workaroundProvidedOn"`
+	// WorkaroundProvidedBy is the engineer who marked the workaround as provided,
+	// null until marked.
+	WorkaroundProvidedBy *AssignedEngineerRef `json:"workaroundProvidedBy"`
+	ParentCase           *CaseNumberRef       `json:"parentCase"`
+	RelatedCase          *CaseNumberRef       `json:"relatedCase"`
+	AccountDetails       *AccountRef          `json:"account"`
 	// LinkedServiceRequests lists any service-request cases whose parent points to this
 	// case. Populated on every case detail response, not just high-severity cases.
 	LinkedServiceRequests []LinkedServiceRequestRef `json:"linkedServiceRequests"`
@@ -1617,6 +1672,22 @@ type ParsedCaseFilters struct {
 	// escalation, from the "escalation" filter field's isEmpty/isNotEmpty op
 	// (optional; nil means no filter on this field).
 	HasActiveEscalation *bool
+	// HasBreachedSLA filters cases to those with a currently-breached SLA
+	// against the 10 named SLA definitions, from the "slaBreached" filter
+	// field's eq value (optional; nil means no filter on this field). Wire
+	// field on the SN payload: "slaBreached". Requires ServiceNow data source.
+	HasBreachedSLA *bool
+	// HasActiveAccountEscalation filters cases to those whose parent ACCOUNT
+	// has an active escalation (active_account_escalation.state IN 100,101),
+	// from the "accountEscalationActive" filter field's eq value (optional;
+	// nil means no filter on this field). Wire field on the SN payload:
+	// "accountEscalationActive". Requires ServiceNow data source.
+	//
+	// Distinct from HasActiveEscalation above: HasActiveEscalation filters by
+	// whether the CASE ITSELF carries an active escalation; this field
+	// filters by whether the case's parent ACCOUNT has one, regardless of
+	// whether this specific case is escalated.
+	HasActiveAccountEscalation *bool
 	// OrGroups: see SearchCasesFilters.AnyOf doc comment. Each entry is one
 	// parsed, ANDed branch; branches are OR'd together by the SN adapter.
 	OrGroups []CaseFilterGroup
@@ -1625,7 +1696,7 @@ type ParsedCaseFilters struct {
 // CaseFilterGroup is one ANDed branch of a SearchCasesFilters.AnyOf entry.
 // Deliberately narrower than ParsedCaseFilters: only fields with a direct,
 // non-subquery ServiceNow field mapping are supported inside an OR branch (no
-// tags/excludeTags/taskSLAFilter/parentId/createdBy/date-range/
+// taskSLAFilter/parentId/createdBy/date-range/
 // projectOnboardingStatus/projectType/creTeam/sreTeam/resolutionNotes/
 // unassigned/hasActiveEscalation) -- service.ParseCaseFieldFilterGroups
 // rejects any of those fields inside a branch with a validation error, they
@@ -1641,6 +1712,14 @@ type CaseFilterGroup struct {
 	DeploymentIDs    []string
 	AssignedUserIDs  []string
 	EscalationLevels []string
+	// Tags filters this branch to cases carrying at least one of these
+	// free-text tag labels (optional). Same semantics as
+	// ParsedCaseFilters.Tags, scoped to this OR branch.
+	Tags []string
+	// ExcludeTags filters this branch to cases NOT carrying any of these
+	// free-text tag labels (optional). Same semantics as
+	// ParsedCaseFilters.ExcludeTags, scoped to this OR branch.
+	ExcludeTags []string
 }
 
 // TaskSLAFilter specifies a range of business-elapsed-percent values for Task SLA
@@ -1670,19 +1749,19 @@ type SearchCasesRequest struct {
 	GroupBy string `json:"groupBy,omitempty"`
 }
 
-// GroupCasesByRequest is the input for the dedicated case group-by
+// AggregateCasesRequest is the input for the dedicated case aggregate
 // aggregation endpoint. Unlike SearchCasesRequest.GroupBy (which returns a
 // bucket per value of a small fixed enum, computed client-side as one search
 // per value), this drives a single server-side aggregation over an
 // open-ended field such as account, capped to the top MaxGroups buckets with
-// the remainder folded into GroupByResponse.OthersCount.
-type GroupCasesByRequest struct {
+// the remainder folded into AggregateResponse.OthersCount.
+type AggregateCasesRequest struct {
 	Filters SearchCasesFilters `json:"filters"`
 	// GroupBy selects the field to aggregate by (e.g. "account", "state",
 	// "severity", "type"). Required.
 	GroupBy string `json:"groupBy"`
 	// MaxGroups caps the number of returned buckets to the top MaxGroups by
-	// count; the rest are folded into GroupByResponse.OthersCount (optional;
+	// count; the rest are folded into AggregateResponse.OthersCount (optional;
 	// the backing service applies a default when omitted).
 	MaxGroups int `json:"maxGroups,omitempty"`
 }
@@ -1694,28 +1773,28 @@ type CaseGroup struct {
 	Count int    `json:"count"`
 }
 
-// GroupByBucket is one aggregated bucket in a server-side group-by result.
+// AggregateBucket is one aggregated bucket in a server-side aggregate result.
 // Key is the backing service's raw group value; Label is its human-readable
 // display form (identical to Key when the grouped field has no separate
 // label, e.g. an already-friendly account name). Count is the number of
 // matching records whose value of the grouped field falls in this bucket.
-type GroupByBucket struct {
+type AggregateBucket struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Count int    `json:"count"`
 }
 
-// GroupByResponse is the shared result shape for every resource's dedicated
-// group-by aggregation endpoint (cases, incidents, problems, change requests,
+// AggregateResponse is the shared result shape for every resource's dedicated
+// aggregate endpoint (cases, incidents, problems, change requests,
 // incident tasks). Groups holds the top buckets by count, capped at the
 // request's MaxGroups when set; OthersCount folds every bucket beyond that
 // cap into a single count. TotalRecords is the total number of records
 // matching the request's filters, and always equals the sum of Groups'
 // counts plus OthersCount.
-type GroupByResponse struct {
-	Groups       []GroupByBucket `json:"groups"`
-	OthersCount  int             `json:"othersCount"`
-	TotalRecords int             `json:"totalRecords"`
+type AggregateResponse struct {
+	Groups       []AggregateBucket `json:"groups"`
+	OthersCount  int               `json:"othersCount"`
+	TotalRecords int               `json:"totalRecords"`
 }
 
 // SearchCaseView is the unified case representation returned in search results.
@@ -1773,6 +1852,9 @@ type SearchCaseView struct {
 	// only; null otherwise. CSM-engineer-facing only, never shared with the
 	// customer.
 	WorstCaseFixEta *string `json:"worstCaseFixEta"`
+	// EscalationLevel is the case's current escalation level -- see
+	// CaseView.EscalationLevel's doc comment.
+	EscalationLevel *string `json:"escalationLevel"`
 }
 
 // SearchCasesResponse is the paginated result of a case search. When the
@@ -1805,14 +1887,40 @@ type SearchCasesResponse struct {
 // WatchList, AssigneeEmail, ParentID, RelatedCaseID, AutocloseHoldUntil, Subject, Description,
 // DeploymentID, DeployedProductID, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta
 // are only supported for the ServiceNow data source.
+// An explicitly empty WatchList clears the case's watch list and counts as a provided field.
 // ResolutionCode, Cause, and CloseNotes are optional resolution fields only allowed when
 // State is closed or solution_proposed.
 type UpdateCaseRequest struct {
-	ID             string              `json:"-"`
-	State          *CaseState          `json:"state"`
-	Severity       *CaseSeverity       `json:"severity"`
-	WorkState      *CaseWorkState      `json:"workState"`
-	WatchList      []string            `json:"watchList"`
+	ID        string         `json:"-"`
+	State     *CaseState     `json:"state"`
+	Severity  *CaseSeverity  `json:"severity"`
+	WorkState *CaseWorkState `json:"workState"`
+	// Type transfers the case to another type. One of
+	// "case" / "engagement" / "security_report_analysis" / "service_request" —
+	// "announcement" and the hosting_* types are system-managed and are never
+	// transfer targets. EngagementType and EngagementPaymentType are both required
+	// alongside Type when transferring into "engagement"; CatalogID/CatalogItemID
+	// (and optionally Variables) are required alongside Type when transferring into
+	// "service_request". Neither combination is meaningful for any other Type
+	// value and both are rejected if supplied otherwise.
+	Type                  *string                `json:"type"`
+	EngagementType        *EngagementType        `json:"engagementType"`
+	EngagementPaymentType *EngagementPaymentType `json:"engagementPaymentType"`
+	// IssueType classifies the case when transferring to type "case". Required in that
+	// transfer and rejected for every other target type: the backing data source stores
+	// issue type only on Incident/Query records.
+	IssueType     *CaseIssueType `json:"issueType"`
+	CatalogID     *string        `json:"catalogId"`
+	CatalogItemID *string        `json:"catalogItemId"`
+	// Variables answers the target catalog item's questions, same shape as
+	// CreateCaseRequest.Variables. Optional even when transferring into
+	// service_request -- a catalog item with no questions has nothing to answer.
+	Variables []Variable `json:"variables"`
+	// WatchList replaces the case's watch list wholesale with the given platform
+	// user UUIDs. It is a pointer so an absent field and an explicitly empty list
+	// are distinguishable: nil leaves the watch list untouched, while an empty
+	// list clears it.
+	WatchList      *[]string           `json:"watchList"`
 	AssigneeEmail  *string             `json:"assigneeEmail"`
 	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
 	Cause          *CaseCause          `json:"cause"`
@@ -1876,6 +1984,12 @@ type UpdateCaseRequest struct {
 	// it cannot be combined with any other field in the same request. Requires an
 	// elevated support role (ServiceNow data source only).
 	Acknowledge *bool `json:"acknowledge"`
+	// WorkaroundProvided marks (true) or recalls (false) the case's workaround.
+	// Unlike Acknowledge, both true and false are meaningful and accepted -- this
+	// is a toggle, not a one-way claim. Marking it stamps the calling engineer as
+	// the provider and pauses the case's Workaround SLA clock in the backing data
+	// source; recalling clears both (ServiceNow data source only).
+	WorkaroundProvided *bool `json:"workaroundProvided"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -1892,11 +2006,16 @@ type CaseLabelRef struct {
 
 // UpdatedCase carries the fields of a case that may change after an update.
 type UpdatedCase struct {
-	ID         string               `json:"id"`
-	UpdatedOn  time.Time            `json:"updatedOn"`
-	UpdatedBy  string               `json:"updatedBy,omitempty"`
-	State      CaseState            `json:"state,omitempty"`
-	Severity   CaseSeverity         `json:"severity,omitempty"`
+	ID        string       `json:"id"`
+	UpdatedOn time.Time    `json:"updatedOn"`
+	UpdatedBy string       `json:"updatedBy,omitempty"`
+	State     CaseState    `json:"state,omitempty"`
+	Severity  CaseSeverity `json:"severity,omitempty"`
+	// Type echoes the case's new type back on a successful transfer.
+	// EngagementType/CatalogID/CatalogItemID/Variables aren't echoed -- same as every
+	// other field this update accepts alongside a type-defining field (subject,
+	// description, deploymentId, ...), none of which echo back either.
+	Type       string               `json:"type,omitempty"`
 	WorkState  *CaseWorkState       `json:"workState"`
 	WatchList  []WatchListUser      `json:"watchList,omitempty"`
 	AssignedTo *AssignedEngineerRef `json:"assignedTo,omitempty"`
@@ -1934,6 +2053,20 @@ type UpdatedCase struct {
 	// request set it or found it already set. Present only when the update set
 	// acknowledge.
 	AcknowledgedBy *AssignedEngineerRef `json:"acknowledgedBy,omitempty"`
+	// WorkaroundProvidedOn/WorkaroundProvidedBy are not echoed here: ServiceNow's
+	// Update Case response only ever returns {id, updatedOn, updatedBy} for a plain
+	// field write like this one (same as Subject/Description/the fix-ETA fields
+	// above, none of which echo back either) -- the caller re-reads the case detail
+	// to see the new value, same as for those.
+}
+
+// CaseVariable is one answered question on a service request: Name is the
+// question as it was shown on the request form, Value the answer recorded
+// against it. Both are plain strings on the backing data source, which stores
+// every answer -- including numbers, dates and choice selections -- as text.
+type CaseVariable struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // WatchListUser is a compact user reference within the watch list.
@@ -2007,7 +2140,8 @@ type CreateCaseRequest struct {
 	// For security_report_analysis type
 	Attachments []CaseAttachment `json:"attachments"`
 	// For engagement type
-	EngagementType EngagementType `json:"engagementType"`
+	EngagementType        EngagementType        `json:"engagementType"`
+	EngagementPaymentType EngagementPaymentType `json:"engagementPaymentType"`
 }
 
 // CommentType classifies the type of a case comment.
@@ -2467,6 +2601,30 @@ type DeleteAttachmentResponse struct {
 	Message string `json:"message"`
 }
 
+// UpdateAttachmentRequest is the input for PATCH /attachments/{attachmentId}.
+// ReferenceID and ReferenceType scope the update the same way SearchAttachmentsRequest does
+// (an IDOR guard: the caller asserts which entity it believes the attachment belongs to).
+// At least one of Name or Description must be provided.
+// Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear,
+// `"value"` = set -- mirroring UpdateDeployedProductRequest.Description, since a plain *string
+// cannot tell an omitted field apart from an explicit null.
+type UpdateAttachmentRequest struct {
+	AttachmentID  string          `json:"-"`
+	ReferenceID   string          `json:"referenceId"`
+	ReferenceType ReferenceType   `json:"referenceType"`
+	Name          *string         `json:"name,omitempty"`
+	Description   json.RawMessage `json:"description,omitempty"`
+}
+
+// UpdateAttachmentResponse is the response for PATCH /attachments/{attachmentId}.
+
+// UpdatedAttachment carries the fields that may change after an attachment update.
+type UpdatedAttachment struct {
+	ID        string    `json:"id"`
+	UpdatedOn time.Time `json:"updatedOn"`
+	UpdatedBy string    `json:"updatedBy"`
+}
+
 // ChangeRequestType classifies the change request type.
 type ChangeRequestType string
 
@@ -2635,6 +2793,11 @@ type SearchChangeRequestsFilters struct {
 	//     inclusive "on or after", lte is inclusive "on or before". A lte
 	//     bound earlier than its own gte bound is rejected.
 	//   - "assignmentGroupId" (op in): sys_user_group UUIDs.
+	//   - "approval" (op eq): ServiceNow's raw task.approval rollup on the
+	//     change request. One of "not requested", "requested", "approved",
+	//     "rejected". Distinct from approvedBy/approvedOn on
+	//     ChangeRequestDetail, which are derived from a narrower
+	//     Customer-Approval-stage record, not this CR-wide field.
 	// See service.ParseChangeRequestFieldFilters.
 	Filters []ChangeRequestFieldFilter `json:"filters,omitempty"`
 }
@@ -2646,17 +2809,17 @@ type SearchChangeRequestsRequest struct {
 	Pagination Pagination                  `json:"pagination"`
 }
 
-// GroupChangeRequestsByRequest is the input for the dedicated change request
-// group-by aggregation endpoint: a single server-side aggregation over the
+// AggregateChangeRequestsRequest is the input for the dedicated change request
+// aggregate endpoint: a single server-side aggregation over the
 // requested field, capped to the top MaxGroups buckets with the remainder
-// folded into GroupByResponse.OthersCount.
-type GroupChangeRequestsByRequest struct {
+// folded into AggregateResponse.OthersCount.
+type AggregateChangeRequestsRequest struct {
 	Filters SearchChangeRequestsFilters `json:"filters"`
 	// GroupBy selects the field to aggregate by (e.g. "state",
 	// "assignmentGroup"). Required.
 	GroupBy string `json:"groupBy"`
 	// MaxGroups caps the number of returned buckets to the top MaxGroups by
-	// count; the rest are folded into GroupByResponse.OthersCount (optional;
+	// count; the rest are folded into AggregateResponse.OthersCount (optional;
 	// the backing service applies a default when omitted).
 	MaxGroups int `json:"maxGroups,omitempty"`
 }
@@ -2726,6 +2889,22 @@ type CatalogItemVariable struct {
 	QuestionText string `json:"questionText"`
 	Order        int    `json:"order"`
 	Type         string `json:"type"`
+	// Choices lists the selectable options for a choice-based variable, in the
+	// order the backing data source returns them. Most variables are free-text
+	// and carry none, so the field is omitted entirely rather than emitted as
+	// an empty list on every variable.
+	Choices []CatalogVariableChoice `json:"choices,omitempty"`
+}
+
+// CatalogVariableChoice is one selectable option on a choice-based catalog item
+// variable: Value is what a case create submits for it, Text the label shown to
+// the user, and Order its position in the list. All three are pointers because
+// the backing data source can genuinely leave any of them unset, and an absent
+// value must be null rather than "" or 0.
+type CatalogVariableChoice struct {
+	Value *string `json:"value"`
+	Text  *string `json:"text"`
+	Order *int    `json:"order"`
 }
 
 // GetCatalogItemVariablesResponse is the response for
@@ -2748,8 +2927,13 @@ type ProjectContact struct {
 	// than treating it as an error. A pointer keeps "no id" distinguishable from an
 	// empty id internally; on the wire both a nil and an absent id are omitted, so the
 	// published shape is unchanged.
-	ID                   *string  `json:"id,omitempty"`
-	Name                 string   `json:"name"`
+	ID *string `json:"id,omitempty"`
+	// Name is nil when the row has no contact record linked -- the name is only ever
+	// known from that record.
+	Name *string `json:"name"`
+	// Email falls back to the address the row was invited under when no contact record is
+	// linked, so a row whose contact record was never created stays identifiable instead
+	// of carrying no name and no address at all.
 	Email                string   `json:"email"`
 	RegistrationState    string   `json:"registrationState"`
 	NotificationsEnabled bool     `json:"notificationsEnabled"`
@@ -2758,10 +2942,12 @@ type ProjectContact struct {
 	// this project's cases" per row, not just "are they listed". CustomerContactPresent
 	// is whether a contact record is linked at all (false is the same fault ID==nil
 	// signals, restated as an explicit boolean rather than an absence a caller has to
-	// notice). GrantsCaseAccess mirrors it directly -- deliberately not the stricter
-	// invited-email-matches-account-email rule the portal's access check technically
-	// applies underneath, since that only ever diverges for integration/system accounts,
-	// not the real customers this signals for.
+	// notice). GrantsCaseAccess is the access rule the backing data source actually
+	// applies: a linked contact record AND the address the row was invited under matching
+	// that record's own address, compared case-insensitively. Deliberately not a
+	// restatement of CustomerContactPresent -- a row invited under one address but linked
+	// to a contact whose own address differs is invisible to both people, and that does
+	// happen on genuine customer rows, not only on integration/system accounts.
 	CustomerContactPresent bool `json:"customerContactPresent"`
 	GrantsCaseAccess       bool `json:"grantsCaseAccess"`
 }
@@ -3125,6 +3311,37 @@ type SearchProductVulnerabilitiesResponse struct {
 	Offset                 int                        `json:"offset"`
 }
 
+// ProductVulnerabilitySyncItem is one entry submitted to a full-replace sync of product
+// vulnerabilities. WSO2ID is the join key the downstream data source uses to match this item
+// against an existing record.
+type ProductVulnerabilitySyncItem struct {
+	WSO2ID                 string `json:"wso2Id"`
+	ComponentName          string `json:"componentName"`
+	ApprovedBySecurityTeam bool   `json:"approvedBySecurityTeam"`
+	ComponentType          string `json:"componentType"`
+	ComponentVersion       string `json:"componentVersion"`
+	CVE                    string `json:"cve"`
+	Justification          string `json:"justification"`
+	ProductName            string `json:"productName"`
+	ProductVersion         string `json:"productVersion"`
+	Resolution             string `json:"resolution"`
+	ScannerName            string `json:"scannerName"`
+	Severity               any    `json:"severity"`
+	UpdateLevel            string `json:"updateLevel"`
+	UseCase                string `json:"useCase"`
+	VulnerabilityID        string `json:"vulnerabilityId"`
+	WSO2Resolution         string `json:"wso2Resolution"`
+}
+
+// ProductVulnerabilitySyncResult reports the outcome of a full-replace product vulnerability
+// sync. Fields are pointers because the downstream data source may omit or partially populate
+// them; a nil field means the count was not reported, not that it was zero.
+type ProductVulnerabilitySyncResult struct {
+	InsertedRecords *int `json:"insertedRecords,omitempty"`
+	UpdatedRecords  *int `json:"updatedRecords,omitempty"`
+	DeletedRecords  *int `json:"deletedRecords,omitempty"`
+}
+
 // CallRequestStateType is the state of a call request as a domain string enum.
 type CallRequestStateType string
 
@@ -3385,6 +3602,17 @@ type CallRequestSort struct {
 type SearchAllCallRequestsFilters struct {
 	AssignedUserIDs []string               `json:"assignedUserIds"`
 	States          []CallRequestStateType `json:"states"`
+	// CaseStates filters to call requests whose parent case is in one of these
+	// states (optional). Uses the same case-state enum as the case search's
+	// States filter.
+	CaseStates []CaseState `json:"caseStates"`
+	// ExcludeCaseStates filters to call requests whose parent case is NOT in
+	// any of these states (optional). Inverse of CaseStates, and the two are
+	// independent: a request may carry either, both, or neither.
+	ExcludeCaseStates []CaseState `json:"excludeCaseStates"`
+	// AssignmentTeamIDs filters to call requests whose parent case is assigned
+	// to one of these teams (optional). Same UUID convention as AssignedUserIDs.
+	AssignmentTeamIDs []string `json:"assignmentTeamIds"`
 }
 
 // SearchAllCallRequestsRequest is the input for POST /call-requests/search-all.
@@ -3727,6 +3955,17 @@ type SearchIncidentsFilters struct {
 	//   - "createdOn" (op gte/lte): RFC3339 timestamp, YYYY-MM-DD date, or a
 	//     relative-date placeholder (e.g. "__daysAgo:90__"), same syntax as
 	//     case search's own "createdOn" filter.
+	//   - "slaViolated" (op eq): a single boolean value; restricts to
+	//     incidents with (or without) at least one breached SLA record.
+	//   - "madeSla" (op eq): a single boolean value; restricts to incidents
+	//     matching ServiceNow's raw `made_sla` field. Deliberately kept
+	//     separate from "slaViolated" above: "slaViolated" is derived from
+	//     task_sla.has_breached and is the reliable signal; "madeSla" is
+	//     ServiceNow's own less-reliable raw field, kept only for exact
+	//     parity with SN's native incident dashboards. Prefer "slaViolated"
+	//     unless dashboard parity is the explicit goal.
+	//   - "productName" (op in): one or more product names, matched as a
+	//     union against the incident's backing business_service name.
 	// See service.ParseIncidentFieldFilters.
 	Filters []IncidentFieldFilter `json:"filters,omitempty"`
 }
@@ -3738,17 +3977,17 @@ type SearchIncidentsRequest struct {
 	Pagination Pagination             `json:"pagination"`
 }
 
-// GroupIncidentsByRequest is the input for the dedicated incident group-by
+// AggregateIncidentsRequest is the input for the dedicated incident aggregate
 // aggregation endpoint: a single server-side aggregation over the requested
 // field, capped to the top MaxGroups buckets with the remainder folded into
-// GroupByResponse.OthersCount.
-type GroupIncidentsByRequest struct {
+// AggregateResponse.OthersCount.
+type AggregateIncidentsRequest struct {
 	Filters SearchIncidentsFilters `json:"filters"`
 	// GroupBy selects the field to aggregate by (e.g. "state",
 	// "assignmentGroup", "businessService"). Required.
 	GroupBy string `json:"groupBy"`
 	// MaxGroups caps the number of returned buckets to the top MaxGroups by
-	// count; the rest are folded into GroupByResponse.OthersCount (optional;
+	// count; the rest are folded into AggregateResponse.OthersCount (optional;
 	// the backing service applies a default when omitted).
 	MaxGroups int `json:"maxGroups,omitempty"`
 }
@@ -4044,17 +4283,17 @@ type SearchProblemsRequest struct {
 	Pagination Pagination            `json:"pagination"`
 }
 
-// GroupProblemsByRequest is the input for the dedicated problem group-by
+// AggregateProblemsRequest is the input for the dedicated problem aggregate
 // aggregation endpoint: a single server-side aggregation over the requested
 // field, capped to the top MaxGroups buckets with the remainder folded into
-// GroupByResponse.OthersCount.
-type GroupProblemsByRequest struct {
+// AggregateResponse.OthersCount.
+type AggregateProblemsRequest struct {
 	Filters SearchProblemsFilters `json:"filters"`
 	// GroupBy selects the field to aggregate by (e.g. "state",
 	// "assignmentGroup"). Required.
 	GroupBy string `json:"groupBy"`
 	// MaxGroups caps the number of returned buckets to the top MaxGroups by
-	// count; the rest are folded into GroupByResponse.OthersCount (optional;
+	// count; the rest are folded into AggregateResponse.OthersCount (optional;
 	// the backing service applies a default when omitted).
 	MaxGroups int `json:"maxGroups,omitempty"`
 }
@@ -4117,6 +4356,48 @@ type CreateProblemRequest struct {
 	PrimaryIncidentID *string `json:"primaryIncidentId,omitempty"`
 }
 
+// UpdateProblemRequest is the input for PATCH /problems/{id}. All fields are optional, but
+// at least one must be provided. A Transition request may also carry any of the plain-field
+// keys in the same body (e.g. attaching an owner and requesting "assess" together).
+//
+// Transition is a plain, unvalidated passthrough string -- one of "assess", "confirm", "fix",
+// "resolve", "close" per the data source's own server-side validation -- rather than a closed
+// enum. Do not add strict validation against this list here: the data source's own "Invalid
+// transition" error names the valid values, and a Go-side closed check would swallow that
+// message with a generic one instead, the same mistake the Ballerina layer made and reverted
+// (see CHANGES-problem-update.md).
+type UpdateProblemRequest struct {
+	ID                   string  `json:"-"`
+	Transition           *string `json:"transition,omitempty"`
+	AssignedToID         *string `json:"assignedToId,omitempty"`
+	AssignmentGroupID    *string `json:"assignmentGroupId,omitempty"`
+	CauseNotes           *string `json:"causeNotes,omitempty"`
+	FixNotes             *string `json:"fixNotes,omitempty"`
+	Workaround           *string `json:"workaround,omitempty"`
+	TargetResolutionDate *string `json:"targetResolutionDate,omitempty"`
+}
+
+// UpdateProblemResponse is the output for PATCH /problems/{id}.
+type UpdateProblemResponse struct {
+	Message string            `json:"message"`
+	Problem UpdateProblemView `json:"problem"`
+}
+
+// UpdateProblemView is the problem representation returned by the update (PATCH) operation --
+// deliberately narrower than ProblemDetail: only the fields the update response actually
+// carries. State and ResolutionCode always reflect the real post-write state, not the caller's
+// requested transition -- the data source's own business rules can force- or fail-promote the
+// state as a side effect (see CHANGES-problem-update.md).
+type UpdateProblemView struct {
+	ID              *string    `json:"id"`
+	UpdatedOn       *string    `json:"updatedOn"`
+	UpdatedBy       *string    `json:"updatedBy"`
+	State           *string    `json:"state"`
+	ResolutionCode  *string    `json:"resolutionCode"`
+	AssignedTo      *EntityRef `json:"assignedTo"`
+	AssignmentGroup *EntityRef `json:"assignmentGroup"`
+}
+
 // IncidentTaskFieldFilter is a single predicate in an incident-task search's
 // generic filter expression array: "field op values", mirroring
 // ProblemFieldFilter's contract. See service.ParseIncidentTaskFieldFilters
@@ -4155,17 +4436,17 @@ type SearchIncidentTasksRequest struct {
 	Pagination Pagination                 `json:"pagination"`
 }
 
-// GroupIncidentTasksByRequest is the input for the dedicated incident task
-// group-by aggregation endpoint: a single server-side aggregation over the
+// AggregateIncidentTasksRequest is the input for the dedicated incident task
+// aggregate endpoint: a single server-side aggregation over the
 // requested field, capped to the top MaxGroups buckets with the remainder
-// folded into GroupByResponse.OthersCount.
-type GroupIncidentTasksByRequest struct {
+// folded into AggregateResponse.OthersCount.
+type AggregateIncidentTasksRequest struct {
 	Filters SearchIncidentTasksFilters `json:"filters"`
 	// GroupBy selects the field to aggregate by (e.g. "state",
 	// "assignmentGroup"). Required.
 	GroupBy string `json:"groupBy"`
 	// MaxGroups caps the number of returned buckets to the top MaxGroups by
-	// count; the rest are folded into GroupByResponse.OthersCount (optional;
+	// count; the rest are folded into AggregateResponse.OthersCount (optional;
 	// the backing service applies a default when omitted).
 	MaxGroups int `json:"maxGroups,omitempty"`
 }
@@ -4284,6 +4565,48 @@ type SearchConversationView struct {
 	State          *string        `json:"state"`
 	CreatedOn      string         `json:"createdOn"`
 	CreatedBy      *UserReference `json:"createdBy"`
+}
+
+// AlertView is the full detail representation returned by GET /alerts/{id}.
+type AlertView struct {
+	ID          *string `json:"id"`
+	Number      *string `json:"number"`
+	Environment *string `json:"environment"`
+	MetricName  *string `json:"metricName"`
+	Source      *string `json:"source"`
+	Category    *string `json:"category"`
+	Severity    *string `json:"severity"`
+	// Description is an opaque, free-form string and is passed through unparsed.
+	Description *string `json:"description"`
+	// IncidentID/ServiceID reference the linked incident/service, if any.
+	IncidentID *string `json:"incidentId"`
+	ServiceID  *string `json:"serviceId"`
+	CreatedOn  string  `json:"createdOn"`
+}
+
+// SmartAlertView is the full detail representation returned by GET /smart-alerts/{id}.
+type SmartAlertView struct {
+	ID               *string `json:"id"`
+	AlertID          *string `json:"alertId"`
+	SourceAlertID    *string `json:"sourceAlertId"`
+	AlertStatus      *string `json:"alertStatus"`
+	WindowStatus     *string `json:"windowStatus"`
+	Severity         *string `json:"severity"`
+	Urgency          *string `json:"urgency"`
+	Impact           *string `json:"impact"`
+	Category         *string `json:"category"`
+	Source           *string `json:"source"`
+	Environment      *string `json:"environment"`
+	ResourceName     *string `json:"resourceName"`
+	ShortDescription *string `json:"shortDescription"`
+	// Details is an opaque, free-form string and is passed through unparsed.
+	Details    *string `json:"details"`
+	MonitorURL *string `json:"monitorUrl"`
+	FiredAt    *string `json:"firedAt"`
+	ReceivedAt *string `json:"receivedAt"`
+	FireCount  *int    `json:"fireCount"`
+	// IncidentID references the linked incident, if any.
+	IncidentID *string `json:"incidentId"`
 }
 
 // SearchConversationsResponse is the paginated result of a conversation search.
@@ -4487,7 +4810,7 @@ type CaseFeedbackEmojiRef struct {
 }
 
 // CaseFeedback is the response for GET /cases/{id}/feedback.
-type CaseFeedback struct {
+type CaseEmojiFeedback struct {
 	ID                string               `json:"id"`
 	Emoji             CaseFeedbackEmojiRef `json:"emoji"`
 	ChipIDs           []string             `json:"chips"`
@@ -4503,10 +4826,11 @@ type CaseFeedback struct {
 // the two data sources differ) ---
 
 // AttachmentDetails is the response for GET /attachments/{id} — attachment
-// metadata plus its base64-encoded file content. Note ServiceNow's
-// attachment-details lookup does not resolve the uploader to a UserReference
-// the way the search/comment paths do (only those two carry a createdByUser
-// object) — CreatedBy is a bare string here.
+// metadata plus its base64-encoded file content. The upstream response does
+// include a createdByUser key, but this lookup leaves it null rather than
+// resolving the uploader the way the search/comment paths do — so CreatedBy is
+// a bare string here. ReferenceType is genuinely absent from the upstream
+// response, so it is deliberately not modeled below.
 type AttachmentDetails struct {
 	ID          string `json:"id"`
 	ReferenceID string `json:"referenceId"`
@@ -4545,20 +4869,8 @@ type AttachmentDetails struct {
 // ReferenceType must be "case" or "deployment"; for "case" Name is required
 // and Description is not allowed; for "deployment" at least one of Name or
 // Description must be present.
-type UpdateAttachmentRequest struct {
-	ID            string        `json:"-"`
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Name          *string       `json:"name,omitempty"`
-	Description   *string       `json:"description,omitempty"`
-}
 
 // UpdatedAttachment holds the fields returned after updating an attachment.
-type UpdatedAttachment struct {
-	ID        string    `json:"id"`
-	UpdatedOn time.Time `json:"updatedOn"`
-	UpdatedBy string    `json:"updatedBy"`
-}
 
 // UpdateAttachmentResponse is the response for PATCH /attachments/{id}.
 type UpdateAttachmentResponse struct {
@@ -4776,6 +5088,22 @@ type SearchEscalationsResponse struct {
 	Total       int          `json:"total"`
 	Offset      int          `json:"offset"`
 	Limit       int          `json:"limit"`
+}
+
+// CaseEscalationHistory is the response for GET /cases/{id}/escalations: a
+// single case's full escalation history (newest first), plus who is
+// authorized to de-escalate its current level.
+type CaseEscalationHistory struct {
+	Escalations []Escalation `json:"escalations"`
+	Total       int          `json:"total"`
+	// CurrentNotifiedUsers is the NotifiedUsers list of the most recent
+	// record in Escalations (i.e. who was notified about the case's current
+	// escalation level). Always present (an empty array, never omitted/null)
+	// when the case has never been escalated. Only someone on this list is
+	// authorized to de-escalate the case's current level -- surfaced as its
+	// own field so callers don't each re-derive "the first record's notified
+	// list" independently.
+	CurrentNotifiedUsers []EscalationNotifiedUser `json:"currentNotifiedUsers"`
 }
 
 // --- case-grouped time cards (ServiceNow data source only) ---
@@ -5098,6 +5426,23 @@ type SLAClock struct {
 	Reached50On  *time.Time `json:"reached50On"`
 	Reached75On  *time.Time `json:"reached75On"`
 	Reached100On *time.Time `json:"reached100On"`
+	// The eight fields below are display-only, populated once at
+	// registration time from the case's own state then — not re-derived
+	// later, so State/Priority in particular can go stale relative to the
+	// case's actual current values by the time a breach fires. Nothing here
+	// participates in scheduling or breach logic; they exist purely so
+	// GET .../sla-clocks/{clockType} can supply everything
+	// csm-notification-service's slaengine needs to build a Google Chat
+	// breach card without a second lookup at tick time, since that service
+	// has no other way to reach case data.
+	CaseNumber string `json:"caseNumber,omitempty"`
+	WSO2CaseID string `json:"wso2CaseId,omitempty"`
+	CaseTitle  string `json:"caseTitle,omitempty"`
+	CaseType   string `json:"caseType,omitempty"`
+	Product    string `json:"product,omitempty"`
+	Team       string `json:"team,omitempty"`
+	Priority   string `json:"priority,omitempty"`
+	State      string `json:"state,omitempty"`
 }
 
 // RegisterSLAClockRequest is the request body for
@@ -5112,6 +5457,17 @@ type RegisterSLAClockRequest struct {
 	ClockType string    `json:"clockType"`
 	StartedAt time.Time `json:"startedAt"`
 	DueAt     time.Time `json:"dueAt"`
+	// The eight fields below are optional display data — see SLAClock's own
+	// doc comment for what they're for and why they're a point-in-time
+	// snapshot, not kept live.
+	CaseNumber string `json:"caseNumber,omitempty"`
+	WSO2CaseID string `json:"wso2CaseId,omitempty"`
+	CaseTitle  string `json:"caseTitle,omitempty"`
+	CaseType   string `json:"caseType,omitempty"`
+	Product    string `json:"product,omitempty"`
+	Team       string `json:"team,omitempty"`
+	Priority   string `json:"priority,omitempty"`
+	State      string `json:"state,omitempty"`
 }
 
 // SLATierStatus is the value of SetSLAClockTierRequest.Status.

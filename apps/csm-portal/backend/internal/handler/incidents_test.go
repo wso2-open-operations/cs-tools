@@ -614,3 +614,80 @@ func TestSearchIncidentComments(t *testing.T) {
 		}
 	})
 }
+
+func TestAggregateIncidents(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/incidents/aggregate", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.AggregateIncidents(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/aggregate", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.AggregateIncidents(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/aggregate", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.AggregateIncidents(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
+		const reqPayload = `{"filters":{},"groupBy":"state","maxGroups":12}`
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			aggregateIncidentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"groups":[{"key":"NEW","label":"New","count":2}],"othersCount":0,"totalRecords":2}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/aggregate", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.AggregateIncidents(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["totalRecords"] != float64(2) {
+			t.Errorf("totalRecords = %v, want 2", resp["totalRecords"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to aggregate incidents.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					aggregateIncidentsFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/aggregate", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.AggregateIncidents(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

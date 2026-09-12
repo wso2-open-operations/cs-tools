@@ -102,7 +102,7 @@ export default function GenericColumnList({
       <DashboardMiniTable
         isLoading={isLoading}
         emptyMessage="No records match this widget's filters."
-        columns={[...columns.map((c) => ({ label: c.label })), { label: "Preview", width: "auto" }]}
+        columns={[{ label: "Preview", width: "auto" }, ...columns.map((c) => ({ label: c.label }))]}
         rows={items.map((item, i) => {
           const id = typeof item.id === "string" ? item.id : undefined;
           const href = config?.detailHref?.(item);
@@ -111,11 +111,6 @@ export default function GenericColumnList({
             key: id ?? `row-${i}`,
             onClick: href ? () => navigate(href, { state: dashboardReturnState }) : undefined,
             cells: [
-              ...columns.map((c) => (
-                <Typography key={c.path} variant="body2" noWrap>
-                  {formatColumnValue(resolveColumnPath(item, c.path), c.format)}
-                </Typography>
-              )),
               <Tooltip key="preview" title={`Quick preview ${label}`}>
                 <IconButton
                   size="small"
@@ -128,6 +123,11 @@ export default function GenericColumnList({
                   <Eye size={16} />
                 </IconButton>
               </Tooltip>,
+              ...columns.map((c) => (
+                <Typography key={c.path} variant="body2" noWrap>
+                  {formatColumnValue(resolveColumnPath(item, c.path), c.format)}
+                </Typography>
+              )),
             ],
           };
         })}

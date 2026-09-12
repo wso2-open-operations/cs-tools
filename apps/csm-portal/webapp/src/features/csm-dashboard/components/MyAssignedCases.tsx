@@ -46,7 +46,7 @@ const VIEW_ALL_HREF = `/cases?assignees=${encodeURIComponent(
 export default function MyAssignedCases(): JSX.Element {
   const currentUser = useCurrentUser();
   const [page, setPage] = useState(0);
-  const { data, isLoading, isError, isFetching, refetch } =
+  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } =
     useGetMyAssignedOpenCases(page, MY_OPEN_CASES_PAGE_SIZE);
 
   // `/users/me` returned but carried no id (entity service down): we can't tell
@@ -92,6 +92,7 @@ export default function MyAssignedCases(): JSX.Element {
           <RefreshButton
             onRefresh={() => void refetch()}
             isFetching={isFetching}
+            updatedAt={dataUpdatedAt}
             label="Refresh assigned cases"
           />
         </Box>

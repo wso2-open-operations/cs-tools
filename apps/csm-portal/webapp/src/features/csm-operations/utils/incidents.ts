@@ -130,8 +130,10 @@ export function incidentPriorityColor(priority?: string | null): ChipColor {
 /**
  * Filters for the incidents list. The backend's `IncidentSearchPayload.filters`
  * supports `searchQuery`, `priorities`, `parentIds`, `slaViolated`,
- * `startCreatedDate`/`endCreatedDate`, and `productNames` (see openapi.yaml);
- * there's no server-side state/category filter to build a control for.
+ * `startCreatedDate`/`endCreatedDate`, and `productNames` (see openapi.yaml),
+ * plus the generic `filters` array this feeds `sreTeamIds` through as an
+ * `assignmentGroupId`/`"in"` entry; there's no server-side state/category
+ * filter to build a control for.
  */
 export interface IncidentFilters {
   search: string;
@@ -146,6 +148,10 @@ export interface IncidentFilters {
   /** Selected service/product names — see `productNames`' coverage caveat
    * at the API (`BeIncidentSearchPayload`). */
   products: string[];
+  /** Selected SRE team `sreGroupId`s — sent as a generic
+   * `{ field: "assignmentGroupId", op: "in" }` filter entry (see
+   * `buildIncidentSearchFilters`), not a named payload field. */
+  sreTeamIds: string[];
 }
 
 export const DEFAULT_INCIDENT_FILTERS: IncidentFilters = {
@@ -155,6 +161,7 @@ export const DEFAULT_INCIDENT_FILTERS: IncidentFilters = {
   createdStartDate: "",
   createdEndDate: "",
   products: [],
+  sreTeamIds: [],
 };
 
 /** Count non-search active filters (used for the badge on the Filters button). */
@@ -164,7 +171,8 @@ export function countActiveIncidentFilters(filters: IncidentFilters): number {
     (filters.slaViolated ? 1 : 0) +
     (filters.createdStartDate ? 1 : 0) +
     (filters.createdEndDate ? 1 : 0) +
-    (filters.products.length > 0 ? 1 : 0)
+    (filters.products.length > 0 ? 1 : 0) +
+    (filters.sreTeamIds.length > 0 ? 1 : 0)
   );
 }
 
@@ -204,5 +212,10 @@ export function buildIncidentSearchFilters(
       endCreatedDate: incidentDateOnlyToUTCEnd(filters.createdEndDate),
     }),
     ...(filters.products.length > 0 && { productNames: filters.products }),
+    ...(filters.sreTeamIds.length > 0 && {
+      filters: [
+        { field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds },
+      ],
+    }),
   };
 }

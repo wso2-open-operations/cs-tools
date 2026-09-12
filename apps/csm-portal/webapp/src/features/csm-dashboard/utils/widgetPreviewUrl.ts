@@ -20,7 +20,61 @@
  * reconstruct `{ filters: [...] }` rather than a flat key→values record. */
 const CASE_FILTER_MARKER = "_cf";
 
-const RESERVED_PARAMS = new Set(["w", "n", CASE_FILTER_MARKER]);
+/** Carries a case widget's `anyOf` cross-field-OR branches (see
+ * `isAnyOfBranchArray`) as one JSON blob, round-tripped by
+ * `buildWidgetPreviewHref`/`parseWidgetPreviewFilters` below. Unlike every
+ * other filter field here, an `anyOf` branch can filter on any field and
+ * there can be several branches, so there's no natural one-field-one-param
+ * encoding the way `severities=critical` works for a flat AND'd field —
+ * this is the one deliberate exception to this file's "no opaque JSON blob"
+ * approach, scoped to just this one nested construct. */
+const ANY_OF_PARAM = "_anyOf";
+
+const RESERVED_PARAMS = new Set(["w", "n", CASE_FILTER_MARKER, ANY_OF_PARAM]);
+
+/**
+ * Query param carrying a dashboard widget's own `displayName`, appended to a
+ * click-through href for the two resourceTypes (`case`, `engagement`) whose
+ * `buildHref` lands on a real, permanent nav page (`/cases`, `/engagements`
+ * — see `caseFamilyBuildHref`'s fallback in `widgetResourceConfig.ts`)
+ * rather than the generic dashboard-widget preview page above. Those nav
+ * pages otherwise render a hardcoded heading ("Cases"/"Engagements"); this
+ * param lets them show the originating widget's own name instead, without
+ * affecting a plain nav visit (which never sets it).
+ *
+ * Deliberately a *different* param than `n` above: `n` belongs to the
+ * dashboard-widget preview page's own URL scheme (paired with `w`, and read
+ * by `parseWidgetPreviewFilters`'s caller, not this file). `wt` ("widget
+ * title") is scoped to this narrower, single-purpose use — a heading
+ * override, not a full preview-page identity — and deliberately excluded
+ * from `RESERVED_PARAMS`/`parseWidgetPreviewFilters`'s filter parsing since
+ * it never reaches that code path (`/cases`/`/engagements` have their own
+ * filter parsing in `casesFiltersUrl.ts`, which never reads this key either
+ * — purely cosmetic, heading-only).
+ */
+export const WIDGET_TITLE_PARAM = "wt";
+
+/** Appends `WIDGET_TITLE_PARAM` (the click-through widget's own
+ * `displayName`) to an already-built `/cases`/`/engagements` href, so that
+ * page's heading can show it instead of falling back to its hardcoded
+ * default. A no-op (returns `href` unchanged) when `displayName` is absent
+ * or empty — never emits `wt=` with nothing meaningful in it. */
+export function appendWidgetTitleParam(href: string, displayName: string | undefined): string {
+  if (!displayName) return href;
+  const [path, query = ""] = href.split("?");
+  const params = new URLSearchParams(query);
+  params.set(WIDGET_TITLE_PARAM, displayName);
+  return `${path}?${params.toString()}`;
+}
+
+/** Reads `WIDGET_TITLE_PARAM` back off a `/cases`/`/engagements` URL's own
+ * search params — the inverse of `appendWidgetTitleParam`. `undefined` when
+ * absent or empty, so a caller can cleanly fall back to that page's own
+ * default heading. */
+export function readWidgetTitleParam(searchParams: URLSearchParams): string | undefined {
+  const v = searchParams.get(WIDGET_TITLE_PARAM);
+  return v && v.length > 0 ? v : undefined;
+}
 
 /** Placeholder swapped in for the signed-in user's own id wherever a
  * widget's (opaque, backend-resolved) filters carry it — e.g. "My Cases"
@@ -78,6 +132,29 @@ export function isCaseFieldFilterArray(value: unknown): value is WidgetCaseField
   );
 }
 
+/** One `anyOf` branch: its own predicate array, ANDed within the branch, OR'd
+ * against every other branch — matches the backend's `CaseFilterBranch` and
+ * `widgetFilterMerge.ts`'s own (independently duplicated, not imported here
+ * to avoid a circular import — `widgetFilterMerge.ts` already imports from
+ * this file) structural check of the identical shape. */
+export interface WidgetAnyOfBranch {
+  filters: WidgetCaseFieldFilterLike[];
+}
+
+function isAnyOfBranch(value: unknown): value is WidgetAnyOfBranch {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { filters?: unknown }).filters)
+  );
+}
+
+/** True when `value` is a case widget's `anyOf` cross-field-OR branch array
+ * (`{filters: BeCaseFieldFilter[]}[]`, at least one branch). */
+export function isAnyOfBranchArray(value: unknown): value is WidgetAnyOfBranch[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isAnyOfBranch);
+}
+
 /**
  * Builds the URL a dashboard widget tile's "View more" link points at — a
  * real, bookmarkable/shareable/refresh-safe URL (no router state): the
@@ -130,6 +207,24 @@ export function buildWidgetPreviewHref(params: {
       }
       continue;
     }
+    if (key === "anyOf" && isAnyOfBranchArray(value)) {
+      // No natural per-field flat encoding exists for a cross-field OR (a
+      // branch can filter on any field, and there can be several branches),
+      // so this round-trips as one JSON blob (see `ANY_OF_PARAM`'s doc
+      // comment) rather than being silently skipped the way it was before —
+      // that silent drop is exactly what let a "View more" click-through
+      // land on a broader, unfiltered-by-`anyOf` result set than the tile
+      // it was clicked from had counted.
+      const masked = value.map((branch) => ({
+        ...branch,
+        filters: branch.filters.map((f) => ({
+          ...f,
+          values: f.values?.map((v) => (v === params.currentUserId ? CURRENT_USER_SENTINEL : v)),
+        })),
+      }));
+      q.set(ANY_OF_PARAM, JSON.stringify(masked));
+      continue;
+    }
     if (isStringArray(value)) {
       if (value.length === 0) continue;
       const masked = value.map((v) =>
@@ -138,6 +233,14 @@ export function buildWidgetPreviewHref(params: {
       q.set(key, masked.join(","));
     } else if (typeof value === "string") {
       q.set(key, value === params.currentUserId ? CURRENT_USER_SENTINEL : value);
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      // A slice's own `query` can carry a plain number (e.g. the rating pie's
+      // `{ rating: 5 }`, from `Math.round(avgRating)` — see
+      // `useCaseFeedbackTrendData`), not just the string/string[] shape every
+      // other widget's filters use. Dropped silently before this branch
+      // existed: a rating-pie click-through landed on the unfiltered list
+      // with no `rating` param in the URL at all.
+      q.set(key, String(value));
     }
   }
   if (usesCaseFieldFilterShape) q.set(CASE_FILTER_MARKER, "1");
@@ -224,6 +327,28 @@ export function parseWidgetPreviewFilters(
 ): ParsedWidgetPreviewFilters {
   let needsCurrentUser = false;
 
+  // `anyOf` round-trips as its own single JSON param regardless of which of
+  // the two shapes below applies — a case-family widget with `anyOf` branches
+  // still carries the flat `filters.filters` array (or a flat field record,
+  // for a non-case-family resourceType) alongside it, so this is read once,
+  // up front, and merged into whichever `filters` object gets built below.
+  let anyOf: WidgetAnyOfBranch[] | undefined;
+  const anyOfRaw = searchParams.get(ANY_OF_PARAM);
+  if (anyOfRaw) {
+    try {
+      const parsed: unknown = JSON.parse(anyOfRaw);
+      if (isAnyOfBranchArray(parsed)) {
+        anyOf = parsed;
+        if (parsed.some((b) => b.filters.some((f) => f.values?.includes(CURRENT_USER_SENTINEL)))) {
+          needsCurrentUser = true;
+        }
+      }
+    } catch {
+      // A malformed/hand-edited URL drops just `anyOf` rather than throwing —
+      // every other filter param still parses and queries normally.
+    }
+  }
+
   if (searchParams.get(CASE_FILTER_MARKER) === "1") {
     const fieldFilters: WidgetCaseFieldFilterLike[] = [];
     for (const [key, raw] of searchParams.entries()) {
@@ -236,7 +361,10 @@ export function parseWidgetPreviewFilters(
       if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
       fieldFilters.push({ field, op, values });
     }
-    return { filters: { filters: fieldFilters }, needsCurrentUser };
+    return {
+      filters: anyOf ? { filters: fieldFilters, anyOf } : { filters: fieldFilters },
+      needsCurrentUser,
+    };
   }
 
   const filters: Record<string, unknown> = {};
@@ -247,6 +375,7 @@ export function parseWidgetPreviewFilters(
     if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
     filters[key] = values;
   }
+  if (anyOf) filters.anyOf = anyOf;
 
   return { filters, needsCurrentUser };
 }
@@ -268,6 +397,21 @@ export function resolveCurrentUserSentinels(
         values: entry.values?.map((v) =>
           v === CURRENT_USER_SENTINEL ? currentUserId : v,
         ),
+      }));
+      continue;
+    }
+    if (key === "anyOf" && isAnyOfBranchArray(value)) {
+      // Same nested-substitution as `filters` above -- the generic
+      // `Array.isArray` branch below only replaces a sentinel that is itself
+      // one of the array's own elements, which would leave `@me` unresolved
+      // inside a branch's own `filters` entries (branch objects, not bare
+      // sentinel strings).
+      resolved[key] = value.map((branch) => ({
+        ...branch,
+        filters: branch.filters.map((f) => ({
+          ...f,
+          values: f.values?.map((v) => (v === CURRENT_USER_SENTINEL ? currentUserId : v)),
+        })),
       }));
       continue;
     }

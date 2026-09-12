@@ -99,8 +99,13 @@ type mockEntityCaseClient struct {
 	patchCaseFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	createCaseCommentFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
+	searchCaseEscalationsFn    func(ctx context.Context, caseID string) ([]byte, error)
+	createCaseEscalationFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCaseActivitiesFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateCasesFn           func(ctx context.Context, body []byte) ([]byte, error)
+	searchFeedbackFn           func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateFeedbackFn        func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
 	createCaseAttachmentFn     func(ctx context.Context, body []byte) ([]byte, error)
 	searchCaseAttachmentsFn    func(ctx context.Context, body []byte) ([]byte, error)
@@ -108,6 +113,8 @@ type mockEntityCaseClient struct {
 	deleteCaseAttachmentFn     func(ctx context.Context, attachmentID string) ([]byte, error)
 	getCaseAttachmentFn        func(ctx context.Context, attachmentID string) ([]byte, error)
 	confirmCaseAttachmentFn    func(ctx context.Context, attachmentID string) ([]byte, error)
+	getAttachmentFn            func(ctx context.Context, attachmentID string) ([]byte, error)
+	updateAttachmentFn         func(ctx context.Context, attachmentID string, body []byte) ([]byte, error)
 	createCallRequestFn        func(ctx context.Context, body []byte) ([]byte, error)
 	searchCallRequestsFn       func(ctx context.Context, body []byte) ([]byte, error)
 	searchAllCallRequestsFn    func(ctx context.Context, body []byte) ([]byte, error)
@@ -176,6 +183,20 @@ func (m *mockEntityCaseClient) SearchComments(ctx context.Context, body []byte) 
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }
 
+func (m *mockEntityCaseClient) SearchCaseEscalations(ctx context.Context, caseID string) ([]byte, error) {
+	if m.searchCaseEscalationsFn != nil {
+		return m.searchCaseEscalationsFn(ctx, caseID)
+	}
+	return []byte(`{"escalations":[]}`), nil
+}
+
+func (m *mockEntityCaseClient) CreateCaseEscalation(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.createCaseEscalationFn != nil {
+		return m.createCaseEscalationFn(ctx, caseID, body)
+	}
+	return []byte(`{}`), nil
+}
+
 func (m *mockEntityCaseClient) SearchCaseActivities(ctx context.Context, caseID string, body []byte) ([]byte, error) {
 	if m.searchCaseActivitiesFn != nil {
 		return m.searchCaseActivitiesFn(ctx, caseID, body)
@@ -188,6 +209,27 @@ func (m *mockEntityCaseClient) SearchCases(ctx context.Context, body []byte) ([]
 		return m.searchCasesFn(ctx, body)
 	}
 	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) AggregateCases(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateCasesFn != nil {
+		return m.aggregateCasesFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchFeedback(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchFeedbackFn != nil {
+		return m.searchFeedbackFn(ctx, body)
+	}
+	return []byte(`{"results":[],"totalRecords":0}`), nil
+}
+
+func (m *mockEntityCaseClient) AggregateFeedback(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateFeedbackFn != nil {
+		return m.aggregateFeedbackFn(ctx, body)
+	}
+	return []byte(`{"buckets":[],"totalRecords":0}`), nil
 }
 
 func (m *mockEntityCaseClient) GetCase(ctx context.Context, caseID string) ([]byte, error) {
@@ -231,12 +273,24 @@ func (m *mockEntityCaseClient) GetCaseAttachment(ctx context.Context, attachment
 	}
 	return []byte(`{}`), nil
 }
+func (m *mockEntityCaseClient) GetAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
+	if m.getAttachmentFn != nil {
+		return m.getAttachmentFn(ctx, attachmentID)
+	}
+	return []byte(`{}`), nil
+}
 
 func (m *mockEntityCaseClient) ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
 	if m.confirmCaseAttachmentFn != nil {
 		return m.confirmCaseAttachmentFn(ctx, attachmentID)
 	}
 	return []byte(`{"message":"Attachment confirmed successfully","attachment":{"id":"` + attachmentID + `","status":"complete"}}`), nil
+}
+func (m *mockEntityCaseClient) UpdateAttachment(ctx context.Context, attachmentID string, body []byte) ([]byte, error) {
+	if m.updateAttachmentFn != nil {
+		return m.updateAttachmentFn(ctx, attachmentID, body)
+	}
+	return []byte(`{}`), nil
 }
 
 func (m *mockEntityCaseClient) CreateCallRequest(ctx context.Context, body []byte) ([]byte, error) {
@@ -512,6 +566,7 @@ func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, pro
 
 type mockEntityIncidentClient struct {
 	searchIncidentsFn          func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateIncidentsFn       func(ctx context.Context, body []byte) ([]byte, error)
 	createIncidentFn           func(ctx context.Context, body []byte) ([]byte, error)
 	getIncidentFn              func(ctx context.Context, id string) ([]byte, error)
 	patchIncidentFn            func(ctx context.Context, id string, body []byte) ([]byte, error)
@@ -525,6 +580,13 @@ func (m *mockEntityIncidentClient) SearchIncidents(ctx context.Context, body []b
 		return m.searchIncidentsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
+}
+
+func (m *mockEntityIncidentClient) AggregateIncidents(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateIncidentsFn != nil {
+		return m.aggregateIncidentsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0}`), nil
 }
 
 func (m *mockEntityIncidentClient) CreateIncident(ctx context.Context, body []byte) ([]byte, error) {
@@ -572,9 +634,11 @@ func (m *mockEntityIncidentClient) SearchIncidentActivities(ctx context.Context,
 // ----- mock entity problem client -----
 
 type mockEntityProblemClient struct {
-	searchProblemsFn func(ctx context.Context, body []byte) ([]byte, error)
-	getProblemFn     func(ctx context.Context, id string) ([]byte, error)
-	createProblemFn  func(ctx context.Context, body []byte) ([]byte, error)
+	searchProblemsFn    func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateProblemsFn func(ctx context.Context, body []byte) ([]byte, error)
+	getProblemFn        func(ctx context.Context, id string) ([]byte, error)
+	createProblemFn     func(ctx context.Context, body []byte) ([]byte, error)
+	updateProblemFn     func(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byte) ([]byte, error) {
@@ -582,6 +646,13 @@ func (m *mockEntityProblemClient) SearchProblems(ctx context.Context, body []byt
 		return m.searchProblemsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
+}
+
+func (m *mockEntityProblemClient) AggregateProblems(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateProblemsFn != nil {
+		return m.aggregateProblemsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0}`), nil
 }
 
 func (m *mockEntityProblemClient) GetProblem(ctx context.Context, id string) ([]byte, error) {
@@ -598,11 +669,69 @@ func (m *mockEntityProblemClient) CreateProblem(ctx context.Context, body []byte
 	return []byte(`{}`), nil
 }
 
+func (m *mockEntityProblemClient) UpdateProblem(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.updateProblemFn != nil {
+		return m.updateProblemFn(ctx, id, body)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity alert client -----
+
+type mockEntityAlertClient struct {
+	getAlertFn      func(ctx context.Context, id string) ([]byte, error)
+	getSmartAlertFn func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityAlertClient) GetAlert(ctx context.Context, id string) ([]byte, error) {
+	if m.getAlertFn != nil {
+		return m.getAlertFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityAlertClient) GetSmartAlert(ctx context.Context, id string) ([]byte, error) {
+	if m.getSmartAlertFn != nil {
+		return m.getSmartAlertFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity incident task client -----
+
+type mockEntityIncidentTaskClient struct {
+	searchIncidentTasksFn    func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateIncidentTasksFn func(ctx context.Context, body []byte) ([]byte, error)
+	getIncidentTaskFn        func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityIncidentTaskClient) SearchIncidentTasks(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchIncidentTasksFn != nil {
+		return m.searchIncidentTasksFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityIncidentTaskClient) AggregateIncidentTasks(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateIncidentTasksFn != nil {
+		return m.aggregateIncidentTasksFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0}`), nil
+}
+
+func (m *mockEntityIncidentTaskClient) GetIncidentTask(ctx context.Context, id string) ([]byte, error) {
+	if m.getIncidentTaskFn != nil {
+		return m.getIncidentTaskFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity change request client -----
 
 type mockEntityChangeRequestClient struct {
 	createChangeRequestFn         func(ctx context.Context, body []byte) ([]byte, error)
 	searchChangeRequestsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateChangeRequestsFn     func(ctx context.Context, body []byte) ([]byte, error)
 	getChangeRequestFn            func(ctx context.Context, id string) ([]byte, error)
 	patchChangeRequestFn          func(ctx context.Context, id string, body []byte) ([]byte, error)
 	getChangeRequestApprovalsFn   func(ctx context.Context, id string) ([]byte, error)
@@ -623,6 +752,13 @@ func (m *mockEntityChangeRequestClient) SearchChangeRequests(ctx context.Context
 		return m.searchChangeRequestsFn(ctx, body)
 	}
 	return []byte(`{"changeRequests":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) AggregateChangeRequests(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateChangeRequestsFn != nil {
+		return m.aggregateChangeRequestsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0}`), nil
 }
 
 func (m *mockEntityChangeRequestClient) GetChangeRequest(ctx context.Context, id string) ([]byte, error) {

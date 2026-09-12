@@ -15,19 +15,29 @@
 // under the License.
 
 import { UserMenu } from "@wso2/oxygen-ui";
-import { LogOut, User } from "@wso2/oxygen-ui-icons-react";
+import { LogOut, Settings, User } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import UserProfileModal from "@components/header/UserProfileModal";
+import PreferencesDialog from "@components/header/PreferencesDialog";
 import { resolveUserInfo } from "@utils/userClaims";
 
-export default function UserProfile(): JSX.Element {
+interface UserProfileProps {
+  /** Hides Profile/Preferences (nothing meaningful to view/configure without
+   * real portal access) — the identity header and Sign out still show. */
+  hideProjectControls?: boolean;
+}
+
+export default function UserProfile({
+  hideProjectControls = false,
+}: UserProfileProps): JSX.Element {
   const { signOut } = useAsgardeo();
   const claims = useIdTokenClaims();
   const logger = useLogger();
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
 
   const handleSignOut = async () => {
     window.dispatchEvent(new CustomEvent("app:signing-out"));
@@ -49,22 +59,39 @@ export default function UserProfile(): JSX.Element {
           email={info.email}
           avatar={info.avatarUrl}
         />
-        <UserMenu.Divider />
-        <UserMenu.Item
-          icon={<User size={16} />}
-          label="Profile"
-          onClick={() => setProfileModalOpen(true)}
-        />
+        {!hideProjectControls && <UserMenu.Divider />}
+        {!hideProjectControls && (
+          <UserMenu.Item
+            icon={<User size={16} />}
+            label="Profile"
+            onClick={() => setProfileModalOpen(true)}
+          />
+        )}
+        {!hideProjectControls && (
+          <UserMenu.Item
+            icon={<Settings size={16} />}
+            label="Preferences"
+            onClick={() => setPreferencesOpen(true)}
+          />
+        )}
         <UserMenu.Logout
           icon={<LogOut size={16} />}
           label="Sign out"
           onClick={handleSignOut}
         />
       </UserMenu>
-      <UserProfileModal
-        open={profileModalOpen}
-        onClose={() => setProfileModalOpen(false)}
-      />
+      {!hideProjectControls && (
+        <>
+          <UserProfileModal
+            open={profileModalOpen}
+            onClose={() => setProfileModalOpen(false)}
+          />
+          <PreferencesDialog
+            open={preferencesOpen}
+            onClose={() => setPreferencesOpen(false)}
+          />
+        </>
+      )}
     </>
   );
 }

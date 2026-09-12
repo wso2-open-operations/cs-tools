@@ -341,6 +341,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /vulnerabilities/sync:
+    post:
+      summary: Full-replace sync of product-vulnerability records.
+      description: >
+        This is a full-replace sync, not an incremental delta: the caller must
+        submit the complete current set of product-vulnerability records on
+        every call. The entity service's downstream ServiceNow-backed operation
+        deletes any existing record not present in the submitted set. The
+        request body is forwarded to the entity service verbatim.
+      operationId: syncProductVulnerabilities
+      requestBody:
+        description: Complete current set of product-vulnerability records.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVulnerabilitySyncPayload'
+      responses:
+        "201":
+          description: The sync was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVulnerabilitySyncResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     oauth2ClientCredentials:
@@ -637,3 +686,28 @@ components:
           type: string
         project:
           $ref: '#/components/schemas/ProjectUpdateResult'
+
+    ProductVulnerabilitySyncPayload:
+      type: array
+      description: >
+        The complete current set of product-vulnerability records. Any record
+        omitted from this array is treated as removed by the downstream sync.
+      items:
+        type: object
+        additionalProperties: true
+        description: >
+          Opaque per-record payload passed through to the entity service
+          as-is — its shape is not defined or validated by this layer.
+
+    ProductVulnerabilitySyncResponse:
+      type: object
+      description: >
+        Fields may be partial or omitted depending on the entity service's
+        response for a given sync.
+      properties:
+        insertedRecords:
+          type: integer
+        updatedRecords:
+          type: integer
+        deletedRecords:
+          type: integer

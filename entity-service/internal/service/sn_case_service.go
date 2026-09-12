@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,12 +74,29 @@ const publishCaseAcknowledgedTimeout = 5 * time.Second
 // needs.
 const publishSeverityChangedTimeout = 5 * time.Second
 
+// applyResponseSLATimeout bounds applyResponseSLAOnComment's own author
+// resolution (SearchCaseComments) + role lookup (SearchUsers) +
+// SetSLAClockTierReached calls — same reasoning as publishCaseCreatedTimeout,
+// though this one isn't a publish at all (see that function's own doc
+// comment for why it's independent of s.publisher/Event Hub entirely).
+const applyResponseSLATimeout = 5 * time.Second
+
+// applyCaseStateSLATimeout bounds applyCaseStateSLAEffects' own
+// Pause/Resume/SetSLAClockTierReached calls — same reasoning as
+// applyResponseSLATimeout.
+const applyCaseStateSLATimeout = 5 * time.Second
+
+// applyCustomerReplyTimeout bounds applyCustomerReplyStateTransition's own
+// GetCaseByID + author resolution + role lookup + UpdateCase calls — same
+// reasoning as applyResponseSLATimeout.
+const applyCustomerReplyTimeout = 5 * time.Second
+
 // watchListEmails extracts the non-empty emails from a case's watch list —
 // Recipients for every case.* event this file publishes is the case's
 // WatchList emails only (an explicit, deliberate decision — this service
 // has no other notion of who should be emailed for a case; see
 // publishCaseCreated's own doc comment).
-func watchListEmails(watchList []domain.WatchListUser) []string {
+func watchListUserEmails(watchList []domain.WatchListUser) []string {
 	recipients := make([]string, 0, len(watchList))
 	for _, w := range watchList {
 		if w.Email != "" {
@@ -152,35 +171,45 @@ type snCasesResponse struct {
 }
 
 type snCase struct {
-	ID                    string                      `json:"id"`
-	InternalID            string                      `json:"internalId"`
-	Number                string                      `json:"number"`
-	Title                 string                      `json:"title"`
-	Description           string                      `json:"description"`
-	CreatedOn             string                      `json:"createdOn"`
-	UpdatedOn             *string                     `json:"updatedOn"`
-	CreatedBy             string                      `json:"createdBy"`
-	CreatedByFullName     string                      `json:"createdByFullName"`
-	Project               snCaseProjectRef            `json:"project"`
-	Deployment            snCaseEntityRef             `json:"deployment"`
-	DeployedProduct       snCaseDeployedProduct       `json:"deployedProduct"`
-	Product               *snCaseEntityRef            `json:"product"`
-	State                 *snCaseState                `json:"state"`
-	WorkState             *snCaseLabel                `json:"workState"`
-	Severity              *snCaseLabel                `json:"severity"`
-	IssueType             *snCaseIssueType            `json:"issueType"`
-	EngagementType        *snCaseLabel                `json:"engagementType"`
-	CaseType              *snCaseEntityRef            `json:"caseType"`
-	Catalog               *snCaseEntityRef            `json:"catalog"`
-	CatalogItem           *snCaseEntityRef            `json:"catalogItem"`
-	AssignedTeam          *snCaseEntityRef            `json:"assignedTeam"`
-	Conversation          *snCaseEntityRef            `json:"conversation"`
-	AssignedEngineer      *snAssignedEngineerRef      `json:"assignedEngineer"`
-	AcknowledgedBy        *snAssignedEngineerRef      `json:"acknowledgedBy"`
+	ID                string                 `json:"id"`
+	InternalID        string                 `json:"internalId"`
+	Number            string                 `json:"number"`
+	Title             string                 `json:"title"`
+	Description       string                 `json:"description"`
+	CreatedOn         string                 `json:"createdOn"`
+	UpdatedOn         *string                `json:"updatedOn"`
+	CreatedBy         string                 `json:"createdBy"`
+	CreatedByFullName string                 `json:"createdByFullName"`
+	Project           snCaseProjectRef       `json:"project"`
+	Deployment        snCaseEntityRef        `json:"deployment"`
+	DeployedProduct   snCaseDeployedProduct  `json:"deployedProduct"`
+	Product           *snCaseEntityRef       `json:"product"`
+	State             *snCaseState           `json:"state"`
+	WorkState         *snCaseLabel           `json:"workState"`
+	Severity          *snCaseLabel           `json:"severity"`
+	IssueType         *snCaseIssueType       `json:"issueType"`
+	EngagementType    *snCaseLabel           `json:"engagementType"`
+	CaseType          *snCaseEntityRef       `json:"caseType"`
+	Catalog           *snCaseEntityRef       `json:"catalog"`
+	CatalogItem       *snCaseEntityRef       `json:"catalogItem"`
+	AssignedTeam      *snCaseEntityRef       `json:"assignedTeam"`
+	Conversation      *snCaseEntityRef       `json:"conversation"`
+	AssignedEngineer  *snAssignedEngineerRef `json:"assignedEngineer"`
+	AcknowledgedBy    *snAssignedEngineerRef `json:"acknowledgedBy"`
+	// WorkaroundProvidedOn/WorkaroundProvidedBy mirror AcknowledgedBy's shape:
+	// populated on the Choreo GET /cases/{id} response, null until the workaround
+	// is marked provided (and cleared again on recall).
+	WorkaroundProvidedOn  *string                     `json:"workaroundProvidedOn"`
+	WorkaroundProvidedBy  *snAssignedEngineerRef      `json:"workaroundProvidedBy"`
 	ParentCase            *snCaseRef                  `json:"parentCase"`
 	RelatedCase           *snCaseRef                  `json:"relatedCase"`
 	Account               *snCaseAccount              `json:"account"`
 	LinkedServiceRequests []snLinkedServiceRequestRef `json:"linkedServiceRequests"`
+	// Variables carries the answers to the catalog item's questions on a service
+	// request, keyed as `variables` upstream. Present on the Choreo GET /cases/{id}
+	// response for service-request cases only; absent for every other case type, so
+	// this must tolerate absence.
+	Variables []snCaseVariableAnswer `json:"variables"`
 	// ChangeRequests carries the change requests raised from this case, keyed as
 	// `changeRequests` upstream. Only populated for service-request cases.
 	//
@@ -255,6 +284,14 @@ type snCase struct {
 	Duration        *string                `json:"duration"`
 	EscalationLevel *snCaseEscalationLevel `json:"escalationLevel"`
 	IsEscalated     *bool                  `json:"isEscalated"`
+}
+
+// snCaseVariableAnswer mirrors one answered catalog-item question on a service
+// request as the backing service returns it (CaseResponse.variables). Distinct
+// from snCaseVariable, which is the {id, value} shape a case create submits.
+type snCaseVariableAnswer struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // snWatchListUser mirrors the watch-list user shape ServiceNow/Ballerina returns on both
@@ -587,6 +624,13 @@ type snCaseFilters struct {
 	// IsEscalated: a *bool (not bool) so that an explicit false is still sent on
 	// the wire -- omitempty on a pointer only drops a nil, not a false value.
 	IsEscalated *bool `json:"isEscalated,omitempty"`
+	// SlaBreached: see domain.ParsedCaseFilters.HasBreachedSLA doc comment. A
+	// *bool for the same reason as IsEscalated above -- an explicit false must
+	// still reach ServiceNow, not be silently dropped.
+	SlaBreached *bool `json:"slaBreached,omitempty"`
+	// AccountEscalationActive: see domain.ParsedCaseFilters.HasActiveAccountEscalation
+	// doc comment. A *bool for the same reason as IsEscalated above.
+	AccountEscalationActive *bool `json:"accountEscalationActive,omitempty"`
 	// OrGroups is the ServiceNow wire field name, deliberately unchanged:
 	// ServiceNow's CaseUtils Script Include reads "orGroups" and silently
 	// ignores JSON keys it does not recognise (returning an unfiltered count
@@ -663,6 +707,13 @@ var snEngagementTypeIDMap = map[domain.EngagementType]int{
 	domain.EngagementTypeNewFeatureImprovement: 3,
 	domain.EngagementTypeFollowUp:              4,
 	domain.EngagementTypeOnboarding:            5,
+}
+
+// snEngagementPaymentTypeIDMap maps domain EngagementPaymentType enums to SN numeric
+// engagement-payment-type IDs.
+var snEngagementPaymentTypeIDMap = map[domain.EngagementPaymentType]int{
+	domain.EngagementPaymentTypePaid: 1,
+	domain.EngagementPaymentTypeFOC:  2,
 }
 
 func domainStatesToSNIDs(states []domain.CaseState) []int {
@@ -776,13 +827,42 @@ type snCaseService struct {
 	// config.Config.EventHubBroker) — every call site must check before
 	// using it. See publishCaseCreated.
 	publisher EventPublisherService
+	// slaClocks/userSvc/supportEngineerRole back the SLA-tracking additions
+	// in this file (publishCaseCreated's registration step,
+	// applyResponseSLAOnComment, applyCaseStateSLAEffects) — see each
+	// function's own doc comment. slaClocks is nil when this service is
+	// running with DATA_SOURCE=servicenow and no database configured (see
+	// config.Config.HasDatabase/routes.go's own comment on slaClockService)
+	// — every call site must check before using it, same as publisher.
+	// userSvc is only ever consulted once supportEngineerRole is non-empty
+	// (see applyResponseSLAOnComment), so it is never dereferenced while
+	// nil in practice. supportEngineerRole may be "" (see
+	// config.Config.SupportEngineerRole's own doc comment), which
+	// applyResponseSLAOnComment treats as "can't confirm engineer
+	// authorship, skip" rather than an error.
+	slaClocks           SLAClockService
+	userSvc             SNUserService
+	supportEngineerRole string
+	// customerRoles backs applyCustomerReplyStateTransition — see that
+	// function's own doc comment and config.Config.CustomerRoles'. May be
+	// empty (unconfigured), treated the same "can't confirm authorship,
+	// skip" way supportEngineerRole == "" is.
+	customerRoles []string
 }
 
 // NewSNCaseService constructs a CaseService that delegates SearchCases to the
 // Choreo API and all write/read-by-id operations to pgFallback. publisher may
 // be nil (see snCaseService.publisher's doc comment).
-func NewServiceNowCaseService(client *integrationservice.Client, pgFallback CaseService, publisher EventPublisherService) CaseService {
-	return &snCaseService{client: client, pgFallback: pgFallback, publisher: publisher}
+func NewServiceNowCaseService(client *integrationservice.Client, pgFallback CaseService, publisher EventPublisherService, slaClocks SLAClockService, userSvc SNUserService, supportEngineerRole string, customerRoles []string) CaseService {
+	return &snCaseService{
+		client:              client,
+		pgFallback:          pgFallback,
+		publisher:           publisher,
+		slaClocks:           slaClocks,
+		userSvc:             userSvc,
+		supportEngineerRole: supportEngineerRole,
+		customerRoles:       customerRoles,
+	}
 }
 
 // snIssueTypeID maps domain CaseIssueType to the ServiceNow issue-type choice-list value.
@@ -796,22 +876,23 @@ var snIssueTypeID = map[domain.CaseIssueType]int{
 }
 
 type snCreateCasePayload struct {
-	Type              string             `json:"type"`
-	ProjectID         string             `json:"projectId"`
-	DeploymentID      string             `json:"deploymentId"`
-	DeployedProductID string             `json:"deployedProductId"`
-	Title             string             `json:"title,omitempty"`
-	Description       string             `json:"description,omitempty"`
-	SeverityKey       int                `json:"severityKey,omitempty"`
-	IssueTypeKey      int                `json:"issueTypeKey,omitempty"`
-	EngagementType    int                `json:"engagementType,omitempty"`
-	CatalogID         string             `json:"catalogId,omitempty"`
-	CatalogItemID     string             `json:"catalogItemId,omitempty"`
-	Variables         []snCaseVariable   `json:"variables,omitempty"`
-	RelatedCaseID     string             `json:"relatedCaseId,omitempty"`
-	ConversationID    string             `json:"conversationId,omitempty"`
-	WatchList         []string           `json:"watchList,omitempty"`
-	Attachments       []snCaseAttachment `json:"attachments,omitempty"`
+	Type                  string             `json:"type"`
+	ProjectID             string             `json:"projectId"`
+	DeploymentID          string             `json:"deploymentId,omitempty"`
+	DeployedProductID     string             `json:"deployedProductId,omitempty"`
+	Title                 string             `json:"title,omitempty"`
+	Description           string             `json:"description,omitempty"`
+	SeverityKey           int                `json:"severityKey,omitempty"`
+	IssueTypeKey          int                `json:"issueTypeKey,omitempty"`
+	EngagementType        int                `json:"engagementType,omitempty"`
+	EngagementPaymentType int                `json:"engagementPaymentType,omitempty"`
+	CatalogID             string             `json:"catalogId,omitempty"`
+	CatalogItemID         string             `json:"catalogItemId,omitempty"`
+	Variables             []snCaseVariable   `json:"variables,omitempty"`
+	RelatedCaseID         string             `json:"relatedCaseId,omitempty"`
+	ConversationID        string             `json:"conversationId,omitempty"`
+	WatchList             []string           `json:"watchList,omitempty"`
+	Attachments           []snCaseAttachment `json:"attachments,omitempty"`
 }
 
 type snCaseVariable struct {
@@ -851,11 +932,15 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
-	if err := validateUUIDs("deploymentId", []string{req.DeploymentID}); err != nil {
-		return domain.CreateCaseResponse{}, err
-	}
-	if err := validateUUIDs("deployedProductId", []string{req.DeployedProductID}); err != nil {
-		return domain.CreateCaseResponse{}, err
+	// Announcements have no deployment/deployed-product concept, so these
+	// fields are left empty rather than validated as UUIDs.
+	if req.Type != "announcement" {
+		if err := validateUUIDs("deploymentId", []string{req.DeploymentID}); err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+		if err := validateUUIDs("deployedProductId", []string{req.DeployedProductID}); err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
 	}
 
 	payload := snCreateCasePayload{
@@ -904,10 +989,21 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		payload.Title = req.Subject
 		payload.Description = req.Description
 		payload.EngagementType = snEngagementTypeIDMap[req.EngagementType]
+		payload.EngagementPaymentType = snEngagementPaymentTypeIDMap[req.EngagementPaymentType]
+	case "announcement":
+		payload.Title = req.Subject
+		payload.Description = req.Description
 	}
 
 	if len(req.WatchList) > 0 {
-		payload.WatchList = req.WatchList
+		// The backing service's case-create payload declares the watch list as
+		// email addresses, not user ids, so the incoming platform UUIDs are
+		// resolved to emails first.
+		emails, err := watchListEmails(ctx, s.client, token, "watchList", req.WatchList)
+		if err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+		payload.WatchList = emails
 	}
 	if req.RelatedCaseID != "" {
 		if err := validateUUIDs("relatedCaseId", []string{req.RelatedCaseID}); err != nil {
@@ -996,7 +1092,15 @@ func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.Creat
 		return
 	}
 
-	recipients := watchListEmails(cv.WatchList)
+	// SLA-clock registration runs here — sharing this function's own
+	// s.publisher==nil guard (registration is inherently Kafka-based, same
+	// as every publish in this file) and its GetCaseByID fetch above — but
+	// deliberately BEFORE the watcher-count check below: that check only
+	// gates the case.created *email*, and SLA tracking must happen
+	// regardless of whether the case has watchers to notify.
+	s.publishSLAClockRegister(ctx, cv, req, caseID)
+
+	recipients := watchListUserEmails(cv.WatchList)
 	if len(recipients) == 0 {
 		slog.InfoContext(ctx, "sn create case: case.created not published, case has no watchers to email", "caseId", caseID)
 		return
@@ -1037,37 +1141,108 @@ func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.Creat
 	}
 }
 
-// resolveCommentAuthorNameSearchLimit bounds resolveCommentAuthorName's
-// lookup — the new comment is essentially certain to be within this many
-// of the case's most recent comments regardless of SearchCaseComments' own
-// sort order (undocumented, not controllable by this service), since it
-// was just created moments before this call runs.
-const resolveCommentAuthorNameSearchLimit = 20
+// publishSLAClockRegister best-effort publishes sla.clock.register for a
+// newly created case's applicable SLA clocks — called from
+// publishCaseCreated (see its own doc comment for why this runs before that
+// function's watcher-count check, sharing its s.publisher==nil guard and
+// its GetCaseByID enrichment instead of a second fetch).
+//
+// Which clock types get registered, and their durations, come from
+// sla_policy.go's slaDurations, keyed by cv.Severity — LOW severity's entry
+// only has a "response" duration (WSO2's support policy defines no fixed
+// Workaround/Resolution SLA for it, "best efforts"), so only that one clock
+// gets registered for a LOW-severity case. A severity with no policy entry
+// at all (shouldn't happen given domain.CaseSeverity's own fixed set, but
+// defensively handled rather than assumed) skips publishing entirely,
+// logged as a warning rather than silently registering nothing.
+//
+// Durations are encoded as Go duration strings (time.Duration.String(),
+// e.g. "24h0m0s") — csm-notification-service's slaengine parses them back
+// via time.ParseDuration and adds them to CaseCreatedAt (the case's actual
+// creation time, not publish/consume-time "now" — see
+// events.SLAClockRegisterPayload.CaseCreatedAt's own doc comment) to
+// compute each clock's actual due timestamp; this function never computes
+// an absolute due time itself. AvoidWeekendDueDate carries sla_policy.go's
+// slaAvoidWeekendClockTypes for cv.Severity — see that map's own doc
+// comment for what it's for.
+//
+// Like every other publish in this file, a failed Publish call below is
+// only durably recorded in event_publish_failures (searchable/resolvable),
+// not automatically retried or reconciled — see
+// EventPublisherService.Publish's own KNOWN GAP doc comment. That's an
+// existing, accepted limitation shared by every case.*/incident.* event
+// this service publishes, not something specific to SLA registration.
+func (s *snCaseService) publishSLAClockRegister(ctx context.Context, cv domain.CaseView, req domain.CreateCaseRequest, caseID string) {
+	durations, ok := slaDurations[cv.Severity]
+	if !ok || len(durations) == 0 {
+		slog.WarnContext(ctx, "sn create case: sla.clock.register not published, no SLA duration policy for severity", "caseId", caseID, "severity", cv.Severity)
+		return
+	}
+	durationStrings := make(map[string]string, len(durations))
+	for clockType, d := range durations {
+		durationStrings[clockType] = d.String()
+	}
 
-// resolveCommentAuthorName looks up commentID's author display name via
+	payload, err := json.Marshal(events.SLAClockRegisterPayload{
+		CaseID:              caseID,
+		Durations:           durationStrings,
+		CaseCreatedAt:       cv.CreatedOn.Format(time.RFC3339),
+		AvoidWeekendDueDate: slaAvoidWeekendClockTypes[cv.Severity],
+		CaseNumber:          cv.Number,
+		WSO2CaseID:          cv.InternalID,
+		CaseTitle:           cv.Subject,
+		CaseType:            strings.ToUpper(req.Type),
+		Product:             caseProductName(cv),
+		Team:                caseTeamName(cv),
+		Priority:            strings.ToUpper(string(cv.Severity)),
+		State:               strings.ToUpper(string(cv.State)),
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "sn create case: encode sla.clock.register payload failed", "caseId", caseID, "error", err)
+		return
+	}
+	if err := s.publisher.Publish(ctx, events.TypeSLAClockRegister, caseID, payload); err != nil {
+		// Not logging err itself — see publishCaseCreated's matching log
+		// line for why.
+		slog.ErrorContext(ctx, "sn create case: publish sla.clock.register failed", "caseId", caseID)
+	}
+}
+
+// resolveCommentAuthorSearchLimit bounds resolveCommentAuthor's lookup —
+// the new comment is essentially certain to be within this many of the
+// case's most recent comments regardless of SearchCaseComments' own sort
+// order (undocumented, not controllable by this service), since it was
+// just created moments before this call runs.
+const resolveCommentAuthorSearchLimit = 20
+
+// resolveCommentAuthor looks up commentID's resolved author (name, email,
+// and — when ServiceNow's comment record carried one — id) via
 // SearchCaseComments — see publishCommentAdded's doc comment for why this
-// re-fetch is needed at all. Returns "" if the comment isn't found in the
-// first resolveCommentAuthorNameSearchLimit results, or if the search
-// itself fails; either way the caller logs and skips publishing rather
-// than sending an event with a fabricated or missing author name.
-func (s *snCaseService) resolveCommentAuthorName(ctx context.Context, caseID, commentID string) string {
-	pagination := domain.Pagination{Limit: resolveCommentAuthorNameSearchLimit}
+// re-fetch is needed at all. Returns nil if the comment isn't found in the
+// first resolveCommentAuthorSearchLimit results, or if the search itself
+// fails; either way the caller logs and skips its own reaction rather than
+// proceeding with a fabricated or missing author. Used by both
+// publishCommentAdded (author display name, for the comment-added email)
+// and applyResponseSLAOnComment (author email, to look up their
+// ServiceNow role).
+func (s *snCaseService) resolveCommentAuthor(ctx context.Context, caseID, commentID string) *domain.UserReference {
+	pagination := domain.Pagination{Limit: resolveCommentAuthorSearchLimit}
 	if err := normalizePagination(&pagination); err != nil {
-		return ""
+		return nil
 	}
 	resp, err := s.SearchCaseComments(ctx, domain.SearchCaseCommentsRequest{
 		CaseID:     caseID,
 		Pagination: pagination,
 	})
 	if err != nil {
-		return ""
+		return nil
 	}
 	for _, c := range resp.Comments {
 		if c.ID == commentID && c.CreatedBy != nil {
-			return c.CreatedBy.Name
+			return c.CreatedBy
 		}
 	}
-	return ""
+	return nil
 }
 
 // publishCommentAdded best-effort publishes a case.comment_added event
@@ -1107,7 +1282,7 @@ func (s *snCaseService) publishCommentAdded(ctx context.Context, req domain.Crea
 		return
 	}
 
-	recipients := watchListEmails(cv.WatchList)
+	recipients := watchListUserEmails(cv.WatchList)
 	if req.Type == domain.CommentTypeWorkNote {
 		recipients = filterWso2Emails(recipients)
 	}
@@ -1116,14 +1291,14 @@ func (s *snCaseService) publishCommentAdded(ctx context.Context, req domain.Crea
 		return
 	}
 
-	authorName := s.resolveCommentAuthorName(ctx, req.CaseID, commentID)
-	if authorName == "" {
+	author := s.resolveCommentAuthor(ctx, req.CaseID, commentID)
+	if author == nil || author.Name == "" {
 		slog.InfoContext(ctx, "sn create comment: case.comment_added not published, could not resolve comment author's display name", "caseId", req.CaseID)
 		return
 	}
 
 	payload, err := json.Marshal(events.CommentAddedPayload{
-		Name:           authorName,
+		Name:           author.Name,
 		ProjectID:      cv.ProjectDetails.ID,
 		CaseID:         req.CaseID,
 		CaseNumber:     cv.Number,
@@ -1142,6 +1317,170 @@ func (s *snCaseService) publishCommentAdded(ctx context.Context, req domain.Crea
 		// Not logging err itself — see publishCaseCreated's matching log
 		// line for why.
 		slog.ErrorContext(ctx, "sn create comment: publish case.comment_added failed", "caseId", req.CaseID)
+	}
+}
+
+// applyResponseSLAOnComment marks the case's "response" SLA clock complete
+// (all three tiers — 50/75/100 — claimed at once via
+// SetSLAClockTierReached, idempotently) when the new comment is a
+// customer-visible reply (req.Type == domain.CommentTypeComment — work
+// notes and system activity entries don't count as a response) from a
+// user holding s.supportEngineerRole.
+//
+// This is a pure in-process DB operation, deliberately NOT gated on
+// s.publisher — unlike every publishXxx function in this file, it never
+// touches Event Hub at all, so a deployment without Event Hub configured
+// must not lose SLA tracking as a side effect. Claiming all three tiers at
+// once (not just "100") is what suppresses a later, spurious breach alert:
+// when csm-notification-service's slaengine eventually reaches the
+// wake-index entries this clock's registration created for 50%/75%/100%
+// elapsed, its own SetTierReachedIfUnset call will see each already
+// claimed and skip publishing — the exact same alreadyReached mechanism
+// that already prevents a duplicate real breach alert, reused here for
+// "this was satisfied early, not breached" instead. Calling this on every
+// qualifying comment (not just literally the first) is intentional and
+// harmless: SetSLAClockTierReached is itself idempotent, so only the
+// first call for a given tier actually claims it.
+//
+// entity-service has no auth/identity layer of its own (the
+// x-user-id-token it forwards is opaque), so "is this comment's author a
+// support engineer" can't be answered from anything in this request — it's
+// answered by resolving the comment's author (resolveCommentAuthor, the
+// same lookup publishCommentAdded already needs for its own display name)
+// and checking their ServiceNow role via s.userSvc.SearchUsers, filtered
+// by the author's email. s.supportEngineerRole being "" (unconfigured — see
+// config.Config.SupportEngineerRole's own doc comment) means this can
+// never be confirmed, so this skips entirely rather than guessing.
+func (s *snCaseService) applyResponseSLAOnComment(ctx context.Context, req domain.CreateCaseCommentRequest, commentID string) {
+	if req.Type != domain.CommentTypeComment || s.supportEngineerRole == "" || s.slaClocks == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, applyResponseSLATimeout)
+	defer cancel()
+
+	author := s.resolveCommentAuthor(ctx, req.CaseID, commentID)
+	if author == nil || author.Email == "" {
+		slog.InfoContext(ctx, "sn create comment: response SLA not evaluated, could not resolve comment author's email", "caseId", req.CaseID)
+		return
+	}
+
+	usersResp, err := s.userSvc.SearchUsers(ctx, domain.SearchUsersRequest{
+		Pagination: domain.Pagination{Limit: 1},
+		Filters:    domain.SearchUsersFilters{Emails: []string{author.Email}},
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "sn create comment: response SLA not evaluated, user role lookup failed", "caseId", req.CaseID)
+		return
+	}
+
+	isSupportEngineer := false
+	for _, u := range usersResp.Users {
+		if slices.Contains(u.Roles, s.supportEngineerRole) {
+			isSupportEngineer = true
+			break
+		}
+	}
+	if !isSupportEngineer {
+		return
+	}
+
+	for _, tier := range []string{"50", "75", "100"} {
+		if _, err := s.slaClocks.SetSLAClockTierReached(ctx, req.CaseID, slaClockTypeResponse, tier, domain.SetSLAClockTierRequest{Status: domain.SLATierStatusReached}); err != nil {
+			logSLAClockOpFailed(ctx, "sn create comment: mark response sla clock tier reached failed", req.CaseID, slaClockTypeResponse, err)
+		}
+	}
+}
+
+// applyCustomerReplyStateTransition moves a case back to Waiting on WSO2
+// when a customer replies while it's Awaiting Info or Solution Proposed —
+// WSO2 was waiting on the customer, and a reply means it's WSO2's turn to
+// act again. A pure in-process call to s.UpdateCase (not a raw ServiceNow
+// PATCH of its own), so it gets publishStatusChanged/applyCaseStateSLAEffects
+// for free — in particular, applyCaseStateSLAEffects' own "any state other
+// than Awaiting Info/Solution Proposed/Closed resumes both Workaround and
+// Resolution" default case is exactly the right side effect here, with no
+// duplicated logic. Calling UpdateCase with a State equal to the case's
+// current one (a race with some other concurrent state change) is a
+// harmless no-op there — see UpdateCase's own pre-PATCH equality check.
+//
+// KNOWN GAP: the read here (this function's own GetCaseByID) and the write
+// (the UpdateCase call below, which does its own separate GetCaseByID
+// purely to decide whether to publish case.status_changed — see that
+// function's own pre-PATCH block) are not atomic. If the case is moved to
+// some OTHER state (e.g. Closed) in the window between this function's read
+// and UpdateCase's PATCH, this still unconditionally sends
+// State: WaitingOnWSO2 — silently reopening a case that was just closed,
+// and resuming SLA clocks applyCaseStateSLAEffects had just paused for
+// Closed. This is not unique to this function: every UpdateCase caller that
+// sets State/Severity/AssigneeEmail (publishStatusChanged/
+// publishSeverityChanged/publishCaseAssigned's own pre-PATCH guards) has the
+// identical read-then-PATCH race window, since ServiceNow is this service's
+// sole source of truth (no local row/version to condition on) and
+// s.client.Patch has no optimistic-concurrency mechanism (no ETag/version/
+// sys_mod_count precondition) to send even if this function wanted one.
+// Closing this needs the underlying Choreo/ServiceNow integration to expose
+// a conditional update — a real, cross-team dependency, not a quick fix
+// here, so it's flagged rather than worked around with a partial guard that
+// wouldn't close the actual window anyway.
+//
+// Requires its own GetCaseByID call: nothing in CreateCaseComment's own flow
+// surfaces the case's current state today (publishCommentAdded fetches one
+// for its own, separate purpose, but never returns or shares it, and is
+// itself skipped when s.publisher is nil — not something this can rely on).
+//
+// Same role-lookup mechanism as applyResponseSLAOnComment (this service has
+// no auth/identity layer of its own, so "is this comment's author a
+// customer" is answered by resolving the author and checking their
+// ServiceNow role via s.userSvc.SearchUsers), but against a configurable
+// LIST of roles (s.customerRoles, config.Config.CustomerRoles) rather than
+// a single one — an organisation can have more than one customer-facing
+// role. Skips entirely, rather than guessing, when s.customerRoles is empty
+// (unconfigured — see config.Config.CustomerRoles' own doc comment).
+func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, req domain.CreateCaseCommentRequest, commentID string) {
+	if req.Type != domain.CommentTypeComment || len(s.customerRoles) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, applyCustomerReplyTimeout)
+	defer cancel()
+
+	cv, err := s.GetCaseByID(ctx, req.CaseID)
+	if err != nil {
+		slog.ErrorContext(ctx, "sn create comment: customer reply state transition not evaluated, get case failed", "caseId", req.CaseID)
+		return
+	}
+	if cv.State != domain.CaseStateAwaitingInfo && cv.State != domain.CaseStateSolutionProposed {
+		return
+	}
+
+	author := s.resolveCommentAuthor(ctx, req.CaseID, commentID)
+	if author == nil || author.Email == "" {
+		slog.InfoContext(ctx, "sn create comment: customer reply state transition not evaluated, could not resolve comment author's email", "caseId", req.CaseID)
+		return
+	}
+
+	usersResp, err := s.userSvc.SearchUsers(ctx, domain.SearchUsersRequest{
+		Pagination: domain.Pagination{Limit: 1},
+		Filters:    domain.SearchUsersFilters{Emails: []string{author.Email}},
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "sn create comment: customer reply state transition not evaluated, user role lookup failed", "caseId", req.CaseID)
+		return
+	}
+
+	isCustomer := false
+	for _, u := range usersResp.Users {
+		if slices.ContainsFunc(u.Roles, func(r string) bool { return slices.Contains(s.customerRoles, r) }) {
+			isCustomer = true
+			break
+		}
+	}
+	if !isCustomer {
+		return
+	}
+
+	waitingOnWSO2 := domain.CaseStateWaitingOnWSO2
+	if _, err := s.UpdateCase(ctx, domain.UpdateCaseRequest{ID: req.CaseID, State: &waitingOnWSO2}); err != nil {
+		slog.ErrorContext(ctx, "sn create comment: move case to waiting on wso2 after customer reply failed", "caseId", req.CaseID)
 	}
 }
 
@@ -1175,7 +1514,7 @@ func (s *snCaseService) publishStatusChanged(ctx context.Context, caseID, newSta
 	ctx, cancel := context.WithTimeout(ctx, publishStatusChangedTimeout)
 	defer cancel()
 
-	recipients := watchListEmails(before.WatchList)
+	recipients := watchListUserEmails(before.WatchList)
 	if len(recipients) == 0 {
 		slog.InfoContext(ctx, "sn update case: case.status_changed not published, case has no watchers to email", "caseId", caseID)
 		return
@@ -1198,6 +1537,93 @@ func (s *snCaseService) publishStatusChanged(ctx context.Context, caseID, newSta
 		// Not logging err itself — see publishCaseCreated's matching log
 		// line for why.
 		slog.ErrorContext(ctx, "sn update case: publish case.status_changed failed", "caseId", caseID)
+	}
+}
+
+// logSLAClockOpFailed logs an SLA clock mutation's failure — at Info, not
+// Error, when it's a *apierror.NotFoundError: that specifically means no
+// such clock was ever registered for this case (e.g. a LOW-severity case,
+// which never gets a "workaround"/"resolution" clock at all — see
+// sla_policy.go's slaDurations), an expected, harmless outcome on every
+// state transition for such a case, not a real failure worth alerting on.
+// Anything else logs at Error, matching every other best-effort publish
+// helper's own failure logging in this file.
+func logSLAClockOpFailed(ctx context.Context, msg, caseID, clockType string, err error) {
+	var notFound *apierror.NotFoundError
+	if errors.As(err, &notFound) {
+		slog.InfoContext(ctx, msg+": no such sla clock registered", "caseId", caseID, "clockType", clockType)
+		return
+	}
+	slog.ErrorContext(ctx, msg, "caseId", caseID, "clockType", clockType)
+}
+
+// applyCaseStateSLAEffects pauses/resumes/completes the case's "workaround"
+// and "resolution" SLA clocks in reaction to a state-changing PATCH — a
+// pure in-process DB operation, deliberately independent of
+// publishStatusChanged/s.publisher (see this function's call site in
+// UpdateCase for why: pause/resume/completion must keep working even in a
+// deployment that hasn't configured Event Hub, since nothing here actually
+// needs it). Skips entirely when s.slaClocks is nil — a deployment running
+// DATA_SOURCE=servicenow with no database configured (see
+// config.Config.HasDatabase) has nowhere to store SLA clocks at all.
+//
+//   - CaseStateAwaitingInfo/CaseStateSolutionProposed: pause both clocks —
+//     the case is waiting on the customer, not actively being worked, so
+//     neither should keep counting toward a breach.
+//   - CaseStateClosed: resume both (so paused_at doesn't stay stuck at a
+//     non-null value on a row that's now done), then complete "resolution"
+//     the same way applyResponseSLAOnComment completes "response" — claim
+//     all three tiers (50/75/100) at once via SetSLAClockTierReached, which
+//     suppresses any later wake-index entry for it from firing a spurious
+//     breach alert (see that function's own doc comment for the mechanism).
+//     "workaround" is only paused here, not completed:
+//     TODO: workaround SLA has no completion trigger wired up yet — it
+//     needs a "workaround provided" signal that doesn't exist anywhere in
+//     this domain model today, distinct from the case simply closing.
+//     Pausing on close is a stopgap so it stops counting/alerting past
+//     closure, not a substitute for real completion.
+//   - Anything else (e.g. back to CaseStateWorkInProgress): resume both —
+//     the case is active again.
+//
+// Every step is idempotent (Pause/Resume/SetSLAClockTierReached all are),
+// so no no-op pre-check is needed here: a caller re-PATCHing the case's own
+// current state just redundantly re-applies the same effect.
+func (s *snCaseService) applyCaseStateSLAEffects(ctx context.Context, caseID string, state domain.CaseState) {
+	if s.slaClocks == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, applyCaseStateSLATimeout)
+	defer cancel()
+
+	switch state {
+	case domain.CaseStateAwaitingInfo, domain.CaseStateSolutionProposed:
+		if _, err := s.slaClocks.Pause(ctx, caseID, slaClockTypeWorkaround); err != nil {
+			logSLAClockOpFailed(ctx, "sn update case: pause workaround sla clock failed", caseID, slaClockTypeWorkaround, err)
+		}
+		if _, err := s.slaClocks.Pause(ctx, caseID, slaClockTypeResolution); err != nil {
+			logSLAClockOpFailed(ctx, "sn update case: pause resolution sla clock failed", caseID, slaClockTypeResolution, err)
+		}
+	case domain.CaseStateClosed:
+		if _, err := s.slaClocks.Resume(ctx, caseID, slaClockTypeResolution); err != nil {
+			logSLAClockOpFailed(ctx, "sn update case: resume resolution sla clock failed", caseID, slaClockTypeResolution, err)
+		}
+		for _, tier := range []string{"50", "75", "100"} {
+			if _, err := s.slaClocks.SetSLAClockTierReached(ctx, caseID, slaClockTypeResolution, tier, domain.SetSLAClockTierRequest{Status: domain.SLATierStatusReached}); err != nil {
+				logSLAClockOpFailed(ctx, "sn update case: mark resolution sla clock tier reached failed", caseID, slaClockTypeResolution, err)
+			}
+		}
+		// workaround: paused, not completed — see this function's own doc
+		// comment TODO above.
+		if _, err := s.slaClocks.Pause(ctx, caseID, slaClockTypeWorkaround); err != nil {
+			logSLAClockOpFailed(ctx, "sn update case: pause workaround sla clock failed", caseID, slaClockTypeWorkaround, err)
+		}
+	default:
+		if _, err := s.slaClocks.Resume(ctx, caseID, slaClockTypeWorkaround); err != nil {
+			logSLAClockOpFailed(ctx, "sn update case: resume workaround sla clock failed", caseID, slaClockTypeWorkaround, err)
+		}
+		if _, err := s.slaClocks.Resume(ctx, caseID, slaClockTypeResolution); err != nil {
+			logSLAClockOpFailed(ctx, "sn update case: resume resolution sla clock failed", caseID, slaClockTypeResolution, err)
+		}
 	}
 }
 
@@ -1234,7 +1660,7 @@ func (s *snCaseService) publishSeverityChanged(ctx context.Context, caseID, oldS
 	ctx, cancel := context.WithTimeout(ctx, publishSeverityChangedTimeout)
 	defer cancel()
 
-	recipients := watchListEmails(before.WatchList)
+	recipients := watchListUserEmails(before.WatchList)
 	if len(recipients) == 0 {
 		slog.InfoContext(ctx, "sn update case: case.severity_changed not published, case has no watchers to email", "caseId", caseID)
 		return
@@ -1292,7 +1718,7 @@ func (s *snCaseService) publishCaseAssigned(ctx context.Context, caseID, assigne
 	ctx, cancel := context.WithTimeout(ctx, publishCaseAssignedTimeout)
 	defer cancel()
 
-	recipients := watchListEmails(before.WatchList)
+	recipients := watchListUserEmails(before.WatchList)
 	if len(recipients) == 0 {
 		slog.InfoContext(ctx, "sn update case: case.assigned not published, case has no watchers to email", "caseId", caseID)
 		return
@@ -1470,6 +1896,16 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if c.AcknowledgedBy != nil {
 		cv.AcknowledgedBy = &domain.AssignedEngineerRef{ID: sysidToUUID(c.AcknowledgedBy.ID), Name: c.AcknowledgedBy.Name, Email: c.AcknowledgedBy.Email}
 	}
+	if c.WorkaroundProvidedOn != nil && *c.WorkaroundProvidedOn != "" {
+		workaroundProvidedOn, err := parseSNDateTime(ctx, "sn get case", "workaroundProvidedOn", *c.WorkaroundProvidedOn)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse workaroundProvidedOn %q: %w", *c.WorkaroundProvidedOn, err)
+		}
+		cv.WorkaroundProvidedOn = &workaroundProvidedOn
+	}
+	if c.WorkaroundProvidedBy != nil {
+		cv.WorkaroundProvidedBy = &domain.AssignedEngineerRef{ID: sysidToUUID(c.WorkaroundProvidedBy.ID), Name: c.WorkaroundProvidedBy.Name, Email: c.WorkaroundProvidedBy.Email}
+	}
 	if c.ParentCase != nil {
 		cv.ParentCase = &domain.CaseNumberRef{ID: sysidToUUID(c.ParentCase.ID), Number: c.ParentCase.Number, Type: snParentCaseTypeToDomain(c.ParentCase.Type)}
 	}
@@ -1510,6 +1946,15 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 			lcr = append(lcr, domain.LinkedChangeRequestRef{ID: sysidToUUID(r.ID), Number: r.Number, Name: name})
 		}
 		cv.LinkedChangeRequests = lcr
+	}
+	if len(c.Variables) > 0 {
+		vars := make([]domain.CaseVariable, 0, len(c.Variables))
+		for _, v := range c.Variables {
+			// Order is the backing data source's own question order; it carries
+			// meaning on the request form, so it is passed through untouched.
+			vars = append(vars, domain.CaseVariable{Name: v.Name, Value: v.Value})
+		}
+		cv.Variables = vars
 	}
 	if c.ResolutionCode != nil {
 		if rc, ok := snResolutionCodeByID[c.ResolutionCode.ID.String()]; ok {
@@ -1586,6 +2031,10 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if c.EngagementPaymentType != nil && c.EngagementPaymentType.Label != "" {
 		cv.EngagementPaymentType = &c.EngagementPaymentType.Label
 	}
+	// EscalationLevel: the single-case GET path (this function) was missing
+	// this assignment -- only SearchCases populated it. Case detail needs it
+	// too (the escalation widget renders off GET /cases/{id}).
+	cv.EscalationLevel = snEscalationLevelToDomain(c.EscalationLevel)
 
 	// The Choreo GET /cases/{id} response (snCase above) still has no inline tags field,
 	// so the case's current tags are fetched separately via the case-scoped
@@ -1668,6 +2117,8 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 		},
 	}
 	s.publishCommentAdded(ctx, req, result.Comment.ID)
+	s.applyResponseSLAOnComment(ctx, req, result.Comment.ID)
+	s.applyCustomerReplyStateTransition(ctx, req, result.Comment.ID)
 	return result, nil
 }
 
@@ -1826,11 +2277,26 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 }
 
 type snUpdateCasePayload struct {
-	StateKey      *int     `json:"stateKey,omitempty"`
-	SeverityKey   *int     `json:"severityKey,omitempty"`
-	WorkStateKey  *int     `json:"workStateKey,omitempty"`
-	WatchList     []string `json:"watchList,omitempty"`
-	AssigneeEmail *string  `json:"assigneeEmail,omitempty"`
+	StateKey     *int `json:"stateKey,omitempty"`
+	SeverityKey  *int `json:"severityKey,omitempty"`
+	WorkStateKey *int `json:"workStateKey,omitempty"`
+	// Type transfers the case to another type --
+	// same string values as the create payload's own Type field (see
+	// snCaseTypeMap). EngagementType/EngagementPaymentType (int keys, only
+	// meaningful with Type "engagement") and CatalogID/CatalogItemID/Variables
+	// (only meaningful with Type "service_request") are its companions, mirroring
+	// snCreateCasePayload's own field set for those two type-specific shapes.
+	Type                  *string          `json:"type,omitempty"`
+	EngagementType        *int             `json:"engagementType,omitempty"`
+	EngagementPaymentType *int             `json:"engagementPaymentType,omitempty"`
+	IssueTypeKey          *int             `json:"issueTypeKey,omitempty"`
+	CatalogID             *string          `json:"catalogId,omitempty"`
+	CatalogItemID         *string          `json:"catalogItemId,omitempty"`
+	Variables             []snCaseVariable `json:"variables,omitempty"`
+	// WatchList replaces the whole list, so an explicitly empty list must still be
+	// sent to clear it rather than be omitted -- hence the pointer.
+	WatchList     *[]string `json:"watchList,omitempty"`
+	AssigneeEmail *string   `json:"assigneeEmail,omitempty"`
 	// Acknowledge claims the case for the calling engineer, first-write-wins. Only
 	// true is ever sent -- there is no unacknowledge -- and the backing service keeps
 	// it mutually exclusive with every other field in this payload.
@@ -1879,6 +2345,10 @@ type snUpdateCasePayload struct {
 	AddPublicComment *bool   `json:"addPublicComment,omitempty"`
 	Product          *string `json:"product,omitempty"`
 	PublicTicket     *string `json:"publicTicket,omitempty"`
+	// WorkaroundProvided marks (true) or recalls (false) the case's workaround
+	// (u_workaround_provided/u_workaround_provided_by). Same combinable pathway as
+	// the fix-ETA fields above -- not mutually exclusive with anything.
+	WorkaroundProvided *bool `json:"workaroundProvided,omitempty"`
 }
 
 // snResolutionStates are the state keys that allow resolution fields.
@@ -1975,12 +2445,13 @@ var snWorkStateIDMap = map[domain.CaseWorkState]int{
 type snUpdateCaseResponse struct {
 	Message string `json:"message"`
 	Case    struct {
-		ID        string       `json:"id"`
-		UpdatedOn string       `json:"updatedOn"`
-		UpdatedBy string       `json:"updatedBy"`
-		State     *snCaseState `json:"state"`
-		Severity  *snCaseLabel `json:"severity"`
-		WorkState *snCaseLabel `json:"workState"`
+		ID        string           `json:"id"`
+		UpdatedOn string           `json:"updatedOn"`
+		UpdatedBy string           `json:"updatedBy"`
+		State     *snCaseState     `json:"state"`
+		Severity  *snCaseLabel     `json:"severity"`
+		Type      *snCaseEntityRef `json:"type"`
+		WorkState *snCaseLabel     `json:"workState"`
 		WatchList []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
@@ -2030,13 +2501,18 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.State != nil {
 		exclusiveCount++
 	}
-	if req.Severity != nil {
+	// Severity is a *companion* of Type when a type transfer is requested: transferring to
+	// "case" needs a severity, which is also what selects Incident vs Query at the backing
+	// data source. In that one combination it does not take an exclusive slot of its own.
+	// Every other severity request is unchanged.
+	severityIsTypeCompanion := req.Severity != nil && req.Type != nil
+	if req.Severity != nil && !severityIsTypeCompanion {
 		exclusiveCount++
 	}
 	if req.WorkState != nil {
 		exclusiveCount++
 	}
-	if len(req.WatchList) > 0 {
+	if req.WatchList != nil {
 		exclusiveCount++
 	}
 	if req.AssigneeEmail != nil {
@@ -2046,6 +2522,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		exclusiveCount++
 	}
 	if req.Acknowledge != nil {
+		exclusiveCount++
+	}
+	if req.Type != nil {
 		exclusiveCount++
 	}
 	// combinableCount covers plain field writes with no cross-field side
@@ -2078,17 +2557,41 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.WorstCaseFixEta != nil {
 		combinableCount++
 	}
-	const fieldList = "state, severity, workState, watchList, assigneeEmail, parentId, acknowledge, " +
+	// AddPublicComment/Product/PublicTicket are meaningful only alongside the
+	// fix-ETA trio above (see the addPublicComment handling below), so they
+	// belong in the same combinable bucket -- otherwise `type` (or any other
+	// exclusive field) plus a bare `product`/`publicTicket` with no fix-ETA
+	// date would pass this gate and then be silently dropped later, never
+	// validated or forwarded.
+	if req.AddPublicComment != nil {
+		combinableCount++
+	}
+	if req.Product != nil {
+		combinableCount++
+	}
+	if req.PublicTicket != nil {
+		combinableCount++
+	}
+	if req.WorkaroundProvided != nil {
+		combinableCount++
+	}
+	const fieldList = "state, severity, workState, watchList, assigneeEmail, parentId, acknowledge, type, " +
 		"relatedCaseId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, " +
-		"bestCaseFixEta, mostLikelyFixEta, or worstCaseFixEta"
+		"bestCaseFixEta, mostLikelyFixEta, worstCaseFixEta, or workaroundProvided"
 	if exclusiveCount == 0 && combinableCount == 0 {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of " + fieldList + " must be provided"}
 	}
 	if exclusiveCount > 1 || (exclusiveCount == 1 && combinableCount > 0) {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state, severity, workState, watchList, assigneeEmail, parentId, and acknowledge cannot be combined with each other or with any other field in the same request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state, severity, workState, watchList, assigneeEmail, parentId, acknowledge, and type cannot be combined with each other or with any other field in the same request"}
 	}
 	if hasResolutionFields && req.State == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is also provided"}
+	}
+	if req.Type == nil && (req.EngagementType != nil || req.EngagementPaymentType != nil || req.CatalogID != nil || req.CatalogItemID != nil || len(req.Variables) > 0 || req.IssueType != nil) {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementType, engagementPaymentType, issueType, catalogId, catalogItemId, and variables are only allowed when type is also provided"}
+	}
+	if req.AddPublicComment == nil && (req.Product != nil || req.PublicTicket != nil) {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "product and publicTicket are only allowed when addPublicComment is also provided"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -2133,6 +2636,110 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 		payload.SeverityKey = &id
 	}
+	if req.Type != nil {
+		if !validCaseType[*req.Type] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + *req.Type}
+		}
+		snType, ok := snCaseTypeMap[*req.Type]
+		if !ok {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "type " + *req.Type + " is not supported by ServiceNow"}
+		}
+		payload.Type = &snType
+		switch *req.Type {
+		case "engagement":
+			if req.EngagementType == nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementType is required when type is \"engagement\""}
+			}
+			if req.EngagementPaymentType == nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementPaymentType is required when type is \"engagement\""}
+			}
+			if req.CatalogID != nil || req.CatalogItemID != nil || len(req.Variables) > 0 {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "catalogId, catalogItemId, and variables are only accepted when type is \"service_request\""}
+			}
+			if req.IssueType != nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "issueType is only accepted when type is \"case\""}
+			}
+			if req.Severity != nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity may only accompany type when type is \"case\""}
+			}
+			if !validEngagementType[*req.EngagementType] {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementType contains invalid value: " + string(*req.EngagementType)}
+			}
+			if !validEngagementPaymentType[*req.EngagementPaymentType] {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementPaymentType contains invalid value: " + string(*req.EngagementPaymentType)}
+			}
+			id := snEngagementTypeIDMap[*req.EngagementType]
+			payload.EngagementType = &id
+			paymentID := snEngagementPaymentTypeIDMap[*req.EngagementPaymentType]
+			payload.EngagementPaymentType = &paymentID
+		case "service_request":
+			if req.CatalogID == nil || req.CatalogItemID == nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "catalogId and catalogItemId are required when type is \"service_request\""}
+			}
+			// The backing data source requires at least one variable: a service request with no
+			// variable values has no request detail, and renders with an empty category in the
+			// customer-facing portal.
+			if len(req.Variables) == 0 {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "variables must contain at least one entry when type is \"service_request\""}
+			}
+			if req.EngagementType != nil || req.EngagementPaymentType != nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementType and engagementPaymentType are only accepted when type is \"engagement\""}
+			}
+			if req.Severity != nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity may only accompany type when type is \"case\""}
+			}
+			if err := validateUUIDs("catalogId", []string{*req.CatalogID}); err != nil {
+				return domain.UpdateCaseResponse{}, err
+			}
+			if err := validateUUIDs("catalogItemId", []string{*req.CatalogItemID}); err != nil {
+				return domain.UpdateCaseResponse{}, err
+			}
+			catalogSysid := uuidToSysid(*req.CatalogID)
+			catalogItemSysid := uuidToSysid(*req.CatalogItemID)
+			payload.CatalogID = &catalogSysid
+			payload.CatalogItemID = &catalogItemSysid
+			if len(req.Variables) > 0 {
+				vars := make([]snCaseVariable, 0, len(req.Variables))
+				for i, v := range req.Variables {
+					if err := validateUUIDs(fmt.Sprintf("variables[%d].id", i), []string{v.ID}); err != nil {
+						return domain.UpdateCaseResponse{}, err
+					}
+					vars = append(vars, snCaseVariable{ID: uuidToSysid(v.ID), Value: v.Value})
+				}
+				payload.Variables = vars
+			}
+		case "case":
+			if req.EngagementType != nil || req.EngagementPaymentType != nil || req.CatalogID != nil || req.CatalogItemID != nil || len(req.Variables) > 0 {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementType and engagementPaymentType are only accepted when type is \"engagement\"; catalogId, catalogItemId, and variables are only accepted when type is \"service_request\""}
+			}
+			// Both are mandatory at the backing data source: severity selects Incident vs Query,
+			// and issue type is the classification those records carry.
+			if req.Severity == nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity is required when type is \"case\""}
+			}
+			if req.IssueType == nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "issueType is required when type is \"case\""}
+			}
+			if !validCaseIssueType[*req.IssueType] {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(*req.IssueType)}
+			}
+			issueTypeID, ok := snIssueTypeIDMap[*req.IssueType]
+			if !ok {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "issueType " + string(*req.IssueType) + " is not supported by ServiceNow"}
+			}
+			payload.IssueTypeKey = &issueTypeID
+		default:
+			if req.EngagementType != nil || req.EngagementPaymentType != nil || req.CatalogID != nil || req.CatalogItemID != nil || len(req.Variables) > 0 {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "engagementType and engagementPaymentType are only accepted when type is \"engagement\"; catalogId, catalogItemId, and variables are only accepted when type is \"service_request\""}
+			}
+			if req.IssueType != nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "issueType is only accepted when type is \"case\""}
+			}
+			if req.Severity != nil {
+				return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity may only accompany type when type is \"case\""}
+			}
+		}
+	}
 	if req.WorkState != nil {
 		if !validCaseWorkState[*req.WorkState] {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
@@ -2143,8 +2750,16 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 		payload.WorkStateKey = &id
 	}
-	if len(req.WatchList) > 0 {
-		payload.WatchList = req.WatchList
+	if req.WatchList != nil {
+		// As on create, the backing service's case-update payload declares the
+		// watch list as email addresses, and it replaces the whole list, so an
+		// explicitly empty list must still be sent to clear it rather than be
+		// skipped.
+		emails, err := watchListEmails(ctx, s.client, token, "watchList", *req.WatchList)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		payload.WatchList = &emails
 	}
 	if req.AssigneeEmail != nil {
 		payload.AssigneeEmail = req.AssigneeEmail
@@ -2236,6 +2851,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		payload.AddPublicComment = req.AddPublicComment
 		payload.Product = req.Product
 		payload.PublicTicket = req.PublicTicket
+	}
+	if req.WorkaroundProvided != nil {
+		payload.WorkaroundProvided = req.WorkaroundProvided
 	}
 
 	// A state-change PATCH is only worth publishing case.status_changed for
@@ -2349,6 +2967,11 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if snResp.Case.Severity != nil {
 		resp.Case.Severity = snSeverityToSeverity(snResp.Case.Severity)
 	}
+	if snResp.Case.Type != nil {
+		if t := snCaseTypeToDomain(snResp.Case.Type); t != nil {
+			resp.Case.Type = *t
+		}
+	}
 	resp.Case.WorkState = snWorkStateLabelToEnum(snResp.Case.WorkState)
 	if snResp.Case.AssignedTo != nil {
 		resp.Case.AssignedTo = &domain.AssignedEngineerRef{
@@ -2422,6 +3045,17 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 
 	if publishStatusChange && snResp.Case.State != nil {
 		s.publishStatusChanged(ctx, req.ID, snResp.Case.State.Label, caseBeforeUpdate)
+	}
+	// Deliberately independent of publishStatusChange (which is also gated
+	// on s.publisher != nil) — see applyCaseStateSLAEffects' own doc
+	// comment for why pause/resume/completion must not depend on Event Hub
+	// being configured. req.State != nil alone (not the no-op-detecting
+	// publishStatusChange flag) is enough: Pause/Resume/
+	// SetSLAClockTierReached are all idempotent, so a caller re-PATCHing
+	// the case's own current state just redundantly re-applies the same
+	// effect harmlessly.
+	if req.State != nil && snResp.Case.State != nil {
+		s.applyCaseStateSLAEffects(ctx, req.ID, resp.Case.State)
 	}
 	if publishCaseAssign {
 		assigneeName := *req.AssigneeEmail
@@ -2833,9 +3467,13 @@ func (s *snCaseService) DeleteCaseAttachment(ctx context.Context, req domain.Del
 }
 
 // snAttachmentDetails mirrors the Choreo GET /attachments/{id} response
-// (Ballerina's AttachmentResponse — every Attachment field plus content).
-// ServiceNow's attachment-details lookup returns a bare createdBy string with
-// no createdByUser/referenceType, unlike the search path (see snAttachment).
+// (Ballerina's AttachmentResponse -- every Attachment field plus content).
+// The response does carry createdByUser/createdByFullName, but this lookup
+// does not resolve them: createdByUser arrives null, unlike the search path
+// (see snAttachment), so CreatedBy stays the bare string below. Do not
+// "align" this decode with the search path's UserReference shape on the
+// assumption the object is populated here -- it is not. referenceType is
+// genuinely absent from this response.
 type snAttachmentDetails struct {
 	ID          string  `json:"id"`
 	ReferenceID string  `json:"referenceId"`
@@ -2896,12 +3534,32 @@ func (s *snCaseService) GetAttachmentByID(ctx context.Context, id string) (domai
 // validateAttachmentUpdatePayload exactly: referenceType must be case or
 // deployment; case requires name and forbids description; deployment
 // requires at least one of name or description.
+// rawDescriptionPresent reports whether a json.RawMessage description carries
+// an actual value. Description is RawMessage so "absent", "explicitly null",
+// and "a value" stay distinguishable; only the last counts as present here.
+func rawDescriptionPresent(d json.RawMessage) bool {
+	if len(d) == 0 {
+		return false // absent -- the caller said nothing about description
+	}
+	if string(d) == "null" {
+		// An explicit null is an instruction to clear the description, so it
+		// counts as "provided" for the at-least-one-field rule. Collapsing it
+		// into "absent" would make clearing a description impossible.
+		return true
+	}
+	var s string
+	if err := json.Unmarshal(d, &s); err == nil {
+		return strings.TrimSpace(s) != ""
+	}
+	return true
+}
+
 func validateAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
 	if req.ReferenceType != domain.ReferenceTypeCase && req.ReferenceType != domain.ReferenceTypeDeployment {
 		return &apierror.ValidationError{Msg: fmt.Sprintf("invalid reference type %q. Only 'case' and 'deployment' are allowed", req.ReferenceType)}
 	}
 	if req.ReferenceType == domain.ReferenceTypeCase {
-		if req.Description != nil {
+		if len(req.Description) > 0 {
 			return &apierror.ValidationError{Msg: "description field is not allowed for case reference type"}
 		}
 		if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
@@ -2910,7 +3568,7 @@ func validateAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
 	}
 	if req.ReferenceType == domain.ReferenceTypeDeployment {
 		hasName := req.Name != nil && strings.TrimSpace(*req.Name) != ""
-		hasDescription := req.Description != nil && strings.TrimSpace(*req.Description) != ""
+		hasDescription := rawDescriptionPresent(req.Description)
 		if !hasName && !hasDescription {
 			return &apierror.ValidationError{Msg: "at least one field (name or description) must be provided for deployment reference type"}
 		}
@@ -2920,10 +3578,10 @@ func validateAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
 
 // snUpdateAttachmentPayload mirrors the Choreo PATCH /attachments/{id} request body.
 type snUpdateAttachmentPayload struct {
-	ReferenceID   string  `json:"referenceId"`
-	ReferenceType string  `json:"referenceType"`
-	Name          *string `json:"name,omitempty"`
-	Description   *string `json:"description,omitempty"`
+	ReferenceID   string          `json:"referenceId"`
+	ReferenceType string          `json:"referenceType"`
+	Name          *string         `json:"name,omitempty"`
+	Description   json.RawMessage `json:"description,omitempty"`
 }
 
 // snUpdateAttachmentResponse mirrors the Choreo PATCH /attachments/{id} response.
@@ -2936,8 +3594,9 @@ type snUpdateAttachmentResponse struct {
 	} `json:"attachment"`
 }
 
+// UpdateAttachment implements CaseService.UpdateAttachment for the ServiceNow data source.
 func (s *snCaseService) UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+	if err := validateUUIDs("id", []string{req.AttachmentID}); err != nil {
 		return domain.UpdateAttachmentResponse{}, err
 	}
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
@@ -2953,10 +3612,12 @@ func (s *snCaseService) UpdateAttachment(ctx context.Context, req domain.UpdateA
 		ReferenceID:   uuidToSysid(req.ReferenceID),
 		ReferenceType: string(req.ReferenceType),
 		Name:          req.Name,
-		Description:   req.Description,
+	}
+	if len(req.Description) > 0 {
+		payload.Description = req.Description
 	}
 
-	raw, err := s.client.Patch(ctx, "/attachments/"+uuidToSysid(req.ID), token, payload)
+	raw, err := s.client.Patch(ctx, "/attachments/"+uuidToSysid(req.AttachmentID), token, payload)
 	if err != nil {
 		return domain.UpdateAttachmentResponse{}, err
 	}
@@ -3000,21 +3661,21 @@ type snCaseFeedbackGetResponse struct {
 	AdditionalComment *string                `json:"additionalComment"`
 }
 
-func (s *snCaseService) GetCaseFeedback(ctx context.Context, id string) (domain.CaseFeedback, error) {
+func (s *snCaseService) GetCaseFeedback(ctx context.Context, id string) (domain.CaseEmojiFeedback, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.CaseFeedback{}, err
+		return domain.CaseEmojiFeedback{}, err
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	raw, err := s.client.Get(ctx, "/cases/"+uuidToSysid(id)+"/feedback", token)
 	if err != nil {
-		return domain.CaseFeedback{}, err
+		return domain.CaseEmojiFeedback{}, err
 	}
 
 	var snResp snCaseFeedbackGetResponse
 	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.CaseFeedback{}, fmt.Errorf("sn get case feedback: parse response: %w", err)
+		return domain.CaseEmojiFeedback{}, fmt.Errorf("sn get case feedback: parse response: %w", err)
 	}
 
 	chips := make([]string, 0, len(snResp.Chips))
@@ -3022,7 +3683,7 @@ func (s *snCaseService) GetCaseFeedback(ctx context.Context, id string) (domain.
 		chips = append(chips, sysidToUUID(c))
 	}
 
-	return domain.CaseFeedback{
+	return domain.CaseEmojiFeedback{
 		ID: sysidToUUID(snResp.ID),
 		Emoji: domain.CaseFeedbackEmojiRef{
 			ID:            sysidToUUID(snResp.Emoji.ID),
@@ -3159,6 +3820,8 @@ type snCaseFilterGroup struct {
 	DeploymentIDs      []string `json:"deploymentIds,omitempty"`
 	AssignedUserIDs    []string `json:"assignedUserIds,omitempty"`
 	EscalationLevels   []string `json:"escalationLevel,omitempty"`
+	Tags               []string `json:"tags,omitempty"`
+	ExcludeTags        []string `json:"excludeTags,omitempty"`
 }
 
 // buildSNCaseFilterGroups maps each domain.CaseFilterGroup branch into its SN
@@ -3181,6 +3844,8 @@ func buildSNCaseFilterGroups(groups []domain.CaseFilterGroup) []snCaseFilterGrou
 			DeploymentIDs:      uuidsToSysids(g.DeploymentIDs),
 			AssignedUserIDs:    uuidsToSysids(g.AssignedUserIDs),
 			EscalationLevels:   g.EscalationLevels,
+			Tags:               g.Tags,
+			ExcludeTags:        g.ExcludeTags,
 		})
 	}
 	return result
@@ -3239,6 +3904,8 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		TaskSLAFilter:                    buildSNTaskSLAFilter(parsed.TaskSLAFilter),
 		EscalationLevels:                 parsed.EscalationLevels,
 		IsEscalated:                      parsed.HasActiveEscalation,
+		SlaBreached:                      parsed.HasBreachedSLA,
+		AccountEscalationActive:          parsed.HasActiveAccountEscalation,
 		OrGroups:                         buildSNCaseFilterGroups(parsed.OrGroups),
 	}
 }
@@ -3493,6 +4160,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			BestCaseFixEta:   c.BestCaseFixEta,
 			MostLikelyFixEta: c.MostLikelyFixEta,
 			WorstCaseFixEta:  c.WorstCaseFixEta,
+			EscalationLevel:  snEscalationLevelToDomain(c.EscalationLevel),
 		}
 		if c.Account != nil {
 			cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
@@ -3546,17 +4214,17 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	}, nil
 }
 
-// snCaseGroupByPayload is the Choreo POST /cases/group-by request body.
-type snCaseGroupByPayload struct {
+// snCaseAggregatePayload is the Choreo POST /cases/aggregate request body.
+type snCaseAggregatePayload struct {
 	Filters   snCaseFilters `json:"filters,omitempty"`
 	GroupBy   string        `json:"groupBy"`
 	MaxGroups int           `json:"maxGroups,omitempty"`
 }
 
-// GroupCasesBy implements CaseService by calling the Choreo POST
-// /cases/group-by endpoint: a single server-side aggregation over the
+// AggregateCases implements CaseService by calling the Choreo POST
+// /cases/aggregate endpoint: a single server-side aggregation over the
 // requested field (e.g. account), capped to the top MaxGroups buckets with
-// the remainder folded into GroupByResponse.OthersCount. This is distinct
+// the remainder folded into AggregateResponse.OthersCount. This is distinct
 // from SearchCases' own GroupBy, which only supports small fixed-enum
 // fields and computes each bucket as a separate client-side search.
 //
@@ -3565,127 +4233,127 @@ type snCaseGroupByPayload struct {
 // range checks -- so a request that would be rejected by search is rejected
 // here too, rather than silently reaching ServiceNow with a narrower filter
 // set than the caller intended.
-func (s *snCaseService) GroupCasesBy(ctx context.Context, req domain.GroupCasesByRequest) (domain.GroupByResponse, error) {
+func (s *snCaseService) AggregateCases(ctx context.Context, req domain.AggregateCasesRequest) (domain.AggregateResponse, error) {
 	if req.GroupBy == "" {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
 	}
-	if !validCaseGroupByField[req.GroupBy] {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	if !validCaseAggregateField[req.GroupBy] {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 	callerEmail, callerEmailErr := resolveCaseFilterCallerEmail(token)
 	parsed, err := ParseCaseFieldFilters(req.Filters.Filters, callerEmail, callerEmailErr, time.Now().UTC())
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
 	orGroups, err := ParseCaseFieldFilterGroups(req.Filters.AnyOf)
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	parsed.OrGroups = orGroups
 
 	if parsed.ClosedEndDate != nil && parsed.ClosedStartDate != nil &&
 		parsed.ClosedEndDate.Before(*parsed.ClosedStartDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "closedOn: lte value must not be before gte value"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "closedOn: lte value must not be before gte value"}
 	}
 	if parsed.ResolvedEndDate != nil && parsed.ResolvedStartDate != nil &&
 		parsed.ResolvedEndDate.Before(*parsed.ResolvedStartDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "resolvedOn: lte value must not be before gte value"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "resolvedOn: lte value must not be before gte value"}
 	}
 	if parsed.EndCreatedDate != nil && parsed.StartCreatedDate != nil &&
 		parsed.EndCreatedDate.Before(*parsed.StartCreatedDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
 	}
 	if parsed.EndUpdatedDate != nil && parsed.StartUpdatedDate != nil &&
 		parsed.EndUpdatedDate.Before(*parsed.StartUpdatedDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "updatedOn: lte value must not be before gte value"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "updatedOn: lte value must not be before gte value"}
 	}
 	for _, ws := range parsed.WorkStates {
 		if ws != domain.CaseWorkStateOngoing && ws != domain.CaseWorkStatePaused {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(ws)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(ws)}
 		}
 	}
 	if err := validateUUIDs("assignedUserId", parsed.AssignedUserIDs); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if parsed.ParentID != nil {
 		if err := validateUUIDs("parentId", []string{*parsed.ParentID}); err != nil {
-			return domain.GroupByResponse{}, err
+			return domain.AggregateResponse{}, err
 		}
 	}
 	if err := validateUUIDs("creTeam", parsed.CreTeamIDs); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if err := validateUUIDs("sreTeam", parsed.SreTeamIDs); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if err := validateUUIDs("accountId", parsed.AccountIDs); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	for _, t := range parsed.Types {
 		if _, ok := snCaseTypeMap[t]; !ok {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + t}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + t}
 		}
 	}
 	for _, st := range parsed.States {
 		if !validCaseState[st] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(st)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(st)}
 		}
 	}
 	for _, st := range parsed.ExcludeStates {
 		if !validCaseState[st] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "state (notIn) contains invalid value: " + string(st)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "state (notIn) contains invalid value: " + string(st)}
 		}
 	}
 	for _, sv := range parsed.Severities {
 		if !validCaseSeverity[sv] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "severity contains invalid value: " + string(sv)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "severity contains invalid value: " + string(sv)}
 		}
 	}
 	for _, it := range parsed.IssueTypes {
 		if !validCaseIssueType[it] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(it)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(it)}
 		}
 	}
 	for _, et := range parsed.EngagementTypes {
 		if !validEngagementType[et] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "engagementType contains invalid value: " + string(et)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "engagementType contains invalid value: " + string(et)}
 		}
 	}
 	for _, lvl := range parsed.EscalationLevels {
 		if !validEscalationLevel[lvl] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "escalationLevel contains invalid value: " + lvl}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "escalationLevel contains invalid value: " + lvl}
 		}
 	}
 	for i, group := range parsed.OrGroups {
 		if err := validateOrGroupEnums(i, group); err != nil {
-			return domain.GroupByResponse{}, err
+			return domain.AggregateResponse{}, err
 		}
 	}
 
 	snFilters := buildSNCaseFilters(parsed, req.Filters.SearchQuery)
 
-	payload := snCaseGroupByPayload{
+	payload := snCaseAggregatePayload{
 		Filters:   snFilters,
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,
 	}
 
-	raw, err := s.client.Post(ctx, "/cases/group-by", token, payload)
+	raw, err := s.client.Post(ctx, "/cases/aggregate", token, payload)
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
-	var resp domain.GroupByResponse
+	var resp domain.AggregateResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return domain.GroupByResponse{}, fmt.Errorf("sn cases: parse group-by response: %w", err)
+		return domain.AggregateResponse{}, fmt.Errorf("sn cases: parse aggregate response: %w", err)
 	}
-	// "account" is the only ID-valued field in validCaseGroupByField; SN
+	// "account" is the only ID-valued field in validCaseAggregateField; SN
 	// returns its bucket keys as raw sys_ids, so convert them to this
 	// platform's UUIDs before returning. Every other allowed field (state,
 	// severity, type) is a plain enum and is left as-is.

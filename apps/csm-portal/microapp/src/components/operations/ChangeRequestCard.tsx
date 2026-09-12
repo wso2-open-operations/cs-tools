@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { Card, Chip, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
@@ -27,7 +28,7 @@ import {
 } from "./config";
 
 export function ChangeRequestCard({ item }: { item: ChangeRequestSummary }) {
-  const theme = useTheme();
+  const theme = useTheme<OxygenTheme>();
 
   return (
     <Card
@@ -40,7 +41,7 @@ export function ChangeRequestCard({ item }: { item: ChangeRequestSummary }) {
           <Typography variant="subtitle2" color="text.secondary">
             {item.number}
           </Typography>
-          <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
+          <ChevronRight size={pxToRem(18)} color={theme.vars.palette.text.secondary} />
         </Stack>
 
         <Typography variant="body1" color="text.primary" noWrap>
@@ -69,7 +70,7 @@ export function ChangeRequestCard({ item }: { item: ChangeRequestSummary }) {
         </Stack>
 
         <Stack direction="row" alignItems="center" gap={0.5}>
-          <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
+          <Clock4 size={pxToRem(13)} color={theme.vars.palette.text.secondary} />
           <Typography variant="subtitle2" color="text.secondary" sx={{ fontSize: pxToRem(12) }}>
             Updated {fromNow(item.updatedOn)}
           </Typography>

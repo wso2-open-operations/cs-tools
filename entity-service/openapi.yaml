@@ -1549,7 +1549,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/group-by:
+  /cases/aggregate:
     post:
       summary: >-
         Server-side aggregation of cases by a single field (e.g. account, top
@@ -1560,20 +1560,20 @@ paths:
         searches), this drives a single aggregation query over an open-ended
         field such as account, capped to the top maxGroups buckets with the
         remainder folded into othersCount.
-      operationId: groupCasesBy
+      operationId: aggregateCases
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GroupCasesByRequest'
+              $ref: '#/components/schemas/AggregateCasesRequest'
       responses:
         "200":
           description: Aggregated case counts per value of groupBy.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GroupByResponse'
+                $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: Bad request.
           content:
@@ -1589,6 +1589,108 @@ paths:
         "503":
           description: >-
             groupBy is only supported for the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/feedback/search:
+    post:
+      summary: >-
+        Search case-feedback (satisfaction rating) records across cases
+        (ServiceNow data source only).
+      description: >-
+        Backs the case-feedback dashboard's list view. Distinct from any
+        single-case feedback lookup: this is filterable by case, accounts,
+        and submission date range, and is paginated.
+      operationId: searchCaseFeedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchFeedbackRequest'
+      responses:
+        "200":
+          description: Case-feedback records matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchFeedbackResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: Request body too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Downstream service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/feedback/aggregate:
+    post:
+      summary: >-
+        Date-bucketed rating aggregation of case-feedback records across
+        cases (ServiceNow data source only).
+      description: >-
+        Backs the case-feedback dashboard's rating-trend chart. This is the
+        many-cases trend endpoint, not scoped to one case, so filters.caseId
+        is not accepted here (unlike POST /cases/feedback/search).
+      operationId: aggregateCaseFeedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateFeedbackRequest'
+      responses:
+        "200":
+          description: Feedback ratings aggregated into date buckets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateFeedbackResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: Request body too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Downstream service unavailable.
           content:
             application/json:
               schema:
@@ -1998,6 +2100,104 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Case is not in a state that allows filing a GitHub issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}/escalations:
+    get:
+      summary: Get a case's full escalation history, newest first (ServiceNow data source only).
+      operationId: searchCaseEscalations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      responses:
+        "200":
+          description: The case's escalation history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseEscalationHistory'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Escalate or de-escalate a case (ServiceNow data source only).
+      operationId: createCaseEscalation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseEscalationCreateRequest'
+      responses:
+        "201":
+          description: Escalation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedEscalation'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
@@ -2215,12 +2415,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AttachmentDetails'
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized.
           content:
@@ -2235,12 +2429,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: Attachments are only supported for the ServiceNow data source.
           content:
             application/json:
               schema:
@@ -3161,6 +3349,140 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /products/vulnerabilities/sync:
+    post:
+      summary: >-
+        Full-replace sync of product vulnerabilities (ServiceNow data source only).
+      description: >-
+        This is a full-replace sync, not an incremental update. The submitted items MUST be
+        the complete current set of product vulnerabilities: the downstream data source
+        deletes any existing record whose wso2Id is not present in the submitted array and
+        upserts everything that is. Submitting a partial list will delete the records omitted
+        from it. Intended for machine-to-machine callers (e.g. a scheduled sync job), not
+        interactive user sessions.
+      operationId: syncProductVulnerabilities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductVulnerabilitySyncItem'
+      responses:
+        "201":
+          description: Sync applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVulnerabilitySyncResult'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alerts/{id}:
+    get:
+      summary: Get an alert by ID.
+      operationId: getAlert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Alert UUID.
+      responses:
+        "200":
+          description: The alert with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Alert not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /smart-alerts/{id}:
+    get:
+      summary: Get a smart alert by ID.
+      operationId: getSmartAlert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Smart alert UUID.
+      responses:
+        "200":
+          description: The smart alert with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartAlertView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Smart alert not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /change-requests/search:
     post:
       summary: Search change requests (ServiceNow data source only).
@@ -3197,25 +3519,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /change-requests/group-by:
+  /change-requests/aggregate:
     post:
       summary: >-
         Server-side aggregation of change requests by a single field
         (ServiceNow data source only).
-      operationId: groupChangeRequestsBy
+      operationId: aggregateChangeRequests
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GroupChangeRequestsByRequest'
+              $ref: '#/components/schemas/AggregateChangeRequestsRequest'
       responses:
         "200":
           description: Aggregated change request counts per value of groupBy.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GroupByResponse'
+                $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: Bad request.
           content:
@@ -3982,25 +4304,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /incidents/group-by:
+  /incidents/aggregate:
     post:
       summary: >-
         Server-side aggregation of incidents by a single field (ServiceNow
         data source only).
-      operationId: groupIncidentsBy
+      operationId: aggregateIncidents
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GroupIncidentsByRequest'
+              $ref: '#/components/schemas/AggregateIncidentsRequest'
       responses:
         "200":
           description: Aggregated incident counts per value of groupBy.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GroupByResponse'
+                $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: Bad request.
           content:
@@ -4092,25 +4414,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /problems/group-by:
+  /problems/aggregate:
     post:
       summary: >-
         Server-side aggregation of problems by a single field (ServiceNow
         data source only).
-      operationId: groupProblemsBy
+      operationId: aggregateProblems
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GroupProblemsByRequest'
+              $ref: '#/components/schemas/AggregateProblemsRequest'
       responses:
         "200":
           description: Aggregated problem counts per value of groupBy.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GroupByResponse'
+                $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: Bad request.
           content:
@@ -4167,6 +4489,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+    patch:
+      summary: >-
+        Update a problem -- a forward state transition, plain-field updates, or both
+        (ServiceNow data source only).
+      operationId: updateProblem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProblemRequest'
+      responses:
+        "200":
+          description: Problem updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateProblemResponse'
+        "400":
+          description: Missing fields, invalid transition, or invalid state transition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Problem, assignedToId, or assignmentGroupId not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: State transition rejected by the data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incident-tasks/search:
     post:
       summary: Search incident tasks (ServiceNow data source only). Search and get only -- no create/update.
@@ -4203,25 +4581,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /incident-tasks/group-by:
+  /incident-tasks/aggregate:
     post:
       summary: >-
         Server-side aggregation of incident tasks by a single field
         (ServiceNow data source only).
-      operationId: groupIncidentTasksBy
+      operationId: aggregateIncidentTasks
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GroupIncidentTasksByRequest'
+              $ref: '#/components/schemas/AggregateIncidentTasksRequest'
       responses:
         "200":
           description: Aggregated incident task counts per value of groupBy.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GroupByResponse'
+                $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: Bad request.
           content:
@@ -4230,6 +4608,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Incident tasks are only supported for the ServiceNow data source.
           content:
             application/json:
               schema:
@@ -4593,7 +4977,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseFeedback'
+                $ref: '#/components/schemas/CaseEmojiFeedback'
         "400":
           description: Bad request.
           content:
@@ -5410,9 +5794,13 @@ components:
       description: >
         One project-contact row for a user, reported as stored rather than as filtered. A
         row with no linked contact record makes the project, and every case on it, silently
-        invisible to that user. grantsCaseAccess mirrors contactRecordPresent directly --
-        deliberately not the stricter email-match rule the live access check enforces, since
-        that only diverges for integration/system accounts.
+        invisible to that user. grantsCaseAccess is the access rule applied per row:
+        contactRecordPresent AND contactEmail matching contactRecordEmail, compared
+        case-insensitively. It is deliberately not a restatement of contactRecordPresent --
+        a row invited under one address but linked to a contact whose own address differs is
+        invisible to both people, and that does happen on genuine customer rows. Both halves
+        of the comparison are returned above, so a false verdict can be explained from the
+        row itself.
       required: [projectId, projectName, projectKey, contactEmail, contactRecordPresent, grantsCaseAccess]
       properties:
         projectId:
@@ -5825,6 +6213,11 @@ components:
         updatedOn:
           type: string
           format: date-time
+        hasSr:
+          type: boolean
+          description: >
+            Whether this project is eligible to raise service requests, per the
+            backing data source's own project classification.
         closureState:
           type: string
           nullable: true
@@ -5849,6 +6242,14 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        onboardingOwner:
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+          nullable: true
+          description: >
+            The person assigned to run this project's onboarding. Null when
+            no owner is assigned — most projects, since only
+            onboarding-enabled projects have one.
 
     ProjectView:
       type: object
@@ -6013,7 +6414,10 @@ components:
           properties:
             searchQuery:
               type: string
-              description: Searches across contact name and email (case-insensitive).
+              description: >
+                Searches across the contact's name, the linked record's address, and the
+                address a row was invited under (case-insensitive) — so a row with no linked
+                contact record is findable by the address it is displayed under.
         pagination:
           $ref: '#/components/schemas/Pagination'
 
@@ -6029,8 +6433,16 @@ components:
             render the row unlinked rather than treating it as an error.
         name:
           type: string
+          nullable: true
+          description: >
+            Null when the row has no contact record linked — the name is only ever known
+            from that record.
         email:
           type: string
+          description: >
+            The contact's address. Falls back to the address the row was invited under when
+            no contact record is linked, so a row whose contact record was never created is
+            still identifiable rather than coming back with no name and no address at all.
         registrationState:
           type: string
         notificationsEnabled:
@@ -6048,8 +6460,11 @@ components:
           type: boolean
           description: >
             Whether this row would actually grant its person visibility into this project's
-            cases. Mirrors `customerContactPresent` directly — a row can be listed here without
-            granting access.
+            cases: a linked contact record AND the address the row was invited under matching
+            that record's own address, compared case-insensitively. Deliberately not a
+            restatement of `customerContactPresent` — a row invited under one address but
+            linked to a contact whose own address differs is invisible to both people, and
+            that does happen on genuine customer rows.
 
     SearchProjectContactsResponse:
       type: object
@@ -6412,20 +6827,39 @@ components:
           allOf:
             - $ref: '#/components/schemas/DeployedProductVersionRef'
         cores:
-          type: string
+          type: integer
           nullable: true
         tps:
-          type: string
+          type: number
           nullable: true
         category:
           type: string
           nullable: true
+        updates:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ProductUpdateEntry'
+          description: Update-level history recorded against this deployed product.
         createdOn:
           type: string
           format: date-time
         updatedOn:
           type: string
           format: date-time
+
+    ProductUpdateEntry:
+      type: object
+      required: [updateLevel, date]
+      properties:
+        updateLevel:
+          type: integer
+        date:
+          type: string
+          format: date
+        details:
+          type: string
+          nullable: true
 
     SearchDeployedProductsResponse:
       type: object
@@ -6495,7 +6929,7 @@ components:
 
     UpdateDeployedProductRequest:
       oneOf:
-        - description: Update deployed product detail fields. At least one of cores, tps, or description must be provided.
+        - description: Update deployed product detail fields. At least one of cores, tps, description, or updates must be provided.
           type: object
           minProperties: 1
           additionalProperties: false
@@ -6516,6 +6950,13 @@ components:
               type: string
               nullable: true
               description: Description of the deployed product.
+            updates:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductUpdateEntry'
+              description: >-
+                Whole-array replace of the deployed product's update-level history: fetch the
+                current array, mutate it client-side, and PATCH the full array back.
         - description: Deactivate the deployed product. active must be false; no other fields may be present.
           type: object
           required: [active]
@@ -6550,17 +6991,36 @@ components:
           format: date-time
         updatedBy:
           type: string
+        updates:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ProductUpdateEntry'
+          description: The deployed product's update-history array as it stands after the write.
 
     UpdateCaseRequest:
       type: object
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`,
-        `acknowledge`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta` must be
-        provided.
-        `watchList`, `assigneeEmail`, `bestCaseFixEta`, `mostLikelyFixEta`, and
-        `worstCaseFixEta` are supported only for the ServiceNow data source.
+        `acknowledge`, `type`, or the combinable group (`bestCaseFixEta`, `mostLikelyFixEta`,
+        `worstCaseFixEta`, `workaroundProvided`) must be provided. The single exception is
+        `severity`, which may accompany `type` and is required when `type` is `case`.
+        The combinable group has no cross-field side effects, so any non-empty subset of its
+        four fields may be sent together in one request (e.g. all three fix-ETA estimates plus
+        `workaroundProvided` in the same call) — they must not be combined with any of the
+        exclusive fields above, though.
+        `watchList`, `assigneeEmail`, and the whole combinable group are supported only for the
+        ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
+        `type` transfers the case to another type and is supported only for the ServiceNow
+        data source. Its companion fields carry the target type's mandatory data:
+        `severity` and `issueType` alongside `type: case`; `engagementType` and
+        `engagementPaymentType` alongside `type: engagement`; `catalogId`, `catalogItemId`
+        and a non-empty `variables` alongside `type: service_request`; none for
+        `type: security_report_analysis`.
+        A companion is rejected when sent without `type`, or with a `type` it does not
+        belong to. `severity` is the one field that may be combined with `type`.
       oneOf:
         - required: [state]
         - required: [severity]
@@ -6568,9 +7028,12 @@ components:
         - required: [watchList]
         - required: [assigneeEmail]
         - required: [acknowledge]
-        - required: [bestCaseFixEta]
-        - required: [mostLikelyFixEta]
-        - required: [worstCaseFixEta]
+        - required: [type]
+        - anyOf:
+            - required: [bestCaseFixEta]
+            - required: [mostLikelyFixEta]
+            - required: [worstCaseFixEta]
+            - required: [workaroundProvided]
       properties:
         state:
           type: string
@@ -6580,6 +7043,51 @@ components:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: The new severity of the case.
+        type:
+          type: string
+          enum: [case, engagement, security_report_analysis, service_request]
+          description: >
+            Transfers the case to this type (ServiceNow only). `announcement` and the
+            hosting_* types are system-managed and are never valid transfer targets.
+        engagementType:
+          type: string
+          enum: [migration, consultancy, new_feature_improvement, follow_up, onboarding]
+          description: "Required alongside `type: engagement`."
+        engagementPaymentType:
+          type: string
+          enum: [paid, foc]
+          description: >
+            Required alongside `type: engagement`. `foc` means "free of charge".
+        issueType:
+          type: string
+          enum: [total_outage, partial_outage, performance_degradation, question, security_or_compliance, error]
+          description: >
+            Required alongside `type: case`, and rejected for every other target type —
+            the backing data source stores issue type only on records of that type.
+        catalogId:
+          type: string
+          format: uuid
+          description: "Required alongside `type: service_request`."
+        catalogItemId:
+          type: string
+          format: uuid
+          description: "Required alongside `type: service_request`."
+        variables:
+          type: array
+          description: >
+            Answers to the target catalog item's questions. Required and non-empty
+            alongside `type: service_request` — the backing data source rejects a service
+            request with no variable values, the same way it does at create time.
+          minItems: 1
+          items:
+            type: object
+            required: [id, value]
+            properties:
+              id:
+                type: string
+                format: uuid
+              value:
+                type: string
         workState:
           type: string
           enum: [ongoing, paused]
@@ -6588,8 +7096,11 @@ components:
           type: array
           items:
             type: string
-            format: email
-          description: List of email addresses to set as the case watch list (ServiceNow only).
+            format: uuid
+          description: |
+            The full set of user identifiers to set as the case watch list, replacing
+            whatever is there (ServiceNow only). An empty array clears the watch list,
+            and counts as providing the field.
         assigneeEmail:
           type: string
           format: email
@@ -6677,6 +7188,12 @@ components:
           description: >-
             Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible
             to CSM engineers only (ServiceNow only).
+        workaroundProvided:
+          type: boolean
+          description: >-
+            Mark (true) or recall (false) the case's workaround. Stamps the calling
+            engineer as the provider and pauses the case's Workaround SLA clock while
+            set; recalling clears both (ServiceNow only).
 
     UpdateCaseResponse:
       type: object
@@ -6716,10 +7233,8 @@ components:
           items:
             $ref: '#/components/schemas/WatchListUser'
         assignedTo:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
         assignedToUser:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         number:
           type: string
@@ -6731,7 +7246,6 @@ components:
             and `acknowledgedBy` names whoever claimed it first. Returned only when the
             update set `acknowledge`.
         acknowledgedBy:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
           description: |
             Engineer who now holds the acknowledgement, whether this request set it or
@@ -6890,7 +7404,6 @@ components:
           type: string
           format: email
         user:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
 
     CreateCaseRequest:
@@ -6911,8 +7424,8 @@ components:
             payload for one — and is rejected with 400 if supplied here.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`; `attachments` optional.
-            - `engagement`: requires `subject`, `description`, `engagementType`.
+            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
+            - `engagement`: professional-services engagement (e.g. migration, onboarding); requires `subject`, `description`, `engagementType`, `engagementPaymentType`.
         projectId:
           type: string
           format: uuid
@@ -6924,10 +7437,10 @@ components:
           format: uuid
         subject:
           type: string
-          description: Required for `case` and `security_report_analysis` types.
+          description: Required for `case`, `security_report_analysis`, and `engagement` types.
         description:
           type: string
-          description: Required for `case` and `security_report_analysis` types.
+          description: Required for `case`, `security_report_analysis`, and `engagement` types.
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
@@ -6962,6 +7475,10 @@ components:
             Optional even for `security_report_analysis` type — the frontend
             creates the case first, then uploads attachments in separate
             requests per file, so this may be omitted or empty.
+        engagementPaymentType:
+          type: string
+          enum: [paid, foc]
+          description: Required for `engagement` type. `foc` means "free of charge".
         relatedCaseId:
           type: string
           format: uuid
@@ -6974,7 +7491,8 @@ components:
           type: array
           items:
             type: string
-          description: Optional list of user IDs to notify.
+            format: uuid
+          description: Optional list of identifiers of the users to add to the case watch list.
 
     CreateCaseResponse:
       type: object
@@ -7033,6 +7551,8 @@ components:
             - escalation
             - number
             - internalId
+            - slaBreached
+            - accountEscalationActive
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -7152,6 +7672,15 @@ components:
         - **internalId** (eq): a single WSO2 case id; matches exactly. Routed
           as a first-class filter rather than through the free-text
           searchQuery scan.
+        - **slaBreached** (eq): a single boolean value ("true"/"false").
+          Matches cases with a currently-breached SLA against the platform's
+          10 named SLA definitions. Only applied by the ServiceNow data
+          source.
+        - **accountEscalationActive** (eq): a single boolean value
+          ("true"/"false"). Matches cases whose parent ACCOUNT has an active
+          escalation (state IN 100,101) — distinct from **escalation** above,
+          which matches on the case's own escalation state, not its parent
+          account's. Only applied by the ServiceNow data source.
 
     CaseFilterBranch:
       type: object
@@ -7197,7 +7726,7 @@ components:
             direct, non-subquery ServiceNow mapping are supported inside a
             branch: type, state, severity, engagementType, issueType,
             workState, projectId, deploymentId, assignedUserId,
-            escalationLevel. A branch containing any other field (e.g. tag,
+            escalationLevel, tag. A branch containing any other field (e.g.
             taskSLABusinessElapsedPercent, createdOn) is rejected with a
             validation error. Requires ServiceNow data source.
 
@@ -7229,7 +7758,7 @@ components:
             fan-out of per-value count queries against the ServiceNow data
             source; not supported by the Postgres data source.
 
-    GroupCasesByRequest:
+    AggregateCasesRequest:
       type: object
       required: [groupBy]
       properties:
@@ -7243,7 +7772,7 @@ components:
           type: integer
           description: >-
             Caps the response to the top maxGroups buckets by count; the
-            remainder is folded into GroupByResponse.othersCount. Optional; a
+            remainder is folded into AggregateResponse.othersCount. Optional; a
             default is applied when omitted.
 
     UserReference:
@@ -7371,6 +7900,9 @@ components:
 
     DeployedProductRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       description: >-
         A deployed product instance, together with the product catalogue entry it
         was deployed from. The two are different records with different ids; they
@@ -7480,7 +8012,6 @@ components:
           nullable: true
           description: Timestamp when the case was closed. null if not yet closed.
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         project:
           $ref: '#/components/schemas/EntityRef'
@@ -7489,7 +8020,6 @@ components:
           $ref: '#/components/schemas/EntityRef'
           description: Deployment associated with the case. null for ServiceNow cases with no deployment.
         deployedProduct:
-          nullable: true
           $ref: '#/components/schemas/DeployedProductRef'
           description: |
             Deployed product instance named by the case, together with the product
@@ -7513,16 +8043,25 @@ components:
           $ref: '#/components/schemas/EntityRef'
           description: Linked conversation. Populated for ServiceNow cases; null for Postgres cases.
         assignedEngineer:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
           description: Engineer assigned to the case, or null when unassigned.
         acknowledgedBy:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
           description: |
             Engineer who acknowledged the case, or null if nobody has. Cleared by the
             backing data source when the case's type or severity changes or it is
             reopened, so a materially changed case has to be acknowledged again.
+        workaroundProvidedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the case's workaround was marked provided, or null until marked (and
+            cleared again on recall). Pauses the case's Workaround SLA clock while set
+            (ServiceNow only).
+        workaroundProvidedBy:
+          $ref: '#/components/schemas/AssignedEngineerRef'
+          description: Engineer who marked the workaround as provided, or null until marked.
         parentCase:
           nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
@@ -7530,7 +8069,6 @@ components:
           nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
         account:
-          nullable: true
           $ref: '#/components/schemas/AccountRef'
         linkedChangeRequests:
           type: array
@@ -7543,6 +8081,14 @@ components:
             type. This is a one-to-many relationship: promoting the same change
             through each environment produces one change request per environment,
             all pointing back at the same service request.
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseVariable'
+          description: >-
+            Answers given to the catalog item's questions when the service request
+            was raised, in the backing data source's own order. Only service-request
+            cases carry them; absent for every other case type.
         resolvedOn:
           type: string
           format: date-time
@@ -7583,6 +8129,14 @@ components:
           description: >-
             Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible to
             CSM engineers only. Populated for ServiceNow cases; null otherwise.
+        escalationLevel:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5"]
+          nullable: true
+          description: >-
+            The case's current escalation level ("0" = not escalated through "5" = highest),
+            the same id space accepted by the case search's escalationLevel filter. Null when
+            the backing case carries no escalation level (e.g. non-ServiceNow-backed cases).
         slaResponseTime:
           type: string
           nullable: true
@@ -7627,7 +8181,6 @@ components:
           type: string
           description: Last-updated timestamp. RFC3339 for Postgres; raw SN timestamp string for ServiceNow.
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         subject:
           type: string
@@ -7684,7 +8237,6 @@ components:
         deployedProduct:
           $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
           description: Engineer assigned to the case, or null when unassigned.
         parentCase:
@@ -7698,7 +8250,6 @@ components:
           $ref: '#/components/schemas/EntityRef'
           description: Populated for ServiceNow data source only.
         account:
-          nullable: true
           $ref: '#/components/schemas/AccountRef'
           description: >-
             The case's account, including support tier (type). Populated for
@@ -7727,6 +8278,13 @@ components:
             Internal-only worst-case fix-commitment date (date-only,
             YYYY-MM-DD), visible to CSM engineers only. Populated for the
             ServiceNow data source only; null otherwise.
+        escalationLevel:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5"]
+          nullable: true
+          description: >-
+            The case's current escalation level -- see CaseView.escalationLevel's
+            description.
 
     SearchCasesResponse:
       type: object
@@ -7759,12 +8317,12 @@ components:
           type: integer
           description: Number of matching cases in this group.
 
-    GroupByBucket:
+    AggregateBucket:
       type: object
       required: [key, label, count]
       description: >-
-        One aggregated bucket in a server-side group-by result. Shared by
-        every resource's dedicated group-by endpoint (cases, incidents,
+        One aggregated bucket in a server-side aggregate result. Shared by
+        every resource's dedicated aggregate endpoint (cases, incidents,
         problems, change requests, incident tasks).
       properties:
         key:
@@ -7779,17 +8337,17 @@ components:
           type: integer
           description: Number of matching records in this bucket.
 
-    GroupByResponse:
+    AggregateResponse:
       type: object
       required: [groups, othersCount, totalRecords]
       description: >-
-        The shared result shape for every resource's dedicated group-by
-        aggregation endpoint.
+        The shared result shape for every resource's dedicated aggregate
+        endpoint.
       properties:
         groups:
           type: array
           items:
-            $ref: '#/components/schemas/GroupByBucket'
+            $ref: '#/components/schemas/AggregateBucket'
           description: The top buckets by count, capped at the request's maxGroups.
         othersCount:
           type: integer
@@ -7878,7 +8436,6 @@ components:
         content:
           type: string
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         createdOn:
           type: string
@@ -7955,7 +8512,6 @@ components:
         createdByLastName:
           type: string
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
           description: >-
             Actor behind this entry. Its name field is the actor's full display
@@ -8168,7 +8724,6 @@ components:
           type: string
           nullable: true
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
         createdOn:
           type: string
@@ -8242,9 +8797,10 @@ components:
           enum:
             - createdOn
             - assignmentGroupId
+            - approval
         op:
           type: string
-          enum: [gte, lte, in]
+          enum: [gte, lte, in, eq]
         values:
           type: array
           items:
@@ -8263,6 +8819,12 @@ components:
           its own gte bound is rejected with a validation error.
         - **assignmentGroupId** (in): sys_user_group UUIDs to filter the
           assignment group by.
+        - **approval** (eq): ServiceNow's raw `task.approval` rollup on the
+          change request. Exactly one value, one of `"not requested"`,
+          `"requested"`, `"approved"`, `"rejected"`. Distinct from
+          `approvedBy`/`approvedOn` on ChangeRequestDetail, which are derived
+          from a narrower Customer-Approval-stage record, not this CR-wide
+          field.
 
     SearchChangeRequestsRequest:
       type: object
@@ -8332,7 +8894,7 @@ components:
               maximum: 50
               default: 20
 
-    GroupChangeRequestsByRequest:
+    AggregateChangeRequestsRequest:
       type: object
       required: [groupBy]
       properties:
@@ -8387,7 +8949,7 @@ components:
           type: integer
           description: >-
             Caps the response to the top maxGroups buckets by count; the
-            remainder is folded into GroupByResponse.othersCount. Optional; a
+            remainder is folded into AggregateResponse.othersCount. Optional; a
             default is applied when omitted.
 
     SearchChangeRequestView:
@@ -8634,6 +9196,210 @@ components:
         offset:
           type: integer
 
+    CaseFeedback:
+      type: object
+      required: [instanceId, caseId, rating, ratingLabel, comment, submittedAt]
+      description: A single case-feedback (satisfaction rating) record.
+      properties:
+        instanceId:
+          type: string
+          format: uuid
+          description: Unique id of the feedback record.
+        caseId:
+          type: string
+          format: uuid
+          description: UUID of the case the feedback belongs to.
+        caseNumber:
+          type: string
+          nullable: true
+          description: >-
+            Human-readable case number (e.g. "CS0441331"). Null if the case
+            record could not be resolved.
+        caseInternalId:
+          type: string
+          nullable: true
+          description: >-
+            WSO2 internal case id (e.g. "SCTPSUB-88") for caseId. Null if the
+            case record could not be resolved or has no internal id assigned.
+        rating:
+          type: integer
+          description: Numeric rating value.
+        ratingLabel:
+          type: string
+          description: Human-readable label for rating (e.g. "Satisfied").
+        comment:
+          type: string
+          nullable: true
+          description: >-
+            Free-text comment submitted with the feedback. Null for feedback
+            submitted without a comment.
+        submittedAt:
+          type: string
+          description: Timestamp when the feedback was submitted.
+        submitterName:
+          type: string
+          nullable: true
+          description: >-
+            Display name of the customer contact who submitted the feedback.
+            Null if the submitting user record could not be resolved.
+        submitterEmail:
+          type: string
+          nullable: true
+          description: Email of the submitting contact. Null, same as submitterName.
+
+    SearchFeedbackFilters:
+      type: object
+      properties:
+        caseId:
+          type: string
+          format: uuid
+          description: Restrict results to a single case.
+        accountIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Restrict results to feedback on cases under these accounts.
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: Restrict results to feedback with this exact rating value.
+        dateFrom:
+          type: string
+          description: Start of the feedback submission date range (inclusive).
+        dateTo:
+          type: string
+          description: End of the feedback submission date range (inclusive).
+
+    SearchFeedbackRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchFeedbackFilters'
+        page:
+          type: integer
+          description: Page number for pagination. Optional; the backing data source applies a default when omitted.
+        pageSize:
+          type: integer
+          description: Number of records per page. Optional; the backing data source applies a default when omitted.
+
+    SearchFeedbackResponse:
+      type: object
+      required: [results, totalRecords]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseFeedback'
+        totalRecords:
+          type: integer
+          description: Total number of matching records across all pages.
+
+    AggregateFeedbackFilters:
+      type: object
+      description: >-
+        Deliberately narrower than SearchFeedbackFilters -- this is the
+        many-cases trend endpoint, not scoped to a single case, so caseId is
+        not accepted here.
+      properties:
+        accountIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Restrict results to feedback on cases under these accounts.
+        dateFrom:
+          type: string
+          description: Start of the feedback submission date range (inclusive).
+        dateTo:
+          type: string
+          description: End of the feedback submission date range (inclusive).
+
+    AggregateFeedbackRequest:
+      type: object
+      required: [bucket]
+      properties:
+        filters:
+          $ref: '#/components/schemas/AggregateFeedbackFilters'
+        bucket:
+          type: string
+          enum:
+            - day
+            - week
+            - month
+            - rating
+            - reasons_very_dissatisfied
+            - reasons_dissatisfied
+            - reasons_neutral
+            - reasons_satisfied
+            - reasons_very_satisfied
+          description: >-
+            Aggregation granularity to group results by. "day"/"week"/"month"
+            are temporal buckets by submission date. "rating" and every
+            "reasons_*" value are categorical buckets, not time ranges:
+            "rating" groups by rating value instead of time (each bucket's
+            bucketStart then carries the rating's own label, e.g. "Very
+            Satisfied", rather than a date); each "reasons_*" value groups by
+            which free-text reason was selected for that specific rating
+            level (each bucket's bucketStart then carries the reason's own
+            label, e.g. "Unhelpful support"). See FeedbackBucketResult for
+            what each bucket shape carries, and note categorical buckets
+            carry no ordering guarantee.
+
+    FeedbackBucketResult:
+      type: object
+      required: [bucketStart, avgRating, count]
+      description: >-
+        One bucket in a case-feedback aggregate result. Shape depends on the
+        request's "bucket" granularity: for "day"/"week"/"month" (temporal
+        buckets) this represents a time range, in ascending chronological
+        order; for "rating"/"reasons_*" (categorical buckets) it represents
+        one category instead, with no ordering guarantee across buckets.
+      properties:
+        bucketStart:
+          type: string
+          description: >-
+            For a temporal bucket, the start of this bucket's time range
+            (e.g. "2026-08-01"). For a categorical bucket, the category's own
+            label instead (e.g. "Very Satisfied" for "rating", "Unhelpful
+            support" for a "reasons_*" bucket) — not a date.
+        avgRating:
+          type: number
+          description: >-
+            For a temporal or "rating" bucket, the average rating across
+            feedback records in this bucket. Meaningless for a "reasons_*"
+            bucket (every row is a categorical chip selection, not a
+            rating) — present on the wire for shape consistency but not a
+            useful value there.
+        count:
+          type: integer
+          description: Number of feedback records in this bucket.
+
+    AggregateFeedbackResponse:
+      type: object
+      required: [buckets, totalRecords]
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedbackBucketResult'
+          description: Time buckets, in chronological order.
+        totalRecords:
+          type: integer
+          description: Total number of feedback records across every bucket.
+
+    CaseVariable:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          description: The question as it was shown on the service-request form.
+        value:
+          type: string
+          description: The answer recorded against that question.
+
     CatalogItemVariable:
       type: object
       properties:
@@ -8649,6 +9415,31 @@ components:
         type:
           type: string
           description: Variable type (e.g. text, select).
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVariableChoice'
+          description: >-
+            Selectable options for a choice-based variable, in the backing data
+            source's own order. Absent for free-text variable types, which are the
+            majority.
+
+    CatalogVariableChoice:
+      type: object
+      required: [value, text, order]
+      properties:
+        value:
+          type: string
+          nullable: true
+          description: The value a case create submits when this option is selected.
+        text:
+          type: string
+          nullable: true
+          description: The label shown to the user for this option.
+        order:
+          type: integer
+          nullable: true
+          description: Position of this option within the list.
 
     GetCatalogItemVariablesResponse:
       type: object
@@ -9231,6 +10022,62 @@ components:
         offset:
           type: integer
 
+    ProductVulnerabilitySyncItem:
+      type: object
+      description: >-
+        One entry in a full-replace product vulnerability sync. wso2Id is the join key used
+        to match this item against an existing record.
+      required:
+        - wso2Id
+      properties:
+        wso2Id:
+          type: string
+        componentName:
+          type: string
+        approvedBySecurityTeam:
+          type: boolean
+        componentType:
+          type: string
+        componentVersion:
+          type: string
+        cve:
+          type: string
+        justification:
+          type: string
+        productName:
+          type: string
+        productVersion:
+          type: string
+        resolution:
+          type: string
+        scannerName:
+          type: string
+        severity: {}
+        updateLevel:
+          type: string
+        useCase:
+          type: string
+        vulnerabilityId:
+          type: string
+        wso2Resolution:
+          type: string
+
+    ProductVulnerabilitySyncResult:
+      type: object
+      description: >-
+        Outcome of a full-replace product vulnerability sync. Fields may be omitted by the
+        downstream data source if a count was not reported.
+      properties:
+        insertedRecords:
+          type: integer
+          nullable: true
+        updatedRecords:
+          type: integer
+          nullable: true
+        deletedRecords:
+          type: integer
+          nullable: true
+
     CallRequestState:
       type: object
       description: State of a call request.
@@ -9500,6 +10347,27 @@ components:
               - notes_pending
               - concluded
           description: Filter by one or more call request states.
+        caseStates:
+          type: array
+          items:
+            type: string
+            enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: Filter to call requests whose parent case is in one of these states.
+        excludeCaseStates:
+          type: array
+          items:
+            type: string
+            enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: >-
+            Filter to call requests whose parent case is NOT in any of these states.
+            Inverse of caseStates; the two are independent and either, both, or
+            neither may be supplied.
+        assignmentTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by the parent case's assigned team(s).
 
     SearchAllCallRequestsRequest:
       type: object
@@ -9643,6 +10511,9 @@ components:
 
     GroupParentRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -9662,7 +10533,6 @@ components:
           type: boolean
         parent:
           $ref: '#/components/schemas/GroupParentRef'
-          nullable: true
 
     SearchGroupsResponse:
       type: object
@@ -9700,6 +10570,9 @@ components:
 
     ServiceOfferingServiceRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -9717,7 +10590,6 @@ components:
           type: string
         service:
           $ref: '#/components/schemas/ServiceOfferingServiceRef'
-          nullable: true
 
     SearchServiceOfferingsResponse:
       type: object
@@ -9812,7 +10684,6 @@ components:
           format: date-time
           description: Timestamp when the comment was created.
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
 
     SearchCommentsRequest:
@@ -9887,6 +10758,9 @@ components:
 
     TaskSlaDefinition:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -9904,6 +10778,9 @@ components:
 
     TaskSlaTaskRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -9925,13 +10802,11 @@ components:
           format: uuid
         slaDefinition:
           $ref: '#/components/schemas/TaskSlaDefinition'
-          nullable: true
         stage:
           type: string
           nullable: true
         task:
           $ref: '#/components/schemas/TaskSlaTaskRef'
-          nullable: true
         businessTimeLeft:
           type: string
           nullable: true
@@ -9965,6 +10840,9 @@ components:
 
     TaskSlaDefinitionDetail:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10039,6 +10917,9 @@ components:
 
     TaskSlaScheduleRef:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       properties:
         id:
           type: string
@@ -10060,10 +10941,8 @@ components:
           format: uuid
         task:
           $ref: '#/components/schemas/TaskSlaTaskRef'
-          nullable: true
         slaDefinition:
           $ref: '#/components/schemas/TaskSlaDefinitionDetail'
-          nullable: true
         stage:
           type: string
           nullable: true
@@ -10088,7 +10967,6 @@ components:
           nullable: true
         schedule:
           $ref: '#/components/schemas/TaskSlaScheduleRef'
-          nullable: true
 
     TaskSummary:
       type: object
@@ -10314,9 +11192,12 @@ components:
             - assignmentGroupId
             - businessServiceId
             - createdOn
+            - slaViolated
+            - madeSla
+            - productName
         op:
           type: string
-          enum: [in, gte, lte]
+          enum: [in, gte, lte, eq]
         values:
           type: array
           items:
@@ -10337,6 +11218,20 @@ components:
           timestamp, a YYYY-MM-DD date, or a relative-date placeholder (e.g.
           "__daysAgo:90__"), same syntax as case search's own createdOn
           filter.
+        - **slaViolated** (eq): a single boolean value ("true"/"false").
+          Restricts to incidents with (or without) at least one breached SLA
+          record.
+        - **madeSla** (eq): a single boolean value ("true"/"false").
+          Restricts to incidents matching ServiceNow's raw `made_sla` field.
+          Deliberately separate from **slaViolated** above: slaViolated is
+          derived from task_sla.has_breached and is the reliable signal;
+          madeSla is ServiceNow's own less-reliable raw field, kept only for
+          exact parity with SN's native incident dashboards. Prefer
+          slaViolated unless dashboard parity is the explicit goal.
+        - **productName** (in): one or more product names to match as a
+          union (an incident matching any one of them is returned). Only a
+          minority of incidents carry a product association, so this filter
+          narrows rather than guarantees full coverage.
 
     SearchIncidentsRequest:
       type: object
@@ -10381,7 +11276,7 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    GroupIncidentsByRequest:
+    AggregateIncidentsRequest:
       type: object
       required: [groupBy]
       properties:
@@ -10422,7 +11317,7 @@ components:
           type: integer
           description: >-
             Caps the response to the top maxGroups buckets by count; the
-            remainder is folded into GroupByResponse.othersCount. Optional; a
+            remainder is folded into AggregateResponse.othersCount. Optional; a
             default is applied when omitted.
 
     SearchIncidentView:
@@ -10545,6 +11440,8 @@ components:
           type: array
           items:
             type: string
+            format: uuid
+          description: Optional list of identifiers of the users to add to the incident watch list.
         additionalComments:
           type: string
           nullable: true
@@ -10588,6 +11485,110 @@ components:
               type: string
             createdBy:
               type: string
+
+    AlertView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          nullable: true
+        metricName:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+          description: Opaque, free-form text.
+        incidentId:
+          type: string
+          nullable: true
+          description: ID of the linked incident, if any.
+        serviceId:
+          type: string
+          nullable: true
+          description: ID of the linked service, if any.
+        createdOn:
+          type: string
+
+    SmartAlertView:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        alertId:
+          type: string
+          nullable: true
+          description: ID of the linked alert, if any.
+        sourceAlertId:
+          type: string
+          nullable: true
+          description: Opaque identifier assigned by the originating alert source.
+        alertStatus:
+          type: string
+          nullable: true
+        windowStatus:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          nullable: true
+        urgency:
+          type: string
+          nullable: true
+        impact:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          nullable: true
+        resourceName:
+          type: string
+          nullable: true
+        shortDescription:
+          type: string
+          nullable: true
+        details:
+          type: string
+          nullable: true
+          description: Opaque, free-form text.
+        monitorUrl:
+          type: string
+          nullable: true
+        firedAt:
+          type: string
+          nullable: true
+        receivedAt:
+          type: string
+          nullable: true
+        fireCount:
+          type: integer
+          nullable: true
+        incidentId:
+          type: string
+          nullable: true
+          description: ID of the linked incident, if any.
 
     IncidentView:
       type: object
@@ -10807,6 +11808,10 @@ components:
           type: array
           items:
             type: string
+            format: uuid
+          description: |
+            The full set of user identifiers to set as the incident watch list, replacing
+            whatever is there. An empty array clears the watch list.
 
     UpdateIncidentResponse:
       type: object
@@ -10835,6 +11840,89 @@ components:
         primaryIncidentId:
           type: string
           format: uuid
+          nullable: true
+
+    UpdateProblemRequest:
+      type: object
+      description: >-
+        All fields are optional, but at least one must be provided. A transition request may
+        also carry any of the plain-field keys in the same body (e.g. attaching an owner and
+        requesting "assess" together).
+      minProperties: 1
+      properties:
+        transition:
+          type: string
+          description: >-
+            Forward state transition to request: one of "assess", "confirm", "fix", "resolve",
+            "close". Left as an open string (validated server-side by the data source, not a
+            closed enum here) so an invalid value's actionable error message reaches the
+            caller unchanged.
+        assignedToId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            404 if not a real user. Setting this on a brand-new problem with no prior assignee
+            can auto-promote it to Assess as a data-source side effect -- the response always
+            reflects the real resulting state, never the caller's assumption.
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: 404 if not a real group.
+        causeNotes:
+          type: string
+          nullable: true
+        fixNotes:
+          type: string
+          nullable: true
+        workaround:
+          type: string
+          nullable: true
+        targetResolutionDate:
+          type: string
+          nullable: true
+          description: >-
+            Format: YYYY-MM-DD HH:mm:ss. Not surfaced on the native Problem form in the
+            backing data source.
+
+    UpdateProblemResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        problem:
+          $ref: '#/components/schemas/UpdateProblemView'
+
+    UpdateProblemView:
+      type: object
+      description: >-
+        Deliberately narrower than ProblemDetail: only the fields the update response
+        actually carries.
+      properties:
+        id:
+          type: string
+          nullable: true
+        updatedOn:
+          type: string
+          nullable: true
+        updatedBy:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: >-
+            Always the real post-write state, not the caller's requested transition --
+            the data source's business rules can force- or fail-promote it.
+        resolutionCode:
+          type: string
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
           nullable: true
 
     ProblemFieldFilter:
@@ -10888,7 +11976,7 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    GroupProblemsByRequest:
+    AggregateProblemsRequest:
       type: object
       required: [groupBy]
       properties:
@@ -10919,7 +12007,7 @@ components:
           type: integer
           description: >-
             Caps the response to the top maxGroups buckets by count; the
-            remainder is folded into GroupByResponse.othersCount. Optional; a
+            remainder is folded into AggregateResponse.othersCount. Optional; a
             default is applied when omitted.
 
     SearchProblemView:
@@ -11076,7 +12164,7 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    GroupIncidentTasksByRequest:
+    AggregateIncidentTasksRequest:
       type: object
       required: [groupBy]
       properties:
@@ -11107,7 +12195,7 @@ components:
           type: integer
           description: >-
             Caps the response to the top maxGroups buckets by count; the
-            remainder is folded into GroupByResponse.othersCount. Optional; a
+            remainder is folded into AggregateResponse.othersCount. Optional; a
             default is applied when omitted.
 
     IncidentTask:
@@ -11279,7 +12367,6 @@ components:
         createdOn:
           type: string
         createdBy:
-          nullable: true
           $ref: '#/components/schemas/UserReference'
 
     SearchConversationsResponse:
@@ -12020,7 +13107,7 @@ components:
         selectedImage:
           type: string
 
-    CaseFeedback:
+    CaseEmojiFeedback:
       type: object
       description: The response for GET /cases/{id}/feedback.
       required: [id, emoji, chips, assessmentId, createdBy, createdOn]
@@ -12486,6 +13573,35 @@ components:
         but callers should send the upper-case form.
       enum: [ESCALATE, DEESCALATE]
 
+    CaseEscalationHistory:
+      type: object
+      required: [escalations, total, currentNotifiedUsers]
+      properties:
+        escalations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Escalation'
+          description: The case's full escalation history, newest first.
+        total:
+          type: integer
+        currentNotifiedUsers:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationNotifiedUser'
+          description: >-
+            The notified-users list of the case's most recent escalation record (empty when the
+            case has never been escalated). Only someone on this list is authorized to
+            de-escalate the case's current level.
+
+    CaseEscalationCreateRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Required (non-blank) when action is ESCALATE (the default); optional when DEESCALATE.
+        action:
+          $ref: '#/components/schemas/EscalationAction'
+
     CreateEscalationRequest:
       type: object
       required: [caseId]
@@ -12600,6 +13716,9 @@ components:
 
     InstanceSearchFilters:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       description: >
         projectIds, deploymentIds, and deployedProductIds are mutually exclusive — at most
         one may be non-empty.
@@ -12634,12 +13753,14 @@ components:
       properties:
         filters:
           $ref: '#/components/schemas/InstanceSearchFilters'
-          nullable: true
         pagination:
           $ref: '#/components/schemas/Pagination'
 
     InstanceMetadata:
       type: object
+      # Nullable here rather than at each $ref: a sibling `nullable` next to a
+      # $ref is ignored in OpenAPI 3.0, and every use of this schema is nullable.
+      nullable: true
       required: [id, createdOn, updatedOn]
       properties:
         id:
@@ -12696,7 +13817,6 @@ components:
           type: string
         metadata:
           $ref: '#/components/schemas/InstanceMetadata'
-          nullable: true
 
     SearchInstancesResponse:
       type: object
@@ -13044,11 +14164,12 @@ components:
     SLAClock:
       description: >
         A durable SLA timer running against a case. clockType is
-        caller-defined, not a fixed enum — which clock types exist and what
-        duration each gets is a policy decision made entirely by whatever
-        publishes the triggering sla.clock.register event; this service only
-        stores the result. Has no ServiceNow equivalent — always backed by
-        Postgres.
+        caller-defined, not a fixed enum, though only "response"/
+        "workaround"/"resolution" are actually used — see
+        internal/service/sla_policy.go for the duration policy. Has no
+        ServiceNow equivalent — always backed by Postgres. The eight
+        display fields (caseNumber through state) are populated once at
+        registration and are a point-in-time snapshot, not kept live.
       type: object
       properties:
         caseId:
@@ -13077,6 +14198,22 @@ components:
           type: string
           format: date-time
           nullable: true
+        caseNumber:
+          type: string
+        wso2CaseId:
+          type: string
+        caseTitle:
+          type: string
+        caseType:
+          type: string
+        product:
+          type: string
+        team:
+          type: string
+        priority:
+          type: string
+        state:
+          type: string
 
     RegisterSLAClockRequest:
       type: object
@@ -13091,6 +14228,22 @@ components:
         dueAt:
           type: string
           format: date-time
+        caseNumber:
+          type: string
+        wso2CaseId:
+          type: string
+        caseTitle:
+          type: string
+        caseType:
+          type: string
+        product:
+          type: string
+        team:
+          type: string
+        priority:
+          type: string
+        state:
+          type: string
 
     SetSLAClockTierRequest:
       type: object

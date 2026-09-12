@@ -49,12 +49,28 @@ func TestSNCaseService_CreateCase_EngagementValidation(t *testing.T) {
 			r.Subject = "Migration planning"
 			r.Description = "Plan the migration"
 			r.EngagementType = "not_a_real_type"
+			r.EngagementPaymentType = domain.EngagementPaymentTypePaid
+			return r
+		}()},
+		{name: "missing engagementPaymentType", req: func() domain.CreateCaseRequest {
+			r := baseReq
+			r.Subject = "Migration planning"
+			r.Description = "Plan the migration"
+			r.EngagementType = domain.EngagementTypeMigration
+			return r
+		}()},
+		{name: "invalid engagementPaymentType", req: func() domain.CreateCaseRequest {
+			r := baseReq
+			r.Subject = "Migration planning"
+			r.Description = "Plan the migration"
+			r.EngagementType = domain.EngagementTypeMigration
+			r.EngagementPaymentType = "not_a_real_payment_type"
 			return r
 		}()},
 	}
 
 	// client is intentionally nil: every case must fail validation before touching it.
-	svc := NewServiceNowCaseService(nil, nil, nil)
+	svc := NewServiceNowCaseService(nil, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,32 +79,6 @@ func TestSNCaseService_CreateCase_EngagementValidation(t *testing.T) {
 				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 			}
 		})
-	}
-}
-
-// TestSNCaseService_CreateCase_AnnouncementRejected verifies that
-// type="announcement" is rejected with a *apierror.ValidationError rather
-// than silently succeeding: "announcement" is valid elsewhere (case
-// search/stats filters — see validCaseType) but neither
-// validateCreateCaseRequest nor this file's payload-building switch has a
-// case for it, so letting it through would silently drop req.Subject/
-// req.Description instead of sending them to ServiceNow.
-func TestSNCaseService_CreateCase_AnnouncementRejected(t *testing.T) {
-	req := domain.CreateCaseRequest{
-		Type:              "announcement",
-		ProjectID:         testProjectUUID,
-		DeploymentID:      testDeploymentUUID,
-		DeployedProductID: testDeployedProdID,
-		Subject:           "New feature rollout",
-		Description:       "Announcing a new feature",
-	}
-
-	// client is intentionally nil: this must fail validation before touching it.
-	svc := NewServiceNowCaseService(nil, nil, nil)
-
-	_, err := svc.CreateCase(contextWithUserIDToken("token"), req)
-	if _, ok := err.(*apierror.ValidationError); !ok {
-		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 	}
 }
 
@@ -112,15 +102,16 @@ func TestSNCaseService_CreateCase_Engagement(t *testing.T) {
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 	req := domain.CreateCaseRequest{
-		Type:              "engagement",
-		ProjectID:         testProjectUUID,
-		DeploymentID:      testDeploymentUUID,
-		DeployedProductID: testDeployedProdID,
-		Subject:           "Migration planning",
-		Description:       "Plan the migration",
-		EngagementType:    domain.EngagementTypeMigration,
+		Type:                  "engagement",
+		ProjectID:             testProjectUUID,
+		DeploymentID:          testDeploymentUUID,
+		DeployedProductID:     testDeployedProdID,
+		Subject:               "Migration planning",
+		Description:           "Plan the migration",
+		EngagementType:        domain.EngagementTypeMigration,
+		EngagementPaymentType: domain.EngagementPaymentTypeFOC,
 	}
 
 	resp, err := svc.CreateCase(contextWithUserIDToken("token"), req)
@@ -139,6 +130,9 @@ func TestSNCaseService_CreateCase_Engagement(t *testing.T) {
 	}
 	if gotBody["engagementType"] != float64(1) {
 		t.Fatalf("payload engagementType: got %v, want 1", gotBody["engagementType"])
+	}
+	if gotBody["engagementPaymentType"] != float64(2) {
+		t.Fatalf("payload engagementPaymentType: got %v, want 2", gotBody["engagementPaymentType"])
 	}
 	if gotBody["type"] != "engagement" {
 		t.Fatalf("payload type: got %v, want %q", gotBody["type"], "engagement")
@@ -166,7 +160,7 @@ func TestSNCaseService_CreateCase_DefaultCaseAliasNormalizesToCase(t *testing.T)
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 	req := domain.CreateCaseRequest{
 		Type:              "default_case",
 		ProjectID:         testProjectUUID,
@@ -211,7 +205,7 @@ func TestSNCaseService_CreateCase_SecurityReportAnalysis_AttachmentsOptional(t *
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 	req := domain.CreateCaseRequest{
 		Type:              "security_report_analysis",
 		ProjectID:         testProjectUUID,
@@ -230,5 +224,94 @@ func TestSNCaseService_CreateCase_SecurityReportAnalysis_AttachmentsOptional(t *
 	}
 	if _, present := gotBody["attachments"]; present {
 		t.Fatalf("expected no attachments field in payload when none provided, got %v", gotBody["attachments"])
+	}
+}
+
+// TestSNCaseService_CreateCase_AnnouncementValidation verifies that an
+// announcement CreateCaseRequest requires only subject and description --
+// announcements have no deployment/deployed-product concept, so those fields
+// must not be required for this type.
+func TestSNCaseService_CreateCase_AnnouncementValidation(t *testing.T) {
+	baseReq := domain.CreateCaseRequest{
+		Type:      "announcement",
+		ProjectID: testProjectUUID,
+	}
+
+	tests := []struct {
+		name string
+		req  domain.CreateCaseRequest
+	}{
+		{name: "missing subject", req: baseReq},
+		{name: "missing description", req: func() domain.CreateCaseRequest { r := baseReq; r.Subject = "Planned maintenance"; return r }()},
+	}
+
+	// client is intentionally nil: every case must fail validation before touching it.
+	svc := NewServiceNowCaseService(nil, nil, nil, noopSLAClockService{}, nil, "", nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.CreateCase(contextWithUserIDToken("token"), tt.req)
+			if _, ok := err.(*apierror.ValidationError); !ok {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestSNCaseService_CreateCase_Announcement verifies a valid announcement
+// request builds the expected snCreateCasePayload (title/description only,
+// no deploymentId/deployedProductId) and maps a successful ServiceNow
+// response back to domain.CreateCaseResponse.
+func TestSNCaseService_CreateCase_Announcement(t *testing.T) {
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{
+			"message": "Case created successfully",
+			"case": {"id": "` + testWLCaseSysid + `", "number": "CS0000003", "createdBy": "engineer@example.com", "createdOn": "2026-01-02 10:00:00", "state": {"id": 1, "label": "Open"}}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	req := domain.CreateCaseRequest{
+		Type:        "announcement",
+		ProjectID:   testProjectUUID,
+		Subject:     "Planned maintenance",
+		Description: "Maintenance window this weekend",
+	}
+
+	resp, err := svc.CreateCase(contextWithUserIDToken("token"), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Case.Number != "CS0000003" {
+		t.Fatalf("unexpected case number: %s", resp.Case.Number)
+	}
+
+	if gotBody["title"] != "Planned maintenance" {
+		t.Fatalf("payload title: got %v, want %q", gotBody["title"], "Planned maintenance")
+	}
+	if gotBody["description"] != "Maintenance window this weekend" {
+		t.Fatalf("payload description: got %v, want %q", gotBody["description"], "Maintenance window this weekend")
+	}
+	if gotBody["type"] != "announcement" {
+		t.Fatalf("payload type: got %v, want %q", gotBody["type"], "announcement")
+	}
+	// deploymentId/deployedProductId are not omitempty on the payload struct,
+	// so they still serialize -- but as empty strings, since announcements
+	// have no deployment/deployed-product concept and req.DeploymentID/
+	// req.DeployedProductID are never populated for this type.
+	if v, present := gotBody["deploymentId"]; present && v != "" {
+		t.Fatalf("expected empty deploymentId in payload for announcement, got %v", v)
+	}
+	if v, present := gotBody["deployedProductId"]; present && v != "" {
+		t.Fatalf("expected empty deployedProductId in payload for announcement, got %v", v)
 	}
 }

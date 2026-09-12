@@ -366,11 +366,17 @@ type AccountSummary struct {
 	AgentEnabled        *bool   `json:"agentEnabled,omitempty"`
 	KbReferencesEnabled *bool   `json:"kbReferencesEnabled,omitempty"`
 	// ServiceNow-only.
-	Classification  *string    `json:"classification,omitempty"`
-	Pod             *string    `json:"pod,omitempty"`
-	SupportTier     *string    `json:"supportTier,omitempty"`
-	ArrToday        *string    `json:"arrToday,omitempty"`
-	Owner           *EntityRef `json:"owner,omitempty"`
+	Classification *string    `json:"classification,omitempty"`
+	Pod            *string    `json:"pod,omitempty"`
+	SupportTier    *string    `json:"supportTier,omitempty"`
+	ArrToday       *string    `json:"arrToday,omitempty"`
+	Owner          *EntityRef `json:"owner,omitempty"`
+	// AccountManager is entity-service's current name for what this backend
+	// exposes as `owner`. The unified account view renamed `owner` ->
+	// `accountManager`; both are decoded so the mapping survives either
+	// service deploying first. PersonRef carries an extra `email` field that
+	// EntityRef simply ignores.
+	AccountManager  *EntityRef `json:"accountManager,omitempty"`
 	TechnicalOwner  *EntityRef `json:"technicalOwner,omitempty"`
 	HasAgent        *bool      `json:"hasAgent,omitempty"`
 	HasKbReferences *bool      `json:"hasKbReferences,omitempty"`
@@ -405,15 +411,17 @@ type AccountDetail struct {
 	AgentEnabled        *bool   `json:"agentEnabled,omitempty"`
 	KbReferencesEnabled *bool   `json:"kbReferencesEnabled,omitempty"`
 	// ServiceNow-only.
-	Classification  *string         `json:"classification,omitempty"`
-	Pod             *string         `json:"pod,omitempty"`
-	SupportTier     *SupportTierRef `json:"supportTier,omitempty"`
-	ArrToday        *string         `json:"arrToday,omitempty"`
-	Owner           *EntityRef      `json:"owner,omitempty"`
-	TechnicalOwner  *EntityRef      `json:"technicalOwner,omitempty"`
-	HasAgent        *bool           `json:"hasAgent,omitempty"`
-	HasKbReferences *bool           `json:"hasKbReferences,omitempty"`
-	CreatedBy       *string         `json:"createdBy,omitempty"`
+	Classification *string         `json:"classification,omitempty"`
+	Pod            *string         `json:"pod,omitempty"`
+	SupportTier    *SupportTierRef `json:"supportTier,omitempty"`
+	ArrToday       *string         `json:"arrToday,omitempty"`
+	Owner          *EntityRef      `json:"owner,omitempty"`
+	// See AccountDetail.AccountManager -- same rename, same reason.
+	AccountManager  *EntityRef `json:"accountManager,omitempty"`
+	TechnicalOwner  *EntityRef `json:"technicalOwner,omitempty"`
+	HasAgent        *bool      `json:"hasAgent,omitempty"`
+	HasKbReferences *bool      `json:"hasKbReferences,omitempty"`
+	CreatedBy       *string    `json:"createdBy,omitempty"`
 	// Shared (identical key/type on both data sources).
 	ActivationDate   *string `json:"activationDate,omitempty"`
 	DeactivationDate *string `json:"deactivationDate,omitempty"`

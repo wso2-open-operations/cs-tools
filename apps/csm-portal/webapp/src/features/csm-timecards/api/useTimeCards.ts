@@ -55,9 +55,12 @@ import {
  * plus whether that one page fell short of the case's full `total` — some of
  * the case's cards may not have been fetched if so. No pagination UI here
  * (unlike the three tabs on `/time-cards`) — a single case logging more than
- * a page's worth of time is not expected. */
+ * a page's worth of time is not expected. `total` is the case's real card
+ * count (not just `cards.length`) — use it for any display count so it stays
+ * correct when `truncated` is true. */
 export interface CaseTimeCardsResult {
   cards: CsmTimeCard[];
+  total: number;
   truncated: boolean;
 }
 
@@ -75,9 +78,9 @@ export function useCaseTimeCards(
   return useQuery<CaseTimeCardsResult, Error>({
     queryKey: [ApiQueryKeys.CASE_TIME_CARDS_SEARCH, caseId ?? ""],
     queryFn: async (): Promise<CaseTimeCardsResult> => {
-      if (!caseId) return { cards: [], truncated: false };
+      if (!caseId) return { cards: [], total: 0, truncated: false };
       const { cards, total } = await searchTimeCards(api, { caseId });
-      return { cards, truncated: cards.length < total };
+      return { cards, total, truncated: cards.length < total };
     },
     enabled: !!caseId,
     staleTime: 5_000,

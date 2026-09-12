@@ -15,10 +15,11 @@
 // under the License.
 
 import { Autocomplete, TextField } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useInfiniteProjectSearch } from "@features/csm-cases/api/useProjectSearch";
+import type { BeProject } from "@api/backend/types";
 
 interface ProjectOption {
   id: string;
@@ -33,6 +34,14 @@ interface AsyncProjectSelectProps {
   onChange: (next: string) => void;
   required?: boolean;
   disabled?: boolean;
+  /**
+   * Restricts the searchable/selectable options to projects matching this
+   * predicate (e.g. by `subscriptionType`) — the backend search endpoint has
+   * no such filter, so this narrows the already-fetched page client-side.
+   * Absent means "no restriction" (the default, used by the case/security
+   * report/engagement creation flows).
+   */
+  filterProject?: (project: BeProject) => boolean;
 }
 
 /**
@@ -49,6 +58,7 @@ export default function AsyncProjectSelect({
   onChange,
   required,
   disabled,
+  filterProject,
 }: AsyncProjectSelectProps): JSX.Element {
   // Search term tracked separately from the displayed input value (which MUI
   // manages and shows the selected project's name) so the type-ahead works.
@@ -93,14 +103,47 @@ export default function AsyncProjectSelect({
   }, [value, picked, projects]);
 
   // Pool = the current selection (so it can render) + the search results,
-  // de-duplicated by id.
+  // de-duplicated by id. `filterProject` (when given) is applied to the
+  // search results only — the current selection always stays shown so an
+  // already-picked project never disappears out from under the field.
+  const filteredProjects = useMemo(
+    () => (filterProject ? projects.filter(filterProject) : projects),
+    [projects, filterProject],
+  );
   const options = useMemo<ProjectOption[]>(() => {
-    const results = projects.map((p) => ({ id: p.id, name: p.name || p.id }));
+    const results = filteredProjects.map((p) => ({ id: p.id, name: p.name || p.id }));
     if (selectedOption && !results.some((o) => o.id === selectedOption.id)) {
       return [selectedOption, ...results];
     }
     return results;
-  }, [projects, selectedOption]);
+  }, [filteredProjects, selectedOption]);
+
+  // With `filterProject` narrowing the loaded page(s) client-side, a page can
+  // come back with zero matches even though a later page has some — and with
+  // nothing rendered, the listbox can't be scrolled to trigger
+  // handleListboxScroll's fetchNextPage. Keep loading pages automatically in
+  // that case until a match appears or hasNextPage runs out.
+  useEffect(() => {
+    if (
+      !open ||
+      !filterProject ||
+      isFetching ||
+      isFetchingNextPage ||
+      !hasNextPage ||
+      filteredProjects.length > 0
+    ) {
+      return;
+    }
+    fetchNextPage();
+  }, [
+    open,
+    filterProject,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    filteredProjects,
+    fetchNextPage,
+  ]);
 
   return (
     <Autocomplete<ProjectOption>

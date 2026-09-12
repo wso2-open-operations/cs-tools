@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 )
 
 // DataSource identifies which backend the service reads from.
@@ -70,6 +71,31 @@ type Config struct {
 	// constructs EventPublisherService when both this is true AND
 	// EventHubBroker is set.
 	EventPublishingEnabled bool
+	// SupportEngineerRole is the ServiceNow role name (e.g. an org-specific
+	// "sn_*" role) whose presence on a case comment's resolved author marks
+	// that comment as a qualifying support-engineer response — see
+	// sn_case_service.go's applyResponseSLAOnComment. Deliberately no
+	// committed default: this is organisation-specific vocabulary, the same
+	// reasoning apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not
+	// shipping one. Left unset, that function simply can't confirm
+	// engineer-authorship and skips (logged) — not fatal, not required by
+	// Validate.
+	SupportEngineerRole string
+	// CustomerRoles is a comma-separated list of ServiceNow role names (see
+	// SUPPORT_ENGINEER_ROLE's own doc comment for the same
+	// organisation-specific-vocabulary reasoning — deliberately no
+	// committed default here either) whose presence on a case comment's
+	// resolved author marks that comment as a customer reply — see
+	// sn_case_service.go's applyCustomerReplyStateTransition, which moves
+	// the case back to Work In Progress when a customer replies while it's
+	// Awaiting Info/Solution Proposed. Left unset (or empty), that function
+	// can't confirm customer-authorship and skips (logged) — not fatal, not
+	// required by Validate. Coincidentally shares its name with an
+	// unrelated CUSTOMER_ROLES env var in
+	// integrations/csm-notification-service (notification-link routing,
+	// nothing to do with case state) — the two are read by separate
+	// processes/environments and don't interact.
+	CustomerRoles []string
 }
 
 // Load reads configuration from environment variables and returns a populated
@@ -94,6 +120,8 @@ func Load() *Config {
 		EventHubConnectionString:                 os.Getenv("EVENT_HUB_CONNECTION_STRING"),
 		EventHubTopic:                            os.Getenv("EVENT_HUB_TOPIC"),
 		EventPublishingEnabled:                   os.Getenv("EVENT_PUBLISHING_ENABLED") == "true",
+		SupportEngineerRole:                      os.Getenv("SUPPORT_ENGINEER_ROLE"),
+		CustomerRoles:                            splitComma(os.Getenv("CUSTOMER_ROLES")),
 	}
 }
 
@@ -102,6 +130,23 @@ func getEnvOrDefault(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// splitComma parses a comma-separated env var into a trimmed, non-empty
+// slice ("" for an unset/empty var, matching integrations/csm-notification-service's
+// own copy of this exact helper).
+func splitComma(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // HasDatabase reports whether a Postgres connection is configured. It is the

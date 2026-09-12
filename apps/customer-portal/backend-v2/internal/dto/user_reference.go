@@ -28,7 +28,7 @@ import (
 // Email, not name: the frontend treats createdBy as an identity, not a label —
 // isNoveraOrBotSender compares it against "novera" to decide whether a comment
 // came from the assistant, and the Ballerina backend sent the email here too
-// ("anuradhab@wso2.com", "system"). Using the display name would silently break
+// ("jane.doe@example.com", "system"). Using the display name would silently break
 // bot attribution.
 //
 // Falls back to the name only when there is no email, so an unresolved author

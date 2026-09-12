@@ -109,6 +109,62 @@ describe("CasesList row navigation", () => {
   });
 });
 
+// Regression: reported live — a single case with an unusually long subject
+// line forced the whole grid to scroll horizontally even with zero optional
+// columns turned on. `noWrap`'s ellipsis only clips paint; it never affects a
+// CSS grid item's max-content sizing contribution, which is what actually
+// drove the grid wider. A `maxWidth` on the Subject cell's wrapping Box is
+// what fixes it — this only guards that the style stays in place, since
+// jsdom doesn't perform real CSS Grid intrinsic-size layout.
+describe("CasesList — Subject cell has a capped width", () => {
+  it("does not let the wrapping cell grow unbounded for a long subject", () => {
+    const longSubject =
+      "A very long case subject line that goes on and on and would otherwise force this column, and the whole table, to grow far past a normal viewport width";
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={<CasesList cases={[{ ...CASE, subject: longSubject }]} isLoading={false} />}
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const subjectCell = screen.getByTitle(longSubject).parentElement;
+    expect(subjectCell).not.toBeNull();
+    expect(getComputedStyle(subjectCell!).maxWidth).toBe("360px");
+  });
+
+  // Regression: reported live for Security Reports' Product column, but the
+  // same shared CasesList renders Cases/Service Requests/Engagements too — an
+  // optional column's track is mechanically identical to Subject's
+  // (minmax(140px, 1fr) vs. Subject's minmax(280px, 3fr)), so it needed the
+  // same maxWidth treatment, not just Subject.
+  it("also caps an optional column's wrapping cell for a long value", () => {
+    const longCustomer =
+      "A very long customer account name that goes on and on and would otherwise force this optional column, and the whole table, to grow far past a normal viewport width";
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, customer: longCustomer }]}
+              isLoading={false}
+              optionalColumns={["customer"]}
+            />
+          }
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const customerCell = screen.getByTitle(longCustomer).parentElement;
+    expect(customerCell).not.toBeNull();
+    expect(getComputedStyle(customerCell!).maxWidth).toBe("260px");
+  });
+});
+
 describe("CasesList quick preview", () => {
   it("opens the preview drawer instead of navigating when the preview action is clicked", () => {
     renderWithProviders(
@@ -263,5 +319,228 @@ describe("CasesList quick preview", () => {
     fireEvent.mouseDown(detailsLink);
 
     expect(screen.getByRole("link", { name: "View full details" })).toBeInTheDocument();
+  });
+});
+
+describe("CasesList optional columns", () => {
+  it("renders the widened optional column set (customer, created) when passed explicitly", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE]}
+              isLoading={false}
+              optionalColumns={["customer", "createdAt"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Customer")).toBeInTheDocument();
+    expect(screen.getByText("Created")).toBeInTheDocument();
+    expect(screen.getByText("Acme Corp")).toBeInTheDocument();
+    // Neither of the legacy fixed-set columns is asked for here.
+    expect(screen.queryByText("Product")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assignee")).not.toBeInTheDocument();
+  });
+
+  it("renders Issue type and Reporter (createdBy) when passed explicitly", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, issueType: "total_outage", createdBy: "John Reporter" }]}
+              isLoading={false}
+              optionalColumns={["issueType", "createdBy"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Issue type")).toBeInTheDocument();
+    expect(screen.getByText("Total outage")).toBeInTheDocument();
+    expect(screen.getByText("Reporter")).toBeInTheDocument();
+    expect(screen.getByText("John Reporter")).toBeInTheDocument();
+  });
+
+  it("shows an em dash for Issue type/Reporter when the row carries neither", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE]}
+              isLoading={false}
+              optionalColumns={["issueType", "createdBy"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    // `CASE` has no `issueType`/`createdBy` set.
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders the escalation level chip for an escalated row", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, escalationLevel: "2" }]}
+              isLoading={false}
+              optionalColumns={["escalationLevel"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Escalation")).toBeInTheDocument();
+    expect(screen.getByText("EL2")).toBeInTheDocument();
+  });
+
+  it("renders nothing (not a placeholder chip) in the escalation column for a non-escalated row", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, escalationLevel: "0" }]}
+              isLoading={false}
+              optionalColumns={["escalationLevel"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Escalation")).toBeInTheDocument();
+    expect(screen.queryByText(/^EL/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Not escalated")).not.toBeInTheDocument();
+  });
+
+  it("keeps rendering the legacy fixed optional set when optionalColumns is omitted", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={<CasesList cases={[CASE]} isLoading={false} />}
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByText("Product")).toBeInTheDocument();
+    expect(screen.queryByText("Customer")).not.toBeInTheDocument();
+    expect(screen.queryByText("Created")).not.toBeInTheDocument();
+  });
+});
+
+describe("CasesList sortable headers", () => {
+  function renderSortable(initialField: "createdOn" | "updatedOn" | "severity" | "state") {
+    const onSortFieldChange = vi.fn();
+    const onSortOrderChange = vi.fn();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE]}
+              isLoading={false}
+              optionalColumns={["severity", "createdAt"]}
+              sortField={initialField}
+              sortOrder="desc"
+              onSortFieldChange={onSortFieldChange}
+              onSortOrderChange={onSortOrderChange}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+    return { onSortFieldChange, onSortOrderChange };
+  }
+
+  it("activates a non-active header at desc order when clicked", () => {
+    const { onSortFieldChange, onSortOrderChange } = renderSortable("updatedOn");
+
+    fireEvent.click(screen.getByText("Created"));
+
+    expect(onSortFieldChange).toHaveBeenCalledWith("createdOn");
+    expect(onSortOrderChange).toHaveBeenCalledWith("desc");
+  });
+
+  it("toggles order when the already-active header is clicked again", () => {
+    const { onSortFieldChange, onSortOrderChange } = renderSortable("severity");
+
+    fireEvent.click(screen.getByText("Severity"));
+
+    expect(onSortFieldChange).not.toHaveBeenCalled();
+    expect(onSortOrderChange).toHaveBeenCalledWith("asc");
+  });
+
+  it("marks only the currently active column as sorted", () => {
+    renderSortable("state");
+
+    // MUI's `TableSortLabel` reflects the active column via `aria-sort` on
+    // its containing header text (rendered as a nested `<span>` here rather
+    // than a real `<th>`, so assert on the label's own active/inactive
+    // class instead of `aria-sort`).
+    const activeLabel = screen.getByText("State").closest(".MuiTableSortLabel-root");
+    const inactiveLabel = screen.getByText("Updated").closest(".MuiTableSortLabel-root");
+
+    expect(activeLabel).toHaveClass("Mui-active");
+    expect(inactiveLabel).not.toHaveClass("Mui-active");
+  });
+
+  it("renders every clickable header when sort props are wired up", () => {
+    renderSortable("updatedOn");
+
+    ["Created", "Severity", "State", "Updated"].forEach((label) => {
+      expect(screen.getByText(label).closest(".MuiTableSortLabel-root")).toBeInTheDocument();
+    });
+  });
+
+  it("keeps headers as plain text when no sort props are passed", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList cases={[CASE]} isLoading={false} optionalColumns={["severity", "createdAt"]} />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    ["Created", "Severity", "State", "Updated"].forEach((label) => {
+      expect(screen.getByText(label).closest(".MuiTableSortLabel-root")).not.toBeInTheDocument();
+    });
   });
 });

@@ -16,7 +16,7 @@
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { USERS_SEARCH_ENDPOINT } from "@config/endpoints";
-import type { AdminUserRole, UserSearchFiltersDto, UserSearchPayloadDto, UserSearchResponseDto } from "@src/types";
+import type { UserSearchFiltersDto, UserSearchPayloadDto, UserSearchResponseDto } from "@src/types";
 import { toAdminUser, type AdminUser } from "@src/types";
 import apiClient from "./apiClient";
 
@@ -39,9 +39,13 @@ const searchUsers = async (payload: UserSearchPayloadDto = {}): Promise<AdminUse
 
 const ADMIN_USERS_PAGE_LIMIT = 20;
 
-// Eligible time-card approvers — mirrors the webapp's INTERNAL_USER_ROLES
-// (csmUsers.ts). A customer account can't approve internal time cards.
-const APPROVER_ROLES: AdminUserRole[] = ["internal", "agent", "admin"];
+// Eligible time-card approvers must hold this dedicated permission group — mirrors the webapp's
+// TIMECARD_APPROVER_GROUP (csm-timecards/constants/timeCardConstants.ts). Filtering on the
+// generic internal-user roles ("internal"/"agent"/"admin") instead — the webapp's own past bug,
+// since fixed there — let a submitter pick literally anyone at the company; here it did the
+// opposite, since none of the ServiceNow accounts actually eligible to approve carry those
+// generic role tags, so the search always came back empty (digiops-cs#2805).
+const TIMECARD_APPROVER_GROUP = "timecard_approver";
 const APPROVER_SEARCH_LIMIT = 6;
 
 export const adminUsers = {
@@ -62,13 +66,13 @@ export const adminUsers = {
 
   // One-shot type-ahead search for a single-pick field (LogTimeCardDialog's
   // approver picker) — mirrors projects.ts's `search`, not the paged `infinite`
-  // list above. Scoped to internal accounts only.
+  // list above. Scoped to timecard approvers only.
   search: (searchQuery: string) =>
     queryOptions({
       queryKey: ["admin-users", "search", searchQuery],
       queryFn: () =>
         searchUsers({
-          filters: { searchQuery, roleIds: APPROVER_ROLES, active: true },
+          filters: { searchQuery, roleIds: [TIMECARD_APPROVER_GROUP], active: true },
           pagination: { offset: 0, limit: APPROVER_SEARCH_LIMIT },
         }),
       enabled: searchQuery.trim().length > 0,

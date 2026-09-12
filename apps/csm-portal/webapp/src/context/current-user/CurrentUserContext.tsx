@@ -37,6 +37,10 @@ interface CurrentUserContextType {
   isLoading: boolean;
   /** True if the `/users/me` fetch failed. */
   isError: boolean;
+  /** The `/users/me` fetch's error, when `isError` is true (typically an
+   * `ApiError` — see `@utils/ApiError`'s `isUnauthorizedError`/
+   * `isForbiddenError` for branching on its status). */
+  error: Error | null;
 }
 
 const CurrentUserContext = createContext<CurrentUserContextType | undefined>(
@@ -60,7 +64,7 @@ interface CurrentUserProviderProps {
 export function CurrentUserProvider({
   children,
 }: CurrentUserProviderProps): JSX.Element {
-  const { data, isLoading, isError } = useGetUsersMe();
+  const { data, isLoading, isError, error } = useGetUsersMe();
 
   // Seed the app-wide preferred-timezone store (used for view-only date
   // formatting) from the profile, so dates render in the user's own zone.
@@ -69,8 +73,8 @@ export function CurrentUserProvider({
   }, [data?.timeZone]);
 
   const value = useMemo<CurrentUserContextType>(
-    () => ({ user: data, isLoading, isError }),
-    [data, isLoading, isError],
+    () => ({ user: data, isLoading, isError, error: error ?? null }),
+    [data, isLoading, isError, error],
   );
 
   return (

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
 
@@ -74,20 +75,36 @@ type WSConfig struct {
 // WSClient dials the upstream AI chat agent's WebSocket endpoint.
 type WSClient struct {
 	baseURL string
-	oauth   *clientcredentials.Config
+	// tokens is a reusing token source, not a bare *clientcredentials.Config.
+	// Config.Token builds and discards a fresh source per call, so every chat
+	// turn and side-channel message paid a full token-endpoint round trip
+	// before the handshake -- added first-byte latency on each message, and one
+	// identity-provider grant per message across all users. Config.TokenSource
+	// wraps the same grant in an oauth2.ReuseTokenSource, so a token is fetched
+	// once and reused until it expires. Same reasoning as NewClient's cached
+	// oauth client for the REST path.
+	tokens oauth2.TokenSource
 }
 
 // NewWSClient constructs a WSClient authenticated via the OAuth2 client
 // credentials grant.
 func NewWSClient(cfg WSConfig) *WSClient {
+	cc := clientcredentials.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		TokenURL:     cfg.TokenURL,
+		Scopes:       cfg.Scopes,
+	}
+
+	// The token source captures this context, not the per-dial caller's, so a
+	// token refresh is bounded by tokenFetchTimeout rather than by whichever
+	// request happened to trigger it -- the same trade-off NewClient makes.
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
+		&http.Client{Timeout: tokenFetchTimeout, CheckRedirect: noRedirect})
+
 	return &WSClient{
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-		oauth: &clientcredentials.Config{
-			ClientID:     cfg.ClientID,
-			ClientSecret: cfg.ClientSecret,
-			TokenURL:     cfg.TokenURL,
-			Scopes:       cfg.Scopes,
-		},
+		tokens:  cc.TokenSource(tokenCtx),
 	}
 }
 
@@ -95,7 +112,7 @@ func NewWSClient(cfg WSConfig) *WSClient {
 // given session ID, authenticated with a bearer token obtained via OAuth2
 // client credentials.
 func (c *WSClient) dial(ctx context.Context, sessionID string) (*websocket.Conn, error) {
-	token, err := c.oauth.Token(ctx)
+	token, err := c.tokens.Token()
 	if err != nil {
 		return nil, fmt.Errorf("aichatagent: fetch WS token: %w", err)
 	}

@@ -31,8 +31,8 @@ import (
 //   - teams sorted for stable paging, with each team's backing group ids already
 //     converted to this platform's UUID form (Team.CreGroupID -> Result.CreGroupID,
 //     Team.SreGroupID -> Result.SreGroupID),
-//   - key -> team, group-name -> team, and resolved-CRE-group-UUID -> team lookups
-//     as maps,
+//   - key -> team, group-name -> team, resolved-CRE-group-UUID -> team, and
+//     resolved-SRE-group-UUID -> team lookups as maps,
 //   - the group-name list a membership query needs,
 //   - the role catalogue with its display names, and the role membership set.
 //
@@ -47,6 +47,7 @@ type Directory struct {
 	byKey        map[string]Team
 	byGroupName  map[string]Team
 	byCreGroupID map[string]Team
+	bySreGroupID map[string]Team
 	groupNames   []string
 
 	roleResults []RoleResult
@@ -60,7 +61,8 @@ type Directory struct {
 // A duplicate resolved group-id UUID is the same class of mistake -- two rows
 // configured with the same backing CreGroupID would shadow each other in
 // byCreGroupID exactly as a duplicate key would in byKey -- so it fails
-// startup too. Callers are expected to treat any error here as fatal at
+// startup too, and the same is true of a duplicate SreGroupID in
+// bySreGroupID. Callers are expected to treat any error here as fatal at
 // startup -- a half-resolved directory would mis-route dashboards rather than
 // fail visibly.
 func New(teams []Team, roles []string) (*Directory, error) {
@@ -70,6 +72,7 @@ func New(teams []Team, roles []string) (*Directory, error) {
 		byKey:        make(map[string]Team, len(teams)),
 		byGroupName:  make(map[string]Team, len(teams)),
 		byCreGroupID: make(map[string]Team, len(teams)),
+		bySreGroupID: make(map[string]Team, len(teams)),
 		groupNames:   make([]string, 0, len(teams)),
 		roleResults:  make([]RoleResult, 0, len(roles)),
 		roleSet:      make(map[string]bool, len(roles)),
@@ -92,10 +95,20 @@ func New(teams []Team, roles []string) (*Directory, error) {
 			if _, dup := d.byCreGroupID[result.CreGroupID]; dup {
 				return nil, fmt.Errorf("team registry: creGroupId %q (team %q) is configured more than once", t.CreGroupID, t.Key)
 			}
+			if _, dup := d.bySreGroupID[result.CreGroupID]; dup {
+				return nil, fmt.Errorf("team registry: creGroupId %q (team %q) collides with another team's sreGroupId", t.CreGroupID, t.Key)
+			}
 			d.byCreGroupID[result.CreGroupID] = t
 		}
 		if t.SreGroupID != "" {
 			result.SreGroupID = sourceIDToUUID(t.SreGroupID)
+			if _, dup := d.bySreGroupID[result.SreGroupID]; dup {
+				return nil, fmt.Errorf("team registry: sreGroupId %q (team %q) is configured more than once", t.SreGroupID, t.Key)
+			}
+			if _, dup := d.byCreGroupID[result.SreGroupID]; dup {
+				return nil, fmt.Errorf("team registry: sreGroupId %q (team %q) collides with another team's creGroupId", t.SreGroupID, t.Key)
+			}
+			d.bySreGroupID[result.SreGroupID] = t
 		}
 		d.teamResults = append(d.teamResults, result)
 	}
@@ -136,18 +149,27 @@ func (d *Directory) TeamByGroupName(name string) (Team, bool) {
 	return t, ok
 }
 
-// TeamByUUID looks a team up by this platform's canonical UUID form of its
-// backing CRE group id -- the same form Team.CreGroupID is converted to for
-// TeamResult.CreGroupID and for accounts.creTeam.id elsewhere. ok is false if
-// uuid does not match any configured team's resolved CRE group id, including
-// for a team that has no CreGroupID configured at all: such a team has no
-// UUID to be looked up by. It does not look up by SreGroupID -- no caller
-// needs that yet.
+// TeamByUUID looks a team up by this platform's canonical UUID form of
+// either its backing CRE group id or its backing SRE group id -- the same
+// form Team.CreGroupID/Team.SreGroupID are converted to for
+// TeamResult.CreGroupID/TeamResult.SreGroupID and for accounts.creTeam.id /
+// accounts.sreTeam.id elsewhere. It checks the CRE-group map first, then
+// falls back to the SRE-group map, because the caller (a case's creTeam.id
+// or sreTeam.id, followed through as a generic team-detail path segment) has
+// no way to say which kind of id it is looking at -- the webapp renders both
+// a case's CRE and SRE team as the same clickable chip, both hitting the
+// same GET /teams/{id} route. ok is false if uuid does not match any
+// configured team's resolved CRE or SRE group id, including for a team that
+// has neither configured at all: such a team has no UUID to be looked up by.
 //
 // uuid is lowercased before lookup, matching sourceIDToUUID's canonical
 // lowercase form, so a caller-supplied uppercase UUID still resolves.
 func (d *Directory) TeamByUUID(uuid string) (Team, bool) {
-	t, ok := d.byCreGroupID[strings.ToLower(uuid)]
+	uuid = strings.ToLower(uuid)
+	if t, ok := d.byCreGroupID[uuid]; ok {
+		return t, true
+	}
+	t, ok := d.bySreGroupID[uuid]
 	return t, ok
 }
 

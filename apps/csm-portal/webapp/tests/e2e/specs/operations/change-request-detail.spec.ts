@@ -15,10 +15,10 @@
 // under the License.
 
 //
-// Change request detail (edit, request approval, approve/reject). Unlike
+// Change request detail (request approval, approve/reject). Unlike
 // change-request-creation.spec.ts (which only ever submits once, tagged, and
 // asserts nothing beyond "it landed on its own detail page"), these specs
-// need a live CR to edit / advance through approval — but there's still no
+// need a live CR to advance through approval — but there's still no
 // delete endpoint, so we never touch a pre-existing record. Each test
 // self-provisions its own tagged CR via ChangeRequestCreatePage first, reads
 // its id back off the post-create URL, and only then drives
@@ -28,17 +28,15 @@
 // test self-skips rather than failing whenever the button isn't there or the
 // call is rejected (same rule as the documented timecard-approval 403).
 //
-// "edit fields" and "request approval" below self-skip on any non-2xx from
-// the underlying `PATCH /change-requests/:id`, rather than failing or
-// blindly retrying. Confirmed live (2026-07-26) this isn't SN
-// write-propagation lag: a single-field body (e.g. `{isCustomerApproved:
-// true}` or `{requestApproval:true}`) always 500s ("Failed to update change
-// request."), and the two-field body the Edit dialog actually sends
-// (`{isCustomerApproved,isCustomerReviewed}`) always 400s ("Invalid request
-// payload.") — reproduced with curl against both a CR created seconds
-// earlier and one from over an hour earlier, so it isn't timing-dependent;
-// it's a standing backend/API-contract issue on this endpoint, not fixable
-// from FE-only test code.
+// "request approval" below self-skips on any non-2xx from the underlying
+// `PATCH /change-requests/:id`, rather than failing or blindly retrying.
+// Confirmed live (2026-07-26) a single-field `{requestApproval:true}` body
+// always 500s ("Failed to update change request.") against the real
+// backend — a standing backend/API-contract issue on this endpoint, not
+// fixable from FE-only test code. (The Edit dialog's former
+// `{isCustomerApproved,isCustomerReviewed}` write path always 400s the same
+// way; that coverage was removed along with the toggle itself — see
+// EditChangeRequestDialog.tsx's doc comment for why the toggle was pulled.)
 //
 
 import { test, expect, withRole } from "../../fixtures/test";
@@ -66,50 +64,6 @@ async function provisionChangeRequest(
   if (!match) return undefined;
   return { id: match[1], subject };
 }
-
-test.describe("change request detail — edit fields", () => {
-  test("toggles Customer approved/reviewed and reflects on the detail page", async ({ page }) => {
-    test.setTimeout(60_000);
-
-    const provisioned = await provisionChangeRequest(page, "e2e change request detail edit");
-    test.skip(!provisioned, "change request provisioning did not reach the detail page");
-    const { id } = provisioned!;
-
-    const detail = new ChangeRequestDetailPage(page);
-    await detail.goto(id);
-
-    await detail.openEditDialog();
-    const wasApproved = await detail.customerApprovedSwitch().isChecked();
-    const wasReviewed = await detail.customerReviewedSwitch().isChecked();
-    await detail.setCustomerApproved(!wasApproved);
-    await detail.setCustomerReviewed(!wasReviewed);
-
-    // See the file-level note above: the real backend's PATCH endpoint
-    // rejects this update outright (400/500), not something a retry can
-    // paper over — self-skip rather than fail on a non-2xx.
-    const response = await Promise.all([
-      page
-        .waitForResponse((r) => new RegExp(`/change-requests/${id}$`).test(r.url()) && r.request().method() === "PATCH", {
-          timeout: 15_000,
-        })
-        .catch(() => undefined),
-      detail.saveEdit(),
-    ]).then(([r]) => r);
-
-    test.skip(
-      !!response && !response.ok(),
-      `backend rejected the edit PATCH (${response?.status()}) — standing backend issue, not a bug in this spec`,
-    );
-
-    // The edit dialog closes on a successful save — reopening it and reading
-    // the switches back is the strongest available confirmation the save
-    // actually persisted (rather than just optimistically closing).
-    await expect(detail.editDialog()).toBeHidden({ timeout: 15_000 });
-    await detail.openEditDialog();
-    await expect(detail.customerApprovedSwitch()).toHaveJSProperty("checked", !wasApproved);
-    await expect(detail.customerReviewedSwitch()).toHaveJSProperty("checked", !wasReviewed);
-  });
-});
 
 test.describe("change request detail — request approval", () => {
   test("transitions the approval section to a requested/pending state", async ({ page }) => {

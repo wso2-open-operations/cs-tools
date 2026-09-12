@@ -28,17 +28,34 @@ import (
 // accepted by incident search. Anything else is rejected outright.
 var incidentFilterFieldSet = map[string]bool{
 	"state": true, "assignmentGroupId": true, "businessServiceId": true,
-	"createdOn": true,
+	"createdOn": true, "slaViolated": true, "madeSla": true, "productName": true,
 }
 
 // incidentFilterOpSet is the exact set of IncidentFieldFilter.Op values
 // accepted by incident search, independent of field. Field/op compatibility
 // is enforced separately in ParseIncidentFieldFilters -- "in" covers state/
-// assignmentGroupId/businessServiceId, "gte"/"lte" cover createdOn (mirrors
-// case_filters.go's "createdOn" handling exactly, including its relative-date
-// placeholder support, e.g. "__daysAgo:90__").
+// assignmentGroupId/businessServiceId/productName, "gte"/"lte" cover
+// createdOn (mirrors case_filters.go's "createdOn" handling exactly,
+// including its relative-date placeholder support, e.g. "__daysAgo:90__"),
+// and "eq" covers slaViolated/madeSla (single boolean value, mirroring case
+// search's "number"/"internalId" single-value eq fields).
 var incidentFilterOpSet = map[string]bool{
-	"in": true, "gte": true, "lte": true,
+	"in": true, "gte": true, "lte": true, "eq": true,
+}
+
+// parseIncidentFilterBool mirrors case_filters.go's parseCaseFilterPercent
+// error-shape convention, retyped for a boolean-valued eq filter. Only the
+// exact lowercase "true"/"false" the OpenAPI contract documents are accepted
+// -- not every string strconv.ParseBool tolerates (e.g. "1", "t", "TRUE").
+func parseIncidentFilterBool(f domain.IncidentFieldFilter, value string) (bool, error) {
+	switch value {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q op %q value %q must be a boolean", f.Field, f.Op, value)}
+	}
 }
 
 // parseIncidentFilterDate mirrors case_filters.go's parseCaseFilterDate,
@@ -98,6 +115,20 @@ type parsedIncidentFilters struct {
 	StartCreatedDate *time.Time
 	// EndCreatedDate is the inclusive upper bound of a createdOn "lte" filter.
 	EndCreatedDate *time.Time
+	// SlaViolated is set from a "slaViolated" "eq" filter: true/false restricts
+	// to incidents with/without at least one breached SLA record; nil means
+	// the filter was not supplied.
+	SlaViolated *bool
+	// MadeSla is set from a "madeSla" "eq" filter: true/false restricts to
+	// incidents matching ServiceNow's raw `made_sla` field; nil means the
+	// filter was not supplied. Deliberately kept separate from SlaViolated
+	// above -- see domain.SearchIncidentsFilters Filters "madeSla" doc
+	// comment: this is SN's own less-reliable raw signal, kept only for
+	// exact parity with SN's native incident dashboards.
+	MadeSla *bool
+	// ProductNames are the values of a "productName" "in" filter, matched as a
+	// union against the incident's backing business_service name.
+	ProductNames []string
 }
 
 // ParseIncidentFieldFilters translates the incident-search wire contract's
@@ -171,6 +202,47 @@ func ParseIncidentFieldFilters(filters []domain.IncidentFieldFilter, now time.Ti
 			default:
 				return parsedIncidentFilters{}, badIncidentFilterCombo(f)
 			}
+
+		case "slaViolated":
+			if f.Op != "eq" {
+				return parsedIncidentFilters{}, badIncidentFilterCombo(f)
+			}
+			if err := requireIncidentFilterValues(f); err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			if len(f.Values) != 1 {
+				return parsedIncidentFilters{}, &apierror.ValidationError{Msg: "filters: slaViolated eq requires exactly one value"}
+			}
+			b, err := parseIncidentFilterBool(f, f.Values[0])
+			if err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			p.SlaViolated = &b
+
+		case "madeSla":
+			if f.Op != "eq" {
+				return parsedIncidentFilters{}, badIncidentFilterCombo(f)
+			}
+			if err := requireIncidentFilterValues(f); err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			if len(f.Values) != 1 {
+				return parsedIncidentFilters{}, &apierror.ValidationError{Msg: "filters: madeSla eq requires exactly one value"}
+			}
+			b, err := parseIncidentFilterBool(f, f.Values[0])
+			if err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			p.MadeSla = &b
+
+		case "productName":
+			if f.Op != "in" {
+				return parsedIncidentFilters{}, badIncidentFilterCombo(f)
+			}
+			if err := requireIncidentFilterValues(f); err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			p.ProductNames = append(p.ProductNames, f.Values...)
 		}
 	}
 

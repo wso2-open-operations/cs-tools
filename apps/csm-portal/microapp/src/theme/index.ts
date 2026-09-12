@@ -14,21 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
-import { AcrylicPurpleTheme, extendTheme } from "@wso2/oxygen-ui";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
+import { WSO2Theme, extendTheme } from "@wso2/oxygen-ui";
 import { typography } from "@theme/typography";
 
-const theme = extendTheme(AcrylicPurpleTheme, {
+const theme = extendTheme(WSO2Theme, {
   typography,
   components: {
-    // @wso2/oxygen-ui's own MuiDialog override (dist/index.js) sets `opacity: 0.7` plus a
-    // backdrop blur on the dialog surface itself — on top of an already semi-transparent
-    // background.paper token, that's a double-transparency effect that makes the whole
-    // surface, including its text, read as hazy/unreadable. All of this app's filter sheets
-    // (FiltersSheet.tsx and friends) are built on MUI Dialog, so fix it once here rather than
-    // overriding sx per sheet. Solid, not background.paper/acrylic, and reads
-    // `theme.vars.palette.*` (a CSS var) rather than the static `theme.palette.mode`, since this
-    // theme switches light/dark purely via CSS variables reacting to the OS color scheme.
+    // WSO2Theme's dialog surface renders background.paper as-is, which is a
+    // semi-transparent token (not a solid color) — that reads as hazy/unreadable against
+    // varied page content behind it. All of this app's filter sheets (FiltersSheet.tsx and
+    // friends) are built on MUI Dialog, so fix it once here rather than overriding sx per
+    // sheet. Solid, not background.paper/acrylic, and reads `theme.vars.palette.*` (a CSS
+    // var) rather than the static `theme.palette.mode`, since this theme switches light/dark
+    // purely via CSS variables reacting to the OS color scheme.
     MuiDialog: {
       styleOverrides: {
         paper: ({ theme }) => ({
@@ -39,18 +38,22 @@ const theme = extendTheme(AcrylicPurpleTheme, {
         }),
       },
     },
-    // AcrylicPurpleTheme (unlike AcrylicOrangeTheme, which has no such override — see the
-    // customer-portal microapp's theme/index.ts) paints a radial-gradient onto <body>, keyed to
-    // fixed focal points (e.g. "circle at 65% 30%") that fade back to background.default
-    // elsewhere. With background-attachment: fixed, that reads as tinted near those points and
-    // plain white/black everywhere else — inconsistent rather than a deliberate design choice
-    // here. Same selectors @wso2/oxygen-ui's own override uses (dist/index.js), just dropping the
-    // image so the page falls back to the flat background.default color everywhere, matching how
-    // the orange theme already looks.
-    MuiCssBaseline: {
+    // WSO2Theme's own MuiButton override sets a black `root` text color for every button, and
+    // only restores a readable color for the `outlined` variant (colored text) and `text`
+    // variant (theme.palette.text.primary) — `contained` has no override at all, so every
+    // contained button in the app (Create Case, Post, Save, filter-sheet Apply, this app's own
+    // CaseActionBar single-target button, ...) fell through to black text on its own colored
+    // background. One override here fixes all of them, keyed off whichever `color` prop the
+    // button actually uses (not just primary) so error/success/etc. contained buttons
+    // (TimeCardReviewDialog's Approve/Reject, CallRequestsTab's Cancel request) get their own
+    // matching contrastText too.
+    MuiButton: {
       styleOverrides: {
-        "html[data-color-scheme='dark'] body": { backgroundImage: "none" },
-        "html[data-color-scheme='light'] body": { backgroundImage: "none" },
+        contained: ({ theme, ownerState }) => {
+          const color = ownerState.color;
+          if (!color || color === "inherit") return {};
+          return { color: theme.vars.palette[color].contrastText };
+        },
       },
     },
   },

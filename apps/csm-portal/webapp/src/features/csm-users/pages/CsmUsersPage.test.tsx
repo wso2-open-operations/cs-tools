@@ -353,28 +353,17 @@ describe("CsmUsersPage — role truncation and row navigation", () => {
     expect(within(row).queryByText("Active")).not.toBeInTheDocument();
   });
 
-  it("renders no Back button when it wasn't reached from a dashboard widget", () => {
-    renderPage("/admin/users");
-    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
-  });
-
-  it("renders a Back button that returns to the dashboard when reached via a dashboard widget's `from` state", async () => {
+  // This page no longer renders its own Back button -- `CsmAdminLayout`
+  // (the parent route shell every `/admin/user-management/*` page is nested
+  // under) sees this exact same `location.state` and is the single Back
+  // button for every page it wraps (see `CsmAdminLayout.test.tsx` for that
+  // behavior). This page still reads `location.state.from` itself, purely to
+  // forward it as `parentState` when a row navigates to a person's profile,
+  // so a dashboard → users → profile → Back → Back round trip restores
+  // correctly instead of losing the dashboard origin partway through.
+  it("carries its own dashboard-return state forward as `parentState` when a row navigates to a profile", async () => {
     renderPageWithLocationProbe({ pathname: "/admin/users", state: { from: "/dashboard" } });
 
-    const backButton = await screen.findByRole("button", { name: "Back" });
-    fireEvent.click(backButton);
-
-    expect(await screen.findByTestId("location-probe")).toHaveTextContent("/dashboard");
-  });
-
-  it("restores its own dashboard-return state after a round trip through a profile (dashboard → users → profile → users → dashboard)", async () => {
-    renderPageWithLocationProbe({ pathname: "/admin/users", state: { from: "/dashboard" } });
-
-    // Users list, reached from the dashboard, still shows its own Back button.
-    expect(await screen.findByRole("button", { name: "Back" })).toBeInTheDocument();
-
-    // Row click into a profile carries both this page's own URL (`from`) and
-    // the dashboard state it was itself carrying (`parentState`).
     await waitFor(() => expect(screen.getByText("John Smith")).toBeInTheDocument());
     fireEvent.click(screen.getByText("John Smith").closest("tr") as HTMLElement);
     expect(await screen.findByTestId("location-state-probe")).toHaveTextContent(

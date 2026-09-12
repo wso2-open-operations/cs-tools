@@ -44,9 +44,6 @@ import ProjectSelectionField from "@features/csm-cases/components/ProjectSelecti
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
-import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
-import { uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
-import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
@@ -94,9 +91,6 @@ export default function CreateSecurityReportPage(): JSX.Element {
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
-  const postAttachment = usePostCsmCaseAttachment();
-  const uploadedBy = useEngineerDisplayName();
-  // Spans the whole submit (create + post-create attachment uploads).
   const [submitting, setSubmitting] = useState(false);
 
   const overLimit = totalEncodedBytes(attachments) > POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES;
@@ -134,9 +128,9 @@ export default function CreateSecurityReportPage(): JSX.Element {
     if (deployedProducts.isError) void deployedProducts.refetch();
   };
 
-  // Attachments are optional here: the case is created first, then attachments
-  // upload separately (see handleSubmit), so a failed upload never blocks or
-  // masks a successful report creation.
+  // At least one attachment is required here: the backing service validates
+  // the create request atomically for this case type, so an attachment added
+  // only after creation would never satisfy it.
   const canSubmit = useMemo(
     () =>
       !!projectId &&
@@ -144,6 +138,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
       !!deployedProductId &&
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
+      attachments.length > 0 &&
       !overLimit &&
       !submitting,
     [
@@ -152,6 +147,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
       deployedProductId,
       subject,
       description,
+      attachments,
       overLimit,
       submitting,
     ],
@@ -168,18 +164,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
         deployedProductId,
         subject: subject.trim(),
         description,
+        attachments: attachments.map((a) => ({ name: a.name, file: a.file })),
       });
-      const failed = await uploadAttachmentsToCase(
-        postAttachment.mutateAsync,
-        created.id,
-        attachments,
-        uploadedBy,
-      );
-      if (failed > 0) {
-        showError(
-          `The security report was created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload. You can add ${failed === 1 ? "it" : "them"} from the report page.`,
-        );
-      }
       navigate(`/security-center/security-reports/${created.id}`, {
         state: { from: backTarget },
       });
@@ -240,13 +226,20 @@ export default function CreateSecurityReportPage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="sra-deployment-label">Deployment</InputLabel>
+              <InputLabel
+                id="sra-deployment-label"
+                shrink={deploymentId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Deployment
+              </InputLabel>
               <Select
                 labelId="sra-deployment-label"
                 label="Deployment"
                 value={deploymentId}
                 onChange={(e) => onDeploymentChange(String(e.target.value))}
                 disabled={!projectId || deployments.isLoading}
+                notched={deploymentId !== ""}
               >
                 {(deployments.data ?? []).map((d) => (
                   <MenuItem key={d.id} value={d.id}>
@@ -266,13 +259,20 @@ export default function CreateSecurityReportPage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="sra-product-label">Deployed product</InputLabel>
+              <InputLabel
+                id="sra-product-label"
+                shrink={deployedProductId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Deployed product
+              </InputLabel>
               <Select
                 labelId="sra-product-label"
                 label="Deployed product"
                 value={deployedProductId}
                 onChange={(e) => onDeployedProductChange(String(e.target.value))}
                 disabled={!deploymentId || deployedProducts.isLoading}
+                notched={deployedProductId !== ""}
               >
                 {(deployedProducts.data ?? []).map((dp) => (
                   <MenuItem key={dp.id} value={dp.id}>
@@ -338,13 +338,14 @@ export default function CreateSecurityReportPage(): JSX.Element {
               color="text.secondary"
               sx={{ display: "block", mb: 0.5 }}
             >
-              Attachments
+              Attachments *
             </Typography>
             <AttachmentsField
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
               maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
+              required
               disabled={submitting}
             />
           </Grid>

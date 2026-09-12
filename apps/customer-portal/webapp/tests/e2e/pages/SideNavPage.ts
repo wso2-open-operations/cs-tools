@@ -79,6 +79,32 @@ export class SideNavPage {
   }
 
   /**
+   * Every item the sidebar renders, in order.
+   *
+   * Read from the items' accessible names — the gated items carry an
+   * `aria-label`, the footer's Settings only its text — so this returns the whole
+   * rendered list rather than probing for names the caller already expects. That
+   * is what lets a spec notice an item it has never heard of.
+   *
+   * @returns The item labels, in render order.
+   */
+  async itemNames(): Promise<string[]> {
+    return this.sidebar()
+      .getByRole("button")
+      .evaluateAll((elements) =>
+        elements
+          .map((element) =>
+            (
+              element.getAttribute("aria-label") ??
+              element.textContent ??
+              ""
+            ).trim(),
+          )
+          .filter((name) => name.length > 0),
+      );
+  }
+
+  /**
    * Clicks a navigation item and waits for it to take effect.
    *
    * Retries the click-and-navigate as a unit rather than clicking once. The

@@ -15,11 +15,15 @@
 // under the License.
 
 import { Box, Card, Skeleton, Typography } from "@wso2/oxygen-ui";
-import type { JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { useDashboard } from "@features/csm-dashboard/api/useDashboard";
 import DashboardWidgetGrid from "@features/csm-dashboard/components/DashboardWidgetGrid";
+import DateRangeFilter, {
+  type DateRangeFilterValue,
+} from "@features/csm-dashboard/components/DateRangeFilter";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
 import { WIDGET_GRID_SX } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
+import { hasDateRangeFilterPlaceholder } from "@features/csm-dashboard/utils/dateRangeFilterPlaceholder";
 
 /** Placeholder tile count while the dashboard detail is in flight. */
 const PILOT_TILE_COUNT = 3;
@@ -69,6 +73,32 @@ export default function AgentsLandingPagePilot({
 }: AgentsLandingPagePilotProps): JSX.Element {
   const { data, isLoading, isError } = useDashboard(dashboardId);
 
+  // Whether ANY widget on this loaded dashboard actually uses the
+  // date-range placeholder (see `dateRangeFilterPlaceholder.ts`) — derived
+  // purely from the loaded widget list, not a dashboard-level config flag:
+  // no such flag exists (or is needed), the same "derive from what's
+  // actually configured" approach the chart-vs-list-tile grouping above
+  // already uses. Checks both a widget's own `query` (every shape) and, for
+  // a `groupBy`-configured pie/bar widget, `groupBy` itself carries no
+  // filters of its own to check — its base filters are `query`, same as
+  // every other shape (see `BeDashboardWidget.query`'s own doc comment) — so
+  // `query` alone is the complete check. Defaults to `false` (no control
+  // rendered) while the dashboard is still loading/erroring, same as
+  // rendering no grid at all in those states below.
+  const showDateRangeFilter = useMemo(
+    () => (data?.widgets ?? []).some((w) => hasDateRangeFilterPlaceholder(w.query ?? {})),
+    [data?.widgets],
+  );
+  // Page-local UI state, not URL/query-param-backed: unlike the team
+  // picker (a real selection that should survive a refresh/share — see
+  // `CsmDashboardPage`), a date range here is closer to an in-page filter
+  // tweak. `undefined`/`undefined` (both fields) is "no range selected",
+  // which `resolveDateRangeFilterPlaceholder` treats as "drop the filter
+  // entirely" — i.e. all time, matching this dashboard's own real
+  // unfiltered totals (961 feedback records, 229 in the last ~22 months) as
+  // the default view rather than an arbitrary pre-selected window.
+  const [dateRange, setDateRange] = useState<DateRangeFilterValue>({});
+
   return (
     <SectionCard>
       {isError ? (
@@ -84,12 +114,21 @@ export default function AgentsLandingPagePilot({
           ))}
         </Box>
       ) : (
-        <DashboardWidgetGrid
-          widgets={data?.widgets ?? []}
-          selectedTeamCreGroupId={selectedTeamCreGroupId}
-          selectedTeamSreGroupId={selectedTeamSreGroupId}
-          selectedTeamLabel={selectedTeamLabel}
-        />
+        <>
+          {showDateRangeFilter && (
+            <Box sx={{ mb: 2 }}>
+              <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            </Box>
+          )}
+          <DashboardWidgetGrid
+            widgets={data?.widgets ?? []}
+            selectedTeamCreGroupId={selectedTeamCreGroupId}
+            selectedTeamSreGroupId={selectedTeamSreGroupId}
+            selectedTeamLabel={selectedTeamLabel}
+            dateRangeFrom={dateRange.from}
+            dateRangeTo={dateRange.to}
+          />
+        </>
       )}
     </SectionCard>
   );

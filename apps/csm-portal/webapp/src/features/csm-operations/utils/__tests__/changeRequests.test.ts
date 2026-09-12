@@ -15,8 +15,14 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { buildCloneChangeRequestNavState } from "@features/csm-operations/utils/changeRequests";
-import type { BeChangeRequestDetail } from "@api/backend/types";
+import {
+  buildChangeRequestSearchFilters,
+  buildCloneChangeRequestNavState,
+  changeRequestBlockingReason,
+  countActiveCRFilters,
+  DEFAULT_CR_FILTERS,
+} from "@features/csm-operations/utils/changeRequests";
+import type { BeChangeRequestApproval, BeChangeRequestDetail } from "@api/backend/types";
 
 const FULL_CR: BeChangeRequestDetail = {
   id: "chg-1",
@@ -144,5 +150,130 @@ describe("buildCloneChangeRequestNavState", () => {
     });
     expect(state.description).not.toContain("<script>");
     expect(state.description).toContain("Safe");
+  });
+});
+
+describe("changeRequestBlockingReason", () => {
+  function approval(overrides: Partial<BeChangeRequestApproval>): BeChangeRequestApproval {
+    return {
+      stage: "Assess",
+      approverType: "STATIC_GROUP",
+      approverName: null,
+      status: "APPROVED",
+      approvers: [],
+      ...overrides,
+    };
+  }
+
+  it("returns null when there are no approval stages yet", () => {
+    expect(changeRequestBlockingReason(undefined)).toBeNull();
+    expect(changeRequestBlockingReason([])).toBeNull();
+  });
+
+  it("returns null when every stage is settled (approved/rejected/not required)", () => {
+    expect(
+      changeRequestBlockingReason([
+        approval({ status: "APPROVED" }),
+        approval({ stage: "Authorize", status: "NOT_REQUIRED" }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("names the stage when a stage is REQUESTED and has no named approver group", () => {
+    expect(
+      changeRequestBlockingReason([approval({ stage: "Authorize", status: "REQUESTED" })]),
+    ).toBe("Awaiting Authorize approval");
+  });
+
+  it("treats PENDING the same as REQUESTED", () => {
+    expect(
+      changeRequestBlockingReason([approval({ stage: "Assess", status: "PENDING" })]),
+    ).toBe("Awaiting Assess approval");
+  });
+
+  it("names the approver group instead of the stage when one is present", () => {
+    expect(
+      changeRequestBlockingReason([
+        approval({ stage: "Authorize", status: "REQUESTED", approverName: "Devops Approval" }),
+      ]),
+    ).toBe("Awaiting Devops Approval");
+  });
+
+  it("does not double the word 'approval' when the approver name already carries it", () => {
+    const reason = changeRequestBlockingReason([
+      approval({ status: "REQUESTED", approverName: "Security Approval Board" }),
+    ]);
+    expect(reason).toBe("Awaiting Security Approval Board");
+    expect(reason?.match(/approval/gi)).toHaveLength(1);
+  });
+
+  it("returns the first waiting stage, in stage order, when several are unsettled", () => {
+    expect(
+      changeRequestBlockingReason([
+        approval({ stage: "Assess", status: "APPROVED" }),
+        approval({ stage: "Authorize", status: "REQUESTED" }),
+        approval({ stage: "Customer Approval", status: "PENDING" }),
+      ]),
+    ).toBe("Awaiting Authorize approval");
+  });
+
+  it("is case-insensitive on the status value", () => {
+    expect(
+      changeRequestBlockingReason([approval({ stage: "Assess", status: "requested" })]),
+    ).toBe("Awaiting Assess approval");
+  });
+});
+
+describe("countActiveCRFilters", () => {
+  it("is 0 for the default filters", () => {
+    expect(countActiveCRFilters(DEFAULT_CR_FILTERS)).toBe(0);
+  });
+
+  it("is 1 when an SRE team filter is set", () => {
+    expect(
+      countActiveCRFilters({ ...DEFAULT_CR_FILTERS, sreTeamIds: ["team-apollo"] }),
+    ).toBe(1);
+  });
+});
+
+describe("buildChangeRequestSearchFilters", () => {
+  it("returns an empty object for the defaults with no search text", () => {
+    expect(buildChangeRequestSearchFilters(DEFAULT_CR_FILTERS, "")).toEqual({});
+  });
+
+  it("includes states/impacts/closed-date bounds when set", () => {
+    expect(
+      buildChangeRequestSearchFilters(
+        {
+          ...DEFAULT_CR_FILTERS,
+          states: ["implement"],
+          impacts: ["high"],
+          closedStartDate: "2026-01-01",
+          closedEndDate: "2026-01-31",
+        },
+        "rollback",
+      ),
+    ).toEqual({
+      searchQuery: "rollback",
+      states: ["implement"],
+      impacts: ["high"],
+      closedStartDate: "2026-01-01T00:00:00Z",
+      closedEndDate: "2026-01-31T23:59:59Z",
+    });
+  });
+
+  it("sends selected SRE teams as an assignmentGroupId/in generic filter entry", () => {
+    expect(
+      buildChangeRequestSearchFilters(
+        { ...DEFAULT_CR_FILTERS, sreTeamIds: ["team-apollo", "team-atlas"] },
+        "",
+      ),
+    ).toEqual({
+      filters: [{ field: "assignmentGroupId", op: "in", values: ["team-apollo", "team-atlas"] }],
+    });
+  });
+
+  it("omits the generic filters array entirely when no SRE team is selected", () => {
+    expect(buildChangeRequestSearchFilters(DEFAULT_CR_FILTERS, "")).not.toHaveProperty("filters");
   });
 });

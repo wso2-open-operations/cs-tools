@@ -16,11 +16,11 @@
 
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { Box, IconButton, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { ArrowLeft, Grip } from "@wso2/oxygen-ui-icons-react";
 import { goToMyAppsScreen } from "@components/microapp-bridge";
 import { ConfirmDialog } from "@components/common/ConfirmDialog";
-import { useThemeMode } from "@context/theme";
 
 const ROOT_PATHS = ["/", "/support", "/operations", "/more"];
 
@@ -28,8 +28,7 @@ export function TopBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const isRootPath = ROOT_PATHS.includes(location.pathname);
-  const mode = useThemeMode();
-  const theme = useTheme();
+  const theme = useTheme<OxygenTheme>();
 
   return (
     <Box
@@ -49,7 +48,7 @@ export function TopBar() {
         // problem because it always has title/subtitle content padding the bar out further;
         // this TopBar has no such content, so it needs the calc instead.
         pt: "calc(var(--safe-top, 44px) + 28px)",
-        backgroundColor: `${mode === "light" ? "white" : "black"} !important`,
+        backgroundColor: `${theme.vars.palette.background.default} !important`,
         zIndex: theme.zIndex.appBar,
       }}
     >

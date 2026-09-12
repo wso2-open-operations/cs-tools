@@ -61,7 +61,15 @@ export function useGetUsersMe() {
   return useQuery<UsersMeResponse, Error>({
     queryKey: ["users-me"],
     queryFn: async () => {
-      const res = await authFetch(`${apiConfig.backendUrl}/users/me`);
+      // skipSignInRedirect: this call's own failure needs a fast, decisive
+      // answer (does this account have access at all?) rather than risk
+      // hanging forever behind a sign-in redirect that can silently no-op
+      // when the IdP session is already fully valid — see
+      // AuthGuard.tsx's AuthorizedAppShell and useAuthApiClient.ts's own
+      // doc comment on skipSignInRedirect.
+      const res = await authFetch(`${apiConfig.backendUrl}/users/me`, undefined, {
+        skipSignInRedirect: true,
+      });
       if (!res.ok) {
         const body = await res.text();
         throw new ApiError(

@@ -95,3 +95,25 @@ func (s *slaClockService) SetSLAClockTierReached(ctx context.Context, caseID, cl
 	}
 	return domain.SetSLAClockTierReachedResponse{ReachedOn: reachedAt, AlreadyReached: alreadyReached}, nil
 }
+
+// Pause implements SLAClockService.
+func (s *slaClockService) Pause(ctx context.Context, caseID, clockType string) (domain.SLAClock, error) {
+	if caseID == "" {
+		return domain.SLAClock{}, &apierror.ValidationError{Msg: "caseId is required"}
+	}
+	if clockType == "" {
+		return domain.SLAClock{}, &apierror.ValidationError{Msg: "clockType is required"}
+	}
+	return s.repo.SetPaused(ctx, caseID, clockType, true)
+}
+
+// Resume implements SLAClockService.
+func (s *slaClockService) Resume(ctx context.Context, caseID, clockType string) (domain.SLAClock, error) {
+	if caseID == "" {
+		return domain.SLAClock{}, &apierror.ValidationError{Msg: "caseId is required"}
+	}
+	if clockType == "" {
+		return domain.SLAClock{}, &apierror.ValidationError{Msg: "clockType is required"}
+	}
+	return s.repo.SetPaused(ctx, caseID, clockType, false)
+}

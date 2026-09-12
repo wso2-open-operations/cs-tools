@@ -27,7 +27,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { usePostProblem } from "@features/csm-operations/api/usePostProblem";
@@ -106,6 +106,14 @@ export default function CreateProblemPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const postProblem = usePostProblem();
 
+  // Set when opened from a list/detail page's own "Create problem" action
+  // with `state: { from: ... }` (same convention as the case-type create
+  // pages), so Back/Cancel return there instead of the hardcoded problems
+  // tab, and the newly created problem's own Back button (reading this same
+  // convention) returns there too.
+  const backState = useLocation().state as { from?: string } | undefined;
+  const backTarget = backState?.from ?? OPERATIONS_PROBLEMS_PATH;
+
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState<string>(UNSET);
   const [subcategory, setSubcategory] = useState<string>(UNSET);
@@ -143,7 +151,10 @@ export default function CreateProblemPage(): JSX.Element {
     if (primaryIncidentId) payload.primaryIncidentId = primaryIncidentId;
 
     postProblem.mutate(payload, {
-      onSuccess: (created) => navigate(`/operations/problems/${created.id}`),
+      onSuccess: (created) =>
+        navigate(`/operations/problems/${created.id}`, {
+          state: { from: backTarget },
+        }),
       onError: (err) => {
         // The backend surfaces real validation messages on 4xx (e.g. an
         // invalid UUID in one of the linking fields); show them.
@@ -161,10 +172,10 @@ export default function CreateProblemPage(): JSX.Element {
       <Button
         variant="text"
         startIcon={<ArrowLeft size={16} />}
-        onClick={() => navigate(OPERATIONS_PROBLEMS_PATH)}
+        onClick={() => navigate(backTarget)}
         sx={{ mb: 1 }}
       >
-        Back to operations
+        Back
       </Button>
       <Typography variant="h5" sx={{ mb: 2 }}>
         New problem
@@ -282,7 +293,7 @@ export default function CreateProblemPage(): JSX.Element {
         </Box>
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
-          <Button variant="outlined" onClick={() => navigate(OPERATIONS_PROBLEMS_PATH)}>
+          <Button variant="outlined" onClick={() => navigate(backTarget)}>
             Cancel
           </Button>
           <Button

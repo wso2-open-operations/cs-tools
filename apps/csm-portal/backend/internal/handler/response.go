@@ -38,6 +38,7 @@ const (
 	ErrMsgCommentNotAllowed      = "Comments can only be added when the case is in progress and the work state is ongoing."
 	ErrMsgCommentNotOwnCase      = "Only the assigned engineer can add a public comment on this case."
 	ErrMsgWorkNoteOnClosedCase   = "Work notes cannot be added to a closed case."
+	ErrMsgCommentOnClosedCase    = "Comments cannot be added to a closed case."
 	ErrMsgAttachmentOnClosedCase = "Attachments cannot be added to a closed case."
 	ErrMsgAttachmentNotShareable = "This attachment is not available for direct download."
 	// ErrMsgAttachmentStorageUnsupportedRef is returned by the direct-upload
@@ -45,6 +46,7 @@ const (
 	// cannot be persisted through that storage mode yet — the caller should
 	// use the standard attachment upload instead.
 	ErrMsgAttachmentStorageUnsupportedRef = "Direct-upload attachment storage is not available for this item type yet. Use the standard attachment upload instead."
+	ErrMsgRequestUpdateNotAllowed         = "An update can only be requested while the case is awaiting info or has a proposed solution."
 	ErrMsgInvalidUUID                     = "Invalid UUID format."
 	errMsgReadBody                        = "Failed to read request body."
 )

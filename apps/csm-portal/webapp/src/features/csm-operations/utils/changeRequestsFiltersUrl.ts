@@ -30,6 +30,7 @@ export const CR_FILTER_PARAM_KEYS = [
   "crImpacts",
   "crClosedFrom",
   "crClosedTo",
+  "crSreTeams",
 ] as const;
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -67,6 +68,19 @@ function parseDateOnly(raw: string | null): string {
 }
 
 /**
+ * Comma-separated SRE team ids (`sreGroupId` UUIDs) — not a fixed enum,
+ * blank entries dropped. Mirrors `parseTeamIdsCsv` in
+ * `incidentsFiltersUrl.ts`.
+ */
+function parseTeamIdsCsv(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
  * Read change-request filters from the URL. Unknown/malformed values (a
  * hand-edited or stale query string) are dropped rather than passed through,
  * so they fall back to the default (unfiltered) behaviour instead of being
@@ -81,6 +95,7 @@ export function readChangeRequestFiltersFromUrl(
     impacts: parseCsv(params.get("crImpacts"), CHANGE_REQUEST_IMPACTS),
     closedStartDate: parseDateOnly(params.get("crClosedFrom")),
     closedEndDate: parseDateOnly(params.get("crClosedTo")),
+    sreTeamIds: parseTeamIdsCsv(params.get("crSreTeams")),
   };
 }
 
@@ -97,5 +112,6 @@ export function writeChangeRequestFiltersToUrl(
   if (f.impacts.length) out.set("crImpacts", f.impacts.join(","));
   if (f.closedStartDate) out.set("crClosedFrom", f.closedStartDate);
   if (f.closedEndDate) out.set("crClosedTo", f.closedEndDate);
+  if (f.sreTeamIds.length) out.set("crSreTeams", f.sreTeamIds.join(","));
   return out;
 }

@@ -151,12 +151,15 @@ function ProjectsSection({ accountId }: { accountId: string }): JSX.Element {
             ) : (
               projects.map((p) => (
                 <TableRow key={p.id} hover>
-                  <TableCell>
+                  <TableCell sx={{ maxWidth: 320 }}>
                     <Typography
                       component={RouterLink}
                       to={`/customers/projects/${p.id}`}
                       variant="body2"
+                      noWrap
+                      title={p.name}
                       sx={(t) => ({
+                        display: "block",
                         textDecoration: "none",
                         color: t.palette.primary.dark,
                         ...t.applyStyles("dark", { color: t.palette.primary.main }),
@@ -316,16 +319,16 @@ export default function CsmAccountDetailPage(): JSX.Element {
             <Chip
               size="small"
               variant="outlined"
-              color={a.agentEnabled ? "success" : "default"}
-              label={a.agentEnabled ? "Enabled" : "Disabled"}
+              color={a.hasAgent ? "success" : "default"}
+              label={a.hasAgent ? "Enabled" : "Disabled"}
             />
           </MetaCell>
           <MetaCell label="Smart KB Suggestions">
             <Chip
               size="small"
               variant="outlined"
-              color={a.kbReferencesEnabled ? "success" : "default"}
-              label={a.kbReferencesEnabled ? "Enabled" : "Disabled"}
+              color={a.hasKbReferences ? "success" : "default"}
+              label={a.hasKbReferences ? "Enabled" : "Disabled"}
             />
           </MetaCell>
           <MetaCell label="Created on">

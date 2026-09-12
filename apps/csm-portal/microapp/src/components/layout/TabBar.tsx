@@ -16,9 +16,9 @@
 
 import { useLayoutEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { BottomNavigation, BottomNavigationAction, Box } from "@wso2/oxygen-ui";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
+import { BottomNavigation, BottomNavigationAction, Box, useTheme } from "@wso2/oxygen-ui";
 import { Cog, Headset, House, LayoutGrid } from "@wso2/oxygen-ui-icons-react";
-import { useThemeMode } from "@context/theme";
 
 // Mirrors a subset of the webapp's CSM_NAV_ITEMS (apps/csm-portal/webapp/src/config/csmNavItems.ts):
 // Home (Dashboard), Support (Cases), Operations get their own tab; Time Cards/Security
@@ -36,7 +36,7 @@ export function TabBar() {
   const ref = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const activeTab = activeTabFor(location.pathname);
-  const mode = useThemeMode();
+  const theme = useTheme<OxygenTheme>();
 
   useLayoutEffect(() => {
     if (!ref.current) return;
@@ -53,14 +53,19 @@ export function TabBar() {
     <Box
       ref={ref}
       position="fixed"
-      bgcolor={mode === "dark" ? "black" : "white"}
+      bgcolor={theme.vars.palette.background.default}
       bottom={0}
       left={0}
       right={0}
       pt={1}
       pb={4}
     >
-      <BottomNavigation value={activeTab} showLabels>
+      {/* MUI's BottomNavigation paints its own background.paper by default, which composites
+          differently over dark-mode's near-transparent paper token than the solid
+          background.default this bar's wrapping Box uses above — visible as a seam between the
+          Box's padding and this component's own area. Transparent here so only the Box's single
+          color shows. */}
+      <BottomNavigation value={activeTab} showLabels sx={{ bgcolor: "transparent" }}>
         <BottomNavigationAction component={Link} to="/" value="home" label="Home" icon={<House />} disableRipple />
         <BottomNavigationAction
           component={Link}

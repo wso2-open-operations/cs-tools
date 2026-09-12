@@ -63,8 +63,13 @@ export interface Account {
   // `csmCases.ts`).
   creTeam?: { id: string; name: string } | null;
   sreTeam?: { id: string; name: string } | null;
-  agentEnabled: boolean;
-  kbReferencesEnabled: boolean;
+  // The unified AccountView emits `hasAgent`/`hasKbReferences`; the older
+  // `agentEnabled`/`kbReferencesEnabled` names are no longer sent for an
+  // account by either data source. (`ProjectAccountRef` — the account
+  // summary embedded in a project — still uses the old names; see
+  // `csmProjects.ts`, which is a different shape and stays as it is.)
+  hasAgent: boolean;
+  hasKbReferences: boolean;
   createdOn: string;
   updatedOn: string;
 }

@@ -47,12 +47,23 @@ describe("replaceCallRequestLinks", () => {
     expect(result).not.toContain("sn_customerservice_customer_call.do");
   });
 
-  it("replaces an already-wrapped <a href> anchor with the marker, dropping the raw anchor", () => {
-    const html = `<p>Call request: <a href="https://sn-dev.example.com/sn_customerservice_customer_call.do?sys_id=${SYSID}">CR-1001</a></p>`;
+  it("replaces an already-wrapped <a href> anchor with the marker, preserving the original visible text (the task number) as the clickable label", () => {
+    const html = `<p>Case Task <a href="https://sn-dev.example.com/sn_customerservice_customer_call.do?sys_id=${SYSID}">CTASK0012345</a> has been created</p>`;
     const result = replaceCallRequestLinks(html);
     expect(result).toContain(`data-call-request-sysid="${UUID}"`);
-    expect(result).not.toContain("CR-1001");
+    // The task number is the label now, not the generic fallback — this is
+    // the fix: rendering must read "Case Task CTASK0012345 has been created",
+    // not "Case Task View call request has been created".
+    expect(result).toContain(">CTASK0012345</span>");
+    expect(result).not.toContain("View call request");
     expect(result).not.toContain("sn_customerservice_customer_call.do");
+  });
+
+  it("falls back to the generic label when the anchor has no visible text", () => {
+    const html = `<a href="https://sn-dev.example.com/sn_customerservice_customer_call.do?sys_id=${SYSID}"></a>`;
+    const result = replaceCallRequestLinks(html);
+    expect(result).toContain(`data-call-request-sysid="${UUID}"`);
+    expect(result).toContain("View call request");
   });
 
   it("handles multiple occurrences independently", () => {

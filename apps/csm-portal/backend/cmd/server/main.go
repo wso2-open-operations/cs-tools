@@ -19,6 +19,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/sftpgo"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
@@ -95,6 +97,17 @@ func main() {
 	taskHandler := handler.NewTaskHandler(customerEntityClient)
 	incidentHandler := handler.NewIncidentHandler(customerEntityClient)
 	problemHandler := handler.NewProblemHandler(customerEntityClient)
+	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
+	alertHandler := handler.NewAlertHandler(customerEntityClient)
+
+	// Google Chat is not yet configured for every deployment, so its spaces
+	// are read with os.Getenv (never mustEnv) — a missing or malformed value
+	// only surfaces as an error the first time an alert is sent for a product
+	// with no matching space.
+	googleChatClient := notifications.NewGoogleChatClient(notifications.GoogleChatConfig{
+		Spaces: parseGoogleChatSpaces(os.Getenv("NOTIFICATIONS_GOOGLE_CHAT_SPACES")),
+	})
+	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
 	// SFTPGo-backed attachment storage — off by default (see loadSftpgoConfig).
 	// When disabled, no SFTPGO_* env var is read at all and neither the client
@@ -149,8 +162,12 @@ func main() {
 	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
 	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
+	mux.HandleFunc("POST /cases/{id}/request-update", caseHandler.RequestCaseUpdate)
+	mux.HandleFunc("GET /case-update-request-templates", caseHandler.GetCaseUpdateRequestTemplates)
 	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
 	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
+	mux.HandleFunc("GET /cases/{id}/escalations", caseHandler.GetCaseEscalations)
+	mux.HandleFunc("POST /cases/{id}/escalations", caseHandler.CreateCaseEscalation)
 	mux.HandleFunc("POST /attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)
@@ -164,6 +181,8 @@ func main() {
 		mux.HandleFunc("POST /attachments/{id}/share", attachmentStorageHandler.CreateAttachmentShare)
 		mux.HandleFunc("POST /cases/{caseId}/attachments/{attachmentId}/confirm", attachmentStorageHandler.ConfirmUpload)
 	}
+	mux.HandleFunc("GET /attachments/{id}", caseHandler.GetAttachment)
+	mux.HandleFunc("PATCH /attachments/{id}", caseHandler.UpdateAttachment)
 	mux.HandleFunc("POST /cases/{id}/call-requests", caseHandler.CreateCallRequest)
 	mux.HandleFunc("POST /cases/{id}/call-requests/search", caseHandler.SearchCallRequests)
 	mux.HandleFunc("POST /call-requests/search", caseHandler.SearchAllCallRequests)
@@ -178,7 +197,15 @@ func main() {
 	//nolint:staticcheck // SA1019: intentional one-release compatibility route; remove with the handler.
 	mux.HandleFunc("GET /tags/search", caseHandler.SearchTagsQuery)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
+	mux.HandleFunc("POST /cases/aggregate", caseHandler.AggregateCases)
+	mux.HandleFunc("POST /cases/feedback/search", caseHandler.SearchFeedback)
+	mux.HandleFunc("POST /cases/feedback/aggregate", caseHandler.AggregateFeedback)
 	mux.HandleFunc("GET /dashboards", dashboardHandler.GetDashboards)
+	// Registered before the {dashboardId} wildcard purely for readability —
+	// net/http's ServeMux resolves by specificity, not registration order,
+	// so these literal paths win over the wildcard regardless.
+	mux.HandleFunc("GET /dashboards/filter-presets", dashboardHandler.GetFilterPresets)
+	mux.HandleFunc("GET /dashboards/sections", dashboardHandler.GetSharedSections)
 	mux.HandleFunc("GET /dashboards/{dashboardId}", dashboardHandler.GetDashboardDetail)
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
@@ -226,6 +253,7 @@ func main() {
 	mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
 	mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
+	mux.HandleFunc("POST /change-requests/aggregate", changeRequestHandler.AggregateChangeRequests)
 	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
 	mux.HandleFunc("POST /service-offerings/search", serviceOfferingHandler.SearchServiceOfferings)
 	mux.HandleFunc("POST /groups/search", groupHandler.SearchGroups)
@@ -248,17 +276,27 @@ func main() {
 	mux.HandleFunc("POST /cases/{caseId}/tasks", taskHandler.CreateCaseTask)
 	mux.HandleFunc("PATCH /tasks/{id}", taskHandler.UpdateTask)
 	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
+	mux.HandleFunc("POST /incidents/aggregate", incidentHandler.AggregateIncidents)
 	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
 	mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)
 	mux.HandleFunc("PATCH /incidents/{id}", incidentHandler.PatchIncident)
 	mux.HandleFunc("POST /incidents/{id}/comments", incidentHandler.CreateIncidentComment)
 	mux.HandleFunc("POST /incidents/{id}/comments/search", incidentHandler.SearchIncidentComments)
 	mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
+	mux.HandleFunc("GET /alerts/{id}", alertHandler.GetAlert)
+	mux.HandleFunc("GET /smart-alerts/{id}", alertHandler.GetSmartAlert)
 	mux.HandleFunc("POST /change-requests/{id}/comments", changeRequestHandler.CreateChangeRequestComment)
 	mux.HandleFunc("POST /change-requests/{id}/comments/search", changeRequestHandler.SearchChangeRequestComments)
 	mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
 	mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
+	mux.HandleFunc("PATCH /problems/{id}", problemHandler.PatchProblem)
 	mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
+	mux.HandleFunc("POST /problems/aggregate", problemHandler.AggregateProblems)
+	mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
+	mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
+	mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
+	// Called manually today; not yet wired into real incident/case creation.
+	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
 
 	// Built once and reused on both listeners below: Auth() does a real JWKS
 	// fetch (when TokenValidatorEnabled), so calling it a second time would
@@ -359,6 +397,14 @@ func main() {
 //	                       to keep a presets file alongside. Unset is legal
 //	                       and means no shared presets, same as unset
 //	                       DASHBOARDS_DIR itself.
+//	DASHBOARD_SECTIONS_FILE a JSON file of sectionKey -> {"displayName",
+//	                       "widgets": [...]}, the shared, reusable widget
+//	                       sections a dashboard pulls in by name with
+//	                       "includeSections" so a section like "My Work" is
+//	                       authored once instead of copy-pasted per
+//	                       dashboard. Same scope rules as
+//	                       DASHBOARD_PRESETS_FILE: DASHBOARDS_DIR path only,
+//	                       unset is legal and means no shared sections.
 //
 // Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and yields no
 // dashboards: a deployment that has not configured any must still start and
@@ -375,6 +421,7 @@ func loadDashboards() *dashboard.Registry {
 	}
 
 	presetsFile := strings.TrimSpace(os.Getenv("DASHBOARD_PRESETS_FILE"))
+	sectionsFile := strings.TrimSpace(os.Getenv("DASHBOARD_SECTIONS_FILE"))
 
 	// ParseBool rather than a "true" string compare: the latter silently reads
 	// 1, yes and on as OFF, and never reports a typo at all -- the operator
@@ -391,9 +438,9 @@ func loadDashboards() *dashboard.Registry {
 		}
 		hotReload = parsed
 	}
-	registry, err := dashboard.NewDirRegistry(dir, hotReload, presetsFile)
+	registry, err := dashboard.NewDirRegistry(dir, hotReload, presetsFile, sectionsFile)
 	if err != nil {
-		slog.Error("invalid dashboard definitions", "dir", dir, "presetsFile", presetsFile, "err", err)
+		slog.Error("invalid dashboard definitions", "dir", dir, "presetsFile", presetsFile, "sectionsFile", sectionsFile, "err", err)
 		os.Exit(1)
 	}
 	if hotReload {
@@ -627,4 +674,16 @@ func splitComma(s string) []string {
 		}
 	}
 	return result
+}
+
+func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {
+	if raw == "" {
+		return nil
+	}
+	var spaces []notifications.GoogleChatSpace
+	if err := json.Unmarshal([]byte(raw), &spaces); err != nil {
+		slog.Error("failed to parse NOTIFICATIONS_GOOGLE_CHAT_SPACES; Google Chat alerts will be unavailable", "err", err)
+		return nil
+	}
+	return spaces
 }

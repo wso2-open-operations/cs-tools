@@ -120,7 +120,8 @@ csm-integration-service/
 │   └── handler/
 │       ├── response.go           # Shared writeError/writeJSON/mapUpstreamError + ErrMsg*
 │       ├── accounts.go           # HTTP handlers for account endpoints
-│       └── projects.go           # HTTP handlers for project endpoints
+│       ├── projects.go           # HTTP handlers for project endpoints
+│       └── vulnerabilities.go    # HTTP handler for the product-vulnerability sync endpoint
 ├── .choreo/component.yaml
 ├── openapi.yaml
 └── .env.example
@@ -136,6 +137,7 @@ csm-integration-service/
 - `POST /projects/search` — search projects
 - `POST /projects/{id}/contacts/search` — search a project's contacts
 - `PATCH /projects/{id}` — update project closure-state fields (ACP automation; currently always 401s, see Overview above)
+- `POST /vulnerabilities/sync` — full-replace sync of product-vulnerability records (submit the complete current set on every call, not a delta)
 
 All responses are raw JSON passthrough from the entity service — this service does not
 reshape upstream response bodies.
@@ -149,4 +151,5 @@ curl -X POST http://localhost:8080/accounts/<id>/contacts/search -d '{}'
 curl -X POST http://localhost:8080/projects/search -d '{}'
 curl http://localhost:8080/projects/<id>
 curl -X POST http://localhost:8080/projects/<id>/contacts/search -d '{}'
+curl -X POST http://localhost:8080/vulnerabilities/sync -d '[]'
 ```

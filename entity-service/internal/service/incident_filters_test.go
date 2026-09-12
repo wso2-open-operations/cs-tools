@@ -64,6 +64,68 @@ func TestParseIncidentFieldFilters_CreatedOnRelativeDate(t *testing.T) {
 	}
 }
 
+func TestParseIncidentFieldFilters_SlaViolated(t *testing.T) {
+	parsed, err := ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "slaViolated", Op: "eq", Values: []string{"true"}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.SlaViolated == nil || !*parsed.SlaViolated {
+		t.Fatalf("SlaViolated = %v, want pointer to true", parsed.SlaViolated)
+	}
+
+	parsed, err = ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "slaViolated", Op: "eq", Values: []string{"false"}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.SlaViolated == nil || *parsed.SlaViolated {
+		t.Fatalf("SlaViolated = %v, want pointer to false", parsed.SlaViolated)
+	}
+}
+
+func TestParseIncidentFieldFilters_MadeSla(t *testing.T) {
+	parsed, err := ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "madeSla", Op: "eq", Values: []string{"true"}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.MadeSla == nil || !*parsed.MadeSla {
+		t.Fatalf("MadeSla = %v, want pointer to true", parsed.MadeSla)
+	}
+
+	parsed, err = ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "madeSla", Op: "eq", Values: []string{"false"}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.MadeSla == nil || *parsed.MadeSla {
+		t.Fatalf("MadeSla = %v, want pointer to false", parsed.MadeSla)
+	}
+}
+
+func TestParseIncidentFieldFilters_ProductName(t *testing.T) {
+	parsed, err := ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "productName", Op: "in", Values: []string{"API Manager", "Choreo"}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"API Manager", "Choreo"}
+	if len(parsed.ProductNames) != len(want) {
+		t.Fatalf("ProductNames = %v, want %v", parsed.ProductNames, want)
+	}
+	for i, v := range want {
+		if parsed.ProductNames[i] != v {
+			t.Errorf("ProductNames[%d] = %q, want %q", i, parsed.ProductNames[i], v)
+		}
+	}
+}
+
 func TestParseIncidentFieldFilters_Rejections(t *testing.T) {
 	now := time.Now().UTC()
 	tests := []struct {
@@ -97,6 +159,38 @@ func TestParseIncidentFieldFilters_Rejections(t *testing.T) {
 		{
 			name:    "createdOn with unparseable value",
 			filters: []domain.IncidentFieldFilter{{Field: "createdOn", Op: "gte", Values: []string{"not-a-date"}}},
+		},
+		{
+			name:    "slaViolated with unsupported op",
+			filters: []domain.IncidentFieldFilter{{Field: "slaViolated", Op: "in", Values: []string{"true"}}},
+		},
+		{
+			name:    "slaViolated with non-boolean value",
+			filters: []domain.IncidentFieldFilter{{Field: "slaViolated", Op: "eq", Values: []string{"yes"}}},
+		},
+		{
+			name:    "slaViolated with more than one value",
+			filters: []domain.IncidentFieldFilter{{Field: "slaViolated", Op: "eq", Values: []string{"true", "false"}}},
+		},
+		{
+			name:    "madeSla with unsupported op",
+			filters: []domain.IncidentFieldFilter{{Field: "madeSla", Op: "in", Values: []string{"true"}}},
+		},
+		{
+			name:    "madeSla with non-boolean value",
+			filters: []domain.IncidentFieldFilter{{Field: "madeSla", Op: "eq", Values: []string{"yes"}}},
+		},
+		{
+			name:    "madeSla with more than one value",
+			filters: []domain.IncidentFieldFilter{{Field: "madeSla", Op: "eq", Values: []string{"true", "false"}}},
+		},
+		{
+			name:    "productName with unsupported op",
+			filters: []domain.IncidentFieldFilter{{Field: "productName", Op: "eq", Values: []string{"Choreo"}}},
+		},
+		{
+			name:    "productName with empty values",
+			filters: []domain.IncidentFieldFilter{{Field: "productName", Op: "in", Values: []string{}}},
 		},
 	}
 

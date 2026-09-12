@@ -33,18 +33,6 @@ const STORAGE_KEY = "csm.savedFilters.v1";
 const STORAGE_EVENT = "csm:saved-filters-changed";
 const MAX_VIEWS = 50;
 
-/**
- * Built-in suggested views. Kept as constants (not seeded into storage) so they
- * always appear and can't be "deleted then reappear on reload". Only severity /
- * state based, which work against the live backend (assignee/SLA filters do
- * not yet).
- */
-export const SUGGESTED_FILTER_VIEWS: readonly SavedFilterView[] = [
-  { name: "S0/S1 active", qs: "severities=S0,S1&states=open,work_in_progress" },
-  { name: "Awaiting info", qs: "states=awaiting_info" },
-  { name: "Open (unstarted)", qs: "states=open" },
-];
-
 function readStorage(): SavedFilterView[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -109,4 +97,23 @@ export function deleteFilterView(name: string): void {
       (v) => v.name.toLowerCase() !== name.trim().toLowerCase(),
     ),
   );
+}
+
+/**
+ * Move a saved view one position up or down in display order (array index
+ * order IS display order — no separate "position" field). A no-op if the
+ * view isn't found, or is already at the boundary in that direction (moving
+ * the first view up, or the last view down).
+ */
+export function moveFilterView(name: string, direction: "up" | "down"): void {
+  const current = readStorage();
+  const index = current.findIndex(
+    (v) => v.name.toLowerCase() === name.trim().toLowerCase(),
+  );
+  if (index === -1) return;
+  const target = direction === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= current.length) return;
+  const reordered = [...current];
+  [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  writeStorage(reordered);
 }

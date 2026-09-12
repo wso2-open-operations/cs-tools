@@ -27,6 +27,22 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 )
 
+// fakeCaseServiceForGithubIssue is a minimal CaseService stub that only
+// implements GetCaseByID (the only method the github-issue state gate calls),
+// returning either a fixed state or an error.
+type fakeCaseServiceForGithubIssue struct {
+	CaseService
+	state domain.CaseState
+	err   error
+}
+
+func (f *fakeCaseServiceForGithubIssue) GetCaseByID(_ context.Context, _ string) (domain.CaseView, error) {
+	if f.err != nil {
+		return domain.CaseView{}, f.err
+	}
+	return domain.CaseView{State: f.state}, nil
+}
+
 // contextWithUserIDToken builds a context carrying the given x-user-id-token,
 // going through the real middleware so the private context key stays
 // encapsulated in the middleware package.
@@ -138,9 +154,9 @@ func TestSNCaseGithubIssueService_CreateCaseGithubIssue_Validation(t *testing.T)
 		},
 	}
 
-	// client is intentionally nil: every case above must fail validation
-	// before the service ever touches s.client.Post.
-	svc := NewServiceNowCaseGithubIssueService(nil)
+	// client and caseSvc are intentionally nil: every case above must fail
+	// validation before the service ever touches s.client.Post or s.caseSvc.
+	svc := NewServiceNowCaseGithubIssueService(nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,4 +172,41 @@ func TestSNCaseGithubIssueService_CreateCaseGithubIssue_Validation(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestSNCaseGithubIssueService_CreateCaseGithubIssue_StateGate(t *testing.T) {
+	validReq := domain.CreateCaseGithubIssueRequest{
+		CaseID:      "11111111-1111-1111-1111-111111111111",
+		Reason:      domain.CaseGithubIssueReasonDefault,
+		Title:       "t",
+		Description: "d",
+	}
+
+	// States mirroring SN's ALLOWED_CASE_STATES ('1', '10', '1002', '1003',
+	// '1006'). '1002' has no domain.CaseState equivalent, so it isn't
+	// exercised here.
+	blockedStates := []domain.CaseState{
+		domain.CaseStateAwaitingInfo,
+		domain.CaseStateSolutionProposed,
+		domain.CaseStateClosed,
+	}
+	for _, state := range blockedStates {
+		t.Run("blocks state "+string(state), func(t *testing.T) {
+			// client stays nil: a blocked state must fail before s.client.Post is touched.
+			svc := NewServiceNowCaseGithubIssueService(nil, &fakeCaseServiceForGithubIssue{state: state})
+			_, err := svc.CreateCaseGithubIssue(contextWithUserIDToken("token"), validReq)
+			if _, ok := err.(*apierror.ConflictError); !ok {
+				t.Fatalf("expected *apierror.ConflictError for state %q, got %T: %v", state, err, err)
+			}
+		})
+	}
+
+	t.Run("propagates case lookup error", func(t *testing.T) {
+		lookupErr := &apierror.NotFoundError{Msg: "case not found"}
+		svc := NewServiceNowCaseGithubIssueService(nil, &fakeCaseServiceForGithubIssue{err: lookupErr})
+		_, err := svc.CreateCaseGithubIssue(contextWithUserIDToken("token"), validReq)
+		if err != lookupErr {
+			t.Fatalf("expected lookup error to propagate, got %T: %v", err, err)
+		}
+	})
 }

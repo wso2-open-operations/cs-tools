@@ -14,7 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { BeCaseFieldFilterOp, BeWidgetResourceType } from "@api/backend/types";
+import type {
+  BeCaseFieldFilterOp,
+  BeDashboardFilterPreset,
+  BeWidgetResourceType,
+} from "@api/backend/types";
 
 /**
  * A widget's `query` (opaque to every other part of this app — see
@@ -58,11 +62,33 @@ export const FILTER_CONDITION_OPS: FilterConditionOp[] = [
 ];
 
 /** One editable filter row. `values` is ignored for `isEmpty`/`isNotEmpty`
- * (those two ops are value-less predicates — see `BeCaseFieldFilter`). */
+ * (those two ops are value-less predicates — see `BeCaseFieldFilter`).
+ *
+ * A row is EITHER a literal field predicate or a shared-preset reference,
+ * discriminated by `preset`: when `preset` is a non-empty name, `field`/`op`/
+ * `values` carry no meaning and the row serializes as `{"preset": name}`.
+ * Modelled as one optional key rather than a discriminated union so every
+ * existing call site that constructs or patches a plain field row keeps
+ * working unchanged — `isPresetCondition` is the single place that decides
+ * which kind a row is. */
 export interface FilterCondition {
   field: string;
   op: FilterConditionOp;
   values: string[];
+  /**
+   * Name of a shared filter preset this row references instead of spelling
+   * the predicate out (see `BeDashboardFilterPreset`). Only meaningful for a
+   * resourceType that uses the case field DSL: presets are expanded inside
+   * `query.filters`, and no other resourceType's search contract has such an
+   * array at all.
+   */
+  preset?: string;
+}
+
+/** Whether a row is a shared-preset reference rather than a literal field
+ * predicate. The one authority on that distinction — see `FilterCondition`. */
+export function isPresetCondition(condition: FilterCondition): boolean {
+  return typeof condition.preset === "string" && condition.preset.length > 0;
 }
 
 const NO_VALUE_OPS = new Set<FilterConditionOp>(["isEmpty", "isNotEmpty"]);
@@ -169,6 +195,57 @@ export const CASE_FIELD_OPTIONS: string[] = [
   "internalId",
 ];
 
+/**
+ * Deterministic stringification of a filter object (keys sorted recursively),
+ * so two structurally-equal predicates that merely differ in key order
+ * compare equal. Same technique, and same reason, as `dashboardDrift`'s own
+ * `canonicalize`: the backend's JSON key order is not something this app
+ * should depend on.
+ */
+function canonicalFilter(value: unknown): string {
+  const canonical = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(canonical);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        out[k] = canonical((v as Record<string, unknown>)[k]);
+      }
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(canonical(value));
+}
+
+/**
+ * Reverse index from a preset's expanded predicate to its name, used to show
+ * an already-deployed widget's filters as preset rows again.
+ *
+ * This is needed because `GET /dashboards/{id}` serves a dashboard with every
+ * preset reference ALREADY EXPANDED and erased — so without this, opening a
+ * deployed dashboard in the builder would show literal predicates, and saving
+ * it would export those literals, silently stripping every preset reference
+ * the deployed definition had.
+ *
+ * When two presets share an identical predicate the first by name wins, which
+ * is deterministic because the catalogue endpoint returns them name-sorted.
+ * The cost of this approach is the converse case: a hand-authored literal
+ * predicate that happens to equal a preset's body is shown, and re-exported,
+ * as that preset. That is a deliberate trade — the two are semantically
+ * identical by definition, since the preset expands to exactly that predicate
+ * — and it is what keeps this working with no extra field on the widget API.
+ */
+export function presetNameByFilterBody(
+  presets: readonly BeDashboardFilterPreset[] | undefined,
+): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const preset of presets ?? []) {
+    const key = canonicalFilter(preset.filter);
+    if (!index.has(key)) index.set(key, preset.name);
+  }
+  return index;
+}
+
 function isFilterOp(v: unknown): v is FilterConditionOp {
   return typeof v === "string" && (FILTER_CONDITION_OPS as string[]).includes(v);
 }
@@ -179,21 +256,40 @@ function isFilterOp(v: unknown): v is FilterConditionOp {
  * retype a row that came out empty. */
 export function filterConditionsFromQuery(
   resourceType: BeWidgetResourceType,
-  query: Record<string, unknown> | undefined,
+  query: Record<string, unknown> | null | undefined,
+  presets?: readonly BeDashboardFilterPreset[],
 ): FilterCondition[] {
   if (!query) return [];
 
   if (usesCaseFieldFilterDsl(resourceType)) {
     const raw = query.filters;
     if (!Array.isArray(raw)) return [];
+    const byBody = presetNameByFilterBody(presets);
     return raw
       .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
-      .map((e) => ({
-        field: typeof e.field === "string" ? e.field : "",
-        op: isFilterOp(e.op) ? e.op : "eq",
-        values: Array.isArray(e.values) ? e.values.map(String) : [],
-      }))
-      .filter((c) => c.field.length > 0);
+      .map((e): FilterCondition => {
+        // An authored `{"preset": name}` entry, which only reaches here from
+        // a local draft or a section definition — a dashboard served by the
+        // API has had these expanded away.
+        if (typeof e.preset === "string" && e.preset.length > 0) {
+          return { field: "", op: "eq", values: [], preset: e.preset };
+        }
+        // An expanded predicate that a preset accounts for: shown as that
+        // preset again, so a round-trip through this editor does not strip
+        // the reference. See `presetNameByFilterBody`.
+        const collapsed = byBody.get(canonicalFilter(e));
+        if (collapsed !== undefined) {
+          return { field: "", op: "eq", values: [], preset: collapsed };
+        }
+        return {
+          field: typeof e.field === "string" ? e.field : "",
+          op: isFilterOp(e.op) ? e.op : "eq",
+          values: Array.isArray(e.values) ? e.values.map(String) : [],
+        };
+      })
+      // A row with neither a field nor a preset carries no meaning at all
+      // (a malformed entry); dropped rather than crashing the editor.
+      .filter((c) => isPresetCondition(c) || c.field.length > 0);
   }
 
   // Every other resourceType's own search contract is flat named top-level
@@ -216,21 +312,36 @@ export function queryFromFilterConditions(
   resourceType: BeWidgetResourceType,
   conditions: FilterCondition[],
 ): Record<string, unknown> {
-  const valid = conditions.filter((c) => c.field.trim().length > 0);
+  const valid = conditions.filter(
+    (c) => isPresetCondition(c) || c.field.trim().length > 0,
+  );
 
   if (usesCaseFieldFilterDsl(resourceType)) {
     if (valid.length === 0) return {};
     return {
-      filters: valid.map((c) =>
-        NO_VALUE_OPS.has(c.op)
+      filters: valid.map((c) => {
+        // A preset row writes the reference and nothing else: the whole
+        // point is that the predicate lives in the shared catalogue, so
+        // emitting field/op/values alongside it would defeat it (and the
+        // backend rejects an entry carrying both).
+        if (isPresetCondition(c)) return { preset: c.preset };
+        return NO_VALUE_OPS.has(c.op)
           ? { field: c.field, op: c.op }
-          : { field: c.field, op: c.op, values: c.values },
-      ),
+          : { field: c.field, op: c.op, values: c.values };
+      }),
     };
   }
 
+  // A preset row cannot be represented for a non-case resourceType: presets
+  // are expanded inside `query.filters`, and these contracts have no such
+  // array. The editor never offers one here (see the condition editor), so
+  // this can only come from a resourceType switch on an existing widget.
+  // Dropped for the same reason an unsupported op is, below: a visible,
+  // recoverable gap beats a silently reinterpreted filter.
+
   const out: Record<string, unknown> = {};
   for (const c of valid) {
+    if (isPresetCondition(c)) continue;
     // Non-case resourceTypes' own contracts only ever use a scalar or an
     // array (see this module's own doc comment), with no per-field op of
     // their own at all — `in` writes the array, `eq` writes a single

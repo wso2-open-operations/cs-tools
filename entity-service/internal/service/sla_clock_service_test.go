@@ -42,6 +42,12 @@ type fakeSLAClockRepo struct {
 	tierResult         time.Time
 	tierAlreadyReached bool
 	tierErr            error
+
+	gotSetPausedCaseID    string
+	gotSetPausedClockType string
+	gotSetPausedValue     bool
+	setPausedResult       domain.SLAClock
+	setPausedErr          error
 }
 
 func (f *fakeSLAClockRepo) Register(_ context.Context, req domain.RegisterSLAClockRequest) (domain.SLAClock, error) {
@@ -60,6 +66,13 @@ func (f *fakeSLAClockRepo) SetTierReachedIfUnset(_ context.Context, caseID, cloc
 	f.gotTierClockType = clockType
 	f.gotTier = tier
 	return f.tierResult, f.tierAlreadyReached, f.tierErr
+}
+
+func (f *fakeSLAClockRepo) SetPaused(_ context.Context, caseID, clockType string, paused bool) (domain.SLAClock, error) {
+	f.gotSetPausedCaseID = caseID
+	f.gotSetPausedClockType = clockType
+	f.gotSetPausedValue = paused
+	return f.setPausedResult, f.setPausedErr
 }
 
 func TestSLAClockService_RegisterSLAClock_ForwardsValidRequest(t *testing.T) {

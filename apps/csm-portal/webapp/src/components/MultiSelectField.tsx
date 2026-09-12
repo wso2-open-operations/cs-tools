@@ -24,7 +24,7 @@ import {
   Select,
   Tooltip,
 } from "@wso2/oxygen-ui";
-import type { JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 
 export interface MultiSelectFieldProps<T extends string> {
   id: string;
@@ -54,15 +54,66 @@ export default function MultiSelectField<T extends string>({
   disabled,
   disabledTooltip,
 }: MultiSelectFieldProps<T>): JSX.Element {
+  // Label sits centered in the box like a placeholder when nothing is
+  // selected, and shrinks into the outline notch once a value is chosen —
+  // matching the async pickers (e.g. AsyncAssigneeMultiSelect's Autocomplete)
+  // rather than MUI's focus-driven default, since a disabled field can never
+  // be focused and would otherwise be stuck looking different from its
+  // enabled, unselected siblings.
+  const hasValue = values.length > 0;
+
+  // MUI's Select already pins the popup's `min-width` to the field's own
+  // rendered width, but never caps its `max-width` -- a long option label
+  // (e.g. a team name) otherwise stretches the popup far past the field it
+  // dropped down from, wider than every other filter's popup. Measuring the
+  // field's own width on open and pinning the popup to exactly that (not
+  // just a generic cap) is what makes it match, whatever width this
+  // particular instance happens to render at in its own grid slot; long
+  // labels wrap onto a second line instead of widening the popup.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [menuWidth, setMenuWidth] = useState<number>();
+
+  const handleOpen = (): void => {
+    const width = rootRef.current?.getBoundingClientRect().width;
+    if (width) setMenuWidth(width);
+    setOpen(true);
+  };
+
   const field = (
-    <FormControl fullWidth size="small" disabled={disabled}>
-      <InputLabel id={`${id}-label`}>{label}</InputLabel>
+    <FormControl ref={rootRef} fullWidth size="small" disabled={disabled}>
+      {/*
+       * oxygen-ui's own theme (MuiInputLabel styleOverrides) targets
+       * `.MuiFormControl-root:has(.MuiSelect-select) &:not(.MuiInputLabel-shrink)`
+       * and shifts an unshrunk label up by `top: -7px` — a compound
+       * `:has()`/`:not()` selector whose specificity beats a plain sx-emitted
+       * class, so a plain `sx={{ top: 0 }}` silently loses the cascade.
+       * `!important` is the only way to reliably win here. Without it, this
+       * field's empty-state label sits visibly higher than the async pickers
+       * (e.g. AsyncAssigneeMultiSelect's Autocomplete), which get no such
+       * adjustment.
+       */}
+      <InputLabel id={`${id}-label`} shrink={hasValue} sx={{ top: "0px !important" }}>
+        {label}
+      </InputLabel>
       <Select
         multiple
+        notched={hasValue}
         labelId={`${id}-label`}
         id={id}
         value={values}
         label={label}
+        open={open}
+        onOpen={handleOpen}
+        onClose={() => setOpen(false)}
+        MenuProps={{
+          slotProps: {
+            // Falls back to a generic cap for the one frame before a width
+            // is ever measured (and in a non-layout environment like jsdom,
+            // where `getBoundingClientRect` always reports 0).
+            paper: { sx: menuWidth ? { width: menuWidth } : { maxWidth: 280 } },
+          },
+        }}
         onChange={(event) => {
           const val = event.target.value;
           onChange(Array.isArray(val) ? (val as T[]) : []);
@@ -92,15 +143,28 @@ export default function MultiSelectField<T extends string>({
         }}
       >
         {options.map((option) => (
-          <MenuItem key={option.value} value={option.value} sx={{ py: 0.5 }}>
+          // MUI's `MenuItem` sets `white-space: nowrap` by default (it
+          // expects a single-line label) — with the popup now pinned to
+          // the field's own width (see `menuWidth` above), a label longer
+          // than that width needs to wrap onto a second line instead of
+          // just getting clipped at the edge. `alignItems: "flex-start"`
+          // keeps the checkbox pinned to the first line's height instead
+          // of centering against the item's full two-line height.
+          <MenuItem
+            key={option.value}
+            value={option.value}
+            sx={{ py: 0.5, alignItems: "flex-start", whiteSpace: "normal" }}
+          >
             <Checkbox
               size="small"
               checked={values.includes(option.value)}
-              sx={{ mr: 1, p: 0.25 }}
+              sx={{ mr: 1, p: 0.25, mt: "1px" }}
             />
             <ListItemText
               primary={option.label}
-              slotProps={{ primary: { style: { fontSize: 13 } } }}
+              slotProps={{
+                primary: { style: { fontSize: 13, whiteSpace: "normal", wordBreak: "break-word" } },
+              }}
             />
           </MenuItem>
         ))}

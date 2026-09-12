@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
 import {
@@ -30,6 +30,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
+import type { BeCaseState, BeCaseType } from "@api/backend/types";
+import { sanitizeDescriptionHtml } from "@utils/sanitizeHtml";
 
 // `@api/backend/client` -> `useAuthApiClient` -> `@config/apiConfig`, which
 // throws at module load when `window.config` isn't set — not present under
@@ -73,8 +75,18 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
   }),
 }));
 
+const showErrorMock = vi.fn();
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
-  useErrorBanner: () => ({ showError: vi.fn() }),
+  useErrorBanner: () => ({ showError: showErrorMock }),
+}));
+const CURRENT_USER_ID = "00000000-0000-0000-0000-00000000000c";
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({
+    user: { id: CURRENT_USER_ID, email: "jane.doe@example.com" },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
 }));
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({
   useSuccessBanner: () => ({ showSuccess: vi.fn() }),
@@ -89,7 +101,14 @@ vi.mock("@utils/useDarkMode", () => ({
 // Builds a minimal but valid CsmCaseDetail whose `id` tracks the currently
 // mutated case id, so the page gets past its loading/error gates (the
 // `isLoading`/`isError`/`!data` early returns) for whichever case is active.
-function buildCase(id: string): CsmCaseDetail {
+function buildCase(
+  id: string,
+  overrides?: {
+    caseType?: BeCaseType;
+    description?: string;
+    state?: BeCaseState;
+  },
+): CsmCaseDetail {
   return {
     id,
     caseNumber: `CS-${id}`,
@@ -100,14 +119,15 @@ function buildCase(id: string): CsmCaseDetail {
     projectName: "Acme Project",
     product: "WSO2 Identity Server",
     severity: "S2",
-    state: "open",
+    state: overrides?.state ?? "open",
     assignee: "Unassigned",
     assigneeIsMe: false,
     slaClockType: "resolution",
     minutesToBreach: 120,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
-    description: "<p>Sample description</p>",
+    description: overrides?.description ?? "<p>Sample description</p>",
+    caseType: overrides?.caseType,
     assignmentGroup: "Support Team",
     customerContext: {
       accountName: "Acme Corp",
@@ -134,23 +154,44 @@ function buildCase(id: string): CsmCaseDetail {
   };
 }
 
+const WATCHER_ID = "00000000-0000-0000-0000-000000000001";
+const NEW_WATCHER_ID = "00000000-0000-0000-0000-000000000002";
+
 const useGetCsmCaseDetailMock = vi.fn();
 vi.mock("@features/csm-cases/api/useGetCsmCaseDetail", () => ({
   useGetCsmCaseDetail: (id: string | undefined) => useGetCsmCaseDetailMock(id),
 }));
-useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
-  data: id ? buildCase(id) : undefined,
-  isLoading: false,
-  isError: false,
-  error: null,
-  refetch: vi.fn(),
-  isFetching: false,
-  dataUpdatedAt: 0,
-}));
 
+// A real (non-vi.fn-per-render) mock so a test can capture the onSuccess/
+// onError options passed to `.mutate()` and invoke them later, simulating a
+// response that arrives after the page has navigated elsewhere.
+const requestCaseUpdateMutateMock = vi.fn();
+afterEach(() => {
+  requestCaseUpdateMutateMock.mockClear();
+});
+function defaultCaseDetailImpl(id: string | undefined): unknown {
+  return {
+    data: id ? buildCase(id) : undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    isFetching: false,
+    dataUpdatedAt: 0,
+  };
+}
+useGetCsmCaseDetailMock.mockImplementation(defaultCaseDetailImpl);
+// Reset to the shared default after every test — a test that swaps in its own
+// implementation (e.g. to set caseType) must not leak that override into
+// whichever test runs next.
+afterEach(() => {
+  useGetCsmCaseDetailMock.mockImplementation(defaultCaseDetailImpl);
+});
+
+const patchCaseMutateMock = vi.fn();
 vi.mock("@features/csm-cases/api/usePatchCsmCase", () => ({
   usePatchCsmCase: () => ({
-    mutate: vi.fn(),
+    mutate: patchCaseMutateMock,
     mutateAsync: vi.fn(),
     isPending: false,
   }),
@@ -159,16 +200,27 @@ vi.mock("@features/csm-cases/api/usePatchCsmCase", () => ({
 vi.mock("@features/csm-cases/api/useFindMyOngoingCases", () => ({
   useFindMyOngoingCases: () => vi.fn(),
 }));
+const useGetCsmCaseCommentsMock = vi.fn();
 vi.mock("@features/csm-cases/api/useCsmCaseComments", () => ({
-  useGetCsmCaseComments: () => ({
+  useGetCsmCaseComments: (id: string | undefined) =>
+    useGetCsmCaseCommentsMock(id),
+  usePostCsmCaseComment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+function defaultCommentsImpl(): unknown {
+  return {
     data: [],
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
     isFetching: false,
-  }),
-  usePostCsmCaseComment: () => ({ mutateAsync: vi.fn(), isPending: false }),
-}));
+  };
+}
+useGetCsmCaseCommentsMock.mockImplementation(defaultCommentsImpl);
+// Same reset reasoning as useGetCsmCaseDetailMock above — a test that swaps
+// in its own comments list must not leak it into the next test.
+afterEach(() => {
+  useGetCsmCaseCommentsMock.mockImplementation(defaultCommentsImpl);
+});
 vi.mock("@features/csm-cases/api/useCsmConversationMessages", () => ({
   useGetCsmConversationMessages: () => ({
     data: undefined,
@@ -200,6 +252,15 @@ usePostCsmCaseAttachmentMock.mockReturnValue({
   variables: undefined,
   uploadProgress: null,
 });
+vi.mock("@features/csm-cases/api/useCsmCaseFeedback", () => ({
+  useGetCsmCaseFeedback: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+    isFetching: false,
+  }),
+}));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   useGetCsmCaseAttachments: () => ({
     data: undefined,
@@ -257,17 +318,62 @@ vi.mock("@features/csm-cases/api/useCaseTags", () => ({
 vi.mock("@features/csm-cases/api/useCsmCaseGithubIssue", () => ({
   usePostCaseGithubIssue: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+vi.mock("@features/csm-cases/api/useGetCsmCaseEscalations", () => ({
+  useGetCsmCaseEscalations: () => ({
+    data: { escalations: [], currentNotifiedUsers: [] },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+vi.mock("@features/csm-cases/api/usePostCsmCaseEscalation", () => ({
+  usePostCsmCaseEscalation: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("@features/csm-cases/api/useRequestCaseUpdate", () => ({
+  useRequestCaseUpdate: () => ({
+    mutate: requestCaseUpdateMutateMock,
+    isPending: false,
+  }),
+}));
+// Two placeholder cards (shape doesn't matter beyond `.length` -- the tab
+// label count is the only thing this page reads from the result;
+// CaseTimeCardsPanel itself is stubbed below and never sees this data).
+// `total` defaults to `cards.length` (no truncation); a test overriding this
+// mock can set `total` higher than `cards.length` to simulate a truncated
+// page and assert the tab count still reflects the real total.
+const useCaseTimeCardsMock = vi.fn();
+function defaultCaseTimeCardsImpl(): unknown {
+  return { data: { cards: [{}, {}], total: 2, truncated: false } };
+}
+useCaseTimeCardsMock.mockImplementation(defaultCaseTimeCardsImpl);
+afterEach(() => {
+  useCaseTimeCardsMock.mockImplementation(defaultCaseTimeCardsImpl);
+});
 vi.mock("@features/csm-timecards/api/useTimeCards", () => ({
   usePostTimeCard: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateTimeCard: () => ({ mutate: vi.fn(), isPending: false }),
+  useCaseTimeCards: (caseId: string | undefined) =>
+    useCaseTimeCardsMock(caseId),
 }));
 
 // Simple presentational stubs — none of this test's assertions touch these.
 vi.mock("@features/csm-cases/components/CsmCaseCommentInput", () => ({
   default: () => null,
 }));
+// Probe, not `null`: the change_case_type and request_update tests below
+// need a way to open their dialogs the same way a real user would (via the
+// action bar's menu). CaseActionBar's own rendering/gating is covered in
+// CaseActionBar.test.tsx.
 vi.mock("@features/csm-cases/components/CaseActionBar", () => ({
-  default: () => null,
+  default: ({ onAction }: { onAction: (action: { secondary: string }) => void }) => (
+    <>
+      <button type="button" onClick={() => onAction({ secondary: "change_case_type" })}>
+        stub open change case type
+      </button>
+      <button type="button" onClick={() => onAction({ secondary: "request_update" })}>
+        stub open request update
+      </button>
+    </>
+  ),
   canAcknowledge: () => false,
 }));
 vi.mock("@features/csm-cases/components/AssignEngineerDialog", () => ({
@@ -278,6 +384,43 @@ vi.mock("@features/csm-cases/components/ResolutionDialog", () => ({
 }));
 vi.mock("@features/csm-cases/components/ChangeSeverityDialog", () => ({
   default: () => null,
+}));
+// Probe, not `null`: the dialog's own three-step flow is covered in
+// ChangeCaseTypeDialog.test.tsx. Here it just hands the page a finished
+// submission so these tests can assert the resulting PATCH body(ies).
+vi.mock("@features/csm-cases/components/ChangeCaseTypeDialog", () => ({
+  default: ({
+    onSubmit,
+  }: {
+    onSubmit: (
+      submission:
+        | { targetType: "engagement"; engagementType: string; engagementPaymentType: string }
+        | { targetType: "case"; severity: string; issueType: string },
+    ) => void;
+  }) => (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          onSubmit({
+            targetType: "engagement",
+            engagementType: "migration",
+            engagementPaymentType: "paid",
+          })
+        }
+      >
+        stub transfer to engagement
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onSubmit({ targetType: "case", severity: "S2", issueType: "error" })
+        }
+      >
+        stub transfer to case with severity
+      </button>
+    </>
+  ),
 }));
 vi.mock("@features/csm-cases/components/SetAutocloseHoldDialog", () => ({
   default: () => null,
@@ -300,6 +443,16 @@ vi.mock("@features/csm-cases/components/CreateTaskDialog", () => ({
 vi.mock("@features/csm-cases/components/AddTagDialog", () => ({
   default: () => null,
 }));
+// Probe, not `null`: the stale-callback regression test below needs a way to
+// submit the dialog the same way a real user would (its own template-preview/
+// custom-message UI is covered in RequestUpdateDialog.test.tsx).
+vi.mock("@features/csm-cases/components/RequestUpdateDialog", () => ({
+  default: ({ onSave }: { onSave: (payload: { stage: string }) => void }) => (
+    <button type="button" onClick={() => onSave({ stage: "first" })}>
+      stub save request update
+    </button>
+  ),
+}));
 vi.mock("@features/csm-cases/components/ChildCasesWidget", () => ({
   ChildCasesWidget: () => null,
 }));
@@ -307,13 +460,42 @@ vi.mock("@features/csm-cases/components/LinkedServiceRequestsWidget", () => ({
   LinkedServiceRequestsWidget: () => null,
 }));
 vi.mock("@features/csm-cases/components/LinkedChangeRequestsWidget", () => ({
-  LinkedChangeRequestsWidget: () => null,
+  LinkedChangeRequestsWidget: () => (
+    <div data-testid="linked-change-requests-widget-probe" />
+  ),
 }));
 vi.mock("@features/csm-cases/components/CreateGithubIssueDialog", () => ({
   CreateGithubIssueDialog: () => null,
 }));
+// Probe, not `null`: several tests below assert on the comments the page
+// hands this feed (including the synthetic description entry — see
+// `safeComments` in CsmCaseDetailPage), which needs the passed-through
+// author name / body / role-chip-suppression to actually render. The feed's
+// own layout/filtering/sorting is covered in CaseActivitiesFeed.test.tsx.
 vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
-  default: () => null,
+  default: ({
+    comments,
+  }: {
+    comments: Array<{
+      id: string;
+      authorName: string;
+      authorRole: string;
+      bodyHtml: string;
+      synthetic?: boolean;
+    }>;
+  }) => (
+    <div data-testid="case-activities-feed-probe">
+      {comments.map((c) => (
+        <div key={c.id} data-testid={`comment-${c.id}`}>
+          <span>{c.authorName}</span>
+          {!c.synthetic && c.authorRole !== "wso2_engineer" && (
+            <span>{c.authorRole === "customer" ? "Customer" : c.authorRole}</span>
+          )}
+          <span dangerouslySetInnerHTML={{ __html: sanitizeDescriptionHtml(c.bodyHtml) }} />
+        </div>
+      ))}
+    </div>
+  ),
 }));
 vi.mock("@features/csm-cases/components/CaseMetaBand", () => ({
   default: () => null,
@@ -336,9 +518,37 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
     </div>
   ),
   CustomerContextWidget: () => null,
+  EscalationWidget: () => null,
   ProductContextWidget: () => null,
+  // Stubbed to a probe rather than `null`: the tests below assert only that
+  // the page mounts it for a service request and not for a plain case. The
+  // widget's own rendering is covered in CaseDetailWidgets.test.tsx.
+  RequestDetailsWidget: () => <div data-testid="request-details-widget" />,
   TagsWidget: () => null,
-  WatchersWidget: () => null,
+  // Probe, not `null`: the real widget computes the replacement watch list and
+  // enforces the per-record-type rules (covered in CaseDetailWidgets.test.tsx).
+  // Here it just hands the page a finished list so these tests can see what
+  // the page does with it.
+  WatchersWidget: ({
+    entityKind,
+    watchers,
+    onReplace,
+  }: {
+    entityKind: string;
+    watchers: Array<{ id: string; name: string }>;
+    onReplace?: (nextWatcherIds: string[], action: "add" | "remove") => void;
+  }) => (
+    <div data-testid="watchers-widget" data-entity-kind={entityKind}>
+      <button
+        type="button"
+        onClick={() =>
+          onReplace?.([...watchers.map((w) => w.id), NEW_WATCHER_ID], "add")
+        }
+      >
+        stub add watcher
+      </button>
+    </div>
+  ),
 }));
 vi.mock("@features/csm-cases/components/CallRequestsWidget", () => ({
   CallRequestsWidget: () => null,
@@ -396,6 +606,7 @@ vi.mock("@features/csm-timecards/components/LogTimeCardDialog", () => ({
 }));
 
 // Imported after the mocks above so the module picks them up.
+import { BackendApiError } from "@api/backend/client";
 import CsmCaseDetailPage from "@features/csm-cases/pages/CsmCaseDetailPage";
 
 // Renders the real route pathname, so the test can assert the router itself
@@ -737,6 +948,34 @@ describe("CsmCaseDetailPage — dashless id normalization", () => {
   });
 });
 
+describe("CsmCaseDetailPage — tab label counts", () => {
+  it("shows the time cards count on the 'Time tracking' tab, sourced from useCaseTimeCards", () => {
+    renderPage();
+
+    // Mocked useCaseTimeCards above returns 2 cards -- this was previously
+    // always 0 because the count read `c.timeLogs.length`, and `timeLogs` is
+    // hardcoded to `[]` in useGetCsmCaseDetail and never populated.
+    expect(
+      screen.getByRole("tab", { name: /time tracking \(2\)/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the case's real total on a truncated time-cards page, not the fetched page size", () => {
+    // A case with more time cards than the fetch page limit: only 2 cards
+    // came back, but the case really has 9. The tab badge must read `total`,
+    // not `cards.length`, or it under-reports the case's real count.
+    useCaseTimeCardsMock.mockImplementation(() => ({
+      data: { cards: [{}, {}], total: 9, truncated: true },
+    }));
+
+    renderPage();
+
+    expect(
+      screen.getByRole("tab", { name: /time tracking \(9\)/i }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("CsmCaseDetailPage — time-card edit dialog reset on case change", () => {
   it("stops showing the previous case's edit dialog once the route moves to a new case", () => {
     renderPage();
@@ -867,5 +1106,483 @@ describe("CsmCaseDetailPage — upload progress scoped to the case it belongs to
     expect(screen.getByTestId("attachments-widget-probe")).toHaveTextContent(
       "uploading=false uploadProgress=null uploadError=null",
     );
+  });
+});
+// Fires real navigate() calls between case-1 and case-2, both directions —
+// the A -> B -> A regression below needs a return trip, unlike
+// NavigateToCaseTwoButton (one-way, used by the simpler dialog-reset tests).
+function NavigateBetweenCasesButtons(): JSX.Element {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate("/cases/case-2")}>
+        Go to case 2
+      </button>
+      <button type="button" onClick={() => navigate("/cases/case-1")}>
+        Go to case 1
+      </button>
+    </>
+  );
+}
+
+describe("CsmCaseDetailPage — request-update stale-callback guard", () => {
+  it("ignores a request-update response that arrives after navigating away and back to the same case", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/cases/case-1"]}>
+          <NavigateBetweenCasesButtons />
+          <LocationProbe />
+          <Routes>
+            <Route path="/cases/:caseId" element={<CsmCaseDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    // Open the dialog and submit while still on case-1; capture the mutate
+    // options instead of letting the mock resolve immediately, so the
+    // response can be replayed later — simulating a slow network response.
+    fireEvent.click(screen.getByRole("button", { name: /stub open request update/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stub save request update/i }));
+    expect(requestCaseUpdateMutateMock).toHaveBeenCalledTimes(1);
+    const [, mutateOptions] = requestCaseUpdateMutateMock.mock.calls[0] as [
+      unknown,
+      { onSuccess: () => void },
+    ];
+
+    // Navigate away and back to case-1 — a real round trip, not a no-op:
+    // caseId is identical before and after, which is exactly what a plain
+    // caseId comparison in the mutation guard can't tell apart from "never
+    // left". The view token (bumped on every transition, including this
+    // return trip) is what makes the guard correctly treat the pending
+    // request as stale here.
+    fireEvent.click(screen.getByRole("button", { name: /go to case 2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /go to case 1/i }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/cases/case-1",
+    );
+
+    // The delayed response for the *original* case-1 visit arrives now.
+    act(() => {
+      mutateOptions.onSuccess();
+    });
+
+    // A caseId-only guard would treat this as still current (case-1 ==
+    // case-1) and show the success toast; the view-token guard correctly
+    // drops it since this is a different visit to case-1 than the one that
+    // submitted the request.
+    expect(
+      screen.queryByText(/update request posted/i),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// An announcement's own body never arrives as the Activities feed's opening
+// comment the way it does for every other case type — it has to be rendered
+// directly (see the note above the description card in the page).
+function renderCaseDetailPage(
+  path: string,
+  routePattern: string,
+  caseType: BeCaseType | undefined,
+  description: string,
+  state?: BeCaseState,
+): ReturnType<typeof render> {
+  useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+    data: id ? buildCase(id, { caseType, description, state }) : undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    isFetching: false,
+    dataUpdatedAt: 0,
+  }));
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path={routePattern} element={<CsmCaseDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("CsmCaseDetailPage — announcement description rendering", () => {
+  it("renders the case description inline in the activity timeline for an announcement, attributed to the creator with no role chip", () => {
+    renderCaseDetailPage(
+      "/announcements/case-1",
+      "/announcements/:caseId",
+      "announcement",
+      "<p>Long advisory content</p>",
+    );
+
+    expect(screen.getByText("Long advisory content")).toBeInTheDocument();
+    // Not just presence — the synthetic entry must render below the
+    // Activity timeline heading, not above or interleaved with it.
+    expect(
+      screen
+        .getByText("Activity timeline")
+        .compareDocumentPosition(screen.getByText("Long advisory content")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Rendered as a comment-like bubble attributed to the case creator
+    // (falls back to the customer context's primary contact in this
+    // fixture), not a visually distinct "Description" card.
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText("Description")).not.toBeInTheDocument();
+    // The synthetic entry carries `authorRole: "customer"` only to pick the
+    // neutral avatar styling — the real role is unknown, so no role chip
+    // ("Customer"/"WSO2"/etc.) should render for it.
+    expect(screen.queryByText("Customer")).not.toBeInTheDocument();
+  });
+
+  it("also injects the description as a synthetic comment entry on the Activities tab for a non-announcement case whose description isn't echoed anywhere", () => {
+    // A plain case reaches the same synthetic entry via
+    // `descriptionEchoedInOriginComment` rather than the isAnnouncement
+    // carve-out — with no comments loaded (the default mock), there's no
+    // origin comment to echo the description, so it must still show up here
+    // instead of leaving it findable only on the Details tab.
+    renderCaseDetailPage(
+      "/cases/case-1",
+      "/cases/:caseId",
+      "case",
+      "<p>Long advisory content</p>",
+    );
+
+    expect(screen.getByText("Long advisory content")).toBeInTheDocument();
+    expect(screen.queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  it("does not inject a synthetic entry on the Activities tab for a non-announcement case whose origin comment already echoes the description", () => {
+    useGetCsmCaseCommentsMock.mockImplementation(() => ({
+      data: [
+        {
+          id: "comment-1",
+          caseId: "case-1",
+          authorName: "Jane Doe",
+          authorRole: "customer",
+          bodyHtml: "<p>Long advisory content</p>",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderCaseDetailPage(
+      "/cases/case-1",
+      "/cases/:caseId",
+      "case",
+      "<p>Long advisory content</p>",
+    );
+
+    // Only the real comment's copy of the content renders, not a second
+    // (synthetic) copy — the real comment already covers it.
+    expect(screen.getAllByText("Long advisory content")).toHaveLength(1);
+  });
+
+  it("does not inject a synthetic entry for an announcement whose origin comment already echoes the description", () => {
+    // Regression guard: `safeComments` gates purely on
+    // `descriptionEchoedInOriginComment`, with no separate `isAnnouncement`
+    // carve-out — if announcement creation ever starts producing a real
+    // echoed origin comment (it doesn't today), this must still suppress the
+    // synthetic entry rather than always appending it for announcements.
+    useGetCsmCaseCommentsMock.mockImplementation(() => ({
+      data: [
+        {
+          id: "comment-1",
+          caseId: "case-1",
+          authorName: "Jane Doe",
+          authorRole: "customer",
+          bodyHtml: "<p>Long advisory content</p>",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderCaseDetailPage(
+      "/announcements/case-1",
+      "/announcements/:caseId",
+      "announcement",
+      "<p>Long advisory content</p>",
+    );
+
+    expect(screen.getAllByText("Long advisory content")).toHaveLength(1);
+  });
+
+  it("renders nothing when an announcement has a blank description", () => {
+    renderCaseDetailPage(
+      "/announcements/case-1",
+      "/announcements/:caseId",
+      "announcement",
+      "",
+    );
+
+    expect(screen.queryByText("Description")).not.toBeInTheDocument();
+  });
+});
+
+// The comment/work-note composer used to be suppressed outright for
+// announcements (`isAnnouncement ? null : …`) — the entity now accepts
+// replies on an announcement the same as any other open case (see the
+// backend's announcement carve-out in CreateCaseComment), so the page must
+// show the same collapsed-until-clicked composer toggle it already shows for
+// a plain case, and only gate it on the case being closed.
+describe("CsmCaseDetailPage — announcement comment composer", () => {
+  it("shows the collapsed 'Add comment' toggle for an open announcement and reveals the composer on click", () => {
+    renderCaseDetailPage(
+      "/announcements/case-1",
+      "/announcements/:caseId",
+      "announcement",
+      "<p>Advisory content</p>",
+      "open",
+    );
+
+    const toggle = screen.getByRole("button", {
+      name: /compose a reply to the customer/i,
+    });
+    expect(toggle).toBeEnabled();
+
+    // Composer content itself is a mocked stub (see the CsmCaseCommentInput
+    // mock above) — what this page owns is the reveal chrome around it: the
+    // "Reply" header and its Cancel action only exist once composerOpen is
+    // true.
+    expect(screen.queryByText("Reply")).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByText("Reply")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /cancel/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the 'Add comment' toggle for a closed announcement", () => {
+    renderCaseDetailPage(
+      "/announcements/case-1",
+      "/announcements/:caseId",
+      "announcement",
+      "<p>Advisory content</p>",
+      "closed",
+    );
+
+    const toggle = screen.getByRole("button", {
+      name: /this case is closed — comments and work notes are read-only/i,
+    });
+    expect(toggle).toBeDisabled();
+  });
+});
+
+describe("CsmCaseDetailPage — Request details card", () => {
+  function mockCaseType(caseType?: string): void {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id ? { ...buildCase(id), caseType } : undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: 0,
+    }));
+  }
+
+  afterEach(() => {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id ? buildCase(id) : undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: 0,
+    }));
+  });
+
+  it("renders the card in the Details tab of a service request", () => {
+    mockCaseType("service_request");
+
+    renderPageAt(
+      "/operations/service-requests/case-1?tab=details",
+      "/operations/service-requests/:caseId",
+    );
+
+    expect(screen.getByTestId("request-details-widget")).toBeInTheDocument();
+  });
+
+  it("does not render the card in the Details tab of a plain case", () => {
+    mockCaseType(undefined);
+
+    renderPageAt("/cases/case-1?tab=details");
+
+    expect(
+      screen.queryByTestId("request-details-widget"),
+    ).not.toBeInTheDocument();
+  });
+
+  // Not covered here: a service request opened through the generic
+  // /cases/:id route. The page's canonical-redirect gate bounces it to
+  // /operations/service-requests/:id behind a skeleton before any tab body
+  // renders, so `caseType`'s half of the signal can't be observed from that
+  // entry point. It is the same `isServiceRequest` value either way — the
+  // page computes it once (route || caseType) and this card reuses it.
+});
+
+describe("CsmCaseDetailPage — Watchers tab", () => {
+  function openWatchers(): void {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id
+        ? {
+            ...buildCase(id),
+            watchers: [
+              {
+                id: WATCHER_ID,
+                name: "Jane Doe",
+                email: "jane.doe@example.com",
+              },
+            ],
+          }
+        : undefined,
+      isLoading: false,
+      isError: false,
+    }));
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /watchers/i }));
+  }
+
+  it("renders the watch list as a case's, so the last-watcher rule applies", () => {
+    openWatchers();
+    expect(screen.getByTestId("watchers-widget")).toHaveAttribute(
+      "data-entity-kind",
+      "case",
+    );
+  });
+
+  it("PATCHes the whole replacement list, keeping the watchers already on it", () => {
+    openWatchers();
+    fireEvent.click(screen.getByRole("button", { name: /stub add watcher/i }));
+
+    expect(patchCaseMutateMock).toHaveBeenCalledWith(
+      { watchList: [WATCHER_ID, NEW_WATCHER_ID] },
+      expect.anything(),
+    );
+  });
+
+  it("surfaces the backend's own message when the write is rejected, leaving the list untouched", () => {
+    openWatchers();
+    fireEvent.click(screen.getByRole("button", { name: /stub add watcher/i }));
+
+    const handlers = patchCaseMutateMock.mock.calls.at(-1)?.[1] as {
+      onError: (err: unknown) => void;
+    };
+    handlers.onError(
+      new BackendApiError(400, 'watchList contains invalid UUID: "not-a-uuid"'),
+    );
+
+    expect(showErrorMock).toHaveBeenCalledWith(
+      'watchList contains invalid UUID: "not-a-uuid"',
+      expect.anything(),
+    );
+    // No optimistic write happened, so nothing needs unwinding: the widget is
+    // still showing the server's list.
+    expect(screen.getByTestId("watchers-widget")).toBeInTheDocument();
+  });
+});
+
+describe("CsmCaseDetailPage — change case type", () => {
+  it("PATCHes type, engagementType, and engagementPaymentType together for an engagement transfer", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /stub open change case type/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stub transfer to engagement/i }));
+
+    expect(patchCaseMutateMock).toHaveBeenCalledWith(
+      { type: "engagement", engagementType: "migration", engagementPaymentType: "paid" },
+      expect.anything(),
+    );
+  });
+
+  it("sends the type, severity and issue type in a single PATCH", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /stub open change case type/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stub transfer to case with severity/i }));
+
+    // One atomic call: the backend requires severity and issueType alongside `type`,
+    // and rejects a standalone severity patch on a case of any other type.
+    expect(patchCaseMutateMock).toHaveBeenCalledWith(
+      { type: "case", severity: "high", issueType: "error" },
+      expect.anything(),
+    );
+    // and crucially no standalone severity follow-up, which the backend rejects
+    // on a case whose type is not already Incident/Query.
+    expect(patchCaseMutateMock).not.toHaveBeenCalledWith(
+      { severity: "high" },
+      expect.anything(),
+    );
+  });
+});
+
+describe("CsmCaseDetailPage — Linked change requests widget only shows on service requests", () => {
+  it("does not render LinkedChangeRequestsWidget for a plain case, even one carrying stale linkedChangeRequests data", () => {
+    // A plain case should never carry `linkedChangeRequests` per the field's
+    // own doc comment (SR-only), but the guard must not rely on that alone —
+    // this proves the render gate itself, not just the data shape, keeps the
+    // widget off a plain case.
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id
+        ? {
+            ...buildCase(id),
+            caseType: "incident",
+            linkedChangeRequests: [{ id: "cr-1", number: "CR-1", name: "Stale link" }],
+          }
+        : undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: 0,
+    }));
+
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /linked items/i }));
+
+    expect(
+      screen.queryByTestId("linked-change-requests-widget-probe"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders LinkedChangeRequestsWidget for a service request", () => {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id ? { ...buildCase(id), caseType: "service_request" } : undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: 0,
+    }));
+
+    // A service request's canonical route is /operations/service-requests/:id
+    // (see CASE_ROUTE_MOUNTS above) — mounting it on the plain /cases/:id
+    // route instead would trip the canonical-redirect skeleton rather than
+    // rendering the tabs.
+    renderPageAt(
+      "/operations/service-requests/case-1",
+      "/operations/service-requests/:caseId",
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /linked items/i }));
+
+    expect(
+      screen.getByTestId("linked-change-requests-widget-probe"),
+    ).toBeInTheDocument();
   });
 });

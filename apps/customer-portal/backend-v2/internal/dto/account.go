@@ -64,7 +64,7 @@ func MapSearchAccounts(r entity.SearchAccountsResponse) SearchAccountsResponse {
 			Tier:             firstNonNil(a.Tier, a.Classification),
 			Region:           a.Region,
 			SupportTier:      a.SupportTier,
-			Owner:            mapAccountRef(a.Owner),
+			Owner:            accountOwnerRef(a.Owner, a.AccountManager),
 			TechnicalOwner:   mapAccountRef(a.TechnicalOwner),
 			ActivationDate:   a.ActivationDate,
 			DeactivationDate: a.DeactivationDate,
@@ -113,7 +113,7 @@ func MapAccountDetails(a entity.AccountDetail) AccountDetails {
 		Tier:             firstNonNil(a.Tier, a.Classification),
 		Region:           a.Region,
 		SupportTier:      supportTier,
-		Owner:            mapAccountRef(a.Owner),
+		Owner:            accountOwnerRef(a.Owner, a.AccountManager),
 		TechnicalOwner:   mapAccountRef(a.TechnicalOwner),
 		ActivationDate:   a.ActivationDate,
 		DeactivationDate: a.DeactivationDate,
@@ -128,6 +128,19 @@ func MapAccountDetails(a entity.AccountDetail) AccountDetails {
 // Postgres owner/technicalOwner ID (no name attached) is intentionally
 // dropped rather than exposed as a nameless Ref — see AccountSummary's doc
 // comment.
+// accountOwnerRef resolves the account's owning person for the portal's `owner`
+// field. entity-service's unified account view renamed this `owner` ->
+// `accountManager`; the old key is preferred when present so a deployment still
+// emitting it is unaffected, and the new key is used otherwise. Without the
+// fallback, `owner` serialises as null for every account under both data
+// sources -- silently, since the field is optional.
+func accountOwnerRef(owner, accountManager *entity.EntityRef) *Ref {
+	if owner != nil {
+		return mapAccountRef(owner)
+	}
+	return mapAccountRef(accountManager)
+}
+
 func mapAccountRef(ref *entity.EntityRef) *Ref {
 	if ref == nil {
 		return nil

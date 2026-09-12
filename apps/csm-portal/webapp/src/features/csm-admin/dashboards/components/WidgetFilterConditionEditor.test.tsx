@@ -20,15 +20,18 @@ import "@testing-library/jest-dom/vitest";
 import { useState } from "react";
 import WidgetFilterConditionEditor from "@features/csm-admin/dashboards/components/WidgetFilterConditionEditor";
 import type { FilterCondition } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
+import type { BeDashboardFilterPreset } from "@api/backend/types";
 
 function Harness({
   initial,
   resourceType = "case",
   onChangeSpy,
+  presets,
 }: {
   initial: FilterCondition[];
   resourceType?: "case" | "incident";
   onChangeSpy?: (next: FilterCondition[]) => void;
+  presets?: BeDashboardFilterPreset[];
 }) {
   const [conditions, setConditions] = useState(initial);
   return (
@@ -39,9 +42,18 @@ function Harness({
         setConditions(next);
         onChangeSpy?.(next);
       }}
+      presets={presets}
     />
   );
 }
+
+const TEST_PRESETS: BeDashboardFilterPreset[] = [
+  {
+    name: "activeCaseStates",
+    filter: { field: "state", op: "in", values: ["open", "work_in_progress"] },
+  },
+  { name: "excludeDipTag", filter: { field: "tag", op: "notIn", values: ["s_dip"] } },
+];
 
 describe("WidgetFilterConditionEditor", () => {
   it("shows an empty-filters message and no rows when there are no conditions", () => {
@@ -130,5 +142,100 @@ describe("WidgetFilterConditionEditor", () => {
     // two ops offered for a non-case resourceType, but it must still show up
     // as the Select's own displayed value.
     expect(screen.getByRole("combobox", { name: "Operator" })).toHaveTextContent("is on/after (≥)");
+  });
+});
+
+describe("WidgetFilterConditionEditor — shared presets", () => {
+  it("offers 'Add preset' only when the deployment actually has presets", () => {
+    render(<Harness initial={[]} />);
+    expect(screen.queryByRole("button", { name: /add preset/i })).not.toBeInTheDocument();
+  });
+
+  it("offers 'Add preset' when presets exist for a case-like resourceType", () => {
+    render(<Harness initial={[]} presets={TEST_PRESETS} />);
+    expect(screen.getByRole("button", { name: /add preset/i })).toBeInTheDocument();
+  });
+
+  it("hides 'Add preset' for a non-case resourceType, which cannot express one", () => {
+    // Presets are expanded inside query.filters; no other resourceType's
+    // search contract has that array, so the affordance would be a trap.
+    render(<Harness initial={[]} resourceType="incident" presets={TEST_PRESETS} />);
+    expect(screen.queryByRole("button", { name: /add preset/i })).not.toBeInTheDocument();
+  });
+
+  it("adds a preset row with no name chosen yet", () => {
+    const spy = vi.fn();
+    render(<Harness initial={[]} presets={TEST_PRESETS} onChangeSpy={spy} />);
+    fireEvent.click(screen.getByRole("button", { name: /add preset/i }));
+    expect(spy).toHaveBeenCalledWith([
+      { field: "", op: "eq", values: [], preset: "" },
+    ]);
+    expect(screen.getByLabelText("Filter preset")).toBeInTheDocument();
+  });
+
+  it("renders a preset row as a preset picker, not as field/operator/values", () => {
+    render(
+      <Harness
+        initial={[{ field: "", op: "eq", values: [], preset: "activeCaseStates" }]}
+        presets={TEST_PRESETS}
+      />,
+    );
+    expect(screen.getByLabelText("Filter preset")).toHaveValue("activeCaseStates");
+    expect(screen.queryByLabelText("Filter field")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Filter value")).not.toBeInTheDocument();
+  });
+
+  it("shows what the chosen preset actually filters on", () => {
+    // The name alone does not say which states "active" means, and getting
+    // it wrong silently changes what the widget counts.
+    render(
+      <Harness
+        initial={[{ field: "", op: "eq", values: [], preset: "activeCaseStates" }]}
+        presets={TEST_PRESETS}
+      />,
+    );
+    expect(
+      screen.getByText(/state is any of open, work_in_progress/i),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps rendering a preset row whose name is not in the catalogue", () => {
+    // A definition may reference a preset this deployment does not define;
+    // the editor must not silently drop the row (which would erase it on the
+    // next save) — it shows it with no summary instead.
+    render(
+      <Harness
+        initial={[{ field: "", op: "eq", values: [], preset: "definedElsewhere" }]}
+        presets={TEST_PRESETS}
+      />,
+    );
+    expect(screen.getByLabelText("Filter preset")).toHaveValue("definedElsewhere");
+  });
+
+  it("removes a preset row via its own remove button", () => {
+    const spy = vi.fn();
+    render(
+      <Harness
+        initial={[{ field: "", op: "eq", values: [], preset: "activeCaseStates" }]}
+        presets={TEST_PRESETS}
+        onChangeSpy={spy}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /remove filter/i }));
+    expect(spy).toHaveBeenCalledWith([]);
+  });
+
+  it("keeps literal rows and preset rows side by side", () => {
+    render(
+      <Harness
+        initial={[
+          { field: "severity", op: "in", values: ["critical"] },
+          { field: "", op: "eq", values: [], preset: "excludeDipTag" },
+        ]}
+        presets={TEST_PRESETS}
+      />,
+    );
+    expect(screen.getByLabelText("Filter field")).toHaveValue("severity");
+    expect(screen.getByLabelText("Filter preset")).toHaveValue("excludeDipTag");
   });
 });

@@ -62,6 +62,17 @@ const (
 	ResourceSecurityReportAnalysis ResourceType = "security_report_analysis"
 	ResourceAnnouncement           ResourceType = "announcement"
 	ResourceEngagement             ResourceType = "engagement"
+	// ResourceCaseFeedback identifies a widget whose data is case-feedback
+	// (satisfaction rating) records rather than cases themselves. Like every
+	// other ResourceType, this layer only validates that the value is a known
+	// enum member -- it does not know, and does not need to know, that a
+	// "bar"+GroupBy.Bucket widget with this resourceType resolves via the
+	// webapp's own hook calling POST /cases/feedback/aggregate (see
+	// GroupByConfig.Bucket's doc comment). There is no
+	// resourceType->endpoint mapping anywhere server-side; the frontend picks
+	// the endpoint from resourceType entirely on its own, same as every other
+	// ResourceType here.
+	ResourceCaseFeedback ResourceType = "case_feedback"
 )
 
 // Shape is how a widget's resolved data should be rendered.
@@ -88,14 +99,32 @@ type GroupByConfig struct {
 	// Field is which field to group by. Each ResourceType enforces its own
 	// small allowlist server-side (see the corresponding SN Utils script
 	// include's group{X}By method) -- an unsupported value is rejected by
-	// that call with a 400, not caught here.
-	Field string `json:"field"`
+	// that call with a 400, not caught here. Mutually exclusive with Bucket
+	// (enforced at directory-load time): a widget sets exactly one.
+	Field string `json:"field,omitempty"`
+	// Bucket configures date-bucketed grouping instead of field-value
+	// grouping -- "day", "week", "month" (temporal buckets, a real time
+	// range in ascending chronological order), or one of the categorical
+	// buckets "rating", "reasons_very_dissatisfied", "reasons_dissatisfied",
+	// "reasons_neutral", "reasons_satisfied", "reasons_very_satisfied" (no
+	// ordering guarantee) -- enforced at directory-load time. Mutually
+	// exclusive with Field. This is the shape
+	// a case-feedback trend/distribution widget uses (ResourceCaseFeedback,
+	// Shape "bar" or "pie"): the frontend's own hook calls POST
+	// /cases/feedback/aggregate with this bucket value and maps its bucketed
+	// response into the same per-slice shape Slices/field-grouping already
+	// produce, same client-side-resolution philosophy as the rest of this
+	// type -- this layer never calls that endpoint itself, it only
+	// validates and forwards the config.
+	Bucket string `json:"bucket,omitempty"`
 	// MaxGroups is the top-N cutoff by count, descending; the remainder is
 	// summed into one "Others" bucket. Omitted/zero defers to the backing
-	// group-by endpoint's own default (12).
+	// group-by endpoint's own default (12). Meaningless when Bucket is set --
+	// a date-bucketed aggregation has no "Others" folding.
 	MaxGroups int `json:"maxGroups,omitempty"`
 	// OthersLabel overrides the default "Others" label for the summed
-	// remainder bucket. Omitted uses "Others".
+	// remainder bucket. Omitted uses "Others". Meaningless when Bucket is
+	// set, same as MaxGroups.
 	OthersLabel string `json:"othersLabel,omitempty"`
 }
 
@@ -270,6 +299,21 @@ type Dashboard struct {
 	IsTeamBased bool             `json:"isTeamBased"`
 	Widgets     []WidgetTemplate `json:"widgets"`
 
+	// IncludeSections pulls in shared, reusable runs of widgets by name --
+	// a section like "My Work" authored once in DASHBOARD_SECTIONS_FILE and
+	// shared by every dashboard that needs it, instead of copy-pasted per
+	// dashboard. Each entry names a section and carries the per-dashboard
+	// adjustments (id prefix, heading override, extra scoping filters, and
+	// whether it leads or trails this dashboard's own widgets) that let one
+	// definition serve dashboards that are not identical -- see
+	// SectionInclude and expandIncludedSections.
+	//
+	// Expanded into literal Widgets once, at load time, before every other
+	// step of the pipeline, and cleared to nil afterwards: nothing
+	// downstream (validation, the handler, the frontend) ever sees a
+	// section reference, only the widgets it stood for.
+	IncludeSections []SectionInclude `json:"includeSections,omitempty"`
+
 	// DefaultForTeamKeys lists team registry keys (BeTeam.id on the
 	// frontend, the values in this deployment's team registry -- not a
 	// group id) that should land a signed-in user on this dashboard by
@@ -334,11 +378,14 @@ func ParseDashboardsConfig(raw string) ([]Dashboard, error) {
 	for i, d := range dashboards {
 		loaded = append(loaded, sourced{dashboard: d, source: fmt.Sprintf("DASHBOARDS_CONFIG[%d]", i)})
 	}
-	// The deprecated single-variable path has no directory and therefore no
-	// DASHBOARD_PRESETS_FILE of its own to read here — nil shared presets, so
-	// only a dashboard's own "filterPresets" (if any) can resolve a
-	// {"preset": ...} reference on this path.
-	return finalize(loaded, false, nil)
+	// The deprecated single-variable path has no directory and therefore
+	// neither a DASHBOARD_PRESETS_FILE nor a DASHBOARD_SECTIONS_FILE of its
+	// own to read here — nil shared presets, so only a dashboard's own
+	// "filterPresets" (if any) can resolve a {"preset": ...} reference on
+	// this path, and nil shared sections, so an "includeSections" reference
+	// on this path always fails loud with the unknown key named rather than
+	// expanding to nothing.
+	return finalize(loaded, false, nil, nil)
 }
 
 // migrateLegacyWidgetKeys upgrades one pre-rename dashboard definition in

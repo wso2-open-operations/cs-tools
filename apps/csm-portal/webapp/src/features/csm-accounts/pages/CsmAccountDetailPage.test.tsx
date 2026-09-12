@@ -55,8 +55,8 @@ const BASE_ACCOUNT: Account = {
   region: "US",
   activationDate: "2026-01-01T00:00:00Z",
   ownerId: "owner-1",
-  agentEnabled: true,
-  kbReferencesEnabled: false,
+  hasAgent: true,
+  hasKbReferences: false,
   createdOn: "2026-01-01T00:00:00Z",
   updatedOn: "2026-01-01T00:00:00Z",
 };

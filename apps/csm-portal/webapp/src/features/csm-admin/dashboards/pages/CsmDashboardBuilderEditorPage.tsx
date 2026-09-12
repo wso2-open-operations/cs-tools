@@ -45,12 +45,18 @@ import DashboardWidgetGrid from "@features/csm-dashboard/components/DashboardWid
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
 import { WIDGET_GRID_SX } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import WidgetEditorDialog from "@features/csm-admin/dashboards/components/WidgetEditorDialog";
+import {
+  useDashboardFilterPresets,
+  useDashboardSharedSections,
+} from "@features/csm-admin/dashboards/api/useDashboardSharedConfig";
+import { deployableDashboardFromDraft } from "@features/csm-admin/dashboards/utils/sharedConfigDraftsStorage";
 import { isDraftDrifted } from "@features/csm-admin/dashboards/utils/dashboardDrift";
 import {
   newDraftId,
   saveDashboardDraft,
   useDashboardDraft,
   type DashboardDraft,
+  type SectionInclude,
 } from "@features/csm-admin/dashboards/utils/dashboardDraftsStorage";
 
 const DASHBOARD_TYPES = ["cre", "sre", "cs"] as const;
@@ -210,6 +216,33 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
     };
   }, []);
 
+  // Fetched here, not in the widget dialog, and the dialog is not mounted
+  // until it has settled: the dialog seeds its filter rows in a useState
+  // initializer that needs the catalogue on the very first render (see
+  // WidgetEditorDialogProps.presets). Starting the query at page mount means
+  // it is long cached by the time an admin opens a widget.
+  const {
+    data: filterPresets,
+    isError: filterPresetsFailed,
+    refetch: refetchFilterPresets,
+  } = useDashboardFilterPresets();
+  const {
+    data: sharedSections,
+    isPending: sharedSectionsPending,
+    isError: sharedSectionsFailed,
+    refetch: refetchSharedSections,
+  } = useDashboardSharedSections();
+
+  // Exporting without the preset catalogue can only LOSE something when the
+  // draft came from a deployed dashboard: those widgets hold the API's
+  // already-expanded filters, and collapse-back needs the catalogue to turn
+  // them into references again. A draft that was authored here has its
+  // references stored as {"preset": ...} in the draft already (the editor
+  // wrote them that way), so its export is lossless with or without the
+  // catalogue — blocking that case would break the builder for no gain, the
+  // same reasoning the widget-editor gate uses.
+  const exportCouldLoseReferences =
+    working?.sourceDashboardId !== undefined && filterPresets === undefined;
   const [editingWidget, setEditingWidget] = useState<
     { widget: BeDashboardWidget | undefined; defaultSection?: string } | undefined
   >(undefined);
@@ -338,18 +371,11 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
   };
 
   const handleCopyJson = async (): Promise<void> => {
-    // Only the fields that actually mean something in the deployed
-    // registry's own JSON shape — `id`/`sourceDashboardId`/
-    // `emptySections`/`updatedAt` are this builder's own local bookkeeping
-    // and have no home there (see `DashboardDraft`'s own doc comment).
-    const deployable = {
-      displayName: working.displayName,
-      type: working.type,
-      isDefault: working.isDefault,
-      isTeamBased: working.isTeamBased,
-      targetTeam: working.targetTeam,
-      widgets: working.widgets,
-    };
+    // Guarded here as well as on the button: a disabled button is a UI
+    // affordance, not an invariant, and this must not be reachable from
+    // anywhere else while the catalogue is missing.
+    if (exportCouldLoseReferences) return;
+    const deployable = deployableDashboardFromDraft(working, filterPresets);
     try {
       await navigator.clipboard.writeText(JSON.stringify(deployable, null, 2));
       setCopyFeedback(true);
@@ -379,8 +405,20 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
           <Typography variant="caption" color="text.secondary">
             {savedAt ? `Saved locally ${new Date(savedAt).toLocaleTimeString()}` : "Not saved yet"}
           </Typography>
-          <Tooltip title="Copy this dashboard's deployable JSON to the clipboard">
-            <Button size="small" variant="outlined" startIcon={<Copy size={14} />} onClick={() => void handleCopyJson()}>
+          <Tooltip
+            title={
+              exportCouldLoseReferences
+                ? "Unavailable while the shared filter presets cannot be loaded: exporting now would turn this dashboard's shared preset references into fixed copies."
+                : "Copy this dashboard's deployable JSON to the clipboard"
+            }
+          >
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Copy size={14} />}
+              disabled={exportCouldLoseReferences}
+              onClick={() => void handleCopyJson()}
+            >
               {copyFeedback ? "Copied!" : "Copy as JSON"}
             </Button>
           </Tooltip>
@@ -398,6 +436,32 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
         <Alert severity="info">
           Couldn't check this draft against what's currently deployed (GET /dashboards/{draftId}{" "}
           failed) — edits are still saved locally regardless.
+        </Alert>
+      )}
+
+      {filterPresetsFailed && (
+        // The widget editor stays shut while this is showing (see the
+        // editingWidget gate below). That is deliberate: without the preset
+        // catalogue, an existing widget's already-expanded filters cannot be
+        // recognised as the presets they came from, so opening the editor and
+        // saving would rewrite every shared reference on this dashboard as a
+        // literal -- silently, and with no way to tell afterwards. A shut
+        // editor with a reason beats a save that quietly strips references.
+        <Alert
+          severity="error"
+          action={
+            <Button
+              size="small"
+              color="inherit"
+              onClick={() => void refetchFilterPresets()}
+            >
+              Retry
+            </Button>
+          }
+        >
+          Could not load the shared filter presets, so widgets cannot be edited
+          safely right now — saving one would turn its shared preset references
+          into fixed copies. Everything else on this page still works.
         </Alert>
       )}
 
@@ -419,6 +483,13 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
             onChange={(e) => updateWorking({ type: (e.target.value || undefined) as DashboardDraft["type"] })}
             size="small"
             sx={{ minWidth: 160 }}
+            slotProps={{
+              inputLabel: {
+                shrink: (working.type ?? "") !== "",
+                sx: { top: "0px !important" },
+              },
+              select: { notched: (working.type ?? "") !== "" },
+            }}
           >
             <MenuItem value="">None</MenuItem>
             {DASHBOARD_TYPES.map((t) => (
@@ -470,6 +541,161 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
             </FormControl>
           )}
         </Box>
+      </SectionCard>
+
+      <SectionCard
+        title="Shared sections"
+        action={
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Plus size={14} />}
+            disabled={(sharedSections ?? []).length === 0}
+            onClick={() =>
+              updateWorking({
+                includeSections: [
+                  ...(working.includeSections ?? []),
+                  { section: (sharedSections ?? [])[0]?.name ?? "", position: "start" },
+                ],
+              })
+            }
+          >
+            Include a section
+          </Button>
+        }
+      >
+        {/* Three distinct states, not two. Collapsing "still loading" and
+            "the request failed" into the same empty-list message told the
+            admin this deployment has no shared sections, which in both cases
+            is a claim we have no basis for -- and the one case where it IS
+            true looks identical, so there was no way to tell them apart.
+            The failure notice sits ALONGSIDE the list rather than replacing
+            it: whatever this dashboard already includes is still real and
+            still removable, it just cannot be added to until the catalogue
+            loads. */}
+        {sharedSectionsFailed && (
+          <Alert
+            severity="error"
+            sx={{ mb: 1.5 }}
+            action={
+              <Button
+                size="small"
+                color="inherit"
+                onClick={() => void refetchSharedSections()}
+              >
+                Retry
+              </Button>
+            }
+          >
+            Could not load the shared sections, so there is nothing new to
+            choose from right now. Anything this dashboard already includes is
+            unaffected.
+          </Alert>
+        )}
+        {sharedSectionsPending ? (
+          <Typography variant="body2" color="text.secondary">
+            Loading shared sections&hellip;
+          </Typography>
+        ) : !sharedSectionsFailed && (sharedSections ?? []).length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            This deployment has no shared sections yet. Design one under
+            &ldquo;Shared presets &amp; sections&rdquo; on the dashboards list.
+          </Typography>
+        ) : (working.includeSections ?? []).length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            None. Including a shared section pulls its widgets in by reference,
+            so editing the section changes every dashboard that includes it.
+          </Typography>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            {(working.includeSections ?? []).map((include, index) => {
+              const patch = (next: Partial<SectionInclude>): void =>
+                updateWorking({
+                  includeSections: (working.includeSections ?? []).map((inc, i) =>
+                    i === index ? { ...inc, ...next } : inc,
+                  ),
+                });
+              return (
+                <Box
+                  key={index}
+                  sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "flex-start" }}
+                >
+                  <TextField
+                    select
+                    size="small"
+                    label="Section"
+                    value={include.section}
+                    onChange={(e) => patch({ section: e.target.value })}
+                    sx={{ minWidth: 200 }}
+                    slotProps={{
+                      inputLabel: { shrink: true, sx: { top: "0px !important" } },
+                      select: { notched: true },
+                    }}
+                  >
+                    {(sharedSections ?? []).map((sec) => (
+                      <MenuItem key={sec.name} value={sec.name}>
+                        {sec.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    select
+                    size="small"
+                    label="Position"
+                    value={include.position ?? "start"}
+                    onChange={(e) =>
+                      patch({ position: e.target.value as "start" | "end" })
+                    }
+                    sx={{ minWidth: 140 }}
+                    slotProps={{
+                      inputLabel: { shrink: true, sx: { top: "0px !important" } },
+                      select: { notched: true },
+                    }}
+                  >
+                    <MenuItem value="start">Before own widgets</MenuItem>
+                    <MenuItem value="end">After own widgets</MenuItem>
+                  </TextField>
+                  <TextField
+                    size="small"
+                    label="Widget id prefix"
+                    value={include.idPrefix ?? ""}
+                    onChange={(e) => patch({ idPrefix: e.target.value || undefined })}
+                    helperText="Optional, e.g. ob_"
+                    sx={{ minWidth: 150 }}
+                  />
+                  <TextField
+                    size="small"
+                    label="Heading override"
+                    value={include.displayName ?? ""}
+                    onChange={(e) => patch({ displayName: e.target.value || undefined })}
+                    helperText="Optional"
+                    sx={{ minWidth: 170 }}
+                  />
+                  <Tooltip title="Stop including this section">
+                    <IconButton
+                      size="small"
+                      aria-label={`Remove included section ${include.section}`}
+                      onClick={() =>
+                        updateWorking({
+                          includeSections: (working.includeSections ?? []).filter(
+                            (_, i) => i !== index,
+                          ),
+                        })
+                      }
+                    >
+                      <Trash2 size={16} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              );
+            })}
+            <Typography variant="caption" color="text.secondary">
+              Included widgets are not shown in the preview below: they are
+              resolved when the definition is loaded, from whatever the shared
+              section says at that moment.
+            </Typography>
+          </Box>
+        )}
       </SectionCard>
 
       <SectionCard
@@ -608,8 +834,15 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
         )}
       </SectionCard>
 
-      {editingWidget && (
+      {/* A NEW widget needs no catalogue: it has no server-expanded filters to
+          misread, and with no catalogue the editor simply offers no preset rows,
+          so nothing can be lost. Editing an EXISTING widget does need it —
+          without it, that widget's expanded filters would be re-saved as
+          literals and its shared references silently dropped. */}
+      {editingWidget &&
+        (editingWidget.widget === undefined || filterPresets !== undefined) && (
         <WidgetEditorDialog
+          presets={filterPresets}
           widget={editingWidget.widget}
           defaultSection={editingWidget.defaultSection}
           sectionSuggestions={sectionNames}

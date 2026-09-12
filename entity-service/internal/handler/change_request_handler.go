@@ -65,13 +65,13 @@ func (h *ChangeRequestHandler) SearchChangeRequests(w http.ResponseWriter, r *ht
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// GroupChangeRequestsBy handles POST /change-requests/group-by.
-func (h *ChangeRequestHandler) GroupChangeRequestsBy(w http.ResponseWriter, r *http.Request) {
-	var req domain.GroupChangeRequestsByRequest
+// AggregateChangeRequests handles POST /change-requests/aggregate.
+func (h *ChangeRequestHandler) AggregateChangeRequests(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateChangeRequestsRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.GroupChangeRequestsBy(r.Context(), req)
+	resp, err := h.svc.AggregateChangeRequests(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

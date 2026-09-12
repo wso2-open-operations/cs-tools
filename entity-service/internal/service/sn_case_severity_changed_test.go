@@ -65,7 +65,7 @@ func TestSNCaseService_UpdateCase_PublishesSeverityChanged(t *testing.T) {
 
 	client := newTestUpdateCaseClient(t, getCaseBody, updateCaseBody)
 	publisher := &mockEventPublisher{}
-	svc := NewServiceNowCaseService(client, nil, publisher)
+	svc := NewServiceNowCaseService(client, nil, publisher, noopSLAClockService{}, nil, "", nil)
 
 	newSeverity := domain.CaseSeverityLow
 	req := domain.UpdateCaseRequest{ID: caseID, Severity: &newSeverity}
@@ -149,7 +149,7 @@ func TestSNCaseService_UpdateCase_SkipsPublishSeverityChangedWhenNoWatchers(t *t
 
 	client := newTestUpdateCaseClient(t, getCaseBody, updateCaseBody)
 	publisher := &mockEventPublisher{}
-	svc := NewServiceNowCaseService(client, nil, publisher)
+	svc := NewServiceNowCaseService(client, nil, publisher, noopSLAClockService{}, nil, "", nil)
 
 	newSeverity := domain.CaseSeverityLow
 	req := domain.UpdateCaseRequest{ID: caseID, Severity: &newSeverity}
@@ -198,7 +198,7 @@ func TestSNCaseService_UpdateCase_SkipsPublishSeverityChangedWhenUnchanged(t *te
 
 	client := newTestUpdateCaseClient(t, getCaseBody, updateCaseBody)
 	publisher := &mockEventPublisher{}
-	svc := NewServiceNowCaseService(client, nil, publisher)
+	svc := NewServiceNowCaseService(client, nil, publisher, noopSLAClockService{}, nil, "", nil)
 
 	sameSeverity := domain.CaseSeverityHigh
 	req := domain.UpdateCaseRequest{ID: caseID, Severity: &sameSeverity}
@@ -254,7 +254,7 @@ func TestSNCaseService_UpdateCase_SkipsPublishSeverityChangedWhenPATCHResponseEc
 
 	client := newTestUpdateCaseClient(t, getCaseBody, updateCaseBody)
 	publisher := &mockEventPublisher{}
-	svc := NewServiceNowCaseService(client, nil, publisher)
+	svc := NewServiceNowCaseService(client, nil, publisher, noopSLAClockService{}, nil, "", nil)
 
 	newSeverity := domain.CaseSeverityLow
 	req := domain.UpdateCaseRequest{ID: caseID, Severity: &newSeverity}

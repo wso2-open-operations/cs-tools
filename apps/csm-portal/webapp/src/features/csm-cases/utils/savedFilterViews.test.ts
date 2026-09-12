@@ -15,11 +15,13 @@
 // under the License.
 
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteFilterView,
+  moveFilterView,
   saveFilterView,
   useSavedFilterViews,
+  type SavedFilterView,
 } from "./savedFilterViews";
 
 beforeEach(() => {
@@ -80,5 +82,58 @@ describe("savedFilterViews", () => {
     act(() => saveFilterView("Drop", "states=closed"));
     act(() => deleteFilterView("DROP"));
     expect(reader.result.current.map((v) => v.name)).toEqual(["Keep"]);
+  });
+
+  describe("moveFilterView", () => {
+    // Saved newest-first: saving A, B, C in order leaves storage as [C, B, A].
+    function seedThree(reader: { result: { current: SavedFilterView[] } }): void {
+      act(() => saveFilterView("A", "states=open"));
+      act(() => saveFilterView("B", "states=closed"));
+      act(() => saveFilterView("C", "states=awaiting_info"));
+      expect(reader.result.current.map((v) => v.name)).toEqual(["C", "B", "A"]);
+    }
+
+    it("moving the first item up is a no-op", () => {
+      const reader = renderHook(() => useSavedFilterViews());
+      seedThree(reader);
+      act(() => moveFilterView("C", "up"));
+      expect(reader.result.current.map((v) => v.name)).toEqual(["C", "B", "A"]);
+    });
+
+    it("moving the last item down is a no-op", () => {
+      const reader = renderHook(() => useSavedFilterViews());
+      seedThree(reader);
+      act(() => moveFilterView("A", "down"));
+      expect(reader.result.current.map((v) => v.name)).toEqual(["C", "B", "A"]);
+    });
+
+    it("swaps two adjacent entries and persists the new order", () => {
+      const reader = renderHook(() => useSavedFilterViews());
+      seedThree(reader);
+      act(() => moveFilterView("B", "up"));
+      expect(reader.result.current.map((v) => v.name)).toEqual(["B", "C", "A"]);
+
+      // Persisted, not just in-memory: a fresh mount sees the same order.
+      const remount = renderHook(() => useSavedFilterViews());
+      expect(remount.result.current.map((v) => v.name)).toEqual(["B", "C", "A"]);
+    });
+
+    it("is a no-op for an unknown name", () => {
+      const reader = renderHook(() => useSavedFilterViews());
+      seedThree(reader);
+      act(() => moveFilterView("Nonexistent", "up"));
+      expect(reader.result.current.map((v) => v.name)).toEqual(["C", "B", "A"]);
+    });
+
+    it("fires the change event so other mounted components pick up the reorder", () => {
+      const reader = renderHook(() => useSavedFilterViews());
+      seedThree(reader);
+      const listener = vi.fn();
+      window.addEventListener("csm:saved-filters-changed", listener);
+      act(() => moveFilterView("B", "down"));
+      window.removeEventListener("csm:saved-filters-changed", listener);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(reader.result.current.map((v) => v.name)).toEqual(["C", "A", "B"]);
+    });
   });
 });

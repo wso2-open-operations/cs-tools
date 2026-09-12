@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { Card, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
@@ -23,7 +24,7 @@ import { SeverityChip, StatusChip } from "./Chips";
 import { TYPE_CONFIG } from "./config";
 
 export function CaseCard({ item }: { item: CaseSummary }) {
-  const theme = useTheme();
+  const theme = useTheme<OxygenTheme>();
   const { icon: Icon, color } = TYPE_CONFIG[item.type] ?? TYPE_CONFIG.case;
 
   return (
@@ -44,7 +45,7 @@ export function CaseCard({ item }: { item: CaseSummary }) {
               {item.number}
             </Typography>
           </Stack>
-          <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
+          <ChevronRight size={pxToRem(18)} color={theme.vars.palette.text.secondary} />
         </Stack>
 
         <Typography variant="body1" color="text.primary" noWrap>
@@ -59,7 +60,7 @@ export function CaseCard({ item }: { item: CaseSummary }) {
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" mt={0.5}>
           <Stack direction="row" alignItems="center" gap={0.5} flexShrink={0}>
-            <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
+            <Clock4 size={pxToRem(13)} color={theme.vars.palette.text.secondary} />
             <Typography variant="subtitle2" color="text.secondary" sx={{ fontSize: pxToRem(12) }}>
               Updated {fromNow(item.updatedOn)}
             </Typography>

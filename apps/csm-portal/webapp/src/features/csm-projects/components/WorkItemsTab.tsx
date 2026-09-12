@@ -53,6 +53,18 @@ interface WorkItemsTabProps {
  * closed `<Select multiple>` dropdown already, not an inline checkbox list)
  * rather than introducing a new control.
  *
+ * `hideOnboardingStatusFilter`/`hideCreTeamFilter` are also passed: both are
+ * per-project attributes (a project's onboarding status, the CS team its
+ * account is scoped to), so every work item on this already project-scoped
+ * tab shares the same value for each — filtering by them here is a no-op
+ * that only adds clutter. `showSeverityFilter` is passed `true` (overriding
+ * `CsmIssuesView`'s own "only when type is locked to Case" default, which
+ * would never fire here since this tab's type filter is unlocked): Severity
+ * is still a genuinely useful control on this mixed list, since narrowing by
+ * it implicitly narrows to Case-type rows (the only type severity applies
+ * to) the same way picking "Case" in the Work item type control would;
+ * non-case rows simply have no severity to match a picked value.
+ *
  * Conversations is the project's chat sessions (`ConversationsTab`), kept as
  * its own sub-tab alongside the flat issues list rather than a third
  * top-level project tab — it was already nested here before this revamp.
@@ -80,6 +92,9 @@ export default function WorkItemsTab({ projectId }: WorkItemsTabProps): JSX.Elem
           entityNoun="work items"
           lockedFilters={{ projects: [projectId] }}
           hideProjectFilter
+          hideOnboardingStatusFilter
+          hideCreTeamFilter
+          showSeverityFilter
           typeFilterLabel="Work item type"
           hideBackButton
         />

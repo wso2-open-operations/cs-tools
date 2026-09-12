@@ -255,3 +255,68 @@ export function caseSearchWithoutSeverity(page: Page): Promise<Response> {
     { timeout: SEARCH_TIMEOUT_MS },
   );
 }
+
+/**
+ * Starts waiting for a case search carrying — or not carrying — a status filter.
+ *
+ * Call this **before** applying or clearing the filter, then await it after: the
+ * "no filter" form also describes the page's own first load, so arming it
+ * beforehand is what ties the wait to the change under test.
+ *
+ * @param page - Test page.
+ * @param filtered - True to match a request with statuses, false for one without.
+ * @returns Promise for the matching search response.
+ */
+export function caseSearchWithStatusFilter(
+  page: Page,
+  filtered: boolean,
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      if (!isCaseSearch(response)) return false;
+      const statusIds = searchFilters(
+        response.request().postData(),
+      )?.statusIds;
+      const hasStatuses = !!statusIds && statusIds.length > 0;
+      return hasStatuses === filtered;
+    },
+    { timeout: SEARCH_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Starts waiting for a case search sorted a particular way.
+ *
+ * `sortBy` sits at the root of the body rather than inside `filters`, so it is
+ * read separately from the filter helpers above.
+ *
+ * @param page - Test page.
+ * @param field - Sort field the request must carry, e.g. "state".
+ * @param order - Sort order, e.g. "asc".
+ * @returns Promise for the matching search response.
+ */
+export function caseSearchWithSort(
+  page: Page,
+  field: string,
+  order: string,
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      if (!isCaseSearch(response)) return false;
+      const postData = response.request().postData();
+      if (!postData) return false;
+      try {
+        const body = JSON.parse(postData) as {
+          sortBy?: { field?: string; order?: string };
+        };
+        return (
+          body.sortBy?.field === field &&
+          body.sortBy?.order?.toLowerCase() === order.toLowerCase()
+        );
+      } catch {
+        return false;
+      }
+    },
+    { timeout: SEARCH_TIMEOUT_MS },
+  );
+}

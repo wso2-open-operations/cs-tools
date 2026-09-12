@@ -52,10 +52,24 @@ type CaseRepository interface {
 	// SearchCaseComments returns a paginated slice of comments for the given case
 	// together with the total count of matching rows before pagination.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
-	// UpdateCase updates the state and/or priority of the case identified by req.ID.
-	// closed_at is set to NOW() when transitioning to closed.
+	// UpdateCase updates the state and/or priority of the case identified by
+	// req.ID. closed_at is set to NOW() when transitioning to closed.
+	//
+	// previousSeverity is the case's severity as it stood immediately before
+	// this update. When req.Severity is nil, severity can't have changed at
+	// all, so this just equals the returned domain.Case.Severity — no extra
+	// work needed. When req.Severity is set, this runs inside a transaction
+	// that locks the row (SELECT ... FOR UPDATE) before reading its prior
+	// severity and applying the update, so previousSeverity is accurate even
+	// under a concurrent update to the same case: a plain separate
+	// read-then-write (what this used to do) could either miss a genuine
+	// LOW-severity-boundary crossing or double-detect one, depending on how
+	// two concurrent updates interleave — see caseService.
+	// detectBillableStatusChange, the sole caller that needs this value, and
+	// the CodeRabbit finding on PR #1683 this fixes.
+	//
 	// Returns a NotFoundError if no matching row exists.
-	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
+	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (c domain.Case, previousSeverity domain.CaseSeverity, err error)
 	// CreateCaseAttachment inserts a new attachment metadata row for the case
 	// identified by req.ReferenceID. req.StorageKey must be non-nil: this data
 	// source stores file bytes externally in SFTPGo, never inline in Postgres.
@@ -323,8 +337,39 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	return comments, total, nil
 }
 
+// updateCaseQuery is shared by both branches of UpdateCase below.
+const updateCaseQuery = `
+	UPDATE cases
+	SET state      = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
+	    severity   = CASE WHEN $3 <> '' THEN $3::case_severity_enum ELSE severity END,
+	    work_state = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
+	    updated_at = NOW(),
+	    closed_at  = CASE WHEN $2 = 'closed' THEN NOW() WHEN $2 <> '' AND $2 <> 'closed' THEN NULL ELSE closed_at END
+	WHERE id = $1
+	RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
+	          subject, description, severity, issue_type, state, work_state, created_at, updated_at, closed_at`
+
+// scanUpdatedCase is shared by both branches of UpdateCase below.
+func scanUpdatedCase(row pgx.Row) (domain.Case, error) {
+	var c domain.Case
+	var workStateRaw *string
+	if err := row.Scan(
+		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
+		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
+		&c.Subject, &c.Description, &c.Severity, &c.IssueType, &c.State, &workStateRaw,
+		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
+	); err != nil {
+		return domain.Case{}, err
+	}
+	if workStateRaw != nil {
+		ws := domain.CaseWorkState(*workStateRaw)
+		c.WorkState = &ws
+	}
+	return c, nil
+}
+
 // UpdateCase implements CaseRepository.
-func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
+func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, domain.CaseSeverity, error) {
 	state := ""
 	if req.State != nil {
 		state = string(*req.State)
@@ -337,36 +382,47 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 	if req.WorkState != nil {
 		workState = string(*req.WorkState)
 	}
-	const query = `
-		UPDATE cases
-		SET state      = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
-		    severity   = CASE WHEN $3 <> '' THEN $3::case_severity_enum ELSE severity END,
-		    work_state = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
-		    updated_at = NOW(),
-		    closed_at  = CASE WHEN $2 = 'closed' THEN NOW() WHEN $2 <> '' AND $2 <> 'closed' THEN NULL ELSE closed_at END
-		WHERE id = $1
-		RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
-		          subject, description, severity, issue_type, state, work_state, created_at, updated_at, closed_at`
 
-	var c domain.Case
-	var workStateRaw *string
-	err := r.db.QueryRow(ctx, query, req.ID, state, severity, workState).Scan(
-		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
-		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
-		&c.Subject, &c.Description, &c.Severity, &c.IssueType, &c.State, &workStateRaw,
-		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
-	)
+	// req.Severity == nil: severity can't change, so there's nothing to
+	// race on — skip the transaction/lock overhead entirely.
+	if req.Severity == nil {
+		c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Case{}, "", &apierror.NotFoundError{Msg: "case not found"}
+		}
+		if err != nil {
+			return domain.Case{}, "", fmt.Errorf("update case: %w", err)
+		}
+		return c, c.Severity, nil
+	}
+
+	// req.Severity != nil: lock the row first so the previous severity this
+	// returns is accurate even under a concurrent update to the same case —
+	// see this method's own interface doc comment for why that matters.
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.Case{}, "", fmt.Errorf("update case: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var previousSeverity domain.CaseSeverity
+	err = tx.QueryRow(ctx, `SELECT severity FROM cases WHERE id = $1 FOR UPDATE`, req.ID).Scan(&previousSeverity)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Case{}, &apierror.NotFoundError{Msg: "case not found"}
+		return domain.Case{}, "", &apierror.NotFoundError{Msg: "case not found"}
 	}
 	if err != nil {
-		return domain.Case{}, fmt.Errorf("update case: %w", err)
+		return domain.Case{}, "", fmt.Errorf("update case: lock row: %w", err)
 	}
-	if workStateRaw != nil {
-		ws := domain.CaseWorkState(*workStateRaw)
-		c.WorkState = &ws
+
+	c, err := scanUpdatedCase(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState))
+	if err != nil {
+		return domain.Case{}, "", fmt.Errorf("update case: %w", err)
 	}
-	return c, nil
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Case{}, "", fmt.Errorf("update case: commit tx: %w", err)
+	}
+	return c, previousSeverity, nil
 }
 
 // CreateCaseAttachment implements CaseRepository.

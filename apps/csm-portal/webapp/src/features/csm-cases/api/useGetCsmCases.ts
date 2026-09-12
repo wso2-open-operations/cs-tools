@@ -25,6 +25,8 @@ import {
   mapCaseSearchViewToRow,
   resolveAssignedUserIds,
 } from "@features/csm-cases/utils/caseSearchPayload";
+import { resolveRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
+import { resolveAdvancedFilterDateValues } from "@features/csm-cases/utils/advancedFilters";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { classifyCaseQuery } from "@features/csm-cases/utils/caseQueryScope";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -36,6 +38,7 @@ import type {
 } from "@features/csm-cases/types/csmCases";
 import {
   DEFAULT_CASES_SORT,
+  type CasesSortField,
   type CasesSortOrder,
 } from "@features/csm-cases/utils/casesSort";
 
@@ -51,12 +54,11 @@ const EXACT_MATCH_LIMIT = 5;
  *
  * Does a single `POST /cases/search` (the flat, cross-project search)
  * and maps each rich `CaseSearchView` — which embeds project / deployment /
- * deployed-product — to the UI `CsmCaseRow`. The list has no Customer column,
- * so the customer (account) name is deliberately not resolved: doing so used to
- * page the entire account directory (`/accounts/search` has no ID filter, and
- * the case search view doesn't embed the account) to fill a field nothing
- * renders. If a Customer column is added, resolve the name from the search view
- * once it carries the account, not by scanning the directory.
+ * deployed-product / account — to the UI `CsmCaseRow`. The optional Customer
+ * column reads `account.name` straight off this response; no separate
+ * `/accounts/search` directory scan is needed (that endpoint has no ID
+ * filter anyway, so scanning it per row would have been the wrong approach
+ * regardless).
  *
  * Search and the severity / state / case-type / project filters are pushed
  * into the search payload (searchQuery / severities / states / types /
@@ -64,11 +66,13 @@ const EXACT_MATCH_LIMIT = 5;
  * `limit` / `offset` / `hasMore`).
  *
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
- * limit (≤ the backend's page-size cap, `BE_MAX_PAGE_LIMIT`). Cases are always sorted by `updatedOn`;
- * `sortOrder` (default `"desc"`) controls direction, so the cases page loads
- * the most recently updated cases on arrival by default but can be flipped
- * to oldest-updated-first. `enabled` is an optional escape hatch to suspend
- * the fetch.
+ * limit (≤ the backend's page-size cap, `BE_MAX_PAGE_LIMIT`). `sortField`
+ * (default `"updatedOn"`) picks which column drives the server-side sort —
+ * `createdOn`, `updatedOn`, `severity`, or `state` — and `sortOrder` (default
+ * `"desc"`) controls direction, so the cases page loads the most recently
+ * updated cases on arrival by default but can be flipped or repointed at a
+ * different column. `enabled` is an optional escape hatch to suspend the
+ * fetch.
  */
 export function useGetCsmCases(
   filters: CasesFilters,
@@ -76,6 +80,7 @@ export function useGetCsmCases(
   pageSize: number,
   enabled = true,
   sortOrder: CasesSortOrder = DEFAULT_CASES_SORT.order,
+  sortField: CasesSortField = DEFAULT_CASES_SORT.field,
 ): UseQueryResult<CsmCasesListResponse, Error> {
   const logger = useLogger();
   const api = useBackendApi();
@@ -104,21 +109,53 @@ export function useGetCsmCases(
     // engineer emails (+ the `@me` sentinel); it's resolved to UUIDs in the
     // queryFn, but keying on the raw selection is enough since resolution is
     // deterministic. `currentUserEmail` is already in the key, covering `@me`.
+    // Every field of `CasesFilters` that reaches `buildCaseSearchFilters`
+    // below must appear here — one that doesn't (as `csTeams` didn't, until
+    // its own bar control made that visible) makes React Query treat a
+    // changed filter as the same query and skip the refetch entirely.
     queryKey: [
       ApiQueryKeys.CSM_CASES,
       search,
       [...filters.severities].sort(),
       [...filters.states].sort(),
+      [...filters.excludeStates].sort(),
       [...filters.caseTypes].sort(),
       [...filters.workStates].sort(),
       [...filters.assignees].sort(),
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
       [...filters.productNames].sort(),
+      [...filters.csTeams].sort(),
+      [...filters.sreTeams].sort(),
+      [...filters.tags].sort(),
+      [...filters.excludeTags].sort(),
+      [...filters.onboardingStatuses].sort(),
+      [...filters.escalationLevels].sort(),
+      [...filters.projectTypes].sort(),
+      filters.slaElapsedPctGte,
+      filters.slaElapsedPctLte,
+      filters.hasEscalation,
+      filters.createdOnGte,
+      filters.createdOnLte,
+      filters.updatedOnGte,
+      filters.updatedOnLte,
+      filters.closedOnGte,
+      filters.closedOnLte,
+      // JSON-stable-enough for a query key: row order is already
+      // user-controlled (add/remove), and every field/op/values combination
+      // that would otherwise collide is exactly the same shape the `/cases/
+      // search` payload itself carries — no separate normalization needed
+      // here beyond what `buildCaseSearchFilters` already applies.
+      JSON.stringify(filters.advancedFilters),
+      // Same reasoning as `advancedFilters` above — every field/values
+      // combination an OR-group row carries is already the exact shape the
+      // request payload itself sends.
+      JSON.stringify(filters.anyOfBranches),
       currentUserEmail ?? "",
       wantsMe ? (currentUserId ?? "") : "",
       page,
       pageSize,
+      sortField,
       sortOrder,
     ],
     queryFn: async (): Promise<CsmCasesListResponse> => {
@@ -147,18 +184,48 @@ export function useGetCsmCases(
         assignedUserIds = resolved;
       }
 
-      // One cross-project case search. No account/project directory scan: the
-      // list has no Customer column, and the old scan paged the entire account
-      // directory to resolve a name nothing renders.
+      // Resolve `createdOnGte`/`createdOnLte`/`updatedOnGte`/`updatedOnLte`/
+      // `closedOnGte`/`closedOnLte` relative-date placeholders (`__today__`,
+      // `__daysAgo:N__`, ... -- same grammar and resolver as the dashboard
+      // widgets' own `resolveRelativeDateFilters`) against the viewer's own
+      // browser-local "now", right here at query-build time -- no backend
+      // change, and "today" correctly means whatever moment the link is
+      // opened, not a moment baked into the URL. Anything that isn't a
+      // recognized placeholder (a literal `YYYY-MM-DD`, or garbage) passes
+      // through unchanged.
+      const now = new Date();
+      const resolveBound = (
+        raw: string | null,
+        op: "gte" | "lte",
+      ): string | null =>
+        raw === null ? null : (resolveRelativeDatePlaceholder(raw, op, now) ?? raw);
+      const resolvedFilters: CasesFilters = {
+        ...filters,
+        createdOnGte: resolveBound(filters.createdOnGte, "gte"),
+        createdOnLte: resolveBound(filters.createdOnLte, "lte"),
+        updatedOnGte: resolveBound(filters.updatedOnGte, "gte"),
+        updatedOnLte: resolveBound(filters.updatedOnLte, "lte"),
+        closedOnGte: resolveBound(filters.closedOnGte, "gte"),
+        closedOnLte: resolveBound(filters.closedOnLte, "lte"),
+        // Same relative-date resolution, extended to any `createdOn`/
+        // `updatedOn`/`closedOn` row from the "Advanced filters" builder —
+        // see `resolveAdvancedFilterDateValues`.
+        advancedFilters: resolveAdvancedFilterDateValues(filters.advancedFilters, now),
+      };
+
+      // One cross-project case search. No separate account/project directory
+      // scan needed: the search response already embeds `account`, which
+      // `mapCaseSearchViewToRow` reads directly for the optional Customer
+      // column.
       const runSearch = (
         searchOptions?: { forceFreeText?: boolean; alsoFreeText?: boolean },
         pagination = { offset, limit: pageSize },
       ): Promise<BeCaseSearchResponse> =>
         api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
           pagination,
-          sortBy: { field: "updatedOn", order: sortOrder },
+          sortBy: { field: sortField, order: sortOrder },
           filters: buildCaseSearchFilters(
-            filters,
+            resolvedFilters,
             search,
             assignedUserIds,
             searchOptions,

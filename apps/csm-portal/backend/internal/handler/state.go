@@ -32,6 +32,11 @@ const relatedCaseWindow = 60 * 24 * time.Hour
 // create flows that don't accept a relatedCaseId today.
 const caseTypeCase = "case"
 
+// caseTypeAnnouncement is a case type with no work-in-progress workflow: it
+// publishes immediately and may never carry an assigned engineer. The
+// comment-creation state/ownership gate in cases.go carves this type out.
+const caseTypeAnnouncement = "announcement"
+
 const (
 	caseStateOpen             = "open"
 	caseStateWorkInProgress   = "work_in_progress"

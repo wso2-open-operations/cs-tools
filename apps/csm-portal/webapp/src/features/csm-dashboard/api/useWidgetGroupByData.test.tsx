@@ -64,7 +64,7 @@ describe("useWidgetGroupByData", () => {
 
     expect(postMock).toHaveBeenCalledTimes(1);
     expect(postMock).toHaveBeenCalledWith(
-      "/cases/group-by",
+      "/cases/aggregate",
       {
         filters: { states: ["open"] },
         groupBy: "severity",
@@ -209,7 +209,7 @@ describe("useWidgetGroupByData", () => {
     await waitFor(() => expect(postMock).toHaveBeenCalled());
 
     expect(postMock).toHaveBeenCalledWith(
-      "/cases/group-by",
+      "/cases/aggregate",
       {
         filters: {
           filters: [

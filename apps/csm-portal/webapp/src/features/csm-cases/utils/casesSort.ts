@@ -15,12 +15,12 @@
 // under the License.
 
 /**
- * Sort fields the cases list exposes to the user via the "Updated" column
- * header. `/cases/search` also accepts `severity` / `state` (see
- * `BeCaseSortField`), but those columns already have their own filters and
- * don't need a sort toggle.
+ * Sort fields the cases list exposes to the user via a clickable column
+ * header: Created, Updated, Severity, and State. Matches `BeCaseSortField`
+ * one-for-one (see `@api/backend/types`) — every value here is already
+ * accepted end-to-end by `/cases/search`.
  */
-export type CasesSortField = "createdOn" | "updatedOn";
+export type CasesSortField = "createdOn" | "updatedOn" | "severity" | "state";
 export type CasesSortOrder = "asc" | "desc";
 
 export const DEFAULT_CASES_SORT: {

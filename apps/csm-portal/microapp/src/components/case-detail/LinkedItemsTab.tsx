@@ -15,6 +15,7 @@
 // under the License.
 
 import { useMemo, type JSX, type ReactNode } from "react";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { Box, Button, Card, Chip, Skeleton, Stack, Tooltip, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, GitFork, GitPullRequest, Link as LinkIcon, Plus } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
@@ -146,7 +147,7 @@ function CaseRow({
    * shared child-cases search resolves. */
   loading?: boolean;
 }): JSX.Element {
-  const theme = useTheme();
+  const theme = useTheme<OxygenTheme>();
   return (
     <Card component={Link} to={to} variant="outlined" sx={{ textDecoration: "none", p: 1, display: "block" }}>
       <Stack direction="row" alignItems="center" gap={1}>
@@ -164,7 +165,7 @@ function CaseRow({
             )}
           </Stack>
         </Stack>
-        <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} style={{ flexShrink: 0 }} />
+        <ChevronRight size={pxToRem(18)} color={theme.vars.palette.text.secondary} style={{ flexShrink: 0 }} />
       </Stack>
     </Card>
   );

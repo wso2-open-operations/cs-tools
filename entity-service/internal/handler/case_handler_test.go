@@ -43,6 +43,28 @@ type stubCaseService struct {
 	searchTagsReq    domain.SearchTagsRequest
 	searchTagsTags   []domain.Tag
 	searchTagsErr    error
+
+	getAttachmentCalled bool
+	getAttachmentID     string
+	getAttachmentResp   domain.AttachmentDetails
+	getAttachmentErr    error
+
+	updateAttachmentCalled bool
+	updateAttachmentReq    domain.UpdateAttachmentRequest
+	updateAttachmentResp   domain.UpdateAttachmentResponse
+	updateAttachmentErr    error
+}
+
+func (s *stubCaseService) GetAttachmentByID(_ context.Context, attachmentID string) (domain.AttachmentDetails, error) {
+	s.getAttachmentCalled = true
+	s.getAttachmentID = attachmentID
+	return s.getAttachmentResp, s.getAttachmentErr
+}
+
+func (s *stubCaseService) UpdateAttachment(_ context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
+	s.updateAttachmentCalled = true
+	s.updateAttachmentReq = req
+	return s.updateAttachmentResp, s.updateAttachmentErr
 }
 
 func (s *stubCaseService) CreateCaseAttachment(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
@@ -295,6 +317,92 @@ func TestSearchTagsQuery_NoParams(t *testing.T) {
 	}
 	if (stub.searchTagsReq != domain.SearchTagsRequest{}) {
 		t.Fatalf("expected a zero request, got %#v", stub.searchTagsReq)
+	}
+}
+
+// TestGetAttachment_PassesPathIDToService pins the GET /attachments/{id} handler's
+// wiring: the path value must reach the service layer as-is (the service layer
+// owns UUID validation), and the response body must round-trip the service result.
+func TestGetAttachment_PassesPathIDToService(t *testing.T) {
+	const attachmentID = "11111111-1111-1111-1111-111111111111"
+	stub := &stubCaseService{getAttachmentResp: domain.AttachmentDetails{ID: attachmentID, Name: "logs.txt"}}
+	h := NewCaseHandler(stub)
+
+	req := httptest.NewRequest(http.MethodGet, "/attachments/"+attachmentID, nil)
+	req.SetPathValue("id", attachmentID)
+	rec := httptest.NewRecorder()
+
+	h.GetAttachmentByID(rec, req)
+
+	if !stub.getAttachmentCalled {
+		t.Fatalf("expected GetAttachmentByID to reach the service layer")
+	}
+	if stub.getAttachmentID != attachmentID {
+		t.Fatalf("service saw id %q, want %q", stub.getAttachmentID, attachmentID)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "logs.txt") {
+		t.Fatalf("expected response body to contain the attachment name, got: %s", rec.Body.String())
+	}
+}
+
+// TestUpdateAttachment_DecodesBodyAndPathID pins the PATCH /attachments/{id}
+// handler's wiring: the path id populates req.AttachmentID (the request body has
+// no id field of its own -- see domain.UpdateAttachmentRequest's `json:"-"` tag),
+// and the JSON body fields decode into the rest of the request.
+func TestUpdateAttachment_DecodesBodyAndPathID(t *testing.T) {
+	const attachmentID = "11111111-1111-1111-1111-111111111111"
+	stub := &stubCaseService{
+		updateAttachmentResp: domain.UpdateAttachmentResponse{Message: "updated"},
+	}
+	h := NewCaseHandler(stub)
+
+	body := `{"referenceId":"22222222-2222-2222-2222-222222222222","referenceType":"deployment","name":"renamed.txt"}`
+	req := httptest.NewRequest(http.MethodPatch, "/attachments/"+attachmentID, strings.NewReader(body))
+	req.SetPathValue("id", attachmentID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateAttachment(rec, req)
+
+	if !stub.updateAttachmentCalled {
+		t.Fatalf("expected UpdateAttachment to reach the service layer, got status %d body %q", rec.Code, rec.Body.String())
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if stub.updateAttachmentReq.AttachmentID != attachmentID {
+		t.Fatalf("AttachmentID = %q, want %q (from the URL path, not the body)", stub.updateAttachmentReq.AttachmentID, attachmentID)
+	}
+	if stub.updateAttachmentReq.ReferenceID != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("ReferenceID = %q, want the decoded body value", stub.updateAttachmentReq.ReferenceID)
+	}
+	if stub.updateAttachmentReq.ReferenceType != domain.ReferenceTypeDeployment {
+		t.Fatalf("ReferenceType = %q, want %q", stub.updateAttachmentReq.ReferenceType, domain.ReferenceTypeDeployment)
+	}
+	if stub.updateAttachmentReq.Name == nil || *stub.updateAttachmentReq.Name != "renamed.txt" {
+		t.Fatalf("Name = %v, want renamed.txt", stub.updateAttachmentReq.Name)
+	}
+}
+
+// TestUpdateAttachment_RejectsMalformedBody proves a body the decoder cannot
+// parse is rejected before the service layer runs.
+func TestUpdateAttachment_RejectsMalformedBody(t *testing.T) {
+	stub := &stubCaseService{}
+	h := NewCaseHandler(stub)
+
+	req := httptest.NewRequest(http.MethodPatch, "/attachments/x", strings.NewReader(`{"name":`))
+	req.SetPathValue("id", "11111111-1111-1111-1111-111111111111")
+	rec := httptest.NewRecorder()
+
+	h.UpdateAttachment(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if stub.updateAttachmentCalled {
+		t.Fatalf("expected the request to be rejected before the service layer")
 	}
 }
 

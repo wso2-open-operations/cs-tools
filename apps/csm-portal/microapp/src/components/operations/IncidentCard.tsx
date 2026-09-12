@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { Card, Chip, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
@@ -26,7 +27,7 @@ import { incidentPriorityColor, incidentPriorityLabel, incidentStateColor, incid
 // type allows — see incident.dto.ts); when absent the card renders as plain, non-navigable content
 // instead of linking to "/operations/incidents/null".
 export function IncidentCard({ item }: { item: IncidentSummary }) {
-  const theme = useTheme();
+  const theme = useTheme<OxygenTheme>();
 
   const content = (
     <Stack gap={0.75}>
@@ -34,7 +35,7 @@ export function IncidentCard({ item }: { item: IncidentSummary }) {
         <Typography variant="subtitle2" color="text.secondary">
           {item.number}
         </Typography>
-        {item.id && <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />}
+        {item.id && <ChevronRight size={pxToRem(18)} color={theme.vars.palette.text.secondary} />}
       </Stack>
 
       <Typography variant="body1" color="text.primary" noWrap>
@@ -62,7 +63,7 @@ export function IncidentCard({ item }: { item: IncidentSummary }) {
       </Stack>
 
       <Stack direction="row" alignItems="center" gap={0.5}>
-        <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
+        <Clock4 size={pxToRem(13)} color={theme.vars.palette.text.secondary} />
         <Typography variant="subtitle2" color="text.secondary" sx={{ fontSize: pxToRem(12) }}>
           Updated {item.updatedOn ? fromNow(item.updatedOn) : "—"}
         </Typography>

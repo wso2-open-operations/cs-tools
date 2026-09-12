@@ -103,10 +103,14 @@ export interface UserTeamRef {
  * One project-contact row for an external user, reported as stored rather
  * than as filtered. A row with no linked contact record makes the project,
  * and every case on it, silently invisible to that user —
- * {@link grantsCaseAccess} is the verdict, mirroring
- * {@link contactRecordPresent} directly (deliberately not the stricter
- * email-match rule the live access check enforces, since that only diverges
- * for integration/system accounts).
+ * {@link grantsCaseAccess} is the verdict, and it is the access rule applied
+ * per row: {@link contactRecordPresent} AND {@link contactEmail} matching
+ * {@link contactRecordEmail}, compared case-insensitively. Deliberately not a
+ * restatement of {@link contactRecordPresent} — a row invited under one
+ * address but linked to a contact whose own address differs is invisible to
+ * both people, and that does happen on genuine customer rows. Both halves of
+ * the comparison are on this type, so a false verdict can be explained from
+ * the row itself.
  */
 export interface UserProjectAccess {
   projectId: string;

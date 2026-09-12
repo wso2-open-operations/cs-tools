@@ -46,6 +46,32 @@ describe("nav tree invariants", () => {
   });
 });
 
+describe("help section", () => {
+  it("sits immediately after Settings in the top-level nav order", () => {
+    const ids = CSM_NAV_ITEMS.map((section) => section.id);
+    const adminIndex = ids.indexOf("admin");
+    expect(ids[adminIndex + 1]).toBe("help");
+  });
+
+  it("gives every topic an in-page anchor href on the single /help route", () => {
+    const help = navNodeById("help");
+    for (const topic of help?.children ?? []) {
+      expect(topic.href.startsWith("/help#")).toBe(true);
+      expect(topic.id.startsWith("help.")).toBe(true);
+    }
+  });
+
+  it("resolves the whole /help route (and any of its topic anchors) to the help section, not a topic", () => {
+    expect(navNodeMatchForPath("/help")).toMatchObject({
+      node: { id: "help" },
+      prefix: "/help",
+    });
+    // A topic anchor's own pathname is "/help" too — it must not out-compete
+    // the section for that prefix (see navNodeRoutes's anchor-href handling).
+    expect(navNodeRoutes(navNodeById("help.operations")!)).toEqual([]);
+  });
+});
+
 describe("navNodeMatchForPath", () => {
   it("prefers the most specific node and reports the matched prefix", () => {
     expect(navNodeMatchForPath("/operations/incidents/INC0001")).toMatchObject({

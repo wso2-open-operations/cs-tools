@@ -201,6 +201,46 @@ describe("ProjectContactsTab", () => {
     ).toBeInTheDocument();
   });
 
+  // The two "No access" causes are operationally different — one is a failed
+  // onboarding to chase, the other a row naming the wrong address — so the
+  // reason line has to say which, not just that access is missing.
+  it("gives a linked row whose invited address differs from its contact's own the mismatch reason, not the no-linked-record one", () => {
+    postMock.mockResolvedValue({ users: [] });
+    mockQueryResult({
+      data: [{ ...GRANTED_CONTACT, customerContactPresent: true, grantsCaseAccess: false }],
+    });
+    renderTab();
+    expect(screen.getByText("No access", { selector: ".MuiChip-label" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/invited under a different address than its linked contact's own/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/no linked contact record/i)).not.toBeInTheDocument();
+  });
+
+  // A failed invite has no name (that is only ever known from the contact
+  // record) but does carry the address it was invited under, so the row must
+  // still be identifiable rather than rendering blank.
+  it("renders a failed-invite row by the address it was invited under, with the invite-never-completed reason", () => {
+    postMock.mockResolvedValue({ users: [] });
+    mockQueryResult({
+      data: [
+        {
+          email: "never.onboarded@example.com",
+          registrationState: "INVITED",
+          customerContactPresent: false,
+          grantsCaseAccess: false,
+        },
+      ],
+    });
+    renderTab();
+    expect(screen.getAllByText("never.onboarded@example.com").length).toBeGreaterThan(0);
+    expect(screen.getByText("No access", { selector: ".MuiChip-label" })).toBeInTheDocument();
+    expect(screen.getByText(/the invite never completed/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/invited under a different address/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("colours the registration chip by state (registered=success-ish, invited=warning-ish) without changing the visible text", () => {
     postMock.mockResolvedValue({ users: [] });
     mockQueryResult({ data: [GRANTED_CONTACT, INVITED_GRANTED_CONTACT] });

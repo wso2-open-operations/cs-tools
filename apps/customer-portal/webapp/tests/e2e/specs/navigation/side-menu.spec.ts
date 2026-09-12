@@ -38,9 +38,11 @@
 
 import { test, expect, withSession } from "../../fixtures/test";
 import { SideNavPage } from "../../pages/SideNavPage";
+import { SIDE_NAV } from "../../utils/selectors";
 import {
   PROJECTS,
   ProjectType,
+  SIDE_NAV_UNGATED_ITEMS,
   SIDE_NAV_VISIBILITY,
 } from "../../config/testData";
 
@@ -80,6 +82,78 @@ test.describe("Side Menu", () => {
               .toHaveCount(0);
           }
         }
+      });
+
+      test("lists exactly those items and nothing else", async ({ page }) => {
+        test.skip(
+          !project.id,
+          `${projectType} needs a project id. Fill it in tests/e2e/config/testData.ts.`,
+        );
+
+        const sideNav = new SideNavPage(page);
+        await sideNav.open(project.id);
+
+        // The per-item test above proves every expected item is there. This one
+        // proves nothing *unexpected* is: an item the suite has never heard of —
+        // a new feature shipped without a visibility expectation, or one whose
+        // gate stopped working — is invisible to a loop over known labels.
+        const expectedItems = [
+          ...Object.entries(expected)
+            .filter(([, isVisible]) => isVisible)
+            .map(([label]) => label),
+          // Settings has no permission filter, so it is not in the gated table
+          // but is always in the rendered list.
+          ...SIDE_NAV_UNGATED_ITEMS,
+        ].sort();
+
+        const actual = (await sideNav.itemNames()).sort();
+
+        expect(
+          actual,
+          "the sidebar should render exactly the expected items",
+        ).toEqual(expectedItems);
+
+        console.log(`Side nav (${projectType}): ${actual.length} items`);
+      });
+
+      test("opens the route behind every visible item", async ({ page }) => {
+        test.skip(
+          !project.id,
+          `${projectType} needs a project id. Fill it in tests/e2e/config/testData.ts.`,
+        );
+
+        const sideNav = new SideNavPage(page);
+        await sideNav.open(project.id);
+
+        // One shell load, then a click per item: the sidebar persists across
+        // routes, so there is no need to return to the dashboard between them.
+        //
+        // Visibility is asserted above; this is about where each item actually
+        // goes. An item rendered but wired to the wrong route — or to none —
+        // passes every visibility check there is.
+        const visible = [
+          ...Object.entries(expected)
+            .filter(([, isVisible]) => isVisible)
+            .map(([label]) => label),
+          ...SIDE_NAV_UNGATED_ITEMS,
+        ];
+
+        for (const label of visible) {
+          const path = SIDE_NAV.paths[label];
+          expect(path, `no route recorded for the "${label}" item`).toBeTruthy();
+
+          // Unanchored: a section that redirects to a child route — a default tab,
+          // say — has still done its job, and pinning the exact landing path would
+          // make this assert routing internals rather than the item.
+          await sideNav.clickItem(
+            label,
+            new RegExp(`/projects/${project.id}/${path}`),
+          );
+        }
+
+        console.log(
+          `Side nav (${projectType}): ${visible.length} items opened their routes`,
+        );
       });
     });
   }

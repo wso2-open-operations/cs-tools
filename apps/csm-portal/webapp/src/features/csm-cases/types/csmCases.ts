@@ -70,6 +70,20 @@ export interface CsmCaseRow {
    * omit it, in which case the type filter treats it as unmatched.
    */
   caseType?: BeCaseType;
+  /** How the issue was categorized at creation (outage/degradation/question/
+   * etc. — see {@link BeCaseIssueType}). Optional: a legacy row, or one not
+   * created through the "Case" flow (service requests etc. don't collect
+   * this), may have none. */
+  issueType?: BeCaseIssueType;
+  /**
+   * Engagement type (e.g. "Migration"), only meaningful when `caseType` is
+   * `"engagement"`. Carried through unmodified from the backend's raw display
+   * label (not normalized/lowercased) — see `detailFromBeCase` in
+   * `useGetCsmCaseDetail.ts`. Consumers that need to test for "is this a
+   * migration engagement" must compare case-insensitively, matching the
+   * backend's own `strings.EqualFold` check in `RequestCaseUpdate`.
+   */
+  engagementType?: string;
   /**
    * Work sub-state of an in-progress case (`ongoing` / `paused`); `null` when
    * the case is not `work_in_progress`. Drives the comment gate and the paused
@@ -79,6 +93,13 @@ export interface CsmCaseRow {
   /** CRE / engineer working the case. "Unassigned" for cases with no one picked up yet. */
   assignee: string;
   assigneeIsMe: boolean;
+  /** Who reported/opened the case — distinct from {@link assignee}. Optional:
+   * absent for any `CsmCaseRow` source that doesn't resolve a creator (e.g.
+   * `CsmCaseDetail`'s own {@link CsmCaseDetail.createdBy}, resolved from a
+   * different, richer data source, already declares this same field
+   * optionally). `mapCaseSearchViewToRow` always sets it, falling back to
+   * "Unknown" rather than leaving it unset. */
+  createdBy?: string;
   slaClockType: SlaClockType;
   // Minutes until breach (negative = already breached).
   minutesToBreach: number;
@@ -92,6 +113,47 @@ export interface CsmCaseRow {
   /** Falls back to {@link createdAt} when the backend hasn't returned
    * `updatedOn` for this row; rendered unprefixed either way. */
   updatedAt: string;
+  /**
+   * The case's current escalation level: one of the raw escalation-level ids
+   * `"0"` through `"5"` (EL0 "not escalated" through EL5 "CEO"), carried
+   * through unmapped from `BeCaseView.escalationLevel` /
+   * `BeCaseSearchView.escalationLevel` — see
+   * `features/csm-cases/utils/escalationLevel.ts` for the display label/color
+   * ramp. Null/absent when the backing case carries no escalation level (e.g.
+   * non-ServiceNow-backed cases) or is not escalated (`"0"`).
+   */
+  escalationLevel?: string | null;
+}
+
+/**
+ * One escalation-level change recorded against a case, as returned by
+ * `GET /cases/{id}/escalations` (newest first). Mirrors the wire shape
+ * (`BeCaseEscalation`) closely — this is a read-mostly history list, not
+ * something the rest of the app maps into a different shape.
+ */
+export interface CaseEscalationRecord {
+  id: string;
+  currentLevel: string;
+  previousLevel: string;
+  createdBy: string;
+  createdOn: string;
+  reason?: string | null;
+}
+
+/** A user notified about the case's current escalation level -- the people
+ * authorized to de-escalate it. `id` can be empty when the backing data
+ * source couldn't resolve a platform user record; match by `email` then. */
+export interface CaseEscalationNotifiedUser {
+  id?: string | null;
+  name?: string | null;
+  email?: string | null;
+}
+
+/** The response for `GET /cases/{id}/escalations`: the case's full escalation
+ * history plus who's authorized to de-escalate its current level. */
+export interface CaseEscalationHistory {
+  escalations: CaseEscalationRecord[];
+  currentNotifiedUsers: CaseEscalationNotifiedUser[];
 }
 
 export interface CsmCasesListResponse {
@@ -133,6 +195,12 @@ export interface CsmCaseComment {
    * `sn_customerservice_case.work_notes` vs `comments` distinction.
    */
   internal?: boolean;
+  /** True for a client-synthesized entry (e.g. the case description echoed
+   * into the feed when the backing data source never actually created a
+   * comment for it). Suppresses the author-role chip in the rendered bubble —
+   * the real creator's role isn't known on the frontend, so nothing should be
+   * claimed about it. */
+  synthetic?: boolean;
 }
 
 export interface CaseAttachment {
@@ -268,6 +336,16 @@ export interface CaseLinkedItem {
   href?: string;
 }
 
+/**
+ * One answered catalog-item question on a service request. `value` is `""`
+ * when the question was asked and left blank — the UI renders that as an em
+ * dash so it stays distinguishable from a question that was never asked.
+ */
+export interface CaseRequestVariable {
+  name: string;
+  value: string;
+}
+
 export interface CaseTag {
   id: string;
   label: string;
@@ -303,6 +381,20 @@ export interface CaseAuditFieldChange {
   previousValue?: string;
   /** Absent/empty when the field was cleared. */
   newValue?: string;
+}
+
+/** One Case Feedback survey submission for a case, shown in its activity feed. */
+export interface CaseFeedbackEntry {
+  id: string;
+  rating: number;
+  ratingLabel: string;
+  /** `null`/absent for feedback submitted without a comment. */
+  comment?: string | null;
+  submittedAt: string;
+  /** `null`/absent if the submitting user record could not be resolved. */
+  submitterName?: string | null;
+  /** `null`/absent, same as submitterName. */
+  submitterEmail?: string | null;
 }
 
 export interface CaseAuditEntry {
@@ -409,14 +501,15 @@ export interface CreateRelatedCaseNavState {
 
 /**
  * Router (`navigate(..., { state })`) payload carried from a case's "Create
- * service request" action (Related tab, Linked service requests card) to
+ * service request" action — either the Related tab's Linked service requests
+ * card, or the "More" menu's "Create service request…" item — to
  * `/operations/service-requests/new`, so the create-service-request form can
  * prefill from the originating case and file the new SR as linked to it in
  * one step — no separate create-then-link round trip. `projectId` seeds the
  * form's Project field locked read-only (mirrors
  * {@link CreateRelatedCaseNavState} / CsmCaseCreatePage.tsx); `deploymentId` /
  * `deployedProductId` are just starting values and stay fully editable. See
- * CsmCaseDetailPage.tsx's "Create service request" button and
+ * CsmCaseDetailPage.tsx's two "Create service request" entry points and
  * CreateServiceRequestPage.tsx's read of `useLocation().state`.
  */
 export interface CreateServiceRequestFromCaseNavState {
@@ -485,6 +578,14 @@ export interface CsmCaseDetail extends CsmCaseRow {
    * severity changes or it is reopened, so it can become absent again.
    */
   acknowledgedBy?: { name: string; email?: string };
+  /**
+   * When the case's workaround was marked provided (ISO date-time), or absent
+   * until marked (and cleared again on recall). Pauses the case's Workaround
+   * SLA clock while set.
+   */
+  workaroundProvidedOn?: string;
+  /** The engineer who marked the workaround as provided. Absent until marked. */
+  workaroundProvidedBy?: { name: string; email?: string };
   /** Category of issue reported, when set (e.g. "total_outage", "question"). */
   issueType?: BeCaseIssueType;
   /**
@@ -531,6 +632,20 @@ export interface CsmCaseDetail extends CsmCaseRow {
     /** Subject, or `null` when the record has none — never `""`. */
     name: string | null;
   }[];
+  /**
+   * The catalog and catalog item a service request was raised against.
+   * Absent for every other case type.
+   */
+  catalog?: { id: string; name: string };
+  catalogItem?: { id: string; name: string };
+  /**
+   * The answers the requester gave to the catalog item's questions, in the
+   * backing data source's display order. Absent when the request carried no
+   * answers; an individual `value` of `""` means the question was asked and
+   * left blank, which is deliberately distinct from the question never being
+   * asked at all.
+   */
+  requestVariables?: CaseRequestVariable[];
   /**
    * Where the case sits in the backing data source's staged auto-closure
    * sequence (ServiceNow only). Read-only; `undefined`/`"DEFAULT"` means no

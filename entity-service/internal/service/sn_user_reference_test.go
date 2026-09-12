@@ -152,7 +152,7 @@ func TestCaseCommentUserReferenceUpstreamVariants(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tc.body))
 			})
-			svc := NewServiceNowCaseService(client, nil, nil)
+			svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 			resp, err := svc.SearchCaseComments(contextWithUserIDToken("token"), domain.SearchCaseCommentsRequest{
 				CaseID:     sysidToUUID(caseSysid),
@@ -209,7 +209,7 @@ func TestAttachmentUserReference(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tc.body))
 			})
-			svc := NewServiceNowCaseService(client, nil, nil)
+			svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 			resp, err := svc.SearchCaseAttachments(contextWithUserIDToken("token"), domain.SearchAttachmentsRequest{
 				ReferenceID:   sysidToUUID(caseSysid),
@@ -271,7 +271,7 @@ func TestCaseViewUserReferences(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	})
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), sysidToUUID(caseSysid))
 	if err != nil {
@@ -362,7 +362,7 @@ func TestCaseActivityUserReference(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	})
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	resp, err := svc.SearchCaseActivities(contextWithUserIDToken("token"), domain.SearchCaseActivitiesRequest{
 		CaseID:     sysidToUUID(caseSysid),

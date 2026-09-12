@@ -49,7 +49,7 @@ export default function AccountDetailPage() {
           <Chip
             size="small"
             label={a.tier}
-            color={a.tier === "enterprise" ? "primary" : "default"}
+            color={a.tier?.toLowerCase() === "enterprise" ? "primary" : "default"}
             variant="outlined"
             sx={{ textTransform: "capitalize" }}
           />

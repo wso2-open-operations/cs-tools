@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -29,6 +29,14 @@ vi.mock("@api/backend/client", () => ({
 // unavailable under vitest (see apps/csm-portal/webapp/CLAUDE.md).
 vi.mock("@config/apiConfig", () => ({
   apiConfig: { backendUrl: "https://example.test" },
+}));
+// CaseWidgetList's own "Customise columns" wiring needs both of these --
+// neither provider is set up by `renderRenderer` below.
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),
+}));
+vi.mock("@hooks/useIdTokenClaims", () => ({
+  useIdTokenClaims: () => ({ email: "agent@example.test" }),
 }));
 
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
@@ -57,6 +65,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.incident;
     renderRenderer(
       <Renderer
+        resourceType="incident"
         items={[
           {
             id: "inc-1",
@@ -85,6 +94,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.change_request;
     renderRenderer(
       <Renderer
+        resourceType="change_request"
         items={[
           {
             id: "cr-1",
@@ -108,6 +118,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.problem;
     renderRenderer(
       <Renderer
+        resourceType="problem"
         items={[{ id: "prb-1", number: "PRB0000001", subject: "Recurring failure", state: "open" }]}
         isLoading={false}
       />,
@@ -123,6 +134,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.account;
     renderRenderer(
       <Renderer
+        resourceType="account"
         items={[{ id: "acc-1", name: "Acme Corp", tier: "enterprise", region: "us-east" }]}
         isLoading={false}
       />,
@@ -142,6 +154,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.project;
     renderRenderer(
       <Renderer
+        resourceType="project"
         items={[
           {
             id: "proj-1",
@@ -165,6 +178,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.user;
     renderRenderer(
       <Renderer
+        resourceType="user"
         items={[
           {
             id: "user-1",
@@ -188,6 +202,7 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     const Renderer = WIDGET_LIST_RENDERERS.product_vulnerability;
     renderRenderer(
       <Renderer
+        resourceType="product_vulnerability"
         items={[
           {
             id: "vuln-1",
@@ -206,10 +221,119 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     expect(screen.queryByTestId("location-probe")).not.toBeInTheDocument();
   });
 
+  it("case: renders an Assignee column, falling back to Unassigned when no engineer is assigned", () => {
+    const Renderer = WIDGET_LIST_RENDERERS.case;
+    renderRenderer(
+      <Renderer
+        resourceType="case"
+        items={[
+          {
+            id: "case-1",
+            caseNumber: "CS0000001",
+            subject: "Cluster degraded",
+            assignedEngineer: { id: "u-1", email: "jane.doe@example.com", name: "Jane Doe" },
+          },
+          {
+            id: "case-2",
+            caseNumber: "CS0000002",
+            subject: "Login failing",
+            assignedEngineer: null,
+          },
+        ]}
+        isLoading={false}
+      />,
+      "/cases/:id",
+    );
+
+    expect(screen.getByText("Assignee")).toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("case: shows a 'Customise columns' picker on the dashboard tile, offering Severity", () => {
+    // Reported live: the "Customise columns" control was missing on every
+    // dashboard tile showing a case-family list (e.g. the "My Work" widget),
+    // even though the main Cases tab, and this widget's own "View more"
+    // preview, both already had it.
+    const Renderer = WIDGET_LIST_RENDERERS.case;
+    renderRenderer(
+      <Renderer
+        resourceType="case"
+        items={[{ id: "case-1", caseNumber: "CS0000001", subject: "Cluster degraded" }]}
+        isLoading={false}
+      />,
+      "/cases/:id",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
+    const picker = screen.getByRole("list", { name: "Customise columns" });
+    expect(within(picker).getByText("Severity")).toBeInTheDocument();
+  });
+
+  it("service_request: does not offer a Severity column in the picker, unlike case", () => {
+    // Severity is a support-case concept; a widget for any other case-family
+    // resourceType sharing this same renderer must not offer a column that
+    // would only ever render "—".
+    const Renderer = WIDGET_LIST_RENDERERS.service_request;
+    renderRenderer(
+      <Renderer
+        resourceType="service_request"
+        items={[{ id: "sr-1", caseNumber: "CS0000002", subject: "Need a new environment" }]}
+        isLoading={false}
+      />,
+      "/operations/service-requests/:id",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
+    expect(screen.queryByText("Severity")).not.toBeInTheDocument();
+  });
+
+  it("case_feedback: renders both the internal case id and the case number, falling back to the raw caseId when neither resolved", () => {
+    const Renderer = WIDGET_LIST_RENDERERS.case_feedback;
+    renderRenderer(
+      <Renderer
+        resourceType="case_feedback"
+        items={[
+          {
+            instanceId: "fb-1",
+            caseId: "case-1",
+            caseNumber: "CS0440709",
+            caseInternalId: "SCTPSUB-88",
+            rating: 4,
+            ratingLabel: "Satisfied",
+            comment: null,
+            submittedAt: "2026-08-03T04:37:50Z",
+            submitterName: "Jane Customer",
+          },
+          {
+            instanceId: "fb-2",
+            caseId: "case-2",
+            caseNumber: null,
+            caseInternalId: null,
+            rating: 5,
+            ratingLabel: "Very Satisfied",
+            comment: null,
+            submittedAt: "2026-08-17T06:17:56Z",
+            submitterName: null,
+          },
+        ]}
+        isLoading={false}
+      />,
+      "/cases/:id",
+    );
+
+    expect(screen.getByText("SCTPSUB-88")).toBeInTheDocument();
+    expect(screen.getByText("CS0440709")).toBeInTheDocument();
+    expect(screen.getByText("case-2")).toBeInTheDocument();
+    expect(screen.getByText("Jane Customer")).toBeInTheDocument();
+    expect(screen.getByText("Customer")).toBeInTheDocument();
+  });
+
   it("call_request: renders the preview icon, opens the existing detail modal without navigating the owning case", () => {
     const Renderer = WIDGET_LIST_RENDERERS.call_request;
     renderRenderer(
       <Renderer
+        resourceType="call_request"
         items={[
           {
             id: "call-1",

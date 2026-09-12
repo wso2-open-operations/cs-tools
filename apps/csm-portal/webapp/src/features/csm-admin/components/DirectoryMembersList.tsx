@@ -193,7 +193,7 @@ export default function DirectoryMembersList({
                       },
                     }}
                   >
-                    <TableCell sx={{ minWidth: 0 }}>
+                    <TableCell sx={{ minWidth: 0, maxWidth: 320 }}>
                       <UserRefLink
                         name={primaryIdentity}
                         email={u.email}

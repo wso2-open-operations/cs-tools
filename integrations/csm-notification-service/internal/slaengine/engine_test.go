@@ -30,6 +30,7 @@ import (
 type registerCall struct {
 	caseID, clockType string
 	startedAt, dueAt  time.Time
+	req               RegisterClockRequest
 }
 
 type tierCall struct{ caseID, clockType, tier string }
@@ -48,8 +49,8 @@ type fakeEntityClock struct {
 	tierErr            error
 }
 
-func (f *fakeEntityClock) RegisterClock(_ context.Context, caseID, clockType string, startedAt, dueAt time.Time) error {
-	f.registerCalls = append(f.registerCalls, registerCall{caseID, clockType, startedAt, dueAt})
+func (f *fakeEntityClock) RegisterClock(_ context.Context, req RegisterClockRequest) error {
+	f.registerCalls = append(f.registerCalls, registerCall{req.CaseID, req.ClockType, req.StartedAt, req.DueAt, req})
 	return f.registerErr
 }
 
@@ -108,8 +109,31 @@ func (f *fakePublisher) Publish(_ context.Context, key, value []byte) error {
 	return f.err
 }
 
+type chatCall struct {
+	product, clockType, tier, caseNumber string
+}
+
+// fakeChatSender is a hand-written fake for chatSender — Tick's happy path
+// (and, since the Chat-retry fix, its alreadyReached path too) always
+// reaches Engine.sendBreachAlert, so every Tick-exercising test needs one
+// wired in even when it isn't asserting on the Chat send itself.
+type fakeChatSender struct {
+	calls []chatCall
+	err   error
+}
+
+func (f *fakeChatSender) SendSLABreachAlert(_ context.Context, product, clockType, tier, caseNumber, _, _, _, _, _, _, _, _, _ string) error {
+	f.calls = append(f.calls, chatCall{product, clockType, tier, caseNumber})
+	return f.err
+}
+
+// fakeLinkResolver is a hand-written fake for linkResolver.
+type fakeLinkResolver struct{}
+
+func (fakeLinkResolver) CSMLink(caseID string) string { return "https://example.test/cases/" + caseID }
+
 func newTestEngine(entity entityClock, wake wakeIndex, pub eventPublisher) *Engine {
-	return &Engine{entity: entity, wake: wake, pub: pub}
+	return &Engine{entity: entity, wake: wake, pub: pub, chat: &fakeChatSender{}, links: fakeLinkResolver{}, defaultChatProduct: "Test Product"}
 }
 
 func TestEngine_Handle_IgnoresOtherEventTypes(t *testing.T) {
@@ -230,6 +254,11 @@ func TestEngine_Tick_FiresDueMemberAndPublishes(t *testing.T) {
 		t.Errorf("payload = %+v, want CASE-1/response/50", payload)
 	}
 
+	chat := e.chat.(*fakeChatSender)
+	if len(chat.calls) != 1 || chat.calls[0] != (chatCall{"Test Product", "response", "50", "CASE-1"}) {
+		t.Errorf("chat.calls = %+v, want one alert for CASE-1/response/50", chat.calls)
+	}
+
 	if len(wake.removed) != 1 || wake.removed[0] != "CASE-1|response|50" {
 		t.Errorf("removed = %v, want the fired member removed", wake.removed)
 	}
@@ -237,11 +266,16 @@ func TestEngine_Tick_FiresDueMemberAndPublishes(t *testing.T) {
 
 // TestEngine_Tick_SkipsPublishWhenAlreadyReached verifies the accepted
 // trade-off documented on Tick's own doc comment: when entity-service
-// reports the tier was already claimed by an earlier call, this engine
-// does not publish again — it just drops the now-stale wake entry. This is
-// a deliberate choice (favoring no duplicates over guaranteed retry of a
-// failed publish), not an oversight — see Tick's doc comment for the full
-// reasoning and the residual risk it accepts.
+// reports the tier was already claimed by an earlier call — including,
+// critically, an in-process early completion on entity-service's own side
+// (e.g. a qualifying support engineer comment satisfying the response SLA,
+// or a case closing) — this engine does not publish again AND does not
+// send a Chat alert; it just drops the now-stale wake entry. The Chat
+// assertion here is the regression guard for a real bug: an earlier
+// version sent the Chat alert unconditionally on alreadyReached=true
+// (reasoning it was just retrying a failed send), which produced a false
+// "SLA at risk" alert for a response SLA a support engineer had already
+// satisfied in time. See Tick's doc comment for the full reasoning.
 func TestEngine_Tick_SkipsPublishWhenAlreadyReached(t *testing.T) {
 	reached := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	entity := &fakeEntityClock{tierResult: reached, tierAlreadyReached: true}
@@ -255,6 +289,9 @@ func TestEngine_Tick_SkipsPublishWhenAlreadyReached(t *testing.T) {
 
 	if len(pub.calls) != 0 {
 		t.Fatalf("expected no publish when alreadyReached=true, got %d", len(pub.calls))
+	}
+	if chat := e.chat.(*fakeChatSender); len(chat.calls) != 0 {
+		t.Fatalf("expected no chat alert when alreadyReached=true, got %+v", chat.calls)
 	}
 	if len(wake.removed) != 1 || wake.removed[0] != "CASE-1|response|50" {
 		t.Errorf("expected the stale wake entry cleaned up regardless, removed = %v", wake.removed)

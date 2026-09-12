@@ -274,6 +274,117 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/request-update:
+    post:
+      summary: >
+        Post a customer-visible "request update" nudge comment on a case. Only
+        the case's assigned engineer may call this, and only while the case is
+        awaiting_info or solution_proposed. The message is one of three fixed
+        reminder templates (first/second/final), automatically drawn from a
+        generic or migration wording set depending on the case's own
+        type/engagementType, or a caller-supplied custom message. The
+        category is always server-determined; it is never accepted from the
+        caller.
+      operationId: postCasesIdRequestUpdate
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Request-update payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestCaseUpdatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseComment'
+        "400":
+          description: BadRequest — malformed body, an unrecognized stage, missing customContent for stage=custom, or customContent supplied alongside a fixed-template stage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — the caller is not the case's assigned engineer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — an update can only be requested while the case is awaiting_info or solution_proposed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /case-update-request-templates:
+    get:
+      summary: >
+        List the fixed "request update" reminder message templates, by
+        category (generic, migration) and stage (first, second, final). No
+        case-specific logic; a category has no "custom" entry since that
+        content is supplied by the caller of POST /cases/{id}/request-update.
+      operationId: getCaseUpdateRequestTemplates
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseUpdateRequestTemplates'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases/{id}/comments/search:
     post:
       summary: Search comments on a case.
@@ -683,6 +794,124 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/escalations:
+    get:
+      summary: Get a case's escalation history.
+      description: >
+        Returns the full escalation history for a case (each escalate/de-escalate
+        step, newest first). Supported by the ServiceNow data source only.
+      operationId: getCasesIdEscalations
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseEscalationSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Escalate or de-escalate a case.
+      description: >
+        Raises or lowers a case's escalation level by one step. A work note
+        recording the change is added to the case automatically as a side
+        effect. Supported by the ServiceNow data source only.
+      operationId: postCasesIdEscalations
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Case escalation payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseEscalationCreatePayload'
+        required: false
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedCaseEscalation'
+        "400":
+          description: BadRequest — an invalid action value, or reason missing while escalating.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /attachments:
     post:
       summary: Upload a file attachment to a case.
@@ -845,6 +1074,115 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
   /attachments/{id}:
+    get:
+      summary: Get a case attachment's metadata.
+      operationId: getAttachment
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the attachment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update a case attachment's name and/or description.
+      operationId: updateAttachment
+      requestBody:
+        description: At least one of name or description must be provided (enforced upstream by the entity service).
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentUpdatePayload'
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the attachment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — upstream rejected the update (e.g. neither name nor description provided).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
     delete:
       summary: Delete a case attachment (ServiceNow data source only).
       operationId: deleteCaseAttachment
@@ -1690,6 +2028,205 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/aggregate:
+    post:
+      summary: >-
+        Server-side aggregation of cases by a single field (e.g. account,
+        state, severity, type), top N + Others.
+      description: >-
+        Unlike CaseSearchPayload's own groupBy-shaped widget config (which
+        fans out one search per literal slice on the frontend), this drives a
+        single aggregation query, capped to the top maxGroups buckets with
+        the remainder folded into othersCount.
+      operationId: postCasesAggregate
+      requestBody:
+        description: Case aggregate payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseAggregatePayload'
+        required: true
+      responses:
+        "200":
+          description: Aggregated case counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/feedback/search:
+    post:
+      summary: Search case-feedback (satisfaction rating) records across cases.
+      description: >-
+        Plain forward-and-return proxy to the entity service's own POST
+        /cases/feedback/search: filterable by case, accounts, and submission
+        date range, and paginated. Backs the case-feedback dashboard's list
+        view. Distinct from any single-case feedback lookup.
+      operationId: postCasesFeedbackSearch
+      requestBody:
+        description: Case-feedback search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseFeedbackSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Case-feedback records matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseFeedbackSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/feedback/aggregate:
+    post:
+      summary: >-
+        Date-bucketed rating aggregation of case-feedback records across
+        cases.
+      description: >-
+        Plain forward-and-return proxy to the entity service's own POST
+        /cases/feedback/aggregate. Backs the case-feedback dashboard's
+        rating-trend chart (a shape "bar" widget with resourceType
+        "case_feedback" and a "groupBy.bucket" — see DashboardWidget). This
+        is the many-cases trend endpoint, not scoped to one case, so
+        filters.caseId is not accepted here (unlike
+        /cases/feedback/search).
+      operationId: postCasesFeedbackAggregate
+      requestBody:
+        description: Case-feedback aggregate payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseFeedbackAggregatePayload'
+        required: true
+      responses:
+        "200":
+          description: Feedback ratings aggregated into date buckets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseFeedbackAggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /dashboards:
     get:
       summary: List available dashboards.
@@ -1709,6 +2246,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DashboardListItem'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
           content:
@@ -1717,6 +2260,121 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /dashboards/filter-presets:
+    get:
+      summary: List the shared filter presets a dashboard definition may reference.
+      description: >
+        Returns the deployment's shared filter-preset catalogue: each preset's
+        name and the single filter predicate it stands for. A dashboard
+        definition references a preset by name instead of repeating the
+        predicate, and the registry expands every reference at load time, so a
+        dashboard returned by GET /dashboards/{dashboardId} never contains a
+        preset reference. This endpoint exists so an authoring tool can offer
+        the names that may be referenced, and show what each one means. A
+        deployment with no preset catalogue configured returns an empty array,
+        not an error.
+      operationId: getDashboardFilterPresets
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DashboardFilterPreset'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /dashboards/sections:
+    get:
+      summary: List the shared reusable sections a dashboard definition may include.
+      description: >
+        Returns the deployment's shared section catalogue: each section's name,
+        the heading its widgets are grouped under, and its widget run. A
+        dashboard definition pulls a section in by name rather than repeating
+        its widgets, and the registry expands every include at load time.
+        Unlike a dashboard's widgets, the widgets returned here are as
+        authored: filter-preset references are NOT expanded and no implied
+        type filter has been injected, because a section is not loaded through
+        a dashboard's own resolution pipeline on its own. They are therefore
+        for authoring, not for use as search criteria. A deployment with no
+        section catalogue configured returns an empty array, not an error.
+      operationId: getDashboardSections
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DashboardSharedSection'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
           content:
             application/json:
               schema:
@@ -3129,6 +3787,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /change-requests/aggregate:
+    post:
+      summary: >-
+        Server-side aggregation of change requests by a single field (e.g.
+        state, assignmentGroup), top N + Others.
+      operationId: postChangeRequestsAggregate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestAggregatePayload'
+      responses:
+        "200":
+          description: Aggregated change request counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /services/search:
     post:
       summary: Search IT services (ServiceNow data source only).
@@ -4281,6 +4995,63 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /incidents/aggregate:
+    post:
+      summary: >-
+        Server-side aggregation of incidents by a single field (e.g. state,
+        assignmentGroup, businessService), top N + Others.
+      operationId: postIncidentsAggregate
+      requestBody:
+        description: Incident aggregate payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentAggregatePayload'
+        required: true
+      responses:
+        "200":
+          description: Aggregated incident counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /incidents:
     post:
       summary: Create a new incident (ServiceNow data source only).
@@ -4440,6 +5211,106 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /alerts/{id}:
+    get:
+      summary: Get a single alert by ID.
+      operationId: getAlert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the alert.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /smart-alerts/{id}:
+    get:
+      summary: Get a single smart alert by ID.
+      operationId: getSmartAlert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the smart alert.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartAlertDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems:
     post:
       summary: Create a new problem (ServiceNow data source only).
@@ -4541,6 +5412,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    patch:
+      summary: Partially update a problem (ServiceNow data source only).
+      operationId: patchProblemById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the problem.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Problem update payload. All fields are optional, but at least one must be provided.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProblemPayload'
+        required: true
+      responses:
+        "200":
+          description: Problem updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateProblemResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Problem not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems/search:
     post:
       summary: Search problems (ServiceNow data source only).
@@ -4559,6 +5486,279 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /problems/aggregate:
+    post:
+      summary: >-
+        Server-side aggregation of problems by a single field (e.g. state,
+        assignmentGroup), top N + Others.
+      operationId: postProblemsAggregate
+      requestBody:
+        description: Problem aggregate payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProblemAggregatePayload'
+        required: true
+      responses:
+        "200":
+          description: Aggregated problem counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incident-tasks/{id}:
+    get:
+      summary: Get a single incident task by ID (ServiceNow data source only).
+      operationId: getIncidentTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the incident task.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentTaskDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incident-tasks/search:
+    post:
+      summary: Search incident tasks (ServiceNow data source only).
+      operationId: postIncidentTasksSearch
+      requestBody:
+        description: Incident task search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentTaskSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentTaskSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incident-tasks/aggregate:
+    post:
+      summary: >-
+        Server-side aggregation of incident tasks by a single field (e.g.
+        state, assignmentGroup), top N + Others.
+      operationId: postIncidentTasksAggregate
+      requestBody:
+        description: Incident task aggregate payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentTaskAggregatePayload'
+        required: true
+      responses:
+        "200":
+          description: Aggregated incident task counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /notifications/google-chat/alerts:
+    post:
+      summary: >-
+        Send an incident alert card message to the Google Chat space
+        configured for the given product. Triggered manually today, pending
+        integration into real case/incident creation.
+      operationId: postNotificationsGoogleChatAlerts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleChatAlertPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
         "400":
           description: BadRequest
           content:
@@ -4917,12 +6117,18 @@ components:
       type: object
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
-        `acknowledge`, `subject`, `description`, `deploymentId`, `deployedProductId`,
+        `acknowledge`, `type`, `subject`, `description`, `deploymentId`, `deployedProductId`,
         `relatedCaseId`, `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or
         `worstCaseFixEta` must be provided. `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are
         supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
+        `type` transfers the case to another type, ServiceNow only. Its companion fields carry
+        the target type's mandatory data: `severity` and `issueType` alongside `type: case`;
+        `engagementType` alongside `type: engagement`; `catalogId`, `catalogItemId` and a
+        non-empty `variables` alongside `type: service_request`; none for
+        `type: security_report_analysis`. A companion is rejected without `type`, or with a
+        `type` it does not belong to. `severity` is the one field that may accompany `type`.
       oneOf:
         - required: [state]
         - required: [severity]
@@ -4931,6 +6137,7 @@ components:
         - required: [assigneeEmail]
         - required: [parentId]
         - required: [acknowledge]
+        - required: [type]
         - required: [subject]
         - required: [description]
         - required: [deploymentId]
@@ -4949,6 +6156,43 @@ components:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: The new severity of the case.
+        type:
+          type: string
+          enum: [case, engagement, security_report_analysis, service_request]
+          description: >
+            Transfers the case to this type (ServiceNow only). `announcement` is
+            system-managed and never a valid transfer target.
+        issueType:
+          type: string
+          enum: [total_outage, partial_outage, performance_degradation, question, security_or_compliance, error]
+          description: "Required alongside `type: case`; rejected for every other target type."
+        engagementType:
+          type: string
+          enum: [migration, consultancy, new_feature_improvement, follow_up, onboarding]
+          description: "Required alongside `type: engagement`."
+        catalogId:
+          type: string
+          format: uuid
+          description: "Required alongside `type: service_request`."
+        catalogItemId:
+          type: string
+          format: uuid
+          description: "Required alongside `type: service_request`."
+        variables:
+          type: array
+          description: >
+            Answers to the target catalog item's questions, only meaningful alongside
+            `type: service_request`. Optional even then — a catalog item with no
+            questions has nothing to answer.
+          items:
+            type: object
+            required: [id, value]
+            properties:
+              id:
+                type: string
+                format: uuid
+              value:
+                type: string
         workState:
           type: string
           enum: [ongoing, paused]
@@ -5358,6 +6602,8 @@ components:
             - taskSLABusinessElapsedPercent
             - escalationLevel
             - escalation
+            - slaBreached
+            - accountEscalationActive
             - number
             - internalId
         op:
@@ -5455,6 +6701,16 @@ components:
         - **escalation** (isEmpty / isNotEmpty): values ignored; isEmpty
           matches cases with no active escalation, isNotEmpty matches cases
           with an active escalation.
+        - **slaBreached** (eq): "true"/"false". Matches cases with a
+          currently-breached SLA against ServiceNow's own named SLA
+          definition set (task_sla.has_breached + stage=in_progress). Only
+          applied by the ServiceNow data source.
+        - **accountEscalationActive** (eq): "true"/"false". Matches cases
+          whose ACCOUNT currently has an active escalation
+          (active_account_escalation.state in Requested/Escalated) --
+          distinct from **escalation** above, which is a case-level flag.
+          The two are independent and may both be queried. Only applied by
+          the ServiceNow data source.
         - **number** (eq): a single case number (e.g. "CS0441174"); matches
           exactly. Routed as a first-class filter rather than through the
           free-text searchQuery scan.
@@ -5516,6 +6772,252 @@ components:
         hasMore:
           type: boolean
 
+    CaseAggregatePayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: '#/components/schemas/CaseSearchFilters'
+        groupBy:
+          type: string
+          enum: [account, state, severity, type]
+          description: The field to aggregate case counts by.
+        maxGroups:
+          type: integer
+          description: >-
+            Caps the response to the top maxGroups buckets by count; the
+            remainder is folded into AggregateResponse.othersCount. Optional;
+            a default is applied when omitted.
+
+    AggregateBucket:
+      type: object
+      description: >-
+        One aggregated bucket in a server-side aggregate result. Shared by
+        every resource's dedicated aggregate endpoint (cases, incidents,
+        problems, change requests, incident tasks).
+      properties:
+        key:
+          type: string
+          description: The backing data source's raw group value.
+        label:
+          type: string
+          description: >-
+            Human-readable display form of key; identical to key when the
+            grouped field has no separate label.
+        count:
+          type: integer
+          description: Number of matching records whose grouped field falls in this bucket.
+
+    AggregateResponse:
+      type: object
+      description: >-
+        The shared result shape for every resource's dedicated aggregate
+        endpoint (cases, incidents, problems, change requests, incident
+        tasks). groups holds the top buckets by count, capped at the
+        request's maxGroups when set; othersCount folds every bucket beyond
+        that cap into a single count. totalRecords is the total number of
+        records matching the request's filters, and always equals the sum
+        of groups' counts plus othersCount.
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/AggregateBucket'
+        othersCount:
+          type: integer
+        totalRecords:
+          type: integer
+
+    CaseFeedback:
+      type: object
+      description: A single case-feedback (satisfaction rating) record.
+      properties:
+        instanceId:
+          type: string
+          format: uuid
+          description: Unique id of the feedback record.
+        caseId:
+          type: string
+          format: uuid
+          description: UUID of the case the feedback belongs to.
+        caseNumber:
+          type: string
+          nullable: true
+          description: >-
+            Human-readable case number (e.g. "CS0441331"). Null if the case
+            record could not be resolved.
+        caseInternalId:
+          type: string
+          nullable: true
+          description: >-
+            WSO2 internal case id (e.g. "SCTPSUB-88") for caseId. Null if the
+            case record could not be resolved or has no internal id assigned.
+        rating:
+          type: integer
+          description: Numeric rating value.
+        ratingLabel:
+          type: string
+          description: Human-readable label for rating (e.g. "Satisfied").
+        comment:
+          type: string
+          nullable: true
+          description: >-
+            Free-text comment submitted with the feedback. Null for feedback
+            submitted without a comment.
+        submittedAt:
+          type: string
+          description: Timestamp when the feedback was submitted.
+        submitterName:
+          type: string
+          nullable: true
+          description: >-
+            Display name of the customer contact who submitted the feedback.
+            Null if the submitting user record could not be resolved.
+        submitterEmail:
+          type: string
+          nullable: true
+          description: Email of the submitting contact. Null, same as submitterName.
+
+    CaseFeedbackSearchFilters:
+      type: object
+      properties:
+        caseId:
+          type: string
+          format: uuid
+          description: Restrict results to a single case.
+        accountIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Restrict results to feedback on cases under these accounts.
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: Restrict results to feedback with this exact rating value.
+        dateFrom:
+          type: string
+          description: Start of the feedback submission date range (inclusive).
+        dateTo:
+          type: string
+          description: End of the feedback submission date range (inclusive).
+
+    CaseFeedbackSearchPayload:
+      type: object
+      nullable: true
+      properties:
+        filters:
+          $ref: '#/components/schemas/CaseFeedbackSearchFilters'
+        page:
+          type: integer
+          description: Page number for pagination. Optional; the backing data source applies a default when omitted.
+        pageSize:
+          type: integer
+          description: Number of records per page. Optional; the backing data source applies a default when omitted.
+
+    CaseFeedbackSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseFeedback'
+        totalRecords:
+          type: integer
+          description: Total number of matching records across all pages.
+
+    CaseFeedbackAggregateFilters:
+      type: object
+      description: >-
+        Deliberately narrower than CaseFeedbackSearchFilters -- this is the
+        many-cases trend endpoint, not scoped to a single case, so caseId is
+        not accepted here.
+      properties:
+        accountIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Restrict results to feedback on cases under these accounts.
+        dateFrom:
+          type: string
+          description: Start of the feedback submission date range (inclusive).
+        dateTo:
+          type: string
+          description: End of the feedback submission date range (inclusive).
+
+    CaseFeedbackAggregatePayload:
+      type: object
+      required: [bucket]
+      properties:
+        filters:
+          $ref: '#/components/schemas/CaseFeedbackAggregateFilters'
+        bucket:
+          type: string
+          enum:
+            - day
+            - week
+            - month
+            - rating
+            - reasons_very_dissatisfied
+            - reasons_dissatisfied
+            - reasons_neutral
+            - reasons_satisfied
+            - reasons_very_satisfied
+          description: >-
+            Aggregation granularity to group results by. "day"/"week"/"month"
+            are temporal buckets by submission date. "rating" and every
+            "reasons_*" value are categorical buckets, not time ranges:
+            "rating" groups by rating value instead of time (each bucket's
+            bucketStart then carries the rating's own label, e.g. "Very
+            Satisfied", rather than a date); each "reasons_*" value groups by
+            which free-text reason was selected for that specific rating
+            level (each bucket's bucketStart then carries the reason's own
+            label, e.g. "Unhelpful support"). See FeedbackBucket for what
+            each bucket shape carries, and note categorical buckets carry no
+            ordering guarantee.
+
+    FeedbackBucket:
+      type: object
+      description: >-
+        One bucket in a case-feedback aggregate result. Shape depends on the
+        request's "bucket" granularity: for "day"/"week"/"month" (temporal
+        buckets) this represents a time range, in ascending chronological
+        order; for "rating"/"reasons_*" (categorical buckets) it represents
+        one category instead, with no ordering guarantee across buckets.
+      properties:
+        bucketStart:
+          type: string
+          description: >-
+            For a temporal bucket, the start of this bucket's time range
+            (e.g. "2026-08-01"). For a categorical bucket, the category's own
+            label instead (e.g. "Very Satisfied" for "rating", "Unhelpful
+            support" for a "reasons_*" bucket) — not a date.
+        avgRating:
+          type: number
+          description: >-
+            For a temporal or "rating" bucket, the average rating across
+            feedback records in this bucket. Meaningless for a "reasons_*"
+            bucket (every row is a categorical chip selection, not a
+            rating) — present on the wire for shape consistency but not a
+            useful value there.
+        count:
+          type: integer
+          description: Number of feedback records in this bucket.
+
+    CaseFeedbackAggregateResponse:
+      type: object
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedbackBucket'
+          description: Time buckets, in chronological order.
+        totalRecords:
+          type: integer
+          description: Total number of feedback records across every bucket.
+
     DashboardWidget:
       type: object
       properties:
@@ -5547,13 +7049,20 @@ components:
             - security_report_analysis
             - announcement
             - engagement
+            - case_feedback
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
             engagement are additional values of the case-search "type" field
             (see Case's own type enum) exposed as their own widget
             resourceType alongside case itself — all five route to the same
-            POST /cases/search.
+            POST /cases/search. case_feedback is case-feedback (satisfaction
+            rating) records, not cases themselves — a shape "bar" widget with
+            this resourceType and a "groupBy.bucket" (see below) is resolved
+            by the caller against POST /cases/feedback/aggregate instead;
+            there is no server-side resourceType-to-endpoint mapping, the
+            caller picks the endpoint from resourceType on its own, same as
+            every other value here.
         shape:
           type: string
           enum:
@@ -5593,30 +7102,60 @@ components:
             "slices" — a widget carries exactly one of the two (enforced at
             dashboard-load time). Configures a single server-side
             aggregation call instead of one search per literal slice: the
-            caller issues one POST /{resourceType}/group-by request (filters
+            caller issues one POST /{resourceType}/aggregate request (filters
             = this widget's own query) and maps the response's groups/
             othersCount into the same per-slice shape "slices" already
-            produces.
+            produces. Carries exactly one of "field" (value grouping) or
+            "bucket" (date grouping) — both set, or neither set, is rejected
+            at dashboard-load time.
           properties:
             field:
               type: string
               description: >
                 Which field to group by. Each resourceType enforces its own
                 small allowlist server-side; an unsupported value is
-                rejected by the group-by call itself with a 400, not caught
-                here.
+                rejected by the aggregate call itself with a 400, not caught
+                here. Mutually exclusive with "bucket".
+            bucket:
+              type: string
+              enum:
+                - day
+                - week
+                - month
+                - rating
+                - reasons_very_dissatisfied
+                - reasons_dissatisfied
+                - reasons_neutral
+                - reasons_satisfied
+                - reasons_very_satisfied
+              description: >
+                Date-bucket granularity instead of field-value grouping
+                ("day"/"week"/"month", temporal — a real time range, in
+                ascending chronological order), or a categorical bucket
+                instead: "rating" groups by rating value, or a "reasons_*"
+                value groups by which reason was selected for that specific
+                rating level — categorical buckets carry no ordering
+                guarantee. This is the mode a case_feedback
+                trend/distribution widget uses: the caller resolves it by
+                calling POST /cases/feedback/aggregate with this value as
+                that endpoint's own "bucket" (see AggregateFeedbackRequest,
+                and FeedbackBucket for what each bucket shape carries), not
+                the generic POST /{resourceType}/aggregate this groupBy
+                block otherwise implies. Mutually exclusive with "field".
             maxGroups:
               type: integer
               description: >
                 Top-N cutoff by count, descending; the remainder is summed
                 into one "Others" bucket. Omitted/zero defers to the
-                group-by endpoint's own default (12).
+                aggregate endpoint's own default (12). Meaningless when
+                "bucket" is set — a date-bucketed aggregation has no
+                "Others" folding.
             othersLabel:
               type: string
               description: >
                 Overrides the default "Others" label for the summed
-                remainder bucket.
-          required: [field]
+                remainder bucket. Meaningless when "bucket" is set, same as
+                "maxGroups".
         listLimit:
           type: integer
           description: Only meaningful for shape list; how many records to show
@@ -5796,6 +7335,61 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DashboardWidget'
+
+    DashboardFilterPreset:
+      type: object
+      description: >
+        One named, reusable filter predicate a dashboard definition may
+        reference instead of repeating it. Returned by
+        GET /dashboards/filter-presets for authoring purposes only — a
+        dashboard served by this API has every reference already expanded.
+      properties:
+        name:
+          type: string
+          description: >
+            The name a definition references this preset by. Unique within
+            the catalogue.
+        filter:
+          type: object
+          additionalProperties: true
+          description: >
+            The single filter predicate this preset stands for, verbatim as
+            authored: the same field/op/values object a widget's own
+            query.filters entries use.
+      required:
+        - name
+        - filter
+
+    DashboardSharedSection:
+      type: object
+      description: >
+        One named, reusable run of widgets a dashboard definition may pull in
+        by name instead of repeating them. Returned by GET /dashboards/sections
+        for authoring purposes only.
+      properties:
+        name:
+          type: string
+          description: >
+            The name a definition references this section by. Unique within
+            the catalogue.
+        displayName:
+          type: string
+          description: >
+            The heading every widget in this section is grouped under, unless
+            the referencing definition overrides it.
+        widgets:
+          type: array
+          description: >
+            The section's widget run, as AUTHORED: filter-preset references
+            are not expanded and no implied type filter has been injected.
+            Not usable directly as search criteria — see the endpoint
+            description.
+          items:
+            $ref: '#/components/schemas/DashboardWidget'
+      required:
+        - name
+        - displayName
+        - widgets
 
     Case:
       type: object
@@ -6200,6 +7794,19 @@ components:
           items:
             $ref: '#/components/schemas/Tag'
           description: Free-text labels attached to the case. null/absent when none are set.
+        escalationLevel:
+          type: string
+          nullable: true
+          enum:
+            - "0"
+            - "1"
+            - "2"
+            - "3"
+            - "4"
+            - "5"
+          description: >-
+            The case's current escalation level (EL0-EL5), or null when not yet known/populated
+            for this case's data source.
 
     CaseSearchView:
       type: object
@@ -6292,6 +7899,19 @@ components:
           $ref: '#/components/schemas/CaseNumberRef'
         account:
           $ref: '#/components/schemas/AccountRef'
+        escalationLevel:
+          type: string
+          nullable: true
+          enum:
+            - "0"
+            - "1"
+            - "2"
+            - "3"
+            - "4"
+            - "5"
+          description: >-
+            The case's current escalation level (EL0-EL5), or null when not yet known/populated
+            for this case's data source.
 
     UpdateDescriptionRequest:
       type: object
@@ -6556,9 +8176,13 @@ components:
       description: >
         One project-contact row for a user, reported as stored rather than as filtered. A
         row with no linked contact record makes the project, and every case on it, silently
-        invisible to that user. grantsCaseAccess mirrors contactRecordPresent directly --
-        deliberately not the stricter email-match rule the live access check enforces, since
-        that only diverges for integration/system accounts.
+        invisible to that user. grantsCaseAccess is the access rule applied per row:
+        contactRecordPresent AND contactEmail matching contactRecordEmail, compared
+        case-insensitively. It is deliberately not a restatement of contactRecordPresent --
+        a row invited under one address but linked to a contact whose own address differs is
+        invisible to both people, and that does happen on genuine customer rows. Both halves
+        of the comparison are returned above, so a false verdict can be explained from the
+        row itself.
       required: [projectId, projectName, projectKey, contactEmail, contactRecordPresent, grantsCaseAccess]
       properties:
         projectId:
@@ -7103,7 +8727,10 @@ components:
           properties:
             searchQuery:
               type: string
-              description: Searches across contact name and email (case-insensitive)
+              description: >
+                Searches across the contact's name, the linked record's address, and the
+                address a row was invited under (case-insensitive) — so a row with no linked
+                contact record is findable by the address it is displayed under.
         pagination:
           allOf:
             - $ref: '#/components/schemas/Pagination'
@@ -7125,8 +8752,15 @@ components:
             render the row unlinked rather than treating it as an error.
         name:
           type: string
+          description: >
+            Empty when the row has no contact record linked — the name is only ever known
+            from that record.
         email:
           type: string
+          description: >
+            The contact's address. Falls back to the address the row was invited under when
+            no contact record is linked, so a row whose contact record was never created is
+            still identifiable rather than coming back with no name and no address at all.
         registrationState:
           type: string
         notificationsEnabled:
@@ -7144,8 +8778,11 @@ components:
           type: boolean
           description: >
             Whether this row would actually grant its person visibility into this project's
-            cases. Mirrors `customerContactPresent` directly — a row can be listed here without
-            granting access.
+            cases: a linked contact record AND the address the row was invited under matching
+            that record's own address, compared case-insensitively. Deliberately not a
+            restatement of `customerContactPresent` — a row invited under one address but
+            linked to a contact whose own address differs is invisible to both people, and
+            that does happen on genuine customer rows.
 
     ProjectContactSearchResponse:
       type: object
@@ -7293,6 +8930,36 @@ components:
             updatedOn:
               type: string
               format: date-time
+            hasSr:
+              type: boolean
+              description: >
+                Whether this project is eligible to raise service requests, per the
+                backing data source's own project classification.
+            onboardingStatus:
+              type: string
+              nullable: true
+              enum:
+                - Not-Started
+                - In-Progress
+                - OnHold
+                - Completed
+                - Expired
+                - Cancelled
+                - Not-Applicable
+              description: >
+                The project's onboarding engagement status. Null when the project has
+                no onboarding engagement at all. "Not-Applicable" (and null) both mean
+                there is no active onboarding to surface for this project; treat either
+                as "onboarding not enabled" when deciding whether to show
+                onboardingOwner. ServiceNow data source only.
+            onboardingOwner:
+              nullable: true
+              allOf:
+                - $ref: '#/components/schemas/PersonRef'
+              description: >
+                The WSO2 staff member assigned to lead this project's onboarding. Null
+                when no owner is assigned (most projects, since it is only set for
+                onboarding-enabled projects). ServiceNow data source only.
 
     ProjectAccountRef:
       type: object
@@ -7804,6 +9471,49 @@ components:
           type: string
           description: Comment text
 
+    RequestCaseUpdatePayload:
+      type: object
+      required:
+        - stage
+      description: >
+        The category (generic vs. migration) is never accepted here — it is
+        always resolved server-side from the case's own type/engagementType.
+      properties:
+        stage:
+          type: string
+          enum: [first, second, final, custom]
+          description: >
+            One of the three fixed reminder templates, or "custom" to supply
+            customContent instead.
+        customContent:
+          type: string
+          description: >
+            Required and non-empty when stage is "custom"; rejected (must be
+            absent) for every other stage.
+
+    CaseUpdateRequestTemplates:
+      type: object
+      description: >
+        Both categories' full stage->message maps. Neither category includes
+        a "custom" entry.
+      properties:
+        generic:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            first: "<p>Hi Team,</p>..."
+            second: "<p>Hi Team,</p>..."
+            final: "<p>Hi Team,</p>..."
+        migration:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            first: "<p>Hi Team,</p>..."
+            second: "<p>Hi Team,</p>..."
+            final: "<p>Hi Team,</p>..."
+
     SnCommentCreatePayload:
       type: object
       required:
@@ -7943,6 +9653,132 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    CaseEscalationNotifiedUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        userName:
+          type: string
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+
+    CaseEscalationCaseRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    CaseEscalationLevel:
+      type: object
+      description: >
+        The escalation-level id ("0" through "5": EL0 "not escalated" through
+        EL5 "CEO") — the same id space the case search's escalationLevel
+        filter accepts and returns — with its display label.
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+
+    CaseEscalation:
+      type: object
+      description: >
+        One escalation-level change recorded against a case: either an escalate
+        or a de-escalate step, with the level it moved from and to. Supported
+        by the ServiceNow data source only.
+      properties:
+        id:
+          type: string
+        case:
+          $ref: '#/components/schemas/CaseEscalationCaseRef'
+        currentLevel:
+          $ref: '#/components/schemas/CaseEscalationLevel'
+        previousLevel:
+          $ref: '#/components/schemas/CaseEscalationLevel'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          nullable: true
+        notificationSentTo:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalationNotifiedUser'
+
+    CreatedCaseEscalation:
+      type: object
+      description: >
+        The response for POST /cases/{id}/escalations. Like CaseEscalation but
+        with no updatedOn — the create response doesn't carry one.
+      properties:
+        id:
+          type: string
+        case:
+          $ref: '#/components/schemas/CaseEscalationCaseRef'
+        currentLevel:
+          $ref: '#/components/schemas/CaseEscalationLevel'
+        previousLevel:
+          $ref: '#/components/schemas/CaseEscalationLevel'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          nullable: true
+        notificationSentTo:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalationNotifiedUser'
+
+    CaseEscalationSearchResponse:
+      type: object
+      description: The response for GET /cases/{id}/escalations — the case's full escalation history, newest first.
+      properties:
+        escalations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalation'
+        total:
+          type: integer
+        currentNotifiedUsers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalationNotifiedUser'
+          description: >-
+            The notified-users list of the case's most recent escalation record (empty when the
+            case has never been escalated). Only someone on this list is authorized to
+            de-escalate the case's current level.
+
+    CaseEscalationCreatePayload:
+      type: object
+      description: >
+        The case ID is taken from the URL path. action defaults to ESCALATE
+        when omitted. reason is required when escalating and optional when
+        de-escalating.
+      properties:
+        reason:
+          type: string
+        action:
+          type: string
+          enum: [ESCALATE, DEESCALATE]
 
     AssignedEngineerRef:
       type: object
@@ -8121,6 +9957,41 @@ components:
         - change_request
         - deployment
         - incident
+
+    AttachmentUpdatePayload:
+      type: object
+      required: [referenceId, referenceType]
+      properties:
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the reference entity (case, change request, etc.)
+        referenceType:
+          $ref: '#/components/schemas/ReferenceType'
+        name:
+          type: string
+          description: New file name. At least one of name or description is required.
+        description:
+          type: string
+          nullable: true
+          description: New description. At least one of name or description is required.
+
+    AttachmentUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        attachment:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+              format: date-time
+            updatedBy:
+              type: string
 
     AttachmentSearchPayload:
       type: object
@@ -8329,6 +10200,38 @@ components:
                 A single change request number (e.g. "CHG0010001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
+            filters:
+              type: array
+              items:
+                type: object
+                required: [field, op]
+                properties:
+                  field:
+                    type: string
+                    enum: [createdOn, assignmentGroupId, approval]
+                  op:
+                    type: string
+                    enum: [gte, lte, in, eq]
+                  values:
+                    type: array
+                    items:
+                      type: string
+              description: >-
+                Generic field/op/values filter predicates, additive to the
+                named fields above. Passed through as-is to the entity
+                service. Supported fields:
+
+                - **createdOn** (gte / lte): a single RFC3339 timestamp,
+                  YYYY-MM-DD date, or relative-date placeholder (e.g.
+                  "__daysAgo:90__") bounding the change request's created
+                  timestamp.
+                - **assignmentGroupId** (in): sys_user_group UUIDs.
+                - **approval** (eq): ServiceNow's raw task.approval rollup on
+                  the change request. Exactly one value, one of
+                  "not requested", "requested", "approved", "rejected".
+                  Distinct from the approvedBy/approvedOn fields on a change
+                  request's detail view, which come from a narrower
+                  Customer-Approval-stage record, not this CR-wide field.
         sortBy:
           type: object
           properties:
@@ -8422,6 +10325,24 @@ components:
           type: integer
         offset:
           type: integer
+
+    ChangeRequestAggregatePayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          type: object
+          description: Same shape as ChangeRequestSearchPayload.filters.
+        groupBy:
+          type: string
+          enum: [state, assignmentGroup]
+          description: The field to aggregate change request counts by.
+        maxGroups:
+          type: integer
+          description: >-
+            Caps the response to the top maxGroups buckets by count; the
+            remainder is folded into AggregateResponse.othersCount. Optional;
+            a default is applied when omitted.
 
     ChangeRequestDetail:
       allOf:
@@ -8966,6 +10887,27 @@ components:
                   - notes_pending
                   - concluded
               description: Filter by one or more states.
+            caseStates:
+              type: array
+              items:
+                type: string
+                enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+              description: Filter to call requests whose parent case is in one of these states.
+            excludeCaseStates:
+              type: array
+              items:
+                type: string
+                enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+              description: >-
+                Filter to call requests whose parent case is NOT in any of these states.
+                Inverse of caseStates; the two are independent and either, both, or
+                neither may be supplied.
+            assignmentTeamIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: Filter by the parent case's assigned team(s).
         sortBy:
           type: object
           additionalProperties: false
@@ -9557,6 +11499,41 @@ components:
                 A single incident number (e.g. "INC0010001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
+            state:
+              type: array
+              items:
+                type: string
+              description: >-
+                Incident state keys (e.g. "NEW", "IN_PROGRESS", "CLOSED",
+                "CANCELLED"). Already accepted by the entity-service today;
+                documented here to catch this schema up to what the code
+                actually accepts.
+            businessServiceId:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: >-
+                Business-service UUIDs. Already accepted by the
+                entity-service today; documented here to catch this schema
+                up to what the code actually accepts.
+            slaViolated:
+              type: boolean
+              description: >-
+                Whether the incident has a breached SLA, derived from
+                task_sla.has_breached (a related-list join), not from
+                ServiceNow's raw made_sla field -- deliberately more
+                reliable than made_sla, which catches only a small fraction
+                of actually-breached incidents on this instance. Prefer
+                this field for correctness-sensitive SLA-breach filtering.
+            madeSla:
+              type: boolean
+              description: >-
+                ServiceNow's raw made_sla field on the incident. Different
+                from, and less reliable than, slaViolated above -- kept
+                only for exact parity with ServiceNow dashboards/reports
+                that filter on this raw field directly. Do not use this for
+                general SLA-breach filtering; use slaViolated instead.
         sortBy:
           type: object
           properties:
@@ -9588,6 +11565,47 @@ components:
           type: integer
         offset:
           type: integer
+
+    IncidentAggregatePayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          type: object
+          description: Same shape as IncidentSearchPayload.filters.
+        groupBy:
+          type: string
+          enum: [state, assignmentGroup, businessService]
+          description: The field to aggregate incident counts by.
+        maxGroups:
+          type: integer
+          description: >-
+            Caps the response to the top maxGroups buckets by count; the
+            remainder is folded into AggregateResponse.othersCount. Optional;
+            a default is applied when omitted.
+
+    GoogleChatAlertPayload:
+      type: object
+      required: [product, title, shortDescription, caseId]
+      additionalProperties: false
+      properties:
+        product:
+          type: string
+          description: >-
+            Selects which configured Google Chat space receives the alert
+            (e.g. "api-manager", "identity-server"); matched case- and
+            whitespace-insensitively against NOTIFICATIONS_GOOGLE_CHAT_SPACES.
+        title:
+          type: string
+          description: Card header title (e.g. "P1 Incident - CASE-001").
+        shortDescription:
+          type: string
+          description: Card body text shown under "Short Description".
+        caseId:
+          type: string
+          description: >-
+            Case ID used to build the "Open in CSM Portal" link
+            (/operations/incidents/{caseId}).
 
     Incident:
       type: object
@@ -9976,6 +11994,64 @@ components:
         incident:
           $ref: '#/components/schemas/IncidentDetail'
 
+    UpdateProblemPayload:
+      type: object
+      description: All fields are optional, but at least one must be provided.
+      minProperties: 1
+      properties:
+        transition:
+          type: string
+          description: >-
+            One of assess, confirm, fix, resolve, close per the data source's own
+            server-side validation. Deliberately typed as a plain string, not a closed
+            enum: an invalid value is rejected upstream with an actionable error naming
+            the valid values, and validating it here would hide that message behind a
+            generic one instead.
+        assignedToId:
+          type: string
+          format: uuid
+        assignmentGroupId:
+          type: string
+          format: uuid
+        causeNotes:
+          type: string
+        fixNotes:
+          type: string
+        workaround:
+          type: string
+        targetResolutionDate:
+          type: string
+
+    UpdateProblemResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        problem:
+          $ref: '#/components/schemas/UpdateProblemView'
+
+    UpdateProblemView:
+      type: object
+      description: >-
+        Deliberately narrower than ProblemDetail: only the fields the update response
+        actually carries.
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+        updatedBy:
+          type: string
+        state:
+          type: string
+        resolutionCode:
+          type: string
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+
     ProblemSearchPayload:
       type: object
       properties:
@@ -10063,6 +12139,110 @@ components:
         number:
           type: string
 
+    AlertDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          nullable: true
+        metricName:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+          description: Opaque, free-form text.
+        incidentId:
+          type: string
+          nullable: true
+          description: ID of the linked incident, if any.
+        serviceId:
+          type: string
+          nullable: true
+          description: ID of the linked service, if any.
+        createdOn:
+          type: string
+
+    SmartAlertDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        alertId:
+          type: string
+          nullable: true
+          description: ID of the linked alert, if any.
+        sourceAlertId:
+          type: string
+          nullable: true
+          description: Opaque identifier assigned by the originating alert source.
+        alertStatus:
+          type: string
+          nullable: true
+        windowStatus:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          nullable: true
+        urgency:
+          type: string
+          nullable: true
+        impact:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          nullable: true
+        resourceName:
+          type: string
+          nullable: true
+        shortDescription:
+          type: string
+          nullable: true
+        details:
+          type: string
+          nullable: true
+          description: Opaque, free-form text.
+        monitorUrl:
+          type: string
+          nullable: true
+        firedAt:
+          type: string
+          nullable: true
+        receivedAt:
+          type: string
+          nullable: true
+        fireCount:
+          type: integer
+          nullable: true
+        incidentId:
+          type: string
+          nullable: true
+          description: ID of the linked incident, if any.
+
     ProblemDetail:
       allOf:
         - $ref: '#/components/schemas/Problem'
@@ -10112,3 +12292,123 @@ components:
             closedOn:
               type: string
               nullable: true
+
+    ProblemAggregatePayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          type: object
+          description: Same shape as ProblemSearchPayload.filters.
+        groupBy:
+          type: string
+          enum: [state, assignmentGroup]
+          description: The field to aggregate problem counts by.
+        maxGroups:
+          type: integer
+          description: >-
+            Caps the response to the top maxGroups buckets by count; the
+            remainder is folded into AggregateResponse.othersCount. Optional;
+            a default is applied when omitted.
+
+    IncidentTaskSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+            number:
+              type: string
+              description: >-
+                A single incident task number (e.g. "TASK0082453"); matches
+                exactly. Routed as a first-class filter rather than through
+                the free-text searchQuery scan.
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    IncidentTask:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+          description: Raw passthrough state value from the backing data source.
+        stateLabel:
+          type: string
+          nullable: true
+        incident:
+          $ref: '#/components/schemas/CaseNumberRef'
+          nullable: true
+        assignmentGroup:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+
+    IncidentTaskSearchResponse:
+      type: object
+      properties:
+        incidentTasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentTask'
+        total:
+          type: integer
+          description: Total number of matching incident tasks
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    IncidentTaskDetail:
+      allOf:
+        - $ref: '#/components/schemas/IncidentTask'
+        - type: object
+          properties:
+            description:
+              type: string
+              nullable: true
+            priority:
+              type: string
+              nullable: true
+            openedOn:
+              type: string
+              nullable: true
+            closedOn:
+              type: string
+              nullable: true
+
+    IncidentTaskAggregatePayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          type: object
+          description: Same shape as IncidentTaskSearchPayload.filters.
+        groupBy:
+          type: string
+          enum: [state, assignmentGroup]
+          description: The field to aggregate incident task counts by.
+        maxGroups:
+          type: integer
+          description: >-
+            Caps the response to the top maxGroups buckets by count; the
+            remainder is folded into AggregateResponse.othersCount. Optional;
+            a default is applied when omitted.

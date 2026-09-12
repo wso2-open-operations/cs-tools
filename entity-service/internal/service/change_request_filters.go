@@ -30,7 +30,7 @@ import (
 // (states/impacts/closedOn/projectIds/number/searchQuery), which stay outside
 // this array.
 var changeRequestFilterFieldSet = map[string]bool{
-	"createdOn": true, "assignmentGroupId": true,
+	"createdOn": true, "assignmentGroupId": true, "approval": true,
 }
 
 // changeRequestFilterOpSet is the exact set of ChangeRequestFieldFilter.Op
@@ -38,7 +38,15 @@ var changeRequestFilterFieldSet = map[string]bool{
 // Field/op compatibility is enforced separately in
 // ParseChangeRequestFieldFilters.
 var changeRequestFilterOpSet = map[string]bool{
-	"gte": true, "lte": true, "in": true,
+	"gte": true, "lte": true, "in": true, "eq": true,
+}
+
+// changeRequestApprovalValueSet is the exact set of values ServiceNow's raw
+// task.approval field can hold on a change_request record. Confirmed live
+// and meaningful on the production instance (distinct from phase_state,
+// which is structurally dead there).
+var changeRequestApprovalValueSet = map[string]bool{
+	"not requested": true, "requested": true, "approved": true, "rejected": true,
 }
 
 // requireChangeRequestFilterValues rejects a filter entry whose op needs a
@@ -92,6 +100,10 @@ type parsedChangeRequestFilters struct {
 	// sysids -- that conversion happens where the outbound payload is built,
 	// same as before).
 	AssignmentGroupIDs []string
+	// Approval is ServiceNow's raw task.approval value on the change
+	// request ("not requested" / "requested" / "approved" / "rejected"),
+	// passed straight through to SN as filters.approval.
+	Approval *string
 }
 
 // ParseChangeRequestFieldFilters translates the change-request-search wire
@@ -144,6 +156,22 @@ func ParseChangeRequestFieldFilters(filters []domain.ChangeRequestFieldFilter, n
 				return parsedChangeRequestFilters{}, err
 			}
 			p.AssignmentGroupIDs = append(p.AssignmentGroupIDs, f.Values...)
+
+		case "approval":
+			if f.Op != "eq" {
+				return parsedChangeRequestFilters{}, badChangeRequestFilterCombo(f)
+			}
+			if err := requireChangeRequestFilterValues(f); err != nil {
+				return parsedChangeRequestFilters{}, err
+			}
+			if len(f.Values) != 1 {
+				return parsedChangeRequestFilters{}, &apierror.ValidationError{Msg: "filters: field \"approval\" accepts exactly one value"}
+			}
+			if !changeRequestApprovalValueSet[f.Values[0]] {
+				return parsedChangeRequestFilters{}, &apierror.ValidationError{Msg: "filters: field \"approval\" value must be one of \"not requested\", \"requested\", \"approved\", \"rejected\""}
+			}
+			v := f.Values[0]
+			p.Approval = &v
 		}
 	}
 

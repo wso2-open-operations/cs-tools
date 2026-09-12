@@ -35,7 +35,7 @@ const entitySearchCasesPayload = `{
       "number": "CS0441080",
       "createdOn": "2026-08-03 06:15:31",
       "updatedOn": "2026-08-03 07:02:30",
-      "createdBy": {"id": "u-1", "email": "anuradhab@wso2.com", "name": "Anuradha B"},
+      "createdBy": {"id": "u-1", "email": "jane.doe@example.com", "name": "Jane Doe"},
       "subject": "test",
       "state": "Open",
       "type": "announcement",
@@ -56,7 +56,7 @@ func TestSearchCases_DecodesObjectCreatedBy(t *testing.T) {
 	if len(resp.Cases) != 1 {
 		t.Fatalf("decoded %d cases, want 1", len(resp.Cases))
 	}
-	if resp.Cases[0].CreatedBy == nil || resp.Cases[0].CreatedBy.Email != "anuradhab@wso2.com" {
+	if resp.Cases[0].CreatedBy == nil || resp.Cases[0].CreatedBy.Email != "jane.doe@example.com" {
 		t.Fatalf("createdBy = %+v, want the email decoded from the object", resp.Cases[0].CreatedBy)
 	}
 
@@ -75,7 +75,7 @@ func TestSearchCases_DecodesObjectCreatedBy(t *testing.T) {
 	if err := json.Unmarshal(out.Cases[0]["createdBy"], &identity); err != nil {
 		t.Fatalf("createdBy is not a JSON string (%s); the frontend reads it as one", out.Cases[0]["createdBy"])
 	}
-	if identity != "anuradhab@wso2.com" {
+	if identity != "jane.doe@example.com" {
 		t.Errorf("createdBy = %q, want the email — isNoveraOrBotSender treats this as an identity", identity)
 	}
 }
@@ -84,12 +84,12 @@ func TestSearchCases_DecodesObjectCreatedBy(t *testing.T) {
 // compares createdBy against "novera" for bot attribution and the Ballerina
 // backend sent the email here, so the display name must not win.
 func TestUserRefIdentity_PrefersEmail(t *testing.T) {
-	both := &entity.UserReference{Email: "a@wso2.com", Name: "A Person"}
-	if got := userRefIdentity(both); got != "a@wso2.com" {
+	both := &entity.UserReference{Email: "a@example.com", Name: "Jane Doe"}
+	if got := userRefIdentity(both); got != "a@example.com" {
 		t.Errorf("userRefIdentity = %q, want the email", got)
 	}
-	nameOnly := &entity.UserReference{Name: "A Person"}
-	if got := userRefIdentity(nameOnly); got != "A Person" {
+	nameOnly := &entity.UserReference{Name: "Jane Doe"}
+	if got := userRefIdentity(nameOnly); got != "Jane Doe" {
 		t.Errorf("no email: got %q, want the name as a fallback rather than empty", got)
 	}
 	if got := userRefIdentity(nil); got != "" {
@@ -98,14 +98,14 @@ func TestUserRefIdentity_PrefersEmail(t *testing.T) {
 }
 
 // TestUserRefDisplayName_IsNameOnly keeps an email out of a field that renders as
-// a person's name — showing "a@wso2.com" where a name belongs is worse than
+// a person's name — showing "a@example.com" where a name belongs is worse than
 // showing nothing, because CommentBubble falls back to createdBy when this is
 // empty.
 func TestUserRefDisplayName_IsNameOnly(t *testing.T) {
-	if got := userRefDisplayName(&entity.UserReference{Email: "a@wso2.com"}); got != "" {
+	if got := userRefDisplayName(&entity.UserReference{Email: "a@example.com"}); got != "" {
 		t.Errorf("email-only reference: got %q, want empty", got)
 	}
-	if got := userRefDisplayName(&entity.UserReference{Email: "a@wso2.com", Name: "A Person"}); got != "A Person" {
+	if got := userRefDisplayName(&entity.UserReference{Email: "a@example.com", Name: "Jane Doe"}); got != "Jane Doe" {
 		t.Errorf("got %q, want the name", got)
 	}
 	if got := userRefDisplayName(nil); got != "" {
@@ -120,7 +120,7 @@ func TestUserRefDisplayName_IsNameOnly(t *testing.T) {
 func TestCaseActivities_DecodeObjectCreatedBy(t *testing.T) {
 	payload := `{"activity":[{
 	  "id":"a1","type":"comment","content":"hello","createdOn":"2026-08-03T06:15:31Z",
-	  "createdBy":{"id":"u-1","email":"anuradhab@wso2.com","name":"Anuradha B"},
+	  "createdBy":{"id":"u-1","email":"jane.doe@example.com","name":"Jane Doe"},
 	  "createdByFirstName":"Anuradha","createdByLastName":"B"
 	}],"total":1,"limit":10,"offset":0}`
 
@@ -133,10 +133,10 @@ func TestCaseActivities_DecodeObjectCreatedBy(t *testing.T) {
 		t.Fatalf("got %d activities, want 1", len(mapped.Activities))
 	}
 	a := mapped.Activities[0]
-	if a.CreatedByFullName != "Anuradha B" {
+	if a.CreatedByFullName != "Jane Doe" {
 		t.Errorf("createdByFullName = %q, want the name from the reference", a.CreatedByFullName)
 	}
-	if a.CreatedBy != "Anuradha B" {
+	if a.CreatedBy != "Jane Doe" {
 		t.Errorf("createdBy = %q, want the same display name this mapper produced before the upstream change", a.CreatedBy)
 	}
 	if a.CreatedByFirstName != "Anuradha" || a.CreatedByLastName != "B" {

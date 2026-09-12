@@ -147,7 +147,7 @@ func TestSNCaseService_SearchCases_GroupBy(t *testing.T) {
 			})
 		})
 
-		svc := NewServiceNowCaseService(newTestSNClient(t, h), nil, nil)
+		svc := NewServiceNowCaseService(newTestSNClient(t, h), nil, nil, noopSLAClockService{}, nil, "", nil)
 		resp, err := svc.SearchCases(contextWithUserIDToken("token"), domain.SearchCasesRequest{
 			GroupBy:    "state",
 			Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -192,7 +192,7 @@ func TestSNCaseService_SearchCases_GroupBy(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"cases": []map[string]any{}, "totalRecords": 1})
 		})
 
-		svc := NewServiceNowCaseService(newTestSNClient(t, h), nil, nil)
+		svc := NewServiceNowCaseService(newTestSNClient(t, h), nil, nil, noopSLAClockService{}, nil, "", nil)
 		_, err := svc.SearchCases(contextWithUserIDToken("token"), domain.SearchCasesRequest{
 			GroupBy:    "state",
 			Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -207,7 +207,7 @@ func TestSNCaseService_SearchCases_GroupBy(t *testing.T) {
 			t.Error("no upstream call expected for an invalid groupBy")
 			w.WriteHeader(http.StatusInternalServerError)
 		})
-		svc := NewServiceNowCaseService(newTestSNClient(t, h), nil, nil)
+		svc := NewServiceNowCaseService(newTestSNClient(t, h), nil, nil, noopSLAClockService{}, nil, "", nil)
 		_, err := svc.SearchCases(contextWithUserIDToken("token"), domain.SearchCasesRequest{
 			GroupBy:    "tag",
 			Pagination: domain.Pagination{Limit: 20, Offset: 0},

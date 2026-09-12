@@ -96,9 +96,21 @@ export default function CsmDashboardBuilderListPage(): JSX.Element {
           Build or adjust a dashboard's widgets, then hand the exported JSON to a maintainer to
           deploy — this builder never writes to the live registry itself.
         </Typography>
-        <Button variant="contained" startIcon={<Plus size={16} />} onClick={handleCreate}>
-          Create new dashboard
-        </Button>
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+          <Button variant="contained" startIcon={<Plus size={16} />} onClick={handleCreate}>
+            Create new dashboard
+          </Button>
+          {/* Presets and sections are shared ACROSS dashboards and deploy as
+              their own files, so they get their own page rather than living
+              inside one dashboard's editor. */}
+          <Button
+            variant="outlined"
+            startIcon={<LayoutGrid size={16} />}
+            onClick={() => navigate("/admin/dashboards/shared")}
+          >
+            Shared presets &amp; sections
+          </Button>
+        </Box>
       </Box>
 
       {isError ? (

@@ -328,6 +328,18 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		// consumer's retries and dead-letter an event that was never broken,
 		// just not this consumer's concern.
 		return nil
+	case events.TypeCaseBillableStatusChanged:
+		// internal/timecardengine's own consumer group (a different group
+		// ID, so it gets its own full copy of this same topic) is what
+		// reacts to this one — same shape as the SLA case above, just with
+		// its handler currently log-only rather than a real reaction (see
+		// that package's own doc comment: entity-service's Publish call for
+		// this event is itself still commented out, so neither consumer
+		// group has ever actually received one yet). Returning nil (not an
+		// error) is required here for the same reason as the SLA case:
+		// erroring would burn this consumer's retries and dead-letter an
+		// event that was never broken, just not this consumer's concern.
+		return nil
 	default:
 		return fmt.Errorf("dispatch: unknown event type %q", env.Type)
 	}

@@ -21,23 +21,18 @@ import {
   Checkbox,
   DatePickers,
   Divider,
-  FormControl,
   FormControlLabel,
   Grid,
   IconButton,
   InputAdornment,
-  InputLabel,
-  ListItemText,
-  MenuItem,
   Paper,
-  Select,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp, ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
 import type { BeIncidentPriority } from "@api/backend/types";
+import { useTeams } from "@features/csm-dashboard/api/useTeams";
 import {
   countActiveIncidentFilters,
   incidentPriorityLabel,
@@ -45,6 +40,7 @@ import {
   type IncidentFilters,
 } from "@features/csm-operations/utils/incidents";
 import IncidentProductMultiSelect from "@features/csm-operations/components/IncidentProductMultiSelect";
+import MultiSelectField from "@components/MultiSelectField";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
 
@@ -89,7 +85,7 @@ interface IncidentsFilterBarProps {
 }
 
 /**
- * Search + filters bar for the Incidents tab: priority, product,
+ * Search + filters bar for the Incidents tab: priority, product, SRE team,
  * SLA-violated, and created date range (see `IncidentSearchPayload.filters` in
  * openapi.yaml — there's still no server-side state/category filter to build
  * a control for). The created-date bounds are inclusive and interpreted in
@@ -125,12 +121,26 @@ export default function IncidentsFilterBar({
     [],
   );
 
-  const handlePriorityChange = (event: SelectChangeEvent<string[]>): void => {
-    const val = event.target.value;
-    onChange({
-      ...filters,
-      priorities: (Array.isArray(val) ? val : [val]) as BeIncidentPriority[],
-    });
+  // SRE Team: incidents are SRE-owned, so this is scoped to the `sre-abt`
+  // team family (unlike the cases list's own "SRE Team" filter, which is
+  // deliberately scoped to `cre-abt` per an explicit, later-flagged-as-
+  // likely-mistaken product instruction — see `CasesFilterBar.tsx`'s
+  // `sreTeamOptions`. This is a fresh field on a different resource, not a
+  // copy of that decision).
+  const { data: teams } = useTeams(true, "sre-abt");
+  const sreTeamOptions = useMemo(
+    () =>
+      (teams ?? [])
+        .filter(
+          (t): t is typeof t & { sreGroupId: string } =>
+            Boolean(t.sreGroupId) && t.family === "sre-abt",
+        )
+        .map((t) => ({ value: t.sreGroupId, label: t.name })),
+    [teams],
+  );
+
+  const handlePriorityChange = (next: BeIncidentPriority[]): void => {
+    onChange({ ...filters, priorities: next });
   };
 
   /**
@@ -220,39 +230,29 @@ export default function IncidentsFilterBar({
           <Divider />
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <FormControl fullWidth size="small">
-                <InputLabel id="incident-filter-priority-label">Priority</InputLabel>
-                <Select
-                  multiple
-                  labelId="incident-filter-priority-label"
-                  id="incident-filter-priority"
-                  value={filters.priorities}
-                  label="Priority"
-                  onChange={handlePriorityChange}
-                  renderValue={(selected) =>
-                    (selected as string[])
-                      .map((v) => priorityOptions.find((o) => o.value === v)?.label ?? v)
-                      .join(", ")
-                  }
-                >
-                  {priorityOptions.map((opt) => (
-                    <MenuItem key={opt.value} value={opt.value} sx={{ py: 0.5 }}>
-                      <Checkbox
-                        size="small"
-                        checked={filters.priorities.includes(opt.value)}
-                        sx={{ mr: 1, p: 0.25 }}
-                      />
-                      <ListItemText primary={opt.label} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <MultiSelectField
+                id="incident-filter-priority"
+                label="Priority"
+                values={filters.priorities}
+                options={priorityOptions}
+                onChange={handlePriorityChange}
+              />
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
               <IncidentProductMultiSelect
                 values={filters.products}
                 onChange={(next) => onChange({ ...filters, products: next })}
+              />
+            </Grid>
+
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MultiSelectField
+                id="incident-filter-sre-team"
+                label="SRE Team"
+                values={filters.sreTeamIds}
+                options={sreTeamOptions}
+                onChange={(next) => onChange({ ...filters, sreTeamIds: next })}
               />
             </Grid>
 

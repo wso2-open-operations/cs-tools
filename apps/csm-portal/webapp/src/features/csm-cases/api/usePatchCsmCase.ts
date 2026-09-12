@@ -31,8 +31,9 @@ import type {
  * Update a case via `PATCH /cases/{id}` — state transitions, priority changes,
  * work sub-state (`workState`), assignee (`assigneeEmail`), watch list
  * (`watchList`), parent/related-case links (`parentId` / `relatedCaseId`),
- * subject/description/deployment/deployed-product edits, or an auto-closure
- * hold (`autocloseHoldUntil`). The backend requires **exactly one** of those
+ * subject/description/deployment/deployed-product edits, marking/recalling
+ * the workaround (`workaroundProvided`), or an auto-closure hold
+ * (`autocloseHoldUntil`). The backend requires **exactly one** of those
  * fields per call, so callers must not combine them.
  * The response is `BeUpdateCaseResponse` ({ message, case }), but on success we
  * ignore the body and invalidate this case's detail query and the cross-project

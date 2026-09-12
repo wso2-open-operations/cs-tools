@@ -79,7 +79,16 @@ export function useCurrentEngineer(): { id: string | undefined; name: string } {
   return { id: me?.id, name: displayName };
 }
 
-/** Invalidate every time-card query so all views refresh after a write. */
+/** Invalidate every time-card query so all views refresh after a write. Also
+ * drops the persisted {@link RecentApprover} cache (see
+ * {@link clearPersistedRecentApprovers}) — this is the one existing hub
+ * already called after every card create/decide/bulk-approve mutation, so
+ * reusing it here (rather than wiring a create-only success handler into
+ * `usePostTimeCard`, a different file) keeps this a same-file change. Decide
+ * and bulk-approve don't actually change *who the signed-in engineer picked
+ * as an approver*, so those two calls make this drop the cache one mutation
+ * too many — an accepted, harmless over-invalidation (one extra background
+ * refetch next dialog open) rather than a second invalidation path. */
 export function invalidateTimecards(queryClient: QueryClient): void {
   for (const key of [
     ApiQueryKeys.TIME_CARDS_SEARCH,
@@ -90,6 +99,7 @@ export function invalidateTimecards(queryClient: QueryClient): void {
   ]) {
     void queryClient.invalidateQueries({ queryKey: [key] });
   }
+  clearPersistedRecentApprovers();
 }
 
 /** Wire `issueComplexity` values the entity-service is confirmed to return
@@ -197,11 +207,18 @@ export interface TimeCardSearchResult {
  * their own such walk — was slow enough to sometimes fail outright. Real,
  * caller-driven pagination replaces that: callers ask for one page at a
  * time via `pagination`, and `total` lets them drive page controls.
+ *
+ * `sortBy` is an escape hatch for callers that need the server to select
+ * (not just order) by a specific field before applying `pagination` — e.g.
+ * {@link useRecentApprovers}, where the top `RECENT_APPROVERS_LOOKBACK`
+ * cards must actually be the most recent by `workDate`, not just sorted
+ * after the fact within whatever page the default order happened to return.
  */
 export async function searchTimeCards(
   api: BackendApi,
   filters?: TimeCardSearchFilters,
   pagination?: TimeCardPagination,
+  sortBy?: BeSearchTimeCardsPayload["sortBy"],
 ): Promise<TimeCardSearchResult> {
   const limit = Math.min(pagination?.rowsPerPage ?? BE_MAX_PAGE_LIMIT, BE_MAX_PAGE_LIMIT);
   const wireFilters: BeSearchTimeCardsFilters = {
@@ -216,6 +233,7 @@ export async function searchTimeCards(
   };
   const payload: BeSearchTimeCardsPayload = {
     filters: wireFilters,
+    ...(sortBy ? { sortBy } : {}),
     pagination: { limit, offset: (pagination?.page ?? 0) * limit },
   };
   const res = await api.post<BeSearchTimeCardsPayload, BeSearchTimeCardsResponse>(
@@ -316,6 +334,197 @@ export function useAllTimeCards(
     queryFn: (): Promise<TimeCardSearchResult> => searchTimeCards(api, filters, pagination),
     enabled: enabled && !!me.id,
     staleTime: 5_000,
+  });
+}
+
+/** A previously-selected approver, reduced from the signed-in engineer's own
+ * recent time-card submissions (see {@link useRecentApprovers}) — deliberately
+ * the same `{ id, name }` shape as {@link TimeCardApprover} since it feeds the
+ * exact same approver-picker candidate rendering in `LogTimeCardDialog`. */
+export interface RecentApprover {
+  id: string;
+  name: string;
+}
+
+/** How many distinct recent approvers {@link useRecentApprovers} surfaces —
+ * enough to cover an engineer's usual handful of team leads without turning
+ * the "before you type" list into a full roster. */
+const RECENT_APPROVERS_MAX = 4;
+
+/** How many of the signed-in engineer's own most-recent cards to look at when
+ * deriving {@link RecentApprover}s — a small page is enough since the same
+ * few approvers repeat constantly; this is "who did I pick before", not a
+ * complete history. */
+const RECENT_APPROVERS_LOOKBACK = 20;
+
+/** localStorage key prefix for the persisted {@link RecentApprover} cache,
+ * one entry per signed-in engineer id (see {@link recentApproversStorageKey})
+ * so switching accounts on a shared browser profile never surfaces another
+ * engineer's picks. Versioned so a future change to the stored shape can
+ * invalidate old entries outright rather than needing a migration. */
+const RECENT_APPROVERS_STORAGE_PREFIX = "csm-portal:time-cards:recent-approvers:v1:";
+
+function recentApproversStorageKey(engineerId: string): string {
+  return `${RECENT_APPROVERS_STORAGE_PREFIX}${engineerId}`;
+}
+
+/** Backstop TTL for the persisted cache, well beyond a normal work session —
+ * this only matters when the *server-side* answer to "who did I pick before"
+ * has drifted without this browser seeing a create/decide/bulk-approve
+ * mutation to invalidate on (e.g. the same engineer logged a card from a
+ * different device or browser profile). 24h bounds that drift to at most one
+ * stale day without forcing a re-fetch on every single dialog open, which
+ * would defeat the point of caching this at all. */
+const RECENT_APPROVERS_TTL_MS = 24 * 60 * 60 * 1000;
+
+interface PersistedRecentApprovers {
+  approvers: RecentApprover[];
+  cachedAt: number;
+}
+
+function isRecentApproverArray(value: unknown): value is RecentApprover[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (v) =>
+        !!v &&
+        typeof v === "object" &&
+        typeof (v as RecentApprover).id === "string" &&
+        typeof (v as RecentApprover).name === "string",
+    )
+  );
+}
+
+/** Reads the persisted {@link RecentApprover} list for `engineerId`, or
+ * `undefined` if there's no entry, the entry is older than
+ * {@link RECENT_APPROVERS_TTL_MS}, or the stored shape doesn't parse as
+ * expected (e.g. a stale format from an older build, or storage tampered with
+ * outside this app) — any of those is treated identically to a cache miss,
+ * never a crash. Wrapped in try/catch: private browsing or a storage quota
+ * error must fall back to the always-fetch behavior, not break the dialog. */
+function readPersistedRecentApprovers(engineerId: string): RecentApprover[] | undefined {
+  try {
+    const raw = window.localStorage.getItem(recentApproversStorageKey(engineerId));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Partial<PersistedRecentApprovers> | null;
+    if (
+      !parsed ||
+      typeof parsed.cachedAt !== "number" ||
+      !isRecentApproverArray(parsed.approvers)
+    ) {
+      return undefined;
+    }
+    const now = Date.now();
+    if (
+      !Number.isFinite(parsed.cachedAt) ||
+      parsed.cachedAt > now ||
+      now - parsed.cachedAt > RECENT_APPROVERS_TTL_MS
+    ) {
+      return undefined;
+    }
+    return parsed.approvers;
+  } catch {
+    return undefined;
+  }
+}
+
+function writePersistedRecentApprovers(engineerId: string, approvers: RecentApprover[]): void {
+  try {
+    const payload: PersistedRecentApprovers = { approvers, cachedAt: Date.now() };
+    window.localStorage.setItem(recentApproversStorageKey(engineerId), JSON.stringify(payload));
+  } catch {
+    // Storage disabled/full/private browsing — nothing to persist, next
+    // dialog open just falls back to fetching live, same as today.
+  }
+}
+
+/** Drops every persisted {@link RecentApprover} entry (all engineer ids, not
+ * just the signed-in one) — cheap and safe since at most a handful of
+ * accounts ever share one browser profile, and this runs from
+ * {@link invalidateTimecards}, which has no engineer id of its own to scope
+ * a single-key removal to. */
+export function clearPersistedRecentApprovers(): void {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key?.startsWith(RECENT_APPROVERS_STORAGE_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) window.localStorage.removeItem(key);
+  } catch {
+    // Nothing persisted to begin with, or storage unavailable — no-op.
+  }
+}
+
+/**
+ * The signed-in engineer's own most-recently-submitted-to approvers, most
+ * recent first, deduped by id, capped at {@link RECENT_APPROVERS_MAX} —
+ * powers "Log time"'s approver picker showing previously-picked approvers
+ * before the engineer types anything (digiops-cs#2839), instead of requiring
+ * the same search every time.
+ *
+ * Derived entirely from the existing `POST /time-cards/search` endpoint
+ * (`userId`-scoped to the signed-in engineer, no `states` filter — an
+ * approved, rejected, or still-`submitted` card all equally answer "who did I
+ * pick before") rather than a new backend endpoint or local storage: no state
+ * restriction is needed here, this is about the approver pick, not the
+ * outcome. `/time-cards/search`'s own default ordering isn't documented, so
+ * results are explicitly re-sorted here by `workDate` descending rather than
+ * assumed to already be newest-first.
+ *
+ * `enabled` should be gated to create-mode only (see `LogTimeCardDialog`) —
+ * the approver field is read-only once editing, so there's nothing for this
+ * list to feed there.
+ *
+ * Persisted to `localStorage` (see {@link readPersistedRecentApprovers} /
+ * {@link writePersistedRecentApprovers}), keyed by the signed-in engineer's
+ * id, so opening "Log time" doesn't re-run this search every single time —
+ * this list only actually changes when the engineer submits a new card with
+ * an approver (see {@link invalidateTimecards}, the sole invalidation path),
+ * so a fresh-enough persisted entry is used as-is with no network call at
+ * all, surviving page reloads and new sessions. A fresh cache is fed straight
+ * back as `initialData`; only a cache miss or a stale entry lets the query
+ * actually run, and every successful fetch re-persists its result.
+ */
+export function useRecentApprovers(enabled: boolean): UseQueryResult<RecentApprover[], Error> {
+  const api = useBackendApi();
+  const me = useCurrentEngineer();
+  const cached = me.id ? readPersistedRecentApprovers(me.id) : undefined;
+  return useQuery<RecentApprover[], Error>({
+    queryKey: [ApiQueryKeys.TIME_SHEETS_SEARCH, "recent-approvers", me.id],
+    queryFn: async (): Promise<RecentApprover[]> => {
+      if (!me.id) return [];
+      // sortBy: workDate desc so the page itself is the most-recent-by-workDate
+      // cards — the server's default order (updatedOn desc) selects a
+      // different, and possibly non-overlapping, top-N.
+      const { cards } = await searchTimeCards(
+        api,
+        { userId: me.id },
+        { page: 0, rowsPerPage: RECENT_APPROVERS_LOOKBACK },
+        { field: "workDate", order: "desc" },
+      );
+      const newestFirst = [...cards].sort((a, b) =>
+        (b.workDate || "").localeCompare(a.workDate || ""),
+      );
+      const seen = new Set<string>();
+      const recents: RecentApprover[] = [];
+      outer: for (const card of newestFirst) {
+        for (const approver of card.approvers ?? []) {
+          // Defensive only: nothing should let an engineer submit a card
+          // approved by themself, mirroring the same self-exclusion already
+          // applied to live search candidates in LogTimeCardDialog.
+          if (approver.id === me.id || seen.has(approver.id)) continue;
+          seen.add(approver.id);
+          recents.push({ id: approver.id, name: approver.name });
+          if (recents.length >= RECENT_APPROVERS_MAX) break outer;
+        }
+      }
+      writePersistedRecentApprovers(me.id, recents);
+      return recents;
+    },
+    enabled: enabled && !!me.id && !cached,
+    initialData: cached,
+    staleTime: 30_000,
   });
 }
 

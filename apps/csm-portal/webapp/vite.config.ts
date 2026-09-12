@@ -14,11 +14,45 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import { configDefaults, defineConfig as defineVitestConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+
+// Choreo's runtime-configuration mechanism injects /config.js fresh at deploy
+// time under a fixed filename that never changes across deploys (unlike
+// Vite's own content-hashed JS/CSS chunks), so a CDN caching it by bare path
+// can serve a stale copy (old backend URL, stale feature flags) after a
+// deploy. Tagging the <script> src with a build-time version query string
+// forces a fresh CDN fetch per deploy without changing the request path that
+// Choreo's injection matches against.
+function configVersionPlugin(): Plugin {
+  let version: string;
+  try {
+    version = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: fileURLToPath(new URL(".", import.meta.url)),
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+  } catch {
+    // No .git available (e.g. a Docker build context without history) --
+    // fall back to a build timestamp so the query string still changes
+    // per build instead of failing it.
+    version = String(Date.now());
+  }
+  return {
+    name: "csm-config-version",
+    transformIndexHtml(html) {
+      return html.replace(
+        '<script src="/config.js"></script>',
+        `<script src="/config.js?v=${version}"></script>`,
+      );
+    },
+  };
+}
 
 const viteConfig = defineConfig({
   plugins: [
@@ -27,6 +61,7 @@ const viteConfig = defineConfig({
         plugins: [["babel-plugin-react-compiler"]],
       },
     }),
+    configVersionPlugin(),
   ],
   resolve: {
     alias: {
@@ -121,6 +156,10 @@ const vitestConfig = defineVitestConfig({
           "@wso2/oxygen-ui-charts-react",
           "@mui/x-data-grid",
           "@asgardeo/browser",
+          // Inlined so `vi.mock("@asgardeo/react")` reaches ProtectedRoute's
+          // own import of the hook; without it the router package stays
+          // external and keeps the real `useAsgardeo`, which no test can steer.
+          "@asgardeo/react-router",
           "buffer",
         ],
       },

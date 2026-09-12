@@ -15,13 +15,19 @@
 // under the License.
 
 import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ReactNode, useEffect } from "react";
+import { ArrowLeft, Link as LinkIcon, Pencil } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type ReactNode, useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { BackendApiError } from "@api/backend/client";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useGetProblem } from "@features/csm-operations/api/useGetProblem";
+import { usePatchProblem } from "@features/csm-operations/api/usePatchProblem";
+import EditProblemDialog from "@features/csm-operations/components/EditProblemDialog";
+import ProblemActionBar from "@features/csm-operations/components/ProblemActionBar";
+import ProblemFixNotesDialog from "@features/csm-operations/components/ProblemFixNotesDialog";
 import { problemStateColor, problemStateLabel } from "@features/csm-operations/utils/problems";
-import type { BeEntityRef, BeProblemRef } from "@api/backend/types";
+import type { BeEntityRef, BeProblemRef, BeUpdateProblemPayload } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
@@ -90,10 +96,18 @@ function ProblemRefItem({
 }
 
 /**
- * Read-only detail for a single problem (`GET /problems/{id}`): its overview
- * fields, linked records, and resolution/fix notes. There is no Edit dialog
- * — problems are SRE-owned and the portal doesn't yet expose a mutation
- * endpoint for them (unlike change requests/incidents).
+ * Detail for a single problem (`GET /problems/{id}`): its overview fields,
+ * linked records, and resolution/fix notes. State transitions (`PATCH
+ * /problems/{id} { transition }`) go through `ProblemActionBar` — the live
+ * ServiceNow Problem Management engine is a strictly linear forward chain
+ * (`New -> Assess -> Root Cause Analysis -> Fix in Progress -> Resolved ->
+ * Closed`, see `getNextProblemTransition`), so there's only ever one legal
+ * next button, unlike Incident/CR. The `fix` transition routes through
+ * `ProblemFixNotesDialog` first to optionally collect `causeNotes`/
+ * `fixNotes` (unlike Incident's `RESOLVED`/`CLOSED`, these are genuinely
+ * optional, not ServiceNow-required — the dialog is skippable). A separate
+ * `EditProblemDialog` covers `assignedToId`/`assignmentGroupId`/
+ * `workaround`/`targetResolutionDate`, independent of any transition.
  */
 export default function ProblemDetailPage(): JSX.Element {
   const id = useNormalizedIdParam("id");
@@ -104,6 +118,13 @@ export default function ProblemDetailPage(): JSX.Element {
   const backState = useLocation().state as { from?: string } | undefined;
   const backTarget = backState?.from ?? OPERATIONS_PROBLEMS_PATH;
   const { data, isLoading, isError } = useGetProblem(id);
+  const { showError } = useErrorBanner();
+  const patchProblem = usePatchProblem();
+  const [editOpen, setEditOpen] = useState(false);
+  // Set only while the `fix` transition's optional-notes dialog is open;
+  // `null` otherwise. Every other transition dispatches directly with no
+  // intermediate dialog.
+  const [fixNotesOpen, setFixNotesOpen] = useState(false);
 
   const recordView = useRecordRecentView();
   useEffect(() => {
@@ -119,6 +140,58 @@ export default function ProblemDetailPage(): JSX.Element {
     });
   }, [data, recordView]);
 
+  /**
+   * Dispatch a transition from `ProblemActionBar`. `fix` opens the optional
+   * notes dialog first; every other transition PATCHes directly, same split
+   * of responsibility as `IncidentActionBar` +
+   * `CsmIncidentDetailPage.onIncidentAction`.
+   */
+  const onProblemAction = useCallback(
+    (transition: string) => {
+      if (!id) return;
+      if (transition === "fix") {
+        setFixNotesOpen(true);
+        return;
+      }
+      patchProblem.mutate(
+        { id, patch: { transition } },
+        {
+          onError: (err) => {
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not update the problem's state. Please try again.";
+            showError(msg, err);
+          },
+        },
+      );
+    },
+    [id, patchProblem, showError],
+  );
+
+  const onFixNotesSubmit = useCallback(
+    (fields: { causeNotes: string; fixNotes: string }) => {
+      if (!id) return;
+      const patch: BeUpdateProblemPayload = { transition: "fix" };
+      if (fields.causeNotes) patch.causeNotes = fields.causeNotes;
+      if (fields.fixNotes) patch.fixNotes = fields.fixNotes;
+      patchProblem.mutate(
+        { id, patch },
+        {
+          onSuccess: () => setFixNotesOpen(false),
+          onError: (err) => {
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not update the problem's state. Please try again.";
+            showError(msg, err);
+          },
+        },
+      );
+    },
+    [id, patchProblem, showError],
+  );
+
   const back = (): void => {
     navigate(backTarget);
   };
@@ -131,7 +204,7 @@ export default function ProblemDetailPage(): JSX.Element {
       onClick={back}
       sx={{ alignSelf: "flex-start" }}
     >
-      Back to problems
+      Back
     </Button>
   );
 
@@ -188,20 +261,63 @@ export default function ProblemDetailPage(): JSX.Element {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       {BackButton}
 
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-          <Typography variant="h5">{problem.subject || problem.number || "Problem"}</Typography>
-          {problem.state && (
-            <Chip
-              size="small"
-              color={problemStateColor(problem.state)}
-              label={problemStateLabel(problem.state)}
-            />
-          )}
+      <Box
+        sx={{
+          display: "flex",
+          gap: 2,
+          alignItems: "flex-start",
+          flexWrap: { xs: "wrap", md: "nowrap" },
+          justifyContent: "space-between",
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1,
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <Typography
+            variant="h6"
+            sx={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              letterSpacing: 0.2,
+              lineHeight: 1.2,
+            }}
+          >
+            {problem.number || problem.id}
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            {problem.state && (
+              <Chip
+                size="small"
+                color={problemStateColor(problem.state)}
+                label={problemStateLabel(problem.state)}
+              />
+            )}
+          </Box>
+          <Typography variant="h5">{problem.subject || "Problem"}</Typography>
         </Box>
-        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-          {problem.number || problem.id}
-        </Typography>
+        <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <ProblemActionBar
+              problem={problem}
+              isPending={patchProblem.isPending}
+              onAction={onProblemAction}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<Pencil size={14} />}
+              onClick={() => setEditOpen(true)}
+            >
+              Edit
+            </Button>
+          </Box>
+        </Box>
       </Box>
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -340,6 +456,48 @@ export default function ProblemDetailPage(): JSX.Element {
             </Box>
           )}
         </Card>
+      )}
+
+      {editOpen && (
+        <EditProblemDialog
+          problem={problem}
+          isSaving={patchProblem.isPending}
+          saveError={
+            patchProblem.isError
+              ? (patchProblem.error instanceof BackendApiError && patchProblem.error.message
+                  ? patchProblem.error.message
+                  : "Could not update the problem. Please try again.")
+              : null
+          }
+          onClose={() => {
+            if (!patchProblem.isPending) setEditOpen(false);
+          }}
+          onSave={(patch) =>
+            patchProblem.mutate(
+              { id: problem.id, patch },
+              {
+                onSuccess: () => setEditOpen(false),
+                onError: (err) => {
+                  const msg =
+                    err instanceof BackendApiError && err.status < 500 && err.message
+                      ? err.message
+                      : "Could not update the problem. Please try again.";
+                  showError(msg, err);
+                },
+              },
+            )
+          }
+        />
+      )}
+
+      {fixNotesOpen && (
+        <ProblemFixNotesDialog
+          isSubmitting={patchProblem.isPending}
+          onClose={() => {
+            if (!patchProblem.isPending) setFixNotesOpen(false);
+          }}
+          onConfirm={onFixNotesSubmit}
+        />
       )}
     </Box>
   );

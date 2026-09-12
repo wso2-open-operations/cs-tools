@@ -52,7 +52,7 @@ func TestSNCaseService_GetAttachmentByID_StatusAndFields(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	details, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), sysidToUUID(testSNAttachmentSysid))
 	if err != nil {
@@ -90,7 +90,7 @@ func TestSNCaseService_CreateCaseAttachment_StatusComplete(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	svc := NewServiceNowCaseService(client, nil, nil)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	resp, err := svc.CreateCaseAttachment(contextWithUserIDToken("token"), domain.CreateAttachmentRequest{
 		ReferenceID:   sysidToUUID(testWLCaseSysid),

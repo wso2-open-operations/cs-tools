@@ -29,6 +29,11 @@ import {
 import { useLocation, useSearchParams } from "react-router";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
+import {
+  getColumnPreferencesUserKey,
+  useColumnPreferences,
+} from "@hooks/useColumnPreferences";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -39,6 +44,10 @@ import CasesFilterBar, {
   type CasesFilters,
 } from "@features/csm-cases/components/CasesFilterBar";
 import CasesList from "@features/csm-cases/components/CasesList";
+import {
+  CASE_OPTIONAL_COLUMNS,
+  type CaseOptionalColumnId,
+} from "@features/csm-cases/utils/caseListColumns";
 import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
 import {
   ASSIGNEE_FILTER_RESOLVED_EMPTY,
@@ -56,6 +65,7 @@ import {
 } from "@features/csm-cases/utils/casesFiltersUrl";
 import {
   DEFAULT_CASES_SORT,
+  type CasesSortField,
   type CasesSortOrder,
 } from "@features/csm-cases/utils/casesSort";
 import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
@@ -79,6 +89,7 @@ const FILTER_PARAM_KEYS = [
   "search",
   "severities",
   "states",
+  "excludeStates",
   "types",
   "assignees",
   "workStates",
@@ -101,6 +112,17 @@ const FILTER_PARAM_KEYS = [
   "updatedTo",
   "closedFrom",
   "closedTo",
+  // Same class of bug as `workStates` above, found the same way while
+  // live-verifying the unified Advanced-mode row builder: removing the last
+  // `filters.advancedFilters` row (or the last `anyOfBranches` OR-group) —
+  // e.g. a "Created by is me" row with no typed `CasesFilters` slot to fall
+  // back to — silently did nothing, because `af`/`anyOf` were missing here.
+  // `writeCasesFiltersToUrl` only ever *sets* these two once there's at
+  // least one row/branch again; it never explicitly clears them, so without
+  // an explicit `delete` here first, the stale value from the previous URL
+  // just kept getting read back on the next render.
+  "af",
+  "anyOf",
 ] as const;
 
 interface CsmIssuesViewProps {
@@ -115,13 +137,47 @@ interface CsmIssuesViewProps {
   lockedFilters?: Partial<CasesFilters>;
   /** Hide the case-type filter control (use when `lockedFilters` fixes it). */
   hideTypeFilter?: boolean;
+  /**
+   * Case type(s) to pre-select the FIRST time this view loads with no `types`
+   * param in the URL at all -- unlike `lockedFilters`, this is a starting
+   * point the user's own control can freely change (and once they do, their
+   * choice round-trips through the URL like any other filter). Only
+   * meaningful when the type control is visible (`!hideTypeFilter`); a
+   * caller that locks and hides the type filter has no use for a separate
+   * "default" on top of that lock. `CsmCasesPage` (Support) is the only
+   * current user: it wants "Case" pre-selected on a fresh visit, but every
+   * other type still one click away.
+   */
+  defaultCaseTypes?: CasesFilters["caseTypes"];
   /** Label for the case-type filter control; see `CasesFilterBar`'s own
    * `typeFilterLabel` doc comment. Defaults to "Case type". */
   typeFilterLabel?: string;
   /** Hide the project filter control (use when the view is project-scoped). */
   hideProjectFilter?: boolean;
+  /**
+   * Hide the "Onboarding status"/"CRE Team" Simple-mode controls — see
+   * `CasesFilterBar`'s own doc comments. Pass when the view is already
+   * scoped to one project (both are per-project attributes, so filtering by
+   * them on a single-project view is a no-op).
+   */
+  hideOnboardingStatusFilter?: boolean;
+  hideCreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
+  /**
+   * Force the Severity filter/column on or off, overriding the default
+   * "only when `lockedFilters.caseTypes` is locked to `case`" rule below.
+   * For a caller whose type filter is *unlocked and visible* (e.g. the
+   * project Work items tab, which spans every case type but lets the user
+   * narrow it with the "Work item type" control) that default would always
+   * read false, permanently hiding Severity even once the user filters
+   * down to just Cases. Pass `true` there — Severity is still a genuinely
+   * useful control on a mixed list (non-case rows simply have no severity
+   * to match, so picking a value implicitly narrows to cases, same as
+   * picking "Case" in the type control would) — or `false` to force it off
+   * regardless of the lock.
+   */
+  showSeverityFilter?: boolean;
   /** Base path for row detail links. Defaults to "/cases". */
   detailBasePath?: string;
   /** Hide the Severity column in the list (severity is a support-case
@@ -137,6 +193,19 @@ interface CsmIssuesViewProps {
    * same destination as the outer page's.
    */
   hideBackButton?: boolean;
+  /**
+   * Opt into the "Customise columns" control for this view's list (add,
+   * remove, and reorder the optional columns between Subject and State),
+   * persisted per user via `useColumnPreferences`. Off by default — enable
+   * per view deliberately rather than changing every `CsmIssuesView` caller
+   * (cases, service requests, security reports) at once. `columnsViewId`
+   * must be unique across enabled views (defaults to `entityNoun`).
+   */
+  enableColumnCustomization?: boolean;
+  /** Storage key suffix for this view's column layout. Defaults to
+   * `entityNoun`; override only if two enabled views would otherwise share
+   * an `entityNoun`. */
+  columnsViewId?: string;
 }
 
 /**
@@ -152,18 +221,52 @@ export default function CsmIssuesView({
   entityNoun = "cases",
   lockedFilters,
   hideTypeFilter,
+  defaultCaseTypes,
   typeFilterLabel,
   hideProjectFilter,
+  hideOnboardingStatusFilter,
+  hideCreTeamFilter,
   showEngagementTypeFilter,
+  showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
   hideSeverityColumn,
   hideBackButton,
+  enableColumnCustomization,
+  columnsViewId,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<CasesFilters>(
     () => readCasesFiltersFromUrl(searchParams),
     [searchParams],
   );
+
+  // Writes `defaultCaseTypes` into the URL at most once per mount, the first
+  // time it finds no `types` param at all. Done as a real URL write (in an
+  // effect, gated by a ref) rather than an in-memory override inside the
+  // `filters` memo above: a memo can't tell "fresh visit" apart from "the
+  // user cleared the type filter back to every type" -- both just look like
+  // "no `types` param" -- so an in-memory default would keep reasserting
+  // itself every time the user broadened back, making that choice
+  // impossible to keep. Writing it into the URL once, right after mount,
+  // means every later render (including a later clear) is driven purely by
+  // `searchParams` like every other filter, with no special-casing.
+  const defaultCaseTypesAppliedRef = useRef(false);
+  useEffect(() => {
+    if (defaultCaseTypesAppliedRef.current || !defaultCaseTypes?.length || hideTypeFilter) {
+      return;
+    }
+    // Marks the default "consumed" on the very first render regardless of
+    // whether it actually got written -- an initial URL that already names
+    // an explicit `types` (e.g. a direct link to `?types=service_request`)
+    // must permanently disarm the default too, or clearing that explicit
+    // type back to "every type" later would look identical to "no types
+    // param yet" and wrongly reassert `defaultCaseTypes` at that point.
+    defaultCaseTypesAppliedRef.current = true;
+    if (searchParams.has("types")) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("types", defaultCaseTypes.join(","));
+    setSearchParams(next, { replace: true });
+  }, [searchParams, defaultCaseTypes, hideTypeFilter, setSearchParams]);
 
   const location = useLocation();
   const navigate = useNavTransition();
@@ -181,6 +284,9 @@ export default function CsmIssuesView({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
+  const [sortField, setSortField] = useState<CasesSortField>(
+    DEFAULT_CASES_SORT.field,
+  );
   const [sortOrder, setSortOrder] = useState<CasesSortOrder>(
     DEFAULT_CASES_SORT.order,
   );
@@ -197,13 +303,17 @@ export default function CsmIssuesView({
     [searchParams, setSearchParams],
   );
 
-  // Severity (S1-S4) is a support-case concept, so the severity filter is only
-  // shown on the support-cases list — i.e. when the surrounding view locks the
-  // record type to `case`. Every other list (service requests, engagements,
-  // security reports, mixed project issues) hides it.
+  // Severity (S1-S4) is a support-case concept, so the severity filter is by
+  // default only shown on the support-cases list — i.e. when the surrounding
+  // view locks the record type to `case`. Every other list (service
+  // requests, engagements, security reports) hides it, unless the caller
+  // overrides with `showSeverityFilter` (see its own doc comment — the
+  // project Work items tab does this since its type filter is unlocked and
+  // visible rather than fixed via `lockedFilters`).
   const showSeverityFilter =
-    lockedFilters?.caseTypes?.length === 1 &&
-    lockedFilters.caseTypes[0] === "case";
+    showSeverityFilterOverride ??
+    (lockedFilters?.caseTypes?.length === 1 &&
+      lockedFilters.caseTypes[0] === "case");
   // Service Requests don't carry a severity, so the column is redundant there.
   const isServiceRequestOnly =
     lockedFilters?.caseTypes?.length === 1 &&
@@ -222,6 +332,17 @@ export default function CsmIssuesView({
         // results.
         ...(showSeverityFilter ? {} : { severities: [] }),
         ...lockedFilters,
+        // `lockedFilters.caseTypes` still drives the severity-filter/column
+        // hints above (both keyed off the raw `lockedFilters` prop, not this
+        // merged query) even when the type control itself is visible
+        // (Support/`CsmCasesPage` — see its own doc comment) — but the
+        // *query* must not be pinned to that lock once the user has a real,
+        // working control to pick a different type from, or the control
+        // would be visible yet functionally inert (picking a type would
+        // silently have no effect on the results). Every other caller pairs
+        // a `caseTypes` lock with `hideTypeFilter`, so this only changes
+        // behavior for the one caller that doesn't.
+        ...(hideTypeFilter ? {} : { caseTypes: filters.caseTypes }),
       };
       // An unlocked, empty type selection means "no type filter applied" from
       // the FE's perspective (every issue type shown — this is the only
@@ -238,7 +359,7 @@ export default function CsmIssuesView({
       }
       return merged;
     },
-    [filters, debouncedSearch, showSeverityFilter, lockedFilters],
+    [filters, debouncedSearch, showSeverityFilter, lockedFilters, hideTypeFilter],
   );
 
   const {
@@ -249,7 +370,12 @@ export default function CsmIssuesView({
     error,
     refetch,
     dataUpdatedAt,
-  } = useGetCsmCases(queryFilters, page, rowsPerPage, true, sortOrder);
+  } = useGetCsmCases(queryFilters, page, rowsPerPage, true, sortOrder, sortField);
+
+  const handleSortFieldChange = (field: CasesSortField): void => {
+    setSortField(field);
+    setPage(0);
+  };
 
   const handleSortOrderChange = (order: CasesSortOrder): void => {
     setSortOrder(order);
@@ -269,6 +395,42 @@ export default function CsmIssuesView({
   const api = useBackendApi();
   const currentUserEmail = useIdTokenClaims()?.email;
   const currentUserId = useCurrentUser().user?.id;
+
+  // "Customise columns" — off unless a caller opts in (see `enableColumnCustomization`'s
+  // doc). `showSeverityColumn` mirrors the exact gate `CasesList` itself is given below
+  // (`isServiceRequestOnly || hideSeverityColumn`) so the picker can never offer a
+  // Severity column that would just render "—" for every row (service requests have no
+  // severity concept at all).
+  const showSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // Every current caller of this view locks the case type via `lockedFilters` (Case, SR,
+  // SRA, Engagements each fix `caseTypes` to one value) — the Type column would then show
+  // the same chip on every row, so it's still offered (a legacy row that predates type
+  // tagging renders "—" there, which is a genuine signal) but left off by default. An
+  // unlocked, multi-type view (none exists among today's callers) would want it on by
+  // default, hence the `isLockedToSingleType` check rather than hard-coding this off.
+  const isLockedToSingleType = lockedFilters?.caseTypes?.length === 1;
+  const availableOptionalColumns: CaseOptionalColumnId[] = [
+    "product",
+    "type",
+    "issueType",
+    ...(showSeverityColumn ? (["severity"] as const) : []),
+    "assignee",
+    "createdBy",
+    "customer",
+    "createdAt",
+    "escalationLevel",
+  ];
+  const defaultVisibleOptionalColumns: CaseOptionalColumnId[] = [
+    "product",
+    ...(isLockedToSingleType ? [] : (["type"] as const)),
+    ...(showSeverityColumn ? (["severity"] as const) : []),
+  ];
+  const columnPrefs = useColumnPreferences({
+    viewId: `case-list:${columnsViewId ?? entityNoun}`,
+    userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    columns: availableOptionalColumns.map((id) => ({ id, label: CASE_OPTIONAL_COLUMNS[id].label })),
+    defaultVisibleIds: defaultVisibleOptionalColumns,
+  });
   const exportSearch = queryFilters.search.trim();
   const fetchCasesExportPage = useCallback(
     async (offset: number, limit: number) => {
@@ -294,14 +456,14 @@ export default function CsmIssuesView({
         "/cases/search",
         {
           pagination: { offset, limit },
-          sortBy: { field: "updatedOn", order: sortOrder },
+          sortBy: { field: sortField, order: sortOrder },
           filters: buildCaseSearchFilters(queryFilters, exportSearch, assignedUserIds),
         },
       );
       const items = (res.cases ?? []).map((c) => mapCaseSearchViewToRow(c, currentUserEmail));
       return { items, total: res.total };
     },
-    [api, queryFilters, exportSearch, sortOrder, currentUserId, currentUserEmail],
+    [api, queryFilters, exportSearch, sortField, sortOrder, currentUserId, currentUserEmail],
   );
 
   // Same gate `CasesList` is given (`hideSeverityColumn={isServiceRequestOnly
@@ -463,6 +625,8 @@ export default function CsmIssuesView({
         hideTypeFilter={hideTypeFilter}
         typeFilterLabel={typeFilterLabel}
         hideProjectFilter={hideProjectFilter}
+        hideOnboardingStatusFilter={hideOnboardingStatusFilter}
+        hideCreTeamFilter={hideCreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
       />
 
@@ -472,6 +636,26 @@ export default function CsmIssuesView({
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
         hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
+        optionalColumns={
+          enableColumnCustomization
+            ? columnPrefs.visibleColumns.map((c) => c.id as CaseOptionalColumnId)
+            : undefined
+        }
+        columnCustomizer={
+          enableColumnCustomization ? (
+            <ColumnCustomizerButton
+              allColumns={columnPrefs.allColumns}
+              isVisible={columnPrefs.isVisible}
+              onToggle={columnPrefs.toggleColumn}
+              onMove={columnPrefs.moveColumn}
+              onReorder={columnPrefs.reorderColumn}
+              onReset={columnPrefs.resetToDefault}
+              label={`Customise ${entityNoun} columns`}
+            />
+          ) : undefined
+        }
+        sortField={sortField}
+        onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortOrderChange}
       />

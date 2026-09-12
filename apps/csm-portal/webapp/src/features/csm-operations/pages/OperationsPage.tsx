@@ -77,6 +77,8 @@ export default function OperationsPage(): JSX.Element {
           lockedFilters={{ caseTypes: ["service_request"] }}
           hideTypeFilter
           detailBasePath="/operations/service-requests"
+          enableColumnCustomization
+          columnsViewId="service-requests"
           actions={
             <Button
               variant="contained"

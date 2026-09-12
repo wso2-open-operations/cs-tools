@@ -41,8 +41,8 @@ func TestMapCaseTimeCardSearchResponse_EmitsCaseAuditFields(t *testing.T) {
 				Name:      "Combined-field PATCH test case title",
 				UpdatedOn: "2026-08-06 17:26:23",
 				CreatedOn: sp("2026-07-27 08:39:48"),
-				CreatedBy: sp("rashmika@wso2.com"),
-				UpdatedBy: sp("sajithe@wso2.com"),
+				CreatedBy: sp("jane.doe@example.com"),
+				UpdatedBy: sp("john.smith@example.com"),
 			},
 			TotalTime:  450,
 			TotalCount: 1,
@@ -75,13 +75,13 @@ func TestMapCaseTimeCardSearchResponse_EmitsCaseAuditFields(t *testing.T) {
 	}
 	c := probe.CaseTimeCards[0]
 
-	if c.Case.CreatedBy == nil || *c.Case.CreatedBy != "rashmika@wso2.com" {
-		t.Errorf("case.createdBy = %v, want rashmika@wso2.com — the card renders \"Created by\" from this", c.Case.CreatedBy)
+	if c.Case.CreatedBy == nil || *c.Case.CreatedBy != "jane.doe@example.com" {
+		t.Errorf("case.createdBy = %v, want jane.doe@example.com — the card renders \"Created by\" from this", c.Case.CreatedBy)
 	}
 	if c.Case.CreatedOn == nil || *c.Case.CreatedOn != "2026-07-27 08:39:48" {
 		t.Errorf("case.createdOn = %v", c.Case.CreatedOn)
 	}
-	if c.Case.UpdatedBy == nil || *c.Case.UpdatedBy != "sajithe@wso2.com" {
+	if c.Case.UpdatedBy == nil || *c.Case.UpdatedBy != "john.smith@example.com" {
 		t.Errorf("case.updatedBy = %v", c.Case.UpdatedBy)
 	}
 	// The Billable chip is gated on (billable?.count ?? 0) > 0, so the count has

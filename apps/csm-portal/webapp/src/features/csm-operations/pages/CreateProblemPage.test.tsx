@@ -15,16 +15,18 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 const navigateMock = vi.fn();
 const postProblemMutateMock = vi.fn();
 const showErrorMock = vi.fn();
 const isPending = false;
+let locationState: { from?: string } | undefined;
 
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
+  useLocation: () => ({ state: locationState }),
 }));
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: showErrorMock }),
@@ -74,6 +76,13 @@ vi.mock("@components/AsyncEntitySelect", () => ({
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
 
 describe("CreateProblemPage", () => {
+  beforeEach(() => {
+    locationState = undefined;
+    navigateMock.mockReset();
+    postProblemMutateMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
   it("disables submit until Subject is filled in", () => {
     render(<CreateProblemPage />);
     expect(screen.getByRole("button", { name: /create problem/i })).toBeDisabled();
@@ -158,7 +167,9 @@ describe("CreateProblemPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /create problem/i }));
     const [, options] = postProblemMutateMock.mock.calls[0];
     options.onSuccess({ id: "prb-1", number: "PRB0040200" });
-    expect(navigateMock).toHaveBeenCalledWith("/operations/problems/prb-1");
+    expect(navigateMock).toHaveBeenCalledWith("/operations/problems/prb-1", {
+      state: { from: "/operations?tab=problems" },
+    });
   });
 
   it("surfaces a mutation error via the shared error banner", () => {
@@ -173,5 +184,49 @@ describe("CreateProblemPage", () => {
       "Could not create the problem. Please try again.",
       expect.any(Error),
     );
+  });
+});
+
+// Regression tests: Back/Cancel used to always navigate to the hardcoded
+// problems tab and never forward a return path to the newly created
+// problem, unlike its 4 sibling create pages.
+describe("CreateProblemPage — Back navigation", () => {
+  beforeEach(() => {
+    locationState = undefined;
+    navigateMock.mockReset();
+    postProblemMutateMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
+  it("falls back to the problems tab when opened with no origin", () => {
+    render(<CreateProblemPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems");
+  });
+
+  it("returns to the captured origin, and forwards it to the newly created problem, when one is known", () => {
+    locationState = { from: "/customers/projects/proj-1?tab=workItems" };
+    render(<CreateProblemPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenCalledWith("/customers/projects/proj-1?tab=workItems");
+
+    fireEvent.change(screen.getByLabelText(/subject/i), {
+      target: { value: "Recurring gateway 502s" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create problem/i }));
+    const [, options] = postProblemMutateMock.mock.calls[0];
+    options.onSuccess({ id: "prb-1", number: "PRB0040200" });
+
+    expect(navigateMock).toHaveBeenCalledWith("/operations/problems/prb-1", {
+      state: { from: "/customers/projects/proj-1?tab=workItems" },
+    });
+  });
+
+  it("uses the same resolved target for Cancel", () => {
+    locationState = { from: "/customers/projects/proj-1?tab=workItems" };
+    render(<CreateProblemPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(navigateMock).toHaveBeenCalledWith("/customers/projects/proj-1?tab=workItems");
   });
 });

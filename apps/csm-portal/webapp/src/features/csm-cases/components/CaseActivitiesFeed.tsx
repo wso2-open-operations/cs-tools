@@ -38,16 +38,19 @@ import {
   ListFilter,
   Paperclip,
   Plus,
+  Star,
   TriangleAlert,
   User,
   Users,
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import type { BeCallRequestView } from "@api/backend/types";
+import AlertDetailModal from "@features/csm-cases/components/AlertDetailModal";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
 import CallRequestDetailModal from "@features/csm-cases/components/CallRequestDetailModal";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import ImageFullscreenModal from "@features/csm-cases/components/ImageFullscreenModal";
+import SmartAlertDetailModal from "@features/csm-cases/components/SmartAlertDetailModal";
 import RelativeTime from "@components/RelativeTime";
 import UserRefLink from "@components/UserRefLink";
 import { formatBytes } from "@utils/formatBytes";
@@ -60,9 +63,11 @@ import {
   compareFeedEntries,
   type FeedEntry,
 } from "@features/csm-cases/utils/caseActivityFeed";
+import type { SnLinkType } from "@features/csm-cases/utils/snLinkRegistry";
 import type {
   CaseAttachment,
   CaseAuditEntry,
+  CaseFeedbackEntry,
   CsmCaseComment,
 } from "@features/csm-cases/types/csmCases";
 
@@ -70,6 +75,10 @@ interface CaseActivitiesFeedProps {
   comments: CsmCaseComment[];
   audit: CaseAuditEntry[];
   attachments: CaseAttachment[];
+  /** Case Feedback (CSAT survey) submissions for this case, if any — typically
+   * only present once a case is closed and the customer has responded to the
+   * survey. Defaults to an empty array (no feedback lane shown). */
+  feedback?: CaseFeedbackEntry[];
   /**
    * Call requests already fetched for this case (e.g. by the page's Call
    * Requests tab query) — reused here, never re-fetched, to resolve a
@@ -162,6 +171,7 @@ export default function CaseActivitiesFeed({
   comments,
   audit,
   attachments,
+  feedback = [],
   callRequests = [],
   onDownloadAttachment,
   preview,
@@ -169,12 +179,16 @@ export default function CaseActivitiesFeed({
   const [showWorkNotes, setShowWorkNotes] = useState(true);
   const [showLifecycle, setShowLifecycle] = useState(true);
   const [showAttachments, setShowAttachments] = useState(true);
+  const [showFeedback, setShowFeedback] = useState(true);
   const [newestFirst, setNewestFirst] = useState(true);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(null);
   const [fullscreenImageAlt, setFullscreenImageAlt] = useState<string | undefined>(undefined);
   const [selectedCallRequest, setSelectedCallRequest] =
     useState<BeCallRequestView | null>(null);
+  const [openSnLink, setOpenSnLink] = useState<{ type: SnLinkType; id: string } | null>(
+    null,
+  );
 
   const entries: FeedEntry[] = useMemo(() => {
     const out: FeedEntry[] = [];
@@ -192,6 +206,11 @@ export default function CaseActivitiesFeed({
         out.push({ kind: "attachment", at: a.uploadedAt, attachment: a });
       }
     }
+    if (showFeedback) {
+      for (const f of feedback) {
+        out.push({ kind: "feedback", at: f.submittedAt, feedback: f });
+      }
+    }
     out.sort((a, b) =>
       newestFirst ? -compareFeedEntries(a, b) : compareFeedEntries(a, b),
     );
@@ -200,9 +219,11 @@ export default function CaseActivitiesFeed({
     comments,
     audit,
     attachments,
+    feedback,
     showWorkNotes,
     showLifecycle,
     showAttachments,
+    showFeedback,
     newestFirst,
   ]);
 
@@ -211,6 +232,7 @@ export default function CaseActivitiesFeed({
     workNotes: comments.filter((c) => c.internal).length,
     lifecycle: audit.length,
     attachments: attachments.length,
+    feedback: feedback.length,
   };
 
   // Filters live in a dropdown so the timeline reads as content, not a row of
@@ -236,6 +258,17 @@ export default function CaseActivitiesFeed({
       checked: showAttachments,
       toggle: () => setShowAttachments((v) => !v),
     },
+    // Only offered when this case actually has feedback — a lane with
+    // nothing to hide would just be dead-weight in the filter menu.
+    ...(counts.feedback > 0
+      ? [
+          {
+            label: `Feedback (${counts.feedback})`,
+            checked: showFeedback,
+            toggle: () => setShowFeedback((v) => !v),
+          },
+        ]
+      : []),
   ];
   const activeFilters = filterOptions.filter((o) => o.checked).length;
   const filterLabel =
@@ -295,10 +328,12 @@ export default function CaseActivitiesFeed({
 
       {entries.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
-          Nothing to show — enable more categories in the Filter menu.
+          {activeFilters === filterOptions.length
+            ? "No activity yet."
+            : "Nothing to show — enable more categories in the Filter menu."}
         </Typography>
       ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.75 }}>
           {entries.map((e) => {
             if (e.kind === "comment") {
               return (
@@ -316,6 +351,7 @@ export default function CaseActivitiesFeed({
                     const match = callRequests.find((cr) => cr.id === sysId);
                     if (match) setSelectedCallRequest(match);
                   }}
+                  onSnLinkClick={(type, id) => setOpenSnLink({ type, id })}
                 />
               );
             }
@@ -351,8 +387,12 @@ export default function CaseActivitiesFeed({
                       display: "flex",
                       flexDirection: "column",
                       gap: 0.75,
-                      backgroundColor: isBreach ? "error.50" : undefined,
-                      borderColor: isBreach ? "error.main" : undefined,
+                      // Same base card-separation fix as the comment bubble
+                      // (explicit elevated surface + stronger theme-derived
+                      // border) for the non-breach case; the breach styling
+                      // itself is untouched.
+                      backgroundColor: isBreach ? "error.50" : "background.paper",
+                      borderColor: isBreach ? "error.main" : "action.disabled",
                     }}
                   >
                     {/* Header mirrors the comment bubble: actor + time up top,
@@ -366,7 +406,7 @@ export default function CaseActivitiesFeed({
                         flexWrap: "wrap",
                       }}
                     >
-                      <Typography variant="subtitle2">
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                         <UserRefLink
                           name={e.entry.actor}
                           email={e.entry.actorUser?.email}
@@ -412,6 +452,82 @@ export default function CaseActivitiesFeed({
                 </Box>
               );
             }
+            if (e.kind === "feedback") {
+              return (
+                <Box
+                  id={e.feedback.id}
+                  key={`fb-${e.feedback.id}`}
+                  sx={{
+                    display: "flex",
+                    gap: 1.5,
+                    alignItems: "flex-start",
+                    scrollMarginTop: 96,
+                  }}
+                >
+                  <Avatar
+                    sx={{
+                      width: 32,
+                      height: 32,
+                      bgcolor: "warning.light",
+                      color: "warning.contrastText",
+                    }}
+                  >
+                    <Star size={16} />
+                  </Avatar>
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      p: 1.5,
+                      flex: 1,
+                      minWidth: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 0.75,
+                      backgroundColor: "background.paper",
+                      borderColor: "action.disabled",
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        <UserRefLink
+                          name={e.feedback.submitterName || "Customer"}
+                          email={e.feedback.submitterEmail ?? undefined}
+                        />
+                      </Typography>
+                      <Chip size="small" variant="outlined" label="Case Feedback" />
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        icon={<Star size={14} />}
+                        label={`${e.feedback.ratingLabel} (${e.feedback.rating}/5)`}
+                        color="warning"
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        <RelativeTime
+                          iso={e.feedback.submittedAt}
+                          href={`#${e.feedback.id}`}
+                        />
+                      </Typography>
+                    </Box>
+                    {e.feedback.comment && (
+                      <Typography
+                        variant="body2"
+                        sx={{ overflowWrap: "anywhere" }}
+                      >
+                        {e.feedback.comment}
+                      </Typography>
+                    )}
+                  </Paper>
+                </Box>
+              );
+            }
             // attachment — rendered like a comment: avatar + card carrying the
             // file description and a download action.
             return (
@@ -444,6 +560,9 @@ export default function CaseActivitiesFeed({
                     display: "flex",
                     flexDirection: "column",
                     gap: 0.75,
+                    // Same base card-separation fix as the comment bubble.
+                    bgcolor: "background.paper",
+                    borderColor: "action.disabled",
                   }}
                 >
                   <Box
@@ -454,7 +573,7 @@ export default function CaseActivitiesFeed({
                       flexWrap: "wrap",
                     }}
                   >
-                    <Typography variant="subtitle2">
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                       <UserRefLink
                         name={e.attachment.uploadedBy}
                         email={
@@ -547,6 +666,18 @@ export default function CaseActivitiesFeed({
         <CallRequestDetailModal
           callRequest={selectedCallRequest}
           onClose={() => setSelectedCallRequest(null)}
+        />
+      )}
+      {openSnLink?.type === "alert" && (
+        <AlertDetailModal
+          alertId={openSnLink.id}
+          onClose={() => setOpenSnLink(null)}
+        />
+      )}
+      {openSnLink?.type === "smartAlert" && (
+        <SmartAlertDetailModal
+          smartAlertId={openSnLink.id}
+          onClose={() => setOpenSnLink(null)}
         />
       )}
     </Box>

@@ -67,6 +67,25 @@ export const CREATE_CASE = {
 /** Side navigation. Items are buttons inside the sidebar landmark; which ones
  * render depends on the project's feature flags (see SideBar.tsx). */
 export const SIDE_NAV = {
+  /**
+   * The route each item opens, relative to `/projects/{id}/`.
+   *
+   * Taken from APP_SHELL_NAV_ITEMS, where every gated item's path is its label
+   * slugified. Settings is not in that list — it is a footer link — and carries
+   * its own path.
+   */
+  paths: {
+    Dashboard: "dashboard",
+    Support: "support",
+    Operations: "operations",
+    Updates: "updates",
+    "Security Center": "security-center",
+    Engagements: "engagements",
+    "Usage & Metrics": "usage-metrics",
+    "Project Details": "project-details",
+    Announcements: "announcements",
+    Settings: "settings",
+  } as Record<string, string>,
   items: {
     dashboard: "Dashboard",
     support: "Support",
@@ -136,6 +155,243 @@ export const ADD_DEPLOYMENT = {
     type: "#deployment-type",
     description: "#deployment-description",
   },
+} as const;
+
+/** Settings page (`/projects/:projectId/settings`), reached from the side nav's
+ * footer item.
+ *
+ * Which tabs render depends on the signed-in user's ServiceNow role: AI
+ * Assistant is admin-only, as are the Add User button and the per-row actions
+ * (`canAddOrRemoveUsers`). */
+export const SETTINGS = {
+  navItem: "Settings",
+  pathSegment: "settings",
+  tabs: {
+    userManagement: "User Management",
+    aiAssistant: "AI Assistant",
+    registryTokens: "Registry Tokens",
+    display: "Display",
+  },
+  userManagement: {
+    /** Column headers of the user list. */
+    headers: ["User", "Role", "Status", "Actions"],
+    searchPlaceholder: "Search users by name, email, or role...",
+    addUserButton: "Add User",
+    editUserButton: "Edit user",
+    removeUserButton: "Remove user",
+    editModal: {
+      title: "Edit User Roles",
+      saveButton: "Save Changes",
+      cancelButton: "Cancel",
+      /** Role checkboxes, by their rendered label. */
+      roles: {
+        admin: "Admin",
+        lead: "Lead",
+      },
+    },
+  },
+  display: {
+    heading: "Display Preferences",
+    fontSizeTitle: "Font Size",
+    /** Each option's control is labelled "Font size: <label>", and choosing one
+     * sets `document.documentElement.style.fontSize` to the matching value. */
+    fontSizeOption: (label: string) => `Font size: ${label}`,
+    fontSizes: [
+      { label: "Small", px: "13px" },
+      { label: "Default", px: "16px" },
+      { label: "Large", px: "18px" },
+      { label: "Extra Large", px: "20px" },
+    ],
+  },
+} as const;
+
+/** Updates page (`/projects/:projectId/updates`), reached from the side nav.
+ *
+ * The page is the All Updates tab: a filter row over update levels, plus results.
+ * The four selects cascade — version needs a product, the start level needs a
+ * version, the end level needs a start — and Search stays disabled until all
+ * four are set. */
+export const UPDATES = {
+  navItem: "Updates",
+  pathSegment: "updates",
+  sectionTitle: "Search Update Levels",
+  labels: {
+    product: "Product Name *",
+    version: "Product Version *",
+    startLevel: "Starting Update Level *",
+    endLevel: "Ending Update Level *",
+  },
+  ids: {
+    product: "all-updates-product",
+    version: "all-updates-version",
+    startLevel: "all-updates-start",
+    endLevel: "all-updates-end",
+  },
+  searchButton: "Search",
+  /** Disabled until something is selected or a search has been run
+   * (`canClear`). Clearing resets the filters, the search and the URL. */
+  clearFiltersButton: "Clear Filters",
+  /** The placeholder MenuItem's text. Only rendered inside the open menu — a
+   * closed select with no value displays a zero-width space, not this, so it
+   * cannot be used to assert that a select has been reset. Verified live. */
+  placeholders: {
+    product: "Select Product",
+    version: "Select Version",
+    level: "Select Level",
+  },
+  /** Shown before a search has been run. */
+  idleHint:
+    "Select product, version, and update level range, then click Search to view updates.",
+  /**
+   * The results table a search renders (PendingUpdatesList), and the copy shown
+   * instead when the range holds nothing.
+   *
+   * The table replaces a skeleton, so a caller has to wait for one of these two
+   * states rather than reading straight after the response.
+   */
+  results: {
+    headers: ["Update Level", "Update Type", "Details"],
+    emptyMessage: "No update levels found for the selected criteria.",
+    /** The Details column's control, one per row. */
+    viewButton: "View",
+  },
+  /**
+   * The update level details page
+   * (`/projects/:id/updates/pending/level/:level`), opened by a row's View.
+   *
+   * Carries the searched product forward as query parameters — note
+   * `productBaseVersion` here where the search used `pv`.
+   */
+  levelDetails: {
+    pathSegment: "updates/pending/level",
+    summaryLabels: ["Product Name", "Product Version", "Released Update Level"],
+    /** Filters over the listed updates. */
+    filterButtons: ["All", "Security", "Regular"],
+    /** Each listed update shows its number and, when it has one, a description
+     * section. The number is rendered inline as "Update Number: <n>". */
+    updateNumberPrefix: "Update Number:",
+    descriptionHeading: "Description",
+    /** Returns to whatever opened this page — it navigates history back
+     * (ROUTE_PREVIOUS_PAGE = -1) rather than to a fixed route. */
+    backButton: "Back",
+  },
+  /**
+   * The report download, offered beside Search once a search has produced
+   * results.
+   *
+   * There is no intermediate dialog: the button builds the PDF in the browser
+   * with jsPDF and saves it as
+   * `Update-Summary-<product>-<version>-<start>-<end>.pdf`, which the browser
+   * surfaces as a download. (`UpdateLevelsReportModal` exists in the codebase but
+   * nothing renders it — only its unit test refers to it.)
+   */
+  report: {
+    downloadButton: "Download Report",
+    /** The label while the PDF is being produced; the button is disabled then. */
+    generatingButton: "Generating...",
+    fileName: (
+      product: string,
+      version: string,
+      startLevel: string,
+      endLevel: string,
+    ) => `Update-Summary-${product}-${version}-${startLevel}-${endLevel}.pdf`,
+  },
+  /** Query parameters a search writes onto the URL (replace, not push). */
+  urlParams: {
+    product: "pn",
+    version: "pv",
+    startLevel: "sl",
+    endLevel: "el",
+  },
+} as const;
+
+/** Announcements list (`/projects/:projectId/announcements`), reached from the
+ * side nav. Announcements are cases underneath, so their rows carry a "CS"
+ * number and the detail page reuses the case header. */
+export const ANNOUNCEMENTS_LIST = {
+  navItem: "Announcements",
+  pathSegment: "announcements",
+  title: "Announcements",
+  description: "View and manage announcements for your project",
+  searchPlaceholder: "Search announcements...",
+  /** ListResultsBar with `entityLabel: "announcements"`. */
+  resultsCountPattern: /Showing (\d+) of (\d+) announcements/,
+  emptyMessage: "No announcements yet.",
+  /** Row number, matched within the card's whole text — so unanchored, for the
+   * same reason the change-request pattern is. */
+  numberPattern: /CS\d+/,
+  /** Opens the filter panel; becomes "Clear Filters (n)" once one is applied. */
+  filtersButton: "Filters",
+  clearFiltersButton: (activeCount: number) => `Clear Filters (${activeCount})`,
+  /** The only filter announcements offer (ANNOUNCEMENT_FILTER_DEFINITIONS), and
+   * it is multi-select. Its element id comes from the definition's `id`, its
+   * label from `deriveFilterLabels`. */
+  statusFilter: {
+    selectId: "status",
+    label: "Status",
+  },
+  /** Sort controls, from the shared ListResultsBar. The order labels depend on
+   * the field: a chronological sort reads "Newest first"/"Oldest first", an
+   * ordinal one "Descending"/"Ascending" — Updated date is chronological, Status
+   * is ordinal. */
+  sort: {
+    fieldSelectId: "list-sort-field",
+    orderSelectId: "list-sort-order",
+    fields: {
+      updatedDate: { label: "Updated date", value: "updatedOn" },
+      status: { label: "Status", value: "state" },
+    },
+    orders: {
+      chronologicalDesc: { label: "Newest first", value: "desc" },
+      chronologicalAsc: { label: "Oldest first", value: "asc" },
+      ordinalDesc: { label: "Descending", value: "desc" },
+      ordinalAsc: { label: "Ascending", value: "asc" },
+    },
+  },
+  /** ListPagination is given no explicit page sizes here, so it uses its own
+   * defaults; the list starts at ANNOUNCEMENTS_PAGE_SIZE. */
+  defaultRowsPerPage: 10,
+  rowsPerPageOptions: [5, 10, 25, 50],
+} as const;
+
+/** Change requests list (`/projects/:projectId/operations/change-requests`),
+ * reached from the Operations hub or the dashboard's operations donut.
+ *
+ * The title depends on router *state* rather than the URL — `outstandingOnly`,
+ * `actionRequired` and `scheduledOnly` all land on this same path — so a direct
+ * navigation always gets the unfiltered "All Change Requests" view. */
+export const CHANGE_REQUESTS_LIST = {
+  pathSegment: "operations/change-requests",
+  titles: {
+    all: "All Change Requests",
+    outstanding: "Outstanding Change Requests",
+    actionRequired: "Action Required Change Requests",
+    scheduled: "Upcoming Change Requests",
+  },
+  descriptions: {
+    outstanding: "Manage and track outstanding change requests",
+    scheduled: "Upcoming scheduled change requests",
+  },
+  /** The list/calendar switch (CHANGE_REQUESTS_VIEW_TABS_CONFIG), rendered by
+   * TabBar as `role="tab"` with `aria-selected`. */
+  viewTabs: {
+    list: "List View",
+    calendar: "Calendar View",
+  },
+  /** Shown when the list has nothing to show — the second only once a search or
+   * filter has been applied. */
+  emptyMessage: "No change requests yet.",
+  emptyRefinedMessage:
+    "No change requests found. Try adjusting your filters or search query.",
+  /**
+   * A change request's number, as the row and the detail header render it.
+   *
+   * Deliberately unanchored: it is used with `hasText` to pick rows out, and a
+   * row's text is the whole card — "Medium Add/Remove Certificates CHG0038759
+   * Scheduled | SR: CS0441440 …" — so an anchored pattern matches nothing and the
+   * list reads as empty.
+   */
+  numberPattern: /CHG\d+/,
 } as const;
 
 /** MUI TablePagination's default labels.

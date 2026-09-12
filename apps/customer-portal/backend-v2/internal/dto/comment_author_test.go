@@ -41,7 +41,7 @@ const entityCommentsPayload = `{
       "content": "hi",
       "type": "comment",
       "createdOn": "2026-08-27T16:23:49Z",
-      "createdBy": {"id": "u-1", "email": "sasmitha@wso2.com", "name": "Sasmitha Ekanayaka"}
+      "createdBy": {"id": "u-1", "email": "jane.doe@example.com", "name": "Jane Doe"}
     }
   ],
   "total": 2, "limit": 10, "offset": 0
@@ -76,7 +76,7 @@ func TestMapSearchComments_KeepsTheAssistantIdentifiable(t *testing.T) {
 	if strings.ToLower(assistant.CreatedBy) != "novera" {
 		t.Errorf("assistant createdBy = %q; the frontend matches createdBy.toLowerCase() == \"novera\"", assistant.CreatedBy)
 	}
-	if human.CreatedBy != "Sasmitha Ekanayaka" {
+	if human.CreatedBy != "Jane Doe" {
 		t.Errorf("human createdBy = %q, want the display name", human.CreatedBy)
 	}
 	// The display label falls back to createdBy, so a name belongs there — not an
@@ -92,7 +92,7 @@ func TestMapSearchComments_HandlesAnUnresolvedAuthor(t *testing.T) {
 	out := MapSearchComments(entity.SearchCommentsResponse{
 		Comments: []entity.CommentView{
 			{ID: "c1", Content: "orphan", CreatedBy: nil},
-			{ID: "c2", Content: "email only", CreatedBy: &entity.UserReference{Email: "a@wso2.com"}},
+			{ID: "c2", Content: "email only", CreatedBy: &entity.UserReference{Email: "a@example.com"}},
 		},
 		Total: 2,
 	})
@@ -113,10 +113,10 @@ func TestMapCommentCreate_UsesTheAuthorName(t *testing.T) {
 	out := MapCommentCreate(entity.CreateCommentResponse{
 		Comment: entity.CommentCreated{
 			ID:        "c1",
-			CreatedBy: &entity.UserReference{Email: "a@wso2.com", Name: "A Person"},
+			CreatedBy: &entity.UserReference{Email: "a@example.com", Name: "Jane Doe"},
 		},
 	})
-	if out.CreatedBy != "A Person" {
+	if out.CreatedBy != "Jane Doe" {
 		t.Errorf("createdBy = %q, want the author name", out.CreatedBy)
 	}
 }

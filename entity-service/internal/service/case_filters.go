@@ -45,7 +45,7 @@ var caseFilterFieldSet = map[string]bool{
 	"projectOnboardingStatus": true, "projectType": true, "creTeam": true, "sreTeam": true,
 	"resolutionNotes": true, "parentId": true, "taskSLABusinessElapsedPercent": true,
 	"escalationLevel": true, "escalation": true, "number": true, "internalId": true,
-	"accountId": true,
+	"accountId": true, "slaBreached": true, "accountEscalationActive": true,
 }
 
 // caseFilterOpSet is the exact set of CaseFieldFilter.Op values accepted by
@@ -623,6 +623,38 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 			default:
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
+
+		case "slaBreached":
+			if f.Op != "eq" {
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			if len(f.Values) != 1 {
+				return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: slaBreached eq requires exactly one value"}
+			}
+			b, err := parseCaseFilterBool(f, f.Values[0])
+			if err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			p.HasBreachedSLA = &b
+
+		case "accountEscalationActive":
+			if f.Op != "eq" {
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			if len(f.Values) != 1 {
+				return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: accountEscalationActive eq requires exactly one value"}
+			}
+			b, err := parseCaseFilterBool(f, f.Values[0])
+			if err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			p.HasActiveAccountEscalation = &b
 		}
 	}
 
@@ -711,6 +743,8 @@ func ParseCaseFieldFilterGroups(branches []domain.CaseFilterBranch) ([]domain.Ca
 			DeploymentIDs:    parsed.DeploymentIDs,
 			AssignedUserIDs:  parsed.AssignedUserIDs,
 			EscalationLevels: parsed.EscalationLevels,
+			Tags:             parsed.Tags,
+			ExcludeTags:      parsed.ExcludeTags,
 		})
 	}
 	return result, nil
@@ -721,8 +755,6 @@ func ParseCaseFieldFilterGroups(branches []domain.CaseFilterBranch) ([]domain.Ca
 // top-level (AND-only) Filters array, not inside an OR branch.
 func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 	switch {
-	case len(parsed.Tags) > 0 || len(parsed.ExcludeTags) > 0:
-		return &apierror.ValidationError{Msg: "anyOf: field \"tag\" is not supported inside an OR group"}
 	case parsed.ParentID != nil:
 		return &apierror.ValidationError{Msg: "anyOf: field \"parentId\" is not supported inside an OR group"}
 	case parsed.Number != nil:
@@ -763,6 +795,10 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"taskSLABusinessElapsedPercent\" is not supported inside an OR group"}
 	case parsed.HasActiveEscalation != nil:
 		return &apierror.ValidationError{Msg: "anyOf: field \"escalation\" is not supported inside an OR group"}
+	case parsed.HasBreachedSLA != nil:
+		return &apierror.ValidationError{Msg: "anyOf: field \"slaBreached\" is not supported inside an OR group"}
+	case parsed.HasActiveAccountEscalation != nil:
+		return &apierror.ValidationError{Msg: "anyOf: field \"accountEscalationActive\" is not supported inside an OR group"}
 	}
 	return nil
 }
@@ -779,6 +815,24 @@ func parseCaseFilterPercent(f domain.CaseFieldFilter, value string) (int, error)
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q op %q value %q must be a non-negative integer", f.Field, f.Op, value)}
 	}
 	return n, nil
+}
+
+// parseCaseFilterBool mirrors incident_filters.go's parseIncidentFilterBool
+// for case search's own plain-boolean eq fields (slaBreached,
+// accountEscalationActive) -- unlike "escalation" (a reference-field
+// isEmpty/isNotEmpty presence check), these are true booleans with an
+// explicit true/false value on the wire, the same shape as the incident
+// side's slaViolated. Only the exact lowercase "true"/"false" the OpenAPI
+// contract documents are accepted.
+func parseCaseFilterBool(f domain.CaseFieldFilter, value string) (bool, error) {
+	switch value {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q op %q value %q must be a boolean", f.Field, f.Op, value)}
+	}
 }
 
 // resolveCaseFilterCallerEmail resolves the authenticated caller's email from

@@ -45,6 +45,12 @@ export const DEFAULT_ANNOUNCEMENT_FILTERS: AnnouncementFilters = {
 export interface CsmAnnouncementRow {
   id: string;
   number?: string;
+  /**
+   * Project-scoped WSO2 case reference (BE `internalId`), same field
+   * `CsmCaseRow.wso2CaseId` carries for regular cases. Distinct from
+   * {@link number}; optional since not every announcement gets one.
+   */
+  wso2CaseId?: string;
   subject: string;
   /** Owning project display name, or "—" when cross-customer / unset. */
   projectName: string;

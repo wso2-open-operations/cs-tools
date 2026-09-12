@@ -17,15 +17,9 @@
 import {
   Box,
   Button,
-  Checkbox,
-  FormControl,
   IconButton,
   InputAdornment,
-  InputLabel,
   LinearProgress,
-  ListItemText,
-  MenuItem,
-  Select,
   Skeleton,
   Table,
   TableBody,
@@ -37,19 +31,29 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import { Search, X } from "@wso2/oxygen-ui-icons-react";
-import { useState, type ChangeEvent, type JSX } from "react";
+import { Plus, Search, X } from "@wso2/oxygen-ui-icons-react";
+import { useMemo, useState, type ChangeEvent, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
+import { useNavTransition } from "@hooks/useNavTransition";
+import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
+import MultiSelectField from "@components/MultiSelectField";
 import QueryErrorState from "@components/QueryErrorState";
 import SemanticChip from "@components/SemanticChip";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import {
+  getColumnPreferencesUserKey,
+  useColumnPreferences,
+  type ColumnOption,
+} from "@hooks/useColumnPreferences";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useSearchAnnouncements } from "@features/csm-announcements/api/useSearchAnnouncements";
 import {
   DEFAULT_ANNOUNCEMENT_FILTERS,
   type AnnouncementFilters,
+  type CsmAnnouncementRow,
 } from "@features/csm-announcements/types/csmAnnouncements";
 import { announcementStateRole } from "@features/csm-announcements/utils/announcementState";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
@@ -58,6 +62,47 @@ import RefreshButton from "@components/RefreshButton";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
+
+// Every field `CsmAnnouncementRow` carries is offered as a column below
+// except `id` (a raw UUID, never human-facing). Fields on the underlying
+// case search view that never made it into `CsmAnnouncementRow` at all —
+// `severity` (announcements carry no severity, see `AnnouncementFilters`'s
+// doc), `issueType`, `deployment`/`deployedProduct`/`product`, and
+// `assignedEngineer` — aren't meaningful for an announcement (a broadcast,
+// not a worked case with an owner or an affected deployment), so there was
+// nothing there worth adding as a column either.
+type AnnouncementColumnId =
+  | "number"
+  | "wso2CaseId"
+  | "subject"
+  | "project"
+  | "state"
+  | "createdBy"
+  | "createdAt"
+  | "updatedAt";
+
+const ANNOUNCEMENT_COLUMNS: { id: AnnouncementColumnId; label: string }[] = [
+  { id: "number", label: "Number" },
+  { id: "wso2CaseId", label: "Reference" },
+  { id: "subject", label: "Subject" },
+  { id: "project", label: "Project" },
+  { id: "state", label: "State" },
+  { id: "createdBy", label: "Created by" },
+  { id: "createdAt", label: "Created" },
+  { id: "updatedAt", label: "Updated" },
+];
+
+// Matches the list's original, always-shown set — "Created" is the one
+// available-but-not-default column (the row already carries `createdAt`,
+// just not surfaced until now).
+const DEFAULT_ANNOUNCEMENT_COLUMN_IDS: AnnouncementColumnId[] = [
+  "number",
+  "subject",
+  "project",
+  "state",
+  "createdBy",
+  "updatedAt",
+];
 
 // `reopened` is intentionally excluded — it only appears as a `nextStates`
 // signal, never as a case's own state (see CaseState's doc).
@@ -82,61 +127,57 @@ function formatDate(value?: string | null): string {
   );
 }
 
-interface MultiSelectProps<T extends string> {
-  id: string;
-  label: string;
-  values: T[];
-  options: { value: T; label: string }[];
-  onChange: (next: T[]) => void;
-}
-
-/** Checkbox multi-select over a fixed enum (State). */
-function MultiSelect<T extends string>({
-  id,
-  label,
-  values,
-  options,
-  onChange,
-}: MultiSelectProps<T>): JSX.Element {
-  const handleChange = (event: SelectChangeEvent<string[]>): void => {
-    const val = event.target.value;
-    onChange((Array.isArray(val) ? val : [val]) as T[]);
-  };
-  return (
-    <FormControl fullWidth size="small">
-      <InputLabel id={`${id}-label`}>{label}</InputLabel>
-      <Select
-        multiple
-        labelId={`${id}-label`}
-        id={id}
-        value={values as unknown as string[]}
-        label={label}
-        onChange={handleChange}
-        renderValue={(selected) =>
-          (Array.isArray(selected) ? selected : [])
-            .map((v) => options.find((o) => o.value === v)?.label ?? v)
-            .join(", ")
-        }
-      >
-        {options.map((opt) => (
-          <MenuItem key={opt.value} value={opt.value} sx={{ py: 0.5 }}>
-            <Checkbox size="small" checked={values.includes(opt.value)} sx={{ mr: 1, p: 0.25 }} />
-            <ListItemText primary={opt.label} />
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
-  );
+function renderAnnouncementCell(id: AnnouncementColumnId, a: CsmAnnouncementRow): ReactNode {
+  switch (id) {
+    case "number":
+      return a.number || "—";
+    case "wso2CaseId":
+      return a.wso2CaseId || "—";
+    case "subject":
+      return (
+        <Typography
+          variant="body2"
+          title={a.subject}
+          sx={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {a.subject}
+        </Typography>
+      );
+    case "project":
+      return a.projectName;
+    case "state":
+      return a.state ? (
+        <SemanticChip
+          role={announcementStateRole(a.state)}
+          label={STATE_LABEL[a.state] ?? a.state}
+          variant="outlined"
+        />
+      ) : (
+        "—"
+      );
+    case "createdBy":
+      return a.createdBy || "—";
+    case "createdAt":
+      return formatDate(a.createdAt);
+    case "updatedAt":
+      return formatDate(a.updatedAt);
+  }
 }
 
 /**
- * Read-only announcements list. Announcements are cases of
- * `type: "announcement"` surfaced via `POST /cases/search`. Filterable by
- * state and project (all default to "show all"). Creating /
- * targeting / unpublishing needs the dedicated announcement backend,
- * tracked separately, which isn't built yet, so this page is view-only for now.
+ * Announcements list. Announcements are cases of `type: "announcement"`
+ * surfaced via `POST /cases/search`. Filterable by state and project (all
+ * default to "show all"). Creating one is handled by
+ * `CsmAnnouncementCreatePage` ("New announcement" below); unpublishing isn't
+ * built yet.
  */
 export default function CsmAnnouncementsPage(): JSX.Element {
+  const navigate = useNavTransition();
   const [filters, setFilters] = useState<AnnouncementFilters>(DEFAULT_ANNOUNCEMENT_FILTERS);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -147,6 +188,20 @@ export default function CsmAnnouncementsPage(): JSX.Element {
 
   const announcements = data?.announcements ?? [];
   const total = data?.total ?? 0;
+
+  const columnOptions = useMemo<ColumnOption[]>(
+    () => ANNOUNCEMENT_COLUMNS.map(({ id, label }) => ({ id, label })),
+    [],
+  );
+  const currentUser = useCurrentUser().user;
+  const currentUserEmail = useIdTokenClaims()?.email;
+  const columnPrefs = useColumnPreferences({
+    viewId: "announcements",
+    userKey: getColumnPreferencesUserKey({ id: currentUser?.id, email: currentUserEmail }),
+    columns: columnOptions,
+    defaultVisibleIds: DEFAULT_ANNOUNCEMENT_COLUMN_IDS,
+  });
+  const visibleColumnIds = columnPrefs.visibleColumns.map((c) => c.id as AnnouncementColumnId);
 
   // Any filter change resets to the first page.
   const patchFilters = (patch: Partial<AnnouncementFilters>): void => {
@@ -170,12 +225,32 @@ export default function CsmAnnouncementsPage(): JSX.Element {
             Customer-facing announcements published across projects and tiers.
           </Typography>
         </Box>
-        <RefreshButton
-          onRefresh={() => void refetch()}
-          isFetching={isFetching}
-          updatedAt={dataUpdatedAt}
-          label="Refresh announcements"
-        />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            size="small"
+            startIcon={<Plus size={16} />}
+            onClick={() => navigate("/announcements/new")}
+          >
+            New announcement
+          </Button>
+          <RefreshButton
+            onRefresh={() => void refetch()}
+            isFetching={isFetching}
+            updatedAt={dataUpdatedAt}
+            label="Refresh announcements"
+          />
+          <ColumnCustomizerButton
+            allColumns={columnPrefs.allColumns}
+            isVisible={columnPrefs.isVisible}
+            onToggle={columnPrefs.toggleColumn}
+            onMove={columnPrefs.moveColumn}
+            onReorder={columnPrefs.reorderColumn}
+            onReset={columnPrefs.resetToDefault}
+            label="Customise announcements columns"
+          />
+        </Box>
       </Box>
 
       {/* Filters — search + state + project, all "show all" by default */}
@@ -212,7 +287,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
           />
         </Box>
         <Box sx={{ flex: "1 1 160px", minWidth: 150 }}>
-          <MultiSelect
+          <MultiSelectField
             id="announcements-filter-state"
             label="State"
             values={filters.states}
@@ -251,29 +326,27 @@ export default function CsmAnnouncementsPage(): JSX.Element {
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
-                <TableCell>Number</TableCell>
-                <TableCell sx={{ width: "28%" }}>Subject</TableCell>
-                <TableCell>Project</TableCell>
-                <TableCell>State</TableCell>
-                <TableCell>Created by</TableCell>
-                <TableCell>Updated</TableCell>
+                {visibleColumnIds.map((id) => (
+                  <TableCell key={id} sx={id === "subject" ? { width: "28%" } : undefined}>
+                    {ANNOUNCEMENT_COLUMNS.find((c) => c.id === id)?.label}
+                  </TableCell>
+                ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {isLoading ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={72} height={22} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
+                    {visibleColumnIds.map((id) => (
+                      <TableCell key={id}>
+                        <Skeleton variant="rounded" width="80%" height={18} />
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center">
+                  <TableCell colSpan={visibleColumnIds.length} align="center">
                     <QueryErrorState
                       message={error instanceof Error && error.message.trim() ? error.message : "Failed to load announcements."}
                       error={error}
@@ -282,7 +355,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
                 </TableRow>
               ) : announcements.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={visibleColumnIds.length} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No announcements found.
                     </Typography>
@@ -308,37 +381,20 @@ export default function CsmAnnouncementsPage(): JSX.Element {
                       },
                     }}
                   >
-                    <TableCell>{a.number || "—"}</TableCell>
-                    <TableCell sx={{ width: "28%" }}>
-                      <Typography
-                        variant="body2"
-                        title={a.subject}
-                        sx={{
-                          display: "-webkit-box",
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: "vertical",
-                          overflow: "hidden",
-                        }}
+                    {visibleColumnIds.map((id) => (
+                      <TableCell
+                        key={id}
+                        sx={
+                          id === "subject"
+                            ? { width: "28%", maxWidth: 360 }
+                            : id === "updatedAt" || id === "createdAt"
+                              ? { whiteSpace: "nowrap" }
+                              : undefined
+                        }
                       >
-                        {a.subject}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>{a.projectName}</TableCell>
-                    <TableCell>
-                      {a.state ? (
-                        <SemanticChip
-                          role={announcementStateRole(a.state)}
-                          label={STATE_LABEL[a.state] ?? a.state}
-                          variant="outlined"
-                        />
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>{a.createdBy || "—"}</TableCell>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>
-                      {formatDate(a.updatedAt)}
-                    </TableCell>
+                        {renderAnnouncementCell(id, a)}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))
               )}

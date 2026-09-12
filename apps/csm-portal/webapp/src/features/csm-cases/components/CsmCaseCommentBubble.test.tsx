@@ -227,6 +227,115 @@ describe("CsmCaseCommentBubble", () => {
     expect(() => fireEvent.click(marker)).not.toThrow();
   });
 
+  it("turns a bare alert URL into an in-app clickable marker and dispatches its type/id", () => {
+    const onSnLinkClick = vi.fn();
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml:
+            "See https://sn-dev.example.com/u_custom_alert.do?sys_id=7a43e2d43b2a4b5091404c6aa5e45a41 for details",
+        })}
+        onSnLinkClick={onSnLinkClick}
+      />,
+    );
+    expect(
+      screen.queryByRole("link", { name: /example\.com|u_custom_alert/i }),
+    ).not.toBeInTheDocument();
+    const marker = screen.getByRole("button", { name: "View alert" });
+    fireEvent.click(marker);
+    expect(onSnLinkClick).toHaveBeenCalledWith(
+      "alert",
+      "7a43e2d4-3b2a-4b50-9140-4c6aa5e45a41",
+    );
+  });
+
+  it("turns a bare smart-alert URL into an in-app clickable marker and dispatches its type/id", () => {
+    const onSnLinkClick = vi.fn();
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml:
+            "https://sn-dev.example.com/u_smart_alert_buffer.do?sys_id=00000000000000000000000000000001",
+        })}
+        onSnLinkClick={onSnLinkClick}
+      />,
+    );
+    const marker = screen.getByRole("button", { name: "View smart alert" });
+    fireEvent.click(marker);
+    expect(onSnLinkClick).toHaveBeenCalledWith(
+      "smartAlert",
+      "00000000-0000-0000-0000-000000000001",
+    );
+  });
+
+  it("invokes onSnLinkClick on Enter/Space keydown for an alert marker", () => {
+    const onSnLinkClick = vi.fn();
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml:
+            "https://sn-dev.example.com/u_custom_alert.do?sys_id=7a43e2d43b2a4b5091404c6aa5e45a41",
+        })}
+        onSnLinkClick={onSnLinkClick}
+      />,
+    );
+    const marker = screen.getByRole("button", { name: "View alert" });
+    fireEvent.keyDown(marker, { key: "Enter" });
+    expect(onSnLinkClick).toHaveBeenCalledWith(
+      "alert",
+      "7a43e2d4-3b2a-4b50-9140-4c6aa5e45a41",
+    );
+  });
+
+  it("does nothing on click when onSnLinkClick is not provided", () => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml:
+            "https://sn-dev.example.com/u_custom_alert.do?sys_id=7a43e2d43b2a4b5091404c6aa5e45a41",
+        })}
+      />,
+    );
+    const marker = screen.getByRole("button", { name: "View alert" });
+    expect(() => fireEvent.click(marker)).not.toThrow();
+  });
+
+  it("does not invoke onSnLinkClick for an unrecognized data-sn-link-type value", () => {
+    const onSnLinkClick = vi.fn();
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml:
+            '<span data-sn-link-type="other" data-sn-link-id="7a43e2d4-3b2a-4b50-9140-4c6aa5e45a41" role="button" tabindex="0">Suspicious marker</span>',
+        })}
+        onSnLinkClick={onSnLinkClick}
+      />,
+    );
+    const marker = screen.getByRole("button", { name: "Suspicious marker" });
+    fireEvent.click(marker);
+    fireEvent.keyDown(marker, { key: "Enter" });
+    expect(onSnLinkClick).not.toHaveBeenCalled();
+  });
+
+  it("preserves the original call-request task-number text as the clickable label", () => {
+    const onCallRequestClick = vi.fn();
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          bodyHtml:
+            'Case Task <a href="https://sn-dev.example.com/sn_customerservice_customer_call.do?sys_id=7a43e2d43b2a4b5091404c6aa5e45a41">CTASK0012345</a> has been created',
+        })}
+        onCallRequestClick={onCallRequestClick}
+      />,
+    );
+    const marker = screen.getByRole("button", { name: "CTASK0012345" });
+    fireEvent.click(marker);
+    expect(onCallRequestClick).toHaveBeenCalledWith(
+      "7a43e2d4-3b2a-4b50-9140-4c6aa5e45a41",
+    );
+    expect(screen.queryByText("View call request")).not.toBeInTheDocument();
+  });
+
   it("renders a system comment as a compact inline row", () => {
     renderWithProviders(
       <CsmCaseCommentBubble
@@ -251,5 +360,25 @@ describe("CsmCaseCommentBubble", () => {
     expect(document.querySelector(".MuiAvatar-root")).not.toBeInTheDocument();
     expect(screen.getByText(/Commented by/)).toBeInTheDocument();
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+  });
+
+  it("suppresses the role chip for a synthetic (client-injected) comment even though authorRole is 'customer'", () => {
+    // `synthetic` is used for entries the frontend fabricates itself (e.g.
+    // the case description echoed into the activity feed) — the real
+    // author's role is unknown in that case, so no chip should claim one,
+    // regardless of what placeholder `authorRole` the entry carries.
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({ authorRole: "customer", synthetic: true })}
+      />,
+    );
+    expect(screen.queryByText("Customer")).not.toBeInTheDocument();
+  });
+
+  it("still shows the role chip for a non-synthetic customer comment", () => {
+    renderWithProviders(
+      <CsmCaseCommentBubble comment={makeComment({ authorRole: "customer" })} />,
+    );
+    expect(screen.getByText("Customer")).toBeInTheDocument();
   });
 });

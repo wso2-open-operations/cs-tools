@@ -78,23 +78,8 @@ export class ChangeRequestDetailPage {
     return this.editDialog().getByRole("group", { name: /^Planned start/ });
   }
 
-  customerApprovedSwitch(): Locator {
-    return this.editDialog().getByRole("switch", { name: "Customer approved" });
-  }
-
-  customerReviewedSwitch(): Locator {
-    return this.editDialog().getByRole("switch", { name: "Customer reviewed" });
-  }
-
-  async setCustomerApproved(value: boolean): Promise<void> {
-    const isChecked = await this.customerApprovedSwitch().isChecked();
-    if (isChecked !== value) await this.customerApprovedSwitch().click();
-  }
-
-  async setCustomerReviewed(value: boolean): Promise<void> {
-    const isChecked = await this.customerReviewedSwitch().isChecked();
-    if (isChecked !== value) await this.customerReviewedSwitch().click();
-  }
+  // "Customer approved"/"Customer reviewed" are deliberately not editable
+  // controls in this dialog — see EditChangeRequestDialog.tsx's doc comment.
 
   saveButton(): Locator {
     return this.editDialog().getByRole("button", { name: /^(Save|Saving…)$/ });

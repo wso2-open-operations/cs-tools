@@ -132,18 +132,26 @@ interface ProjectAccessStatus {
 
 /**
  * A project row's access status, folding case-access and registration state
- * into the single "Access" column a support engineer scans: a project with no
- * linked contact record is the fundamental failure ("No access", with the
- * reason called out inline); one that's linked but hasn't completed
+ * into the single "Access" column a support engineer scans: a project that
+ * doesn't grant case access is the fundamental failure ("No access", with the
+ * reason called out inline); one that grants access but hasn't completed
  * registration yet reads "Invited" rather than "Has access", since the
  * person hasn't actually logged in to see it.
+ *
+ * "No access" has two causes and the reason line distinguishes them, because
+ * the fix differs: no contact record linked at all (the invite never
+ * completed), or a row invited under one address while its linked contact's
+ * own address is another (the row names the wrong address, and the project is
+ * invisible to both people).
  */
 function deriveProjectAccessStatus(pa: UserProjectAccess): ProjectAccessStatus {
   if (!pa.grantsCaseAccess) {
     return {
       label: "No access",
       color: "error",
-      reason: "No contact record is linked to this project for this user.",
+      reason: pa.contactRecordPresent
+        ? `Invited as ${pa.contactEmail} but linked to a contact whose own address is ${pa.contactRecordEmail ?? "different"} — this project is invisible to both.`
+        : "No contact record is linked to this project for this user.",
     };
   }
   if ((pa.registrationState ?? "").toLowerCase() === "invited") {

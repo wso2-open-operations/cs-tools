@@ -109,6 +109,19 @@ type snIncidentFilters struct {
 	// contract on the Ballerina/SN side).
 	StartCreatedDate string `json:"startCreatedDate,omitempty"`
 	EndCreatedDate   string `json:"endCreatedDate,omitempty"`
+	// SlaViolated: see domain.SearchIncidentsFilters Filters "slaViolated" doc
+	// comment. nil (omitted) means the filter was not supplied.
+	SlaViolated *bool `json:"slaViolated,omitempty"`
+	// MadeSla: see domain.SearchIncidentsFilters Filters "madeSla" doc
+	// comment. nil (omitted) means the filter was not supplied. Deliberately
+	// kept separate from SlaViolated above -- this is ServiceNow's own raw,
+	// less-reliable `made_sla` field, carried through only for exact parity
+	// with SN's native incident dashboards; prefer SlaViolated otherwise.
+	MadeSla *bool `json:"madeSla,omitempty"`
+	// ProductNames: see domain.SearchIncidentsFilters Filters "productName"
+	// doc comment. Matched as a union against the incident's backing
+	// business_service name.
+	ProductNames []string `json:"productNames,omitempty"`
 }
 
 // snIncidentPriorityKeyMap maps domain IncidentPriority enums to SN numeric priority keys.
@@ -256,6 +269,9 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 			BusinessServiceIDs: uuidsToSysids(parsedFilters.BusinessServiceIDs),
 			StartCreatedDate:   formatSNDateTimeUTC(parsedFilters.StartCreatedDate),
 			EndCreatedDate:     formatSNDateTimeUTC(parsedFilters.EndCreatedDate),
+			SlaViolated:        parsedFilters.SlaViolated,
+			MadeSla:            parsedFilters.MadeSla,
+			ProductNames:       parsedFilters.ProductNames,
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -329,55 +345,55 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 	}, nil
 }
 
-// snIncidentGroupByPayload is the Choreo POST /incidents/group-by request body.
-type snIncidentGroupByPayload struct {
+// snIncidentAggregatePayload is the Choreo POST /incidents/aggregate request body.
+type snIncidentAggregatePayload struct {
 	Filters   snIncidentFilters `json:"filters,omitempty"`
 	GroupBy   string            `json:"groupBy"`
 	MaxGroups int               `json:"maxGroups,omitempty"`
 }
 
-// validIncidentGroupByField is the allow-list for
-// GroupIncidentsByRequest.GroupBy, matching openapi.yaml's
-// GroupIncidentsByRequest.groupBy enum exactly.
-var validIncidentGroupByField = map[string]bool{
+// validIncidentAggregateField is the allow-list for
+// AggregateIncidentsRequest.GroupBy, matching openapi.yaml's
+// AggregateIncidentsRequest.groupBy enum exactly.
+var validIncidentAggregateField = map[string]bool{
 	"state":           true,
 	"assignmentGroup": true,
 	"businessService": true,
 }
 
-// GroupIncidentsBy implements IncidentService by calling the Choreo POST
-// /incidents/group-by endpoint: a single server-side aggregation over the
+// AggregateIncidents implements IncidentService by calling the Choreo POST
+// /incidents/aggregate endpoint: a single server-side aggregation over the
 // requested field, capped to the top MaxGroups buckets with the remainder
-// folded into GroupByResponse.OthersCount. Filter parsing and validation
+// folded into AggregateResponse.OthersCount. Filter parsing and validation
 // mirror SearchIncidents.
-func (s *snIncidentService) GroupIncidentsBy(ctx context.Context, req domain.GroupIncidentsByRequest) (domain.GroupByResponse, error) {
+func (s *snIncidentService) AggregateIncidents(ctx context.Context, req domain.AggregateIncidentsRequest) (domain.AggregateResponse, error) {
 	if req.GroupBy == "" {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
 	}
-	if !validIncidentGroupByField[req.GroupBy] {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	if !validIncidentAggregateField[req.GroupBy] {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if err := validateExactNumber("number", req.Filters.Number); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	for _, p := range req.Filters.Priorities {
 		if !validIncidentPriority[p] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "priorities contains invalid value: " + string(p)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "priorities contains invalid value: " + string(p)}
 		}
 	}
 	if err := validateUUIDs("parentIds", req.Filters.ParentIDs); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	parsedFilters, err := ParseIncidentFieldFilters(req.Filters.Filters, time.Now().UTC())
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if parsedFilters.EndCreatedDate != nil && parsedFilters.StartCreatedDate != nil &&
 		parsedFilters.EndCreatedDate.Before(*parsedFilters.StartCreatedDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -387,7 +403,7 @@ func (s *snIncidentService) GroupIncidentsBy(ctx context.Context, req domain.Gro
 		priorityKeys = append(priorityKeys, snIncidentPriorityKeyMap[p])
 	}
 
-	payload := snIncidentGroupByPayload{
+	payload := snIncidentAggregatePayload{
 		Filters: snIncidentFilters{
 			SearchQuery:        req.Filters.SearchQuery,
 			PriorityKeys:       priorityKeys,
@@ -398,19 +414,31 @@ func (s *snIncidentService) GroupIncidentsBy(ctx context.Context, req domain.Gro
 			BusinessServiceIDs: uuidsToSysids(parsedFilters.BusinessServiceIDs),
 			StartCreatedDate:   formatSNDateTimeUTC(parsedFilters.StartCreatedDate),
 			EndCreatedDate:     formatSNDateTimeUTC(parsedFilters.EndCreatedDate),
+			SlaViolated:        parsedFilters.SlaViolated,
+			MadeSla:            parsedFilters.MadeSla,
+			ProductNames:       parsedFilters.ProductNames,
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,
 	}
 
-	raw, err := s.client.Post(ctx, "/incidents/group-by", token, payload)
+	raw, err := s.client.Post(ctx, "/incidents/aggregate", token, payload)
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
-	var resp domain.GroupByResponse
+	var resp domain.AggregateResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return domain.GroupByResponse{}, fmt.Errorf("sn incidents: parse group-by response: %w", err)
+		return domain.AggregateResponse{}, fmt.Errorf("sn incidents: parse aggregate response: %w", err)
+	}
+	// "assignmentGroup" and "businessService" are the only ID-valued fields
+	// in validIncidentAggregateField; SN returns their bucket keys as raw
+	// sys_ids, so convert them to this platform's UUIDs before returning.
+	// "state" is a plain enum and is left as-is.
+	if req.GroupBy == "assignmentGroup" || req.GroupBy == "businessService" {
+		for i := range resp.Groups {
+			resp.Groups[i].Key = sysidToUUID(resp.Groups[i].Key)
+		}
 	}
 	return resp, nil
 }
@@ -659,11 +687,15 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 			}
 		}
 	}
-	if err := validateUUIDs("watchList", req.WatchList); err != nil {
+	token := middleware.UserIDTokenFromContext(ctx)
+
+	// The backing service's incident-create payload declares the watch list as
+	// email addresses, not user ids, so the incoming platform UUIDs are resolved
+	// to emails first.
+	watchList, err := watchListEmails(ctx, s.client, token, "watchList", req.WatchList)
+	if err != nil {
 		return domain.CreateIncidentResponse{}, err
 	}
-
-	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snCreateIncidentPayload{
 		CallerID:           uuidToSysid(req.CallerID),
@@ -672,7 +704,7 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 		ImpactKey:          snIncidentImpactKeyMap[req.Impact],
 		UrgencyKey:         snIncidentUrgencyKeyMap[req.Urgency],
 		Subject:            req.Subject,
-		WatchList:          uuidsToSysids(req.WatchList),
+		WatchList:          watchList,
 		AdditionalComments: req.AdditionalComments,
 		WorkNotes:          req.WorkNotes,
 	}
@@ -1158,8 +1190,15 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 		WorkNotes:          req.WorkNotes,
 	}
 	if req.WatchList != nil {
-		v := uuidsToSysids(*req.WatchList)
-		payload.WatchList = &v
+		// The backing service's incident-update payload declares the watch list as
+		// usernames -- not emails as its create counterpart does, and not ids --
+		// and it replaces the whole list, so an explicitly empty list must still be
+		// sent to clear it rather than be skipped.
+		userNames, err := watchListUserNames(ctx, s.client, token, "watchList", *req.WatchList)
+		if err != nil {
+			return domain.UpdateIncidentResponse{}, err
+		}
+		payload.WatchList = &userNames
 	}
 	if req.Priority != nil {
 		v := snIncidentPriorityKeyMap[*req.Priority]

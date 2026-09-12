@@ -18,6 +18,10 @@ import { Button, FormControl, MenuItem, Select } from "@wso2/oxygen-ui";
 import type { CaseDetail, CaseState } from "@src/types";
 import { STATE_LABELS } from "@components/support/config";
 
+// Shared with CaseMoreMenu's "More" button so every control in this action bar renders at the
+// same height regardless of which underlying component (Button vs Select) backs it.
+export const ACTION_BAR_CONTROL_HEIGHT = 36;
+
 interface CaseActionBarProps {
   caseDetail: CaseDetail;
   currentUserId: string | null | undefined;
@@ -80,7 +84,7 @@ export function CaseActionBar({
         size="small"
         disabled={isPending}
         onClick={() => runTarget(targets[0])}
-        sx={{ borderRadius: 999 }}
+        sx={{ borderRadius: 999, height: ACTION_BAR_CONTROL_HEIGHT }}
       >
         {labelFor(targets[0])}
       </Button>
@@ -97,6 +101,19 @@ export function CaseActionBar({
         sx={{
           color: "#fff",
           borderRadius: 999,
+          // Select defaults to a taller control than Button's own size="small" (its input padding
+          // is sized for typed text, not a pill label) — pin both to the same explicit height so
+          // this reads as one consistent control next to CaseMoreMenu's "More" button rather than
+          // two different implicit defaults sitting side by side.
+          height: ACTION_BAR_CONTROL_HEIGHT,
+          "& .MuiSelect-select": {
+            display: "flex",
+            alignItems: "center",
+            height: "100%",
+            boxSizing: "border-box",
+            paddingTop: 0,
+            paddingBottom: 0,
+          },
           // Reuse the theme's own `gradient.primary` token (same one MuiButton/MuiFab
           // containedPrimary use) instead of hand-deriving a gradient from
           // palette.primary.light/main/dark — that diverged in direction, stops, and

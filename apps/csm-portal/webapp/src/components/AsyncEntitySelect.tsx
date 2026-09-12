@@ -52,6 +52,11 @@ export interface AsyncEntitySelectProps<T> {
   knownLabel?: string;
   /** Forwarded as `useSearch`'s third argument — see `useSearch` above. */
   searchExtra?: string;
+  /** Ids to drop from the results — for pickers that add to a list the entity
+   * is already on (e.g. a watch list), so an already-added person can't be
+   * offered again. The currently selected `value` is never excluded, so the
+   * field stays labelled. */
+  excludeIds?: readonly string[];
 }
 
 /**
@@ -76,6 +81,7 @@ export default function AsyncEntitySelect<T>({
   getLabel,
   knownLabel,
   searchExtra,
+  excludeIds,
 }: AsyncEntitySelectProps<T>): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
@@ -83,7 +89,12 @@ export default function AsyncEntitySelect<T>({
   const query = debounced.trim();
 
   const { data, isFetching, isError } = useSearch(query, open, searchExtra);
-  const items = useMemo(() => data ?? [], [data]);
+  const items = useMemo(() => {
+    const all = data ?? [];
+    if (!excludeIds?.length) return all;
+    const skip = new Set(excludeIds);
+    return all.filter((item) => getId(item) === value || !skip.has(getId(item)));
+  }, [data, excludeIds, getId, value]);
 
   // Captured at selection time so the field stays labelled once the search
   // term (and its results) move on to something else.

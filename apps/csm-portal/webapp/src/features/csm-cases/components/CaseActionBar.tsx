@@ -25,29 +25,33 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ArrowRight,
   CalendarClock,
   CheckCircle,
   ChevronDown,
   Clock,
-  Copy,
+  FileText,
   Gauge,
   GitBranch,
   GitPullRequest,
   Inbox,
   Link as LinkIcon,
-  ListChecks,
+  MessageCircleQuestion,
   PauseCircle,
   Pencil,
   Play,
   Send,
+  Undo2,
   User,
+  Wrench,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type {
   CaseLifecycleAction,
   CsmCaseDetail,
 } from "@features/csm-cases/types/csmCases";
+import { canRequestCaseUpdate } from "@features/csm-cases/utils/caseUpdateRequests";
 import type {
   CaseState,
   SeverityOrUnset,
@@ -210,24 +214,32 @@ interface SecondaryItem {
  *   - Edit case details              → subject/description/deployment/deployed product (see EditCaseDetailsDialog.tsx)
  *   - Create incident from case      → ISSU-021 (POST /incidents { parentId }, see
  *                                       CreateIncidentPage.tsx's read of the nav state)
+ *   - Create service request…        → navigates to the service-request create form
+ *                                       pre-linked to this case (POST /cases { type:
+ *                                       "service_request", relatedCaseId }, see
+ *                                       CreateServiceRequestPage.tsx's read of the nav
+ *                                       state). Mirrors the same action already reachable
+ *                                       from the Related tab's Linked service requests
+ *                                       card — kept in both places, same as "Create change
+ *                                       request…" below.
  *   - Link to incident               → ISSU-021 (PATCH /cases/{id} { parentId }, see
  *                                       LinkIncidentDialog.tsx)
  *   - Raise Git issue                → ISSU-020
+ *   - Request update…                → nudge the customer for a response using a fixed
+ *                                       reminder template or a custom message. Only offered
+ *                                       while the case is Awaiting info or Solution proposed
+ *                                       — see `POST /cases/{id}/request-update` and
+ *                                       RequestUpdateDialog.tsx.
  *   - Create change request          → service-request-only. Navigates to the change-request
  *                                       create form pre-filled with this service request as the
  *                                       "Originating service request" (POST /change-requests, then
  *                                       PATCH { caseId } — see CreateChangeRequestPage.tsx).
- *   - Create task                    → ISSU-025 (POST /cases/{caseId}/tasks, see CreateTaskDialog.tsx).
- *                                       Kept here even though a Tasks tab exists: that tab is
- *                                       still `hidden` in CsmCaseDetailPage's TAB_DEFS, so this
- *                                       menu item is the only reachable entry point today.
  *   - Set fix ETA                    → PATCH /cases/{id} { bestCaseFixEta?, mostLikelyFixEta?,
  *                                       worstCaseFixEta?, addPublicComment?, product?,
  *                                       publicTicket? } combined in one call, see SetFixEtaDialog.tsx
  *   - Log time                       → ISSU-017
  *   - Change severity                → PATCH /cases/{id} { severity }, already fully
  *                                       backend-supported (see ChangeSeverityDialog.tsx)
- *   - Copy case link                 → ISSU-010 (per-comment + per-case permalinks)
  *
  * Intentionally NOT here (removed as duplicate entry points once their target
  * tab already exposes the same action directly, so there's one way to do each
@@ -238,6 +250,16 @@ interface SecondaryItem {
  *   - Link to another case → the Related tab's "Linked service requests" card
  *                          has its own "Link to another case…" button wired to
  *                          the same LinkCaseDialog.
+ *   - Link to incident → relocated to the Related tab's new "Linked incident"
+ *                          widget, which has its own "Link to incident…"
+ *                          button — same pattern as "Link to another case"
+ *                          above.
+ *   - Create task → hidden with no replacement; the Tasks tab this would
+ *                          otherwise belong to is still hidden in
+ *                          CsmCaseDetailPage's TAB_DEFS, so task creation is
+ *                          unreachable until that's addressed separately
+ *                          (deliberate, not an oversight).
+ *   - Copy case link → removed per product decision, no replacement.
  *   - Request a call    → the Call requests tab has its own "Create call
  *                          request" button (CallRequestsWidget.tsx); the menu
  *                          item only jumped there and auto-opened that same
@@ -264,6 +286,31 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
     });
   }
 
+  // Mark / recall the case's workaround. Pauses the case's Workaround SLA
+  // clock while set; recalling clears it. Not assignee-gated (unlike
+  // pause/resume work above) -- any engineer working the case can mark or
+  // recall it. Blocked once the case is closed, same as every other write
+  // action below.
+  {
+    const caseClosedForWorkaround = caseDetail.state === "closed";
+    items.push({
+      key: "toggle_workaround_provided",
+      label: caseDetail.workaroundProvidedOn
+        ? "Recall workaround"
+        : "Provide workaround",
+      icon: caseDetail.workaroundProvidedOn ? (
+        <Undo2 size={16} />
+      ) : (
+        <Wrench size={16} />
+      ),
+      divider: true,
+      disabled: caseClosedForWorkaround,
+      tooltip: caseClosedForWorkaround
+        ? "This case is closed — it's read-only."
+        : undefined,
+    });
+  }
+
   // Assignee changes are rejected while a case is Work in progress + Ongoing:
   // the backend silently reverts the change and still reports success, so the
   // reassign would appear to work while the assignee stays put. Gate the action
@@ -277,21 +324,36 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   // attachments, and time tracking (see CsmCaseDetailPage.tsx's isClosed).
   const caseClosed = caseDetail.state === "closed";
 
-  // Git issues may only be raised while the case is active: Open, Work in
-  // progress, Awaiting info, Waiting on WSO2, or Reopened. Anything else
-  // (e.g. Solution proposed, Closed) blocks the action. `caseDetail.state` is
-  // the normalized label (see `uiStateFromBe`) — this must match the real
-  // `CaseState` values (there is no "waiting_on_client" state).
+  // Git issues may only be raised while the case is in a state SN's own
+  // gate allows — CaseGithubIssueUtils.isCaseActionable's ALLOWED_CASE_STATES
+  // ('1', '10', '1002', '1003', '1006': Open, Work in progress, [a legacy SN
+  // state id with no CSM-side equivalent], Waiting on WSO2, Reopened).
+  // Notably this does NOT include Awaiting info — anything outside this
+  // list (Awaiting info, Solution proposed, Closed) blocks the action.
+  // `caseDetail.state` is the normalized label (see `uiStateFromBe`) — this
+  // must match the real `CaseState` values (there is no "waiting_on_client"
+  // state).
   const GIT_ISSUE_ALLOWED_STATES: readonly string[] = [
     "open",
     "work_in_progress",
-    "awaiting_info",
     "waiting_on_wso2",
     "reopened",
   ];
   const gitIssueStateBlocked = !GIT_ISSUE_ALLOWED_STATES.includes(
     caseDetail.state,
   );
+
+  // Opposite shape to the git-issue gate above: "Request update" is only
+  // meaningful while the ball is meant to be in the customer's court, so it's
+  // enabled ONLY in those two states rather than blocked in a few — mirrors
+  // the backend's own state gate in `RequestCaseUpdate` (409 outside these
+  // states). Also requires `assigneeIsMe`: the backend separately rejects a
+  // non-assignee with 403 (same ownership rule `CreateCaseComment` already
+  // enforces for public comments), so gating on state alone would let anyone
+  // open the dialog and fill it in only to hit a confusing 403 on submit.
+  const requestUpdateStateAllowed = canRequestCaseUpdate(caseDetail);
+  const requestUpdateAllowed =
+    requestUpdateStateAllowed && caseDetail.assigneeIsMe;
 
   // Only a service request can be the "Originating service request" a change
   // request links back to (see the create form's picker), so the action is
@@ -318,7 +380,19 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       tooltip: caseClosed
         ? "This case is closed — it's read-only."
         : gitIssueStateBlocked
-          ? "Git issues can only be raised while the case is Open, Work in progress, Awaiting info, Waiting on WSO2, or Reopened."
+          ? "Git issues can only be raised while the case is Open, Work in progress, Waiting on WSO2, or Reopened."
+          : undefined,
+    },
+    {
+      key: "request_update",
+      label: "Request update…",
+      icon: <MessageCircleQuestion size={16} />,
+      divider: true,
+      disabled: !requestUpdateAllowed,
+      tooltip: !requestUpdateStateAllowed
+        ? "Requesting an update is only available while the case is Awaiting info or has a proposed solution."
+        : !requestUpdateAllowed
+          ? "Only the assigned engineer can request an update on this case."
           : undefined,
     },
     {
@@ -344,6 +418,13 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       key: "edit_case_details",
       label: "Edit case details…",
       icon: <Pencil size={16} />,
+      disabled: caseClosed,
+      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
+    },
+    {
+      key: "change_case_type",
+      label: "Change case type…",
+      icon: <ArrowLeftRight size={16} />,
       divider: true,
       disabled: caseClosed,
       tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
@@ -364,17 +445,10 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
     },
     {
-      key: "link_incident",
-      label: "Link to incident…",
-      icon: <LinkIcon size={16} />,
+      key: "create_service_request",
+      label: "Create service request…",
+      icon: <FileText size={16} />,
       divider: true,
-      disabled: caseClosed,
-      tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
-    },
-    {
-      key: "create_task",
-      label: "Create task…",
-      icon: <ListChecks size={16} />,
       disabled: caseClosed,
       tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
     },
@@ -386,8 +460,7 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
       disabled: caseClosed,
       tooltip: caseClosed ? "This case is closed — it's read-only." : undefined,
     },
-    { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
-    { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
+    { key: "log_time", label: "Log time…", icon: <Clock size={16} /> },
   );
 
   return items;

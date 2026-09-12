@@ -77,10 +77,11 @@ export function LinkCaseDialog({ currentCaseId, isLinking, onClose, onLink }: Li
             backgroundImage: "none",
             backgroundColor: "background.default",
             // Same explicit cap as LogTimeCardDialog — keeps the search results scrollable within
-            // the dialog instead of letting the paper grow past the viewport.
+            // the dialog instead of letting the paper grow past the viewport. `dvh`, not `vh` — see
+            // that file's comment for why.
             display: "flex",
             flexDirection: "column",
-            maxHeight: "85vh",
+            maxHeight: "85dvh",
           },
         },
       }}

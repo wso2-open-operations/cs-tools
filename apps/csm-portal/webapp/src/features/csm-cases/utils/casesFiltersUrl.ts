@@ -25,11 +25,23 @@ import type {
 } from "@api/backend/types";
 import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
 import { ALL_CASE_TYPES } from "@features/csm-cases/utils/caseType";
+import {
+  isCompleteAdvancedFilterRow,
+  parseAdvancedFiltersParam,
+  writeAdvancedFiltersParam,
+} from "@features/csm-cases/utils/advancedFilters";
+import {
+  isCompleteAnyOfBranch,
+  parseAnyOfBranchesParam,
+  writeAnyOfBranchesParam,
+} from "@features/csm-cases/utils/anyOfFilters";
+import { normalizeCasesFilters } from "@features/csm-cases/utils/filterFieldAdapters";
 
 export const DEFAULT_CASES_FILTERS: CasesFilters = {
   search: "",
   severities: [],
   states: [],
+  excludeStates: [],
   caseTypes: [],
   assignees: [],
   workStates: [],
@@ -52,12 +64,15 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   updatedOnLte: null,
   closedOnGte: null,
   closedOnLte: null,
-  // Note: `tags`/`excludeTags` are real, wired-through fields as of this
-  // codec (round-trip URL + `/cases/search` payload) — only the filter-bar
-  // *control* for them is still pending; they surface only as removable
-  // chips (see `buildActiveFilterChips` in `CasesFilterBar.tsx`).
-  // `TagsMultiSelect` and `useSearchTags` remain used by the case-detail
-  // "Add tag" picker regardless.
+  advancedFilters: [],
+  anyOfBranches: [],
+  // Note: `tags`/`excludeTags` are real, wired-through fields (round-trip
+  // URL + `/cases/search` payload), both driven by the one tri-state
+  // "Tags" bar control (`TagsMultiSelect`, digiops-cs#2907) — see its own
+  // doc comment for the include/exclude cycling model. `useSearchTags`
+  // (the same `/tags/search` type-ahead) is also used standalone by the
+  // case-detail "Add tag" picker (`AddTagDialog`), which doesn't reuse
+  // `TagsMultiSelect` itself (single-tag add, not a filter).
 };
 
 const VALID_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -150,10 +165,15 @@ export function readCasesFiltersFromUrl(
     states.length === 1 && states[0] === "work_in_progress"
       ? parseCsv(params.get("workStates"), VALID_WORK_STATES)
       : [];
-  return {
+  // `normalizeCasesFilters` folds any `af` row targeting a field that now
+  // has its own typed `CasesFilters` slot (severity/state/tag/...) into that
+  // real property, so a legacy or hand-edited URL can never produce a
+  // dangling duplicate of the same predicate — see its own doc comment.
+  return normalizeCasesFilters({
     search: params.get("search") ?? "",
     severities: parseCsv(params.get("severities"), VALID_SEVERITIES),
     states,
+    excludeStates: parseCsv(params.get("excludeStates"), VALID_STATES),
     caseTypes: parseCsv(params.get("types"), VALID_CASE_TYPES),
     assignees: parseFreeFormCsv(params.get("assignees")),
     workStates,
@@ -176,7 +196,9 @@ export function readCasesFiltersFromUrl(
     updatedOnLte: parseFreeFormScalar(params.get("updatedTo")),
     closedOnGte: parseFreeFormScalar(params.get("closedFrom")),
     closedOnLte: parseFreeFormScalar(params.get("closedTo")),
-  };
+    advancedFilters: parseAdvancedFiltersParam(params.get("af")),
+    anyOfBranches: parseAnyOfBranchesParam(params.get("anyOf")),
+  });
 }
 
 /**
@@ -195,9 +217,21 @@ export function readCasesFiltersFromUrl(
  * struct, not a generic opaque array, so every op that would otherwise
  * collide on one field name already gets its own dedicated field/param
  * instead —
- *   - `tags` (op:in) vs. `excludeTags` (op:notIn) — two arrays, not one
- *     array plus an op flag, so `in` and `notIn` can never be conflated on
- *     the round trip;
+ *   - `tags` (op:in) vs. `excludeTags` (op:notIn), and `states` vs.
+ *     `excludeStates` — each an in/notIn pair as two arrays, not one array
+ *     plus an op flag, so `in` and `notIn` can never be conflated on the
+ *     round trip. `state`/`tag`/`projectOnboardingStatus` are the only 3
+ *     case-search fields whose backend contract accepts `notIn` at all (see
+ *     `POST /cases/search`'s `caseFilterOpSet`/per-field op table); every
+ *     other field is `in`-only and has no exclude counterpart to conflate
+ *     with in the first place. `projectOnboardingStatus` is the one
+ *     exception among those 3: its domain is the 4 fixed values in
+ *     `onboardingStatus.ts`, so `translateCaseDashboardFilters`
+ *     (`widgetResourceConfig.ts`) folds a `notIn` dashboard filter into
+ *     `onboardingStatuses`' own complement instead of carrying a second
+ *     `excludeOnboardingStatuses` field/param through the round trip — one
+ *     less param that could collide with (or be conflated with) the plain
+ *     `onboardingStatuses` one;
  *   - `slaElapsedPctGte`/`slaElapsedPctLte`, and the `createdOnGte/Lte`,
  *     `updatedOnGte/Lte`, `closedOnGte/Lte` date-range pairs — one param per
  *     bound, not a shared field with an op suffix;
@@ -218,6 +252,7 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.search) out.set("search", f.search);
   if (f.severities.length) out.set("severities", f.severities.join(","));
   if (f.states.length) out.set("states", f.states.join(","));
+  if (f.excludeStates.length) out.set("excludeStates", f.excludeStates.join(","));
   if (f.caseTypes.length) out.set("types", f.caseTypes.join(","));
   if (f.assignees.length) out.set("assignees", f.assignees.join(","));
   if (f.workStates.length) out.set("workStates", f.workStates.join(","));
@@ -246,6 +281,20 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.updatedOnLte !== null) out.set("updatedTo", f.updatedOnLte);
   if (f.closedOnGte !== null) out.set("closedFrom", f.closedOnGte);
   if (f.closedOnLte !== null) out.set("closedTo", f.closedOnLte);
+  // `af` is the one exception to the "one param per field+op pair" rule this
+  // doc comment argues for above — it IS the generic escape hatch the
+  // comment calls out, so `field~op` (or here, a JSON `[field, op, values]`
+  // triple) is the right shape for it: each row already carries its own op
+  // explicitly, so there's no default-op fallback for a decode to silently
+  // mis-attribute a value to.
+  const af = writeAdvancedFiltersParam(f.advancedFilters);
+  if (af !== null) out.set("af", af);
+  // Same generic-escape-hatch reasoning as `af` above — `anyOf` already
+  // carries its own field per row (no op at all, since every branch field is
+  // `in`-only, see `anyOfFilters.ts`), so there is no default op for a
+  // decode to silently mis-attribute a value to here either.
+  const anyOf = writeAnyOfBranchesParam(f.anyOfBranches);
+  if (anyOf !== null) out.set("anyOf", anyOf);
   return out;
 }
 
@@ -260,6 +309,7 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.search.trim()) n += 1;
   if (f.severities.length) n += 1;
   if (f.states.length) n += 1;
+  if (f.excludeStates.length) n += 1;
   if (f.caseTypes.length) n += 1;
   if (f.assignees.length) n += 1;
   if (f.workStates.length) n += 1;
@@ -282,6 +332,13 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.updatedOnLte !== null) n += 1;
   if (f.closedOnGte !== null) n += 1;
   if (f.closedOnLte !== null) n += 1;
+  // Each advanced-filter row is its own distinct predicate (unlike e.g.
+  // `tags`, where every selected tag is really one "tag in [...]" filter) —
+  // count complete rows individually rather than the whole array as one.
+  n += f.advancedFilters.filter(isCompleteAdvancedFilterRow).length;
+  // Same reasoning as advanced-filter rows: each OR group with at least one
+  // complete condition is its own distinct predicate.
+  n += f.anyOfBranches.filter(isCompleteAnyOfBranch).length;
   return n;
 }
 

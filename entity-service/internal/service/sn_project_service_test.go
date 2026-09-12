@@ -307,3 +307,101 @@ func TestSNProjectContactService_GetProjectContact_UnlinkedRowsDoNotMatch(t *tes
 		t.Fatalf("GetProjectContact error = %v, want NotFoundError", err)
 	}
 }
+
+// TestSNProjectService_GetProjectByID_MapsHasSr verifies that ServiceNow's own
+// precomputed "hasSr" (service-request eligibility) field is parsed from the
+// project-detail response and passed through into domain.ProjectDetailsView
+// unmodified.
+func TestSNProjectService_GetProjectByID_MapsHasSr(t *testing.T) {
+	projectSysid := sysid32('9')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "SR Eligible", "key": "SRE", "sfId": "sf-1",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "2026-01-01", "endDate": "2026-12-31",
+			"type":    map[string]any{"name": "Subscription"},
+			"account": map[string]any{"id": "", "name": ""},
+			"hasSr":   true,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.HasSr {
+		t.Errorf("GetProjectByID HasSr = false, want true (passthrough of SN's hasSr)")
+	}
+}
+
+// TestSNProjectService_GetProjectByID_MapsOnboardingFields verifies that the
+// detail-only onboardingStatus and onboardingOwner fields are parsed from the
+// project-detail response and mapped into domain.ProjectDetailsView, with the
+// owner's sys_id converted to the service's UUID form.
+func TestSNProjectService_GetProjectByID_MapsOnboardingFields(t *testing.T) {
+	projectSysid := sysid32('a')
+	ownerSysid := sysid32('b')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "Onboarding Project", "key": "ONB", "sfId": "sf-2",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "2026-01-01", "endDate": "2026-12-31",
+			"type":             map[string]any{"name": "Subscription"},
+			"account":          map[string]any{"id": "", "name": ""},
+			"onboardingStatus": "In-Progress",
+			"onboardingOwner":  map[string]any{"id": ownerSysid, "name": "Jane Doe", "email": "jane.doe@example.com"},
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.OnboardingStatus == nil || *got.OnboardingStatus != "In-Progress" {
+		t.Errorf("GetProjectByID OnboardingStatus = %v, want \"In-Progress\"", got.OnboardingStatus)
+	}
+	wantOwnerID := sysidToUUID(ownerSysid)
+	if got.OnboardingOwner == nil {
+		t.Fatalf("GetProjectByID OnboardingOwner = nil, want non-nil")
+	}
+	if got.OnboardingOwner.ID != wantOwnerID || got.OnboardingOwner.Name != "Jane Doe" {
+		t.Errorf("GetProjectByID OnboardingOwner = %+v, want id=%s name=Jane Doe", got.OnboardingOwner, wantOwnerID)
+	}
+	if got.OnboardingOwner.Email == nil || *got.OnboardingOwner.Email != "jane.doe@example.com" {
+		t.Errorf("GetProjectByID OnboardingOwner.Email = %v, want jane.doe@example.com", got.OnboardingOwner.Email)
+	}
+}
+
+// TestSNProjectService_GetProjectByID_OnboardingFieldsAbsent verifies that
+// projects with no onboarding engagement at all (the common case) map to nil
+// OnboardingStatus and nil OnboardingOwner, rather than empty-string/zero-value
+// placeholders.
+func TestSNProjectService_GetProjectByID_OnboardingFieldsAbsent(t *testing.T) {
+	projectSysid := sysid32('c')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "No Onboarding", "key": "NOB", "sfId": "sf-3",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "2026-01-01", "endDate": "2026-12-31",
+			"type":    map[string]any{"name": "Subscription"},
+			"account": map[string]any{"id": "", "name": ""},
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.OnboardingStatus != nil {
+		t.Errorf("GetProjectByID OnboardingStatus = %v, want nil", *got.OnboardingStatus)
+	}
+	if got.OnboardingOwner != nil {
+		t.Errorf("GetProjectByID OnboardingOwner = %+v, want nil", got.OnboardingOwner)
+	}
+}

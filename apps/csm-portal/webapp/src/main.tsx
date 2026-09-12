@@ -19,6 +19,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import AppWithConfig from "./AppWithConfig";
 import { POST_LOGIN_REDIRECT_KEY } from "@layouts/postLoginRedirect";
+import { isTopLevelWindow } from "@utils/isTopLevelWindow";
 
 if (typeof window !== "undefined") {
   (window as unknown as { Prism: typeof Prism }).Prism = Prism;
@@ -29,8 +30,13 @@ if (typeof window !== "undefined") {
 // the SDK restores the session synchronously (in which case ProtectedRoute's
 // `onSignIn` never fires and the SDK navigates straight to `afterSignInUrl`).
 // AuthGuard reads/clears `post_login_redirect` once signed in. Skip the bare
-// root and the OAuth callback (which carries `?code=&state=`).
-if (typeof window !== "undefined") {
+// root, the OAuth callback (which carries `?code=&state=`), and any boot that
+// is not the top-level page (see below).
+// The `isTopLevelWindow()` guard keeps the silent-re-auth iframe's own boot of
+// this module from overwriting the real deep link with the iframe's URL
+// (`/?error=login_required&state=…` with no IdP session, `/?state=…` with one),
+// which otherwise lands the user on that instead of the page they asked for.
+if (typeof window !== "undefined" && isTopLevelWindow()) {
   try {
     // Include the hash so permalinks like `/cases/:id#description` (per-comment /
     // per-section anchors) survive the IdP round-trip, not just pathname+search.

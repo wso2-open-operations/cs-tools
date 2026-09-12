@@ -37,6 +37,36 @@ const (
 	TypeCaseAcknowledged Type = "case.acknowledged"
 	TypeSeverityChanged  Type = "case.severity_changed"
 	TypeIncidentCreated  Type = "incident.created"
+	// TypeCaseBillableStatusChanged is Postgres-data-source-only (unlike
+	// every other type here, which is ServiceNow-only) — see
+	// CaseBillableStatusChangedPayload's own doc comment for what it's for
+	// and why the two data sources aren't symmetric here.
+	//
+	// TODO: the consumer group plumbing exists on the
+	// csm-notification-service side (its own dedicated consumer group,
+	// internal/timecardengine.Engine — not folded into dispatch.Dispatcher's
+	// group, since eventbus.Consumer.Run processes one record at a time,
+	// fully sequentially/blocking, and a bulk update over "several time
+	// cards" must not delay unrelated email/Chat delivery on the same
+	// consumer instance), but its Handle only logs today — the actual
+	// reaction (bulk-flip every time card on the case to match
+	// Payload.IsBillable) needs a time_cards table/repo/service on this
+	// data source first (it has none today; time cards are
+	// ServiceNow-only, see internal/service/sn_time_card_service.go).
+	// Publishing this event is therefore still commented out at its one
+	// call site (case_service.go's UpdateCase) — the detection logic is
+	// real and live, only the actual Publish call is inert, so there's
+	// nothing for that consumer to receive yet either.
+	TypeCaseBillableStatusChanged Type = "case.billable_status_changed"
+	// TypeSLAClockRegister belongs to csm-notification-service's own
+	// internal/slaengine, not its internal/dispatch — see
+	// SLAClockRegisterPayload's own doc comment. Published once, from
+	// sn_case_service.go's publishCaseCreated; unlike every payload above,
+	// there is no separate "tier reached"/breach event type here —
+	// csm-notification-service's slaengine owns that half of the mechanism
+	// entirely (it also sends the Google Chat breach alert directly,
+	// without a second event round-trip through this topic).
+	TypeSLAClockRegister Type = "sla.clock.register"
 )
 
 // Envelope is the wire shape of every record on the case-events topic.
@@ -172,6 +202,28 @@ type SeverityChangedPayload struct {
 	Recipients []string `json:"recipients"`
 }
 
+// CaseBillableStatusChangedPayload is the Payload shape for
+// TypeCaseBillableStatusChanged — published (once a consumer exists — see
+// that type's own TODO) when a case's severity crosses into or out of LOW
+// on the Postgres data source. Type is always "case" and fixed forever for
+// a Postgres-backed case (see case_service.go's UpdateCase, which rejects
+// changing Type at all on this data source), so unlike the ServiceNow data
+// source — where Type can transfer between case/engagement/service_request
+// and severity is only ever meaningful for Type=="case" — the "does this
+// case count as S4 (WSO2's own support-policy tier for LOW severity, see
+// entity-service's sla_policy.go)" question collapses to a single check:
+// is the new severity LOW or not. IsBillable is the resulting target state
+// (true entering LOW, false leaving it) — precomputed here rather than left
+// for a consumer to re-derive from raw severity strings, since severity's
+// mapping to "billable" is business policy this service already owns (the
+// same reasoning sla_policy.go already established for SLA durations).
+// No Recipients/Product/Team: this event has no notification reaction at
+// all, only the (not yet built) time-card side effect.
+type CaseBillableStatusChangedPayload struct {
+	CaseID     string `json:"caseId"`
+	IsBillable bool   `json:"isBillable"`
+}
+
 // CaseCreatedPayload is the Payload shape for TypeCaseCreated — mirrors
 // csm-notification-service's own CaseCreatedPayload (its internal/events/
 // validate.go is the schema authority; keep this in sync by hand the same
@@ -230,4 +282,40 @@ type CaseCreatedPayload struct {
 type IncidentCreatedPayload struct {
 	Title            string `json:"title"`
 	ShortDescription string `json:"shortDescription"`
+}
+
+// SLAClockRegisterPayload is the Payload shape for TypeSLAClockRegister —
+// mirrors csm-notification-service's own SLAClockRegisterPayload exactly;
+// keep the two in sync by hand, same reasoning as every payload above.
+// Durations is a Go duration string (e.g. "2h") per clock type
+// ("response"/"workaround"/"resolution" — see internal/service/
+// sla_policy.go), added to CaseCreatedAt (not the publish/consume-time
+// "now" — a delayed publish or consumer backlog must not start the SLA
+// clock late) by csm-notification-service's slaengine to compute each
+// clock's due time. CaseCreatedAt is an RFC3339 timestamp; an empty or
+// unparsable value falls back to consume-time "now" (see slaengine's own
+// registerClocks). AvoidWeekendDueDate names the subset of those clock
+// types whose computed due date must not land on a Saturday/Sunday
+// (currently only ever "resolution", for MEDIUM severity's "1 Business
+// Week" SLA — see sla_policy.go's slaAvoidWeekendClockTypes) —
+// csm-notification-service's slaengine is what actually performs that
+// roll-forward, since only it knows the real startedAt/dueAt at consume
+// time. The remaining fields (including State — the case's own state at
+// registration time, UPPER_SNAKE_CASE, e.g. "WORK_IN_PROGRESS") are purely
+// for display in a Google Chat breach card and are stored verbatim on the
+// registered sla_clocks row — see domain.SLAClock's own doc comment for
+// why they're a point-in-time snapshot, not kept live.
+type SLAClockRegisterPayload struct {
+	CaseID              string            `json:"caseId"`
+	Durations           map[string]string `json:"durations"`
+	CaseCreatedAt       string            `json:"caseCreatedAt,omitempty"`
+	AvoidWeekendDueDate []string          `json:"avoidWeekendDueDate,omitempty"`
+	CaseNumber          string            `json:"caseNumber,omitempty"`
+	WSO2CaseID          string            `json:"wso2CaseId,omitempty"`
+	CaseTitle           string            `json:"caseTitle,omitempty"`
+	CaseType            string            `json:"caseType,omitempty"`
+	Product             string            `json:"product,omitempty"`
+	Team                string            `json:"team,omitempty"`
+	Priority            string            `json:"priority,omitempty"`
+	State               string            `json:"state,omitempty"`
 }

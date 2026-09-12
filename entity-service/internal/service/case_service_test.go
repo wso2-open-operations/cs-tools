@@ -61,7 +61,7 @@ func (s *stubCaseRepo) SearchCaseComments(ctx context.Context, req domain.Search
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) UpdateCase(context.Context, domain.UpdateCaseRequest) (domain.Case, error) {
+func (s *stubCaseRepo) UpdateCase(context.Context, domain.UpdateCaseRequest) (domain.Case, domain.CaseSeverity, error) {
 	panic("not implemented")
 }
 func (s *stubCaseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error) {
@@ -125,7 +125,7 @@ func (s stubUserRepo) GetUserByEmail(ctx context.Context, email string) (domain.
 // schema equivalent), rather than silently accepting the request and
 // returning a broader-than-requested result set.
 func TestCaseService_SearchCases_RejectsUnsupportedPostgresFields(t *testing.T) {
-	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{})
+	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	cases := []struct {
@@ -192,7 +192,7 @@ func TestCaseService_SearchCases_SupportedFieldsStillReachRepository(t *testing.
 					return nil, 0, nil
 				},
 			}
-			svc := NewCaseService(repo, stubUserRepo{})
+			svc := NewCaseService(repo, stubUserRepo{}, nil)
 			ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 			req := domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{
@@ -216,7 +216,7 @@ func TestCaseService_SearchCases_SupportedFieldsStillReachRepository(t *testing.
 // The stub repository panics if reached, so a passing test proves the
 // short-circuit, not merely that the repository ignored the option.
 func TestCaseService_SearchCases_RejectsServiceNowOnlyOptions(t *testing.T) {
-	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{})
+	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	cases := []struct {
@@ -251,6 +251,20 @@ func TestCaseService_SearchCases_RejectsServiceNowOnlyOptions(t *testing.T) {
 				Filters: []domain.CaseFieldFilter{{Field: "escalation", Op: "isNotEmpty"}},
 			}},
 			wantMsg: `field "escalation" is not supported by this data source`,
+		},
+		{
+			name: "slaBreached",
+			req: domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{
+				Filters: []domain.CaseFieldFilter{{Field: "slaBreached", Op: "eq", Values: []string{"true"}}},
+			}},
+			wantMsg: `field "slaBreached" is not supported by this data source`,
+		},
+		{
+			name: "accountEscalationActive",
+			req: domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{
+				Filters: []domain.CaseFieldFilter{{Field: "accountEscalationActive", Op: "eq", Values: []string{"true"}}},
+			}},
+			wantMsg: `field "accountEscalationActive" is not supported by this data source`,
 		},
 		{
 			name: "resolvedOn gte",
@@ -316,7 +330,7 @@ func TestCaseService_SearchCaseComments(t *testing.T) {
 				return nil, 0, nil
 			},
 		}
-		svc := NewCaseService(repo, stubUserRepo{})
+		svc := NewCaseService(repo, stubUserRepo{}, nil)
 
 		resp, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{CaseID: caseID})
 		if err != nil {
@@ -344,7 +358,7 @@ func TestCaseService_SearchCaseComments(t *testing.T) {
 				return []domain.CaseComment{want}, 1, nil
 			},
 		}
-		svc := NewCaseService(repo, stubUserRepo{})
+		svc := NewCaseService(repo, stubUserRepo{}, nil)
 
 		resp, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{CaseID: caseID})
 		if err != nil {
@@ -374,7 +388,7 @@ func TestCaseService_SearchCaseComments(t *testing.T) {
 				return []domain.CaseComment{newest, middle, oldest}, 5, nil
 			},
 		}
-		svc := NewCaseService(repo, stubUserRepo{})
+		svc := NewCaseService(repo, stubUserRepo{}, nil)
 
 		resp, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{
 			CaseID:     caseID,
@@ -405,7 +419,7 @@ func TestCaseService_SearchCaseComments(t *testing.T) {
 				return nil, 0, nil
 			},
 		}
-		svc := NewCaseService(repo, stubUserRepo{})
+		svc := NewCaseService(repo, stubUserRepo{}, nil)
 
 		_, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{CaseID: "not-a-uuid"})
 		var ve *apierror.ValidationError
@@ -413,4 +427,55 @@ func TestCaseService_SearchCaseComments(t *testing.T) {
 			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 		}
 	})
+}
+
+// TestCaseService_UpdateCase_RejectsTypeTransferFields proves the case-type
+// transfer fields are rejected before the
+// Postgres-backed UpdateCase ever reaches the repository -- stubCaseRepo's
+// UpdateCase panics if called, so a passing test here proves the rejection,
+// not just a repository that happens to ignore the field. Postgres-backed
+// cases have no engagement_type column and are always type "case" (see
+// CreateCase's own "only type \"case\" is supported" guard), so none of these
+// fields have anywhere to go on this data source.
+func TestCaseService_UpdateCase_RejectsTypeTransferFields(t *testing.T) {
+	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil)
+	ctx := context.Background()
+	strPtr := func(s string) *string { return &s }
+	engagement := domain.EngagementTypeMigration
+
+	cases := []struct {
+		name string
+		req  domain.UpdateCaseRequest
+	}{
+		{name: "type", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, Type: strPtr("engagement")}},
+		{
+			name: "engagementType",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, EngagementType: &engagement},
+		},
+		{
+			name: "catalogId",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, CatalogID: strPtr(testDeploymentUUID)},
+		},
+		{
+			name: "catalogItemId",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, CatalogItemID: strPtr(testDeploymentUUID)},
+		},
+		{
+			name: "variables",
+			req: domain.UpdateCaseRequest{
+				ID:        testDeploymentUUID,
+				Variables: []domain.Variable{{ID: testDeploymentUUID, Value: "x"}},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.UpdateCase(ctx, tc.req)
+			var ve *apierror.ValidationError
+			if !asValidationError(err, &ve) {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+			}
+		})
+	}
 }

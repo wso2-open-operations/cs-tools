@@ -470,7 +470,7 @@ func TestRegistry_DefaultModeReadsDiskExactlyOnce(t *testing.T) {
 	writeDefinition(t, dir, "a.json", csDefinition)
 
 	var reads atomic.Int64
-	r, err := NewDirRegistry(dir, false, "")
+	r, err := NewDirRegistry(dir, false, "", "")
 	if err != nil {
 		t.Fatalf("NewDirRegistry returned error: %v", err)
 	}
@@ -509,7 +509,7 @@ func TestRegistry_HotReloadPicksUpChanges(t *testing.T) {
 	dir := t.TempDir()
 	writeDefinition(t, dir, "a.json", csDefinition)
 
-	r, err := NewDirRegistry(dir, true, "")
+	r, err := NewDirRegistry(dir, true, "", "")
 	if err != nil {
 		t.Fatalf("NewDirRegistry returned error: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestRegistry_HotReloadKeepsLastKnownGoodOnError(t *testing.T) {
 	dir := t.TempDir()
 	writeDefinition(t, dir, "a.json", csDefinition)
 
-	r, err := NewDirRegistry(dir, true, "")
+	r, err := NewDirRegistry(dir, true, "", "")
 	if err != nil {
 		t.Fatalf("NewDirRegistry returned error: %v", err)
 	}
@@ -580,7 +580,7 @@ func TestNewDirRegistry_FailsAtStartupInBothModes(t *testing.T) {
 	for _, hotReload := range []bool{false, true} {
 		dir := t.TempDir()
 		writeDefinition(t, dir, "broken.json", `{"id": "broken", "displayName":`)
-		if _, err := NewDirRegistry(dir, hotReload, ""); err == nil {
+		if _, err := NewDirRegistry(dir, hotReload, "", ""); err == nil {
 			t.Fatalf("NewDirRegistry(hotReload=%v) returned no error for a malformed definition", hotReload)
 		}
 	}
@@ -833,6 +833,24 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			 "query": {}, "groupBy": {"field": ""}}`,
 			want: `widget "w": "groupBy.field" is empty`,
 		},
+		{
+			name: "bar widget groupBy with both field and bucket",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case_feedback", "shape": "bar", "gridWidth": 3,
+			 "query": {}, "groupBy": {"field": "account", "bucket": "day"}}`,
+			want: `widget "w": "groupBy" carries both "field" and "bucket"`,
+		},
+		{
+			name: "bar widget groupBy with an unknown bucket",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case_feedback", "shape": "bar", "gridWidth": 3,
+			 "query": {}, "groupBy": {"bucket": "quarter"}}`,
+			want: `widget "w": unknown "groupBy.bucket" "quarter"`,
+		},
+		{
+			name: "bar widget with neither slices nor groupBy",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case_feedback", "shape": "bar", "gridWidth": 3,
+			 "query": {}}`,
+			want: `widget "w": shape "bar" needs either "slices" or "groupBy"`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -854,6 +872,42 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 				t.Errorf("err = %q, want it to name the offending file", err.Error())
 			}
 		})
+	}
+}
+
+// A "bar" widget grouped by date bucket (case-feedback trend) loads clean,
+// same as a field-grouped pie/bar widget always has -- the new
+// GroupByConfig.Bucket branch is additive, not a narrowing of what already
+// loaded.
+func TestLoadDir_AcceptsBarWidgetWithBucketGroupBy(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "d.json", `{
+	  "id": "d", "displayName": "D", "type": "cs",
+	  "widgets": [
+	    {"id": "feedback-trend", "displayName": "Feedback Trend", "resourceType": "case_feedback", "shape": "bar", "gridWidth": 6,
+	     "query": {}, "groupBy": {"bucket": "week"}}
+	  ]
+	}`)
+
+	dashboards, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	if len(dashboards) != 1 || len(dashboards[0].Widgets) != 1 {
+		t.Fatalf("unexpected loaded dashboards: %+v", dashboards)
+	}
+	w := dashboards[0].Widgets[0]
+	if w.ResourceType != ResourceCaseFeedback {
+		t.Errorf("resourceType = %q, want %q", w.ResourceType, ResourceCaseFeedback)
+	}
+	if w.Shape != ShapeBar {
+		t.Errorf("shape = %q, want %q", w.Shape, ShapeBar)
+	}
+	if w.GroupBy == nil || w.GroupBy.Bucket != "day" && w.GroupBy.Bucket != "week" && w.GroupBy.Bucket != "month" {
+		t.Fatalf("groupBy = %+v, want a valid bucket", w.GroupBy)
+	}
+	if w.GroupBy.Field != "" {
+		t.Errorf("groupBy.field = %q, want empty for a bucket-mode groupBy", w.GroupBy.Field)
 	}
 }
 
@@ -959,5 +1013,167 @@ func TestLoadDir_ShippedExampleDirectoryIsValid(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Fatalf("%s loaded no dashboards", dir)
+	}
+}
+
+// TestLoadDir_SingleFileDashboardUnaffectedByPartOfSupport is the regression
+// check for the "partOf" mechanism: a dashboard with no parts anywhere in the
+// directory must load exactly as it always has.
+func TestLoadDir_SingleFileDashboardUnaffectedByPartOfSupport(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "01-cs.json", csDefinition)
+	writeDefinition(t, dir, "02-cre.json", creDefinition)
+
+	got, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("LoadDir returned %d dashboards, want 2: %+v", len(got), got)
+	}
+	if got[1].ID != "cre-team" || len(got[1].Widgets) != 2 {
+		t.Fatalf("cre-team = %+v; want its usual 2 widgets, untouched by partOf support", got[1])
+	}
+}
+
+// TestLoadDir_MergesPartFilesIntoPrimaryDashboard proves the split
+// mechanism's happy path: a primary file's widgets and a part file's widgets
+// end up concatenated onto one dashboard, and the part file itself
+// contributes no dashboard beyond that.
+func TestLoadDir_MergesPartFilesIntoPrimaryDashboard(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "01-primary.json", `{
+	  "id": "cs-overview", "displayName": "CS Overview", "type": "cs",
+	  "widgets": [
+	    {"id": "open-cases", "displayName": "Open Cases", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["open"]}]}}
+	  ]
+	}`)
+	// Deliberately placed before the primary in lexical order, and under an
+	// unrelated filename, to prove the loader groups by "partOf" rather than
+	// by file adjacency or naming.
+	writeDefinition(t, dir, "00-extra-widgets.json", `{
+	  "partOf": "cs-overview",
+	  "widgets": [
+	    {"id": "closed-cases", "displayName": "Closed Cases", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["closed"]}]}}
+	  ]
+	}`)
+
+	got, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("LoadDir returned %d dashboards, want 1 (the part file must not become its own dashboard): %+v", len(got), got)
+	}
+	d := got[0]
+	if d.ID != "cs-overview" {
+		t.Fatalf("dashboard id = %q, want cs-overview", d.ID)
+	}
+	if len(d.Widgets) != 2 {
+		t.Fatalf("cs-overview has %d widgets, want 2 (1 primary + 1 from the part file): %+v", len(d.Widgets), d.Widgets)
+	}
+	ids := map[string]bool{}
+	for _, w := range d.Widgets {
+		ids[w.ID] = true
+	}
+	if !ids["open-cases"] || !ids["closed-cases"] {
+		t.Fatalf("merged widget ids = %v, want both open-cases and closed-cases", ids)
+	}
+}
+
+// TestLoadDir_WidgetIDCollisionAcrossPartsFailsWholeLoad mirrors
+// TestLoadDir_RejectsInvalidWidgets's "duplicate widget id" case, but with
+// the colliding widget split across a primary and its part instead of both
+// living in one file -- the merge happens before validateWidgets runs, so
+// the same check and the same error shape catch it.
+func TestLoadDir_WidgetIDCollisionAcrossPartsFailsWholeLoad(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "primary.json", `{
+	  "id": "cs-overview", "displayName": "CS Overview", "type": "cs",
+	  "widgets": [
+	    {"id": "w", "displayName": "W", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["open"]}]}}
+	  ]
+	}`)
+	writeDefinition(t, dir, "part.json", `{
+	  "partOf": "cs-overview",
+	  "widgets": [
+	    {"id": "w", "displayName": "W dup", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["closed"]}]}}
+	  ]
+	}`)
+
+	_, err := LoadDir(dir)
+	if err == nil {
+		t.Fatal("LoadDir accepted a widget id colliding across a primary and its part; expected an error")
+	}
+	if !strings.Contains(err.Error(), `duplicate widget id "w"`) {
+		t.Fatalf("err = %q, want it to contain the same duplicate-widget-id message the single-file case uses", err.Error())
+	}
+	if !strings.Contains(err.Error(), filepath.Join(dir, "primary.json")) {
+		t.Fatalf("err = %q, want it to name the primary file the merged widget list belongs to", err.Error())
+	}
+}
+
+// TestLoadDir_OrphanPartOfFailsWholeLoad: a part file naming a dashboard id
+// nothing else defines is not silently dropped -- same fail-loud rule as an
+// unknown preset or section reference elsewhere in this loader.
+func TestLoadDir_OrphanPartOfFailsWholeLoad(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "cs.json", csDefinition)
+	writeDefinition(t, dir, "orphan-part.json", `{
+	  "partOf": "does-not-exist",
+	  "widgets": [
+	    {"id": "stray", "displayName": "Stray", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["open"]}]}}
+	  ]
+	}`)
+
+	_, err := LoadDir(dir)
+	if err == nil {
+		t.Fatal("LoadDir accepted a part file whose partOf matched no loaded dashboard; expected an error")
+	}
+	for _, want := range []string{"orphan-part.json", `"partOf"`, "does-not-exist"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, does not mention %q", err.Error(), want)
+		}
+	}
+}
+
+// TestLoadDir_PartFileWithUnexpectedFieldFailsWholeLoad: a part file is only
+// ever read for its "partOf"/"widgets" -- any other embedded Dashboard field
+// (id, displayName, filterPresets, etc) decodes successfully via
+// dashboardFile's embedded Dashboard and then silently vanishes, since
+// dashboardPart never carries it forward. That must be a hard load failure,
+// not a silent drop, the same fail-loud rule TestLoadDir_OrphanPartOfFailsWholeLoad
+// enforces for a mismatched "partOf".
+func TestLoadDir_PartFileWithUnexpectedFieldFailsWholeLoad(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "primary.json", `{
+	  "id": "cs-overview", "displayName": "CS Overview", "type": "cs",
+	  "widgets": [
+	    {"id": "open-cases", "displayName": "Open Cases", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["open"]}]}}
+	  ]
+	}`)
+	writeDefinition(t, dir, "part.json", `{
+	  "partOf": "cs-overview",
+	  "displayName": "This should never take effect",
+	  "widgets": [
+	    {"id": "closed-cases", "displayName": "Closed Cases", "resourceType": "case", "shape": "count", "gridWidth": 3,
+	     "query": {"filters": [{"field": "state", "op": "in", "values": ["closed"]}]}}
+	  ]
+	}`)
+
+	_, err := LoadDir(dir)
+	if err == nil {
+		t.Fatal("LoadDir accepted a part file carrying an unexpected field (\"displayName\"); expected an error")
+	}
+	for _, want := range []string{"part.json", `"partOf"`, "displayName"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, does not mention %q", err.Error(), want)
+		}
 	}
 }

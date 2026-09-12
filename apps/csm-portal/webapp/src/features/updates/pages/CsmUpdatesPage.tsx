@@ -683,9 +683,16 @@ export default function CsmUpdatesPage(): JSX.Element {
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={productLevels.isLoading}>
-                <InputLabel id="upd-product">Product</InputLabel>
+                <InputLabel
+                  id="upd-product"
+                  shrink={filter.productName !== ""}
+                  sx={{ top: "0px !important" }}
+                >
+                  Product
+                </InputLabel>
                 <Select
                   labelId="upd-product"
+                  notched={filter.productName !== ""}
                   value={filter.productName}
                   label="Product"
                   onChange={handleFilterChange("productName")}
@@ -698,9 +705,16 @@ export default function CsmUpdatesPage(): JSX.Element {
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={!filter.productName}>
-                <InputLabel id="upd-version">Version</InputLabel>
+                <InputLabel
+                  id="upd-version"
+                  shrink={filter.productVersion !== ""}
+                  sx={{ top: "0px !important" }}
+                >
+                  Version
+                </InputLabel>
                 <Select
                   labelId="upd-version"
+                  notched={filter.productVersion !== ""}
                   value={filter.productVersion}
                   label="Version"
                   onChange={handleFilterChange("productVersion")}
@@ -713,9 +727,16 @@ export default function CsmUpdatesPage(): JSX.Element {
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={!filter.productVersion}>
-                <InputLabel id="upd-start">Start level</InputLabel>
+                <InputLabel
+                  id="upd-start"
+                  shrink={filter.startLevel !== ""}
+                  sx={{ top: "0px !important" }}
+                >
+                  Start level
+                </InputLabel>
                 <Select
                   labelId="upd-start"
+                  notched={filter.startLevel !== ""}
                   value={filter.startLevel}
                   label="Start level"
                   onChange={handleFilterChange("startLevel")}
@@ -728,9 +749,16 @@ export default function CsmUpdatesPage(): JSX.Element {
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={!filter.startLevel}>
-                <InputLabel id="upd-end">End level</InputLabel>
+                <InputLabel
+                  id="upd-end"
+                  shrink={filter.endLevel !== ""}
+                  sx={{ top: "0px !important" }}
+                >
+                  End level
+                </InputLabel>
                 <Select
                   labelId="upd-end"
+                  notched={filter.endLevel !== ""}
                   value={filter.endLevel}
                   label="End level"
                   onChange={handleFilterChange("endLevel")}

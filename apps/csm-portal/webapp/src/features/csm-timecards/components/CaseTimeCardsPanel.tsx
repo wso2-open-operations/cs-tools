@@ -19,16 +19,17 @@ import {
   Box,
   Button,
   Card,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   IconButton,
   Skeleton,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Clock, Pencil, Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { ClipboardCheck, Clock, Eye, Pencil, Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import RelativeDate from "@components/RelativeDate";
 import {
   useCaseTimeCards,
@@ -41,6 +42,7 @@ import { billableLabel } from "@features/csm-timecards/constants/timeCardConstan
 import { decisionSummary } from "@features/csm-timecards/utils/timeCardDecision";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import TimeCardDetailsDialog from "@features/csm-timecards/components/TimeCardDetailsDialog";
 import TimeCardStatusChip from "@features/csm-timecards/components/TimeCardStatusChip";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
 import TimeCardTruncatedNotice from "@features/csm-timecards/components/TimeCardTruncatedNotice";
@@ -56,6 +58,23 @@ interface CaseTimeCardsPanelProps {
    * instance, just in different modes). */
   onEditTimeCard: (card: CsmTimeCard) => void;
 }
+
+// Every column is left-aligned for a consistent scan line down the table,
+// except "Actions" -- a row of icon buttons rather than text, which reads
+// better centered under its own column. Mirrors CallRequestsTable's
+// HEADER_CELLS/GRID convention so the two tabs read consistently.
+const HEADER_CELLS: string[] = [
+  "Preview",
+  "Engineer",
+  "State",
+  "Minutes",
+  "Billable",
+  "Logged",
+  "Actions",
+];
+
+const GRID =
+  "minmax(56px, 0.4fr) minmax(140px, 1.1fr) minmax(140px, 1.1fr) minmax(80px, 0.6fr) minmax(90px, 0.6fr) minmax(110px, 0.8fr) minmax(120px, 0.9fr)";
 
 /**
  * The body of a case's "Time tracking" tab: the time cards logged on this
@@ -77,6 +96,7 @@ export default function CaseTimeCardsPanel({
   const { showError } = useErrorBanner();
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CsmTimeCard | null>(null);
+  const [detailCard, setDetailCard] = useState<CsmTimeCard | null>(null);
 
   const cards = useMemo(() => data?.cards ?? [], [data]);
   const total = useMemo(
@@ -85,21 +105,29 @@ export default function CaseTimeCardsPanel({
   );
 
   return (
-    <Card variant="outlined" sx={{ p: 2 }}>
+    <Card variant="outlined" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+      {/* Header */}
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: 1,
-          mb: 1.25,
+          flexWrap: "wrap",
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
           <Clock size={16} />
           <Typography variant="subtitle2">Time tracked</Typography>
+          {!isLoading && !isError && (
+            <Chip
+              size="small"
+              variant="outlined"
+              label={`${total} min · ${cards.length} ${cards.length === 1 ? "entry" : "entries"}`}
+            />
+          )}
         </Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
           <RefreshButton
             onRefresh={() => void refetch()}
             isFetching={isFetching}
@@ -108,142 +136,223 @@ export default function CaseTimeCardsPanel({
           />
           <Button
             size="small"
-            variant="text"
+            variant="contained"
             startIcon={<Plus size={14} />}
             onClick={onLogTime}
+            sx={{ textTransform: "none" }}
           >
             Log time
           </Button>
         </Box>
       </Box>
 
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          mb: 1,
-        }}
-      >
-        <Typography variant="h6" sx={{ lineHeight: 1 }}>
-          {total} min
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Across {cards.length} {cards.length === 1 ? "entry" : "entries"}
-        </Typography>
-      </Box>
-
-      <Divider sx={{ mb: 1 }} />
-
       {!isError && data?.truncated && (
         <TimeCardTruncatedNotice hint="Some entries on this case may not be shown." />
       )}
 
-      {isLoading ? (
+      {/* Content */}
+      {isLoading && (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {[0, 1, 2].map((i) => (
-            <Box
-              key={i}
-              sx={{ p: 1, borderRadius: 1, border: 1, borderColor: "divider" }}
-            >
-              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                <Skeleton variant="rounded" width="40%" height={20} />
-                <Skeleton variant="rounded" width="20%" height={20} />
-              </Box>
-              <Skeleton variant="rounded" width="25%" height={16} />
-            </Box>
+            <Skeleton key={i} variant="rounded" height={64} />
           ))}
         </Box>
-      ) : isError ? (
+      )}
+
+      {isError && (
         <Typography variant="body2" color="error" sx={{ py: 2 }}>
           Could not load time cards.
         </Typography>
-      ) : cards.length === 0 ? (
-        <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-          No time logged on this case yet.
-        </Typography>
-      ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      )}
+
+      {!isLoading && !isError && cards.length === 0 && (
+        <Box sx={{ py: 3, textAlign: "center" }}>
+          <Typography variant="body2" color="text.secondary">
+            No time logged on this case yet.
+          </Typography>
+        </Box>
+      )}
+
+      {!isLoading && !isError && cards.length > 0 && (
+        <Box
+          sx={{
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            overflowX: "auto",
+            overflowY: "hidden",
+            display: "grid",
+            gridTemplateColumns: GRID,
+            columnGap: 2,
+          }}
+        >
+          {/* Header */}
+          <Box
+            sx={{
+              gridColumn: "1 / -1",
+              display: "grid",
+              gridTemplateColumns: "subgrid",
+              columnGap: 2,
+              alignItems: "center",
+              px: 2,
+              py: 1.25,
+              bgcolor: "action.hover",
+              borderBottom: 1,
+              borderColor: "divider",
+            }}
+          >
+            {HEADER_CELLS.map((label) => (
+              <Typography
+                key={label}
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontWeight: 600, textAlign: label === "Actions" ? "center" : "left" }}
+              >
+                {label}
+              </Typography>
+            ))}
+          </Box>
+
+          {/* Rows */}
           {cards.map((c) => {
             const decision = decisionSummary(c);
+            const canEdit = c.state === "submitted" && !!me.id && c.userId === me.id;
+            // Never shown on your own card: the backend 403s a self-decide
+            // regardless of approver status, so a card you submitted
+            // yourself can never actually be reviewed by you. Also gated on
+            // being in the card's own approver list -- this panel shows
+            // every submitted card on the case, not just ones assigned to
+            // the signed-in lead, and the backend 403s a decision from
+            // anyone not in that list (confirmed live).
+            const canReview =
+              isTeamLead &&
+              c.state === "submitted" &&
+              !!me.id &&
+              c.userId !== me.id &&
+              !!c.approvers?.some((a) => a.id === me.id);
+
             return (
-            <Box
-              key={c.id}
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 0.5,
-                p: 1,
-                borderRadius: 1,
-                border: 1,
-                borderColor: "divider",
-              }}
-            >
               <Box
+                key={c.id}
                 sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 1,
+                  gridColumn: "1 / -1",
+                  display: "grid",
+                  gridTemplateColumns: "subgrid",
+                  columnGap: 2,
+                  alignItems: "start",
+                  px: 2,
+                  py: 1.25,
+                  borderBottom: 1,
+                  borderColor: "divider",
+                  "&:last-of-type": { borderBottom: 0 },
                 }}
               >
-                <Typography variant="body2">{c.userName}</Typography>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography variant="body2">{c.totalMinutes} min</Typography>
+                {/* Preview: view-detail eye icon, its own leading column so
+                    it reads as "inspect this row" rather than one of the
+                    row's actions. Read-only, so shown on every row
+                    regardless of state or ownership -- unlike Edit/Review
+                    below, there's no authorization concern here. */}
+                <Box sx={{ justifySelf: "start" }}>
+                  <IconButton
+                    size="small"
+                    aria-label={`View details for ${c.userName}'s entry`}
+                    aria-pressed={detailCard?.id === c.id}
+                    data-testid={`timecard-view-${c.id}`}
+                    onClick={() =>
+                      setDetailCard((prev) => (prev?.id === c.id ? null : c))
+                    }
+                  >
+                    <Eye size={16} />
+                  </IconButton>
+                </Box>
+
+                <Typography variant="body2" noWrap title={c.userName}>
+                  {c.userName}
+                </Typography>
+
+                {/* State: chip + decision summary, when present. */}
+                <Box sx={{ justifySelf: "start", minWidth: 0 }}>
                   <TimeCardStatusChip state={c.state} />
-                  {/* Own card, still submitted: only the submitter can edit
-                   its content, matching the backend's own submitter-only +
-                   submitted-state-only enforcement (see cardActions). */}
-                  {c.state === "submitted" && !!me.id && c.userId === me.id && (
-                    <>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<Pencil size={14} />}
-                        onClick={() => onEditTimeCard(c)}
-                      >
-                        Edit
-                      </Button>
-                      <IconButton
-                        size="small"
-                        color="error"
-                        aria-label="Delete time card"
-                        onClick={() => setPendingDelete(c)}
-                      >
-                        <Trash2 size={14} />
-                      </IconButton>
-                    </>
+                  {decision && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      noWrap
+                      title={decision}
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      {decision}
+                    </Typography>
                   )}
-                  {/* Never shown on your own card: the backend 403s a
-                   self-decide regardless of approver status, so a card you
-                   submitted yourself can never actually be reviewed by you.
-                   Also gated on being in the card's own approver list — this
-                   panel shows every submitted card on the case, not just
-                   ones assigned to the signed-in lead, and the backend 403s
-                   a decision from anyone not in that list (confirmed live). */}
-                  {isTeamLead &&
-                    c.state === "submitted" &&
-                    !!me.id &&
-                    c.userId !== me.id &&
-                    !!c.approvers?.some((a) => a.id === me.id) && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => setReviewCard(c)}
-                      >
-                        Review
-                      </Button>
+                </Box>
+
+                <Typography variant="body2">{c.totalMinutes} min</Typography>
+
+                <Typography variant="body2">{billableLabel(c.billable)}</Typography>
+
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  <RelativeDate value={c.workDate} />
+                </Typography>
+
+                {/* Actions: Edit/Delete for your own still-submitted card,
+                    Review for a team lead. The view-detail eye icon has its
+                    own leading "Preview" column instead. Centered under the
+                    "Actions" header, matching CallRequestsTable. */}
+                <Box sx={{ minWidth: 0, textAlign: "center" }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      gap: 0.5,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {canEdit && (
+                      <>
+                        <Tooltip title="Edit">
+                          <IconButton
+                            size="small"
+                            aria-label="Edit time card"
+                            onClick={() => onEditTimeCard(c)}
+                          >
+                            <Pencil size={16} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            aria-label="Delete time card"
+                            onClick={() => setPendingDelete(c)}
+                          >
+                            <Trash2 size={16} />
+                          </IconButton>
+                        </Tooltip>
+                      </>
                     )}
+                    {canReview && (
+                      <Tooltip title="Review">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          aria-label="Review time card"
+                          onClick={() => setReviewCard(c)}
+                        >
+                          <ClipboardCheck size={16} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
                 </Box>
               </Box>
-              <Typography variant="caption" color="text.secondary">
-                {billableLabel(c.billable)} · <RelativeDate value={c.workDate} />
-                {decision && ` · ${decision}`}
-              </Typography>
-            </Box>
             );
           })}
         </Box>
+      )}
+
+      {detailCard && (
+        <TimeCardDetailsDialog card={detailCard} onClose={() => setDetailCard(null)} />
       )}
 
       {reviewCard && (

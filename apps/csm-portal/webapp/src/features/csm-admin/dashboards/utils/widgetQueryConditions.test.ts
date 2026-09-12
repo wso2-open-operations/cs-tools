@@ -20,6 +20,8 @@ import {
   operatorsForResourceType,
   queryFromFilterConditions,
   usesCaseFieldFilterDsl,
+  isPresetCondition,
+  presetNameByFilterBody,
 } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
 
 describe("usesCaseFieldFilterDsl", () => {
@@ -189,5 +191,114 @@ describe("operatorsForResourceType", () => {
   it("offers only eq/in for a non-case resourceType, since no other op has a real, proven query shape", () => {
     expect(operatorsForResourceType("incident")).toEqual(["eq", "in"]);
     expect(operatorsForResourceType("account")).toEqual(["eq", "in"]);
+  });
+});
+
+describe("shared filter presets", () => {
+  const presets = [
+    {
+      name: "activeCaseStates",
+      filter: { field: "state", op: "in", values: ["open", "work_in_progress"] },
+    },
+    { name: "excludeDipTag", filter: { field: "tag", op: "notIn", values: ["s_dip"] } },
+  ];
+
+  it("reads an authored preset reference as a preset row", () => {
+    const got = filterConditionsFromQuery("case", {
+      filters: [{ preset: "activeCaseStates" }],
+    });
+    expect(got).toEqual([
+      { field: "", op: "eq", values: [], preset: "activeCaseStates" },
+    ]);
+    expect(isPresetCondition(got[0])).toBe(true);
+  });
+
+  it("keeps a preset reference through a full round-trip", () => {
+    const query = { filters: [{ preset: "activeCaseStates" }] };
+    expect(
+      queryFromFilterConditions("case", filterConditionsFromQuery("case", query)),
+    ).toEqual(query);
+  });
+
+  it("collapses an already-expanded filter back to the preset it came from", () => {
+    // This is what GET /dashboards/{id} actually serves: the reference is
+    // gone and only the expansion remains.
+    const got = filterConditionsFromQuery(
+      "case",
+      { filters: [{ field: "state", op: "in", values: ["open", "work_in_progress"] }] },
+      presets,
+    );
+    expect(got).toEqual([
+      { field: "", op: "eq", values: [], preset: "activeCaseStates" },
+    ]);
+  });
+
+  it("collapses regardless of key order in the served filter", () => {
+    const got = filterConditionsFromQuery(
+      "case",
+      { filters: [{ values: ["s_dip"], op: "notIn", field: "tag" }] },
+      presets,
+    );
+    expect(got[0].preset).toBe("excludeDipTag");
+  });
+
+  it("leaves a filter no preset accounts for as a literal row", () => {
+    const got = filterConditionsFromQuery(
+      "case",
+      { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+      presets,
+    );
+    expect(got).toEqual([{ field: "severity", op: "in", values: ["critical"] }]);
+  });
+
+  it("does not collapse when the values differ, even by one entry", () => {
+    const got = filterConditionsFromQuery(
+      "case",
+      { filters: [{ field: "state", op: "in", values: ["open"] }] },
+      presets,
+    );
+    expect(got[0].preset).toBeUndefined();
+    expect(got[0].field).toBe("state");
+  });
+
+  it("serializes a preset row as the reference alone, never alongside field/op/values", () => {
+    const got = queryFromFilterConditions("case", [
+      { field: "state", op: "in", values: ["open"], preset: "activeCaseStates" },
+    ]);
+    expect(got).toEqual({ filters: [{ preset: "activeCaseStates" }] });
+  });
+
+  it("keeps a preset row that has no name yet out of the output", () => {
+    // A freshly added "Add preset" row before the admin picks one.
+    const got = queryFromFilterConditions("case", [
+      { field: "", op: "eq", values: [], preset: "" },
+    ]);
+    expect(got).toEqual({});
+  });
+
+  it("drops a preset row for a non-case resourceType, which cannot express one", () => {
+    const got = queryFromFilterConditions("incident", [
+      { field: "", op: "eq", values: [], preset: "activeCaseStates" },
+      { field: "priorities", op: "in", values: ["HIGH"] },
+    ]);
+    expect(got).toEqual({ priorities: ["HIGH"] });
+  });
+
+  it("prefers the first preset by name when two share an identical body", () => {
+    const duplicates = [
+      { name: "aaaFirst", filter: { field: "state", op: "in", values: ["open"] } },
+      { name: "zzzSecond", filter: { field: "state", op: "in", values: ["open"] } },
+    ];
+    const index = presetNameByFilterBody(duplicates);
+    expect(index.get(JSON.stringify({ field: "state", op: "in", values: ["open"] }))).toBe(
+      "aaaFirst",
+    );
+  });
+
+  it("treats an undefined catalogue as no collapsing at all", () => {
+    const got = filterConditionsFromQuery("case", {
+      filters: [{ field: "state", op: "in", values: ["open", "work_in_progress"] }],
+    });
+    expect(got[0].preset).toBeUndefined();
   });
 });

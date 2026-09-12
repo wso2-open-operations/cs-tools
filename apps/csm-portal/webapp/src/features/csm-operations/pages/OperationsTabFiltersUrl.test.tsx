@@ -48,6 +48,15 @@ vi.mock("@context/error-banner/ErrorBannerContext", () => ({
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({
   useSuccessBanner: () => ({ showSuccess: vi.fn() }),
 }));
+// ChangeRequestsTab now also renders a "customise columns" picker, whose
+// storage key derives from the signed-in user — not under test here, so
+// stubbed the same way ChangeRequestsTab.test.tsx / CsmAnnouncementsPage.test.tsx do.
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),
+}));
+vi.mock("@hooks/useIdTokenClaims", () => ({
+  useIdTokenClaims: () => ({ email: "user@example.test" }),
+}));
 
 vi.mock("@features/csm-operations/api/useSearchChangeRequests", () => ({
   useSearchChangeRequests: vi.fn(),

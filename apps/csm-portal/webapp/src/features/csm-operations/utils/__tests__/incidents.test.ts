@@ -109,6 +109,7 @@ describe("buildIncidentSearchFilters", () => {
       createdStartDate: "2026-05-01",
       createdEndDate: "2026-05-31",
       products: ["Choreo"],
+      sreTeamIds: [],
     };
     expect(buildIncidentSearchFilters(filters, "timeout")).toEqual({
       searchQuery: "timeout",
@@ -118,6 +119,22 @@ describe("buildIncidentSearchFilters", () => {
       endCreatedDate: "2026-05-31T23:59:59Z",
       productNames: ["Choreo"],
     });
+  });
+
+  it("sends selected SRE teams as an assignmentGroupId/in generic filter entry", () => {
+    const filters: IncidentFilters = {
+      ...DEFAULT_INCIDENT_FILTERS,
+      sreTeamIds: ["team-apollo", "team-atlas"],
+    };
+    expect(buildIncidentSearchFilters(filters, "")).toEqual({
+      filters: [{ field: "assignmentGroupId", op: "in", values: ["team-apollo", "team-atlas"] }],
+    });
+  });
+
+  it("omits the generic filters array entirely when no SRE team is selected", () => {
+    expect(buildIncidentSearchFilters(DEFAULT_INCIDENT_FILTERS, "")).not.toHaveProperty(
+      "filters",
+    );
   });
 });
 
@@ -140,6 +157,9 @@ describe("countActiveIncidentFilters", () => {
       countActiveIncidentFilters({ ...DEFAULT_INCIDENT_FILTERS, products: ["Choreo"] }),
     ).toBe(1);
     expect(
+      countActiveIncidentFilters({ ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["team-apollo"] }),
+    ).toBe(1);
+    expect(
       countActiveIncidentFilters({
         ...DEFAULT_INCIDENT_FILTERS,
         slaViolated: true,
@@ -147,7 +167,8 @@ describe("countActiveIncidentFilters", () => {
         createdEndDate: "2026-05-31",
         products: ["Choreo"],
         priorities: ["HIGH"],
+        sreTeamIds: ["team-apollo"],
       }),
-    ).toBe(5);
+    ).toBe(6);
   });
 });

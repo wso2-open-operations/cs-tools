@@ -74,6 +74,7 @@ function detailFromBeCase(
     wso2CaseId: c.internalId,
     subject: c.subject ?? "(no subject)",
     caseType: c.type ?? undefined,
+    engagementType: c.engagementType ?? undefined,
     customer,
     accountId: account?.id ?? "",
     projectId: c.project?.id ?? "",
@@ -91,6 +92,13 @@ function detailFromBeCase(
       : undefined,
     linkedServiceRequests: c.linkedServiceRequests ?? undefined,
     linkedChangeRequests: c.linkedChangeRequests ?? undefined,
+    catalog: c.catalog ? { id: c.catalog.id, name: c.catalog.name } : undefined,
+    catalogItem: c.catalogItem
+      ? { id: c.catalogItem.id, name: c.catalogItem.name }
+      : undefined,
+    // Passed through in the backend's order — the display order the catalog
+    // item defines for its questions. Never re-sorted.
+    requestVariables: c.variables?.map((v) => ({ name: v.name, value: v.value })),
     autoclosureStep: c.autoclosureStep ?? undefined,
     autoclosureStateTime: c.autoclosureStateTime ?? undefined,
     acknowledgedBy: c.acknowledgedBy
@@ -99,6 +107,13 @@ function detailFromBeCase(
           // name, so the UI never renders "Acknowledged by" with nothing after it.
           name: c.acknowledgedBy.name?.trim() || (c.acknowledgedBy.email ?? "—"),
           email: c.acknowledgedBy.email ?? undefined,
+        }
+      : undefined,
+    workaroundProvidedOn: c.workaroundProvidedOn ?? undefined,
+    workaroundProvidedBy: c.workaroundProvidedBy
+      ? {
+          name: c.workaroundProvidedBy.name?.trim() || (c.workaroundProvidedBy.email ?? "—"),
+          email: c.workaroundProvidedBy.email ?? undefined,
         }
       : undefined,
     assignee,
@@ -148,6 +163,7 @@ function detailFromBeCase(
     watchers,
     linkedItems: [],
     tags: (c.tags ?? []).map((t) => ({ id: t.id, label: t.label })),
+    escalationLevel: c.escalationLevel ?? null,
     timeLogs: [],
     audit: [],
     attachments: [],

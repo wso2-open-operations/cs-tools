@@ -88,19 +88,22 @@ function mergeFilterArrays(
 }
 
 export function mergeWidgetFilters(
-  base: Record<string, unknown> | undefined,
-  slice: Record<string, unknown> | undefined,
+  base: Record<string, unknown> | null | undefined,
+  slice: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
-  // Both callers pass a slice's or widget's own `filters` field straight
-  // from backend-driven config (DASHBOARDS_CONFIG, a raw JSON env var not
-  // schema-validated beyond basic decoding) — either can be genuinely
-  // absent at runtime despite the wire type declaring it required.
-  base ??= {};
-  slice ??= {};
-  const merged = { ...base, ...slice };
+  // Both a widget's own base `query` and a slice's own `query` are legally
+  // absent on the wire — a slices-only widget (no top-level `query`, e.g. a
+  // shape "bar" widget whose every slice supplies its own criteria) marshals
+  // its base as JSON `null` (see `BeDashboardWidget.query`'s doc comment),
+  // and a slice with no criteria of its own beyond the base is exactly as
+  // legitimate. Normalizing to `{}` up front means every access below can
+  // assume an object, the same way an always-present `query` always could.
+  const baseObj = base ?? {};
+  const sliceObj = slice ?? {};
+  const merged = { ...baseObj, ...sliceObj };
 
-  const baseArr = base.filters;
-  const sliceArr = slice.filters;
+  const baseArr = baseObj.filters;
+  const sliceArr = sliceObj.filters;
   if (isCaseFieldFilterArrayOrEmpty(baseArr) && isCaseFieldFilterArrayOrEmpty(sliceArr)) {
     merged.filters = mergeFilterArrays(baseArr, sliceArr);
   }
@@ -124,8 +127,8 @@ export function mergeWidgetFilters(
   // adopted). Anything not matching the branch shape falls through to the
   // spread's last-writer-wins rather than being mangled into a query that
   // would be accepted but mean something else.
-  const baseBranches = base.anyOf;
-  const sliceBranches = slice.anyOf;
+  const baseBranches = baseObj.anyOf;
+  const sliceBranches = sliceObj.anyOf;
   if (isBranchArray(baseBranches) && isBranchArray(sliceBranches)) {
     merged.anyOf = baseBranches.flatMap((b) =>
       sliceBranches.map((s) => ({ ...b, ...s, filters: mergeFilterArrays(b.filters, s.filters) })),

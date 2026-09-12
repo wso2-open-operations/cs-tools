@@ -214,11 +214,18 @@ export default function EditCaseDetailsDialog({
           </Box>
 
           <FormControl fullWidth size="small">
-            <InputLabel id="edit-case-deployment-label">Deployment</InputLabel>
+            <InputLabel
+              id="edit-case-deployment-label"
+              shrink={deploymentId !== ""}
+              sx={{ top: "0px !important" }}
+            >
+              Deployment
+            </InputLabel>
             <Select
               labelId="edit-case-deployment-label"
               label="Deployment"
               value={deploymentId}
+              notched={deploymentId !== ""}
               onChange={(e) => onDeploymentChange(String(e.target.value))}
               disabled={isSaving || deployments.isLoading}
             >
@@ -234,11 +241,18 @@ export default function EditCaseDetailsDialog({
           </FormControl>
 
           <FormControl fullWidth size="small">
-            <InputLabel id="edit-case-product-label">Deployed product</InputLabel>
+            <InputLabel
+              id="edit-case-product-label"
+              shrink={deployedProductId !== ""}
+              sx={{ top: "0px !important" }}
+            >
+              Deployed product
+            </InputLabel>
             <Select
               labelId="edit-case-product-label"
               label="Deployed product"
               value={deployedProductId}
+              notched={deployedProductId !== ""}
               onChange={(e) => setDeployedProductId(String(e.target.value))}
               disabled={isSaving || !deploymentId || deployedProducts.isLoading}
             >

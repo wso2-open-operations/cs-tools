@@ -142,48 +142,48 @@ func (s *snIncidentTaskService) SearchIncidentTasks(ctx context.Context, req dom
 	}, nil
 }
 
-// snIncidentTaskGroupByPayload is the Choreo POST /incident-tasks/group-by
+// snIncidentTaskAggregatePayload is the Choreo POST /incident-tasks/aggregate
 // request body.
-type snIncidentTaskGroupByPayload struct {
+type snIncidentTaskAggregatePayload struct {
 	Filters   snIncidentTaskFilters `json:"filters,omitempty"`
 	GroupBy   string                `json:"groupBy"`
 	MaxGroups int                   `json:"maxGroups,omitempty"`
 }
 
-// validIncidentTaskGroupByField is the allow-list for
-// GroupIncidentTasksByRequest.GroupBy, matching openapi.yaml's
-// GroupIncidentTasksByRequest.groupBy enum exactly.
-var validIncidentTaskGroupByField = map[string]bool{
+// validIncidentTaskAggregateField is the allow-list for
+// AggregateIncidentTasksRequest.GroupBy, matching openapi.yaml's
+// AggregateIncidentTasksRequest.groupBy enum exactly.
+var validIncidentTaskAggregateField = map[string]bool{
 	"state":           true,
 	"assignmentGroup": true,
 }
 
-// GroupIncidentTasksBy implements IncidentTaskService by calling the Choreo
-// POST /incident-tasks/group-by endpoint: a single server-side aggregation
+// AggregateIncidentTasks implements IncidentTaskService by calling the Choreo
+// POST /incident-tasks/aggregate endpoint: a single server-side aggregation
 // over the requested field, capped to the top MaxGroups buckets with the
-// remainder folded into GroupByResponse.OthersCount. Filter parsing and
+// remainder folded into AggregateResponse.OthersCount. Filter parsing and
 // validation mirror SearchIncidentTasks.
-func (s *snIncidentTaskService) GroupIncidentTasksBy(ctx context.Context, req domain.GroupIncidentTasksByRequest) (domain.GroupByResponse, error) {
+func (s *snIncidentTaskService) AggregateIncidentTasks(ctx context.Context, req domain.AggregateIncidentTasksRequest) (domain.AggregateResponse, error) {
 	if req.GroupBy == "" {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
 	}
-	if !validIncidentTaskGroupByField[req.GroupBy] {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	if !validIncidentTaskAggregateField[req.GroupBy] {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if err := validateExactNumber("number", req.Filters.Number); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	parsedFilters, err := ParseIncidentTaskFieldFilters(req.Filters.Filters)
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
-	payload := snIncidentTaskGroupByPayload{
+	payload := snIncidentTaskAggregatePayload{
 		Filters: snIncidentTaskFilters{
 			SearchQuery:        req.Filters.SearchQuery,
 			Number:             stringPtrValue(req.Filters.Number),
@@ -195,17 +195,17 @@ func (s *snIncidentTaskService) GroupIncidentTasksBy(ctx context.Context, req do
 		MaxGroups: req.MaxGroups,
 	}
 
-	raw, err := s.client.Post(ctx, "/incident-tasks/group-by", token, payload)
+	raw, err := s.client.Post(ctx, "/incident-tasks/aggregate", token, payload)
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
-	var resp domain.GroupByResponse
+	var resp domain.AggregateResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return domain.GroupByResponse{}, fmt.Errorf("sn incident tasks: parse group-by response: %w", err)
+		return domain.AggregateResponse{}, fmt.Errorf("sn incident tasks: parse aggregate response: %w", err)
 	}
 	// "assignmentGroup" is the only ID-valued field in
-	// validIncidentTaskGroupByField; SN returns its bucket keys as raw
+	// validIncidentTaskAggregateField; SN returns its bucket keys as raw
 	// sys_ids, so convert them to this platform's UUIDs before returning.
 	// "state" is a plain enum and is left as-is.
 	if req.GroupBy == "assignmentGroup" {

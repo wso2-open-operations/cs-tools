@@ -24,6 +24,32 @@ import type { BeDashboardWidget } from "@api/backend/types";
  * out-of-band by a maintainer). See `DashboardBuilderEditorPage`'s own doc
  * comment for the deploy story.
  */
+/**
+ * One `includeSections` entry: which shared section to pull in, and the
+ * per-dashboard adjustments that let one section definition serve dashboards
+ * that are not identical.
+ *
+ * Mirrors the backend's own `SectionInclude`. `extraFilters` is deliberately
+ * NOT exposed by the builder yet — it is ANDed into every included
+ * case-family widget's filters, which is powerful and easy to get quietly
+ * wrong, and no dashboard needs it from the UI today. A definition that
+ * already carries one keeps it: it round-trips through `unknown[]` untouched
+ * rather than being dropped on save.
+ */
+export interface SectionInclude {
+  /** Name of the section in the shared section catalogue. */
+  section: string;
+  /** Prepended to each included widget's id, so a dashboard already shipping
+   * prefixed widget ids can adopt a section without renaming its widgets. */
+  idPrefix?: string;
+  /** Overrides the section's own heading for this dashboard only. */
+  displayName?: string;
+  /** Whether the section leads or trails this dashboard's own widgets. */
+  position?: "start" | "end";
+  /** Opaque passthrough — see this type's own doc comment. */
+  extraFilters?: unknown[];
+}
+
 export interface DashboardDraft {
   /**
    * Local draft id — the storage key. For a draft opened from a deployed
@@ -57,6 +83,19 @@ export interface DashboardDraft {
    * emergent grouping of `widget.section` values.
    */
   emptySections: string[];
+  /**
+   * Shared sections this dashboard pulls in by name, written to the deployed
+   * definition's own `includeSections` (see the backend's
+   * `expandIncludedSections`).
+   *
+   * Not merged into `widgets`: the whole value of a reference is that the
+   * section's content stays in one place and every dashboard using it changes
+   * together. Expanding it here would produce a copy that silently stops
+   * tracking the original.
+   *
+   * Absent on a draft written before this field existed, hence optional.
+   */
+  includeSections?: SectionInclude[];
   /** ISO timestamp of the last local save, shown in the editor and used to
    * order the builder's own "local drafts" list. */
   updatedAt: string;

@@ -29,6 +29,7 @@ import {
 import { ArrowLeft, ChevronDown, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
+import UserRefLink from "@components/UserRefLink";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import DeploymentsTab from "@features/csm-projects/components/DeploymentsTab";
@@ -351,6 +352,19 @@ export default function CsmProjectDetailPage(): JSX.Element {
             <MetaCell label={endDateLabel(p.endDate)}>
               <Typography variant="body2">{formatDate(p.endDate)}</Typography>
             </MetaCell>
+            {p.onboardingStatus &&
+              p.onboardingStatus !== "Not-Applicable" &&
+              p.onboardingOwner && (
+                <MetaCell label="Onboarding Owner">
+                  <Typography variant="body2">
+                    <UserRefLink
+                      name={p.onboardingOwner.name}
+                      email={p.onboardingOwner.email || undefined}
+                      userId={p.onboardingOwner.id}
+                    />
+                  </Typography>
+                </MetaCell>
+              )}
           </Box>
         </Card>
       )}

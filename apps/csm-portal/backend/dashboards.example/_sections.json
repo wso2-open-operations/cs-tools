@@ -1,0 +1,62 @@
+{
+  "my-work": {
+    "displayName": "My Work",
+    "widgets": [
+      {
+        "id": "my-ongoing-cases",
+        "displayName": "On Going Cases",
+        "resourceType": "case",
+        "shape": "list",
+        "gridWidth": 12,
+        "listLimit": 5,
+        "query": {
+          "filters": [
+            {
+              "field": "assignedUserId",
+              "op": "in",
+              "values": [
+                "__current_user__"
+              ]
+            },
+            {
+              "field": "state",
+              "op": "in",
+              "values": [
+                "open",
+                "work_in_progress",
+                "waiting_on_wso2",
+                "reopened"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "my-pending-closure",
+        "displayName": "Pending Closure",
+        "resourceType": "case",
+        "shape": "list",
+        "gridWidth": 12,
+        "listLimit": 5,
+        "query": {
+          "filters": [
+            {
+              "field": "assignedUserId",
+              "op": "in",
+              "values": [
+                "__current_user__"
+              ]
+            },
+            {
+              "field": "state",
+              "op": "in",
+              "values": [
+                "solution_proposed"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

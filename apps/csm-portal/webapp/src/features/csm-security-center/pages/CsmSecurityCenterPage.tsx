@@ -78,6 +78,8 @@ export default function CsmSecurityCenterPage(): JSX.Element {
           hideTypeFilter
           hideSeverityColumn
           detailBasePath="/security-center/security-reports"
+          enableColumnCustomization
+          columnsViewId="security-reports"
           actions={
             <Button
               variant="contained"

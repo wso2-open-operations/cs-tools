@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { pickAccessibleText } from "@utils/contrastText";
 
 /**

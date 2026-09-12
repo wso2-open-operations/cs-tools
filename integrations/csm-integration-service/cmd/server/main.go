@@ -50,6 +50,7 @@ func main() {
 	entityClient := entity.NewClient(cfg)
 	accountHandler := handler.NewAccountHandler(entityClient)
 	projectHandler := handler.NewProjectHandler(entityClient)
+	vulnerabilityHandler := handler.NewVulnerabilityHandler(entityClient)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +63,7 @@ func main() {
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
 	mux.HandleFunc("PATCH /projects/{id}", projectHandler.UpdateProject)
+	mux.HandleFunc("POST /vulnerabilities/sync", vulnerabilityHandler.SyncProductVulnerabilities)
 
 	addr := ":" + envOrDefault("PORT", "8080")
 

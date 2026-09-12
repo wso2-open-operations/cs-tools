@@ -34,6 +34,18 @@ var validCaseGithubIssueReasons = map[domain.CaseGithubIssueReason]struct{}{
 	domain.CaseGithubIssueReasonRDTicket:  {},
 }
 
+// caseGithubIssueActionableStates mirrors the SN scripted API's own gate
+// (CaseGithubIssueUtils.isCaseActionable / ALLOWED_CASE_STATES = ['1', '10',
+// '1002', '1003', '1006']). '1002' has no corresponding domain.CaseState today
+// (not in snStateIDMap), so it can never be produced by this service and is
+// omitted here; the four that do map are kept in sync with SN's list.
+var caseGithubIssueActionableStates = map[domain.CaseState]struct{}{
+	domain.CaseStateOpen:           {},
+	domain.CaseStateWorkInProgress: {},
+	domain.CaseStateWaitingOnWSO2:  {},
+	domain.CaseStateReopened:       {},
+}
+
 // snCaseGithubIssueRepoOverride mirrors CaseGithubIssueRepoOverride in the SN integration service payload.
 type snCaseGithubIssueRepoOverride struct {
 	Owner string `json:"owner"`
@@ -65,12 +77,16 @@ type snCaseGithubIssueCreateResponse struct {
 }
 
 type snCaseGithubIssueService struct {
-	client *integrationservice.Client
+	client  *integrationservice.Client
+	caseSvc CaseService
 }
 
-// NewServiceNowCaseGithubIssueService constructs a CaseGithubIssueService backed by the SN integration service.
-func NewServiceNowCaseGithubIssueService(client *integrationservice.Client) CaseGithubIssueService {
-	return &snCaseGithubIssueService{client: client}
+// NewServiceNowCaseGithubIssueService constructs a CaseGithubIssueService backed by the SN
+// integration service. caseSvc is used to look up the case's current state so the state gate
+// (mirroring SN's own CaseGithubIssueUtils.isCaseActionable) can be enforced here too, instead
+// of relying solely on the 409 SN itself returns.
+func NewServiceNowCaseGithubIssueService(client *integrationservice.Client, caseSvc CaseService) CaseGithubIssueService {
+	return &snCaseGithubIssueService{client: client, caseSvc: caseSvc}
 }
 
 // CreateCaseGithubIssue implements CaseGithubIssueService.
@@ -94,6 +110,16 @@ func (s *snCaseGithubIssueService) CreateCaseGithubIssue(ctx context.Context, re
 	}
 	if req.RepoOverride != nil && (req.RepoOverride.Owner == "" || req.RepoOverride.Repo == "") {
 		return domain.CreateCaseGithubIssueResponse{}, &apierror.ValidationError{Msg: "repoOverride requires both owner and repo"}
+	}
+
+	caseView, err := s.caseSvc.GetCaseByID(ctx, req.CaseID)
+	if err != nil {
+		return domain.CreateCaseGithubIssueResponse{}, err
+	}
+	if _, ok := caseGithubIssueActionableStates[caseView.State]; !ok {
+		return domain.CreateCaseGithubIssueResponse{}, &apierror.ConflictError{
+			Msg: "Case is not in a state that allows filing a GitHub issue",
+		}
 	}
 
 	payload := snCaseGithubIssueCreatePayload{

@@ -23,7 +23,10 @@
 // customer-portal reference (operations/utils/serviceRequestValidation.ts).
 
 import { htmlToPlainText } from "@components/rich-text-editor/richTextEditor";
-import type { BeCatalogItemVariable } from "@api/backend/types";
+import type {
+  BeCatalogItemVariable,
+  BeCatalogItemVariableChoice,
+} from "@api/backend/types";
 
 // Variable `type` strings ServiceNow emits (matched case-insensitively).
 export const VARIABLE_TYPE_SINGLE_LINE = "Single Line Text";
@@ -32,7 +35,36 @@ export const VARIABLE_TYPE_SELECT = "Select Box";
 export const VARIABLE_TYPE_CHECKBOX = "Checkbox";
 export const VARIABLE_TYPE_RADIO = "Radio Buttons";
 
-/** Boolean-ish field that renders a Yes/No dropdown (no choice list in the API). */
+/**
+ * A choice whose `value` can actually be submitted, paired with the label to
+ * show for it. The contract makes every key inside a choice nullable, so an
+ * option with no `value` is dropped: it would submit nothing and render as a
+ * blank row. A blank `value` is dropped for the same reason — in a select it
+ * is the "nothing selected" sentinel, so it cannot be told apart from an
+ * unanswered field. `text` falls back to `value` when absent.
+ */
+export interface UsableChoice {
+  value: string;
+  label: string;
+}
+
+/**
+ * The submittable options on a variable, in the order the backing data source
+ * returned them (never re-sorted). Empty when the variable carries no choice
+ * list, or when every option in it is malformed — in which case the form
+ * falls back to a plain text input rather than showing an empty dropdown.
+ */
+export function usableChoices(variable: BeCatalogItemVariable): UsableChoice[] {
+  const choices: BeCatalogItemVariableChoice[] = variable.choices ?? [];
+  return choices
+    .filter((c): c is BeCatalogItemVariableChoice & { value: string } =>
+      typeof c?.value === "string" && c.value !== "",
+    )
+    .map((c) => ({ value: c.value, label: c.text ?? c.value }));
+}
+
+/** Boolean-ish field that renders a Yes/No dropdown (used only when the
+ *  backing data source supplied no choice list for the field). */
 export function isChoiceField(variable: BeCatalogItemVariable): boolean {
   // Case-insensitive, matching the documented contract and the other classifiers.
   const t = (variable.type ?? "").trim().toLowerCase();

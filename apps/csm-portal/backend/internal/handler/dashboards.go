@@ -18,6 +18,7 @@ package handler
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -59,6 +60,36 @@ type dashboardWidgetView struct {
 	// request's "sortBy" instead of its "filters".
 	Columns []dashboard.Column `json:"columns,omitempty"`
 	SortBy  map[string]any     `json:"sortBy,omitempty"`
+}
+
+// filterPresetView is one entry of the shared filter-preset catalogue,
+// returned by GET /dashboards/filter-presets. Filter is the single filter
+// predicate the preset stands for, verbatim as authored (field/op/values —
+// see dashboard.LoadSharedPresets).
+//
+// Returned as a sorted array rather than a name-keyed object so the order the
+// builder's picker shows is deterministic and the shape is expressible in
+// OpenAPI without a free-form additionalProperties map.
+type filterPresetView struct {
+	Name   string         `json:"name"`
+	Filter map[string]any `json:"filter"`
+}
+
+// sharedSectionView is one entry of the shared reusable-section catalogue,
+// returned by GET /dashboards/sections. Widgets is the section's widget run
+// in the same shape a dashboard's own widgets are returned in, so the builder
+// has one widget model rather than two.
+//
+// The widgets here are as AUTHORED in the section file: unlike a dashboard's
+// widgets, their {"preset": ...} references are NOT expanded and no implied
+// "type" filter has been injected, because a section is never loaded through
+// a dashboard's finalize pipeline on its own. That is what the builder wants
+// — it edits the authored form — but it means these queries are not directly
+// usable as search criteria.
+type sharedSectionView struct {
+	Name        string                `json:"name"`
+	DisplayName string                `json:"displayName"`
+	Widgets     []dashboardWidgetView `json:"widgets"`
 }
 
 // dashboardListItemView is a dashboard's list-level metadata, returned by
@@ -154,8 +185,26 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	widgets := make([]dashboardWidgetView, 0, len(d.Widgets))
-	for _, tpl := range d.Widgets {
+	widgets := widgetViews(d.Widgets)
+
+	writeJSONValue(w, http.StatusOK, dashboardDetailView{
+		ID:          d.ID,
+		DisplayName: d.DisplayName,
+		Type:        d.Type,
+		IsDefault:   d.IsDefault,
+		TargetTeam:  d.TargetTeam,
+		IsTeamBased: d.IsTeamBased,
+		Widgets:     widgets,
+	})
+}
+
+// widgetViews maps widget templates onto their wire shape. Shared by
+// GET /dashboards/{dashboardId} and GET /dashboards/sections so a section's
+// widgets and a dashboard's widgets are never two different shapes on the
+// wire.
+func widgetViews(templates []dashboard.WidgetTemplate) []dashboardWidgetView {
+	views := make([]dashboardWidgetView, 0, len(templates))
+	for _, tpl := range templates {
 		var slices []dashboardPieSliceView
 		if len(tpl.Slices) > 0 {
 			slices = make([]dashboardPieSliceView, 0, len(tpl.Slices))
@@ -167,7 +216,7 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 				})
 			}
 		}
-		widgets = append(widgets, dashboardWidgetView{
+		views = append(views, dashboardWidgetView{
 			WidgetID:     tpl.ID,
 			DisplayName:  tpl.DisplayName,
 			Description:  tpl.Description,
@@ -183,14 +232,67 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 			SortBy:       tpl.SortBy,
 		})
 	}
+	return views
+}
 
-	writeJSONValue(w, http.StatusOK, dashboardDetailView{
-		ID:          d.ID,
-		DisplayName: d.DisplayName,
-		Type:        d.Type,
-		IsDefault:   d.IsDefault,
-		TargetTeam:  d.TargetTeam,
-		IsTeamBased: d.IsTeamBased,
-		Widgets:     widgets,
-	})
+// GetFilterPresets handles GET /dashboards/filter-presets.
+//
+// Lists the shared filter presets a dashboard definition may reference by
+// name. This is builder-support, not dashboard-serving: a served dashboard
+// has every preset reference already expanded.
+//
+// A deployment with no presets file configured is legal and returns an empty
+// array, not an error — the builder then simply offers no presets.
+func (h *DashboardHandler) GetFilterPresets(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	presets := dashboard.FilterPresets()
+	names := make([]string, 0, len(presets))
+	for name := range presets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	views := make([]filterPresetView, 0, len(names))
+	for _, name := range names {
+		views = append(views, filterPresetView{Name: name, Filter: presets[name]})
+	}
+
+	writeJSONValue(w, http.StatusOK, views)
+}
+
+// GetSharedSections handles GET /dashboards/sections.
+//
+// Lists the shared reusable sections a dashboard definition may pull in by
+// name via "includeSections". Same builder-support contract, and same
+// empty-array-not-error behaviour, as GetFilterPresets.
+func (h *DashboardHandler) GetSharedSections(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	sections := dashboard.SharedSections()
+	names := make([]string, 0, len(sections))
+	for name := range sections {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	views := make([]sharedSectionView, 0, len(names))
+	for _, name := range names {
+		s := sections[name]
+		views = append(views, sharedSectionView{
+			Name:        name,
+			DisplayName: s.DisplayName,
+			Widgets:     widgetViews(s.Widgets),
+		})
+	}
+
+	writeJSONValue(w, http.StatusOK, views)
 }

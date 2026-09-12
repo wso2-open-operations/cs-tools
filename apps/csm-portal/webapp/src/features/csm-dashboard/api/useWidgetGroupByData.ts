@@ -23,7 +23,10 @@ import type {
   BeWidgetResourceType,
 } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
-import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
+import {
+  hasTeamPlaceholder,
+  resolveTeamPlaceholder,
+} from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
   hasCurrentUserPlaceholder,
@@ -58,7 +61,7 @@ function bucketQuery(
 
 /**
  * Resolves a `shape: "pie"` widget's per-bucket values via a single
- * server-side `POST {resourceType}/group-by` call — the `groupBy`
+ * server-side `POST {resourceType}/aggregate` call — the `groupBy`
  * counterpart of `useWidgetPieData`'s per-slice `search` calls. The
  * widget's own base `query` is resolved through the exact same
  * placeholder pipeline `useWidgetPieData` applies per-slice
@@ -94,6 +97,13 @@ export function useWidgetGroupByData(
   // signed-in user's profile hasn't landed yet, so the query holds rather
   // than searching unscoped.
   const awaitingCurrentUser = hasCurrentUserPlaceholder(resolvedFilters);
+  // See useWidgetData's own comment — same derivation, same reasoning.
+  const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
+  // See useWidgetData's own comment — same derivation (off the raw,
+  // pre-resolution `baseFilters`), same reasoning; there's no per-slice
+  // query to merge under here, so this is the widget's whole filters
+  // object, same as useWidgetData.
+  const isTeamIndependent = !hasTeamPlaceholder(baseFilters);
 
   const query = useQuery({
     queryKey: [
@@ -111,6 +121,22 @@ export function useWidgetGroupByData(
       if (!config?.groupByEndpoint) {
         throw new Error(`Unsupported group-by widget resourceType: ${resourceType}`);
       }
+      // `groupBy.field` is only set for field-based grouping — a
+      // `groupBy.bucket` widget (date-bucketed grouping; see that field's own
+      // doc comment on `BeDashboardGroupByConfig`) never reaches this hook at
+      // all: `DashboardWidgetTile` calls `useCaseFeedbackTrendData` instead,
+      // whose own `POST /cases/feedback/aggregate` request/response shape
+      // this hook's `groupBy`/`BeGroupByResponse` types don't match. This
+      // check is therefore normally dead — it exists only so a
+      // misconfigured/future caller that reaches here with a bucket-only
+      // `groupBy` fails loudly instead of posting `groupBy: undefined`
+      // silently.
+      if (!groupBy.field) {
+        throw new Error(
+          `useWidgetGroupByData: groupBy carries no "field" (bucket-based grouping belongs to useCaseFeedbackTrendData, not this hook) for widget "${widgetId}"`,
+        );
+      }
+      const field = groupBy.field;
       // Same shared concurrency slot (and timeout) useWidgetPieData's own
       // slice fetches use — a groupBy widget fires one call on top of every
       // other widget's own call, so it needs both at least as much.
@@ -122,18 +148,20 @@ export function useWidgetGroupByData(
           config.groupByEndpoint as string,
           {
             filters: resolvedFilters,
-            groupBy: groupBy.field,
+            groupBy: field,
             maxGroups: groupBy.maxGroups,
           },
           { signal },
         );
-      });
+      }, teamKey);
     },
     enabled: enabled && !!groupBy && !awaitingCurrentUser,
     // Same per-query retry override as useWidgetPieData's own slice
-    // fetches, same reasoning (see shouldRetryWidgetFetch).
-    retry: shouldRetryWidgetFetch,
-    staleTime: 60_000,
+    // fetches, same reasoning (see shouldRetryWidgetFetch). Wrapped for the
+    // same reason useWidgetData wraps it — react-query's own `retry` option
+    // only calls the 2-arg form.
+    retry: (failureCount, error) => shouldRetryWidgetFetch(failureCount, error, isTeamIndependent),
+    staleTime: 300_000,
   });
 
   // Mirrors useWidgetPieData's own isLoading semantics: `!enabled` or a
@@ -152,7 +180,7 @@ export function useWidgetGroupByData(
     // `bucketQuery`'s own doc comment) — an empty `query` here would merge
     // to the widget's unfiltered base result set instead of this bucket's,
     // since `mergeWidgetFilters({...}, {})` is a no-op.
-    query: groupBy ? bucketQuery(resourceType, groupBy.field, bucket.key) : {},
+    query: groupBy?.field ? bucketQuery(resourceType, groupBy.field, bucket.key) : {},
     value: bucket.count,
   }));
   if (othersCount > 0) {

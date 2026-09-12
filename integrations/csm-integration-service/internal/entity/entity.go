@@ -73,3 +73,14 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
 }
+
+// SyncProductVulnerabilities calls POST /products/vulnerabilities/sync on the entity
+// service. This is a full-replace sync: the caller must submit the complete current set
+// of product-vulnerability records on every call, not an incremental delta — the
+// downstream ServiceNow-backed operation deletes any existing record not present in the
+// submitted set. Unlike UpdateProject, this entity-service operation accepts pure M2M
+// calls with no forwarded end-user token, so this call is expected to succeed.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SyncProductVulnerabilities(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/products/vulnerabilities/sync", body)
+}

@@ -23,6 +23,7 @@ import { AsgardeoProvider } from "@asgardeo/react";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ThemePreferenceProvider } from "@context/theme/ThemePreferenceContext";
+import { CaseTabsBehaviorProvider } from "@context/case-tabs/CaseTabsBehaviorContext";
 import { authConfig } from "@config/authConfig";
 
 // React-Query devtools ship from a devDependency and must not enter the
@@ -108,16 +109,18 @@ export default function AppWithConfig(): JSX.Element {
         <BrowserRouter>
           <LoggerProvider config={loggerConfig}>
             <ThemePreferenceProvider>
-              <QueryClientProvider client={queryClient}>
-                <AppErrorBoundary>
-                  <App />
-                </AppErrorBoundary>
-                {ReactQueryDevtools && (
-                  <Suspense fallback={null}>
-                    <ReactQueryDevtools initialIsOpen={false} />
-                  </Suspense>
-                )}
-              </QueryClientProvider>
+              <CaseTabsBehaviorProvider>
+                <QueryClientProvider client={queryClient}>
+                  <AppErrorBoundary>
+                    <App />
+                  </AppErrorBoundary>
+                  {ReactQueryDevtools && (
+                    <Suspense fallback={null}>
+                      <ReactQueryDevtools initialIsOpen={false} />
+                    </Suspense>
+                  )}
+                </QueryClientProvider>
+              </CaseTabsBehaviorProvider>
             </ThemePreferenceProvider>
           </LoggerProvider>
         </BrowserRouter>

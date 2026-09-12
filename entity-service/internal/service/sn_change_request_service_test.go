@@ -261,6 +261,64 @@ func TestSNChangeRequestService_SearchChangeRequests_NewFiltersPassedThrough(t *
 	}
 }
 
+// TestSNChangeRequestService_SearchChangeRequests_ApprovalFilterPassedThrough
+// verifies the generic filters array's "approval" predicate translates into
+// filters.approval on the outgoing payload under the exact raw ServiceNow
+// task.approval value, unchanged (no key/enum mapping).
+func TestSNChangeRequestService_SearchChangeRequests_ApprovalFilterPassedThrough(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/change-requests/search", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"changeRequests": [], "totalRecords": 0, "offset": 0, "limit": 20}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowChangeRequestService(client)
+
+	req := domain.SearchChangeRequestsRequest{
+		Filters: domain.SearchChangeRequestsFilters{
+			Filters: []domain.ChangeRequestFieldFilter{
+				{Field: "approval", Op: "eq", Values: []string{"approved"}},
+			},
+		},
+	}
+	if _, err := svc.SearchChangeRequests(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotFilters, ok := gotBody["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected filters object in payload, got %+v", gotBody["filters"])
+	}
+	if gotFilters["approval"] != "approved" {
+		t.Fatalf("filters.approval: got %v, want %q", gotFilters["approval"], "approved")
+	}
+}
+
+// TestSNChangeRequestService_SearchChangeRequests_ApprovalInvalidValueRejected
+// verifies a malformed approval filter value is rejected with a clean
+// validation error before any SN call.
+func TestSNChangeRequestService_SearchChangeRequests_ApprovalInvalidValueRejected(t *testing.T) {
+	// client is intentionally nil: validation must fail before touching it.
+	svc := NewServiceNowChangeRequestService(nil)
+
+	req := domain.SearchChangeRequestsRequest{
+		Filters: domain.SearchChangeRequestsFilters{
+			Filters: []domain.ChangeRequestFieldFilter{
+				{Field: "approval", Op: "eq", Values: []string{"maybe"}},
+			},
+		},
+	}
+	_, err := svc.SearchChangeRequests(contextWithUserIDToken("token"), req)
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
 // TestSNChangeRequestService_SearchChangeRequests_CreatedEndDateBeforeStart verifies
 // a createdOn lte predicate earlier than its own gte predicate is rejected,
 // mirroring the existing closedEndDate/closedStartDate ordering check.

@@ -29,6 +29,16 @@ window.config = {
   // Default Oxygen UI theme. One of: "acrylicOrange", "acrylicPurple",
   // "choreo", "classic", "highContrast". Users can override this at runtime via
   // the header theme dropdown (the choice is persisted per browser).
+  // Default Oxygen UI theme. Derived at build time from whatever
+  // @wso2/oxygen-ui exports as a theme (see src/config/themeConfig.ts) --
+  // this list is illustrative, not exhaustive, and can grow on an
+  // oxygen-ui bump without a code change here. As of oxygen-ui 0.13.1, the
+  // theme picker offers: "acrylicOrange", "acrylicPurple", "oxygen",
+  // "paleBase", "paleGray", "paleIndigo", "wso2" ("classic" and
+  // "highContrast" still resolve as a config/persisted value for back-compat
+  // but are no longer offered in the picker). Users can override this at
+  // runtime via the header theme dropdown (the choice is persisted per
+  // browser).
   CSM_PORTAL_THEME: "acrylicOrange",
   CSM_PORTAL_LOG_LEVEL: "ERROR",
 

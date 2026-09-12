@@ -37,7 +37,7 @@ import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeploymen
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { useNavTransition } from "@hooks/useNavTransition";
-import type { BeEngagementType } from "@api/backend/types";
+import type { BeEngagementPaymentType, BeEngagementType } from "@api/backend/types";
 
 const ENGAGEMENT_TYPES: { value: BeEngagementType; label: string }[] = [
   { value: "migration", label: "Migration" },
@@ -45,6 +45,11 @@ const ENGAGEMENT_TYPES: { value: BeEngagementType; label: string }[] = [
   { value: "new_feature_improvement", label: "New feature / improvement" },
   { value: "follow_up", label: "Follow up" },
   { value: "onboarding", label: "Onboarding" },
+];
+
+const ENGAGEMENT_PAYMENT_TYPES: { value: BeEngagementPaymentType; label: string }[] = [
+  { value: "paid", label: "Paid" },
+  { value: "foc", label: "FOC" },
 ];
 
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
@@ -72,6 +77,9 @@ export default function CsmEngagementCreatePage(): JSX.Element {
   const [deploymentId, setDeploymentId] = useState("");
   const [deployedProductId, setDeployedProductId] = useState("");
   const [engagementType, setEngagementType] = useState<BeEngagementType | "">("");
+  const [engagementPaymentType, setEngagementPaymentType] = useState<
+    BeEngagementPaymentType | ""
+  >("");
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
 
@@ -92,6 +100,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
       !!deploymentId &&
       !!deployedProductId &&
       !!engagementType &&
+      !!engagementPaymentType &&
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
       !submitting,
@@ -100,6 +109,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
       deploymentId,
       deployedProductId,
       engagementType,
+      engagementPaymentType,
       subject,
       description,
       submitting,
@@ -117,7 +127,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
   };
 
   const handleSubmit = async (): Promise<void> => {
-    if (!canSubmit || !engagementType) return;
+    if (!canSubmit || !engagementType || !engagementPaymentType) return;
     setSubmitting(true);
     try {
       const created = await postCase.mutateAsync({
@@ -128,6 +138,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
         subject: subject.trim(),
         description,
         engagementType,
+        engagementPaymentType,
       });
       navigate(`/engagements/${created.id}`, { state: { from: backTarget } });
     } catch (err) {
@@ -181,13 +192,20 @@ export default function CsmEngagementCreatePage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="engagement-deployment-label">Deployment</InputLabel>
+              <InputLabel
+                id="engagement-deployment-label"
+                shrink={deploymentId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Deployment
+              </InputLabel>
               <Select
                 labelId="engagement-deployment-label"
                 label="Deployment"
                 value={deploymentId}
                 onChange={(e) => onDeploymentChange(String(e.target.value))}
                 disabled={!projectId || deployments.isLoading}
+                notched={deploymentId !== ""}
               >
                 {(deployments.data ?? []).map((d) => (
                   <MenuItem key={d.id} value={d.id}>
@@ -207,13 +225,20 @@ export default function CsmEngagementCreatePage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="engagement-product-label">Deployed product</InputLabel>
+              <InputLabel
+                id="engagement-product-label"
+                shrink={deployedProductId !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Deployed product
+              </InputLabel>
               <Select
                 labelId="engagement-product-label"
                 label="Deployed product"
                 value={deployedProductId}
                 onChange={(e) => setDeployedProductId(String(e.target.value))}
                 disabled={!deploymentId || deployedProducts.isLoading}
+                notched={deployedProductId !== ""}
               >
                 {(deployedProducts.data ?? []).map((dp) => (
                   <MenuItem key={dp.id} value={dp.id}>
@@ -233,16 +258,50 @@ export default function CsmEngagementCreatePage(): JSX.Element {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth size="small" required>
-              <InputLabel id="engagement-type-label">Engagement type</InputLabel>
+              <InputLabel
+                id="engagement-type-label"
+                shrink={engagementType !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Engagement type
+              </InputLabel>
               <Select
                 labelId="engagement-type-label"
                 label="Engagement type"
                 value={engagementType}
                 onChange={(e) => setEngagementType(e.target.value as BeEngagementType)}
+                notched={engagementType !== ""}
               >
                 {ENGAGEMENT_TYPES.map((et) => (
                   <MenuItem key={et.value} value={et.value}>
                     {et.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormControl fullWidth size="small" required>
+              <InputLabel
+                id="engagement-payment-type-label"
+                shrink={engagementPaymentType !== ""}
+                sx={{ top: "0px !important" }}
+              >
+                Engagement payment type
+              </InputLabel>
+              <Select
+                labelId="engagement-payment-type-label"
+                label="Engagement payment type"
+                value={engagementPaymentType}
+                onChange={(e) =>
+                  setEngagementPaymentType(e.target.value as BeEngagementPaymentType)
+                }
+                notched={engagementPaymentType !== ""}
+              >
+                {ENGAGEMENT_PAYMENT_TYPES.map((ept) => (
+                  <MenuItem key={ept.value} value={ept.value}>
+                    {ept.label}
                   </MenuItem>
                 ))}
               </Select>

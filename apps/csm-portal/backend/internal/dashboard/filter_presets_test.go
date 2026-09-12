@@ -172,7 +172,7 @@ func TestFilterPresets_DashboardLocalShadowsSharedOnCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSharedPresets returned error: %v", err)
 	}
-	got, err := loadDir(dir, sharedPresets)
+	got, err := loadDir(dir, sharedPresets, nil)
 	if err != nil {
 		t.Fatalf("loadDir returned error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestFilterPresets_SharedFileAlsoResolves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSharedPresets returned error: %v", err)
 	}
-	got, err := loadDir(dir, sharedPresets)
+	got, err := loadDir(dir, sharedPresets, nil)
 	if err != nil {
 		t.Fatalf("loadDir returned error: %v", err)
 	}

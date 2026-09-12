@@ -159,3 +159,16 @@ func (m *mockEntityProjectClient) UpdateProject(ctx context.Context, id string, 
 	}
 	return []byte(`{}`), nil
 }
+
+// ----- mock entity vulnerability client -----
+
+type mockEntityVulnerabilityClient struct {
+	syncProductVulnerabilitiesFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityVulnerabilityClient) SyncProductVulnerabilities(ctx context.Context, body []byte) ([]byte, error) {
+	if m.syncProductVulnerabilitiesFn != nil {
+		return m.syncProductVulnerabilitiesFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}

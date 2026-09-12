@@ -250,10 +250,13 @@ export function LogTimeCardDialog({
             // Explicit cap (rather than relying on the default `calc(100% - 64px)`) so the dialog
             // never grows taller than the visible viewport in the microapp's WebView — without it,
             // the last field(s) and the action buttons can end up clipped below the fold with no
-            // way to scroll to them.
+            // way to scroll to them. `dvh`, not `vh` — `vh` resolves against the layout viewport,
+            // which in a mobile WebView (or a desktop browser with devtools docked, shrinking the
+            // available frame) can be taller than what's actually visible, letting the cap sit
+            // below the real fold anyway. Matches AttachmentPreviewDialog's use of `100dvh`.
             display: "flex",
             flexDirection: "column",
-            maxHeight: "85vh",
+            maxHeight: "85dvh",
           },
         },
       }}
@@ -336,7 +339,7 @@ export function LogTimeCardDialog({
               size="small"
               value={issueComplexity}
               onChange={(e) => setIssueComplexity(e.target.value as IssueComplexity)}
-              sx={{ minWidth: 140 }}
+              sx={{ minWidth: 120, flexShrink: 0 }}
               slotProps={{ select: { MenuProps: { slotProps: { paper: OPAQUE_POPUP } } } }}
             >
               {ISSUE_COMPLEXITY_OPTIONS.map((o) => (
@@ -345,7 +348,13 @@ export function LogTimeCardDialog({
                 </MenuItem>
               ))}
             </TextField>
-            <Stack alignItems="flex-end" gap={0.25}>
+            {/* Bounded so the caption below wraps onto its own line(s) instead of growing this
+                column wide enough to push the row into flex-wrap at normal dialog widths, which
+                is what put the toggle on its own line under Issue complexity. flexWrap stays on
+                the row itself (rather than switching to nowrap) as a fallback for genuinely
+                narrow viewports where even 120px (Issue complexity) + 150px (this column) can't
+                both fit — there it still wraps instead of clipping. */}
+            <Stack alignItems="flex-end" gap={0.25} sx={{ maxWidth: 150 }}>
               <FormControlLabel
                 control={
                   <Switch
@@ -359,7 +368,7 @@ export function LogTimeCardDialog({
                 sx={{ ml: 0 }}
               />
               {isAlwaysNonBillable && (
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="text.secondary" sx={{ textAlign: "right" }}>
                   Always non-billable{caseSeverity ? ` for ${SEVERITY_LABELS[caseSeverity]} cases` : ""}.
                 </Typography>
               )}

@@ -118,12 +118,19 @@ export default function EditDeploymentDialog({
           />
 
           <FormControl size="small" fullWidth required>
-            <InputLabel id="edit-deployment-type-label">Type</InputLabel>
+            <InputLabel
+              id="edit-deployment-type-label"
+              shrink={type !== ""}
+              sx={{ top: "0px !important" }}
+            >
+              Type
+            </InputLabel>
             <Select
               labelId="edit-deployment-type-label"
               label="Type"
               value={type}
               onChange={(e) => setType(e.target.value as BeDeploymentType)}
+              notched={type !== ""}
             >
               {DEPLOYMENT_TYPES.map((t) => (
                 <MenuItem key={t} value={t}>

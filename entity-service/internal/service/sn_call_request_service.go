@@ -76,8 +76,11 @@ type snCallRequestsSearchAllPayload struct {
 }
 
 type snCallRequestsSearchAllFilters struct {
-	AssignedUserIDs []string `json:"assignedUserIds,omitempty"`
-	StateKeys       []int    `json:"stateKeys,omitempty"`
+	AssignedUserIDs   []string `json:"assignedUserIds,omitempty"`
+	StateKeys         []int    `json:"stateKeys,omitempty"`
+	CaseStates        []int    `json:"caseStates,omitempty"`
+	ExcludeCaseStates []int    `json:"excludeCaseStates,omitempty"`
+	AssignmentTeamIDs []string `json:"assignmentTeamIds,omitempty"`
 }
 
 type snCallRequestSort struct {
@@ -370,6 +373,26 @@ func (s *snCallRequestService) SearchAllCallRequests(ctx context.Context, req do
 	if err := validateUUIDs("filters.assignedUserIds", req.Filters.AssignedUserIDs); err != nil {
 		return domain.SearchCallRequestsResponse{}, err
 	}
+	if err := validateUUIDs("filters.assignmentTeamIds", req.Filters.AssignmentTeamIDs); err != nil {
+		return domain.SearchCallRequestsResponse{}, err
+	}
+	// domainStatesToSNIDs silently skips unrecognized values, which omitempty
+	// then drops from the SN payload entirely -- validate up front so an
+	// unrecognized value errors instead of silently widening the result set,
+	// mirroring the case search's States/ExcludeStates validation.
+	for _, st := range req.Filters.CaseStates {
+		if !validCaseState[st] {
+			return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "filters.caseStates contains invalid value: " + string(st)}
+		}
+	}
+	// Same reasoning as CaseStates above, and it matters more here: an
+	// exclusion value that got silently dropped would widen the result set
+	// rather than narrow it, which is the harder failure to notice.
+	for _, st := range req.Filters.ExcludeCaseStates {
+		if !validCaseState[st] {
+			return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "filters.excludeCaseStates contains invalid value: " + string(st)}
+		}
+	}
 
 	if req.SortBy.Field == "" {
 		req.SortBy.Field = domain.CallRequestSortFieldUpdatedOn
@@ -405,6 +428,18 @@ func (s *snCallRequestService) SearchAllCallRequests(ctx context.Context, req do
 			keys = append(keys, callRequestStateToKey[st])
 		}
 		filters.StateKeys = keys
+		hasFilters = true
+	}
+	if len(req.Filters.CaseStates) > 0 {
+		filters.CaseStates = domainStatesToSNIDs(req.Filters.CaseStates)
+		hasFilters = true
+	}
+	if len(req.Filters.ExcludeCaseStates) > 0 {
+		filters.ExcludeCaseStates = domainStatesToSNIDs(req.Filters.ExcludeCaseStates)
+		hasFilters = true
+	}
+	if len(req.Filters.AssignmentTeamIDs) > 0 {
+		filters.AssignmentTeamIDs = uuidsToSysids(req.Filters.AssignmentTeamIDs)
 		hasFilters = true
 	}
 	if hasFilters {

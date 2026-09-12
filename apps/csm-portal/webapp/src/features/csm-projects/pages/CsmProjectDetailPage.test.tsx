@@ -36,6 +36,15 @@ vi.mock("@features/csm-projects/components/WorkItemsTab", () => ({
   default: ({ projectId }: { projectId: string }) => <div>Work items for {projectId}</div>,
 }));
 
+// The backend client reads runtime config at module load, which isn't
+// present under vitest. `UserRefLink` (used for the Onboarding Owner cell)
+// resolves an unknown id through `useBackendApi` — same approach as
+// ProjectContactsTab.test.tsx. Every test here passes a known `userId`, so
+// the mocked `post` is never actually invoked.
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ post: vi.fn() }),
+}));
+
 import CsmProjectDetailPage from "@features/csm-projects/pages/CsmProjectDetailPage";
 
 const PROJECT: ProjectDetails = {
@@ -151,5 +160,54 @@ describe("CsmProjectDetailPage — tab state", () => {
         from: "/customers/projects/proj-1?tab=workItems&subTab=engagements",
       }),
     );
+  });
+});
+
+describe("CsmProjectDetailPage — Onboarding Owner", () => {
+  it("renders the onboarding owner cell when onboarding is enabled and an owner is set", () => {
+    mockUseGetProject.mockReturnValue({
+      data: {
+        ...PROJECT,
+        onboardingStatus: "In-Progress",
+        onboardingOwner: {
+          id: "user-1",
+          name: "Jane Doe",
+          email: "jane.doe@example.com",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    renderPage();
+    expect(screen.getByText("Onboarding Owner")).toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+  });
+
+  it("hides the onboarding owner cell when onboardingStatus is Not-Applicable", () => {
+    mockUseGetProject.mockReturnValue({
+      data: {
+        ...PROJECT,
+        onboardingStatus: "Not-Applicable",
+        onboardingOwner: {
+          id: "user-1",
+          name: "Jane Doe",
+          email: "jane.doe@example.com",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    renderPage();
+    expect(screen.queryByText("Onboarding Owner")).not.toBeInTheDocument();
+  });
+
+  it("hides the onboarding owner cell when there is no onboarding engagement at all", () => {
+    mockUseGetProject.mockReturnValue({
+      data: { ...PROJECT },
+      isLoading: false,
+      isError: false,
+    });
+    renderPage();
+    expect(screen.queryByText("Onboarding Owner")).not.toBeInTheDocument();
   });
 });

@@ -51,13 +51,13 @@ func (h *IncidentTaskHandler) SearchIncidentTasks(w http.ResponseWriter, r *http
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// GroupIncidentTasksBy handles POST /incident-tasks/group-by.
-func (h *IncidentTaskHandler) GroupIncidentTasksBy(w http.ResponseWriter, r *http.Request) {
-	var req domain.GroupIncidentTasksByRequest
+// AggregateIncidentTasks handles POST /incident-tasks/aggregate.
+func (h *IncidentTaskHandler) AggregateIncidentTasks(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateIncidentTasksRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.GroupIncidentTasksBy(r.Context(), req)
+	resp, err := h.svc.AggregateIncidentTasks(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

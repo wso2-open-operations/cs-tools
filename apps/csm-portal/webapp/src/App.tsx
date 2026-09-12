@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX, lazy } from "react";
+import { type JSX } from "react";
 import {
   Navigate,
   Outlet,
@@ -47,155 +47,67 @@ import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
+import CaseDetailRouteSync from "@features/case-tabs/components/CaseDetailRouteSync";
+import { useAppMountedSignal } from "@utils/appMountedEvent";
 
 /*
- * Authenticated feature pages are lazily loaded so each lands in its own chunk
- * and is fetched only when its route is visited, instead of being bundled into
- * the initial entry chunk. They all render inside AppLayout's Outlet, which
- * owns the Suspense boundary that covers the load. Error pages and the shared
- * CsmComingSoonPage stay eager: they are tiny and act as immediate fallbacks.
+ * Authenticated feature pages used to be lazily loaded (one chunk per route),
+ * fetched only when their route was visited. That meant navigating to a
+ * not-yet-visited route triggered a fresh network fetch + module evaluation
+ * mid-session, which could stall the UI for a beat — especially for a larger
+ * page chunk or a slow/variable connection. They are now imported eagerly so
+ * every page ships in the initial load and no route navigation ever triggers
+ * a runtime chunk fetch. Error pages and the shared CsmComingSoonPage were
+ * already eager (tiny, immediate fallbacks) and are unaffected.
  */
-const CsmDashboardPage = lazy(
-  () => import("@features/csm-dashboard/pages/CsmDashboardPage"),
-);
-const DashboardWidgetPreviewPage = lazy(
-  () => import("@features/csm-dashboard/pages/DashboardWidgetPreviewPage"),
-);
-const CsmCasesPage = lazy(
-  () => import("@features/csm-cases/pages/CsmCasesPage"),
-);
-const CsmCaseCreatePage = lazy(
-  () => import("@features/csm-cases/pages/CsmCaseCreatePage"),
-);
-const CsmCaseDetailPage = lazy(
-  () => import("@features/csm-cases/pages/CsmCaseDetailPage"),
-);
-const OperationsPage = lazy(
-  () => import("@features/csm-operations/pages/OperationsPage"),
-);
-const CreateServiceRequestPage = lazy(
-  () => import("@features/csm-operations/pages/CreateServiceRequestPage"),
-);
-const CsmChangeRequestDetailPage = lazy(
-  () => import("@features/csm-operations/pages/CsmChangeRequestDetailPage"),
-);
-const CreateChangeRequestPage = lazy(
-  () => import("@features/csm-operations/pages/CreateChangeRequestPage"),
-);
-const CsmIncidentDetailPage = lazy(
-  () => import("@features/csm-operations/pages/CsmIncidentDetailPage"),
-);
-const CreateIncidentPage = lazy(
-  () => import("@features/csm-operations/pages/CreateIncidentPage"),
-);
-const ProblemDetailPage = lazy(
-  () => import("@features/csm-operations/pages/ProblemDetailPage"),
-);
-const CreateProblemPage = lazy(
-  () => import("@features/csm-operations/pages/CreateProblemPage"),
-);
-const CsmAdminLayout = lazy(
-  () => import("@features/csm-admin/pages/CsmAdminLayout"),
-);
-const CsmUserManagementLandingPage = lazy(
-  () => import("@features/csm-admin/pages/CsmUserManagementLandingPage"),
-);
-const CsmUsersPage = lazy(
-  () => import("@features/csm-users/pages/CsmUsersPage"),
-);
-const UserProfilePage = lazy(
-  () => import("@features/csm-users/pages/UserProfilePage"),
-);
-const CsmRolesPage = lazy(
-  () => import("@features/csm-admin/pages/CsmRolesPage"),
-);
-const RoleMembersPage = lazy(
-  () => import("@features/csm-admin/pages/RoleMembersPage"),
-);
-const CsmGroupsPage = lazy(
-  () => import("@features/csm-admin/pages/CsmGroupsPage"),
-);
-const GroupMembersPage = lazy(
-  () => import("@features/csm-admin/pages/GroupMembersPage"),
-);
-const CsmTeamsPage = lazy(
-  () => import("@features/csm-admin/pages/CsmTeamsPage"),
-);
-const TeamMembersPage = lazy(
-  () => import("@features/csm-admin/pages/TeamMembersPage"),
-);
-const DashboardBuilderRouteGuard = lazy(
-  () => import("@features/csm-admin/dashboards/pages/DashboardBuilderRouteGuard"),
-);
-const CsmDashboardBuilderListPage = lazy(
-  () => import("@features/csm-admin/dashboards/pages/CsmDashboardBuilderListPage"),
-);
-const CsmDashboardBuilderEditorPage = lazy(
-  () => import("@features/csm-admin/dashboards/pages/CsmDashboardBuilderEditorPage"),
-);
-const CsmCustomersLayout = lazy(
-  () => import("@features/csm-customers/pages/CsmCustomersLayout"),
-);
-const CsmAccountsPage = lazy(
-  () => import("@features/csm-accounts/pages/CsmAccountsPage"),
-);
-const CsmKBArticlesLayout = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBArticlesLayout"),
-);
-const CsmKBArticlesListPage = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBArticlesListPage"),
-);
-const CsmKBArticlesAllPage = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBArticlesAllPage"),
-);
-const CsmKBArticleEditorPage = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBArticleEditorPage"),
-);
-const CsmKBArticleHistoryDetailPage = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage"),
-);
-const CsmKBReviewQueuePage = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBReviewQueuePage"),
-);
-const CsmKBAdminPage = lazy(
-  () => import("@features/csm-kb-articles/pages/CsmKBAdminPage"),
-);
-const CsmAccountDetailPage = lazy(
-  () => import("@features/csm-accounts/pages/CsmAccountDetailPage"),
-);
-const CsmProjectsPage = lazy(
-  () => import("@features/csm-projects/pages/CsmProjectsPage"),
-);
-const CsmProjectDetailPage = lazy(
-  () => import("@features/csm-projects/pages/CsmProjectDetailPage"),
-);
-const ConversationDetailPage = lazy(
-  () => import("@features/csm-projects/pages/ConversationDetailPage"),
-);
-const CsmUpdatesPage = lazy(
-  () => import("@features/updates/pages/CsmUpdatesPage"),
-);
-const CsmSecurityCenterPage = lazy(
-  () => import("@features/csm-security-center/pages/CsmSecurityCenterPage"),
-);
-const CreateSecurityReportPage = lazy(
-  () => import("@features/csm-security-center/pages/CreateSecurityReportPage"),
-);
-const ProductVulnerabilityDetailPage = lazy(
-  () => import("@features/csm-security-center/pages/ProductVulnerabilityDetailPage"),
-);
-const CsmEngagementsPage = lazy(
-  () => import("@features/csm-engagements/pages/CsmEngagementsPage"),
-);
-const CsmEngagementCreatePage = lazy(
-  () => import("@features/csm-engagements/pages/CsmEngagementCreatePage"),
-);
-const CsmTimeCardsPage = lazy(
-  () => import("@features/csm-timecards/pages/CsmTimeCardsPage"),
-);
-const CsmAnnouncementsPage = lazy(
-  () => import("@features/csm-announcements/pages/CsmAnnouncementsPage"),
-);
+import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
+import CsMonitorDashboardPage from "@features/csm-dashboard/pages/CsMonitorDashboardPage";
+import DashboardWidgetPreviewPage from "@features/csm-dashboard/pages/DashboardWidgetPreviewPage";
+import CsmCasesPage from "@features/csm-cases/pages/CsmCasesPage";
+import CsmCaseCreatePage from "@features/csm-cases/pages/CsmCaseCreatePage";
+import OperationsPage from "@features/csm-operations/pages/OperationsPage";
+import CreateServiceRequestPage from "@features/csm-operations/pages/CreateServiceRequestPage";
+import CreateChangeRequestPage from "@features/csm-operations/pages/CreateChangeRequestPage";
+import CreateIncidentPage from "@features/csm-operations/pages/CreateIncidentPage";
+import ProblemDetailPage from "@features/csm-operations/pages/ProblemDetailPage";
+import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
+import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
+import CsmUserManagementLandingPage from "@features/csm-admin/pages/CsmUserManagementLandingPage";
+import CsmUsersPage from "@features/csm-users/pages/CsmUsersPage";
+import UserProfilePage from "@features/csm-users/pages/UserProfilePage";
+import CsmRolesPage from "@features/csm-admin/pages/CsmRolesPage";
+import RoleMembersPage from "@features/csm-admin/pages/RoleMembersPage";
+import CsmGroupsPage from "@features/csm-admin/pages/CsmGroupsPage";
+import GroupMembersPage from "@features/csm-admin/pages/GroupMembersPage";
+import CsmTeamsPage from "@features/csm-admin/pages/CsmTeamsPage";
+import TeamMembersPage from "@features/csm-admin/pages/TeamMembersPage";
+import DashboardBuilderRouteGuard from "@features/csm-admin/dashboards/pages/DashboardBuilderRouteGuard";
+import CsmDashboardBuilderListPage from "@features/csm-admin/dashboards/pages/CsmDashboardBuilderListPage";
+import CsmDashboardBuilderEditorPage from "@features/csm-admin/dashboards/pages/CsmDashboardBuilderEditorPage";
+import CsmDashboardSharedConfigPage from "@features/csm-admin/dashboards/pages/CsmDashboardSharedConfigPage";
+import CsmCustomersLayout from "@features/csm-customers/pages/CsmCustomersLayout";
+import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
+import CsmAccountDetailPage from "@features/csm-accounts/pages/CsmAccountDetailPage";
+import CsmProjectsPage from "@features/csm-projects/pages/CsmProjectsPage";
+import CsmProjectDetailPage from "@features/csm-projects/pages/CsmProjectDetailPage";
+import ConversationDetailPage from "@features/csm-projects/pages/ConversationDetailPage";
+import CsmUpdatesPage from "@features/updates/pages/CsmUpdatesPage";
+import CsmSecurityCenterPage from "@features/csm-security-center/pages/CsmSecurityCenterPage";
+import CreateSecurityReportPage from "@features/csm-security-center/pages/CreateSecurityReportPage";
+import ProductVulnerabilityDetailPage from "@features/csm-security-center/pages/ProductVulnerabilityDetailPage";
+import CsmEngagementsPage from "@features/csm-engagements/pages/CsmEngagementsPage";
+import CsmEngagementCreatePage from "@features/csm-engagements/pages/CsmEngagementCreatePage";
+import CsmTimeCardsPage from "@features/csm-timecards/pages/CsmTimeCardsPage";
+import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncementsPage";
+import CsmAnnouncementCreatePage from "@features/csm-announcements/pages/CsmAnnouncementCreatePage";
+import HelpPage from "@features/help/pages/HelpPage";
+import CsmKBArticlesLayout from "@features/csm-kb-articles/pages/CsmKBArticlesLayout";
+import CsmKBArticlesAllPage from "@features/csm-kb-articles/pages/CsmKBArticlesAllPage";
+import CsmKBArticlesListPage from "@features/csm-kb-articles/pages/CsmKBArticlesListPage";
+import CsmKBArticleEditorPage from "@features/csm-kb-articles/pages/CsmKBArticleEditorPage";
+import CsmKBArticleHistoryDetailPage from "@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage";
+import CsmKBReviewQueuePage from "@features/csm-kb-articles/pages/CsmKBReviewQueuePage";
+import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -287,7 +199,28 @@ function LegacyDetailRedirect({ to }: { to: string }): JSX.Element {
   return <Navigate to={`${target}${search}${hash}`} replace />;
 }
 
+/**
+ * Redirects a legacy Settings path (`/admin/users`, `/admin/roles`, ...) to
+ * its `/admin/user-management/*` home, forwarding whatever `location.state`
+ * the caller navigated here with. A bare `<Navigate to={...} replace />`
+ * (as `LegacyDetailRedirect` above uses) has no `state` prop bound to the
+ * incoming navigation — it would silently drop a dashboard widget's own
+ * `state: { from }` click-through on this exact hop, which is exactly the
+ * state `CsmAdminLayout`'s Back button (and `CsmUsersPage`'s own profile-page
+ * hand-off) depend on to work end to end.
+ */
+function LegacySettingsRedirect({ to }: { to: string }): JSX.Element {
+  const { state } = useLocation();
+  return <Navigate to={to} state={state} replace />;
+}
+
 export default function App(): JSX.Element {
+  // Signals the index.html boot loading screen that React has mounted and
+  // taken over rendering, so it can remove itself. Not gated on auth/data —
+  // the loading screen's job is only to cover "JS not yet running", not
+  // "signed-in and ready".
+  useAppMountedSignal();
+
   return (
     <LoaderProvider>
       <ErrorBannerProvider>
@@ -320,6 +253,22 @@ export default function App(): JSX.Element {
                 }
               />
 
+              {/* Standalone full-screen wallboard/kiosk view of the
+                  cs-overview dashboard — real sign-in required (still
+                  routed through AuthGuard), but no portal chrome at all:
+                  no header, sidebar, banners, or dashboard switcher, just
+                  this one page. Deliberately its own AuthGuard instance
+                  (`bare`) and OUTSIDE FeatureRouteGuard — it has no nav
+                  entry to be WIP-gated against, unlike every route in the
+                  main authenticated block below. See
+                  CsMonitorDashboardPage.tsx's own doc comment. */}
+              <Route element={<AuthGuard bare />}>
+                <Route
+                  path="cs-monitor-dashboard"
+                  element={<CsMonitorDashboardPage />}
+                />
+              </Route>
+
               <Route element={<AuthGuard />}>
                 <Route element={<FeatureRouteGuard />}>
                   <Route path="/" element={<RootLanding />} />
@@ -335,18 +284,6 @@ export default function App(): JSX.Element {
                     <Route path="accounts" element={<CsmAccountsPage />} />
                     <Route path="projects" element={<CsmProjectsPage />} />
                   </Route>
-
-                  <Route path="knowledge" element={<CsmKBArticlesLayout />}>
-                  <Route index element={<Navigate to="all" replace />} />
-                  <Route path="all" element={<CsmKBArticlesAllPage />} />
-                  <Route path="my-articles" element={<CsmKBArticlesListPage />} />
-                  <Route path="my-articles/new" element={<CsmKBArticleEditorPage />} />
-                  <Route path="my-articles/:id" element={<CsmKBArticleEditorPage />} />
-                  <Route path="my-articles/:id/history" element={<CsmKBArticleHistoryDetailPage />} />
-                  <Route path="to-review" element={<CsmKBReviewQueuePage />} />
-                  <Route path="admin" element={<CsmKBAdminPage />} />
-                </Route>
-                
                   <Route
                     path="customers/accounts/:id"
                     element={<CsmAccountDetailPage />}
@@ -408,6 +345,10 @@ export default function App(): JSX.Element {
                         only; there is no backend behind this feature. */}
                     <Route path="dashboards" element={<DashboardBuilderRouteGuard />}>
                       <Route index element={<CsmDashboardBuilderListPage />} />
+                      {/* Before the ":draftId" wildcard: "shared" is a
+                          literal segment, and react-router would otherwise
+                          match it as a draft id. */}
+                      <Route path="shared" element={<CsmDashboardSharedConfigPage />} />
                       <Route path="new" element={<CsmDashboardBuilderEditorPage />} />
                       <Route path=":draftId" element={<CsmDashboardBuilderEditorPage />} />
                     </Route>
@@ -420,23 +361,23 @@ export default function App(): JSX.Element {
                       revert this block alone if unwanted. */}
                   <Route
                     path="admin/users"
-                    element={<Navigate to="/admin/user-management/users" replace />}
+                    element={<LegacySettingsRedirect to="/admin/user-management/users" />}
                   />
                   <Route
                     path="admin/roles"
-                    element={<Navigate to="/admin/user-management/roles" replace />}
+                    element={<LegacySettingsRedirect to="/admin/user-management/roles" />}
                   />
                   <Route
                     path="admin/groups"
-                    element={<Navigate to="/admin/user-management/groups" replace />}
+                    element={<LegacySettingsRedirect to="/admin/user-management/groups" />}
                   />
                   <Route
                     path="admin/teams"
-                    element={<Navigate to="/admin/user-management/teams" replace />}
+                    element={<LegacySettingsRedirect to="/admin/user-management/teams" />}
                   />
                   <Route
                     path="admin/permissions"
-                    element={<Navigate to="/admin/user-management/permissions" replace />}
+                    element={<LegacySettingsRedirect to="/admin/user-management/permissions" />}
                   />
 
                   {/* Role/group/team member lists, one level below the
@@ -500,7 +441,10 @@ export default function App(): JSX.Element {
                   />
                   <Route path="cases" element={<CsmCasesPage />} />
                   <Route path="cases/new" element={<CsmCaseCreatePage />} />
-                  <Route path="cases/:caseId" element={<CsmCaseDetailPage />} />
+                  <Route
+                    path="cases/:caseId"
+                    element={<CaseDetailRouteSync kind="case" />}
+                  />
 
                   {/* A project's chat sessions ("Conversations" sub-tab of
                       Work items) each get a dedicated detail page, flat at
@@ -531,7 +475,7 @@ export default function App(): JSX.Element {
                     <Route path="service-requests/new" element={<CreateServiceRequestPage />} />
                     <Route
                       path="service-requests/:caseId"
-                      element={<CsmCaseDetailPage />}
+                      element={<CaseDetailRouteSync kind="service_request" />}
                     />
                     <Route
                       path="change-requests/new"
@@ -539,17 +483,23 @@ export default function App(): JSX.Element {
                     />
                     <Route
                       path="change-requests/:id"
-                      element={<CsmChangeRequestDetailPage />}
+                      element={<CaseDetailRouteSync kind="change_request" paramName="id" />}
                     />
                     <Route path="incidents/new" element={<CreateIncidentPage />} />
-                    <Route path="incidents/:id" element={<CsmIncidentDetailPage />} />
+                    <Route
+                      path="incidents/:id"
+                      element={<CaseDetailRouteSync kind="incident" paramName="id" />}
+                    />
                     <Route path="problems/new" element={<CreateProblemPage />} />
                     <Route path="problems/:id" element={<ProblemDetailPage />} />
                   </Route>
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />
                   <Route path="engagements/new" element={<CsmEngagementCreatePage />} />
-                  <Route path="engagements/:caseId" element={<CsmCaseDetailPage />} />
+                  <Route
+                    path="engagements/:caseId"
+                    element={<CaseDetailRouteSync kind="engagement" />}
+                  />
                   <Route path="updates" element={<CsmUpdatesPage />} />
                   {/* Security Center's own Security reports / Vulnerabilities
                       switch — same path-segment + legacy-`?tab=`-redirect
@@ -572,15 +522,37 @@ export default function App(): JSX.Element {
                     />
                     <Route
                       path="security-reports/:caseId"
-                      element={<CsmCaseDetailPage />}
+                      element={<CaseDetailRouteSync kind="security_report_analysis" />}
                     />
                   </Route>
                   <Route path="time-cards" element={<CsmTimeCardsPage />} />
                   <Route path="announcements" element={<CsmAnnouncementsPage />} />
                   <Route
-                    path="announcements/:caseId"
-                    element={<CsmCaseDetailPage />}
+                    path="announcements/new"
+                    element={<CsmAnnouncementCreatePage />}
                   />
+                  <Route
+                    path="announcements/:caseId"
+                    element={<CaseDetailRouteSync kind="announcement" />}
+                  />
+
+                  {/* Help — static, bundled Markdown docs, all rendered on
+                      one scrollable page with a table of contents at the top
+                      (see HelpPage). Every topic is an in-page anchor rather
+                      than its own route, so unlike Customers/Settings above
+                      there is nothing to redirect an index route to. */}
+                  <Route path="help" element={<HelpPage />} />
+
+                  <Route path="knowledge" element={<CsmKBArticlesLayout />}>
+                    <Route index element={<Navigate to="all" replace />} />
+                    <Route path="all" element={<CsmKBArticlesAllPage />} />
+                    <Route path="my-articles" element={<CsmKBArticlesListPage />} />
+                    <Route path="my-articles/new" element={<CsmKBArticleEditorPage />} />
+                    <Route path="my-articles/:id" element={<CsmKBArticleEditorPage />} />
+                    <Route path="my-articles/:id/history" element={<CsmKBArticleHistoryDetailPage />} />
+                    <Route path="to-review" element={<CsmKBReviewQueuePage />} />
+                    <Route path="admin" element={<CsmKBAdminPage />} />
+                  </Route>
                 </Route>
               </Route>
 

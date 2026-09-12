@@ -21,18 +21,19 @@ import {
   Chip,
   CircularProgress,
   IconButton,
-  InputAdornment,
   LinearProgress,
-  Skeleton,
-  TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
   Activity,
+  ArrowDownRight,
   ArrowUpRight,
+  Bell,
+  BellOff,
   Building,
   CheckCircle,
+  ClipboardList,
   Clock,
   Download,
   Eye,
@@ -40,7 +41,6 @@ import {
   Link as LinkIcon,
   Paperclip,
   Plus,
-  Search,
   Server,
   Shield,
   Trash2,
@@ -50,13 +50,21 @@ import {
   Users,
   X,
 } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useRef, useState, type ChangeEvent, type JSX, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useId,
+  useMemo,
+  useRef,
+  type ChangeEvent,
+  type JSX,
+  type ReactNode,
+} from "react";
 import { Link as RouterLink } from "react-router";
 import { formatBytes } from "@utils/formatBytes";
 import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityChip";
-import { useDebouncedValue } from "@hooks/useDebouncedValue";
-import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
-import type { NormalizedUser } from "@features/csm-users/types/csmUsers";
+import { useSearchUsersByName } from "@api/useSearchUsersByName";
+import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
 import {
   getAttachmentPreviewKind,
@@ -66,18 +74,23 @@ import type {
   CaseAttachment,
   CaseAuditEntry,
   CaseCustomerContext,
+  CaseEscalationRecord,
   CaseProductContext,
+  CaseRequestVariable,
   CaseTag,
   CaseTimeLogEntry,
-  CaseWatcher,
 } from "@features/csm-cases/types/csmCases";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
+import { escalationLevelLabel } from "@features/csm-cases/utils/escalationLevel";
 import {
   deploymentTypeLabel,
   formatDeploymentDate,
 } from "@features/csm-projects/utils/deployments";
 import type { ProjectDetails } from "@features/csm-projects/types/csmProjects";
-import type { BeDeployment } from "@api/backend/types";
+import type { BeDeployment, BeUser } from "@api/backend/types";
+import type { UserReference } from "@/types/userReference";
+import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import EscalationLevelChip from "@components/EscalationLevelChip";
 import RelativeTime from "@components/RelativeTime";
 import UserRefLink from "@components/UserRefLink";
 import RefreshButton from "@components/RefreshButton";
@@ -303,6 +316,19 @@ export function CustomerContextWidget({
           </MetaRow>
           {/* No subscription-status field exists on the project record today
               (only start/end dates) — omitted rather than inferring one. */}
+          {project.onboardingStatus &&
+            project.onboardingStatus !== "Not-Applicable" &&
+            project.onboardingOwner && (
+              <MetaRow label="Onboarding Owner">
+                <Typography variant="body2">
+                  <UserRefLink
+                    name={project.onboardingOwner.name}
+                    email={project.onboardingOwner.email || undefined}
+                    userId={project.onboardingOwner.id}
+                  />
+                </Typography>
+              </MetaRow>
+            )}
         </>
       )}
     </WidgetCard>
@@ -420,236 +446,482 @@ export function TagsWidget({
 }
 
 // ---------------------------------------------------------------------------
-// 3b. Watchers
+// 3b. Escalation
 // ---------------------------------------------------------------------------
 
-function watcherFullName(u: NormalizedUser): string {
-  return u.name.trim() || u.userName;
+/**
+ * Current escalation level (as a badge) plus a read-only history of past
+ * escalate/de-escalate steps. Each of `onEscalate` / `onDeescalate` renders
+ * its own clearly-labeled button ("Escalate" / "De-escalate") independently —
+ * both can show at once (e.g. EL2, which can go either way), or just one
+ * (EL0 has only "Escalate"; EL5 has only "De-escalate"). Two distinctly
+ * labeled buttons are unambiguous about which action a click performs, unlike
+ * a single button whose label/target silently changes with the case's
+ * current level would be.
+ *
+ * Escalating has no permission gate; de-escalating does -- only someone
+ * notified on the case's current escalation level may de-escalate it, which
+ * is why `onDeescalate` is the caller's decision to pass or omit (see
+ * `CsmCaseDetailPage.tsx`'s notified-user check), not something this widget
+ * decides itself. `onEscalate`/`onDeescalate` both open the caller's own
+ * confirm dialog (which collects the reason) rather than firing the mutation
+ * directly, so this widget never has to know the mutation's pending/error
+ * state itself.
+ */
+export function EscalationWidget({
+  currentLevel,
+  history,
+  isHistoryLoading,
+  isHistoryError,
+  onEscalate,
+  onDeescalate,
+  actionDisabledReason,
+}: {
+  /** Raw escalation-level id ("0"-"5"), or null when the data source doesn't
+   * track it (e.g. non-ServiceNow-backed case) -- rendered as "Not tracked",
+   * never coerced to "0"/EL0, since that would misrepresent "unknown" as a
+   * known, non-escalated case. Action buttons are hidden when null: there's
+   * nothing to escalate/de-escalate without a tracked level. */
+  currentLevel: string | null;
+  history: CaseEscalationRecord[];
+  isHistoryLoading?: boolean;
+  isHistoryError?: boolean;
+  /** Opens the escalate confirm dialog. Omit to hide the button entirely
+   * (e.g. already at EL5). */
+  onEscalate?: () => void;
+  /** Opens the de-escalate confirm dialog. Omit to hide the button entirely
+   * (e.g. already at EL0 / unset). */
+  onDeescalate?: () => void;
+  /** Disables both action buttons with an explanatory tooltip (e.g. "This
+   * case is closed — it's read-only.") without hiding them. */
+  actionDisabledReason?: string;
+}): JSX.Element {
+  return (
+    <WidgetCard
+      title="Escalation"
+      icon={<ArrowUpRight size={16} />}
+      action={
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {currentLevel === null ? (
+            <Typography variant="body2" color="text.secondary">
+              Not tracked
+            </Typography>
+          ) : (
+            <EscalationLevelChip level={currentLevel} />
+          )}
+          {currentLevel !== null && (onEscalate || onDeescalate) && (
+            <Tooltip title={actionDisabledReason ?? ""}>
+              <Box component="span" sx={{ display: "flex", gap: 0.5 }}>
+                {onDeescalate && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={onDeescalate}
+                    disabled={!!actionDisabledReason}
+                  >
+                    De-escalate
+                  </Button>
+                )}
+                {onEscalate && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={onEscalate}
+                    disabled={!!actionDisabledReason}
+                  >
+                    Escalate
+                  </Button>
+                )}
+              </Box>
+            </Tooltip>
+          )}
+        </Box>
+      }
+    >
+      {isHistoryLoading ? (
+        <Typography variant="body2" color="text.secondary">
+          Loading escalation history…
+        </Typography>
+      ) : isHistoryError ? (
+        <Typography variant="body2" color="error">
+          Could not load the escalation history.
+        </Typography>
+      ) : history.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No escalations on this case.
+        </Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {history.map((h) => {
+            const isEscalate =
+              Number(h.currentLevel) > Number(h.previousLevel);
+            return (
+              <Box
+                key={h.id}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 0.25,
+                  p: 0.75,
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                  {isEscalate ? (
+                    <ArrowUpRight size={14} />
+                  ) : (
+                    <ArrowDownRight size={14} />
+                  )}
+                  <Typography variant="body2">
+                    {`${escalationLevelLabel(h.previousLevel, true)} → ${escalationLevelLabel(h.currentLevel, true)}`}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                  {h.createdBy} · <RelativeTime iso={h.createdOn} />
+                </Typography>
+                {h.reason && (
+                  <Typography
+                    variant="body2"
+                    sx={{ mt: 0.25, overflowWrap: "anywhere" }}
+                  >
+                    {h.reason}
+                  </Typography>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+    </WidgetCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 3c. Watchers
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry on a record's watch list, in the shape both the case and the
+ * incident detail read models expose. `id` is the platform user UUID, which
+ * is also what the write side is keyed by — see {@link WatchersWidget}.
+ */
+export interface WatchListMember {
+  id: string;
+  name: string;
+  email?: string;
+  /** True for the signed-in engineer; renders a "(you)" suffix. */
+  isMe?: boolean;
+  /** Canonical user reference, when the read model carries one. */
+  user?: UserReference;
 }
 
 /**
- * Inline "search people, click to add" panel used by {@link WatchersWidget}.
- * Mounted only while the caller's "Add watcher" toggle is open, so the user
- * search (`POST /users/search`) isn't issued in the background — same pattern
- * as {@link AssignEngineerDialog} mounting only while its dialog is open.
+ * The single place the per-record-type watch-list rules live, so the two
+ * detail pages rendering {@link WatchersWidget} can't drift apart or carry
+ * their own copy of the "may the last watcher go?" flag.
+ *
+ * `minWatchers` is the asymmetry between the two. The incident update request
+ * declares its watch list as an *optional* list, so an explicitly empty one
+ * survives the round trip and clears the list. The case update request
+ * declares a plain list, which makes an empty one indistinguishable from an
+ * absent field, and the backend then rejects the whole request as changing
+ * nothing. Removing a case's only watcher is therefore not expressible at
+ * all, so the control is blocked rather than fired at a request already known
+ * to fail. Lifting it needs a deliberate change to the case update contract.
  */
-function WatcherAddPicker({
-  existingEmails,
-  disabled,
-  onPick,
-  onCancel,
-}: {
-  /** Lower-cased emails already on the watch list, filtered out of the results. */
-  existingEmails: string[];
-  disabled?: boolean;
-  onPick: (email: string, name: string) => void;
-  onCancel: () => void;
-}): JSX.Element {
-  const [input, setInput] = useState("");
-  const search = useDebouncedValue(input.trim(), 300);
-  const { data, isFetching, isError } = useSearchUsers({
-    filters: {
-      ...(search.length > 0 && { searchQuery: search }),
-      active: true,
-    },
-    pagination: { limit: 8, offset: 0 },
-  });
+const WATCH_LIST_RULES = {
+  case: {
+    noun: "case",
+    minWatchers: 1,
+    minWatchersReason: "A case must keep at least one watcher.",
+  },
+  incident: {
+    noun: "incident",
+    minWatchers: 0,
+    minWatchersReason: "",
+  },
+} as const;
 
-  const candidates = useMemo(
-    () =>
-      (data?.users ?? []).filter(
-        (u) =>
-          !!u.email &&
-          u.active !== false &&
-          !existingEmails.includes(u.email.toLowerCase()),
-      ),
-    [data, existingEmails],
-  );
+/** Record types that have an editable watch list. */
+export type WatchedEntityKind = keyof typeof WATCH_LIST_RULES;
 
-  return (
-    <Box
-      sx={{
-        mt: 1,
-        border: 1,
-        borderColor: "divider",
-        borderRadius: 1,
-        p: 1,
-        display: "flex",
-        flexDirection: "column",
-        gap: 0.75,
-      }}
-    >
-      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-        <TextField
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Search people to add…"
-          size="small"
-          fullWidth
-          autoFocus
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={14} />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-        <IconButton
-          size="small"
-          onClick={onCancel}
-          aria-label="Cancel adding a watcher"
-        >
-          <X size={14} />
-        </IconButton>
-      </Box>
-      <Box sx={{ minHeight: 36 }}>
-        {isFetching ? (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-            {[0, 1].map((i) => (
-              <Skeleton key={i} variant="rounded" height={28} />
-            ))}
-          </Box>
-        ) : isError ? (
-          <Typography variant="caption" color="error">
-            Could not load people. Try again.
-          </Typography>
-        ) : candidates.length === 0 ? (
-          <Typography variant="caption" color="text.secondary">
-            {search ? "No matches." : "Type to search people…"}
-          </Typography>
-        ) : (
-          <Box sx={{ display: "flex", flexDirection: "column" }}>
-            {candidates.map((u) => (
-              <Button
-                key={u.id}
-                variant="text"
-                color="inherit"
-                size="small"
-                disabled={disabled}
-                onClick={() => onPick(u.email, watcherFullName(u))}
-                sx={{
-                  justifyContent: "flex-start",
-                  textTransform: "none",
-                  px: 0.75,
-                  py: 0.5,
-                  gap: 0.5,
-                }}
-              >
-                {watcherFullName(u)}
-                <Typography variant="caption" color="text.secondary">
-                  {u.email}
-                </Typography>
-              </Button>
-            ))}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
+/**
+ * Watch list for a case or an incident, with add/remove.
+ *
+ * Neither backend has an add-one/remove-one endpoint: both take the **whole**
+ * watch list as user UUIDs and replace what is stored. Sending only the user
+ * that changed silently wipes everyone else. So this widget — not its callers
+ * — computes the replacement list in {@link addWatcher}/{@link removeWatcher}
+ * and hands the finished array to `onReplace`; a page can only forward it.
+ *
+ * `entityKind` selects the rules in {@link WATCH_LIST_RULES}; nothing else
+ * about this component varies by record type.
+ */
 export function WatchersWidget({
+  entityKind,
   watchers,
-  onAdd,
-  onRemove,
+  onReplace,
   isSaving,
   onRefresh,
   isRefreshing,
   refreshedAt,
+  currentUserId,
+  autoWatchingReason,
 }: {
-  watchers: CaseWatcher[];
-  /** Add a watcher by email — the caller PATCHes the full replacement watch
-   * list (`PATCH /cases/{id}` `{ watchList }`). Omit to hide the "Add
-   * watcher" control. */
-  onAdd?: (email: string, name: string) => void;
-  /** Remove a single watcher — the caller PATCHes the full replacement watch
-   * list minus this one. Omit to hide the per-chip remove affordance. */
-  onRemove?: (watcher: CaseWatcher) => void;
-  /** True while a watch-list PATCH is in flight; disables add/remove. */
+  /** Which record's watch list this is. Drives the copy and the rules. */
+  entityKind: WatchedEntityKind;
+  watchers: WatchListMember[];
+  /**
+   * Persist `nextWatcherIds` as the record's complete new watch list. Already
+   * the full replacement list, never a delta. Omit to render read-only.
+   */
+  onReplace?: (nextWatcherIds: string[], action: "add" | "remove") => void;
+  /** True while a watch-list write is in flight; blocks add and remove so a
+   * double-click can't fire two conflicting replacements. */
   isSaving?: boolean;
-  /** Re-runs the case-detail query the watch list comes from. Omit to hide
-   * the refresh control. */
+  /** Re-runs the detail query the watch list comes from. Omit to hide the
+   * refresh control. */
   onRefresh?: () => void;
   isRefreshing?: boolean;
   refreshedAt?: number;
+  /**
+   * Platform UUID of the signed-in engineer. Drives the self-subscribe
+   * Follow/Unfollow control: without it there is no id to add on Follow, so
+   * the button is omitted entirely rather than rendered disabled.
+   */
+  currentUserId?: string;
+  /**
+   * Non-empty when the signed-in engineer is on this watch list only because
+   * of an automatic, role-based add (e.g. they're the record's assigned
+   * engineer) rather than having chosen to self-subscribe. The widget has no
+   * visibility into role assignment, so the caller supplies this; when set,
+   * Unfollow is blocked with this as the reason, same treatment as
+   * {@link removalBlockedReason} above.
+   */
+  autoWatchingReason?: string;
 }): JSX.Element {
-  const [addOpen, setAddOpen] = useState(false);
-  const existingEmails = useMemo(
-    () =>
-      watchers
-        .filter((w): w is CaseWatcher & { email: string } => !!w.email)
-        .map((w) => w.email.toLowerCase()),
-    [watchers],
+  const rules = WATCH_LIST_RULES[entityKind];
+  const reasonId = useId();
+  const followReasonId = useId();
+  const watcherIds = useMemo(() => watchers.map((w) => w.id), [watchers]);
+  // Keyed on the UUID, not `isMe`: both page callers derive `isMe` from an
+  // email match, which is unreliable when email data is missing, whereas
+  // `currentUserId` is the same UUID the watch list itself is keyed by.
+  const isFollowing = !!currentUserId && watcherIds.includes(currentUserId);
+
+  // Below the floor the record type allows, removal isn't expressible at all
+  // (see WATCH_LIST_RULES), so the control is blocked with the reason rather
+  // than firing a request that is known to be rejected.
+  const belowFloorAfterRemoval = watchers.length <= rules.minWatchers;
+  const removalBlockedReason = belowFloorAfterRemoval ? rules.minWatchersReason : "";
+  const unfollowBlockedReason = autoWatchingReason || removalBlockedReason;
+
+  const addWatcher = useCallback(
+    (userId: string) => {
+      if (!onReplace || !userId || isSaving) return;
+      // Already watching: nothing to write, and resending the same list would
+      // burn a request for no change.
+      if (watcherIds.includes(userId)) return;
+      onReplace([...watcherIds, userId], "add");
+    },
+    [onReplace, isSaving, watcherIds],
   );
+
+  const removeWatcher = useCallback(
+    (watcher: WatchListMember) => {
+      if (!onReplace || isSaving || belowFloorAfterRemoval) return;
+      onReplace(
+        watcherIds.filter((id) => id !== watcher.id),
+        "remove",
+      );
+    },
+    [onReplace, isSaving, belowFloorAfterRemoval, watcherIds],
+  );
+
+  // Self-subscribe: the same add/remove path as the per-watcher controls
+  // below, just always targeting the signed-in engineer's own id rather than
+  // a picked-from-search or a listed watcher.
+  const onFollowClick = useCallback(() => {
+    if (currentUserId) addWatcher(currentUserId);
+  }, [addWatcher, currentUserId]);
+  const onUnfollowClick = useCallback(() => {
+    if (!currentUserId || unfollowBlockedReason) return;
+    if (!onReplace || isSaving) return;
+    onReplace(
+      watcherIds.filter((id) => id !== currentUserId),
+      "remove",
+    );
+  }, [currentUserId, unfollowBlockedReason, onReplace, isSaving, watcherIds]);
 
   return (
     <WidgetCard
       title="Watchers"
       icon={<Users size={16} />}
       action={
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          {onRefresh && (
-            <RefreshButton
-              onRefresh={onRefresh}
-              isFetching={!!isRefreshing}
-              updatedAt={refreshedAt}
-              label="Refresh watchers"
-            />
-          )}
-          {onAdd && (
-            <Button
-              size="small"
-              variant="text"
-              startIcon={<Plus size={14} />}
-              disabled={isSaving}
-              onClick={() => setAddOpen((v) => !v)}
-            >
-              Add watcher
-            </Button>
-          )}
-        </Box>
+        onRefresh && (
+          <RefreshButton
+            onRefresh={onRefresh}
+            isFetching={!!isRefreshing}
+            updatedAt={refreshedAt}
+            label="Refresh watchers"
+          />
+        )
       }
     >
-      {watchers.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          No one is watching this case.
-        </Typography>
-      ) : (
-        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-          {watchers.map((w) => (
-            <Chip
-              key={w.id}
+      {onReplace && currentUserId && (
+        <Box sx={{ mb: 1.5 }}>
+          {isFollowing ? (
+            <Tooltip title={unfollowBlockedReason}>
+              {/* aria-disabled, not disabled, so the reason stays reachable
+                  via aria-describedby — same reasoning as the per-watcher
+                  remove control below. */}
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<BellOff size={14} />}
+                  aria-disabled={!!unfollowBlockedReason || isSaving || undefined}
+                  aria-describedby={unfollowBlockedReason ? followReasonId : undefined}
+                  onClick={onUnfollowClick}
+                  sx={{ opacity: unfollowBlockedReason ? 0.6 : 1 }}
+                >
+                  {`Unfollow ${rules.noun} updates`}
+                </Button>
+              </span>
+            </Tooltip>
+          ) : (
+            <Button
               size="small"
               variant="outlined"
-              icon={<User size={14} />}
-              label={
-                <UserRefLink
-                  name={w.isMe ? `${w.name} (you)` : w.name}
-                  email={w.user?.email || w.email}
-                  userId={w.user?.id}
-                />
-              }
+              startIcon={<Bell size={14} />}
               disabled={isSaving}
-              onDelete={
-                onRemove && w.email ? () => onRemove(w) : undefined
-              }
-            />
-          ))}
+              onClick={onFollowClick}
+            >
+              {`Follow ${rules.noun} updates`}
+            </Button>
+          )}
+          {unfollowBlockedReason && (
+            <Box
+              component="span"
+              id={followReasonId}
+              sx={{
+                position: "absolute",
+                width: 1,
+                height: 1,
+                overflow: "hidden",
+                clip: "rect(0 0 0 0)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {unfollowBlockedReason}
+            </Box>
+          )}
         </Box>
       )}
-      {addOpen && onAdd && (
-        <WatcherAddPicker
-          existingEmails={existingEmails}
-          disabled={isSaving}
-          onPick={(email, name) => {
-            onAdd(email, name);
-            setAddOpen(false);
+      {watchers.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {`No one is watching this ${rules.noun}.`}
+        </Typography>
+      ) : (
+        <Box
+          component="ul"
+          aria-label="Watchers"
+          sx={{ listStyle: "none", m: 0, p: 0, display: "flex", flexDirection: "column" }}
+        >
+          {watchers.map((w) => {
+            const label = w.isMe ? `${w.name} (you)` : w.name;
+            return (
+              <Box
+                component="li"
+                key={w.id}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  py: 0.5,
+                  minWidth: 0,
+                  borderBottom: 1,
+                  borderColor: "divider",
+                  "&:last-of-type": { borderBottom: 0 },
+                }}
+              >
+                <User size={14} />
+                <Typography
+                  variant="body2"
+                  component="span"
+                  sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                >
+                  <UserRefLink
+                    name={label}
+                    email={w.user?.email || w.email}
+                    userId={w.user?.id}
+                  />
+                </Typography>
+                {onReplace && (
+                  <Tooltip title={removalBlockedReason}>
+                    {/* aria-disabled, not disabled: a disabled button drops out
+                        of the tab order, taking the reason for its own
+                        disabling with it. This stays focusable, keeps its
+                        tooltip, and points at that reason via
+                        aria-describedby. */}
+                    <IconButton
+                      size="small"
+                      aria-label={`Remove ${label} from the watch list`}
+                      aria-disabled={belowFloorAfterRemoval || isSaving || undefined}
+                      aria-describedby={belowFloorAfterRemoval ? reasonId : undefined}
+                      onClick={() => removeWatcher(w)}
+                      sx={{
+                        color: "text.secondary",
+                        opacity: belowFloorAfterRemoval || isSaving ? 0.5 : 1,
+                      }}
+                    >
+                      <X size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+      {onReplace && (
+        <Box sx={{ mt: 1.5 }}>
+          <AsyncEntitySelect<BeUser>
+            id={`${entityKind}-watchers-add`}
+            label="Add a watcher"
+            placeholder="Search people…"
+            // Held at "" so the field clears itself after each pick and reads
+            // as an "add another" control rather than a current selection.
+            value=""
+            onChange={addWatcher}
+            disabled={isSaving}
+            useSearch={useSearchUsersByName}
+            // useSearchUsersByName drops any user without an id, so every
+            // option here is guaranteed to have one.
+            getId={(u) => u.id!}
+            getLabel={userLabel}
+            excludeIds={watcherIds}
+            helperText={`Notified on updates to this ${rules.noun}.`}
+          />
+        </Box>
+      )}
+      {belowFloorAfterRemoval && onReplace && watchers.length > 0 && (
+        <Box
+          component="span"
+          id={reasonId}
+          sx={{
+            position: "absolute",
+            width: 1,
+            height: 1,
+            overflow: "hidden",
+            clip: "rect(0 0 0 0)",
+            whiteSpace: "nowrap",
           }}
-          onCancel={() => setAddOpen(false)}
-        />
+        >
+          {removalBlockedReason}
+        </Box>
       )}
     </WidgetCard>
   );
@@ -1106,6 +1378,102 @@ export function AuditTimelineWidget({
             ))
         )}
       </Box>
+    </WidgetCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 8. Service-request "Request details"
+// ---------------------------------------------------------------------------
+
+/** Placeholder for a value the backing data source did not give us. */
+const NO_VALUE = "\u2014";
+
+/**
+ * The catalog, catalog item, and the answers the requester gave to that
+ * item's questions — the payload a service request is actually made of, and
+ * which the engineer working it otherwise cannot see anywhere in the portal.
+ *
+ * Renders even when `variables` is empty: an SR with no captured answers is a
+ * real upstream data problem, and hiding the card would make it invisible.
+ * An answer that is present but blank renders as an em dash, so "asked and
+ * left blank" stays distinguishable from "never asked".
+ */
+export function RequestDetailsWidget({
+  catalog,
+  catalogItem,
+  variables,
+}: {
+  catalog?: { id: string; name: string };
+  catalogItem?: { id: string; name: string };
+  /** In the backing data source's display order — never re-sorted here. */
+  variables?: CaseRequestVariable[];
+}): JSX.Element {
+  const answers = variables ?? [];
+  return (
+    <WidgetCard title="Request details" icon={<ClipboardList size={16} />}>
+      <MetaRow label="Catalog">
+        <Typography variant="body2">{catalog?.name || NO_VALUE}</Typography>
+      </MetaRow>
+      <MetaRow label="Catalog item">
+        <Typography variant="body2">{catalogItem?.name || NO_VALUE}</Typography>
+      </MetaRow>
+      {answers.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+          No request details captured.
+        </Typography>
+      ) : (
+        <Box
+          component="dl"
+          sx={{
+            display: "grid",
+            // Single column on narrow viewports so a long question and its
+            // answer stack instead of squeezing; two columns from sm up.
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              sm: "minmax(0, 12rem) minmax(0, 1fr)",
+            },
+            columnGap: 1.5,
+            rowGap: 0.75,
+            alignItems: "baseline",
+            m: 0,
+            mt: 1.5,
+            pt: 1.5,
+            borderTop: 1,
+            borderColor: "divider",
+          }}
+        >
+          {answers.map((v, i) => (
+            // The data source guarantees no id per answer and question text
+            // is not guaranteed unique, so the index is part of the key.
+            <Fragment key={`${v.name}-${i}`}>
+              <Typography
+                component="dt"
+                variant="caption"
+                color="text.secondary"
+                sx={{ minWidth: 0, overflowWrap: "anywhere" }}
+              >
+                {v.name}
+              </Typography>
+              <Typography
+                component="dd"
+                variant="body2"
+                color={v.value ? "text.primary" : "text.secondary"}
+                sx={{
+                  m: 0,
+                  minWidth: 0,
+                  // Long single-token answers (paths, ids, URLs) must wrap
+                  // rather than push a horizontal scrollbar onto the page.
+                  overflowWrap: "anywhere",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {v.value || NO_VALUE}
+              </Typography>
+            </Fragment>
+          ))}
+        </Box>
+      )}
     </WidgetCard>
   );
 }

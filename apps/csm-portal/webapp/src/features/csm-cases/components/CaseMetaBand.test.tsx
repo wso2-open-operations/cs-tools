@@ -135,3 +135,51 @@ describe("CaseMetaBand — fix ETA cells", () => {
     expect(screen.queryByText("Worst case fix ETA")).not.toBeInTheDocument();
   });
 });
+
+describe("CaseMetaBand — CRE / SRE team", () => {
+  it("renders each present team as a clickable chip, not plain text", () => {
+    renderBand({
+      customerContext: {
+        ...BASE_CASE.customerContext,
+        creTeam: { id: "team-cre-1", name: "CRE Alpha" },
+        sreTeam: { id: "team-sre-1", name: "SRE Bravo" },
+      },
+    });
+
+    expect(screen.getByText("CRE / SRE team")).toBeInTheDocument();
+
+    const creChip = screen.getByText("CRE Alpha");
+    const sreChip = screen.getByText("SRE Bravo");
+    expect(creChip).toBeInTheDocument();
+    expect(sreChip).toBeInTheDocument();
+    // DirectoryEntityChip renders an MUI Chip — a clickable element, unlike
+    // the plain <Typography> the old join rendered.
+    expect(creChip.closest('[role="button"]')).not.toBeNull();
+    expect(sreChip.closest('[role="button"]')).not.toBeNull();
+  });
+
+  it("renders only the present team's chip when just one is set", () => {
+    renderBand({
+      customerContext: {
+        ...BASE_CASE.customerContext,
+        creTeam: { id: "team-cre-1", name: "CRE Alpha" },
+        sreTeam: undefined,
+      },
+    });
+
+    expect(screen.getByText("CRE Alpha")).toBeInTheDocument();
+    expect(screen.queryByText("SRE Bravo")).not.toBeInTheDocument();
+  });
+
+  it("omits the CRE / SRE team cell entirely when neither team is set", () => {
+    renderBand({
+      customerContext: {
+        ...BASE_CASE.customerContext,
+        creTeam: undefined,
+        sreTeam: undefined,
+      },
+    });
+
+    expect(screen.queryByText("CRE / SRE team")).not.toBeInTheDocument();
+  });
+});

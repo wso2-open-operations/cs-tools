@@ -66,24 +66,27 @@ export default function ConversationDetailPage(): JSX.Element {
     | { conversation?: BeConversationView; from?: string }
     | undefined;
   const conversation = state?.conversation;
-  const backTarget = state?.from;
+  // Prefer the caller's own `from` (the Conversations tab / preview drawer
+  // that linked here). Absent that -- a cold/bookmarked visit -- fall back
+  // to the owning project's Conversations tab when the forwarded
+  // `conversation` at least named its project, and only to the bare
+  // projects list when even that's unavailable. A hardcoded fallback here,
+  // not `navigate(-1)`, matches every other detail page's Back convention
+  // and doesn't depend on what happens to be in browser history.
+  const backTarget =
+    state?.from ??
+    (conversation?.project?.id
+      ? `/customers/projects/${conversation.project.id}?tab=workItems&subTab=conversations`
+      : "/customers/projects");
 
   const { data: messages, isLoading, isError } = useGetCsmConversationMessages(id);
-
-  const back = (): void => {
-    if (backTarget) {
-      navigate(backTarget);
-    } else {
-      navigate(-1);
-    }
-  };
 
   const BackButton = (
     <Button
       variant="text"
       size="small"
       startIcon={<ArrowLeft size={16} />}
-      onClick={back}
+      onClick={() => navigate(backTarget)}
       sx={{ alignSelf: "flex-start" }}
     >
       Back

@@ -183,7 +183,7 @@ export default function AsyncAssigneeMultiSelect({
         const content = (
           <Box
             component="span"
-            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pl: 1 }}
           >
             {displayText}
           </Box>
@@ -201,12 +201,17 @@ export default function AsyncAssigneeMultiSelect({
         return (
           <li key={key} {...liProps} style={{ paddingTop: 2, paddingBottom: 2 }}>
             <Checkbox size="small" checked={selected} sx={{ mr: 1, p: 0.25 }} />
+            {/* An email (the secondary line) has no spaces to wrap at --
+                without `overflowWrap`, it only breaks at the `@`/`.`
+                (browsers don't reliably treat those as break points
+                either), then overflows and gets clipped by the popup's
+                own overflow instead of wrapping onto a further line. */}
             <ListItemText
               primary={option.name}
               secondary={secondary}
               slotProps={{
-                primary: { style: { fontSize: 13 } },
-                secondary: { style: { fontSize: 11 } },
+                primary: { style: { fontSize: 13, overflowWrap: "anywhere" } },
+                secondary: { style: { fontSize: 11, overflowWrap: "anywhere" } },
               }}
             />
           </li>

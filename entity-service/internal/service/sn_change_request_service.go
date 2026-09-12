@@ -98,6 +98,10 @@ type snChangeRequestFilters struct {
 	CreatedEndDate   string `json:"createdEndDate,omitempty"`
 	// AssignmentGroupIDs: sys_user_group sys_ids (converted from UUIDs).
 	AssignmentGroupIDs []string `json:"assignmentGroupIds,omitempty"`
+	// Approval: see domain.SearchChangeRequestsFilters.Filters doc comment
+	// ("approval" field). ServiceNow's raw task.approval value, passed
+	// through as-is -- not a key/enum mapping.
+	Approval string `json:"approval,omitempty"`
 }
 
 // snCRTypeIDMap maps domain ChangeRequestType enums to SN numeric type IDs.
@@ -322,6 +326,7 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 			CreatedStartDate:   formatSNDateTimeUTC(parsedFilters.CreatedStartDate),
 			CreatedEndDate:     formatSNDateTimeUTC(parsedFilters.CreatedEndDate),
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
+			Approval:           stringPtrValue(parsedFilters.Approval),
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -391,70 +396,70 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 	}, nil
 }
 
-// snChangeRequestGroupByPayload is the Choreo POST /change-requests/group-by
+// snChangeRequestAggregatePayload is the Choreo POST /change-requests/aggregate
 // request body.
-type snChangeRequestGroupByPayload struct {
+type snChangeRequestAggregatePayload struct {
 	Filters   snChangeRequestFilters `json:"filters,omitempty"`
 	GroupBy   string                 `json:"groupBy"`
 	MaxGroups int                    `json:"maxGroups,omitempty"`
 }
 
-// validChangeRequestGroupByField is the allow-list for
-// GroupChangeRequestsByRequest.GroupBy, matching openapi.yaml's
-// GroupChangeRequestsByRequest.groupBy enum exactly.
-var validChangeRequestGroupByField = map[string]bool{
+// validChangeRequestAggregateField is the allow-list for
+// AggregateChangeRequestsRequest.GroupBy, matching openapi.yaml's
+// AggregateChangeRequestsRequest.groupBy enum exactly.
+var validChangeRequestAggregateField = map[string]bool{
 	"state":           true,
 	"assignmentGroup": true,
 }
 
-// GroupChangeRequestsBy implements ChangeRequestService by calling the
-// Choreo POST /change-requests/group-by endpoint: a single server-side
+// AggregateChangeRequests implements ChangeRequestService by calling the
+// Choreo POST /change-requests/aggregate endpoint: a single server-side
 // aggregation over the requested field, capped to the top MaxGroups buckets
-// with the remainder folded into GroupByResponse.OthersCount. Filter
+// with the remainder folded into AggregateResponse.OthersCount. Filter
 // parsing and validation mirror SearchChangeRequests.
-func (s *snChangeRequestService) GroupChangeRequestsBy(ctx context.Context, req domain.GroupChangeRequestsByRequest) (domain.GroupByResponse, error) {
+func (s *snChangeRequestService) AggregateChangeRequests(ctx context.Context, req domain.AggregateChangeRequestsRequest) (domain.AggregateResponse, error) {
 	if req.GroupBy == "" {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy is required"}
 	}
-	if !validChangeRequestGroupByField[req.GroupBy] {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	if !validChangeRequestAggregateField[req.GroupBy] {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if err := validateExactNumber("number", req.Filters.Number); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
 	if req.Filters.ClosedEndDate != nil && req.Filters.ClosedStartDate != nil &&
 		req.Filters.ClosedEndDate.Before(*req.Filters.ClosedStartDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
 	}
 	for _, s := range req.Filters.States {
 		if !validChangeRequestState[s] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "states contains invalid value: " + string(s)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "states contains invalid value: " + string(s)}
 		}
 	}
 	for _, i := range req.Filters.Impacts {
 		if !validChangeRequestImpact[i] {
-			return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "impacts contains invalid value: " + string(i)}
+			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "impacts contains invalid value: " + string(i)}
 		}
 	}
 	if err := validateUUIDs("projectIds", req.Filters.ProjectIDs); err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	parsedFilters, err := ParseChangeRequestFieldFilters(req.Filters.Filters, time.Now().UTC())
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 	if parsedFilters.CreatedEndDate != nil && parsedFilters.CreatedStartDate != nil &&
 		parsedFilters.CreatedEndDate.Before(*parsedFilters.CreatedStartDate) {
-		return domain.GroupByResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "createdOn: lte value must not be before gte value"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
-	payload := snChangeRequestGroupByPayload{
+	payload := snChangeRequestAggregatePayload{
 		Filters: snChangeRequestFilters{
 			ProjectIDs:         uuidsToSysids(req.Filters.ProjectIDs),
 			SearchQuery:        req.Filters.SearchQuery,
@@ -466,19 +471,29 @@ func (s *snChangeRequestService) GroupChangeRequestsBy(ctx context.Context, req 
 			CreatedStartDate:   formatSNDateTimeUTC(parsedFilters.CreatedStartDate),
 			CreatedEndDate:     formatSNDateTimeUTC(parsedFilters.CreatedEndDate),
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
+			Approval:           stringPtrValue(parsedFilters.Approval),
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,
 	}
 
-	raw, err := s.client.Post(ctx, "/change-requests/group-by", token, payload)
+	raw, err := s.client.Post(ctx, "/change-requests/aggregate", token, payload)
 	if err != nil {
-		return domain.GroupByResponse{}, err
+		return domain.AggregateResponse{}, err
 	}
 
-	var resp domain.GroupByResponse
+	var resp domain.AggregateResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return domain.GroupByResponse{}, fmt.Errorf("sn change requests: parse group-by response: %w", err)
+		return domain.AggregateResponse{}, fmt.Errorf("sn change requests: parse aggregate response: %w", err)
+	}
+	// "assignmentGroup" is the only ID-valued field in
+	// validChangeRequestAggregateField; SN returns its bucket keys as raw
+	// sys_ids, so convert them to this platform's UUIDs before returning.
+	// "state" is a plain enum and is left as-is.
+	if req.GroupBy == "assignmentGroup" {
+		for i := range resp.Groups {
+			resp.Groups[i].Key = sysidToUUID(resp.Groups[i].Key)
+		}
 	}
 	return resp, nil
 }

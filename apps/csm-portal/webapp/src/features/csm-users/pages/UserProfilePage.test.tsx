@@ -251,6 +251,38 @@ describe("UserProfilePage", () => {
     expect(screen.queryByText("Has access", { selector: ".MuiChip-label" })).not.toBeInTheDocument();
   });
 
+  // Same two-causes distinction the project contacts tab makes: "No access"
+  // on its own does not say what to fix.
+  it("names both addresses when a row is linked but invited under a different address", () => {
+    mockQueryResult({
+      data: {
+        ...BLOCKED_EXTERNAL_USER,
+        projectAccess: [
+          {
+            projectId: "proj-4",
+            projectName: "Query Platform",
+            projectKey: "QUERYPLAT",
+            contactEmail: "someone.else@example.com",
+            contactRecordPresent: true,
+            contactRecordEmail: "john.smith@example.com",
+            registrationState: "invited",
+            grantsCaseAccess: false,
+          },
+        ],
+      },
+    });
+    renderPage();
+    expect(screen.getByText("No access", { selector: ".MuiChip-label" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Invited as someone\.else@example\.com but linked to a contact whose own address is john\.smith@example\.com/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No contact record is linked to this project/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders 'No project access records found' rather than hiding the card for an external user with none", () => {
     mockQueryResult({ data: { ...BLOCKED_EXTERNAL_USER, projectAccess: [] } });
     renderPage();

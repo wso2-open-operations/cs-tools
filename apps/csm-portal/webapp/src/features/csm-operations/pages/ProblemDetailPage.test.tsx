@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeProblemDetail } from "@api/backend/types";
@@ -23,6 +23,25 @@ import type { BeProblemDetail } from "@api/backend/types";
 const navigateMock = vi.fn();
 const useGetProblemMock = vi.fn();
 const useLocationMock = vi.fn<() => { state: { from?: string } | null }>(() => ({ state: null }));
+const patchMutateMock = vi.fn();
+const showErrorMock = vi.fn();
+const editProblemDialogMock = vi.fn();
+const problemFixNotesDialogMock = vi.fn();
+let patchIsPending = false;
+
+// The backend client reads runtime config at module load, which isn't
+// present under vitest. The page imports `BackendApiError` from it directly,
+// so stub the module with a real class (so `instanceof` still works) — same
+// approach as CsmIncidentDetailPage.test.tsx / CsmChangeRequestDetailPage.test.tsx.
+vi.mock("@api/backend/client", () => ({
+  BackendApiError: class BackendApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
+}));
 
 vi.mock("react-router", () => ({
   useParams: () => ({ id: "prb-1" }),
@@ -31,8 +50,33 @@ vi.mock("react-router", () => ({
 vi.mock("@hooks/useNavTransition", () => ({
   useNavTransition: () => navigateMock,
 }));
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({
+  useErrorBanner: () => ({ showError: showErrorMock }),
+}));
 vi.mock("@features/csm-operations/api/useGetProblem", () => ({
   useGetProblem: () => useGetProblemMock(),
+}));
+vi.mock("@features/csm-operations/api/usePatchProblem", () => ({
+  usePatchProblem: () => ({
+    mutate: patchMutateMock,
+    isPending: patchIsPending,
+    isError: false,
+    error: null,
+  }),
+}));
+// Exercised in isolation by their own test files; here we only assert this
+// page opens them and wires the expected props.
+vi.mock("@features/csm-operations/components/EditProblemDialog", () => ({
+  default: (props: unknown) => {
+    editProblemDialogMock(props);
+    return null;
+  },
+}));
+vi.mock("@features/csm-operations/components/ProblemFixNotesDialog", () => ({
+  default: (props: unknown) => {
+    problemFixNotesDialogMock(props);
+    return null;
+  },
 }));
 
 // Imported after the mocks above so the module picks them up.
@@ -77,6 +121,14 @@ function mockQueryResult(
 }
 
 describe("ProblemDetailPage", () => {
+  beforeEach(() => {
+    patchMutateMock.mockReset();
+    showErrorMock.mockReset();
+    editProblemDialogMock.mockReset();
+    problemFixNotesDialogMock.mockReset();
+    patchIsPending = false;
+  });
+
   it("renders a loading skeleton while the query is pending", () => {
     mockQueryResult({ isLoading: true });
     const { container } = render(<ProblemDetailPage />);
@@ -154,7 +206,7 @@ describe("ProblemDetailPage", () => {
     useLocationMock.mockReturnValue({ state: null });
     mockQueryResult({ data: BASE_PROBLEM });
     render(<ProblemDetailPage />);
-    screen.getByRole("button", { name: /back to problems/i }).click();
+    screen.getByRole("button", { name: "Back" }).click();
     expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems");
   });
 
@@ -162,7 +214,7 @@ describe("ProblemDetailPage", () => {
     useLocationMock.mockReturnValue({ state: { from: "/dashboard" } });
     mockQueryResult({ data: BASE_PROBLEM });
     render(<ProblemDetailPage />);
-    screen.getByRole("button", { name: /back to problems/i }).click();
+    screen.getByRole("button", { name: "Back" }).click();
     expect(navigateMock).toHaveBeenCalledWith("/dashboard");
   });
 
@@ -172,7 +224,52 @@ describe("ProblemDetailPage", () => {
     });
     mockQueryResult({ data: BASE_PROBLEM });
     render(<ProblemDetailPage />);
-    screen.getByRole("button", { name: /back to problems/i }).click();
+    screen.getByRole("button", { name: "Back" }).click();
     expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems&state=closed");
+  });
+
+  it("shows a transition action button for a New problem (assess) and PATCHes with { transition } on click", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "NEW" } });
+    render(<ProblemDetailPage />);
+    const btn = screen.getByRole("button", { name: /Move to Assess/i });
+    fireEvent.click(btn);
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "prb-1", patch: { transition: "assess" } },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("opens the optional fix-notes dialog instead of PATCHing directly for the fix transition", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "ROOT_CAUSE_ANALYSIS" } });
+    render(<ProblemDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Move to Fix In Progress/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    expect(problemFixNotesDialogMock).toHaveBeenCalled();
+  });
+
+  it("renders no transition action button for a Closed (terminal) problem", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "CLOSED" } });
+    render(<ProblemDetailPage />);
+    expect(screen.queryByRole("button", { name: /Move to/i })).not.toBeInTheDocument();
+  });
+
+  it("opens EditProblemDialog with the current problem when Edit is clicked", () => {
+    mockQueryResult({ data: BASE_PROBLEM });
+    render(<ProblemDetailPage />);
+    expect(editProblemDialogMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(editProblemDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ problem: BASE_PROBLEM, isSaving: false }),
+    );
+  });
+
+  it("shows an error banner message when a transition PATCH fails with a caller-actionable status", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "NEW" } });
+    patchMutateMock.mockImplementation((_input, opts) => {
+      opts?.onError?.(new Error("State transition rejected"));
+    });
+    render(<ProblemDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Move to Assess/i }));
+    expect(showErrorMock).toHaveBeenCalled();
   });
 });

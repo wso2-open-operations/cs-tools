@@ -36,6 +36,7 @@ import QueryErrorState from "@components/QueryErrorState";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProblems } from "@features/csm-operations/api/useSearchProblems";
 import {
+  buildProblemSearchFilters,
   DEFAULT_PROBLEM_FILTERS,
   problemStateColor,
   problemStateLabel,
@@ -63,13 +64,10 @@ export default function ProblemsTab(): JSX.Element {
 
   const payload = useMemo(
     () => ({
-      filters: {
-        ...(debouncedSearch.length > 0 && { searchQuery: debouncedSearch }),
-        ...(filters.states.length > 0 && { states: filters.states }),
-      },
+      filters: buildProblemSearchFilters(filters, debouncedSearch),
       pagination: { offset: page * rowsPerPage, limit: rowsPerPage },
     }),
-    [debouncedSearch, filters.states, page, rowsPerPage],
+    [filters, debouncedSearch, page, rowsPerPage],
   );
 
   const { data, isLoading, isError, error, isFetching, refetch, dataUpdatedAt } =

@@ -67,10 +67,20 @@ function deriveAccessStatus(c: BeProjectContact): AccessStatus {
     if (c.grantsCaseAccess) {
       return { label: "Has access", color: "success" };
     }
+    // Two distinct faults behind one verdict, and which one it is changes
+    // what you do about it: no contact record means the invite never
+    // completed, so chase the onboarding; a linked record whose own address
+    // differs means the row names the wrong address, so fix the row. When
+    // `customerContactPresent` is absent (a backend that has one field but
+    // not the other), the missing-record reading is the safer default — it is
+    // both the commoner fault and the one that doesn't accuse a healthy row
+    // of naming the wrong person.
     return {
       label: "No access",
       color: "error",
-      reason: "No linked contact record — this person can't see this project's cases.",
+      reason: c.customerContactPresent
+        ? "Invited under a different address than its linked contact's own — this project, and every case on it, is invisible to both of them."
+        : "No linked contact record — the invite never completed, so this person can't see this project's cases.",
     };
   }
   if (!c.id) {
@@ -100,9 +110,10 @@ interface ProjectContactsTabProps {
  * record at all, or a linked contact whose email doesn't match what this row
  * was invited under), and the reason line says which.
  *
- * A real project can return dozens of these rows with `name` *and* `email`
- * both empty (no natural identifier at all, not even an email to show) — the
- * explanatory line is always rendered inline, not tucked behind a hover
+ * A real project can return dozens of failed-invite rows. Those have no
+ * `name` (it is only ever known from the contact record) but do carry the
+ * address they were invited under as `email`, so they are identifiable — and
+ * the explanatory line is always rendered inline, not tucked behind a hover
  * tooltip, so scanning the table surfaces every "can't see their cases" row
  * without hovering each one.
  */
@@ -166,7 +177,7 @@ export default function ProjectContactsTab({
                   // email is the closest thing to a natural key, and index
                   // disambiguates the rare case of a duplicate/blank email.
                   <TableRow key={c.id ?? `${c.email ?? "unknown"}-${i}`} hover>
-                    <TableCell>
+                    <TableCell sx={{ maxWidth: 280 }}>
                       <UserRefLink name={name} email={c.email} userId={c.id ?? null} />
                     </TableCell>
                     <TableCell sx={{ wordBreak: "break-all" }}>{c.email || "—"}</TableCell>

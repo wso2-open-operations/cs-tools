@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -1177,7 +1177,7 @@ describe("DashboardWidgetTile", () => {
     expect(screen.getByText("slice:Others:4")).toBeInTheDocument();
     expect(postMock).toHaveBeenCalledTimes(1);
     expect(postMock).toHaveBeenCalledWith(
-      "/cases/group-by",
+      "/cases/aggregate",
       {
         filters: { filters: [{ field: "state", op: "in", values: ["open"] }] },
         groupBy: "severity",
@@ -1435,7 +1435,53 @@ describe("DashboardWidgetTile", () => {
     expect(tile.contains(legendRow)).toBe(false);
   });
 
-  it("does not render a per-widget refresh button on any shape", async () => {
+  it("shape count: renders a per-widget refresh button that invalidates only this widget's own queries without navigating", async () => {
+    postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <DashboardWidgetTile
+            widgetId="my_patches"
+            displayName="My Patches"
+            resourceType="case"
+            shape="count"
+            filters={{}}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
+    const refreshButton = screen.getByRole("button", { name: "Refresh My Patches" });
+    expect(refreshButton).toBeInTheDocument();
+
+    fireEvent.click(refreshButton);
+
+    expect(invalidateSpy).toHaveBeenCalled();
+    const predicate = invalidateSpy.mock.calls[0]?.[0]?.predicate;
+    expect(typeof predicate).toBe("function");
+    // Matches only this widget's own count query key, not some other
+    // widget's — the whole point of scoping the refresh to a single tile.
+    expect(
+      predicate?.({
+        queryKey: ["csm-dashboard-widget-data", "my_patches", "case", {}, undefined, undefined],
+      } as never),
+    ).toBe(true);
+    expect(
+      predicate?.({
+        queryKey: ["csm-dashboard-widget-data", "some_other_widget", "case", {}, undefined, undefined],
+      } as never),
+    ).toBe(false);
+
+    // Must not also trigger the tile's own whole-card navigation.
+    expect(screen.queryByTestId("location-probe")).not.toBeInTheDocument();
+  });
+
+  it("shape count: folds 'Last refreshed' into the refresh button's tooltip (no room for an inline label on this shape), absent before click and present after", async () => {
     postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
 
     renderWithClient(
@@ -1449,7 +1495,164 @@ describe("DashboardWidgetTile", () => {
     );
 
     await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: /Refresh/i })).not.toBeInTheDocument();
+    const refreshButton = screen.getByRole("button", { name: "Refresh My Patches" });
+
+    // Not shown from the tile's own initial data load — only after a manual
+    // refresh click (matches the section-level RefreshButton's own gating).
+    // Count-shape tiles are too narrow for an inline label, so this never
+    // renders as visible text on the tile itself either before or after the
+    // click — only ever inside the tooltip.
+    expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
+    fireEvent.mouseOver(refreshButton);
+    await waitFor(() => expect(screen.getByRole("tooltip")).toBeInTheDocument());
+    // Deliberately generic — no widget name (it's already visible next to
+    // the tile's own title; including it made the combined tooltip too
+    // long). The `aria-label` above still carries the widget name for
+    // screen-reader users who need to tell apart multiple refresh buttons.
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Refresh this widget");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent(/Last refreshed/);
+    fireEvent.mouseOut(refreshButton);
+    await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(2));
+
+    expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
+    fireEvent.mouseOver(refreshButton);
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/Last refreshed.*(just now|ago)/),
+    );
+  });
+
+  it("shape list: renders a per-widget refresh button", async () => {
+    postMock.mockResolvedValue({
+      total: 2,
+      cases: [{ id: "11111111-1111-1111-1111-111111111111", number: "CS-1", subject: "Disk full", state: "open" }],
+      limit: 5,
+      offset: 0,
+      hasMore: false,
+    });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_critical_open"
+        displayName="My Critical & High Cases"
+        resourceType="case"
+        shape="list"
+        filters={{}}
+        listLimit={5}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("CS-1")).toBeInTheDocument());
+    expect(
+      screen.getByRole("button", { name: "Refresh My Critical & High Cases" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shape list: shows the 'Customise columns' button next to refresh (same corner), not in a separate row, and toggling a column there updates the table live", async () => {
+    // Reported live: the column customizer (added to case-family list-shape
+    // tiles by CaseWidgetList) rendered in its own row above the table,
+    // separate from the tile's existing refresh button in the top-right
+    // corner — read as two unrelated controls. CaseWidgetList now hands its
+    // button up to the tile via `onColumnCustomizerChange` so both sit in
+    // the same corner; this also guards the single-source-of-truth wiring
+    // behind that (a second, independent `useColumnPreferences` instance
+    // would let the header's button drift out of sync with the table).
+    postMock.mockResolvedValue({
+      total: 2,
+      cases: [
+        {
+          id: "11111111-1111-1111-1111-111111111111",
+          number: "CS-1",
+          subject: "Disk full",
+          state: "open",
+          createdBy: { id: null, email: "jane.doe@example.test", name: "Jane Doe" },
+        },
+      ],
+      limit: 5,
+      offset: 0,
+      hasMore: false,
+    });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_critical_open"
+        displayName="My Critical & High Cases"
+        resourceType="case"
+        shape="list"
+        filters={{}}
+        listLimit={5}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("CS-1")).toBeInTheDocument());
+
+    const actionsCorner = screen.getByTestId("widget-tile-actions");
+    const refreshButton = within(actionsCorner).getByRole("button", {
+      name: "Refresh My Critical & High Cases",
+    });
+    const customizerButton = within(actionsCorner).getByRole("button", {
+      name: "Customise columns",
+    });
+    expect(refreshButton).toBeInTheDocument();
+    expect(customizerButton).toBeInTheDocument();
+
+    // Toggling "Reporter" (off by default) from the hoisted header button
+    // must update the actual table, proving both share one live
+    // `useColumnPreferences` instance rather than two independently-seeded
+    // ones (which would leave the header's button out of sync with what
+    // the table actually shows).
+    fireEvent.click(customizerButton);
+    const picker = screen.getByRole("list", { name: "Customise columns" });
+    expect(screen.queryByText("Jane Doe")).not.toBeInTheDocument();
+    fireEvent.click(within(picker).getByText("Reporter"));
+    await waitFor(() => expect(screen.getByText("Jane Doe")).toBeInTheDocument());
+  });
+
+  it("shape pie: renders a per-widget refresh button that does not trigger the tile's own click-through", async () => {
+    postMock.mockResolvedValue({ total: 2 });
+
+    renderWithRoutes(
+      <DashboardWidgetTile
+        widgetId="cases-by-severity"
+        displayName="Cases by severity"
+        resourceType="case"
+        shape="pie"
+        filters={{}}
+        slices={[
+          {
+            label: "Critical",
+            query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+          },
+        ]}
+      />,
+      "/cases",
+    );
+
+    await waitFor(() => expect(screen.getByText("slice:Critical:2")).toBeInTheDocument());
+    const refreshButton = screen.getByRole("button", { name: "Refresh Cases by severity" });
+    fireEvent.click(refreshButton);
+
+    expect(screen.queryByTestId("location-probe")).not.toBeInTheDocument();
+  });
+
+  it("shape bar: renders a per-widget refresh button", async () => {
+    postMock.mockResolvedValue({ total: 0 });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="cases_by_severity"
+        displayName="Open Cases by Severity"
+        resourceType="case"
+        shape="bar"
+        filters={{}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Refresh Open Cases by Severity" }),
+    ).toBeInTheDocument();
   });
 
   it("shape count: shows an info icon with the widget's description in an accessible tooltip, only when a description is set", async () => {
@@ -1740,5 +1943,25 @@ describe("DashboardWidgetTile", () => {
     expect(screen.getByText("Mystery Widget")).toBeInTheDocument();
     expect(screen.getByText("Unsupported widget type.")).toBeInTheDocument();
     expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("shape count: hides its own refresh button when hideRefreshButton is set (avoids covering the dashboard builder's Edit/Remove overlay)", async () => {
+    postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_patches"
+        displayName="My Patches"
+        resourceType="case"
+        shape="count"
+        filters={{}}
+        hideRefreshButton
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
+    expect(
+      screen.queryByRole("button", { name: "Refresh My Patches" }),
+    ).not.toBeInTheDocument();
   });
 });

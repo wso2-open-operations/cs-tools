@@ -21,18 +21,13 @@ import {
   AUTH_NOT_READY_ERROR_MESSAGE,
 } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
+import { trySilentSignInOnce } from "@hooks/silentSignIn";
 
 // Shared across every caller's hook instance. Each useAuthTokens() call
 // creates its own closures, so this lives at module scope to ensure only ONE
 // full sign-in redirect is triggered even when many concurrent callers
 // (across different hook instances) discover a dead refresh token at once.
 let signInInFlight = false;
-
-// Shared across every caller's hook instance for the same reason as
-// signInInFlight: many concurrent callers can discover a dead refresh token
-// at once, and they should all await the SAME hidden-iframe silent sign-in
-// attempt rather than each opening their own.
-let silentSignInInFlight: Promise<boolean> | null = null;
 
 // Only the Asgardeo "unauthenticated" code means the token was expired/missing
 // when the call ran (e.g. the refresh token itself has expired, so the SDK's
@@ -83,13 +78,14 @@ export interface AuthTokens {
  * caller to just retry forever against a refresh token that's actually
  * dead.
  *
- * useAuthApiClient.ts is this hook's primary consumer (wrapping the result
- * into a fetch call), but anything else that needs raw tokens outside a
- * fetch — e.g. useCaseActivityStream's EventSource headers, which can't be
- * refreshed via fetch's own Authorization-header path since headers are
- * fixed at EventSource construction time — should go through this too,
- * rather than calling useAsgardeo() directly and reimplementing (or
- * omitting) the recovery dance.
+ * useCaseActivityStream is this hook's consumer today: its EventSource headers
+ * are fixed at construction time, so they cannot be refreshed through fetch's
+ * own Authorization-header path. useAuthApiClient no longer uses this hook —
+ * it resolves tokens itself — so the two coordinate through the shared
+ * `trySilentSignInOnce` rather than by sharing this code. Anything else
+ * needing raw tokens outside a fetch should come through here rather than
+ * calling useAsgardeo() directly and reimplementing (or omitting) the
+ * recovery dance.
  */
 export function useAuthTokens() {
   const { getAccessToken, getIdToken, signIn, signInSilently } = useAsgardeo();
@@ -128,23 +124,20 @@ export function useAuthTokens() {
   // dialog), try a silent, hidden-iframe re-authentication. If the user's IdP
   // session (SSO cookie) is still alive, this mints a fresh token without any
   // visible navigation; only a genuinely dead IdP session falls through to
-  // `redirectToSignIn`. Single-flighted for the same reason as sign-in above.
+  // `redirectToSignIn`.
+  //
+  // Single-flighted via the shared `trySilentSignInOnce`, NOT a guard local to
+  // this module. A dead refresh token is typically noticed by several callers
+  // at once — the SSE stream through this hook, and any REST fetch through
+  // useAuthApiClient — and a module-local guard cannot see the other module's
+  // attempt, so each would open its own hidden iframe. That is exactly the
+  // uncoordinated double re-auth `silentSignIn.ts` exists to prevent, and it
+  // can drop an in-flight request such as a comment POST.
   const trySilentSignIn = useCallback((): Promise<boolean> => {
-    if (!silentSignInInFlight) {
-      silentSignInInFlight = Promise.resolve(signInSilentlyRef.current())
-        .then((result) => Boolean(result))
-        .catch((error) => {
-          logger.debug(
-            "[auth] silent sign-in failed",
-            error instanceof Error ? error.message : "Unknown error",
-          );
-          return false;
-        })
-        .finally(() => {
-          silentSignInInFlight = null;
-        });
-    }
-    return silentSignInInFlight;
+    return trySilentSignInOnce(
+      () => signInSilentlyRef.current(),
+      (message) => logger.debug("[auth] silent sign-in failed", message),
+    );
   }, [logger]);
 
   const attemptGetTokens = useCallback(async (): Promise<AuthTokens> => {

@@ -116,12 +116,19 @@ export default function CreateDeployedProductDialog({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           {/* Product picker */}
           <FormControl size="small" fullWidth required error={productId === "" && tps.length > 0}>
-            <InputLabel id="create-dp-product-label">Product</InputLabel>
+            <InputLabel
+              id="create-dp-product-label"
+              shrink={productId !== ""}
+              sx={{ top: "0px !important" }}
+            >
+              Product
+            </InputLabel>
             <Select
               labelId="create-dp-product-label"
               label="Product"
               value={productId}
               onChange={(e) => handleProductChange(e.target.value as string)}
+              notched={productId !== ""}
               startAdornment={
                 productsLoading ? <CircularProgress size={16} sx={{ mr: 1 }} /> : null
               }
@@ -145,12 +152,19 @@ export default function CreateDeployedProductDialog({
             disabled={!productId}
             error={productId !== "" && versionId === "" && description.length > 0}
           >
-            <InputLabel id="create-dp-version-label">Version</InputLabel>
+            <InputLabel
+              id="create-dp-version-label"
+              shrink={versionId !== ""}
+              sx={{ top: "0px !important" }}
+            >
+              Version
+            </InputLabel>
             <Select
               labelId="create-dp-version-label"
               label="Version"
               value={versionId}
               onChange={(e) => setVersionId(e.target.value as string)}
+              notched={versionId !== ""}
               startAdornment={
                 versionsLoading ? <CircularProgress size={16} sx={{ mr: 1 }} /> : null
               }

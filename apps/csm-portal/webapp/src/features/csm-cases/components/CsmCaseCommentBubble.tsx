@@ -27,6 +27,7 @@ import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
 import { replaceCallRequestLinks } from "@features/csm-cases/utils/callRequestLinks";
+import { replaceSnLinks, type SnLinkType } from "@features/csm-cases/utils/snLinkRegistry";
 import {
   convertCodeTagsToHtml,
   hasDisplayableContent,
@@ -47,6 +48,8 @@ interface CsmCaseCommentBubbleProps {
   onImageClick?: (src: string, alt?: string) => void;
   /** Opens the call-request detail popup for a call-request link embedded in the comment body. */
   onCallRequestClick?: (sysId: string) => void;
+  /** Opens the alert/smart-alert detail popup for an alert-reference marker embedded in the comment body. */
+  onSnLinkClick?: (type: SnLinkType, id: string) => void;
   /** Drops the author avatar and prefixes the name with "Commented by "
    * instead — the avatar column eats a disproportionate share of a narrow
    * container's width (e.g. `CasePreviewContent`'s ~420px drawer); the full
@@ -88,6 +91,7 @@ export default function CsmCaseCommentBubble({
   comment,
   onImageClick,
   onCallRequestClick,
+  onSnLinkClick,
   compact = false,
 }: CsmCaseCommentBubbleProps): JSX.Element | null {
   const theme = useTheme();
@@ -120,15 +124,17 @@ export default function CsmCaseCommentBubble({
   );
   const { resolvedHtml, isLoading: isImagesLoading } =
     useResolvedInlineImageHtml(safeHtml);
-  // Both run last, on the already-resolved/sanitized HTML — no re-sanitize.
-  // `replaceCallRequestLinks` must run before `linkifyBareUrls`: it swaps the
-  // bare ServiceNow call-request URL for our own `<span data-call-request-…>`
-  // marker, and `linkifyBareUrls` would otherwise linkify that same bare URL
-  // into a plain external `<a>` first. Its output is generated entirely by us
-  // from a regex-validated hex sysid (never raw comment text passed through
+  // All three run last, on the already-resolved/sanitized HTML — no
+  // re-sanitize. `replaceCallRequestLinks`/`replaceSnLinks` must both run
+  // before `linkifyBareUrls`: they swap their respective bare backing-store
+  // URLs for our own `<span data-…>` markers, and `linkifyBareUrls` would
+  // otherwise linkify those same bare URLs into plain external `<a>`s first.
+  // The order between the two marker passes doesn't matter — they match
+  // disjoint URL patterns. Their output is generated entirely by us from a
+  // regex-validated hex sysid (never raw comment text passed through
   // unescaped), so running after sanitization is safe.
   const renderHtml = useMemo(
-    () => linkifyBareUrls(replaceCallRequestLinks(resolvedHtml)),
+    () => linkifyBareUrls(replaceSnLinks(replaceCallRequestLinks(resolvedHtml))),
     [resolvedHtml],
   );
 
@@ -171,9 +177,19 @@ export default function CsmCaseCommentBubble({
           e.preventDefault();
           onCallRequestClick(sysId);
         }
+        return;
+      }
+      const snLinkMarker = target.closest?.("[data-sn-link-type]");
+      if (snLinkMarker && onSnLinkClick) {
+        const type = snLinkMarker.getAttribute("data-sn-link-type");
+        const id = snLinkMarker.getAttribute("data-sn-link-id");
+        if ((type === "alert" || type === "smartAlert") && id) {
+          e.preventDefault();
+          onSnLinkClick(type, id);
+        }
       }
     },
-    [onImageClick, onCallRequestClick],
+    [onImageClick, onCallRequestClick, onSnLinkClick],
   );
 
   const handleKeyDown = useCallback(
@@ -197,11 +213,21 @@ export default function CsmCaseCommentBubble({
           if (sysId) {
             e.preventDefault();
             onCallRequestClick(sysId);
+            return;
+          }
+        }
+        const snLinkMarker = target.closest?.("[data-sn-link-type]");
+        if (snLinkMarker && onSnLinkClick) {
+          const type = snLinkMarker.getAttribute("data-sn-link-type");
+          const id = snLinkMarker.getAttribute("data-sn-link-id");
+          if ((type === "alert" || type === "smartAlert") && id) {
+            e.preventDefault();
+            onSnLinkClick(type, id);
           }
         }
       }
     },
-    [onImageClick, onCallRequestClick],
+    [onImageClick, onCallRequestClick, onSnLinkClick],
   );
 
   useEffect(() => {
@@ -313,6 +339,11 @@ export default function CsmCaseCommentBubble({
           display: "flex",
           flexDirection: "column",
           gap: 0.75,
+          // The default outlined-Paper divider is near-invisible against the
+          // page background in some theme presets; an elevated surface +
+          // stronger border keeps entries visually distinct in both themes.
+          bgcolor: "background.paper",
+          borderColor: "action.disabled",
           ...(isInternal && {
             bgcolor: "action.hover",
             borderColor: "divider",
@@ -322,7 +353,7 @@ export default function CsmCaseCommentBubble({
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-          <Typography variant="subtitle2">
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
             {compact && "Commented by "}
             <UserRefLink
               name={comment.authorName}
@@ -330,7 +361,7 @@ export default function CsmCaseCommentBubble({
               userId={comment.authorUser?.id}
             />
           </Typography>
-          {comment.authorRole !== "wso2_engineer" && (
+          {!comment.synthetic && comment.authorRole !== "wso2_engineer" && (
             <Chip
               size="small"
               label={ROLE_LABEL[comment.authorRole]}

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
@@ -98,5 +98,44 @@ describe("useDashboard", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe("boom");
+  });
+
+  it("does not auto-refetch when refetchIntervalMs is omitted — the behavior every existing caller had before this parameter existed", async () => {
+    getMock.mockResolvedValue({ id: "agents_pilot", displayName: "x", isDefault: true, isTeamBased: false, widgets: [] });
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useDashboard("agents_pilot"), { wrapper });
+      await vi.waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(getMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+      expect(getMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auto-refetches on refetchIntervalMs — the CS Overview dashboard's own 60s call", async () => {
+    getMock.mockResolvedValue({ id: "cs-overview", displayName: "x", isDefault: false, isTeamBased: false, widgets: [] });
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useDashboard("cs-overview", 60_000), { wrapper });
+      await vi.waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(getMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(getMock).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(getMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

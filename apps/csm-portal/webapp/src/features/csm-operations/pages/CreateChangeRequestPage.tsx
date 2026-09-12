@@ -45,9 +45,6 @@ import { usePostChangeRequest } from "@features/csm-operations/api/usePostChange
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useSearchGroups } from "@api/useSearchGroups";
-import { useSearchItServices } from "@api/useSearchItServices";
-import { useSearchServiceOfferings } from "@api/useSearchServiceOfferings";
-import { useSearchConfigurationItems } from "@api/useSearchConfigurationItems";
 import { useSearchUsersByName } from "@api/useSearchUsersByName";
 import { useSearchServiceRequestsForSelect } from "@features/csm-operations/api/useSearchServiceRequestsForSelect";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
@@ -58,18 +55,13 @@ import {
 } from "@features/csm-operations/utils/changeRequests";
 import type { CreateChangeRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
 import type {
-  BeChangeRequestCategory,
   BeChangeRequestImpact,
   BeChangeRequestPriority,
-  BeChangeRequestRisk,
   BeChangeRequestState,
   BeChangeRequestType,
   BeCaseSearchView,
   BeCreateChangeRequestPayload,
-  BeConfigurationItem,
   BeGroup,
-  BeItService,
-  BeServiceOffering,
   BeUser,
 } from "@api/backend/types";
 
@@ -94,22 +86,6 @@ const TYPE_OPTIONS: Array<{ value: BeChangeRequestType; label: string }> = [
   { value: "azure", label: "Azure" },
 ];
 
-const CATEGORY_OPTIONS: Array<{ value: BeChangeRequestCategory; label: string }> = [
-  { value: "hardware", label: "Hardware" },
-  { value: "software", label: "Software" },
-  { value: "service", label: "Service" },
-  { value: "system_software", label: "System software" },
-  { value: "applications_software", label: "Applications software" },
-  { value: "network", label: "Network" },
-  { value: "telecom", label: "Telecom" },
-  { value: "documentation", label: "Documentation" },
-  { value: "regular_release_cloud", label: "Regular release (cloud)" },
-  { value: "hotfix_release_cloud", label: "Hotfix release (cloud)" },
-  { value: "devops", label: "DevOps" },
-  { value: "cloud_computing", label: "Cloud computing" },
-  { value: "other", label: "Other" },
-];
-
 const IMPACT_OPTIONS: Array<{ value: BeChangeRequestImpact; label: string }> = [
   { value: "high", label: "High" },
   { value: "medium", label: "Medium" },
@@ -118,12 +94,6 @@ const IMPACT_OPTIONS: Array<{ value: BeChangeRequestImpact; label: string }> = [
 
 const PRIORITY_OPTIONS: Array<{ value: BeChangeRequestPriority; label: string }> = [
   { value: "critical", label: "Critical" },
-  { value: "high", label: "High" },
-  { value: "moderate", label: "Moderate" },
-  { value: "low", label: "Low" },
-];
-
-const RISK_OPTIONS: Array<{ value: BeChangeRequestRisk; label: string }> = [
   { value: "high", label: "High" },
   { value: "moderate", label: "Moderate" },
   { value: "low", label: "Low" },
@@ -146,16 +116,6 @@ const STATE_OPTIONS: Array<{ value: BeChangeRequestState; label: string }> =
 /** Display label for a user option: full name, else email, else id. */
 function userLabel(u: BeUser): string {
   return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || u.id || "";
-}
-
-/** Display label for an IT service option: name, else id. */
-function itServiceLabel(s: BeItService): string {
-  return s.name ?? s.id;
-}
-
-/** Display label for a configuration item option: name, else id. */
-function configurationItemLabel(ci: BeConfigurationItem): string {
-  return ci.name ?? ci.id;
 }
 
 /**
@@ -228,7 +188,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
   //     originating service request (and its project, for scoping the
   //     picker's search) so the "Originating service request" field below
   //     starts pre-selected rather than blank.
-  const locationState = useLocation().state as
+  const location = useLocation();
+  const locationState = location.state as
     | CloneChangeRequestNavState
     | CreateChangeRequestFromCaseNavState
     | undefined;
@@ -237,23 +198,31 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const fromCaseState =
     locationState && "caseId" in locationState ? locationState : undefined;
 
+  // Set when opened from a list/detail page's own "Create change request"
+  // action with `state: { from: ... }` (same convention as the 4 case-type
+  // create pages), so Back/Cancel return there instead of the hardcoded
+  // change-requests tab, and the newly created change request's own Back
+  // button (reading this same convention) returns there too.
+  const backState = location.state as { from?: string } | undefined;
+  const backTarget = backState?.from ?? OPERATIONS_CHANGE_REQUESTS_PATH;
+
   // Slice on seed as well as on change: a source record at or beyond the cap
   // would otherwise load untrimmed, show a negative characters-left count, and
   // submit over-length if the user never edits the field.
   const [subject, setSubject] = useState((cloneState?.subject ?? "").slice(0, SUBJECT_MAX));
   // Pre-selected to match the legacy ServiceNow form's own defaults, rather
   // than leaving every dropdown blank — most change requests are Normal
-  // type, Other category, Low impact, Moderate risk. Priority has no default
-  // there either ("-- None --"), so it stays unset here too. A clone
-  // carries over `type`/`impact` from the source record when present;
-  // category/priority/risk have no source value to carry (see
-  // buildCloneChangeRequestNavState), so they keep the same defaults a
-  // from-scratch change request gets.
+  // type, Low impact. Priority has no default there either ("-- None --"),
+  // so it stays unset here too. A clone carries over `type`/`impact` from
+  // the source record when present; priority has no source value to carry
+  // (see buildCloneChangeRequestNavState), so it keeps the same default a
+  // from-scratch change request gets. `category` and `risk` are not
+  // editable here at all — see BeCreateChangeRequestPayload's doc comment:
+  // `category` is 99.9% left at its default on real records and `risk`
+  // isn't a field on the real ServiceNow CR form.
   const [type, setType] = useState<string>(cloneState?.type ?? "normal");
-  const [category, setCategory] = useState<string>("other");
   const [impact, setImpact] = useState<string>(cloneState?.impact ?? "low");
   const [priority, setPriority] = useState<string>(UNSET);
-  const [risk, setRisk] = useState<string>("moderate");
   // Always "new" regardless of the source record's own state/schedule/
   // approval — cloning must never carry an approval or a stale window
   // across into the new change request.
@@ -266,9 +235,6 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const [riskImpactAnalysis, setRiskImpactAnalysis] = useState("");
   const [backoutPlan, setBackoutPlan] = useState("");
   const [testPlan, setTestPlan] = useState(cloneState?.testPlan ?? "");
-  const [serviceId, setServiceId] = useState("");
-  const [serviceOfferingId, setServiceOfferingId] = useState("");
-  const [configurationItemId, setConfigurationItemId] = useState("");
   const [groupId, setGroupId] = useState("");
   const [assignedEngineerId, setAssignedEngineerId] = useState(
     cloneState?.assignedEngineerId ?? "",
@@ -320,10 +286,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
 
     const payload: BeCreateChangeRequestPayload = { subject: subject.trim() };
     if (type) payload.type = type as BeChangeRequestType;
-    if (category) payload.category = category as BeChangeRequestCategory;
     if (impact) payload.impact = impact as BeChangeRequestImpact;
     if (priority) payload.priority = priority as BeChangeRequestPriority;
-    if (risk) payload.risk = risk as BeChangeRequestRisk;
     if (state) payload.state = state as BeChangeRequestState;
     if (plannedStartDate) payload.plannedStartDate = toBackendDateTime(plannedStartDate);
     if (plannedEndDate) payload.plannedEndDate = toBackendDateTime(plannedEndDate);
@@ -338,9 +302,6 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
     if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
     if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
-    if (serviceId.trim()) payload.serviceId = serviceId.trim();
-    if (serviceOfferingId.trim()) payload.serviceOfferingId = serviceOfferingId.trim();
-    if (configurationItemId.trim()) payload.configurationItemId = configurationItemId.trim();
     if (groupId.trim()) payload.groupId = groupId.trim();
     if (assignedEngineerId.trim()) payload.assignedEngineerId = assignedEngineerId.trim();
     if (requestedById.trim()) payload.requestedById = requestedById.trim();
@@ -354,18 +315,25 @@ export default function CreateChangeRequestPage(): JSX.Element {
         // still leaves a valid, created change request — navigate there
         // regardless, but surface the link failure rather than hiding it.
         if (!caseId) {
-          navigate(`/operations/change-requests/${createdId}`);
+          navigate(`/operations/change-requests/${createdId}`, {
+            state: { from: backTarget },
+          });
           return;
         }
         patchChangeRequest.mutate(
           { id: createdId, patch: { caseId } },
           {
-            onSuccess: () => navigate(`/operations/change-requests/${createdId}`),
+            onSuccess: () =>
+              navigate(`/operations/change-requests/${createdId}`, {
+                state: { from: backTarget },
+              }),
             onError: () => {
               showError(
                 "The change request was created, but linking it to the originating service request failed. The change request itself is unaffected; the link is not set.",
               );
-              navigate(`/operations/change-requests/${createdId}`);
+              navigate(`/operations/change-requests/${createdId}`, {
+                state: { from: backTarget },
+              });
             },
           },
         );
@@ -457,10 +425,10 @@ export default function CreateChangeRequestPage(): JSX.Element {
       <Button
         variant="text"
         startIcon={<ArrowLeft size={16} />}
-        onClick={() => navigate(OPERATIONS_CHANGE_REQUESTS_PATH)}
+        onClick={() => navigate(backTarget)}
         sx={{ mb: 1 }}
       >
-        Back to operations
+        Back
       </Button>
       <Typography variant="h5" sx={{ mb: 2 }}>
         New change request
@@ -502,16 +470,10 @@ export default function CreateChangeRequestPage(): JSX.Element {
               {renderSelect("cr-type", "Type", type, setType, TYPE_OPTIONS)}
             </Box>
             <Box sx={{ flex: "1 1 200px" }}>
-              {renderSelect("cr-category", "Category", category, setCategory, CATEGORY_OPTIONS)}
-            </Box>
-            <Box sx={{ flex: "1 1 200px" }}>
               {renderSelect("cr-priority", "Priority", priority, setPriority, PRIORITY_OPTIONS)}
             </Box>
             <Box sx={{ flex: "1 1 200px" }}>
               {renderSelect("cr-impact", "Impact", impact, setImpact, IMPACT_OPTIONS)}
-            </Box>
-            <Box sx={{ flex: "1 1 200px" }}>
-              {renderSelect("cr-risk", "Risk", risk, setRisk, RISK_OPTIONS)}
             </Box>
             <Box sx={{ flex: "1 1 200px" }}>
               {renderSelect("cr-state", "State", state, setState, STATE_OPTIONS)}
@@ -622,52 +584,6 @@ export default function CreateChangeRequestPage(): JSX.Element {
             <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                 <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeItService>
-                    id="cr-service"
-                    label="Service"
-                    placeholder="Search services…"
-                    value={serviceId}
-                    onChange={(next) => {
-                      setServiceId(next);
-                      // A service offering only makes sense under its own
-                      // service — drop it rather than leave a stale pairing.
-                      setServiceOfferingId("");
-                    }}
-                    disabled={isSubmitting}
-                    useSearch={useSearchItServices}
-                    getId={(s) => s.id}
-                    getLabel={itServiceLabel}
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeServiceOffering>
-                    id="cr-service-offering"
-                    label="Service offering"
-                    placeholder="Search service offerings…"
-                    value={serviceOfferingId}
-                    onChange={setServiceOfferingId}
-                    disabled={isSubmitting}
-                    useSearch={useSearchServiceOfferings}
-                    searchExtra={serviceId || undefined}
-                    getId={(o) => o.id}
-                    getLabel={(o) => o.name}
-                    helperText={serviceId ? undefined : "Narrows to a Service once one is picked."}
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeConfigurationItem>
-                    id="cr-configuration-item"
-                    label="Configuration item"
-                    placeholder="Search configuration items…"
-                    value={configurationItemId}
-                    onChange={setConfigurationItemId}
-                    disabled={isSubmitting}
-                    useSearch={useSearchConfigurationItems}
-                    getId={(ci) => ci.id}
-                    getLabel={configurationItemLabel}
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
                   <AsyncEntitySelect<BeGroup>
                     id="cr-group"
                     label="Assignment group"
@@ -749,10 +665,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
         </Box>
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
-          <Button
-            variant="outlined"
-            onClick={() => navigate(OPERATIONS_CHANGE_REQUESTS_PATH)}
-          >
+          <Button variant="outlined" onClick={() => navigate(backTarget)}>
             Cancel
           </Button>
           <Button

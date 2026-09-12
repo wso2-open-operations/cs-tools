@@ -91,8 +91,8 @@ export default function AccountPreviewDrawer({
               <Field label="Updated">
                 {account.updatedOn ? <RelativeTime iso={account.updatedOn} /> : "—"}
               </Field>
-              <Field label="Agent enabled">{account.agentEnabled ? "Yes" : "No"}</Field>
-              <Field label="KB references enabled">{account.kbReferencesEnabled ? "Yes" : "No"}</Field>
+              <Field label="Agent enabled">{account.hasAgent ? "Yes" : "No"}</Field>
+              <Field label="KB references enabled">{account.hasKbReferences ? "Yes" : "No"}</Field>
             </Box>
           </Box>
 

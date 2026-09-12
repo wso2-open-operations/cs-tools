@@ -113,11 +113,18 @@ export default function ResolutionDialog({
         </Typography>
 
         <FormControl fullWidth size="small" required>
-          <InputLabel id="resolution-code-label">Resolution code</InputLabel>
+          <InputLabel
+            id="resolution-code-label"
+            shrink={resolutionCode !== ""}
+            sx={{ top: "0px !important" }}
+          >
+            Resolution code
+          </InputLabel>
           <Select
             labelId="resolution-code-label"
             label="Resolution code"
             value={resolutionCode}
+            notched={resolutionCode !== ""}
             onChange={(e) =>
               setResolutionCode(e.target.value as BeCaseResolutionCode)
             }
@@ -131,11 +138,18 @@ export default function ResolutionDialog({
         </FormControl>
 
         <FormControl fullWidth size="small" required>
-          <InputLabel id="case-cause-label">Cause</InputLabel>
+          <InputLabel
+            id="case-cause-label"
+            shrink={cause !== ""}
+            sx={{ top: "0px !important" }}
+          >
+            Cause
+          </InputLabel>
           <Select
             labelId="case-cause-label"
             label="Cause"
             value={cause}
+            notched={cause !== ""}
             onChange={(e) => setCause(e.target.value as BeCaseCause)}
           >
             {CASE_CAUSES.map((c) => (

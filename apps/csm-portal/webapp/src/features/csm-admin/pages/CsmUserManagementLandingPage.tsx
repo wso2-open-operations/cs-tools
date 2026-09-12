@@ -36,7 +36,15 @@ export default function CsmUserManagementLandingPage(): JSX.Element {
     <Box
       sx={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+        // Fixed at 4 per row from "md" up rather than `auto-fill`, which
+        // packed in as many 200px-min tiles as the viewport allowed (5 on a
+        // typical desktop width) -- inconsistent with every other card grid
+        // in the app, which caps at a specific column count per breakpoint.
+        gridTemplateColumns: {
+          xs: "1fr",
+          sm: "repeat(2, minmax(0, 1fr))",
+          md: "repeat(4, minmax(0, 1fr))",
+        },
         gap: 2,
       }}
     >
