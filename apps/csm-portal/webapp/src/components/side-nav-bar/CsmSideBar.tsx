@@ -30,6 +30,8 @@ import {
   visibleNavSections,
 } from "@config/featureFlags";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { usePermissions } from "@hooks/usePermissions";
+import { isNavNodeAuthorized } from "@layouts/navFilter";
 
 /** Tooltip for a disabled WIP item. Includes the label so the collapsed rail
  *  (which hides the label) still says which feature it is. */
@@ -113,6 +115,7 @@ export default function CsmSideBar({
 }: CsmSideBarProps): JSX.Element {
   const location = useLocation();
   const navigate = useNavTransition();
+  const { roles: userRoles } = usePermissions();
   const activeItem = pickActiveId(location.pathname);
   useEffect(() => {
     // The persisted id is the fallback used for routes with no owning section
@@ -185,7 +188,9 @@ export default function CsmSideBar({
         <Sidebar.Category>
           {/* `hidden` sections are filtered out entirely; `wip` ones stay
               rendered but disabled below. */}
-          {visibleNavSections().map((item) => {
+          {visibleNavSections()
+            .filter((item) => isNavNodeAuthorized(item, userRoles))
+            .map((item) => {
             const itemContent = (
               <Sidebar.Item id={item.id}>
                 <Sidebar.ItemIcon>
@@ -233,7 +238,9 @@ export default function CsmSideBar({
             // children (below) navigate. A section whose config has hidden
             // every one of its children falls through to the plain flat item
             // instead of rendering an entry with nothing to expand.
-            const children = isSubmenuSection(item) ? visibleNavChildren(item) : [];
+            const children = isSubmenuSection(item)
+              ? visibleNavChildren(item).filter((child) => isNavNodeAuthorized(child, userRoles))
+              : [];
             if (children.length > 0) {
               return (
                 <Sidebar.Item id={item.id} key={item.id}>

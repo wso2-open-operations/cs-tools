@@ -95,3 +95,11 @@ export function useCurrentUser(): CurrentUserContextType {
   }
   return ctx;
 }
+
+/**
+ * Access the signed-in user's platform profile, or `undefined` if outside a
+ * {@link CurrentUserProvider} (e.g. during pre-auth shell or isolated unit tests).
+ */
+export function useCurrentUserOptional(): CurrentUserContextType | undefined {
+  return useContext(CurrentUserContext);
+}
