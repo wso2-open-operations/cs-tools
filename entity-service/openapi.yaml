@@ -19,6 +19,48 @@ paths:
         "200":
           description: Ok
 
+  /salesforce/events:
+    post:
+      summary: >-
+        Ingest a Salesforce change event from sales-apex-trigger-subscriber.
+        Fetches the Salesforce Account and upserts the csm-platform account
+        table. Registered only when DATA_SOURCE=postgres and Salesforce
+        config is present.
+      operationId: handleSalesforceEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceEventRequest'
+      responses:
+        "204":
+          description: Event accepted (including ignored non-Account entities and idempotent deletes).
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Salesforce is temporarily unavailable (including Account 404 so the event can be retried).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /event-publish-failures:
     post:
       summary: >-
@@ -11372,6 +11414,21 @@ components:
         hasMore:
           type: boolean
           description: Whether additional pages are available.
+
+    SalesforceEventRequest:
+      type: object
+      required: [eventType, entity, referenceId]
+      properties:
+        eventType:
+          type: string
+          enum: [CREATED, UPDATED, DELETED, RESTORED, UNDEFINED]
+          description: Salesforce change type from the ASB envelope.
+        entity:
+          type: string
+          description: Salesforce sObject name. Non-Account values are ignored with 204.
+        referenceId:
+          type: string
+          description: Salesforce record Id.
 
     ErrorResponse:
       type: object
