@@ -33,6 +33,10 @@ func (f *fakeEntityCaseClient) SearchAttachments(ctx context.Context, req entity
 	return entity.SearchAttachmentsResponse{Total: 3}, nil
 }
 
+func (f *fakeEntityCaseClient) GetCase(_ context.Context, id string) (entity.CaseView, error) {
+	return entity.CaseView{ID: id, ProjectDetails: entity.EntityRef{ID: "proj-1"}}, nil
+}
+
 // TestSearchCaseAttachments_RouteAndQueryParams is an end-to-end check,
 // through a real http.ServeMux registered with the exact pattern main.go
 // uses ("GET /cases/{id}/attachments"), that the {id} path value and the
@@ -97,6 +101,14 @@ func (f *fakeEntityCallRequestClient) SearchCallRequests(ctx context.Context, re
 
 func (f *fakeEntityCallRequestClient) UpdateCallRequest(ctx context.Context, id string, req entity.UpdateCallRequestRequest) (entity.UpdateCallRequestResponse, error) {
 	return entity.UpdateCallRequestResponse{CallRequest: entity.CallRequestUpdated{ID: id}}, nil
+}
+
+// GetCase is a stub for SearchCallRequests' caller-scope check (see
+// caller_scope.go) — these tests never call SetCallerScope, so
+// requireProjectMember treats the nil resolver as unscoped and never
+// inspects this response.
+func (f *fakeEntityCallRequestClient) GetCase(ctx context.Context, id string) (entity.CaseView, error) {
+	return entity.CaseView{}, nil
 }
 
 // TestCreateCallRequest_CaseIDFromPath verifies POST /cases/{caseId}/call-requests

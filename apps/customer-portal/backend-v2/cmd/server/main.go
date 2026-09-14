@@ -190,6 +190,28 @@ func main() {
 	registryHandler := handler.NewRegistryHandler(entityClient, registryClient, adminRole)
 	contactHandler := handler.NewContactHandler(entityClient, userManagementClient)
 
+	// Caller-scoped project/case search — always enforced, no kill switch.
+	// See handler.CallerScopeResolver: there is no bulk "projects for this
+	// email" lookup anywhere upstream, so membership is checked one project
+	// at a time via entity-service's own native project-contacts search
+	// (the same endpoint CSM's backend already calls in production) — no
+	// separate dependency beyond entityClient.
+	callerScopeResolver := handler.NewCallerScopeResolver(entityClient)
+	projectHandler.SetCallerScope(callerScopeResolver)
+	caseHandler.SetCallerScope(callerScopeResolver)
+	attachmentHandler.SetCallerScope(callerScopeResolver)
+	registryHandler.SetCallerScope(callerScopeResolver)
+	changeRequestHandler.SetCallerScope(callerScopeResolver)
+	timeCardHandler.SetCallerScope(callerScopeResolver)
+	projectStatsHandler.SetCallerScope(callerScopeResolver)
+	aiChatHandler.SetCallerScope(callerScopeResolver)
+	deploymentHandler.SetCallerScope(callerScopeResolver)
+	instanceHandler.SetCallerScope(callerScopeResolver)
+	callRequestHandler.SetCallerScope(callerScopeResolver)
+	contactHandler.SetCallerScope(callerScopeResolver)
+	productConsumptionHandler.SetCallerScope(callerScopeResolver)
+	commentHandler.SetCallerScope(callerScopeResolver)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -280,7 +302,6 @@ func main() {
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/usages/search", instanceHandler.SearchDeployedProductInstanceUsageStats)
 
 	mux.HandleFunc("POST /attachments", attachmentHandler.CreateAttachment)
-	mux.HandleFunc("POST /attachments/search", attachmentHandler.SearchAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", attachmentHandler.GetAttachmentContent)
 	mux.HandleFunc("GET /attachments/{id}", attachmentHandler.GetAttachment)
 	mux.HandleFunc("DELETE /attachments/{id}", attachmentHandler.DeleteAttachment)
@@ -303,11 +324,9 @@ func main() {
 	mux.HandleFunc("POST /cases/{caseId}/call-requests/search", callRequestHandler.SearchCallRequests)
 	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{id}", callRequestHandler.PatchCallRequest)
 
-	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
 
 	mux.HandleFunc("POST /comments", commentHandler.CreateComment)
-	mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
 
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)

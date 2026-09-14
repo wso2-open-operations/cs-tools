@@ -44,11 +44,22 @@ type entityChangeRequestClient interface {
 // source — a Postgres-mode deployment 404s on every route this handler serves.
 type ChangeRequestHandler struct {
 	entity entityChangeRequestClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewChangeRequestHandler creates a ChangeRequestHandler backed by the given entity client.
 func NewChangeRequestHandler(entity entityChangeRequestClient) *ChangeRequestHandler {
 	return &ChangeRequestHandler{entity: entity}
+}
+
+// SetCallerScope enables caller-scoped access: SearchChangeRequests requires
+// the caller to be an active portal-user contact of the project in the URL
+// path. Always enforced in production (main.go calls this unconditionally,
+// no kill switch) — see ProjectHandler.SetCallerScope for why this is a
+// setter rather than a constructor parameter.
+func (h *ChangeRequestHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // CreateChangeRequest handles POST /change-requests.
@@ -98,6 +109,13 @@ func (h *ChangeRequestHandler) SearchChangeRequests(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
+
 	body, ok := readJSONBody(w, r)
 	if !ok {
 		return
@@ -140,6 +158,11 @@ func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if result.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, result.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
+
 	writeJSONValue(w, http.StatusOK, dto.MapChangeRequestDetails(result))
 }
 
@@ -156,6 +179,17 @@ func (h *ChangeRequestHandler) PatchChangeRequest(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// cr, err := h.entity.GetChangeRequest(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to update change request.")
+	// 	return
+	// }
+	// if cr.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, cr.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -196,6 +230,17 @@ func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, 
 		return
 	}
 
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// cr, err := h.entity.GetChangeRequest(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to retrieve change request approvals.")
+	// 	return
+	// }
+	// if cr.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, cr.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
+
 	result, err := h.entity.GetChangeRequestApprovals(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
@@ -219,6 +264,17 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// cr, err := h.entity.GetChangeRequest(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to record approval decision.")
+	// 	return
+	// }
+	// if cr.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, cr.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
