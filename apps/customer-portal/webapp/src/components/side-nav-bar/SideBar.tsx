@@ -25,6 +25,7 @@ import useGetMetadata from "@api/useGetMetadata";
 import { APP_SHELL_NAV_ITEMS } from "@features/project-hub/constants/appLayoutConstants";
 import type { AppShellNavItem } from "@features/project-hub/types/appLayout";
 import { getProjectPermissions } from "@utils/permission";
+import useCustomerPermissions from "@hooks/useCustomerPermissions";
 
 // Props for the SideBar component.
 interface SideBarProps {
@@ -62,6 +63,8 @@ export default function SideBar({
   const usageMetricsEnabled =
     portalMetadata?.featureFlags?.usageMetricsEnabled === true;
 
+  const { canAccessSecurityAdmin, isStakeholder } = useCustomerPermissions();
+
   const projectTypeLabel =
     selectedProject?.type?.label ?? projectDetails?.type?.label;
   const isProjectTypeResolved =
@@ -84,6 +87,7 @@ export default function SideBar({
     }
 
     if (
+      isStakeholder ||
       !isProjectTypeResolved ||
       !permissions.hasOperations ||
       (!permissions.hasSR && !permissions.hasCR)
@@ -102,8 +106,9 @@ export default function SideBar({
     }
 
     if (
-      !permissions.hasSecurityReportAnalysis &&
-      !permissions.hasComponentAnalysis
+      !canAccessSecurityAdmin ||
+      (!permissions.hasSecurityReportAnalysis &&
+        !permissions.hasComponentAnalysis)
     ) {
       items = items.filter(
         (item: AppShellNavItem) => item.id !== "security-center",
@@ -113,6 +118,8 @@ export default function SideBar({
     return items;
   }, [
     isProjectTypeResolved,
+    isStakeholder,
+    canAccessSecurityAdmin,
     permissions.hasOperations,
     permissions.hasSR,
     permissions.hasCR,
