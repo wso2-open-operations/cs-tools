@@ -89,6 +89,7 @@ func TestPostgresOnlyRoutesAreAbsentWithoutAPool(t *testing.T) {
 	for _, path := range []string{
 		"/event-publish-failures/search",
 		"/scheduled-tasks/attempts",
+		"/salesforce/events",
 	} {
 		rec := postDirectory(t, router, path, `{}`)
 		if rec.Code != http.StatusNotFound {

@@ -26,6 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesforce"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
@@ -79,6 +80,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 
 	accountRepo := repository.NewAccountRepository(db)
 	accountHandler := handler.NewAccountHandler(service.NewAccountService(accountRepo))
+
+	var salesforceEventHandler *handler.SalesforceEventHandler
+	if db != nil && cfg.DataSource == config.DataSourcePostgres && cfg.SalesforceConfigured() {
+		sfClient := salesforce.New(salesforce.Config{
+			BaseURL:      cfg.SalesforceBaseURL,
+			TokenURL:     cfg.SalesforceTokenURL,
+			ClientID:     cfg.SalesforceClientID,
+			ClientSecret: cfg.SalesforceClientSecret,
+			RefreshToken: cfg.SalesforceRefreshToken,
+		})
+		salesforceEventHandler = handler.NewSalesforceEventHandler(service.NewSalesforceEventService(accountRepo, sfClient))
+	}
 
 	var serviceNowIntegrationServiceClient *integrationservice.Client
 	if cfg.DataSource == config.DataSourceServiceNow {
@@ -320,6 +333,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
+
+	if salesforceEventHandler != nil {
+		mux.HandleFunc("POST /salesforce/events", salesforceEventHandler.HandleEvent)
+	}
 
 	if eventPublishFailureHandler != nil {
 		mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
