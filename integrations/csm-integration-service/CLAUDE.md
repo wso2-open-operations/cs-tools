@@ -114,7 +114,7 @@ handler so every `slog.*Context(r.Context(), …)` call automatically includes
 
 | Package | Upstream | Notes |
 |---------|----------|-------|
-| `entity` | Entity service | Account/Project + Contacts sub-resource, Case (patch + comment create); raw `[]byte` passthrough |
+| `entity` | Entity service | Account/Project + Contacts sub-resource, Case (patch + comment create), Opportunity/Invoice/ProjectOpportunityLink (read-only); raw `[]byte` passthrough |
 
 A new upstream service would get its own package under `internal/`, following the
 same `Config`/`Client`/`NewClient`/`do()` pattern as `internal/entity`.

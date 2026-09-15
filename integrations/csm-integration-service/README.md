@@ -117,7 +117,7 @@ csm-integration-service/
 │   ├── apierror/                 # Typed upstream error type (4xx/5xx passthrough)
 │   ├── entity/
 │   │   ├── client.go             # OAuth2 HTTP client for the entity service
-│   │   └── entity.go             # Entity service operations (accounts, projects, contacts, cases)
+│   │   └── entity.go             # Entity service operations (accounts, projects, contacts, cases, opportunities, invoices, project-opportunity links)
 │   ├── middleware/
 │   │   ├── correlation.go        # X-CSM-Correlation-ID propagation + slog enrichment
 │   │   ├── logger.go             # Per-request access log
@@ -127,7 +127,10 @@ csm-integration-service/
 │       ├── accounts.go           # HTTP handlers for account endpoints
 │       ├── projects.go           # HTTP handlers for project endpoints
 │       ├── cases.go              # HTTP handlers for case endpoints
-│       └── vulnerabilities.go    # HTTP handler for the product-vulnerability sync endpoint
+│       ├── vulnerabilities.go    # HTTP handler for the product-vulnerability sync endpoint
+│       ├── opportunities.go      # HTTP handlers for opportunity endpoints (ServiceNow data source only)
+│       ├── invoices.go           # HTTP handlers for invoice endpoints (ServiceNow data source only)
+│       └── project_opportunity_links.go  # HTTP handler for project-opportunity link search (ServiceNow data source only)
 ├── .choreo/component.yaml
 ├── openapi.yaml
 └── .env.example
@@ -146,6 +149,11 @@ csm-integration-service/
 - `PATCH /cases/{id}` — update a case's state, severity, or workState (succeeds on a Postgres data source; other fields 400 there, and every field 401s on a ServiceNow data source — see Overview above)
 - `POST /cases/{id}/comments` — add a comment to a case (currently always 401s, see Overview above)
 - `POST /vulnerabilities/sync` — full-replace sync of product-vulnerability records (submit the complete current set on every call, not a delta)
+- `GET /opportunities/{id}` — get an opportunity by ID (ServiceNow data source only)
+- `POST /opportunities/search` — search opportunities (ServiceNow data source only)
+- `GET /invoices/{id}` — get an invoice by ID (ServiceNow data source only)
+- `POST /invoices/search` — search invoices (ServiceNow data source only)
+- `POST /project-opportunity-links/search` — search project-opportunity links (ServiceNow data source only; no by-id fetch — the underlying data has no single-record endpoint)
 
 All responses are raw JSON passthrough from the entity service — this service does not
 reshape upstream response bodies.
@@ -162,4 +170,9 @@ curl -X POST http://localhost:8080/projects/<id>/contacts/search -d '{}'
 curl -X POST http://localhost:8080/vulnerabilities/sync -d '[]'
 curl -X PATCH http://localhost:8080/cases/<id> -d '{"state":"closed"}'
 curl -X POST http://localhost:8080/cases/<id>/comments -d '{"type":"comment","content":"hi"}'
+curl -X POST http://localhost:8080/opportunities/search -d '{}'
+curl http://localhost:8080/opportunities/<id>
+curl -X POST http://localhost:8080/invoices/search -d '{}'
+curl http://localhost:8080/invoices/<id>
+curl -X POST http://localhost:8080/project-opportunity-links/search -d '{}'
 ```

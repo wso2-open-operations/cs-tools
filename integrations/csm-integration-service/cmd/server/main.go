@@ -52,6 +52,9 @@ func main() {
 	projectHandler := handler.NewProjectHandler(entityClient)
 	vulnerabilityHandler := handler.NewVulnerabilityHandler(entityClient)
 	caseHandler := handler.NewCaseHandler(entityClient)
+	opportunityHandler := handler.NewOpportunityHandler(entityClient)
+	invoiceHandler := handler.NewInvoiceHandler(entityClient)
+	projectOpportunityLinkHandler := handler.NewProjectOpportunityLinkHandler(entityClient)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +70,11 @@ func main() {
 	mux.HandleFunc("POST /vulnerabilities/sync", vulnerabilityHandler.SyncProductVulnerabilities)
 	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
+	mux.HandleFunc("POST /opportunities/search", opportunityHandler.SearchOpportunities)
+	mux.HandleFunc("GET /opportunities/{id}", opportunityHandler.GetOpportunity)
+	mux.HandleFunc("POST /invoices/search", invoiceHandler.SearchInvoices)
+	mux.HandleFunc("GET /invoices/{id}", invoiceHandler.GetInvoice)
+	mux.HandleFunc("POST /project-opportunity-links/search", projectOpportunityLinkHandler.SearchProjectOpportunityLinks)
 
 	addr := ":" + envOrDefault("PORT", "8080")
 

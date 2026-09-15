@@ -181,6 +181,61 @@ func (m *mockEntityCaseClient) CreateCaseComment(ctx context.Context, caseID str
 	return []byte(`{}`), nil
 }
 
+// ----- mock entity opportunity client -----
+
+type mockEntityOpportunityClient struct {
+	searchOpportunitiesFn func(ctx context.Context, body []byte) ([]byte, error)
+	getOpportunityFn      func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityOpportunityClient) SearchOpportunities(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchOpportunitiesFn != nil {
+		return m.searchOpportunitiesFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityOpportunityClient) GetOpportunity(ctx context.Context, id string) ([]byte, error) {
+	if m.getOpportunityFn != nil {
+		return m.getOpportunityFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity invoice client -----
+
+type mockEntityInvoiceClient struct {
+	searchInvoicesFn func(ctx context.Context, body []byte) ([]byte, error)
+	getInvoiceFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityInvoiceClient) SearchInvoices(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchInvoicesFn != nil {
+		return m.searchInvoicesFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityInvoiceClient) GetInvoice(ctx context.Context, id string) ([]byte, error) {
+	if m.getInvoiceFn != nil {
+		return m.getInvoiceFn(ctx, id)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity project-opportunity-link client -----
+
+type mockEntityProjectOpportunityLinkClient struct {
+	searchProjectOpportunityLinksFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityProjectOpportunityLinkClient) SearchProjectOpportunityLinks(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchProjectOpportunityLinksFn != nil {
+		return m.searchProjectOpportunityLinksFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
 // ----- mock entity vulnerability client -----
 
 type mockEntityVulnerabilityClient struct {
