@@ -53,6 +53,19 @@ type Config struct {
 	ServiceNowIntegrationServiceClientID     string
 	ServiceNowIntegrationServiceClientSecret string
 	ServiceNowIntegrationServiceScopes       string
+	// ConsumptionSecretKey is the base64-encoded 32-byte AES key used to
+	// encrypt the product-consumption credentials at rest (see
+	// internal/crypto). Optional, and meaningful only when DataSource is
+	// "postgres": when it is empty the project-consumption routes are not
+	// registered at all, exactly as the ServiceNow-only routes are absent from
+	// a Postgres deployment.
+	//
+	// It is deliberately not required by Validate. Requiring it would break
+	// every existing Postgres deployment that has no interest in product
+	// consumption, and a missing key must never silently degrade into storing
+	// these credentials in the clear — so "absent" disables the feature rather
+	// than weakening it.
+	ConsumptionSecretKey string
 	// EventHubBroker/EventHubConnectionString/EventHubTopic configure this
 	// service's EventPublisherService (internal/service/
 	// event_publisher_service.go). Optional — gated on EventHubBroker being
@@ -90,6 +103,7 @@ func Load() *Config {
 		ServiceNowIntegrationServiceClientID:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID"),
 		ServiceNowIntegrationServiceClientSecret: os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET"),
 		ServiceNowIntegrationServiceScopes:       os.Getenv("SERVICENOW_INTEGRATION_SERVICE_SCOPES"),
+		ConsumptionSecretKey:                     os.Getenv("CONSUMPTION_SECRET_KEY"),
 		EventHubBroker:                           os.Getenv("EVENT_HUB_BROKER"),
 		EventHubConnectionString:                 os.Getenv("EVENT_HUB_CONNECTION_STRING"),
 		EventHubTopic:                            os.Getenv("EVENT_HUB_TOPIC"),
