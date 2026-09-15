@@ -11423,7 +11423,9 @@ components:
         eventType:
           type: string
           enum: [CREATED, UPDATED, DELETED, RESTORED, UNDEFINED]
-          description: Salesforce change type from the ASB envelope.
+          description: >-
+            Salesforce change type from the ASB envelope. UNDEFINED is a valid
+            envelope value from Apex but this endpoint returns 400 for it.
         entity:
           type: string
           description: Salesforce sObject name. Non-Account values are ignored with 204.
