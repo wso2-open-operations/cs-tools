@@ -214,3 +214,15 @@ func (s *userService) GetMe(ctx context.Context) (domain.GetUserMeResponse, erro
 		Groups:    []domain.UserGroupRef{},
 	}, nil
 }
+
+// GetUsersByIDs implements UserService.
+func (s *userService) GetUsersByIDs(ctx context.Context, ids []string) (domain.GetUsersByIDsResponse, error) {
+	if len(ids) == 0 {
+		return domain.GetUsersByIDsResponse{Users: []domain.User{}}, nil
+	}
+	users, err := s.repo.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return domain.GetUsersByIDsResponse{}, err
+	}
+	return domain.GetUsersByIDsResponse{Users: users}, nil
+}
