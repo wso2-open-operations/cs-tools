@@ -118,7 +118,8 @@ type snDeployedProductSearchPayload struct {
 }
 
 type snDeployedProductFilters struct {
-	DeploymentIDs []string `json:"deploymentIds,omitempty"`
+	DeploymentIDs     []string `json:"deploymentIds,omitempty"`
+	ProductCategories []string `json:"productCategories,omitempty"`
 }
 
 type snDeployedProductService struct {
@@ -339,7 +340,10 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snDeployedProductSearchPayload{
-		Filters:    snDeployedProductFilters{DeploymentIDs: uuidsToSysids(req.DeploymentIDs)},
+		Filters: snDeployedProductFilters{
+			DeploymentIDs:     uuidsToSysids(req.DeploymentIDs),
+			ProductCategories: req.ProductCategories,
+		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	raw, err := s.client.Post(ctx, "/deployed-products/search", token, payload)

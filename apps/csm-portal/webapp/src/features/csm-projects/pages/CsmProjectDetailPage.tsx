@@ -31,6 +31,7 @@ import { useState, type JSX, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import UserRefLink from "@components/UserRefLink";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
+import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadata";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import DeploymentsTab from "@features/csm-projects/components/DeploymentsTab";
 import ProjectContactsTab from "@features/csm-projects/components/ProjectContactsTab";
@@ -154,6 +155,15 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const fromListState = location.state as { from?: string } | undefined;
   const resolvedBackPath = fromListState?.from ?? "/customers/projects";
   const { data, isLoading, isError } = useGetProject(id);
+  // Only used to gate the "Create service request" menu item below — fail
+  // open (show the item) while metadata is loading or failed, since
+  // `subscriptionType === managed_cloud_subscription` already narrows to
+  // projects where SR is normally offered; an explicit `false` once loaded
+  // is what actually hides it. The create page itself is the authoritative,
+  // fail-closed gate (see CreateServiceRequestPage.tsx's hasNoSrReadAccess).
+  const projectMetadata = useProjectMetadata(id);
+  const hasNoSrReadAccess =
+    projectMetadata.data?.features?.hasServiceRequestReadAccess === false;
   // Kept in the URL (`?tab=`), not local state, so returning here after a
   // create-flow round trip (see `projectPath` below) restores the tab the
   // engineer was actually on, instead of always resetting to Overview. A
@@ -261,7 +271,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
           >
             Create case
           </MenuItem>
-          {p.subscriptionType === "managed_cloud_subscription" && (
+          {p.subscriptionType === "managed_cloud_subscription" && !hasNoSrReadAccess && (
             <MenuItem
               onClick={() => {
                 setCreateMenuAnchor(null);

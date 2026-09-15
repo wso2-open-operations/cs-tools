@@ -121,7 +121,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   // `hasSr` is precomputed by the backing data source, so an ineligible
   // project is caught before the engineer fills out the rest of the form
-  // rather than on a rejected submit.
+  // rather than on a rejected submit. `hasServiceRequestReadAccess` (from
+  // project metadata, checked below once it's loaded) is a separate,
+  // viewer-permission check — see BeProject.hasSr's doc comment for why both
+  // exist. Either being false makes the project ineligible.
   const selectedProject = useGetProject(projectId || undefined);
   const isIneligibleForSr = projectId
     ? selectedProject.data?.hasSr === false
@@ -134,18 +137,31 @@ export default function CreateServiceRequestPage(): JSX.Element {
     !selectedProject.isLoading &&
     (selectedProject.isError || selectedProject.data === null);
 
-  const deployments = useSearchDeployments(projectId || undefined);
-  const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   // Service requests are only raisable against a subset of a project's
   // deployed products, keyed by category — mirrors CP's
   // CreateServiceRequestPage, which restricts its deployed-product picker the
-  // same way. Fetched independently of deployedProducts (no server-side
-  // filter param exists for this yet) and applied client-side below. A
-  // missing/empty/failed-to-load srProductCategories must never narrow the
-  // list to zero when it would otherwise show options — fail open, not
-  // closed.
+  // same way. Fetched independently of deployedProducts and applied both
+  // server-side (below, via useDeployedProductOptions' productCategories
+  // param — the entity service narrows the search itself) and client-side
+  // (the memo below) as a defensive backstop. A missing/empty/failed-to-load
+  // srProductCategories must never narrow the list to zero when it would
+  // otherwise show options — fail open, not closed.
   const projectMetadata = useProjectMetadata(projectId || undefined);
   const srProductCategories = projectMetadata.data?.features?.srProductCategories;
+  // `hasServiceRequestReadAccess` gates the SR feature itself (viewer
+  // permission), separately from `hasSr` (project eligibility) above. Fail
+  // open while metadata is still loading/unloaded (`undefined`) — only an
+  // explicit `false` once loaded blocks submission; the same fail-closed
+  // `projectLoadFailed`/`isLoading` guard on `canSubmit` below already
+  // prevents submitting before metadata resolves.
+  const hasNoSrReadAccess =
+    projectMetadata.data?.features?.hasServiceRequestReadAccess === false;
+
+  const deployments = useSearchDeployments(projectId || undefined);
+  const deployedProducts = useDeployedProductOptions(
+    deploymentId || undefined,
+    srProductCategories ?? undefined,
+  );
   const deployedProductOptions = useMemo(() => {
     const options = deployedProducts.data ?? [];
     if (!srProductCategories || srProductCategories.length === 0) return options;
@@ -262,6 +278,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstExceedingMaxLength === null &&
       firstFailingValidation === null &&
       !isIneligibleForSr &&
+      !hasNoSrReadAccess &&
       // Fail closed while a selected project's eligibility is still loading
       // or couldn't be confirmed at all — see projectLoadFailed above.
       (!projectId || (!selectedProject.isLoading && !projectLoadFailed)) &&
@@ -278,6 +295,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstExceedingMaxLength,
       firstFailingValidation,
       isIneligibleForSr,
+      hasNoSrReadAccess,
       selectedProject.isLoading,
       projectLoadFailed,
       submitting,
@@ -383,11 +401,14 @@ export default function CreateServiceRequestPage(): JSX.Element {
           </Alert>
         )}
 
-        {!!projectId && !selectedProject.isLoading && !projectLoadFailed && isIneligibleForSr && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            This project isn't eligible to raise service requests.
-          </Alert>
-        )}
+        {!!projectId &&
+          !selectedProject.isLoading &&
+          !projectLoadFailed &&
+          (isIneligibleForSr || hasNoSrReadAccess) && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              This project isn't eligible to raise service requests.
+            </Alert>
+          )}
 
         <Grid container spacing={2.5}>
           <Grid size={{ xs: 12, md: 4 }}>

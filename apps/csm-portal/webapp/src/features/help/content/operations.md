@@ -26,6 +26,14 @@ field, with the backing system's own message shown if it doesn't match. A
 question the catalog item doesn't currently use (inactive or hidden) isn't
 shown at all.
 
+Not every project can raise a service request — the form checks the selected
+project's eligibility and shows an error instead of letting you submit
+against one that isn't eligible. A project's **Create** menu on its detail
+page hides **Create service request** the same way. For a cloud project
+with a private data plane, the deployed-product picker is narrowed to that
+project's eligible product categories automatically — you won't see
+unrelated deployed products in the list.
+
 ## Change requests
 
 The Change requests tab lists change requests with server-side search,

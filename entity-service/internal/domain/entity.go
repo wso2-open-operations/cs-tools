@@ -1059,10 +1059,13 @@ type ProductUpdateEntry struct {
 }
 
 // SearchDeployedProductsRequest is the input for a deployed-product search operation.
-// DeploymentIDs scopes results to the given deployments; it is the only filter besides pagination.
+// DeploymentIDs scopes results to the given deployments. ProductCategories, when non-empty,
+// additionally filters results to deployed products in one of the given categories (e.g.
+// "pdp"); it is optional and combines with DeploymentIDs rather than replacing it.
 type SearchDeployedProductsRequest struct {
-	Pagination    Pagination `json:"pagination"`
-	DeploymentIDs []string   `json:"deploymentIds"`
+	Pagination        Pagination `json:"pagination"`
+	DeploymentIDs     []string   `json:"deploymentIds"`
+	ProductCategories []string   `json:"productCategories,omitempty"`
 }
 
 // SearchDeployedProductsResponse is the paginated result of a deployed-product search.

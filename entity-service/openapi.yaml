@@ -2626,7 +2626,7 @@ paths:
 
   /deployed-products/search:
     post:
-      summary: Search deployed products by deployment IDs.
+      summary: Search deployed products by deployment IDs, optionally filtered by product category.
       operationId: searchDeployedProducts
       requestBody:
         required: true
@@ -7193,6 +7193,11 @@ components:
             type: string
             format: uuid
           description: Filter by deployment UUIDs.
+        productCategories:
+          type: array
+          items:
+            type: string
+          description: Optional filter by product category (e.g. "pdp"). Combines with deploymentIds rather than replacing it.
 
     DeployedProductVersionRef:
       type: object

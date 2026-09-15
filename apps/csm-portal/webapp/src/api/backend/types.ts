@@ -1732,7 +1732,10 @@ export interface BeProject {
   projectKey?: string;
   subscriptionType?: BeSubscriptionType;
   /** Whether this project is eligible to raise service requests, as
-   *  precomputed by the backing data source. */
+   *  precomputed by the backing data source. Distinct from
+   *  `BeProjectMetadata.features.hasServiceRequestReadAccess`, a
+   *  viewer-permission flag rather than a project eligibility flag — gate SR
+   *  creation on both. */
   hasSr?: boolean;
   startDate?: string | null;
   endDate?: string | null;
@@ -1759,6 +1762,14 @@ export interface BeProjectSearchResponse extends BeSearchResponseBase {
  */
 export interface BeProjectMetadata {
   features?: {
+    /**
+     * Whether the current viewer has read access to this project's service
+     * requests at all — a permission flag, distinct from `BeProject.hasSr`
+     * (see that field's doc comment) which is a project-level "can this
+     * project raise SRs" eligibility check. Gate SR creation UI on this
+     * being `true`, alongside `hasSr`.
+     */
+    hasServiceRequestReadAccess?: boolean;
     /**
      * Plain opaque category-code strings (not a named enum), matching the
      * entity service's own convention. When present and non-empty, only
@@ -2010,6 +2021,13 @@ export interface BeDeployedProduct {
 
 export interface BeDeployedProductSearchPayload {
   pagination?: BePagination;
+  /**
+   * Restricts results to deployed products in one of these opaque category
+   * codes (e.g. "pdp"). Optional, combines with (does not replace) the
+   * deployment scoping the BFF injects server-side; omit for unfiltered
+   * results.
+   */
+  productCategories?: string[];
 }
 
 export interface BeDeployedProductSearchResponse extends BeSearchResponseBase {

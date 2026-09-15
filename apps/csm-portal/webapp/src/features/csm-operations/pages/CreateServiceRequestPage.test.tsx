@@ -193,3 +193,51 @@ describe("CreateServiceRequestPage — deployed-product filtering by srProductCa
     expect(screen.queryByText(/failed to load deployed products/i)).not.toBeInTheDocument();
   });
 });
+
+describe("CreateServiceRequestPage — gating on hasServiceRequestReadAccess", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    postCaseMutateAsyncMock.mockReset();
+    showErrorMock.mockReset();
+    projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+  });
+
+  it("blocks submission and shows the ineligibility error once metadata resolves hasServiceRequestReadAccess: false", () => {
+    projectMetadataResult = {
+      data: { features: { hasServiceRequestReadAccess: false } },
+      isLoading: false,
+      isError: false,
+    };
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+
+    expect(
+      screen.getByText(/isn't eligible to raise service requests/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+  });
+
+  it("allows submission when metadata resolves hasServiceRequestReadAccess: true", () => {
+    projectMetadataResult = {
+      data: { features: { hasServiceRequestReadAccess: true } },
+      isLoading: false,
+      isError: false,
+    };
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+
+    expect(
+      screen.queryByText(/isn't eligible to raise service requests/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("fails open (no error, not blocked on this check alone) while metadata is still undefined", () => {
+    projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+
+    expect(
+      screen.queryByText(/isn't eligible to raise service requests/i),
+    ).not.toBeInTheDocument();
+  });
+});
