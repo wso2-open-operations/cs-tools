@@ -78,6 +78,22 @@ func TestGroupsSearch_IsStillALiveQuery(t *testing.T) {
 	}
 }
 
+// TestPostgresOnlyRoutesAreAbsentWithoutAPool pins that SN-mode startup
+// without a reachable database must not register the side-table routes.
+func TestPostgresOnlyRoutesAreAbsentWithoutAPool(t *testing.T) {
+	router := newDirectoryRouter(t)
+	for _, path := range []string{
+		"/event-publish-failures/search",
+		"/scheduled-tasks/attempts",
+		"/salesforce/events",
+	} {
+		rec := postDirectory(t, router, path, `{}`)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("POST %s = %d, want 404 when the pool is nil", path, rec.Code)
+		}
+	}
+}
+
 // TestCuratedCataloguesAreNoLongerServedHere locks in the move: the team
 // registry and the role allow-list are the caller's configuration now, and this
 // service no longer reads either. If someone reinstates a route here, the

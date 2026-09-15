@@ -96,6 +96,12 @@ type Config struct {
 	// nothing to do with case state) — the two are read by separate
 	// processes/environments and don't interact.
 	CustomerRoles []string
+	// Salesforce* configure POST /salesforce/events. All-or-nothing like Event Hub.
+	SalesforceBaseURL      string
+	SalesforceTokenURL     string
+	SalesforceClientID     string
+	SalesforceClientSecret string
+	SalesforceRefreshToken string
 }
 
 // Load reads configuration from environment variables and returns a populated
@@ -122,6 +128,11 @@ func Load() *Config {
 		EventPublishingEnabled:                   os.Getenv("EVENT_PUBLISHING_ENABLED") == "true",
 		SupportEngineerRole:                      os.Getenv("SUPPORT_ENGINEER_ROLE"),
 		CustomerRoles:                            splitComma(os.Getenv("CUSTOMER_ROLES")),
+		SalesforceBaseURL:                        os.Getenv("SALESFORCE_BASE_URL"),
+		SalesforceTokenURL:                       os.Getenv("SALESFORCE_TOKEN_URL"),
+		SalesforceClientID:                       os.Getenv("SALESFORCE_CLIENT_ID"),
+		SalesforceClientSecret:                   os.Getenv("SALESFORCE_CLIENT_SECRET"),
+		SalesforceRefreshToken:                   os.Getenv("SALESFORCE_REFRESH_TOKEN"),
 	}
 }
 
@@ -166,8 +177,9 @@ func (c *Config) HasDatabase() bool {
 // error if DATA_SOURCE is an unrecognised value, if the DB variables are
 // missing when DATA_SOURCE=postgres or only partially set in either mode, if
 // SERVICENOW_INTEGRATION_SERVICE_BASE_URL is missing when
-// DATA_SOURCE=servicenow, or if EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/
-// EVENT_HUB_TOPIC are only partially set.
+// DATA_SOURCE=servicenow, if EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/
+// EVENT_HUB_TOPIC are only partially set, or if the SALESFORCE_* vars are
+// only partially set.
 func (c *Config) Validate() error {
 	switch c.DataSource {
 	case DataSourcePostgres, DataSourceServiceNow:
@@ -233,7 +245,20 @@ func (c *Config) Validate() error {
 	if eventHubSet && !eventHubComplete {
 		return fmt.Errorf("EVENT_HUB_BROKER, EVENT_HUB_CONNECTION_STRING, and EVENT_HUB_TOPIC must be set together or not at all")
 	}
+	salesforceSet := c.SalesforceBaseURL != "" || c.SalesforceTokenURL != "" || c.SalesforceClientID != "" || c.SalesforceClientSecret != "" || c.SalesforceRefreshToken != ""
+	if salesforceSet && !c.SalesforceConfigured() {
+		return fmt.Errorf("SALESFORCE_BASE_URL, SALESFORCE_TOKEN_URL, SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, and SALESFORCE_REFRESH_TOKEN must be set together or not at all")
+	}
 	return nil
+}
+
+// SalesforceConfigured reports whether every Salesforce env var is set.
+func (c *Config) SalesforceConfigured() bool {
+	return c.SalesforceBaseURL != "" &&
+		c.SalesforceTokenURL != "" &&
+		c.SalesforceClientID != "" &&
+		c.SalesforceClientSecret != "" &&
+		c.SalesforceRefreshToken != ""
 }
 
 // DSN constructs a PostgreSQL connection string from the config fields.

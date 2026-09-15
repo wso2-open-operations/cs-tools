@@ -64,6 +64,9 @@ type AccountRepository interface {
 	// GetAccountByID returns the account with the given UUID, or a NotFoundError
 	// if no such account exists.
 	GetAccountByID(ctx context.Context, id string) (AccountRow, error)
+	UpsertFromSalesforce(ctx context.Context, row domain.SalesforceAccountUpsert) error
+	SoftDeleteBySfID(ctx context.Context, sfID string) error
+	LookupUserIDByEmail(ctx context.Context, email string) (*string, error)
 }
 
 type accountRepo struct {
@@ -194,4 +197,82 @@ func (r *accountRepo) GetAccountByID(ctx context.Context, id string) (AccountRow
 		return AccountRow{}, fmt.Errorf("get account by id: %w", err)
 	}
 	return a, nil
+}
+
+const salesforceSyncActor = domain.SalesforceSyncActor
+
+func (r *accountRepo) UpsertFromSalesforce(ctx context.Context, row domain.SalesforceAccountUpsert) error {
+	query := `
+		INSERT INTO account (
+			id, created_on, updated_on, created_by, updated_by,
+			name, number, sf_id,
+			industry, region, global_pod, phone, sales_region, sub_region,
+			account_vertical, life_cycle, naics_industry, sub_industry,
+			classification, technical_owner_id, secondary_technical_owner_id,
+			deactivation_date, sync_time_stamp
+		) VALUES (
+			gen_random_uuid(), now(), now(), $1, $1,
+			$2, $3, $4,
+			$5, $6, $7, $8, $9, $10,
+			$11, $12, $13, $14,
+			$15, $16, $17,
+			NULL, now()
+		)
+		ON CONFLICT (sf_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			industry = EXCLUDED.industry,
+			region = EXCLUDED.region,
+			global_pod = EXCLUDED.global_pod,
+			phone = CASE WHEN $18 THEN account.phone ELSE EXCLUDED.phone END,
+			sales_region = EXCLUDED.sales_region,
+			sub_region = EXCLUDED.sub_region,
+			account_vertical = EXCLUDED.account_vertical,
+			life_cycle = EXCLUDED.life_cycle,
+			naics_industry = EXCLUDED.naics_industry,
+			sub_industry = EXCLUDED.sub_industry,
+			classification = EXCLUDED.classification,
+			technical_owner_id = EXCLUDED.technical_owner_id,
+			secondary_technical_owner_id = EXCLUDED.secondary_technical_owner_id,
+			deactivation_date = NULL,
+			updated_on = now(),
+			updated_by = EXCLUDED.updated_by,
+			sync_time_stamp = now()`
+	_, err := r.db.Exec(ctx, query,
+		salesforceSyncActor,
+		row.Name, row.Number, row.SfID,
+		row.Industry, row.Region, row.GlobalPod, row.Phone, row.SalesRegion, row.SubRegion,
+		row.AccountVertical, row.LifeCycle, row.NAICSIndustry, row.SubIndustry,
+		row.Classification, row.TechnicalOwnerID, row.SecondaryTechnicalOwnerID,
+		row.KeepExistingPhone,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert account from salesforce: %w", err)
+	}
+	return nil
+}
+
+func (r *accountRepo) SoftDeleteBySfID(ctx context.Context, sfID string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE account
+		SET deactivation_date = COALESCE(deactivation_date, CURRENT_DATE),
+		    updated_on = now(),
+		    updated_by = $2,
+		    sync_time_stamp = now()
+		WHERE sf_id = $1`, sfID, salesforceSyncActor)
+	if err != nil {
+		return fmt.Errorf("soft-delete account by sf_id: %w", err)
+	}
+	return nil
+}
+
+func (r *accountRepo) LookupUserIDByEmail(ctx context.Context, email string) (*string, error) {
+	var id string
+	err := r.db.QueryRow(ctx, `SELECT id::text FROM "user" WHERE lower(email) = lower($1)`, email).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lookup user id by email: %w", err)
+	}
+	return &id, nil
 }

@@ -70,6 +70,11 @@ type AccountService interface {
 	GetAccountByID(ctx context.Context, id string) (domain.AccountDetail, error)
 }
 
+// SalesforceEventService handles POST /salesforce/events.
+type SalesforceEventService interface {
+	HandleEvent(ctx context.Context, req domain.SalesforceEventRequest) error
+}
+
 // EventPublishFailureService defines the operations available on the
 // event_publish_failures entity — see domain.EventPublishFailure's doc
 // comment for what it's for.

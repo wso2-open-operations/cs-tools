@@ -77,6 +77,60 @@ func TestConfig_Validate_EventHubAllOrNothing(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_SalesforceAllOrNothing(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseURL      string
+		tokenURL     string
+		clientID     string
+		clientSecret string
+		refreshToken string
+		wantErr      bool
+	}{
+		{name: "none set", wantErr: false},
+		{name: "all five set", baseURL: "b", tokenURL: "t", clientID: "c", clientSecret: "s", refreshToken: "r", wantErr: false},
+		{name: "only base URL", baseURL: "b", wantErr: true},
+		{name: "only token URL", tokenURL: "t", wantErr: true},
+		{name: "only client ID", clientID: "c", wantErr: true},
+		{name: "missing refresh token", baseURL: "b", tokenURL: "t", clientID: "c", clientSecret: "s", wantErr: true},
+		{name: "missing base URL", tokenURL: "t", clientID: "c", clientSecret: "s", refreshToken: "r", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.SalesforceBaseURL = tt.baseURL
+			c.SalesforceTokenURL = tt.tokenURL
+			c.SalesforceClientID = tt.clientID
+			c.SalesforceClientSecret = tt.clientSecret
+			c.SalesforceRefreshToken = tt.refreshToken
+
+			err := c.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("Validate() = nil, want an error for a partial Salesforce configuration")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestConfig_SalesforceConfigured(t *testing.T) {
+	c := baseValidConfig()
+	if c.SalesforceConfigured() {
+		t.Fatal("SalesforceConfigured() = true, want false when unset")
+	}
+	c.SalesforceBaseURL = "b"
+	c.SalesforceTokenURL = "t"
+	c.SalesforceClientID = "c"
+	c.SalesforceClientSecret = "s"
+	c.SalesforceRefreshToken = "r"
+	if !c.SalesforceConfigured() {
+		t.Fatal("SalesforceConfigured() = false, want true when all five are set")
+	}
+}
+
 func TestConfig_Validate_InvalidDataSource(t *testing.T) {
 	c := baseValidConfig()
 	c.DataSource = DataSource("not-a-real-source")

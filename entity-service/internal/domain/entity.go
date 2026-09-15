@@ -339,6 +339,44 @@ type AccountDetail struct {
 	UpdatedOn        string     `json:"updatedOn"`
 }
 
+const (
+	SalesforceEventCreated   = "CREATED"
+	SalesforceEventUpdated   = "UPDATED"
+	SalesforceEventDeleted   = "DELETED"
+	SalesforceEventRestored  = "RESTORED"
+	SalesforceEventUndefined = "UNDEFINED"
+	SalesforceEntityAccount  = "Account"
+	SalesforceSyncActor      = "salesforce-sync"
+)
+
+// SalesforceEventRequest is the ASB envelope POSTed to /salesforce/events.
+type SalesforceEventRequest struct {
+	EventType   string `json:"eventType"`
+	Entity      string `json:"entity"`
+	ReferenceID string `json:"referenceId"`
+}
+
+// SalesforceAccountUpsert is the mapped Salesforce Account written to account.
+type SalesforceAccountUpsert struct {
+	SfID                      string
+	Name                      string
+	Number                    string
+	Industry                  *string
+	Region                    *string
+	GlobalPod                 *string
+	Phone                     *string
+	KeepExistingPhone         bool
+	SalesRegion               *string
+	SubRegion                 *string
+	AccountVertical           *string
+	LifeCycle                 *string
+	NAICSIndustry             *string
+	SubIndustry               *string
+	Classification            *string
+	TechnicalOwnerID          *string
+	SecondaryTechnicalOwnerID *string
+}
+
 // SubscriptionType classifies the subscription type of a project.
 type SubscriptionType string
 

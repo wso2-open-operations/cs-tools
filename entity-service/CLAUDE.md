@@ -53,6 +53,11 @@ A failed Event Hub publish is logged instead of recorded — see
 | `EVENT_PUBLISHING_ENABLED` | no | `false` | Must be `"true"` for `EventPublisherService` to actually get constructed, even with `EVENT_HUB_BROKER` fully configured — a separate safe-by-default kill switch |
 | `SUPPORT_ENGINEER_ROLE` | no | — | ServiceNow role name whose presence on a case comment's resolved author completes the case's "response" SLA clock — see "SLA clocks" below |
 | `CUSTOMER_ROLES` | no | — | Comma-separated ServiceNow role names whose presence on a case comment's resolved author marks a customer reply — see `applyCustomerReplyStateTransition` in "SLA clocks" below |
+| `SALESFORCE_BASE_URL` | no* | — | Salesforce instance URL for Account GET. *Required once any `SALESFORCE_*` var is set |
+| `SALESFORCE_TOKEN_URL` | no* | — | OAuth2 token endpoint (refresh_token grant) |
+| `SALESFORCE_CLIENT_ID` | no* | — | Connected-app client id |
+| `SALESFORCE_CLIENT_SECRET` | no* | — | Connected-app client secret |
+| `SALESFORCE_REFRESH_TOKEN` | no* | — | Long-lived refresh token |
 
 `CSM_TEAM_REGISTRY` and `CSM_USER_ROLES` are **not read here**. The team registry
 and the assignable-role allow-list are organisation vocabulary and live in the CSM
@@ -104,6 +109,24 @@ just a bool, either `"true"` or not. `NewRouter` returns the constructed
 `EventPublisherService` (nil if unconfigured) alongside the `http.Handler`,
 threaded through `server.New` to `cmd/api/main.go`, which calls `Close()` on
 it during shutdown, after `srv.Shutdown`.
+
+## Salesforce Account ingest
+
+`POST /salesforce/events` accepts the ASB envelope `{eventType, entity, referenceId}`
+from `sales-apex-trigger-subscriber`, which dual-forwards every envelope to
+ServiceNow and to this endpoint. The subscriber has no `dataSource` switch.
+Wired in `internal/server/routes.go` only when entity-service
+`DATA_SOURCE=postgres`, a pool is available, and all five `SALESFORCE_*`
+vars are set — the same optional all-or-nothing style as Event Hub.
+`Config.Validate` rejects a partial Salesforce set at startup.
+
+`internal/salesforce` uses stdlib `net/http` and an OAuth2 `refresh_token`
+grant, then `GET /services/data/v54.0/sobjects/Account/{id}`. Token is
+refreshed on 401. A Salesforce 404 on CREATED/UPDATED/RESTORED is a 503 so
+the caller can retry (the event can arrive before Salesforce commits).
+Non-Account entities return 204 and are ignored (do not 400 — ASB would
+retry forever). DELETED soft-deletes by setting `deactivation_date`; never
+`DELETE FROM account` (project → account is `ON DELETE CASCADE`).
 
 Seven call sites publish today, all ServiceNow-data-source-only (`DATA_SOURCE=servicenow`;
 there is no Postgres-backed equivalent for any of them). There is also one
