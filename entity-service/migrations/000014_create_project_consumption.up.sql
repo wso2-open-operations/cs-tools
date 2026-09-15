@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS project_consumption (
     -- advance `status` past a step whose output was never stored, and the next
     -- license download would resume from the wrong place — creating a second
     -- Choreo application for the same customer.
+    --
+    -- These constrain the row as a whole, which constrains how it may be
+    -- written: PostgreSQL evaluates CHECK constraints against the *proposed*
+    -- insert tuple, before ON CONFLICT resolves anything. An upsert that
+    -- supplies only the columns of the step it is recording and merges the rest
+    -- in its DO UPDATE SET therefore proposes a row full of NULLs and is
+    -- rejected here, even though the update it would have performed is valid.
+    -- The repository merges the stored row into the proposed one *before* the
+    -- insert for exactly this reason — see the query in
+    -- internal/repository/project_consumption_repo.go before adding another
+    -- constraint that spans columns a single step does not write.
     CONSTRAINT chk_project_consumption_application_id
         CHECK (status < 2 OR choreo_application_id IS NOT NULL),
     CONSTRAINT chk_project_consumption_credentials
