@@ -36,6 +36,9 @@ var staleCasesReportTemplateRaw string
 //go:embed templates/open_cases_report.html
 var openCasesReportTemplateRaw string
 
+//go:embed templates/weekend_rotation_notice.html
+var weekendRotationNoticeTemplateRaw string
+
 // wso2LogoURL is the white WSO2 logo variant — the alert template's header
 // sits on an orange background, unlike
 // integrations/csm-notification-service's own equivalent constant of the
@@ -56,6 +59,7 @@ func bakeLogo(raw string) string {
 var alertTemplate = bakeLogo(alertTemplateRaw)
 var staleCasesReportTemplate = bakeLogo(staleCasesReportTemplateRaw)
 var openCasesReportTemplate = bakeLogo(openCasesReportTemplateRaw)
+var weekendRotationNoticeTemplate = bakeLogo(weekendRotationNoticeTemplateRaw)
 
 // escapeHTML mirrors integrations/csm-notification-service's own
 // internal/notifications.escapeHTML exactly: HTML-escapes s and
@@ -223,6 +227,91 @@ func humanizeState(state string) string {
 		}
 		if strings.EqualFold(w, "wso2") {
 			words[i] = "WSO2"
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
+}
+
+// WeekendRotationMember is one rostered person in the weekend notice. Declared
+// here rather than reusing internal/entityrotations.Member so this package
+// keeps depending on nothing but the standard library and internal/entitycases
+// — a template should not pull in an HTTP client.
+type WeekendRotationMember struct {
+	Name  string
+	Email string
+	// Date is the day covered, as YYYY-MM-DD.
+	Date string
+	// Type is the raw rotation type, e.g. "ops_weekend_night".
+	Type  string
+	Notes string
+}
+
+// WeekendRotationNoticeData holds every value substituted into the weekend
+// rotation notice template.
+type WeekendRotationNoticeData struct {
+	// Saturday and Sunday are the weekend's two dates, as YYYY-MM-DD.
+	Saturday string
+	Sunday   string
+	Members  []WeekendRotationMember
+}
+
+// RenderWeekendRotationNotice fills in the "you are on weekend support" HTML
+// email template — one table row per rostered person, in the order
+// entity-service returned them (rotation type, then name), which keeps the two
+// days and the day/night shifts grouped rather than interleaved.
+func RenderWeekendRotationNotice(data WeekendRotationNoticeData) string {
+	replacer := strings.NewReplacer(
+		"<!-- [SATURDAY] -->", escapeHTML(data.Saturday),
+		"<!-- [SUNDAY] -->", escapeHTML(data.Sunday),
+		"<!-- [ROTATION_ROWS] -->", renderRotationRows(data.Members),
+		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
+	)
+	return replacer.Replace(weekendRotationNoticeTemplate)
+}
+
+// renderRotationRows builds one <tr> per rostered person. A member with no
+// notes shows an em dash rather than a blank cell, matching renderCaseRows.
+func renderRotationRows(members []WeekendRotationMember) string {
+	if len(members) == 0 {
+		return `<tr><td colspan="5" style="padding:16px 10px; text-align:center; color:#8a8f98;">Nobody is rostered.</td></tr>`
+	}
+
+	const cell = "padding:8px 10px; border-bottom:1px solid #e8eaed;"
+	var b strings.Builder
+	for _, m := range members {
+		fmt.Fprintf(&b,
+			`<tr>`+
+				`<td style="%[1]s">%[2]s</td>`+
+				`<td style="%[1]s">%[3]s</td>`+
+				`<td style="%[1]s">%[4]s</td>`+
+				`<td style="%[1]s">%[5]s</td>`+
+				`<td style="%[1]s">%[6]s</td>`+
+				`</tr>`,
+			cell,
+			orDash(escapeHTML(m.Date)),
+			orDash(escapeHTML(humanizeRotationType(m.Type))),
+			orDash(escapeHTML(m.Name)),
+			orDash(escapeHTML(m.Email)),
+			orDash(escapeHTML(m.Notes)),
+		)
+	}
+	return b.String()
+}
+
+// humanizeRotationType turns entity-service's raw enum value into something
+// readable in an email: "ops_weekend_night" -> "Weekend Night". An unknown
+// value is passed through unchanged rather than blanked, so a shift added
+// upstream still renders as itself instead of vanishing from the roster.
+func humanizeRotationType(t string) string {
+	trimmed := strings.TrimPrefix(t, "ops_")
+	if trimmed == "" {
+		return t
+	}
+	words := strings.Split(trimmed, "_")
+	for i, w := range words {
+		if w == "" {
 			continue
 		}
 		words[i] = strings.ToUpper(w[:1]) + w[1:]
