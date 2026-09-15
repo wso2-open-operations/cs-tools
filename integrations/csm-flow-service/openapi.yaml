@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: CSM Flow Service
+  version: 0.1.0
+  description: >
+    Health surface for the CSM flow engine's event consumer. The service's real
+    work is consuming domain events off the shared event bus and running ported
+    flows; it exposes no business HTTP endpoints (the admin API is a separate,
+    later component). Only /health is served.
+paths:
+  /health:
+    get:
+      summary: Liveness/readiness probe
+      operationId: getHealth
+      responses:
+        "200":
+          description: The consumer process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  registeredFlows:
+                    type: integer
+                    example: 0

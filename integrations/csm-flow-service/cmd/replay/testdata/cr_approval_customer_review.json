@@ -1,0 +1,14 @@
+{
+  "type": "entity.changed",
+  "entityId": "11111111-2222-3333-4444-555555555555",
+  "payload": {
+    "entityType": "change_request",
+    "entityId": "11111111-2222-3333-4444-555555555555",
+    "changes": { "state": { "from": "REVIEW", "to": "CUSTOMER_REVIEW" } },
+    "snapshot": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "state": "CUSTOMER_REVIEW",
+      "git_reference": "https://github.com/wso2-enterprise/choreo-apis/pull/42"
+    }
+  }
+}

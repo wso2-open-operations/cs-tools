@@ -1,0 +1,14 @@
+{
+  "type": "case.comment_added",
+  "entityId": "case-123",
+  "payload": {
+    "caseId": "case-123",
+    "name": "Jane Perera",
+    "projectId": "proj-9",
+    "caseTitle": "Login intermittently fails",
+    "caseComment": "Any update on this?",
+    "commentId": "comment-1",
+    "isInternalNote": false,
+    "recipients": ["watcher@example.com"]
+  }
+}

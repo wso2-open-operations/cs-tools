@@ -1,0 +1,15 @@
+# Local env
+.env
+
+# Build output
+/bin/
+*.out
+
+# Go test / coverage
+coverage.txt
+*.test
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

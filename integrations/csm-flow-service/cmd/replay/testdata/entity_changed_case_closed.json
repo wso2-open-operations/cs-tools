@@ -1,0 +1,11 @@
+{
+  "type": "entity.changed",
+  "entityId": "case-123",
+  "payload": {
+    "entityType": "case",
+    "entityId": "case-123",
+    "changes": { "state": { "from": "work_in_progress", "to": "closed" } },
+    "snapshot": { "state": "closed", "priority": "10", "assignedTo": "eng-7" },
+    "actor": { "email": "agent@wso2.com" }
+  }
+}
