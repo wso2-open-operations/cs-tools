@@ -17,11 +17,13 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/crypto"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -54,6 +56,52 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		eventPublishFailureHandler = handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
 		slaClockHandler = handler.NewSLAClockHandler(service.NewSLAClockService(repository.NewSLAClockRepository(db)))
 		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
+	}
+
+	// Project consumption is the mirror image of the ServiceNow-only routes
+	// below: it exists only on the Postgres path. On the ServiceNow path this
+	// state lives on the customer_project record and is reached through the
+	// product-consumption scripted REST API, which the Choreo subscription
+	// operation calls directly — neither this service nor the ServiceNow
+	// integration service is in that path.
+	//
+	// It needs both a pool and an encryption key, since it stores OAuth2
+	// credentials and subscription secret keys. A missing or malformed key
+	// leaves the handler nil and the routes unregistered rather than falling
+	// back to storing those values in the clear.
+	//
+	// Every path that leaves the routes unregistered says so at startup. A
+	// disabled route is otherwise indistinguishable from a typo in the URL —
+	// both are a bare 404 — and the one thing a person debugging that 404
+	// cannot discover from the outside is that the service deliberately chose
+	// not to register it.
+	var projectConsumptionHandler *handler.ProjectConsumptionHandler
+	switch {
+	case cfg.DataSource != config.DataSourcePostgres || db == nil:
+		// Not logged: on the ServiceNow path these routes are absent by
+		// design, exactly as the ServiceNow-only routes are absent here.
+	case cfg.ConsumptionSecretKey == "":
+		slog.Info("project consumption routes not registered: CONSUMPTION_SECRET_KEY is unset",
+			"routes", "GET,PATCH /projects/{id}/consumption",
+			"reason", "these routes store OAuth2 credentials and subscription secret keys, which are never stored unencrypted")
+	default:
+		key, err := crypto.KeyFromBase64(cfg.ConsumptionSecretKey)
+		if err != nil {
+			// The error text never contains the key itself — see
+			// crypto.KeyFromBase64.
+			slog.Error("project consumption routes not registered: invalid CONSUMPTION_SECRET_KEY",
+				"routes", "GET,PATCH /projects/{id}/consumption", "error", err)
+			break
+		}
+		codec, err := crypto.NewAESGCMCodec(key)
+		if err != nil {
+			slog.Error("project consumption routes not registered: could not construct the codec",
+				"routes", "GET,PATCH /projects/{id}/consumption", "error", err)
+			break
+		}
+		projectConsumptionHandler = handler.NewProjectConsumptionHandler(
+			service.NewProjectConsumptionService(repository.NewProjectConsumptionRepository(db, codec)),
+		)
 	}
 
 	// EventPublisherService is optional, like every ServiceNow-only
@@ -359,6 +407,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	if projectConsumptionHandler != nil {
+		mux.HandleFunc("GET /projects/{id}/consumption", projectConsumptionHandler.GetProjectConsumption)
+		mux.HandleFunc("PATCH /projects/{id}/consumption", projectConsumptionHandler.UpdateProjectConsumption)
+	}
 	if projectContactHandler != nil {
 		mux.HandleFunc("POST /projects/{id}/contacts/search", projectContactHandler.SearchProjectContacts)
 		mux.HandleFunc("GET /projects/{id}/contacts/{contactId}", projectContactHandler.GetProjectContact)

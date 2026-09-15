@@ -151,6 +151,40 @@ rather than async.
 | `EVENT_HUB_TOPIC` | Event Hub (Kafka topic) name, e.g. `case-events` — must match `csm-notification-service`'s own `EVENT_HUB_TOPIC` (required once `EVENT_HUB_BROKER` is set) |
 | `EVENT_PUBLISHING_ENABLED` | Set to `true` to actually publish. Defaults to `false` — safe by default even with Event Hub fully configured (optional) |
 
+### Product-consumption provisioning state
+
+`project_consumption` (migration `000014`) stores where a project has got to in the
+product-consumption provisioning flow: the Choreo application created for it, that application's
+OAuth2 credentials, and the two subscription secret keys a deployment's license is built from.
+Exposed at `GET /projects/{id}/consumption` and `PATCH /projects/{id}/consumption`.
+
+This is the mirror image of the ServiceNow-only routes — it exists **only** on the Postgres path.
+On the ServiceNow path the same state lives on the `customer_project` record and is reached through
+the product-consumption scripted REST API, which the Choreo subscription operation calls directly;
+neither this service nor the ServiceNow integration service is in that path at all.
+
+The status is a step number, and it only ever moves forward: `1` pending, `2` application created,
+`3` subscribed, `4` credentials generated, `5` secret keys generated. The flow is resumable by
+design — a caller reads the current status and runs only the steps above it — so a write whose
+status is not ahead of what is stored is a no-op that returns the stored state, not an error. This
+matters: applying an out-of-order write would re-run a side-effecting step and create a **second**
+Choreo application for a customer who already has one.
+
+Credentials are encrypted at rest (`internal/crypto`, AES-256-GCM) and never returned by either
+endpoint — the read reports only `hasConsumerSecret`/`hasSecretKeys`. Both routes need a key and are
+not registered without one, so a deployment missing `CONSUMPTION_SECRET_KEY` loses the feature
+rather than storing these values in the clear.
+
+| Variable | Description |
+|---|---|
+| `CONSUMPTION_SECRET_KEY` | Base64-encoded 32-byte AES key (`openssl rand -base64 32`). Optional — absent disables the two routes. Rotating it makes already-stored credentials undecryptable |
+
+Only the provisioning state is served here. **License generation itself is not implemented on the
+Postgres path** and still runs in ServiceNow: it depends on the secret-shuffling and payload-signing
+script includes (`LicenseFileContentSigner`), whose output is a live contract with every deployed
+customer product, so it needs a bit-exact port verified against ServiceNow rather than a
+reimplementation from the design docs.
+
 ### SLA clocks
 
 `sla_clocks` (migration `000011`) durably tracks per-case SLA timers — `caseId`/`clockType`,

@@ -807,6 +807,118 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/{id}/consumption:
+    get:
+      summary: Get a project's product-consumption provisioning state.
+      description: >
+        Postgres data source only; there is no ServiceNow equivalent. On the
+        ServiceNow path this state lives on the customer_project record and is
+        reached through the product-consumption scripted REST API, which the
+        Choreo subscription operation calls directly.
+
+        Also requires an encryption key to be configured (CONSUMPTION_SECRET_KEY);
+        without one these routes are not registered at all, rather than storing
+        the credentials in the clear.
+
+        A project that has never entered the provisioning flow reports status 1
+        (pending) rather than 404 — "not provisioned yet" is the first step of
+        the state machine, not an absent resource.
+
+        No secret value is ever returned. The consumer secret and the two
+        subscription secret keys are reported only as the booleans
+        hasConsumerSecret and hasSecretKeys.
+      operationId: getProjectConsumption
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The project's provisioning state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectConsumptionView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      summary: Record the completion of one product-consumption provisioning step.
+      description: >
+        Postgres data source only — see the GET on this path.
+
+        The status may only move forward. The flow is resumable: a caller reads
+        the current status and runs only the steps above it, so an out-of-order
+        write is either a stale retry or a bug, and applying it would re-run a
+        side-effecting step — creating a second Choreo application for a
+        customer who already has one. A status that is not ahead of what is
+        stored is therefore a no-op that returns the stored state with an
+        explanatory message, not an error, so a retrying caller converges.
+
+        Each step's own artefacts are required when recording it: applicationId
+        at status 2, consumerKey and consumerSecret at status 4, and
+        primarySecretKey and secondarySecretKey at status 5. Status 3 produces
+        nothing to store. Fields that are not supplied are left as stored, so
+        recording a later step never clears an earlier one's output.
+      operationId: updateProjectConsumption
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectConsumptionRequest'
+      responses:
+        "200":
+          description: The provisioning state after the update.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateProjectConsumptionResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}/contacts/{contactId}:
     get:
       summary: Get one contact's attributes for a single project.
@@ -6735,6 +6847,103 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    ProjectConsumptionView:
+      type: object
+      description: >
+        A project's product-consumption provisioning state. Carries no secret
+        material — see hasConsumerSecret and hasSecretKeys.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        status:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 5
+          description: >
+            The provisioning step reached: 1 pending, 2 application created,
+            3 subscribed, 4 credentials generated, 5 secret keys generated.
+            A license can only be issued at 5.
+        applicationId:
+          type: string
+          nullable: true
+          description: The Choreo application created for this project.
+        consumerKey:
+          type: string
+          nullable: true
+          description: >
+            The application's OAuth2 client ID. Not a secret — its matching
+            secret is never returned.
+        name:
+          type: string
+          description: The name to give the project's Choreo application.
+        description:
+          type: string
+          description: The description to give the project's Choreo application.
+        hasConsumerSecret:
+          type: boolean
+          description: Whether a consumer secret is stored, not its value.
+        hasSecretKeys:
+          type: boolean
+          description: Whether both subscription secret keys are stored, not their values.
+        updatedOn:
+          type: string
+          format: date-time
+      required:
+        - projectId
+        - status
+        - name
+        - description
+        - hasConsumerSecret
+        - hasSecretKeys
+        - updatedOn
+
+    UpdateProjectConsumptionRequest:
+      type: object
+      additionalProperties: false
+      description: >
+        Records the completion of one provisioning step. Which of the optional
+        fields are required depends on status — see the endpoint description.
+      properties:
+        status:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 5
+        applicationId:
+          type: string
+          description: Required when status is 2.
+        consumerKey:
+          type: string
+          description: Required when status is 4.
+        consumerSecret:
+          type: string
+          description: Required when status is 4. Stored encrypted; never returned.
+        primarySecretKey:
+          type: string
+          description: Required when status is 5. Stored encrypted; never returned.
+        secondarySecretKey:
+          type: string
+          description: Required when status is 5. Stored encrypted; never returned.
+      required:
+        - status
+
+    UpdateProjectConsumptionResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: >
+            Describes what happened — in particular, distinguishes an applied
+            update from a no-op where the stored status was already at or beyond
+            the requested one.
+        result:
+          $ref: '#/components/schemas/ProjectConsumptionView'
+      required:
+        - message
+        - result
 
     ProjectUpdateRequest:
       type: object
