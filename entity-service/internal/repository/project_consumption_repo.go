@@ -173,9 +173,19 @@ func (r *projectConsumptionRepo) Upsert(ctx context.Context, projectID string, n
 		return domain.ProjectConsumption{}, fmt.Errorf("upsert project consumption: encrypt secondarySecretKey: %w", err)
 	}
 
-	// COALESCE(EXCLUDED.x, pc.x) is what makes a partial write safe: the
-	// caller sends only the artefacts of the step it just completed, and every
-	// other column keeps its stored value.
+	// The COALESCEs are in the SELECT that builds the proposed row, not in the
+	// DO UPDATE SET, and that placement is load-bearing.
+	//
+	// PostgreSQL evaluates CHECK constraints against the *proposed* insert
+	// tuple, before ON CONFLICT resolves anything. Merging in the DO UPDATE SET
+	// is therefore too late: advancing a project to status 3 while supplying
+	// only the status proposes a row whose choreo_application_id is NULL, and
+	// chk_project_consumption_application_id rejects it — even though the
+	// update that would have followed preserves the stored value. Merging here
+	// means the row that reaches the constraints is already the final one.
+	//
+	// It also makes EXCLUDED carry the merged values, so DO UPDATE SET is a
+	// plain assignment rather than a second copy of the same COALESCE list.
 	//
 	// The WHERE clause is the concurrency guard. Two license downloads racing
 	// for the same project both read status 1 and both try to write 2; the
@@ -186,14 +196,30 @@ func (r *projectConsumptionRepo) Upsert(ctx context.Context, projectID string, n
 			project_id, status, choreo_application_id, consumer_key,
 			consumer_secret, primary_secret_key, secondary_secret_key
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		SELECT next.project_id,
+		       next.status,
+		       COALESCE(next.choreo_application_id, stored.choreo_application_id),
+		       COALESCE(next.consumer_key, stored.consumer_key),
+		       COALESCE(next.consumer_secret, stored.consumer_secret),
+		       COALESCE(next.primary_secret_key, stored.primary_secret_key),
+		       COALESCE(next.secondary_secret_key, stored.secondary_secret_key)
+		FROM (
+			SELECT $1::TEXT     AS project_id,
+			       $2::SMALLINT AS status,
+			       $3::TEXT     AS choreo_application_id,
+			       $4::TEXT     AS consumer_key,
+			       $5::BYTEA    AS consumer_secret,
+			       $6::BYTEA    AS primary_secret_key,
+			       $7::BYTEA    AS secondary_secret_key
+		) AS next
+		LEFT JOIN project_consumption AS stored ON stored.project_id = next.project_id
 		ON CONFLICT (project_id) DO UPDATE SET
 			status                = EXCLUDED.status,
-			choreo_application_id = COALESCE(EXCLUDED.choreo_application_id, project_consumption.choreo_application_id),
-			consumer_key          = COALESCE(EXCLUDED.consumer_key, project_consumption.consumer_key),
-			consumer_secret       = COALESCE(EXCLUDED.consumer_secret, project_consumption.consumer_secret),
-			primary_secret_key    = COALESCE(EXCLUDED.primary_secret_key, project_consumption.primary_secret_key),
-			secondary_secret_key  = COALESCE(EXCLUDED.secondary_secret_key, project_consumption.secondary_secret_key),
+			choreo_application_id = EXCLUDED.choreo_application_id,
+			consumer_key          = EXCLUDED.consumer_key,
+			consumer_secret       = EXCLUDED.consumer_secret,
+			primary_secret_key    = EXCLUDED.primary_secret_key,
+			secondary_secret_key  = EXCLUDED.secondary_secret_key,
 			updated_at            = NOW()
 		WHERE project_consumption.status < EXCLUDED.status
 		RETURNING project_id, status, choreo_application_id, consumer_key, created_at, updated_at`
