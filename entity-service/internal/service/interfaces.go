@@ -215,6 +215,29 @@ type ProjectStatsService interface {
 	GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error)
 }
 
+// ProjectConsumptionService defines the operations on a project's
+// product-consumption provisioning state — the resumable sequence that creates
+// a Choreo application for the project, subscribes it to the tracking API and
+// mints the credentials a deployment's license is built from.
+//
+// This is the mirror image of ProjectContactService and friends: all methods
+// require the **Postgres** data source, and there is no ServiceNow
+// implementation. On the ServiceNow path this state lives on the
+// customer_project record and is reached through the product-consumption
+// scripted REST API, which the Choreo subscription operation calls directly —
+// neither this service nor the ServiceNow integration service sits in that
+// path at all.
+type ProjectConsumptionService interface {
+	// GetProjectConsumption returns the project's current provisioning state.
+	// A project that has never entered the flow reports status 1 (pending)
+	// rather than a not-found error; an unknown project ID is not found.
+	GetProjectConsumption(ctx context.Context, projectID string) (domain.ProjectConsumptionView, error)
+	// UpdateProjectConsumption records the completion of one provisioning step.
+	// The status may only move forward; a status that is not ahead of what is
+	// stored returns the stored state unchanged instead of failing.
+	UpdateProjectConsumption(ctx context.Context, projectID string, req domain.UpdateProjectConsumptionRequest) (domain.UpdateProjectConsumptionResponse, error)
+}
+
 // ProjectContactService defines the operations available on project contacts.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ProjectContactService interface {
