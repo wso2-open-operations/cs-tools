@@ -42,6 +42,12 @@ var internalNoteTemplateRaw string
 //go:embed templates/severity_changed.html
 var severityChangedTemplateRaw string
 
+//go:embed templates/mention.html
+var mentionTemplateRaw string
+
+//go:embed templates/internal_mention.html
+var internalMentionTemplateRaw string
+
 // wso2LogoURL is WSO2's own official logo asset, served from wso2.cachefly.net
 // (WSO2's public CDN for site assets — not third-party hosting). An earlier
 // version embedded the logo as an inline base64 data: URI instead, avoiding
@@ -71,6 +77,8 @@ var (
 	caseCreatedTemplate     = bakeLogo(caseCreatedTemplateRaw)
 	internalNoteTemplate    = bakeLogo(internalNoteTemplateRaw)
 	severityChangedTemplate = bakeLogo(severityChangedTemplateRaw)
+	mentionTemplate         = bakeLogo(mentionTemplateRaw)
+	internalMentionTemplate = bakeLogo(internalMentionTemplateRaw)
 )
 
 // htmlBlockBoundary matches the tags plainTextFromHTML treats as line
@@ -195,6 +203,45 @@ func RenderInternalNoteEmail(name, caseNumber, caseTitle, caseComment, commentLi
 		"<!-- [CASE_LINK] -->", escapeHTML(caseLink),
 	)
 	return replacer.Replace(internalNoteTemplate)
+}
+
+// RenderMentionEmail fills in the "you were mentioned" HTML email template —
+// the customer/CSM-facing layout for events.TypeCaseMentioned, used when the
+// mention happened in a public comment (see events.CaseMentionedPayload.
+// IsInternalNote). name is the mentioner (who @mentioned the recipient), not
+// the recipient themselves — dispatch.handleCaseMentioned resolves one
+// portal link per recipient the same way handleCommentAdded does, so this is
+// called once per resolved link group, same as RenderCommentAddedEmail.
+// Parameter order/meaning otherwise mirrors RenderCommentAddedEmail exactly.
+func RenderMentionEmail(name, caseNumber, caseTitle, caseComment, commentLink, caseLink string) string {
+	replacer := strings.NewReplacer(
+		"<!-- [NAME] -->", escapeHTML(name),
+		"<!-- [CASE_NUMBER] -->", escapeHTML(caseNumber),
+		"<!-- [CASE_TITLE] -->", escapeHTML(caseTitle),
+		"<!-- [CASE_COMMENT] -->", escapeMultiline(caseComment),
+		"<!-- [COMMENT_LINK] -->", escapeHTML(commentLink),
+		"<!-- [CASE_LINK] -->", escapeHTML(caseLink),
+	)
+	return replacer.Replace(mentionTemplate)
+}
+
+// RenderInternalMentionEmail fills in the "you were mentioned" HTML email
+// template's internal-note variant — used instead of RenderMentionEmail when
+// the mention happened inside a work note (see events.CaseMentionedPayload.
+// IsInternalNote), matching RenderInternalNoteEmail's own internal-note
+// conventions: caseNumber here is expected to be the case's WSO2CaseID, not
+// the ServiceNow CaseNumber, same reasoning as RenderInternalNoteEmail's own
+// doc comment.
+func RenderInternalMentionEmail(name, caseNumber, caseTitle, caseComment, commentLink, caseLink string) string {
+	replacer := strings.NewReplacer(
+		"<!-- [NAME] -->", escapeHTML(name),
+		"<!-- [CASE_NUMBER] -->", escapeHTML(caseNumber),
+		"<!-- [CASE_TITLE] -->", escapeHTML(caseTitle),
+		"<!-- [CASE_COMMENT] -->", escapeMultiline(caseComment),
+		"<!-- [COMMENT_LINK] -->", escapeHTML(commentLink),
+		"<!-- [CASE_LINK] -->", escapeHTML(caseLink),
+	)
+	return replacer.Replace(internalMentionTemplate)
 }
 
 // RenderStatusChangedEmail fills in the "case status changed" HTML email

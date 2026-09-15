@@ -50,6 +50,8 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
+import { MentionNode } from "@components/rich-text-editor/MentionNode";
+import MentionsPlugin from "@components/rich-text-editor/MentionsPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
 import { LinkNode } from "@lexical/link";
@@ -387,6 +389,7 @@ const DEFAULT_EDITOR_CONFIG = {
     ListNode,
     ListItemNode,
     ImageNode,
+    MentionNode,
     CodeNode,
     LinkNode,
     HeadingNode,
@@ -601,6 +604,13 @@ const Editor = ({
                 textDecoration: "none",
               },
             },
+            "& .editor-mention": {
+              color: "primary.main",
+              backgroundColor: "action.hover",
+              borderRadius: "4px",
+              padding: "0 2px",
+              fontWeight: oxygenTheme.typography.fontWeightMedium || 500,
+            },
             "& .editor-code": {
               backgroundColor: "background.default",
               color: "text.primary",
@@ -649,6 +659,7 @@ const Editor = ({
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />
+          <MentionsPlugin />
           <ClipboardImagePlugin onPasteError={onPasteError} />
           <PasteNormalizationPlugin />
           <LinkPlugin />

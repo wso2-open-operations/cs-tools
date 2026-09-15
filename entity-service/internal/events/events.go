@@ -67,6 +67,17 @@ const (
 	// entirely (it also sends the Google Chat breach alert directly,
 	// without a second event round-trip through this topic).
 	TypeSLAClockRegister Type = "sla.clock.register"
+	// TypeCaseMentioned is Postgres-data-source-only — published from
+	// caseService.publishCaseMentioned (case_service.go) whenever a new
+	// comment carries CreateCaseCommentRequest.MentionedUserIDs that
+	// resolve to at least one recipient. There is no ServiceNow-side
+	// equivalent of this event in this service: the phase-1 (ServiceNow)
+	// @mention feature publishes its own case.mentioned event from a
+	// different codebase entirely (cs-tools#1713), which this type and
+	// CaseMentionedPayload are kept in sync with by hand, same as every
+	// other event in this file is kept in sync with
+	// csm-notification-service.
+	TypeCaseMentioned Type = "case.mentioned"
 )
 
 // Envelope is the wire shape of every record on the case-events topic.
@@ -113,6 +124,28 @@ type CommentAddedPayload struct {
 	// snCaseService.publishCommentAdded's own doc comment). Mirrors
 	// csm-notification-service's own IsInternalNote field, which renders a
 	// distinct email layout for it.
+	IsInternalNote bool     `json:"isInternalNote,omitempty"`
+	Recipients     []string `json:"recipients"`
+}
+
+// CaseMentionedPayload is the Payload shape for TypeCaseMentioned. Field
+// shape mirrors CommentAddedPayload closely (same comment-about-a-case
+// data), but Recipients here is the resolved set of @mentioned users
+// specifically, not the case's watch list — see
+// caseService.publishCaseMentioned's own doc comment. MentionerName is the
+// comment author's resolved display name (not the mentioned users'), same
+// role CommentAddedPayload.Name plays for its own event. IsInternalNote —
+// see CommentAddedPayload's own doc comment; Recipients is already
+// filtered to wso2.com addresses only when true, same reasoning.
+type CaseMentionedPayload struct {
+	MentionerName  string   `json:"mentionerName"`
+	ProjectID      string   `json:"projectId"`
+	CaseID         string   `json:"caseId"`
+	CaseNumber     string   `json:"caseNumber,omitempty"`
+	WSO2CaseID     string   `json:"wso2CaseId,omitempty"`
+	CaseTitle      string   `json:"caseTitle,omitempty"`
+	CaseComment    string   `json:"caseComment"`
+	CommentID      string   `json:"commentId"`
 	IsInternalNote bool     `json:"isInternalNote,omitempty"`
 	Recipients     []string `json:"recipients"`
 }

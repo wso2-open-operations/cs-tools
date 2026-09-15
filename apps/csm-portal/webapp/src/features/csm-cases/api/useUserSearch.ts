@@ -17,11 +17,14 @@
 import {
   keepPreviousData,
   useInfiniteQuery,
+  useQuery,
+  type UseQueryResult,
 } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useBackendApi } from "@api/backend/client";
 import {
   normalizeUserSearchResponse,
+  type NormalizedUser,
   type NormalizedUserSearchResult,
   type SearchUsersRequest,
   type SearchUsersResponse,
@@ -149,4 +152,44 @@ export function useInfiniteUserSearch(
       void result.fetchNextPage();
     },
   };
+}
+
+/**
+ * Single-page user-directory search that keeps every field
+ * {@link normalizeUser} produces — notably `userType` — unlike
+ * {@link useInfiniteUserSearch}'s own flattened `UserSearchOption`, which
+ * drops it. For a caller that needs to scope results by `userType` itself
+ * (e.g. the comment composer's `@`-mention picker, which only offers
+ * `userType === "internal"` staff) rather than a paginated, chip-rendering
+ * picker. Goes through the same `useBackendApi()` (`@api/backend/client`) as
+ * every other case-feature user search, not `useSearchUsers`'s
+ * `useAuthApiClient`, so it shares that hook's existing test-mock story
+ * instead of requiring its own `@config/apiConfig` stub in every suite that
+ * renders the rich-text editor.
+ */
+export function useUserDirectorySearch(
+  query: string,
+  enabled: boolean,
+  limit: number = USER_PAGE_SIZE,
+): UseQueryResult<NormalizedUser[], Error> {
+  const api = useBackendApi();
+  const q = query.trim();
+
+  return useQuery<SearchUsersResponse, Error, NormalizedUser[]>({
+    queryKey: ["csm-users", "directory-search", q, limit],
+    queryFn: async () => {
+      const request: SearchUsersRequest = {
+        pagination: { offset: 0, limit },
+        ...(q.length > 0 && { filters: { searchQuery: q } }),
+      };
+      return api.post<SearchUsersRequest, SearchUsersResponse>(
+        "/users/search",
+        request,
+      );
+    },
+    select: (res) => normalizeUserSearchResponse(res).users,
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
 }

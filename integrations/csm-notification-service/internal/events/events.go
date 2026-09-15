@@ -46,6 +46,7 @@ const (
 	TypeCaseAssigned     Type = "case.assigned"
 	TypeCaseAcknowledged Type = "case.acknowledged"
 	TypeSeverityChanged  Type = "case.severity_changed"
+	TypeCaseMentioned    Type = "case.mentioned"
 	TypeIncidentCreated  Type = "incident.created"
 
 	// TypeSLAClockRegister and TypeSLATierReached belong to internal/slaengine,
@@ -88,7 +89,7 @@ const (
 // checked — used both for request validation and for generating docs/errors
 // that enumerate valid values.
 var KnownTypes = []Type{
-	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
+	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeCaseMentioned, TypeIncidentCreated,
 	TypeSLAClockRegister, TypeSLATierReached, TypeCaseBillableStatusChanged,
 }
 
@@ -273,6 +274,38 @@ type SeverityChangedPayload struct {
 	Product     string   `json:"product,omitempty"`
 	Team        string   `json:"team,omitempty"`
 	Recipients  []string `json:"recipients"`
+}
+
+// CaseMentionedPayload is TypeCaseMentioned's payload — published when
+// someone is @mentioned in a case comment or work note. Unlike every other
+// case.* payload above, Recipients here is not the case's watch list: it's
+// specifically the person(s) the comment text @mentioned, resolved by the
+// publisher (entity-service) from the comment body — this service has no
+// notion of how that resolution happened, it just emails whoever's listed.
+// MentionerName is who wrote the comment (the mention's source), not a
+// recipient. See CaseCreatedPayload's doc comment for why ProjectID/CaseID
+// are required (groupByLink's link resolution) and for CaseNumber/
+// WSO2CaseID's meaning. CommentID — see CommentAddedPayload's own doc
+// comment; always present here (an @mention only ever happens inside a
+// specific comment, unlike case.created/status_changed/assigned, which have
+// no comment to link to).
+type CaseMentionedPayload struct {
+	MentionerName string `json:"mentionerName"`
+	ProjectID     string `json:"projectId"`
+	CaseID        string `json:"caseId"`
+	// CaseNumber — see CaseCreatedPayload's own doc comment.
+	CaseNumber string `json:"caseNumber,omitempty"`
+	// WSO2CaseID — see CaseCreatedPayload's own doc comment.
+	WSO2CaseID  string `json:"wso2CaseId,omitempty"`
+	CaseTitle   string `json:"caseTitle,omitempty"`
+	CaseComment string `json:"caseComment"`
+	CommentID   string `json:"commentId"`
+	// IsInternalNote — see CommentAddedPayload's own doc comment; same
+	// meaning here. dispatch.handleCaseMentioned renders a distinct layout
+	// for it — RenderInternalMentionEmail instead of RenderMentionEmail —
+	// the same public/internal split handleCommentAdded already makes.
+	IsInternalNote bool     `json:"isInternalNote,omitempty"`
+	Recipients     []string `json:"recipients"`
 }
 
 // IncidentCreatedPayload is TypeIncidentCreated's payload. Unlike the case.*

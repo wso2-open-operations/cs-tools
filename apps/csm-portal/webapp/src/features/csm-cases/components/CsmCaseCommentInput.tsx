@@ -62,6 +62,9 @@ interface CsmCaseCommentInputProps {
     html: string,
     internal: boolean,
     attachments: CommentAttachmentDraft[],
+    /** De-duplicated platform user ids `@`-mentioned in `html` (see
+     * {@link extractMentionedUserIds}), in first-mention order. */
+    mentionedUserIds: string[],
   ) => Promise<unknown> | void;
   disabled?: boolean;
   /**
@@ -128,6 +131,30 @@ const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
 function isEmpty(html: string): boolean {
   const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
   return text.length === 0;
+}
+
+/**
+ * Pulls every `@`-mentioned user id out of the editor's submitted HTML,
+ * de-duplicated and in first-mention order. Each mention round-trips through
+ * `Editor`'s `MentionNode.exportDOM` as
+ * `<span data-mention-user-id="{userId}">@{name}</span>` (see
+ * `rich-text-editor/MentionNode.tsx`) — a plain regex pull is simpler here
+ * than re-walking Lexical editor state, since by submit time the mention is
+ * already flattened into the HTML string this component tracks as `html`.
+ */
+function extractMentionedUserIds(html: string): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const re = /data-mention-user-id="([^"]+)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    const id = match[1];
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
 /**
@@ -391,7 +418,7 @@ export default function CsmCaseCommentInput({
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit(html, internal, attachments);
+      await onSubmit(html, internal, attachments, extractMentionedUserIds(html));
       setHtml("");
       setAttachments([]);
       resetTriggerRef.current += 1;

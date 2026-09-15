@@ -18,11 +18,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 )
 
 // stubCaseRepo is a minimal repository.CaseRepository whose SearchCases
@@ -38,12 +41,17 @@ type stubCaseRepo struct {
 	updateAttachmentName  func(ctx context.Context, id, name, updatedBy string) (time.Time, error)
 	confirmCaseAttachment func(ctx context.Context, id string) (domain.Attachment, error)
 	searchCaseComments    func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
+	getCaseByID           func(ctx context.Context, id string) (domain.CaseView, error)
+	createCaseComment     func(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error)
 }
 
 func (s *stubCaseRepo) CreateCase(context.Context, domain.CreateCaseRequest) (domain.Case, error) {
 	panic("not implemented")
 }
-func (s *stubCaseRepo) GetCaseByID(context.Context, string) (domain.CaseView, error) {
+func (s *stubCaseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
+	if s.getCaseByID != nil {
+		return s.getCaseByID(ctx, id)
+	}
 	panic("not implemented")
 }
 func (s *stubCaseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error) {
@@ -52,7 +60,10 @@ func (s *stubCaseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRe
 	}
 	panic("SearchCases called unexpectedly: the unsupported-field check should have short-circuited before reaching the repository")
 }
-func (s *stubCaseRepo) CreateCaseComment(context.Context, domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
+func (s *stubCaseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
+	if s.createCaseComment != nil {
+		return s.createCaseComment(ctx, req)
+	}
 	panic("not implemented")
 }
 func (s *stubCaseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
@@ -106,6 +117,7 @@ func (s *stubCaseRepo) ConfirmCaseAttachment(ctx context.Context, id string) (do
 // use.
 type stubUserRepo struct {
 	getUserByEmail func(ctx context.Context, email string) (domain.User, error)
+	getUsersByIDs  func(ctx context.Context, ids []string) ([]domain.User, error)
 }
 
 func (stubUserRepo) SearchUsers(context.Context, domain.SearchUsersRequest) ([]domain.User, int, error) {
@@ -114,6 +126,12 @@ func (stubUserRepo) SearchUsers(context.Context, domain.SearchUsersRequest) ([]d
 func (s stubUserRepo) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
 	if s.getUserByEmail != nil {
 		return s.getUserByEmail(ctx, email)
+	}
+	panic("not implemented")
+}
+func (s stubUserRepo) GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error) {
+	if s.getUsersByIDs != nil {
+		return s.getUsersByIDs(ctx, ids)
 	}
 	panic("not implemented")
 }
@@ -425,6 +443,225 @@ func TestCaseService_SearchCaseComments(t *testing.T) {
 		var ve *apierror.ValidationError
 		if !asValidationError(err, &ve) {
 			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
+}
+
+// TestCaseService_CreateCaseComment_PublishesCaseMentioned covers
+// publishCaseMentioned, called from CreateCaseComment right after a
+// successful comment insert. Exercises: mentioned ids resolved to emails via
+// GetUsersByIDs and published as case.mentioned's Recipients; an id that
+// doesn't resolve is silently dropped rather than failing the request; a
+// work-note comment's recipients are filtered to wso2.com addresses only,
+// and skipped entirely (no publish) when that filtering empties the list; no
+// MentionedUserIDs at all means no publish and GetUsersByIDs is never
+// called; and a nil publisher means CreateCaseComment still succeeds.
+func TestCaseService_CreateCaseComment_PublishesCaseMentioned(t *testing.T) {
+	caseID := "11111111-1111-1111-1111-111111111111"
+	authorID := "22222222-2222-2222-2222-222222222222"
+	mentionedID1 := "33333333-3333-3333-3333-333333333333"
+	mentionedID2 := "44444444-4444-4444-4444-444444444444"
+	commentID := "c1"
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+
+	author := domain.User{ID: authorID, FirstName: "Jane", LastName: "Doe", Email: "jane.doe@example.com"}
+	cv := domain.CaseView{
+		ID:             caseID,
+		Number:         "CS0009001",
+		InternalID:     "WSO2-009",
+		Subject:        "Something is broken",
+		ProjectDetails: domain.EntityRef{ID: "p1", Name: "Project One"},
+	}
+
+	newRepo := func(t *testing.T, req domain.CreateCaseCommentRequest) *stubCaseRepo {
+		return &stubCaseRepo{
+			createCaseComment: func(_ context.Context, gotReq domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
+				if gotReq.CreatedBy != authorID {
+					t.Fatalf("CreatedBy = %q, want %q", gotReq.CreatedBy, authorID)
+				}
+				return domain.CaseComment{ID: commentID, CaseID: caseID, CreatedOn: now}, nil
+			},
+			getCaseByID: func(_ context.Context, id string) (domain.CaseView, error) {
+				if id != caseID {
+					t.Fatalf("GetCaseByID id = %q, want %q", id, caseID)
+				}
+				return cv, nil
+			},
+		}
+	}
+	newUserRepo := func(getUsersByIDs func(ctx context.Context, ids []string) ([]domain.User, error)) stubUserRepo {
+		return stubUserRepo{
+			getUserByEmail: func(context.Context, string) (domain.User, error) { return author, nil },
+			getUsersByIDs:  getUsersByIDs,
+		}
+	}
+
+	t.Run("resolves mentioned ids and publishes case.mentioned", func(t *testing.T) {
+		req := domain.CreateCaseCommentRequest{
+			CaseID:           caseID,
+			Type:             domain.CommentTypeComment,
+			Content:          "hey @jane @unresolved check this out",
+			MentionedUserIDs: []string{mentionedID1, mentionedID2},
+		}
+		repo := newRepo(t, req)
+		var gotIDs []string
+		userRepo := newUserRepo(func(_ context.Context, ids []string) ([]domain.User, error) {
+			gotIDs = ids
+			// mentionedID2 deliberately doesn't resolve, to prove an
+			// unresolved id is dropped rather than failing the publish.
+			return []domain.User{{ID: mentionedID1, Email: "mention1@example.com"}}, nil
+		})
+		publisher := &mockEventPublisher{}
+		svc := NewCaseService(repo, userRepo, publisher)
+
+		_, err := svc.CreateCaseComment(contextWithUserIDToken(fakeJWTWithEmail(t, author.Email)), req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(gotIDs) != 2 || gotIDs[0] != mentionedID1 || gotIDs[1] != mentionedID2 {
+			t.Fatalf("GetUsersByIDs called with %v, want %v", gotIDs, req.MentionedUserIDs)
+		}
+		if len(publisher.calls) != 1 {
+			t.Fatalf("Publish calls = %d, want 1", len(publisher.calls))
+		}
+		call := publisher.calls[0]
+		if call.eventType != events.TypeCaseMentioned || call.entityID != caseID {
+			t.Fatalf("Publish(type=%q, entityID=%q), want (%q, %q)", call.eventType, call.entityID, events.TypeCaseMentioned, caseID)
+		}
+		var payload events.CaseMentionedPayload
+		if err := json.Unmarshal(call.payload, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload.MentionerName != "Jane Doe" {
+			t.Errorf("MentionerName = %q, want %q", payload.MentionerName, "Jane Doe")
+		}
+		if payload.ProjectID != "p1" || payload.CaseNumber != "CS0009001" || payload.WSO2CaseID != "WSO2-009" || payload.CaseTitle != "Something is broken" {
+			t.Errorf("case detail fields not populated from GetCaseByID: %+v", payload)
+		}
+		if payload.CommentID != commentID || payload.CaseComment != req.Content {
+			t.Errorf("CommentID/CaseComment = %q/%q, want %q/%q", payload.CommentID, payload.CaseComment, commentID, req.Content)
+		}
+		if payload.IsInternalNote {
+			t.Errorf("IsInternalNote = true, want false for a customer-visible comment")
+		}
+		if len(payload.Recipients) != 1 || payload.Recipients[0] != "mention1@example.com" {
+			t.Errorf("Recipients = %v, want [mention1@example.com] (unresolved id dropped)", payload.Recipients)
+		}
+	})
+
+	t.Run("work note filters recipients to wso2.com addresses only", func(t *testing.T) {
+		req := domain.CreateCaseCommentRequest{
+			CaseID:           caseID,
+			Type:             domain.CommentTypeWorkNote,
+			Content:          "internal only",
+			MentionedUserIDs: []string{mentionedID1, mentionedID2},
+		}
+		repo := newRepo(t, req)
+		userRepo := newUserRepo(func(context.Context, []string) ([]domain.User, error) {
+			return []domain.User{
+				{ID: mentionedID1, Email: "internal@wso2.com"},
+				{ID: mentionedID2, Email: "customer@example.com"},
+			}, nil
+		})
+		publisher := &mockEventPublisher{}
+		svc := NewCaseService(repo, userRepo, publisher)
+
+		if _, err := svc.CreateCaseComment(contextWithUserIDToken(fakeJWTWithEmail(t, author.Email)), req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(publisher.calls) != 1 {
+			t.Fatalf("Publish calls = %d, want 1", len(publisher.calls))
+		}
+		var payload events.CaseMentionedPayload
+		if err := json.Unmarshal(publisher.calls[0].payload, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if !payload.IsInternalNote {
+			t.Errorf("IsInternalNote = false, want true for a work note")
+		}
+		if len(payload.Recipients) != 1 || payload.Recipients[0] != "internal@wso2.com" {
+			t.Errorf("Recipients = %v, want [internal@wso2.com] (customer address filtered out)", payload.Recipients)
+		}
+	})
+
+	t.Run("work note with no wso2.com recipients skips publishing entirely", func(t *testing.T) {
+		req := domain.CreateCaseCommentRequest{
+			CaseID:           caseID,
+			Type:             domain.CommentTypeWorkNote,
+			Content:          "internal only",
+			MentionedUserIDs: []string{mentionedID1},
+		}
+		repo := newRepo(t, req)
+		userRepo := newUserRepo(func(context.Context, []string) ([]domain.User, error) {
+			return []domain.User{{ID: mentionedID1, Email: "customer@example.com"}}, nil
+		})
+		publisher := &mockEventPublisher{}
+		svc := NewCaseService(repo, userRepo, publisher)
+
+		if _, err := svc.CreateCaseComment(contextWithUserIDToken(fakeJWTWithEmail(t, author.Email)), req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(publisher.calls) != 0 {
+			t.Fatalf("Publish calls = %d, want 0 (no wso2.com recipients left after filtering)", len(publisher.calls))
+		}
+	})
+
+	t.Run("no mentions means no publish and GetUsersByIDs is never called", func(t *testing.T) {
+		req := domain.CreateCaseCommentRequest{CaseID: caseID, Type: domain.CommentTypeComment, Content: "no mentions here"}
+		repo := newRepo(t, req)
+		userRepo := newUserRepo(func(context.Context, []string) ([]domain.User, error) {
+			t.Fatal("GetUsersByIDs should not be called when MentionedUserIDs is empty")
+			return nil, nil
+		})
+		publisher := &mockEventPublisher{}
+		svc := NewCaseService(repo, userRepo, publisher)
+
+		if _, err := svc.CreateCaseComment(contextWithUserIDToken(fakeJWTWithEmail(t, author.Email)), req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(publisher.calls) != 0 {
+			t.Fatalf("Publish calls = %d, want 0", len(publisher.calls))
+		}
+	})
+
+	t.Run("nil publisher does not fail comment creation", func(t *testing.T) {
+		req := domain.CreateCaseCommentRequest{
+			CaseID:           caseID,
+			Type:             domain.CommentTypeComment,
+			Content:          "hey @jane",
+			MentionedUserIDs: []string{mentionedID1},
+		}
+		repo := newRepo(t, req)
+		userRepo := newUserRepo(func(context.Context, []string) ([]domain.User, error) {
+			t.Fatal("GetUsersByIDs should not be called when the publisher is nil")
+			return nil, nil
+		})
+		svc := NewCaseService(repo, userRepo, nil)
+
+		if _, err := svc.CreateCaseComment(contextWithUserIDToken(fakeJWTWithEmail(t, author.Email)), req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("mentioned-user resolution failure does not fail comment creation", func(t *testing.T) {
+		req := domain.CreateCaseCommentRequest{
+			CaseID:           caseID,
+			Type:             domain.CommentTypeComment,
+			Content:          "hey @jane",
+			MentionedUserIDs: []string{mentionedID1},
+		}
+		repo := newRepo(t, req)
+		userRepo := newUserRepo(func(context.Context, []string) ([]domain.User, error) {
+			return nil, fmt.Errorf("db unavailable")
+		})
+		publisher := &mockEventPublisher{}
+		svc := NewCaseService(repo, userRepo, publisher)
+
+		if _, err := svc.CreateCaseComment(contextWithUserIDToken(fakeJWTWithEmail(t, author.Email)), req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(publisher.calls) != 0 {
+			t.Fatalf("Publish calls = %d, want 0", len(publisher.calls))
 		}
 	})
 }

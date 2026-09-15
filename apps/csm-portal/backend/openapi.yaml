@@ -9470,6 +9470,19 @@ components:
         content:
           type: string
           description: Comment text
+        mentionedUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            User ids (the platform's own UUID-form user id, the same shape
+            returned by GET /users/{id} and POST /users/search, and used by
+            assignedEngineer.id / createdBy.id elsewhere in this API) that the
+            comment's author @mentioned in content, as selected by the
+            caller's mention-typeahead. Optional: absent or empty means no
+            mentions. A mentioned id the backing data source cannot resolve
+            to a user is silently skipped rather than failing the comment.
 
     RequestCaseUpdatePayload:
       type: object

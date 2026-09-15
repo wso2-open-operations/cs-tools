@@ -1199,6 +1199,8 @@ export interface BeCaseCommentCreatePayload {
   type: BeCreatableCommentType;
   /** Rich-text HTML body. */
   content: string;
+  /** Platform user ids `@`-mentioned in `content`; omitted/empty when none. */
+  mentionedUserIds?: string[];
 }
 
 export interface BeCaseCommentSearchPayload {

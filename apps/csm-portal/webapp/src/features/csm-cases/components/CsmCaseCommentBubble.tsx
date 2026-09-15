@@ -288,6 +288,13 @@ export default function CsmCaseCommentBubble({
               wordBreak: "break-word",
               "& p": { m: 0 },
               "& a": { color: "primary.main" },
+              "& .editor-mention": {
+                color: "primary.main",
+                bgcolor: "action.hover",
+                borderRadius: "4px",
+                px: "2px",
+                fontWeight: 500,
+              },
               ...{ "& *": { fontSize: "0.875rem" } },
             }}
             dangerouslySetInnerHTML={{ __html: renderHtml }}
@@ -427,6 +434,13 @@ export default function CsmCaseCommentBubble({
               fontSize: "0.85em",
             },
             "& a": { color: "primary.main" },
+            "& .editor-mention": {
+              color: "primary.main",
+              bgcolor: "action.hover",
+              borderRadius: "4px",
+              px: "2px",
+              fontWeight: 500,
+            },
             "& img": { maxWidth: "100%", cursor: onImageClick ? "pointer" : "default" },
             "& br": { display: "block", content: '""', mt: 0.5 },
             "& blockquote": {
