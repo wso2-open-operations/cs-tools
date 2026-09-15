@@ -1478,6 +1478,9 @@ paths:
   /cases/{id}/activities/search:
     post:
       summary: Search a case's activity feed (comments, attachments, field changes).
+      description: >
+        Returns customer-visible activities for the case. Internal WSO2 support
+        work notes are strictly filtered out server-side and never returned here.
       operationId: postCasesIdActivitiesSearch
       parameters:
         - name: id
@@ -6811,7 +6814,8 @@ components:
     SearchCaseActivitiesResponse:
       description: >
         activities (not activity) and totalRecords (not total) to match the
-        frontend's actual read sites.
+        frontend's actual read sites. Internal WSO2 support work notes are
+        strictly filtered out and never returned in activities.
       type: object
       properties:
         activities:
