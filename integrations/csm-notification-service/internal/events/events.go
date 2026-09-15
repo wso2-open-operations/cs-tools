@@ -56,6 +56,13 @@ const (
 	TypeSLAClockRegister Type = "sla.clock.register"
 	TypeSLATierReached   Type = "sla.tier_reached"
 
+	// TypeCRApprovalRequested is published by csm-flow-service's
+	// cr_approval_notice flow when a change request enters an approval state.
+	// Unlike the case.* types, its recipients and subject arrive already
+	// resolved: the flow owns the branch-specific wording and the audience
+	// lookup, so this service renders and sends rather than deciding who.
+	TypeCRApprovalRequested Type = "change_request.approval_requested"
+
 	// TypeCaseBillableStatusChanged is Postgres-data-source-only on the
 	// entity-service side, and — like TypeSLAClockRegister/TypeSLATierReached
 	// above — not an email/Chat trigger, so dispatch.Handle's switch has no
@@ -90,6 +97,7 @@ const (
 var KnownTypes = []Type{
 	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
 	TypeSLAClockRegister, TypeSLATierReached, TypeCaseBillableStatusChanged,
+	TypeCRApprovalRequested, TypeCRPlanDateNotice,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -366,4 +374,65 @@ type SLATierReachedPayload struct {
 type CaseBillableStatusChangedPayload struct {
 	CaseID     string `json:"caseId"`
 	IsBillable bool   `json:"isBillable"`
+}
+
+// TypeCRPlanDateNotice is published by csm-flow-service's cr_plan_date_notice
+// flow — the plan-start-date conversation between WSO2 and a customer. One
+// type for all three notices because they differ only in wording and audience.
+const TypeCRPlanDateNotice Type = "change_request.plan_date_notice"
+
+// CRPlanDateNoticePayload is TypeCRPlanDateNotice's payload. Mirrors
+// csm-flow-service's struct of the same name.
+type CRPlanDateNoticePayload struct {
+	ChangeRequestID string `json:"changeRequestId"`
+	Number          string `json:"number"`
+	// Kind is "customer_proposed" (internal audience), or "accepted" /
+	// "rejected" (customer audience). It selects the body wording.
+	Kind string `json:"kind"`
+	// Audience is "internal" or "customer" — picks the portal to link to, and
+	// whether the recipient list goes in To or BCC.
+	Audience  string `json:"audience"`
+	GroupName string `json:"groupName,omitempty"`
+	// ActorName is whoever changed the date, already rendered LAST NAME FIRST
+	// by the flow, matching the ServiceNow templates' pill order.
+	ActorName        string   `json:"actorName,omitempty"`
+	ProjectID        string   `json:"projectId,omitempty"`
+	ProjectName      string   `json:"projectName,omitempty"`
+	ShortDescription string   `json:"shortDescription,omitempty"`
+	Description      string   `json:"description,omitempty"`
+	Subject          string   `json:"subject"`
+	Recipients       []string `json:"recipients"`
+}
+
+// CRApprovalRequestedPayload is TypeCRApprovalRequested's payload. Mirrors
+// csm-flow-service's copy; keep the two in sync by hand.
+type CRApprovalRequestedPayload struct {
+	ChangeRequestID string `json:"changeRequestId"`
+	// Number is the human-readable CR reference (e.g. "CHG0031234").
+	Number string `json:"number"`
+	// State is the approval state just entered: ASSESS / AUTHORIZE /
+	// CUSTOMER_APPROVAL / REVIEW / CUSTOMER_REVIEW.
+	State string `json:"state"`
+	// Audience is "internal" (a WSO2 approval group) or "customer" (the
+	// project's contacts). It selects the portal the link points at.
+	Audience string `json:"audience"`
+	// Team is the owning team for an internal notice (Choreo / Asgardeo / MS),
+	// empty for a customer one.
+	Team string `json:"team,omitempty"`
+	// GroupName is the approval group whose members were resolved, empty for a
+	// customer notice.
+	GroupName     string `json:"groupName,omitempty"`
+	RequesterName string `json:"requesterName,omitempty"`
+	ProjectName   string `json:"projectName,omitempty"`
+	// ProjectID is the project the change request belongs to, needed to build a
+	// customer-portal link: that portal nests its change-request page under the
+	// project. Absent on an internal notice, which links into the CSM portal.
+	ProjectID string `json:"projectId,omitempty"`
+	// Subject is the fully rendered subject line. Used verbatim: the flow
+	// reproduces ServiceNow's per-branch wording, and re-deriving it here would
+	// mean keeping two copies of that in step.
+	Subject string `json:"subject"`
+	// Recipients are already resolved and de-duplicated. Never empty — a notice
+	// with nobody to send to is not published.
+	Recipients []string `json:"recipients"`
 }

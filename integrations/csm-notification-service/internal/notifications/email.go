@@ -152,6 +152,12 @@ type sendEmailRequest struct {
 // SendEmail sends an HTML email via the notification service. The sender
 // address is always the client's configured FromAddress; every other value
 // is supplied by the caller.
+// FromAddress is the address this client sends as. Exposed because a caller
+// that BCCs its whole audience still has to put something in To -- the email
+// service rejects a message without one -- and the sender itself is the only
+// address guaranteed to be valid and to reveal nothing about the recipients.
+func (c *EmailClient) FromAddress() string { return c.fromAddress }
+
 func (c *EmailClient) SendEmail(ctx context.Context, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []EmailAttachment) error {
 	if len(to) == 0 {
 		return fmt.Errorf("notifications: at least one recipient (to) is required")

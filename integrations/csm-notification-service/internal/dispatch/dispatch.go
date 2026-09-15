@@ -43,6 +43,10 @@ import (
 // emailSender abstracts notifications.EmailClient for testability.
 type emailSender interface {
 	SendEmail(ctx context.Context, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error
+	// FromAddress is needed by a handler that BCCs its audience: the email
+	// service requires a non-empty To, and the sender is the only address that
+	// is always valid and discloses nothing.
+	FromAddress() string
 }
 
 // googleChatSender abstracts notifications.GoogleChatClient for testability.
@@ -64,6 +68,7 @@ type linkResolver interface {
 	ResolveLinks(ctx context.Context, emails []string, projectID, caseID string) ([]recipientlinks.RecipientLink, error)
 	CSMLink(caseID string) string
 	IncidentLink(incidentID string) string
+	ChangeRequestLink(audience, changeRequestID, projectID string) string
 }
 
 // Dispatcher turns a published events.Envelope into an actual notification
@@ -321,6 +326,10 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleSeverityChanged(ctx, record, env.Payload)
 	case events.TypeIncidentCreated:
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
+	case events.TypeCRApprovalRequested:
+		return d.handleCRApprovalRequested(ctx, record, env.Payload)
+	case events.TypeCRPlanDateNotice:
+		return d.handleCRPlanDateNotice(ctx, record, env.Payload)
 	case events.TypeSLAClockRegister, events.TypeSLATierReached:
 		// internal/slaengine's own consumer group (a different group ID, so
 		// it gets its own full copy of this same topic) is what reacts to
@@ -554,6 +563,94 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 		d.forgetEmailGroups(baseKey, owned)
 	}
 	return sendErr
+}
+
+// handleCRApprovalRequested emails the people a change request is waiting on.
+//
+// UNLIKE EVERY OTHER HANDLER HERE, it does not resolve recipients or build a
+// subject. csm-flow-service's cr_approval_notice flow does both before
+// publishing: the audience comes from an approval group or a project's
+// contacts, and the subject reproduces ServiceNow's per-branch wording
+// verbatim. Re-deriving either here would mean maintaining a second copy of
+// logic that only exists to match a system being decommissioned.
+//
+// It also does not use groupByLink. That splits a case's recipients by which
+// portal each should be linked to, and needs a caseID to do it — a change
+// request has neither. Internal and customer audiences never share one notice
+// (they are separate branches of the original flow), so the audience on the
+// payload picks the portal for the whole send.
+// crAudienceCustomer is the audience value csm-flow-service publishes for a
+// notice bound for a project's contacts rather than a WSO2 approval group.
+const crAudienceCustomer = "customer"
+
+func (d *Dispatcher) handleCRApprovalRequested(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
+	var p events.CRApprovalRequestedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode change_request.approval_requested payload: %w", err)
+	}
+	if len(p.Recipients) == 0 {
+		// The flow does not publish a notice with nobody to send to, so this is
+		// a malformed event rather than a quiet state. Dropping it beats
+		// burning retries on something no retry can fix.
+		slog.WarnContext(ctx, "dispatch: change_request.approval_requested with no recipients, dropping",
+			"changeRequestId", p.ChangeRequestID, "state", p.State)
+		return nil
+	}
+	if p.Subject == "" {
+		slog.WarnContext(ctx, "dispatch: change_request.approval_requested with no subject, dropping",
+			"changeRequestId", p.ChangeRequestID)
+		return nil
+	}
+
+	recipients := p.Recipients
+	if !d.emailSendingEnabled {
+		slog.InfoContext(ctx, "dispatch: email sending disabled, skipping CR approval notice",
+			"changeRequestId", p.ChangeRequestID, "recipients", len(recipients))
+		return nil
+	}
+	if d.emailDebugMode {
+		if len(d.emailDebugRecipients) == 0 {
+			slog.WarnContext(ctx, "dispatch: email debug mode on with no debug recipients, skipping CR approval notice",
+				"changeRequestId", p.ChangeRequestID)
+			return nil
+		}
+		recipients = d.emailDebugRecipients
+	}
+
+	body := notifications.RenderCRApprovalRequestedEmail(notifications.CRApprovalEmailData{
+		Number:        p.Number,
+		State:         p.State,
+		Audience:      p.Audience,
+		Team:          p.Team,
+		GroupName:     p.GroupName,
+		RequesterName: p.RequesterName,
+		ProjectName:   p.ProjectName,
+		Link:          d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
+	})
+
+	// A customer audience goes in BCC, an internal one in To.
+	//
+	// ServiceNow sent one email per recipient, so nobody ever saw who else was
+	// notified. Collapsing that into one message is right -- the notice is
+	// identical for everyone -- but it must not also publish a customer's
+	// contact list to itself: a project's contacts routinely span several
+	// organisations, so To would disclose addresses across companies that have
+	// no relationship with each other.
+	//
+	// Internal notices stay in To deliberately. That audience is one WSO2
+	// approval group who already know each other, and a visible To is what lets
+	// them reply to the group and see that a colleague has picked it up.
+	to, bcc := recipients, []string(nil)
+	if p.Audience == crAudienceCustomer {
+		to, bcc = []string{d.email.FromAddress()}, recipients
+	}
+	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, p.Subject, body, nil); err != nil {
+		return fmt.Errorf("dispatch: send CR approval notice for %s: %w", p.ChangeRequestID, err)
+	}
+	slog.InfoContext(ctx, "dispatch: CR approval notice sent",
+		"changeRequestId", p.ChangeRequestID, "number", p.Number,
+		"state", p.State, "audience", p.Audience, "recipients", len(recipients))
+	return nil
 }
 
 // handleCaseAssigned's email step is tracked the same way — see
@@ -1120,4 +1217,64 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 		d.forget(callKey)
 	}
 	return errors.Join(chatErr, callErr)
+}
+
+// handleCRPlanDateNotice emails one turn of the plan-start-date conversation:
+// a customer proposing a new date (internal audience), or WSO2 accepting or
+// rejecting one (customer audience).
+//
+// Same division of labour as handleCRApprovalRequested — the flow resolves the
+// recipients and builds the subject, both reproduced from ServiceNow verbatim,
+// and this service renders and sends. The audience decides two things here:
+// which portal the link points at, and whether the recipient list is visible.
+func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
+	var p events.CRPlanDateNoticePayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode change_request.plan_date_notice payload: %w", err)
+	}
+	if len(p.Recipients) == 0 || p.Subject == "" {
+		slog.WarnContext(ctx, "dispatch: plan date notice with no recipients or subject, dropping",
+			"changeRequestId", p.ChangeRequestID, "kind", p.Kind)
+		return nil
+	}
+
+	recipients := p.Recipients
+	if !d.emailSendingEnabled {
+		slog.InfoContext(ctx, "dispatch: email sending disabled, skipping plan date notice",
+			"changeRequestId", p.ChangeRequestID, "recipients", len(recipients))
+		return nil
+	}
+	if d.emailDebugMode {
+		if len(d.emailDebugRecipients) == 0 {
+			slog.WarnContext(ctx, "dispatch: email debug mode on with no debug recipients, skipping plan date notice",
+				"changeRequestId", p.ChangeRequestID)
+			return nil
+		}
+		recipients = d.emailDebugRecipients
+	}
+
+	body := notifications.RenderCRPlanDateNoticeEmail(notifications.CRPlanDateEmailData{
+		Kind:             p.Kind,
+		Number:           p.Number,
+		ActorName:        p.ActorName,
+		ProjectName:      p.ProjectName,
+		ShortDescription: p.ShortDescription,
+		Description:      p.Description,
+		Link:             d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
+	})
+
+	// Customer contacts go in BCC for the same reason as the approval notice:
+	// a project's contacts span organisations, and ServiceNow sent these one
+	// per person so nobody ever saw the rest of the list.
+	to, bcc := recipients, []string(nil)
+	if p.Audience == crAudienceCustomer {
+		to, bcc = []string{d.email.FromAddress()}, recipients
+	}
+	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, p.Subject, body, nil); err != nil {
+		return fmt.Errorf("dispatch: send plan date notice for %s: %w", p.ChangeRequestID, err)
+	}
+	slog.InfoContext(ctx, "dispatch: plan date notice sent",
+		"changeRequestId", p.ChangeRequestID, "number", p.Number,
+		"kind", p.Kind, "audience", p.Audience, "recipients", len(recipients))
+	return nil
 }
