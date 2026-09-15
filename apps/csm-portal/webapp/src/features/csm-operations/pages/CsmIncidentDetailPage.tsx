@@ -362,8 +362,20 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         setResolutionTarget(target);
         return;
       }
+      // Starting work on an unassigned incident implicitly claims it, same
+      // as the case detail page's "assign to me" flow — otherwise moving an
+      // alert-generated incident to IN_PROGRESS leaves it with no assignee
+      // at all, since nothing else in this flow ever sets one. Combined into
+      // the single state PATCH (unlike cases, the entity service doesn't
+      // treat `state` and `assignedEngineerId` as mutually exclusive here),
+      // and only when nobody's already assigned, so a plain state change on
+      // an already-assigned incident never reassigns it to whoever clicked.
+      const claim =
+        target === "IN_PROGRESS" && !data?.assignedTo && currentUser?.id
+          ? { assignedEngineerId: currentUser.id }
+          : {};
       patchIncident.mutate(
-        { id, patch: { state: target } },
+        { id, patch: { state: target, ...claim } },
         {
           onError: (err) => {
             const msg =
@@ -375,7 +387,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         },
       );
     },
-    [id, patchIncident, showError],
+    [id, data?.assignedTo, currentUser?.id, patchIncident, showError],
   );
 
   const onResolutionSubmit = useCallback(

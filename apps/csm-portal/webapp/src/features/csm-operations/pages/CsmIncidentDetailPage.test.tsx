@@ -535,6 +535,40 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
     );
   });
 
+  it("claims an unassigned incident for the signed-in engineer when starting work (-> IN_PROGRESS)", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW", assignedTo: null } });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      {
+        id: "inc-1",
+        patch: {
+          state: "IN_PROGRESS",
+          assignedEngineerId: "00000000-0000-0000-0000-00000000000c",
+        },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("does not reassign an already-assigned incident when starting work (-> IN_PROGRESS)", () => {
+    mockQueryResult({
+      data: {
+        ...BASE_INCIDENT,
+        state: "NEW",
+        assignedTo: { id: "someone-else", name: "Someone Else" },
+      },
+    });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "inc-1", patch: { state: "IN_PROGRESS" } },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
   it("renders no state-transition buttons for a terminal incident (CLOSED)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "CLOSED" } });
     renderPage();
