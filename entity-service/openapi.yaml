@@ -11417,6 +11417,7 @@ components:
 
     SalesforceEventRequest:
       type: object
+      additionalProperties: false
       required: [eventType, entity, referenceId]
       properties:
         eventType:
