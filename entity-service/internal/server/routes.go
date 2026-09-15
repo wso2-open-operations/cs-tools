@@ -69,23 +69,39 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	// credentials and subscription secret keys. A missing or malformed key
 	// leaves the handler nil and the routes unregistered rather than falling
 	// back to storing those values in the clear.
+	//
+	// Every path that leaves the routes unregistered says so at startup. A
+	// disabled route is otherwise indistinguishable from a typo in the URL —
+	// both are a bare 404 — and the one thing a person debugging that 404
+	// cannot discover from the outside is that the service deliberately chose
+	// not to register it.
 	var projectConsumptionHandler *handler.ProjectConsumptionHandler
-	if db != nil && cfg.ConsumptionSecretKey != "" {
+	switch {
+	case cfg.DataSource != config.DataSourcePostgres || db == nil:
+		// Not logged: on the ServiceNow path these routes are absent by
+		// design, exactly as the ServiceNow-only routes are absent here.
+	case cfg.ConsumptionSecretKey == "":
+		slog.Info("project consumption routes not registered: CONSUMPTION_SECRET_KEY is unset",
+			"routes", "GET,PATCH /projects/{id}/consumption",
+			"reason", "these routes store OAuth2 credentials and subscription secret keys, which are never stored unencrypted")
+	default:
 		key, err := crypto.KeyFromBase64(cfg.ConsumptionSecretKey)
 		if err != nil {
 			// The error text never contains the key itself — see
 			// crypto.KeyFromBase64.
-			slog.Error("project consumption routes disabled: invalid CONSUMPTION_SECRET_KEY", "error", err)
-		} else {
-			codec, codecErr := crypto.NewAESGCMCodec(key)
-			if codecErr != nil {
-				slog.Error("project consumption routes disabled: could not construct codec", "error", codecErr)
-			} else {
-				projectConsumptionHandler = handler.NewProjectConsumptionHandler(
-					service.NewProjectConsumptionService(repository.NewProjectConsumptionRepository(db, codec)),
-				)
-			}
+			slog.Error("project consumption routes not registered: invalid CONSUMPTION_SECRET_KEY",
+				"routes", "GET,PATCH /projects/{id}/consumption", "error", err)
+			break
 		}
+		codec, err := crypto.NewAESGCMCodec(key)
+		if err != nil {
+			slog.Error("project consumption routes not registered: could not construct the codec",
+				"routes", "GET,PATCH /projects/{id}/consumption", "error", err)
+			break
+		}
+		projectConsumptionHandler = handler.NewProjectConsumptionHandler(
+			service.NewProjectConsumptionService(repository.NewProjectConsumptionRepository(db, codec)),
+		)
 	}
 
 	// EventPublisherService is optional, like every ServiceNow-only
