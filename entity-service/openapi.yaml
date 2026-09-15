@@ -687,6 +687,186 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /opportunities/search:
+    post:
+      summary: Search opportunities.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Sourced from
+        Salesforce-sync data via the ServiceNow Table API — no scoped-app endpoint
+        exists for this resource.
+      operationId: searchOpportunities
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchOpportunitiesRequest'
+      responses:
+        "200":
+          description: Opportunities matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchOpportunitiesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /opportunities/{id}:
+    get:
+      summary: Get an opportunity by ID.
+      description: ServiceNow data source only; there is no Postgres equivalent.
+      operationId: getOpportunity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The opportunity with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Opportunity'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Opportunity not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /invoices/search:
+    post:
+      summary: Search invoices.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Sourced from
+        Salesforce-sync data via the ServiceNow Table API — no scoped-app endpoint
+        exists for this resource.
+      operationId: searchInvoices
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchInvoicesRequest'
+      responses:
+        "200":
+          description: Invoices matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchInvoicesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /invoices/{id}:
+    get:
+      summary: Get an invoice by ID.
+      description: ServiceNow data source only; there is no Postgres equivalent.
+      operationId: getInvoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Invoice not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /project-opportunity-links/search:
+    post:
+      summary: Search project-opportunity links.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Sourced from
+        Salesforce-sync data via the ServiceNow Table API — no scoped-app endpoint
+        exists for this resource. A project can have more than one linked
+        opportunity — one row per link — so this always returns a list. No by-id
+        fetch: the underlying data has no single-record endpoint.
+      operationId: searchProjectOpportunityLinks
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProjectOpportunityLinksRequest'
+      responses:
+        "200":
+          description: Project-opportunity links matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProjectOpportunityLinksResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}:
     get:
       summary: Get a project by ID.
@@ -6360,6 +6540,14 @@ components:
           nullable: true
         updatedOn:
           type: string
+        isPartner:
+          type: boolean
+          nullable: true
+          description: Whether this account is itself a partner organization. ServiceNow data source only.
+        hasPrimaryPartner:
+          type: boolean
+          nullable: true
+          description: Whether this account has a primary partner account set. ServiceNow data source only.
 
     SNSupportTierRef:
       type: object
@@ -6429,6 +6617,14 @@ components:
           nullable: true
         updatedOn:
           type: string
+        isPartner:
+          type: boolean
+          nullable: true
+          description: Whether this account is itself a partner organization. ServiceNow data source only.
+        hasPrimaryPartner:
+          type: boolean
+          nullable: true
+          description: Whether this account has a primary partner account set. ServiceNow data source only.
 
     SearchAccountsResponse:
       type: object
@@ -6524,6 +6720,12 @@ components:
           type: boolean
         kbReferencesEnabled:
           type: boolean
+        isPartner:
+          type: boolean
+          nullable: true
+          description: >
+            Whether this project's linked account is itself a partner organization.
+            ServiceNow data source only.
 
     ProjectDetailsView:
       type: object
@@ -8289,6 +8491,177 @@ components:
           format: uuid
         name:
           type: string
+
+    SearchOpportunitiesRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        accountId:
+          type: string
+          format: uuid
+          description: Restrict to opportunities linked to this account.
+
+    Opportunity:
+      type: object
+      description: >
+        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
+        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        any of them entirely for a sparsely-populated row.
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        account:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        eulaVersion:
+          type: string
+          nullable: true
+        eulaVersionDecimal:
+          type: string
+          nullable: true
+
+    SearchOpportunitiesResponse:
+      type: object
+      properties:
+        opportunities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Opportunity'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchInvoicesRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        opportunityId:
+          type: string
+          format: uuid
+          description: Restrict to invoices linked to this opportunity.
+
+    Invoice:
+      type: object
+      description: >
+        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
+        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        any of them entirely for a sparsely-populated row.
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        invoicedAmount:
+          type: string
+          nullable: true
+        invoiceDate:
+          type: string
+          format: date
+          nullable: true
+        invoicedPaidDate:
+          type: string
+          format: date
+          nullable: true
+          description: Date the invoice was paid, if paid.
+        invoicedDueDate:
+          type: string
+          format: date
+          nullable: true
+        invoiceOriginalDueDate:
+          type: string
+          format: date
+          nullable: true
+          description: The invoice's original due date before any extension.
+        opportunity:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        classification:
+          type: string
+          nullable: true
+          description: Short classification code (e.g. "CL").
+
+    SearchInvoicesResponse:
+      type: object
+      properties:
+        invoices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invoice'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProjectOpportunityLinksRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        projectId:
+          type: string
+          format: uuid
+          description: Restrict to links for this project.
+        opportunityId:
+          type: string
+          format: uuid
+          description: Restrict to links for this opportunity.
+
+    ProjectOpportunityLink:
+      type: object
+      description: >
+        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
+        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        either reference entirely for a sparsely-populated row.
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        opportunity:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+
+    SearchProjectOpportunityLinksResponse:
+      type: object
+      properties:
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOpportunityLink'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
 
     PersonRef:
       type: object

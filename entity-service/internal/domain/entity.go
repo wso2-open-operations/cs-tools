@@ -291,6 +291,15 @@ type AccountView struct {
 	CreatedOn        string     `json:"createdOn"`
 	CreatedBy        *string    `json:"createdBy"`
 	UpdatedOn        string     `json:"updatedOn"`
+	// IsPartner is whether this account is itself a partner organization. Named/derived at
+	// this layer from ServiceNow's raw `customer_account.partner` passthrough (ServiceNow
+	// data source only).
+	IsPartner *bool `json:"isPartner"`
+	// HasPrimaryPartner is whether this account has a primary partner account set. Derived
+	// at this layer as "ServiceNow's customer_account.u_primary_partner_account_id reference
+	// is non-nil" -- the raw reference itself is not exposed, only this boolean (ServiceNow
+	// data source only).
+	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
 }
 
 // SearchAccountsResponse is the paginated result of an account search, unified
@@ -337,6 +346,12 @@ type AccountDetail struct {
 	CreatedOn        string     `json:"createdOn"`
 	CreatedBy        *string    `json:"createdBy"`
 	UpdatedOn        string     `json:"updatedOn"`
+	// IsPartner is whether this account is itself a partner organization (ServiceNow data
+	// source only). Mirrors AccountView.IsPartner.
+	IsPartner *bool `json:"isPartner"`
+	// HasPrimaryPartner is whether this account has a primary partner account set
+	// (ServiceNow data source only). Mirrors AccountView.HasPrimaryPartner.
+	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
 }
 
 // SubscriptionType classifies the subscription type of a project.
@@ -396,6 +411,10 @@ type ProjectAccountRef struct {
 	// Ballerina's ProjectResponse.account and the portal's ProjectDetailsAccount.
 	OwnerEmail          *string `json:"ownerEmail"`
 	TechnicalOwnerEmail *string `json:"technicalOwnerEmail"`
+	// IsPartner is whether this project's linked account is itself a partner organization
+	// (ServiceNow data source only). Mirrors AccountView.IsPartner, surfaced through the
+	// project's nested account object; there is no project-level primary-partner concept.
+	IsPartner *bool `json:"isPartner"`
 }
 
 // ProjectClosureFields groups the ServiceNow-only closure-tracking fields
@@ -563,6 +582,9 @@ type ProjectSearchAccountRef struct {
 	Region    *string `json:"region"`
 	SubRegion *string `json:"subRegion"`
 	ArrToday  *string `json:"arrToday"`
+	// IsPartner is whether this project's linked account is itself a partner organization
+	// (ServiceNow data source only). Mirrors ProjectAccountRef.IsPartner.
+	IsPartner *bool `json:"isPartner"`
 }
 
 // ProjectView is the unified search result shape returned for all data sources.
@@ -603,6 +625,113 @@ type SearchProjectsResponse struct {
 	Limit    int           `json:"limit"`
 	Offset   int           `json:"offset"`
 	HasMore  bool          `json:"hasMore"`
+}
+
+// --- opportunities, invoices, project-opportunity links (ServiceNow data source only) ---
+//
+// Sourced from ServiceNow's Salesforce-sync tables (u_sf_opportunity, u_sf_invoice,
+// u_sf_link_opportunity) via the Ballerina entity-service's generic Table API reads -- there
+// is no scoped-app resource and no Postgres equivalent for any of these three. Read-only: no
+// write path is exposed for any of them.
+
+// Opportunity is a sales opportunity, optionally linked to an account (ServiceNow data source
+// only). Every field but ID is nilable: ServiceNow can omit any of them entirely for a
+// sparsely-populated row.
+type Opportunity struct {
+	ID   string  `json:"id"`
+	Name *string `json:"name"`
+	// Account is the opportunity's linked account, nil when absent.
+	Account            *EntityRef `json:"account"`
+	EulaVersion        *string    `json:"eulaVersion"`
+	EulaVersionDecimal *string    `json:"eulaVersionDecimal"`
+}
+
+// SearchOpportunitiesRequest is the input for searching opportunities (ServiceNow data
+// source only).
+type SearchOpportunitiesRequest struct {
+	Pagination Pagination `json:"pagination"`
+	// AccountID filters to opportunities linked to this account. Platform UUID, converted to
+	// the backing data source's internal id before dispatch.
+	AccountID string `json:"accountId"`
+}
+
+// SearchOpportunitiesResponse is the paginated result of an opportunity search.
+type SearchOpportunitiesResponse struct {
+	Opportunities []Opportunity `json:"opportunities"`
+	Total         int           `json:"total"`
+	Limit         int           `json:"limit"`
+	Offset        int           `json:"offset"`
+	HasMore       bool          `json:"hasMore"`
+}
+
+// Invoice is a billing invoice, optionally linked to an opportunity (ServiceNow data source
+// only). Every field but ID is nilable: ServiceNow can omit any of them entirely for a
+// sparsely-populated row.
+type Invoice struct {
+	ID             string  `json:"id"`
+	Name           *string `json:"name"`
+	InvoicedAmount *string `json:"invoicedAmount"`
+	// InvoiceDate is a date-only value (YYYY-MM-DD), matching openapi.yaml's `format: date`.
+	InvoiceDate *string `json:"invoiceDate"`
+	// InvoicedPaidDate is the date the invoice was paid, nil if unpaid or not tracked.
+	InvoicedPaidDate *string `json:"invoicedPaidDate"`
+	InvoicedDueDate  *string `json:"invoicedDueDate"`
+	// InvoiceOriginalDueDate is the invoice's original due date before any extension
+	// (ServiceNow `u_original_invoice_due_date`).
+	InvoiceOriginalDueDate *string `json:"invoiceOriginalDueDate"`
+	// Opportunity is the invoice's linked opportunity, nil when absent.
+	Opportunity *EntityRef `json:"opportunity"`
+	// Classification is a short code (e.g. "CL"), nil when not set.
+	Classification *string `json:"classification"`
+}
+
+// SearchInvoicesRequest is the input for searching invoices (ServiceNow data source only).
+type SearchInvoicesRequest struct {
+	Pagination Pagination `json:"pagination"`
+	// OpportunityID filters to invoices linked to this opportunity. Platform UUID, converted
+	// to the backing data source's internal id before dispatch.
+	OpportunityID string `json:"opportunityId"`
+}
+
+// SearchInvoicesResponse is the paginated result of an invoice search.
+type SearchInvoicesResponse struct {
+	Invoices []Invoice `json:"invoices"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+	HasMore  bool      `json:"hasMore"`
+}
+
+// ProjectOpportunityLink links a project to an opportunity (ServiceNow data source only). A
+// project may have more than one linked opportunity -- one row per link. Every field but ID
+// is nilable: ServiceNow can omit either reference entirely for a sparsely-populated row.
+type ProjectOpportunityLink struct {
+	ID          string     `json:"id"`
+	Project     *EntityRef `json:"project"`
+	Opportunity *EntityRef `json:"opportunity"`
+}
+
+// SearchProjectOpportunityLinksRequest is the input for searching project-opportunity links
+// (ServiceNow data source only). At least one of ProjectID/OpportunityID should be supplied by
+// the caller; an entirely unfiltered search is allowed but returns every link row.
+type SearchProjectOpportunityLinksRequest struct {
+	Pagination Pagination `json:"pagination"`
+	// ProjectID filters to links for this project. Platform UUID, converted to the backing
+	// data source's internal id before dispatch.
+	ProjectID string `json:"projectId"`
+	// OpportunityID filters to links for this opportunity. Platform UUID, converted to the
+	// backing data source's internal id before dispatch.
+	OpportunityID string `json:"opportunityId"`
+}
+
+// SearchProjectOpportunityLinksResponse is the paginated result of a project-opportunity
+// link search.
+type SearchProjectOpportunityLinksResponse struct {
+	Links   []ProjectOpportunityLink `json:"links"`
+	Total   int                      `json:"total"`
+	Limit   int                      `json:"limit"`
+	Offset  int                      `json:"offset"`
+	HasMore bool                     `json:"hasMore"`
 }
 
 // --- project metadata/stats (ServiceNow data source only) ---

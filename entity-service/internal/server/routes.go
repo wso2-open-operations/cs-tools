@@ -100,6 +100,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		accountContactHandler = handler.NewAccountContactHandler(service.NewServiceNowAccountContactService(serviceNowIntegrationServiceClient))
 	}
 
+	var opportunityHandler *handler.OpportunityHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		opportunityHandler = handler.NewOpportunityHandler(service.NewServiceNowOpportunityService(serviceNowIntegrationServiceClient))
+	}
+
+	var invoiceHandler *handler.InvoiceHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		invoiceHandler = handler.NewInvoiceHandler(service.NewServiceNowInvoiceService(serviceNowIntegrationServiceClient))
+	}
+
+	var projectOpportunityLinkHandler *handler.ProjectOpportunityLinkHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		projectOpportunityLinkHandler = handler.NewProjectOpportunityLinkHandler(service.NewServiceNowProjectOpportunityLinkService(serviceNowIntegrationServiceClient))
+	}
+
 	projectRepo := repository.NewProjectRepository(db)
 	pgProjectSvc := service.NewProjectService(projectRepo)
 	var activeProjectSvc service.ProjectService
@@ -356,6 +371,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	}
 	if accountContactHandler != nil {
 		mux.HandleFunc("POST /accounts/{id}/contacts/search", accountContactHandler.SearchAccountContacts)
+	}
+	if opportunityHandler != nil {
+		mux.HandleFunc("POST /opportunities/search", opportunityHandler.SearchOpportunities)
+		mux.HandleFunc("GET /opportunities/{id}", opportunityHandler.GetOpportunity)
+	}
+	if invoiceHandler != nil {
+		mux.HandleFunc("POST /invoices/search", invoiceHandler.SearchInvoices)
+		mux.HandleFunc("GET /invoices/{id}", invoiceHandler.GetInvoice)
+	}
+	if projectOpportunityLinkHandler != nil {
+		mux.HandleFunc("POST /project-opportunity-links/search", projectOpportunityLinkHandler.SearchProjectOpportunityLinks)
 	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)

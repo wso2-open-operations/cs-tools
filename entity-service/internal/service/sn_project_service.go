@@ -85,6 +85,9 @@ type snProjectSummaryAccount struct {
 	Region    *string `json:"region"`
 	SubRegion *string `json:"subRegion"`
 	ArrToday  *string `json:"arrToday"`
+	// Partner is the linked account's raw ServiceNow customer_account.partner passthrough,
+	// merged in by the Ballerina entity-service. Named into domain.ProjectSearchAccountRef.IsPartner.
+	Partner *bool `json:"partner"`
 }
 
 // snSearchProjectsPayload is the Choreo POST /projects/search request body.
@@ -251,6 +254,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 				Region:    p.Account.Region,
 				SubRegion: p.Account.SubRegion,
 				ArrToday:  p.Account.ArrToday,
+				IsPartner: p.Account.Partner,
 			}
 		}
 		var onboardingOwner *domain.PersonRef
@@ -342,6 +346,9 @@ type snProjectAccount struct {
 	OwnerEmail          *string `json:"ownerEmail"`
 	TechnicalOwnerEmail *string `json:"technicalOwnerEmail"`
 	DeactivationDate    *string `json:"deactivationDate"`
+	// Partner is the linked account's raw ServiceNow customer_account.partner passthrough,
+	// merged in by the Ballerina entity-service. Named into domain.ProjectAccountRef.IsPartner.
+	Partner *bool `json:"partner"`
 }
 
 // GetProjectByID implements ProjectService by calling the Choreo GET /projects/{id} endpoint.
@@ -469,6 +476,7 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 			KbReferencesEnabled: sn.Account.HasKbReferences,
 			OwnerEmail:          sn.Account.OwnerEmail,
 			TechnicalOwnerEmail: sn.Account.TechnicalOwnerEmail,
+			IsPartner:           sn.Account.Partner,
 		},
 		OnboardingOwner: onboardingOwner,
 	}, nil
