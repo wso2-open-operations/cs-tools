@@ -100,11 +100,12 @@ it during shutdown, after `srv.Shutdown`.
 ## Salesforce Account ingest
 
 `POST /salesforce/events` accepts the ASB envelope `{eventType, entity, referenceId}`
-from `sales-apex-trigger-subscriber` when `dataSource=postgres`. Wired in
-`internal/server/routes.go` only when `DATA_SOURCE=postgres`, a pool is
-available, and all five `SALESFORCE_*` vars are set — the same optional
-all-or-nothing style as Event Hub. `Config.Validate` rejects a partial
-Salesforce set at startup.
+from `sales-apex-trigger-subscriber`, which dual-forwards every envelope to
+ServiceNow and to this endpoint. The subscriber has no `dataSource` switch.
+Wired in `internal/server/routes.go` only when entity-service
+`DATA_SOURCE=postgres`, a pool is available, and all five `SALESFORCE_*`
+vars are set — the same optional all-or-nothing style as Event Hub.
+`Config.Validate` rejects a partial Salesforce set at startup.
 
 `internal/salesforce` uses stdlib `net/http` and an OAuth2 `refresh_token`
 grant, then `GET /services/data/v54.0/sobjects/Account/{id}`. Token is
