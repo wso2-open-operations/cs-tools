@@ -76,6 +76,37 @@ type SearchProjectsRequest struct {
 	SortOrder     string     `json:"sortOrder,omitempty"`
 }
 
+// SearchContactsFilters holds the optional filter criteria for a project or
+// account contact search.
+type SearchContactsFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchProjectContactsRequest is the input for POST /projects/{id}/contacts/search.
+type SearchProjectContactsRequest struct {
+	Filters    SearchContactsFilters `json:"filters"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// ProjectContact is a contact associated with a project (ServiceNow data
+// source only). GrantsCaseAccess is the access rule entity-service's own
+// ServiceNow adapter applies — a linked contact record AND the address the
+// row was invited under matching that record's own address — so it answers
+// "can this person actually see this project's cases", not just "are they
+// listed".
+type ProjectContact struct {
+	Email            string `json:"email"`
+	GrantsCaseAccess bool   `json:"grantsCaseAccess"`
+}
+
+// SearchProjectContactsResponse is the paginated result of a project contact search.
+type SearchProjectContactsResponse struct {
+	Contacts []ProjectContact `json:"contacts"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
+}
+
 // ProjectClosureFields groups the ServiceNow-only closure-tracking fields
 // shared by ProjectDetailsView and ProjectView.
 type ProjectClosureFields struct {
@@ -2014,16 +2045,17 @@ type CaseFeedback struct {
 
 // AttachmentDetails is entity-service's response for GET /attachments/{id}.
 type AttachmentDetails struct {
-	ID          string    `json:"id"`
-	ReferenceID string    `json:"referenceId"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	SizeBytes   int       `json:"sizeBytes"`
-	Description *string   `json:"description"`
-	CreatedBy   string    `json:"createdBy"`
-	CreatedOn   time.Time `json:"createdOn"`
-	DownloadURL *string   `json:"downloadUrl"`
-	PreviewURL  *string   `json:"previewUrl"`
+	ID            string        `json:"id"`
+	ReferenceID   string        `json:"referenceId"`
+	ReferenceType ReferenceType `json:"referenceType"`
+	Name          string        `json:"name"`
+	Type          string        `json:"type"`
+	SizeBytes     int           `json:"sizeBytes"`
+	Description   *string       `json:"description"`
+	CreatedBy     string        `json:"createdBy"`
+	CreatedOn     time.Time     `json:"createdOn"`
+	DownloadURL   *string       `json:"downloadUrl"`
+	PreviewURL    *string       `json:"previewUrl"`
 	// Content is nil for a CSM-native (Postgres) data source attachment:
 	// entity-service holds no bytes for it, only its storage key. Always
 	// non-nil for ServiceNow-sourced attachments.

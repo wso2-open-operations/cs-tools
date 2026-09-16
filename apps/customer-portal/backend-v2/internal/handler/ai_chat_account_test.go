@@ -88,7 +88,7 @@ func (e *convEntity) CreateComment(_ context.Context, _ entity.CreateCommentRequ
 }
 
 func (e *convEntity) GetConversation(_ context.Context, _ string) (entity.ConversationDetails, error) {
-	return entity.ConversationDetails{}, nil
+	return entity.ConversationDetails{Project: &entity.EntityRef{ID: testProjectID}}, nil
 }
 
 func (e *convEntity) UpdateConversation(_ context.Context, _ string, _ entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error) {

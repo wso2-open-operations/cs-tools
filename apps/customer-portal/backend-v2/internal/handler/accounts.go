@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -29,7 +28,6 @@ import (
 
 // entityAccountClient abstracts the entity-service account operations used by AccountHandler.
 type entityAccountClient interface {
-	SearchAccounts(ctx context.Context, req entity.SearchAccountsRequest) (entity.SearchAccountsResponse, error)
 	GetAccount(ctx context.Context, id string) (entity.AccountDetail, error)
 }
 
@@ -41,35 +39,6 @@ type AccountHandler struct {
 // NewAccountHandler creates an AccountHandler backed by the given entity client.
 func NewAccountHandler(entity entityAccountClient) *AccountHandler {
 	return &AccountHandler{entity: entity}
-}
-
-// SearchAccounts handles POST /accounts/search.
-func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req entity.SearchAccountsRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchAccounts(r.Context(), req)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAccounts failed", "userID", user.UserID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to search accounts.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusOK, dto.MapSearchAccounts(result))
 }
 
 // GetAccount handles GET /accounts/{id}.
