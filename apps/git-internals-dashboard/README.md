@@ -102,6 +102,13 @@ or returned by any endpoint except `POST /issues/titles`, which fetches titles l
 on demand and caches them in memory only (never written to Postgres, never sent anywhere else).
 Labels are read transiently during ingest solely to derive an issue's priority, then discarded.
 
+## Security Scanning
+
+SAST, SCA, secrets, and IaC config scanning run in CI on every PR and push, plus a weekly
+schedule, via `.github/workflows/git-internals-dashboard-security.yml`. DAST runs on demand
+against a non-production environment via `.github/workflows/git-internals-dashboard-dast.yml`;
+`scripts/dast-local.sh` runs the same active scan against a local instance.
+
 ## Reporting Issues
 
 ### 1. Opening an issue
