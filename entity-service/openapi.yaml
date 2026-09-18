@@ -13633,7 +13633,7 @@ components:
               type: array
               items:
                 type: string
-                enum: [ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
+                enum: [OPEN, ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
             searchQuery:
               type: string
             number:
@@ -13699,7 +13699,7 @@ components:
         state:
           type: string
           nullable: true
-          enum: [ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
+          enum: [OPEN, ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
         createdOn:
           type: string
         createdBy:
@@ -14401,9 +14401,11 @@ components:
     ConversationState:
       type: string
       description: >
-        Only ACTIVE and RESOLVED are accepted by the conversation search filter; all five
-        values are accepted transitions for PATCH /conversations/{id}.
-      enum: [ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
+        Only ACTIVE and RESOLVED are accepted by the conversation search filter; all
+        values except OPEN are accepted transitions for PATCH /conversations/{id}.
+        OPEN is a state a conversation may already be in when read (e.g. via GET or
+        search) but is never itself a valid PATCH target.
+      enum: [OPEN, ACTIVE, RESOLVED, CONVERTED, ABANDONED, CLOSED]
 
     ConversationDetails:
       type: object

@@ -4996,13 +4996,16 @@ type IncidentTaskDetail struct {
 
 // ConversationState represents the state of a conversation. Only ACTIVE and
 // RESOLVED are accepted as SearchConversationsFilters.States values (the
-// search endpoint's own filter allow-list); all five values are accepted as
-// UpdateConversationRequest.State (the transition allow-list PATCH
-// /conversations/{id} enforces), matching the Ballerina reference's SN state
-// keys 2-6 respectively.
+// search endpoint's own filter allow-list); all five transition states
+// (excluding OPEN, which a conversation only ever starts in and is never
+// PATCHed back to) are accepted as UpdateConversationRequest.State (the
+// transition allow-list PATCH /conversations/{id} enforces), matching the
+// Ballerina reference's SN state keys 2-6 respectively. OPEN (SN state key 1)
+// is a read-only state a conversation may already be in when fetched.
 type ConversationState string
 
 const (
+	ConversationStateOpen      ConversationState = "OPEN"
 	ConversationStateActive    ConversationState = "ACTIVE"
 	ConversationStateResolved  ConversationState = "RESOLVED"
 	ConversationStateConverted ConversationState = "CONVERTED"

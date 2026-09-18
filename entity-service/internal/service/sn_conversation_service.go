@@ -81,10 +81,11 @@ type snConversationFilters struct {
 }
 
 // snConversationStateKeyMap maps domain ConversationState enums to SN numeric state keys.
-// Covers all 5 transition states (used by UpdateConversation and to interpret
+// Covers all 6 states (used by UpdateConversation and to interpret
 // GetConversation's state, which may be any of them), though search filters
 // (validConversationState) only ever accept ACTIVE/RESOLVED.
 var snConversationStateKeyMap = map[domain.ConversationState]int{
+	domain.ConversationStateOpen:      1,
 	domain.ConversationStateActive:    2,
 	domain.ConversationStateResolved:  3,
 	domain.ConversationStateConverted: 4,
@@ -94,6 +95,7 @@ var snConversationStateKeyMap = map[domain.ConversationState]int{
 
 // snConversationStateLabelMap maps SN numeric state keys to domain enum strings.
 var snConversationStateLabelMap = map[int]string{
+	1: "OPEN",
 	2: "ACTIVE",
 	3: "RESOLVED",
 	4: "CONVERTED",
@@ -102,6 +104,7 @@ var snConversationStateLabelMap = map[int]string{
 }
 
 var validConversationState = map[domain.ConversationState]bool{
+	domain.ConversationStateOpen:      true,
 	domain.ConversationStateActive:    true,
 	domain.ConversationStateResolved:  true,
 	domain.ConversationStateConverted: true,
