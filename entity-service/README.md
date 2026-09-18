@@ -192,6 +192,56 @@ rather than async.
 | `SUPPORT_ENGINEER_ROLE` | ServiceNow role name whose presence on a case comment's author completes the case's "response" SLA clock — see "SLA clocks" below. No default; unset means that specific completion path never fires (optional) |
 | `CUSTOMER_ROLES` | Comma-separated ServiceNow role names whose presence on a case comment's author marks it a customer reply — see "Customer reply state transition" below. No default; unset means that path never fires (optional) |
 
+### Product-consumption provisioning state
+
+Where a project has got to in the product-consumption provisioning flow — the Choreo application
+created for it, that application's OAuth2 credentials, and the two subscription secret keys a
+deployment's license is built from — is stored on the **`project` table**, mirroring the ServiceNow
+`customer_project` record field for field (`choreo_application_status`, `choreo_application_id`,
+`client_id`, `client_secret`, and `primary_secret_key`/`secondary_secret_key` from migration
+`000067`). Exposed at `GET /projects/{id}/consumption` and `PATCH /projects/{id}/consumption`.
+
+These two routes are gated on a database being configured, **not** on the data source: the flow
+mirrors its state into Postgres alongside ServiceNow, and the deployments that need it run
+`DATA_SOURCE=servicenow`, so gating on the data source would disable the feature exactly where it
+is used. ServiceNow remains the source of truth for the status itself, read through the Choreo
+subscription operation (`internal/choreosubscription`); Postgres is written alongside and any
+divergence is logged.
+
+`POST /projects/{id}/deployments/{deploymentId}/license` is registered **independently of the
+database**. Issuing a licence reads status from ServiceNow and runs through the Choreo operation;
+Postgres is touched only to mirror state, which is best-effort and skipped entirely when there is
+no repository. It needs the operation's own configuration instead — see the deployment-licence
+variables below.
+
+The status is a step number, and it only ever moves forward: `1` pending, `2` application created,
+`3` subscribed, `4` credentials generated, `5` secret keys generated. The flow is resumable by
+design — a caller reads the current status and runs only the steps above it — so a write whose
+status is not ahead of what is stored is a no-op that returns the stored state, not an error. This
+matters: applying an out-of-order write would re-run a side-effecting step and create a **second**
+Choreo application for a customer who already has one.
+
+Credentials are encrypted at rest (`internal/crypto`, AES-256-GCM) and never returned by either
+endpoint — the read reports only `hasConsumerSecret`/`hasSecretKeys`. Both routes need a key and are
+not registered without one, so a deployment missing `CONSUMPTION_SECRET_KEY` loses the feature
+rather than storing these values in the clear.
+
+| Variable | Description |
+|---|---|
+| `CONSUMPTION_SECRET_KEY` | Base64-encoded 32-byte AES key (`openssl rand -base64 32`). Optional — absent disables the two routes. Rotating it makes already-stored credentials undecryptable |
+
+**License issuance still runs in ServiceNow.** This service drives the five-step provisioning
+sequence through the Choreo subscription operation and returns the licence ServiceNow issues; the
+signed payload is passed through byte for byte, never reshaped, because the customer's product
+verifies an HMAC computed over it and a dropped field breaks that verification.
+
+`internal/license` implements the secret obfuscation and signature that ServiceNow's script
+includes produce, verified against a real record — but it is **not wired to the licence path**.
+Switching issuance over is gated on a compatibility decision: the specification flattens `secrets`
+from an object into a single string, which changes the canonical string and therefore invalidates
+every licence a deployed customer product already holds. That needs a transition plan — a verifier
+accepting both forms, or a versioned licence file — before the switch, not after.
+
 ### SLA clocks
 
 `sla_clocks` (migration `000042`, display columns added in `000046`) durably tracks per-case SLA

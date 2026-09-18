@@ -125,13 +125,21 @@ func TestSNCaseService_CreateCase_PublishesCaseCreated(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(publisher.calls) != 1 {
-		t.Fatalf("expected 1 publish call, got %d", len(publisher.calls))
+	// Exactly one case.created, however many other event types accompany it.
+	// Counting rather than stopping at the first match keeps the guarantee that
+	// matters — a duplicate case.created would notify every subscriber twice —
+	// while tolerating the other events this path now publishes.
+	var matches []mockPublishCall
+	for _, c := range publisher.calls {
+		if c.eventType == events.TypeCaseCreated {
+			matches = append(matches, c)
+		}
 	}
-	call := publisher.calls[0]
-	if call.eventType != events.TypeCaseCreated {
-		t.Errorf("eventType = %q, want %q", call.eventType, events.TypeCaseCreated)
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 %s publish call, got %d (of %d calls in total)",
+			events.TypeCaseCreated, len(matches), len(publisher.calls))
 	}
+	call := matches[0]
 	if call.entityID != resp.Case.ID {
 		t.Errorf("entityID = %q, want the new case's id %q", call.entityID, resp.Case.ID)
 	}

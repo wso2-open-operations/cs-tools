@@ -60,14 +60,17 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// NewPoolIfNeeded creates a Postgres connection pool when one is needed.
-// When DATA_SOURCE=servicenow, case/account/etc. reads go through the SN
-// integration service, so no pool is opened and (nil, nil) is returned.
-// Side tables (event_publish_failures, sla_clocks, scheduled_task_run) have
-// no ServiceNow equivalent and are registered in routes.go only when a pool
-// is available — they must not block SN-mode startup (local customer-portal).
+// NewPoolIfNeeded opens a connection pool when database credentials are
+// configured, whatever the data source.
+//
+// It is deliberately NOT gated on DATA_SOURCE. Product consumption keeps its
+// provisioning state in Postgres and dual-writes it alongside ServiceNow, so a
+// DATA_SOURCE=servicenow deployment — which is what staging and production run
+// — still needs a pool. A deployment with no DB_* set gets no pool and starts
+// exactly as it did before, which is what keeps local ServiceNow-mode startups
+// working without a database.
 func NewPoolIfNeeded(cfg *config.Config) (*pgxpool.Pool, error) {
-	if cfg.DataSource == config.DataSourceServiceNow {
+	if !cfg.HasDatabase() {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

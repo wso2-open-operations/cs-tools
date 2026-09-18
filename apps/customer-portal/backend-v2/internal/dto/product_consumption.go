@@ -16,40 +16,38 @@
 
 package dto
 
-import "github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/productconsumption"
+import (
+	"encoding/json"
 
-// LicenseSubscriptionData carries the deployment's license/subscription
-// credentials. Every field here is deliberately included, unlike most
-// response DTOs in this package — this endpoint's entire purpose is handing
-// the customer their own deployment's license credentials.
-type LicenseSubscriptionData struct {
-	DeploymentID    string `json:"deploymentId"`
-	DeploymentName  string `json:"deploymentName"`
-	SubscriptionKey string `json:"subscriptionKey"`
-	ClientID        string `json:"clientId"`
-	ClientSecret    string `json:"clientSecret"`
-	Secrets         string `json:"secrets"`
-}
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/productconsumption"
+)
 
 // LicenseResponse is the portal's response for
 // POST /projects/{projectId}/deployments/{deploymentId}/license.
+//
+// SubscriptionData is passed through verbatim — the one endpoint in this
+// package that deliberately does not trim, and the one that must not even
+// reshape. ServiceNow signs an HMAC over the canonicalised subscription data,
+// and the customer's product recomputes that canonical string from the licence
+// file to verify it. Every field is therefore load-bearing: drop one and the
+// signature stops verifying.
+//
+// It was previously a closed struct of six named fields, which silently
+// discarded the rest — including usageDataPublishingUrl, the address the
+// customer's product publishes its usage to. Modelling the payload at all
+// means re-deciding its shape every time ServiceNow adds a field; carrying the
+// bytes means never having to.
 type LicenseResponse struct {
-	SubscriptionData LicenseSubscriptionData `json:"subscriptionData"`
-	Signature        string                  `json:"signature"`
+	SubscriptionData json.RawMessage `json:"subscriptionData"`
+	Signature        string          `json:"signature"`
 }
 
-// MapLicense builds the portal response from the product-consumption service's License.
-func MapLicense(l productconsumption.License) LicenseResponse {
+// MapLicense builds the portal response from entity-service's License.
+func MapLicense(l entity.License) LicenseResponse {
 	return LicenseResponse{
-		SubscriptionData: LicenseSubscriptionData{
-			DeploymentID:    l.SubscriptionData.DeploymentID,
-			DeploymentName:  l.SubscriptionData.DeploymentName,
-			SubscriptionKey: l.SubscriptionData.SubscriptionKey,
-			ClientID:        l.SubscriptionData.ClientID,
-			ClientSecret:    l.SubscriptionData.ClientSecret,
-			Secrets:         l.SubscriptionData.Secrets,
-		},
-		Signature: l.Signature,
+		SubscriptionData: l.SubscriptionData,
+		Signature:        l.Signature,
 	}
 }
 

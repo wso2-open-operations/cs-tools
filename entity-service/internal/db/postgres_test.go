@@ -22,19 +22,13 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
-func TestNewPoolIfNeeded_ServiceNowSkipsPool(t *testing.T) {
-	pool, err := NewPoolIfNeeded(&config.Config{
-		DataSource: config.DataSourceServiceNow,
-		DBHost:     "db-that-must-not-be-dialed.example",
-		DBPort:     "5432",
-		DBUser:     "user",
-		DBPassword: "password",
-		DBName:     "db",
-	})
+func TestNewPoolIfNeeded_SkipsWhenCredentialsAbsent(t *testing.T) {
+	cfg := &config.Config{DataSource: config.DataSourceServiceNow}
+	pool, err := NewPoolIfNeeded(cfg)
 	if err != nil {
 		t.Fatalf("NewPoolIfNeeded() = %v, want nil", err)
 	}
 	if pool != nil {
-		t.Fatal("NewPoolIfNeeded() returned a pool for DATA_SOURCE=servicenow")
+		t.Fatal("expected no pool when DB credentials are absent")
 	}
 }

@@ -17,11 +17,14 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/choreosubscription"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/crypto"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -55,6 +58,106 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	if db != nil {
 		eventPublishFailureSvc = service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(db))
 		eventPublishFailureHandler = handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
+	}
+
+	// Project consumption is gated on having a database, NOT on the data
+	// source. It used to be Postgres-only, on the reasoning that ServiceNow
+	// deployments keep this state on the customer_project record; it now
+	// dual-writes both stores, and staging and production run
+	// DATA_SOURCE=servicenow, so gating on the data source would have disabled
+	// the feature exactly where it is needed. ServiceNow remains the source of
+	// truth for status, reached through the Choreo subscription operation.
+	//
+	// The two halves are configured independently, because they need different
+	// things and failing one must not take out the other.
+	//
+	// Reading and writing the stored state needs a pool and an encryption key,
+	// since it holds OAuth2 credentials and subscription secret keys; a missing
+	// or malformed key leaves those routes unregistered rather than falling
+	// back to storing the values in the clear. Issuing a licence needs neither:
+	// the sequence reads status from ServiceNow and runs through the Choreo
+	// operation, touching Postgres only to mirror state, which is best-effort
+	// and skipped entirely when there is no repository. Gating the licence
+	// route on the database would take licence downloads out of any deployment
+	// that happens not to have one — and the customer portal now issues every
+	// licence through this service.
+	//
+	// Every path that leaves a route unregistered says so at startup. A
+	// disabled route is otherwise indistinguishable from a typo in the URL —
+	// both are a bare 404 — and the one thing a person debugging that 404
+	// cannot discover from the outside is that the service deliberately chose
+	// not to register it.
+	var consumptionRepo repository.ProjectConsumptionRepository
+	switch {
+	case db == nil:
+		// Not logged: with no database pool configured, stored state cannot be
+		// registered. The licence route below does not depend on it.
+	case cfg.ConsumptionSecretKey == "":
+		slog.Info("project consumption state routes not registered: CONSUMPTION_SECRET_KEY is unset",
+			"routes", "GET,PATCH /projects/{id}/consumption",
+			"reason", "these routes store OAuth2 credentials and subscription secret keys, which are never stored unencrypted")
+	default:
+		key, err := crypto.KeyFromBase64(cfg.ConsumptionSecretKey)
+		if err != nil {
+			// The error text never contains the key itself — see
+			// crypto.KeyFromBase64.
+			slog.Error("project consumption state routes not registered: invalid CONSUMPTION_SECRET_KEY",
+				"routes", "GET,PATCH /projects/{id}/consumption", "error", err)
+			break
+		}
+		codec, err := crypto.NewAESGCMCodec(key)
+		if err != nil {
+			slog.Error("project consumption state routes not registered: could not construct the codec",
+				"routes", "GET,PATCH /projects/{id}/consumption", "error", err)
+			break
+		}
+		consumptionRepo = repository.NewProjectConsumptionRepository(db, codec)
+	}
+
+	// Provisioning reaches an upstream that mints Choreo applications for real
+	// customers, so an unconfigured or partially-configured operation leaves
+	// the route absent rather than registering something that fails — or worse,
+	// succeeds — against the wrong environment.
+	var choreoClient choreosubscription.Client
+	if cfg.ConsumptionOperationBaseURL == "" {
+		slog.Info("deployment licence route not registered: PRODUCT_CONSUMPTION_OPERATION_URL is unset",
+			"routes", "POST /projects/{id}/deployments/{deploymentId}/license")
+	} else {
+		client, err := choreosubscription.NewClient(choreosubscription.Config{
+			BaseURL: cfg.ConsumptionOperationBaseURL,
+			Creds: choreosubscription.ClientCredentialsConfig{
+				TokenURL:     cfg.ConsumptionOperationTokenURL,
+				ClientID:     cfg.ConsumptionOperationClientID,
+				ClientSecret: cfg.ConsumptionOperationClientSecret,
+				Scopes:       cfg.ConsumptionOperationScopes,
+			},
+		})
+		if err != nil {
+			// The error names the offending field, never a credential value.
+			slog.Error("deployment licence route not registered: the product-consumption operation is not configured correctly",
+				"routes", "POST /projects/{id}/deployments/{deploymentId}/license", "error", err)
+		} else {
+			choreoClient = client
+		}
+	}
+
+	consumptionStateEnabled := consumptionRepo != nil
+	licenseProvisioningEnabled := choreoClient != nil
+
+	var projectConsumptionHandler *handler.ProjectConsumptionHandler
+	if consumptionStateEnabled || licenseProvisioningEnabled {
+		if !consumptionStateEnabled {
+			slog.Info("deployment licence route registered without Postgres state",
+				"routes", "POST /projects/{id}/deployments/{deploymentId}/license",
+				"reason", "ServiceNow remains the source of truth for status; the Postgres mirror is skipped")
+		}
+		projectConsumptionHandler = handler.NewProjectConsumptionHandler(
+			service.NewProjectConsumptionService(
+				consumptionRepo,
+				choreoClient,
+				cfg.ConsumptionDualWriteEnabled,
+			),
+		)
 	}
 
 	// EventPublisherService is optional, like every ServiceNow-only
@@ -547,6 +650,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	// Registered independently: the stored-state routes read and write
+	// Postgres, the licence route does not need it at all.
+	if consumptionStateEnabled {
+		mux.HandleFunc("GET /projects/{id}/consumption", projectConsumptionHandler.GetProjectConsumption)
+		mux.HandleFunc("PATCH /projects/{id}/consumption", projectConsumptionHandler.UpdateProjectConsumption)
+	}
+	if licenseProvisioningEnabled {
+		mux.HandleFunc("POST /projects/{id}/deployments/{deploymentId}/license", projectConsumptionHandler.GetDeploymentLicense)
+	}
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectContactHandler.SearchProjectContacts)
 	mux.HandleFunc("GET /projects/{id}/contacts/{contactId}", projectContactHandler.GetProjectContact)
 	if projectUpdateHandler != nil {
