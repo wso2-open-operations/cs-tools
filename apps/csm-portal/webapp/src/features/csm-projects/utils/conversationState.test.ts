@@ -23,6 +23,10 @@ import {
 } from "@features/csm-projects/utils/conversationState";
 
 describe("conversationStateGroup", () => {
+  it("keeps OPEN as its own group, distinct from ACTIVE", () => {
+    expect(conversationStateGroup("OPEN")).toBe("open");
+  });
+
   it("keeps ACTIVE on its own", () => {
     expect(conversationStateGroup("ACTIVE")).toBe("active");
   });
@@ -48,6 +52,10 @@ describe("conversationStateChipMeta", () => {
 
   it("gives ACTIVE an info role", () => {
     expect(conversationStateChipMeta("ACTIVE").role).toBe("info");
+  });
+
+  it("gives OPEN a warning role, distinct from active/converted/closed", () => {
+    expect(conversationStateChipMeta("OPEN").role).toBe("warning");
   });
 });
 
