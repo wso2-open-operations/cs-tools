@@ -161,6 +161,22 @@ type ScheduledTaskRunService interface {
 	DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (domain.DeleteScheduledTaskRunsResponse, error)
 }
 
+// AlertIncidentMappingService defines the operations available on the
+// alert_incident_mapping entity — see domain.AlertIncidentMappingView's doc
+// comment for what it's for.
+type AlertIncidentMappingService interface {
+	// CreateAlertIncidentMapping inserts a new mapping row. A ValidationError
+	// is returned if alertNumber, source, alertStatus, or incidentId is
+	// missing; a ConflictError if alertNumber is already mapped.
+	CreateAlertIncidentMapping(ctx context.Context, req domain.CreateAlertIncidentMappingRequest) (domain.AlertIncidentMappingView, error)
+	// LookupAlertIncidentMappings returns every mapping for
+	// (req.Source, req.UniqueIdentifier), most-recent-first. A
+	// ValidationError is returned if source or uniqueIdentifier is missing.
+	// An empty (never nil) Mappings slice, not an error, is returned when
+	// nothing matches.
+	LookupAlertIncidentMappings(ctx context.Context, req domain.LookupAlertIncidentMappingsRequest) (domain.LookupAlertIncidentMappingsResponse, error)
+}
+
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the

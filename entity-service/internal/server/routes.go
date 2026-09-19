@@ -41,19 +41,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handler.NewUserHandler(userSvc)
 
-	// event_publish_failures, sla_clocks, and scheduled_task_run have no
-	// ServiceNow equivalent. They are Postgres-backed and registered only
-	// when a pool is available (db.NewPoolIfNeeded returns nil for
-	// DATA_SOURCE=servicenow so local SN-mode startups are not blocked).
+	// event_publish_failures, sla_clocks, scheduled_task_run, and
+	// alert_incident_mapping have no ServiceNow equivalent. They are
+	// Postgres-backed and registered only when a pool is available
+	// (db.NewPoolIfNeeded returns nil for DATA_SOURCE=servicenow so local
+	// SN-mode startups are not blocked).
 	var eventPublishFailureHandler *handler.EventPublishFailureHandler
 	var eventPublishFailureSvc service.EventPublishFailureService
 	var slaClockHandler *handler.SLAClockHandler
 	var scheduledTaskRunHandler *handler.ScheduledTaskRunHandler
+	var alertIncidentMappingHandler *handler.AlertIncidentMappingHandler
 	if db != nil {
 		eventPublishFailureSvc = service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(db))
 		eventPublishFailureHandler = handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
 		slaClockHandler = handler.NewSLAClockHandler(service.NewSLAClockService(repository.NewSLAClockRepository(db)))
 		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
+		alertIncidentMappingHandler = handler.NewAlertIncidentMappingHandler(service.NewAlertIncidentMappingService(repository.NewAlertIncidentMappingRepository(db)))
 	}
 
 	// EventPublisherService is optional, like every ServiceNow-only
@@ -351,6 +354,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
 		mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
 		mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	}
+	if alertIncidentMappingHandler != nil {
+		mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
+		mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
 	}
 
 	if snUserHandler != nil {

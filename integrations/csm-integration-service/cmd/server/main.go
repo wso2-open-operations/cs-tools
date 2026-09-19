@@ -55,6 +55,8 @@ func main() {
 	opportunityHandler := handler.NewOpportunityHandler(entityClient)
 	invoiceHandler := handler.NewInvoiceHandler(entityClient)
 	projectOpportunityLinkHandler := handler.NewProjectOpportunityLinkHandler(entityClient)
+	incidentHandler := handler.NewIncidentHandler(entityClient)
+	alertIncidentMappingHandler := handler.NewAlertIncidentMappingHandler(entityClient)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +77,10 @@ func main() {
 	mux.HandleFunc("POST /invoices/search", invoiceHandler.SearchInvoices)
 	mux.HandleFunc("GET /invoices/{id}", invoiceHandler.GetInvoice)
 	mux.HandleFunc("POST /project-opportunity-links/search", projectOpportunityLinkHandler.SearchProjectOpportunityLinks)
+	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
+	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
+	mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
+	mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
 
 	addr := ":" + envOrDefault("PORT", "8080")
 
