@@ -261,6 +261,366 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /announcement-requests:
+    post:
+      summary: >-
+        Create a new announcement request in state draft. Has no ServiceNow
+        equivalent — always backed by Postgres.
+      operationId: createAnnouncementRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnouncementRequestRequest'
+      responses:
+        "201":
+          description: Request created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/search:
+    post:
+      summary: Search announcement_requests rows, newest first, optionally filtered by state and/or createdBy.
+      operationId: searchAnnouncementRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAnnouncementRequestsRequest'
+      responses:
+        "200":
+          description: Requests matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAnnouncementRequestsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}:
+    get:
+      summary: Get one announcement request by id.
+      operationId: getAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The requested announcement request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: >-
+        Edit an announcement request's own content. What actually happens
+        depends entirely on the request's current state, not on anything the
+        caller chooses: a draft is edited in place; a request pending
+        approval is edited *and* reverted to draft as one atomic side effect
+        (clearing its dry-run record and frozen audience snapshot); an
+        approved request has subject/description/isSecurityAnnouncement
+        edited in place with no state change and no audience change allowed;
+        a published request cannot be edited at all.
+      operationId: updateAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAnnouncementRequestRequest'
+      responses:
+        "200":
+          description: Request updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: Bad request, or an audience change was attempted on an approved request (the approved snapshot is frozen).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/dry-run:
+    post:
+      summary: >-
+        Record that a dry run has completed for this request. caseId is the
+        real case id the caller's own dry-run mechanism already created —
+        this endpoint does not create it and does not verify it exists.
+        Recording one is a precondition for Submit.
+      operationId: recordAnnouncementRequestDryRun
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordAnnouncementDryRunRequest'
+      responses:
+        "200":
+          description: Dry run recorded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is not in state draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/submit:
+    post:
+      summary: >-
+        Move a draft to pending_approval, freezing resolvedProjectIds as the
+        audience snapshot. Rejected unless the request is currently a draft
+        and a dry run has already been recorded — the dry-run case is the
+        only preview the approver ever sees.
+      operationId: submitAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAnnouncementRequestRequest'
+      responses:
+        "200":
+          description: Request submitted for approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is not a draft, or has no recorded dry run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/approve:
+    post:
+      summary: >-
+        Move a request pending approval to approved. There is no
+        approver-role check here — the real approval decision already
+        happened over email, outside this service; this call only records
+        that whoever is working the request says it's been approved.
+      operationId: approveAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnouncementRequestActorRequest'
+      responses:
+        "200":
+          description: Request approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is not pending approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/publish:
+    post:
+      summary: >-
+        Move an approved request to published. Does not itself create any
+        cases — the caller's own fan-out (POST /cases per project) is
+        unchanged and happens separately; this call only records that
+        publishing happened, by whom, and when.
+      operationId: publishAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnouncementRequestActorRequest'
+      responses:
+        "200":
+          description: Request published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is not approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /scheduled-tasks/attempts:
     post:
       summary: >-
@@ -15975,6 +16335,181 @@ components:
             completed it once. Only rely on this field to gate a reaction
             if that risk is acceptable, or if the reaction's own completion
             is tracked separately and durably instead.
+
+    AnnouncementRequest:
+      description: >
+        A draft, in-review, or approved announcement that has not yet been
+        published. Carries an announcement through
+        draft -> pending_approval -> approved -> published while the real
+        approval decision happens over email, outside this service entirely.
+        Has no ServiceNow equivalent — always backed by Postgres.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [customer, eol]
+        state:
+          type: string
+          enum: [draft, pending_approval, approved, published]
+        subject:
+          type: string
+        description:
+          type: string
+        isSecurityAnnouncement:
+          type: boolean
+        audienceDefinition:
+          type: object
+          description: >-
+            Whichever shape the caller's own create form builds — opaque to
+            this service, stored and returned as-is.
+        resolvedProjectIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: The frozen audience snapshot, set at Submit. Null until then.
+        resolvedProjectCount:
+          type: integer
+          nullable: true
+        dryRunCaseId:
+          type: string
+          nullable: true
+        dryRunAt:
+          type: string
+          format: date-time
+          nullable: true
+        dryRunBy:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        submittedBy:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        approvedBy:
+          type: string
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        publishedBy:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateAnnouncementRequestRequest:
+      type: object
+      required: [kind, createdBy]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [customer, eol]
+        subject:
+          type: string
+        description:
+          type: string
+        isSecurityAnnouncement:
+          type: boolean
+        audienceDefinition:
+          type: object
+        createdBy:
+          type: string
+          description: The caller-resolved actor id — this service is called server-to-server and does not resolve one itself.
+
+    UpdateAnnouncementRequestRequest:
+      type: object
+      required: [actorId]
+      additionalProperties: false
+      properties:
+        subject:
+          type: string
+        description:
+          type: string
+        isSecurityAnnouncement:
+          type: boolean
+        audienceDefinition:
+          type: object
+          description: Rejected with 409 if the request is currently approved — the approved audience snapshot is frozen.
+        actorId:
+          type: string
+
+    RecordAnnouncementDryRunRequest:
+      type: object
+      required: [caseId, actorId]
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+        actorId:
+          type: string
+
+    SubmitAnnouncementRequestRequest:
+      type: object
+      required: [resolvedProjectIds, actorId]
+      additionalProperties: false
+      properties:
+        resolvedProjectIds:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        actorId:
+          type: string
+
+    AnnouncementRequestActorRequest:
+      type: object
+      required: [actorId]
+      additionalProperties: false
+      properties:
+        actorId:
+          type: string
+
+    SearchAnnouncementRequestsRequest:
+      type: object
+      required: [pagination]
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum: [draft, pending_approval, approved, published]
+        createdBy:
+          type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchAnnouncementRequestsResponse:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnnouncementRequest'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
 
     ScheduledTaskRun:
       description: >

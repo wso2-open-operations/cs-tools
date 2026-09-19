@@ -515,6 +515,79 @@ Exposed at:
   there) — that endpoint existed from the start, but this is the first
   thing that actually calls it.
 
+## Announcement requests
+
+`announcement_requests` (migration `000014`, `internal/domain/entity.go`'s
+`AnnouncementRequest`, `internal/repository/announcement_request_repo.go`,
+`internal/service/announcement_request_service.go`) is durable state for an
+announcement that hasn't been published yet — `draft -> pending_approval ->
+approved -> published`. Like `sla_clocks`/`scheduled_task_run`, it has no
+ServiceNow equivalent and is always backed by Postgres regardless of
+`DATA_SOURCE`. It exists purely to let the CSM portal remember an
+announcement is mid-flight while the real approval decision happens over
+email, entirely outside this service — there is no approver role, no email
+sending, and no preview-rendering component here. The dry-run case the
+caller's own mechanism already creates (a real case in a test project) *is*
+the preview the approver reviews; this service just records that one
+happened (`dryRunCaseId`/`dryRunAt`/`dryRunBy`) and refuses `Submit` until it
+has (see `AnnouncementRequestService.Submit`'s own doc comment) — submitting
+for approval without one would send an approval request for content nobody
+has actually seen rendered.
+
+`audienceDefinition` is an opaque JSON blob (whichever shape the caller's own
+create form builds) that this service never interprets, so a draft can be
+re-opened and re-edited without re-deriving anything. `resolvedProjectIds` is
+a *different* field: the actual resolved project id list, frozen by the
+caller (with whatever exclusions it applies — see `AnnouncementHandler`'s
+`injectExcludeProjectKeys` in `csm-portal-backend`) at the moment of
+`Submit`, never re-resolved later. That's a deliberate choice: the frozen
+snapshot is what the dry-run link and the approval email actually describe,
+so `Publish` must send to exactly that list, not to whatever "all customer
+projects" happens to resolve to by the time someone gets around to
+publishing.
+
+**Editing behaves differently depending on the row's current state — this is
+the one piece of real business logic here, not just CRUD.** `Update` (backing
+`PATCH /announcement-requests/{id}`) branches on the row's current state,
+fetched fresh immediately before deciding what to do:
+- `draft` → a plain field update, no state change.
+- `pending_approval` → the same field update, but reverts to `draft` as one
+  atomic side effect, clearing the frozen `resolvedProjectIds` snapshot and
+  the dry-run record. The content is out for real review over email at this
+  point, so a silent change under the reviewer isn't safe, and the old dry
+  run no longer describes whatever's about to be re-submitted.
+- `approved` → subject/description/`isSecurityAnnouncement` may still be
+  updated in place with **no** state change and **no** audience change (an
+  audience-change attempt here is rejected outright) — a human has already
+  said yes over email, so this is a deliberate, explicitly-accepted
+  trade-off: a post-approval edit is not re-verified against a fresh dry run
+  before `Publish` sends whatever's currently there.
+- `published` → rejected outright; nothing about a published request is
+  editable through this entity again.
+
+**Every state-transition write is atomically conditioned on the state (and,
+for `Submit`, the dry-run precondition) it requires, inside the `UPDATE`'s
+own `WHERE` clause — not just checked beforehand in the service layer.** A
+service-layer "fetch current state, validate, then write" sequence is not
+atomic against two concurrent transitions on the same row (e.g. one caller's
+`Submit` racing another's `RecordDryRun`-clearing `RevertToDraft`); without
+the state repeated in the `WHERE` clause itself, the slower writer would
+silently apply its own stale-precondition write after the faster one already
+moved the row on. Every mutating repository method (`Update`, `RecordDryRun`,
+`Submit`, `Approve`, `RevertToDraft`, `MarkPublished`) follows this shape;
+`announcementRequestRepo.onConflictOrNotFound` is what a 0-row `UPDATE ...
+RETURNING` turns into — a `ConflictError` if the row still exists (the
+precondition changed underneath the caller, a real race) or the propagated
+`NotFoundError` if it doesn't (checked via one extra `Get`, only on this rare
+path, so the common case stays a single round trip).
+
+This service never creates the real per-project cases itself — `MarkPublished`
+only records that publishing happened, by whom, and when. The actual fan-out
+(`POST /cases` per project) is, and remains, the caller's own job, unchanged
+from before this entity existed; there is deliberately no persisted
+per-project delivery ledger here either — that belongs to a future batch
+entity, not this one.
+
 ## Adding a new entity
 
 Follow these steps in order:

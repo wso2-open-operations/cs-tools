@@ -6274,6 +6274,177 @@ type SetSLAClockTierReachedResponse struct {
 	AlreadyReached bool      `json:"alreadyReached"`
 }
 
+// AnnouncementRequestState is the lifecycle state of an announcement_requests
+// row. Like SLAClock and EventPublishFailure, this entity has no ServiceNow
+// equivalent and is always backed by Postgres regardless of DATA_SOURCE.
+//
+//	draft             Editable. May have a recorded dry run (see
+//	                   AnnouncementRequest.DryRunCaseID) but nothing has been
+//	                   sent for approval yet.
+//	pending_approval  Content locked; ResolvedProjectIDs is frozen (taken at
+//	                   the moment of submission — not re-resolved later).
+//	                   Approval itself happens entirely outside this
+//	                   service, over email; this state only means "waiting
+//	                   for that reply." Editing while in this state reverts
+//	                   to draft (see AnnouncementRequestService.Update) —
+//	                   the content is out for real review, so a silent
+//	                   change under the reviewer isn't safe.
+//	approved          A human has said yes over email and whoever is
+//	                   working the request called Approve. Unlike
+//	                   pending_approval, editing here does NOT revert state
+//	                   — subject/description may still be tweaked in place
+//	                   (the frozen ResolvedProjectIDs snapshot never
+//	                   changes) since the decision has already been made.
+//	published         MarkPublished has been called. This service never
+//	                   creates the real per-project cases itself — that
+//	                   fan-out is the caller's job, unchanged from before
+//	                   this entity existed. This state only records that it
+//	                   happened, by whom, and when.
+type AnnouncementRequestState string
+
+const (
+	AnnouncementRequestStateDraft           AnnouncementRequestState = "draft"
+	AnnouncementRequestStatePendingApproval AnnouncementRequestState = "pending_approval"
+	AnnouncementRequestStateApproved        AnnouncementRequestState = "approved"
+	AnnouncementRequestStatePublished       AnnouncementRequestState = "published"
+)
+
+// AnnouncementRequestKind distinguishes which of the two announcement create
+// flows an announcement_requests row backs — the audience is resolved
+// completely differently for each (see AnnouncementRequest.AudienceDefinition),
+// but the state machine and every other field is shared.
+type AnnouncementRequestKind string
+
+const (
+	AnnouncementRequestKindCustomer AnnouncementRequestKind = "customer"
+	AnnouncementRequestKindEOL      AnnouncementRequestKind = "eol"
+)
+
+// AnnouncementRequest is a draft, in-review, or approved announcement that
+// has not yet been published. It exists purely to carry an announcement
+// through draft -> pending_approval -> approved -> published while the real
+// approval decision happens over email, outside this service entirely (see
+// AnnouncementRequestState's own doc comment for the full state machine).
+//
+// AudienceDefinition is whichever shape the caller's own create form
+// already builds — {scope, excludeCloudTypes, excludeClosedStates,
+// projectIds} for the customer flow, {productId, productVersionId} for EOL
+// — stored opaquely (this service does not interpret it) so a draft can be
+// re-opened and re-edited without re-deriving anything. ResolvedProjectIDs
+// is a *different* thing: the actual resolved project id list, computed and
+// frozen by the caller (with whatever exclusions it applies) at the moment
+// of Submit — never re-resolved later, since that's the version the
+// dry-run link and the approval email actually describe.
+type AnnouncementRequest struct {
+	ID                     string                   `json:"id"`
+	Kind                   AnnouncementRequestKind  `json:"kind"`
+	State                  AnnouncementRequestState `json:"state"`
+	Subject                string                   `json:"subject"`
+	Description            string                   `json:"description"`
+	IsSecurityAnnouncement bool                     `json:"isSecurityAnnouncement"`
+	AudienceDefinition     json.RawMessage          `json:"audienceDefinition"`
+	// ResolvedProjectIDs and ResolvedProjectCount are nil/unset until Submit
+	// has been called — see the struct's own doc comment.
+	ResolvedProjectIDs   []string   `json:"resolvedProjectIds,omitempty"`
+	ResolvedProjectCount *int       `json:"resolvedProjectCount,omitempty"`
+	DryRunCaseID         *string    `json:"dryRunCaseId,omitempty"`
+	DryRunAt             *time.Time `json:"dryRunAt,omitempty"`
+	DryRunBy             *string    `json:"dryRunBy,omitempty"`
+	CreatedBy            string     `json:"createdBy"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
+	SubmittedBy          *string    `json:"submittedBy,omitempty"`
+	SubmittedAt          *time.Time `json:"submittedAt,omitempty"`
+	ApprovedBy           *string    `json:"approvedBy,omitempty"`
+	ApprovedAt           *time.Time `json:"approvedAt,omitempty"`
+	PublishedBy          *string    `json:"publishedBy,omitempty"`
+	PublishedAt          *time.Time `json:"publishedAt,omitempty"`
+}
+
+// CreateAnnouncementRequestRequest creates a new announcement_requests row
+// in state draft. CreatedBy is the caller-resolved actor id — this service
+// is called server-to-server (by csm-portal-backend, which is the one that
+// actually authenticates the browser user), so unlike the CSM-native
+// entities reachable directly from a browser (cases, comments, attachments),
+// there is no token to resolve an actor from here; the caller supplies it
+// directly, the same convention SLAClock/ScheduledTaskRun/EventPublishFailure
+// already established for this class of entity.
+type CreateAnnouncementRequestRequest struct {
+	Kind                   AnnouncementRequestKind `json:"kind"`
+	Subject                string                  `json:"subject"`
+	Description            string                  `json:"description"`
+	IsSecurityAnnouncement bool                    `json:"isSecurityAnnouncement"`
+	AudienceDefinition     json.RawMessage         `json:"audienceDefinition"`
+	CreatedBy              string                  `json:"createdBy"`
+}
+
+// UpdateAnnouncementRequestRequest edits an announcement_requests row's own
+// content. Every field is optional — only non-nil fields are applied. What
+// actually happens depends entirely on the row's *current* state when this
+// arrives (see AnnouncementRequestService.Update's own doc comment); the
+// caller does not choose the behavior, the current state does.
+type UpdateAnnouncementRequestRequest struct {
+	Subject                *string         `json:"subject,omitempty"`
+	Description            *string         `json:"description,omitempty"`
+	IsSecurityAnnouncement *bool           `json:"isSecurityAnnouncement,omitempty"`
+	AudienceDefinition     json.RawMessage `json:"audienceDefinition,omitempty"`
+	// ActorID is who performed this edit — recorded nowhere on the row
+	// itself today (there's no "last edited by" field), but required so a
+	// future audit addition doesn't need a wire-contract change, and so a
+	// pending_approval -> draft revert (see Update's doc comment) has a
+	// consistent actor-required shape with every other transition below.
+	ActorID string `json:"actorId"`
+}
+
+// RecordAnnouncementDryRunRequest records that a dry run has been completed
+// for this request — CaseID is the real case id the caller's own dry-run
+// mechanism already created (this service does not create it, does not
+// validate that it exists, and does not know what "dry run" even means
+// beyond "a case id the caller is vouching for"). Recording one is what
+// Submit's own precondition checks for (see AnnouncementRequestService.Submit).
+type RecordAnnouncementDryRunRequest struct {
+	CaseID  string `json:"caseId"`
+	ActorID string `json:"actorId"`
+}
+
+// SubmitAnnouncementRequestRequest moves a draft to pending_approval.
+// ResolvedProjectIDs is the audience snapshot to freeze — computed and
+// exclusion-filtered by the caller (see the BFF's own submit handler, which
+// applies the mandatory excluded-project-key denylist before calling this),
+// never re-derived by this service from AudienceDefinition. An empty slice
+// is rejected (a submission with nothing to send to is not a valid state).
+type SubmitAnnouncementRequestRequest struct {
+	ResolvedProjectIDs []string `json:"resolvedProjectIds"`
+	ActorID            string   `json:"actorId"`
+}
+
+// AnnouncementRequestActorRequest is the minimal request shape for a
+// transition that needs nothing but who's performing it — Approve and
+// MarkPublished both use this.
+type AnnouncementRequestActorRequest struct {
+	ActorID string `json:"actorId"`
+}
+
+// SearchAnnouncementRequestsRequest filters announcement_requests. State and
+// CreatedBy are both optional; omitting both returns every row (subject to
+// pagination) — there is no default filter, unlike some other search
+// endpoints in this service, since every caller of this endpoint so far
+// (the registry page's "Pending" tab) needs to choose its own filter
+// explicitly rather than inherit an implicit one.
+type SearchAnnouncementRequestsRequest struct {
+	State      *AnnouncementRequestState `json:"state,omitempty"`
+	CreatedBy  *string                   `json:"createdBy,omitempty"`
+	Pagination Pagination                `json:"pagination"`
+}
+
+type SearchAnnouncementRequestsResponse struct {
+	Requests []AnnouncementRequest `json:"requests"`
+	Total    int                   `json:"total"`
+	Limit    int                   `json:"limit"`
+	Offset   int                   `json:"offset"`
+	HasMore  bool                  `json:"hasMore"`
+}
+
 // ScheduledTaskRun is the durable record of one attempted period of a
 // registered sub-cron running inside operations/csm-scheduled-tasks — a
 // single Choreo Scheduled Task that internally fans out to any number of

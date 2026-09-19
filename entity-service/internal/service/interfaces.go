@@ -161,6 +161,47 @@ type ScheduledTaskRunService interface {
 	DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (domain.DeleteScheduledTaskRunsResponse, error)
 }
 
+// AnnouncementRequestService defines the operations available on the
+// announcement_requests entity — see domain.AnnouncementRequest's own doc
+// comment for the full state machine (draft -> pending_approval -> approved
+// -> published) and what each transition does and doesn't allow.
+type AnnouncementRequestService interface {
+	// CreateDraft creates a new request in state draft. A ValidationError is
+	// returned if kind isn't "customer"/"eol" or createdBy is missing.
+	CreateDraft(ctx context.Context, req domain.CreateAnnouncementRequestRequest) (domain.AnnouncementRequest, error)
+	// Get returns the request by id. A NotFoundError is returned if it
+	// doesn't exist.
+	Get(ctx context.Context, id string) (domain.AnnouncementRequest, error)
+	// Search returns requests matching req's optional state/createdBy
+	// filters, paginated.
+	Search(ctx context.Context, req domain.SearchAnnouncementRequestsRequest) (domain.SearchAnnouncementRequestsResponse, error)
+	// Update edits the request's own content — what actually happens
+	// (plain edit, edit-and-revert-to-draft, or edit-in-place) depends
+	// entirely on the request's current state; see the service's own
+	// implementation doc comment for the full breakdown. A ConflictError is
+	// returned if the request is published; a ValidationError if an
+	// audience change is attempted while approved (the approved snapshot
+	// is frozen — this is a rejected request shape, not a state conflict).
+	Update(ctx context.Context, id string, req domain.UpdateAnnouncementRequestRequest) (domain.AnnouncementRequest, error)
+	// RecordDryRun records that a dry run (created by the caller's own
+	// mechanism, not this service) has completed for this request. A
+	// ConflictError is returned unless the current state is draft.
+	RecordDryRun(ctx context.Context, id string, req domain.RecordAnnouncementDryRunRequest) (domain.AnnouncementRequest, error)
+	// Submit moves draft -> pending_approval, freezing req.ResolvedProjectIDs
+	// as the audience snapshot. A ConflictError is returned unless the
+	// current state is draft and a dry run has already been recorded; a
+	// ValidationError if resolvedProjectIds is empty.
+	Submit(ctx context.Context, id string, req domain.SubmitAnnouncementRequestRequest) (domain.AnnouncementRequest, error)
+	// Approve moves pending_approval -> approved. A ConflictError is
+	// returned unless the current state is pending_approval. There is no
+	// approver-role check — see the interface's own doc comment.
+	Approve(ctx context.Context, id, actorID string) (domain.AnnouncementRequest, error)
+	// MarkPublished moves approved -> published. Does not itself create any
+	// cases. A ConflictError is returned unless the current state is
+	// approved.
+	MarkPublished(ctx context.Context, id, actorID string) (domain.AnnouncementRequest, error)
+}
+
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
