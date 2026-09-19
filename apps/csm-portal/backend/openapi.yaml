@@ -1970,6 +1970,445 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /announcement-requests:
+    post:
+      summary: Create a new announcement request in state draft (Phase 2 draft/approval workflow).
+      description: >
+        createdBy is always the authenticated caller — a client-supplied
+        value for that field is ignored.
+      operationId: createAnnouncementRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnouncementRequestPayload'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/search:
+    post:
+      summary: Search announcement requests, optionally filtered by state and/or createdBy.
+      operationId: searchAnnouncementRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAnnouncementRequestsPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAnnouncementRequestsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}:
+    get:
+      summary: Get one announcement request by id.
+      operationId: getAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: >-
+        Edit an announcement request's own content. What actually happens
+        depends entirely on the request's current state — see
+        entity-service's own AnnouncementRequestService.Update doc comment
+        for the full breakdown (plain edit while draft; edit-and-revert-to-
+        draft while pending approval; edit-in-place with the audience left
+        untouched while approved; rejected outright once published).
+        actorId is always the authenticated caller.
+      operationId: updateAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAnnouncementRequestPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: >-
+            BadRequest — includes an audience change attempted on an
+            approved request (the approved snapshot is frozen).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — the request is published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/dry-run:
+    post:
+      summary: Record that a dry run has completed for this request (Phase 2 draft/approval workflow).
+      description: >-
+        caseId is the real case id the caller's own dry-run mechanism
+        (useAnnouncementDryRun.ts) already created — this endpoint does not
+        create it and does not verify it exists. Recording one is a
+        precondition for Submit. actorId is always the authenticated caller.
+      operationId: recordAnnouncementRequestDryRun
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordAnnouncementDryRunPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — the request is not in state draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/submit:
+    post:
+      summary: Submit a draft announcement request for approval (Phase 2 draft/approval workflow).
+      description: >-
+        Resolves the real audience server-side — with the mandatory
+        excluded-project-key denylist applied for the customer "all
+        projects" scope, exactly like a live
+        POST /announcements/audience/search resolution — and freezes it as
+        the request's resolvedProjectIds snapshot. Rejected unless the
+        request is currently a draft and a dry run has already been
+        recorded (see .../dry-run above). Takes no body — everything this
+        needs is already stored on the request itself, plus the
+        authenticated caller as actorId.
+      operationId: submitAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "400":
+          description: >-
+            BadRequest — includes an unresolvable or empty audience.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — the request is not a draft, or has no recorded dry run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/approve:
+    post:
+      summary: Approve a request pending approval (Phase 2 draft/approval workflow).
+      description: >-
+        There is no approver-role check here — the real approval decision
+        already happened over email, outside the platform entirely; this
+        call only records that whoever's working the request says it's
+        been approved. Takes no body — actorId is always the authenticated
+        caller.
+      operationId: approveAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — the request is not pending approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/publish:
+    post:
+      summary: Mark an approved request published (Phase 2 draft/approval workflow).
+      description: >-
+        Does not itself create any cases — the webapp's own fan-out
+        (unchanged from today) is what actually sends the announcement,
+        separately, after this call succeeds. Takes no body — actorId is
+        always the authenticated caller.
+      operationId: publishAnnouncementRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequest'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict — the request is not approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /projects/{id}/contacts/{contactId}:
     get:
       summary: Get one contact's attributes for a single project.
@@ -12174,6 +12613,149 @@ components:
           type: integer
         offset:
           type: integer
+
+    AnnouncementRequest:
+      description: >
+        A draft, in-review, or approved announcement that has not yet been
+        published — Phase 2's draft/pending_approval/approved/published
+        workflow. Passthrough from entity-service's own AnnouncementRequest;
+        see that service's CLAUDE.md ("Announcement requests") for the full
+        state machine.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [customer, eol]
+        state:
+          type: string
+          enum: [draft, pending_approval, approved, published]
+        subject:
+          type: string
+        description:
+          type: string
+        isSecurityAnnouncement:
+          type: boolean
+        audienceDefinition:
+          type: object
+          description: Opaque to this backend — stored and returned as-is.
+        resolvedProjectIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        resolvedProjectCount:
+          type: integer
+          nullable: true
+        dryRunCaseId:
+          type: string
+          nullable: true
+        dryRunAt:
+          type: string
+          format: date-time
+          nullable: true
+        dryRunBy:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        submittedBy:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        approvedBy:
+          type: string
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        publishedBy:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateAnnouncementRequestPayload:
+      type: object
+      required: [kind]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [customer, eol]
+        subject:
+          type: string
+        description:
+          type: string
+        isSecurityAnnouncement:
+          type: boolean
+        audienceDefinition:
+          type: object
+
+    UpdateAnnouncementRequestPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        subject:
+          type: string
+        description:
+          type: string
+        isSecurityAnnouncement:
+          type: boolean
+        audienceDefinition:
+          type: object
+          description: Rejected with 400 if the request is currently approved — the approved audience snapshot is frozen.
+
+    RecordAnnouncementDryRunPayload:
+      type: object
+      required: [caseId]
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+
+    SearchAnnouncementRequestsPayload:
+      type: object
+      required: [pagination]
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum: [draft, pending_approval, approved, published]
+        createdBy:
+          type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchAnnouncementRequestsResponse:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnnouncementRequest'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
 
     TaskSlaDefinitionDetail:
       type: object

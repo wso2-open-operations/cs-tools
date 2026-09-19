@@ -682,3 +682,51 @@ func (c *CustomerEntityClient) SearchOutageCommunications(ctx context.Context, i
 func (c *CustomerEntityClient) GetOutageMetadata(ctx context.Context) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, "/outages/metadata", nil)
 }
+
+// CreateAnnouncementRequest calls POST /announcement-requests on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) CreateAnnouncementRequest(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/announcement-requests", body)
+}
+
+// GetAnnouncementRequest calls GET /announcement-requests/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) GetAnnouncementRequest(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/announcement-requests/%s", url.PathEscape(id)), nil)
+}
+
+// SearchAnnouncementRequests calls POST /announcement-requests/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) SearchAnnouncementRequests(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/announcement-requests/search", body)
+}
+
+// UpdateAnnouncementRequest calls PATCH /announcement-requests/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) UpdateAnnouncementRequest(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/announcement-requests/%s", url.PathEscape(id)), body)
+}
+
+// RecordAnnouncementRequestDryRun calls POST /announcement-requests/{id}/dry-run on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) RecordAnnouncementRequestDryRun(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/announcement-requests/%s/dry-run", url.PathEscape(id)), body)
+}
+
+// SubmitAnnouncementRequest calls POST /announcement-requests/{id}/submit on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) SubmitAnnouncementRequest(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/announcement-requests/%s/submit", url.PathEscape(id)), body)
+}
+
+// ApproveAnnouncementRequest calls POST /announcement-requests/{id}/approve on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) ApproveAnnouncementRequest(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/announcement-requests/%s/approve", url.PathEscape(id)), body)
+}
+
+// PublishAnnouncementRequest calls POST /announcement-requests/{id}/publish on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) PublishAnnouncementRequest(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/announcement-requests/%s/publish", url.PathEscape(id)), body)
+}
