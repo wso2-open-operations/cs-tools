@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { settleWithConcurrencyLimit } from "./settleWithConcurrencyLimit";
 
 describe("settleWithConcurrencyLimit", () => {
@@ -60,5 +60,37 @@ describe("settleWithConcurrencyLimit", () => {
       { status: "fulfilled", value: 10 },
       { status: "fulfilled", value: 20 },
     ]);
+  });
+
+  it("calls onSettle once per item, with that item's own result, as soon as it settles", async () => {
+    const items = ["a", "b", "c"];
+    const settled: { item: string; status: string }[] = [];
+
+    await settleWithConcurrencyLimit(
+      items,
+      2,
+      async (item) => {
+        if (item === "b") throw new Error("b failed");
+        return `${item}-ok`;
+      },
+      (result, item) => {
+        settled.push({ item, status: result.status });
+      },
+    );
+
+    expect(settled).toHaveLength(3);
+    expect(settled).toEqual(
+      expect.arrayContaining([
+        { item: "a", status: "fulfilled" },
+        { item: "b", status: "rejected" },
+        { item: "c", status: "fulfilled" },
+      ]),
+    );
+  });
+
+  it("never calls onSettle for an empty item list", async () => {
+    const onSettle = vi.fn();
+    await settleWithConcurrencyLimit([], 5, async (x) => x, onSettle);
+    expect(onSettle).not.toHaveBeenCalled();
   });
 });

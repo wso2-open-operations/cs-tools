@@ -42,11 +42,18 @@ export const ANNOUNCEMENT_CASE_CREATE_CONCURRENCY_LIMIT = 5;
  * `Promise.allSettled` — one entry per item, in the original order — so a
  * caller already written against `Promise.allSettled` only needs to swap
  * the call itself, not its own result-handling logic.
+ *
+ * `onSettle`, when given, fires once per item as soon as that item's own
+ * `fn` call settles (not in original-index order — whichever worker
+ * finishes next) — the hook a caller needs to drive a live "N/total"
+ * progress indicator while the batch is still running, rather than only
+ * finding out the outcome after every item has finished.
  */
 export async function settleWithConcurrencyLimit<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,
+  onSettle?: (result: PromiseSettledResult<R>, item: T, index: number) => void,
 ): Promise<PromiseSettledResult<R>[]> {
   const results: PromiseSettledResult<R>[] = new Array(items.length);
   let nextIndex = 0;
@@ -55,11 +62,14 @@ export async function settleWithConcurrencyLimit<T, R>(
     for (;;) {
       const i = nextIndex++;
       if (i >= items.length) return;
+      let result: PromiseSettledResult<R>;
       try {
-        results[i] = { status: "fulfilled", value: await fn(items[i]) };
+        result = { status: "fulfilled", value: await fn(items[i]) };
       } catch (error) {
-        results[i] = { status: "rejected", reason: error };
+        result = { status: "rejected", reason: error };
       }
+      results[i] = result;
+      onSettle?.(result, items[i], i);
     }
   }
 

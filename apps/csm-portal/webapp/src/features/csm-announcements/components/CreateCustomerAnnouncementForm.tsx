@@ -24,7 +24,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX } from "react";
+import { useCallback, useMemo, useState, type JSX } from "react";
 import type { BeSubscriptionType } from "@api/backend/types";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -34,6 +34,9 @@ import { DRY_RUN_TAG_LABEL, useAnnouncementDryRun } from "@features/csm-announce
 import { useAnnouncementExcludedProjectKeys } from "@features/csm-announcements/api/useAnnouncementExcludedProjectKeys";
 import { useResolveAnnouncementAudience } from "@features/csm-announcements/api/useResolveAnnouncementAudience";
 import AnnouncementDryRunCard from "@features/csm-announcements/components/AnnouncementDryRunCard";
+import AnnouncementSendProgress, {
+  type AnnouncementSendProgressState,
+} from "@features/csm-announcements/components/AnnouncementSendProgress";
 import AudienceScopeControls, {
   type AnnouncementAudienceScope,
 } from "@features/csm-announcements/components/AudienceScopeControls";
@@ -118,6 +121,11 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
   const [description, setDescription] = useState("");
   const [isSecurityAnnouncement, setIsSecurityAnnouncement] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sendProgress, setSendProgress] = useState<AnnouncementSendProgressState | null>(null);
+  // Populated as the user picks "specific" projects (see
+  // AudienceScopeControls' onProjectKeysChange) so a failed project can be
+  // shown by its short key instead of its raw id.
+  const [pickedProjectKeyById, setPickedProjectKeyById] = useState<Map<string, string>>(new Map());
 
   const postCase = usePostCsmCase();
   const addTag = useAddTagToCase();
@@ -151,9 +159,60 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
     [scope, resolvedAudience.projects, projectIds],
   );
 
+  // id → short key ("CUPPTSUB") for whichever audience source is active, so
+  // a failed project can be shown by something readable instead of its raw
+  // id — in both the live progress card and the summary error message.
+  const projectKeyById = useMemo(() => {
+    if (scope === "all") {
+      const m = new Map<string, string>();
+      resolvedAudience.projects.forEach((p) => {
+        if (p.key) m.set(p.id, p.key);
+      });
+      return m;
+    }
+    return pickedProjectKeyById;
+  }, [scope, resolvedAudience.projects, pickedProjectKeyById]);
+  const projectLabel = useCallback(
+    (projectId: string) => projectKeyById.get(projectId) ?? projectId,
+    [projectKeyById],
+  );
+
+  // When set, a prior submit left these (and only these) projects without
+  // an announcement — the next submit targets just this narrower list
+  // instead of the full audience again, so a retry after a partial failure
+  // can't create a second, duplicate case for a project that already
+  // succeeded. Reset back to "submit the full audience" the moment the
+  // audience itself changes (a different scope, a different pick, a
+  // re-resolved "all" list) — a stale retry target from a previous audience
+  // would silently narrow a genuinely new send to the wrong projects.
+  const [retryProjectIds, setRetryProjectIds] = useState<string[] | null>(null);
+  // Adjusting state during render (React's own recommended pattern for
+  // "reset state when a derived value changes") rather than an effect — the
+  // audience changing is itself the render this needs to react to, not a
+  // side effect to synchronize afterward. Compared by content (JSON.stringify
+  // of a *sorted* copy — order-independent), not by reference:
+  // resolvedAudience.projects falls back to a fresh `[]` on every render
+  // while unresolved/disabled, so targetProjectIds is never referentially
+  // stable — comparing by reference here would reset on every single render
+  // and loop. Sorting matters too: a refetch of the same audience isn't
+  // guaranteed to return the same project order, and an unsorted key would
+  // treat that reordering as "the audience changed," silently discarding an
+  // in-progress retry target for no real reason.
+  const targetProjectIdsKey = JSON.stringify([...targetProjectIds].sort());
+  const [retryBaselineKey, setRetryBaselineKey] = useState(targetProjectIdsKey);
+  if (targetProjectIdsKey !== retryBaselineKey) {
+    setRetryBaselineKey(targetProjectIdsKey);
+    setRetryProjectIds(null);
+    // The previous batch's own outcome no longer describes this audience —
+    // leaving it up would show stale failed-project chips/counts as if they
+    // applied to whatever's now selected.
+    setSendProgress(null);
+  }
+  const submitProjectIds = retryProjectIds ?? targetProjectIds;
+
   const canSubmit = useMemo(
     () =>
-      targetProjectIds.length > 0 &&
+      submitProjectIds.length > 0 &&
       !(scope === "all" && resolvedAudience.isLoading) &&
       // TanStack Query can retain a previous successful fetch's `data` after
       // a later refetch fails (isLoading goes back to false, but the stale
@@ -165,7 +224,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
       !isEmptyHtml(description) &&
       !submitting,
     [
-      targetProjectIds,
+      submitProjectIds,
       scope,
       resolvedAudience.isLoading,
       resolvedAudience.isError,
@@ -178,6 +237,13 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
+    setSendProgress({
+      total: submitProjectIds.length,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      failedProjectIds: [],
+    });
 
     const trimmedSubject = subject.trim();
     // Tag failures are tracked separately from create failures: the case
@@ -186,7 +252,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
     // problem to fix on an otherwise-successful case.
     const failedTagProjectIds: string[] = [];
     const results = await settleWithConcurrencyLimit(
-      targetProjectIds,
+      submitProjectIds,
       ANNOUNCEMENT_CASE_CREATE_CONCURRENCY_LIMIT,
       async (projectId) => {
         const created = await postCase.mutateAsync({
@@ -207,52 +273,92 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
         }
         return created;
       },
+      (result, projectId) => {
+        // Fires as each project's own create call actually settles (not in
+        // original-index order) — what drives the live "N/total" card below,
+        // independent of the final failure report assembled after every
+        // project has finished.
+        setSendProgress((prev) =>
+          prev && {
+            ...prev,
+            completed: prev.completed + 1,
+            succeeded: prev.succeeded + (result.status === "fulfilled" ? 1 : 0),
+            failed: prev.failed + (result.status === "rejected" ? 1 : 0),
+            failedProjectIds:
+              result.status === "rejected"
+                ? [...prev.failedProjectIds, projectId]
+                : prev.failedProjectIds,
+          },
+        );
+      },
     );
     setSubmitting(false);
 
     // Neither audience source exposes picked project names for a failure
     // report beyond what's already resolved, so a failure is reported by id
     // — still enough for the engineer to identify which project(s) to retry.
-    const failedProjectIds = targetProjectIds.filter(
+    const failedProjectIds = submitProjectIds.filter(
       (_, i) => results[i].status === "rejected",
     );
 
     if (failedProjectIds.length === 0 && failedTagProjectIds.length === 0) {
+      setRetryProjectIds(null);
       navigate(BACK_TARGET);
       return;
     }
 
-    const succeededCount = targetProjectIds.length - failedProjectIds.length;
-    if (succeededCount > 0) {
-      // Partial failure: the succeeded creates already landed and aren't
-      // retried automatically, so navigate away and surface exactly which
-      // project(s) still need attention — a failed create needs retrying,
-      // a failed tag attach just needs the label added by hand.
-      const messages: string[] = [];
-      if (failedProjectIds.length > 0) {
-        messages.push(
-          `created for ${succeededCount} of ${targetProjectIds.length} project${
-            targetProjectIds.length === 1 ? "" : "s"
-          }, but failed for project${failedProjectIds.length === 1 ? "" : "s"} ${failedProjectIds.join(
-            ", ",
-          )} — create it again for the failed project${failedProjectIds.length === 1 ? "" : "s"} only`,
-        );
-      } else {
-        messages.push(`created for all ${targetProjectIds.length} project${targetProjectIds.length === 1 ? "" : "s"}`);
-      }
-      if (failedTagProjectIds.length > 0) {
-        messages.push(
-          `the security label couldn't be attached for project${
-            failedTagProjectIds.length === 1 ? "" : "s"
-          } ${failedTagProjectIds.join(", ")} — add it manually on ${
-            failedTagProjectIds.length === 1 ? "that case" : "those cases"
-          }`,
-        );
-      }
-      showError(`The announcement was ${messages.join("; ")}.`);
-      navigate(BACK_TARGET);
-    } else {
+    // A create failure means the next submit must target only these
+    // projects, not the full audience again — otherwise clicking "Create
+    // announcement" a second time would resend to every project that
+    // already succeeded too, creating a duplicate case for each one (there
+    // is no idempotency key on the create call).
+    if (failedProjectIds.length > 0) {
+      setRetryProjectIds(failedProjectIds);
+    }
+
+    const succeededCount = submitProjectIds.length - failedProjectIds.length;
+    if (succeededCount === 0) {
+      // Every create call failed — nothing to report per-project beyond
+      // what the progress card's own failed-id chips already show.
       showError("Could not create the announcement. Please try again.");
+      return;
+    }
+
+    const messages: string[] = [];
+    if (failedProjectIds.length > 0) {
+      messages.push(
+        `created for ${succeededCount} of ${submitProjectIds.length} project${
+          submitProjectIds.length === 1 ? "" : "s"
+        }, but failed for project${failedProjectIds.length === 1 ? "" : "s"} ${failedProjectIds
+          .map(projectLabel)
+          .join(", ")} — click "Retry" to resend to just the failed project${
+          failedProjectIds.length === 1 ? "" : "s"
+        }`,
+      );
+    } else {
+      messages.push(`created for all ${submitProjectIds.length} project${submitProjectIds.length === 1 ? "" : "s"}`);
+    }
+    if (failedTagProjectIds.length > 0) {
+      messages.push(
+        `the security label couldn't be attached for project${
+          failedTagProjectIds.length === 1 ? "" : "s"
+        } ${failedTagProjectIds.map(projectLabel).join(", ")} — add it manually on ${
+          failedTagProjectIds.length === 1 ? "that case" : "those cases"
+        }`,
+      );
+    }
+    showError(`The announcement was ${messages.join("; ")}.`);
+
+    // A create failure means at least one customer project never got the
+    // announcement at all — stay on this page (instead of navigating back
+    // to the list) so the failed-project chips on the progress card above
+    // stay visible for the sender to identify and retry, rather than only
+    // living in a toast that's gone the moment they navigate elsewhere. A
+    // tag-attach-only failure doesn't block navigation: every case was
+    // created successfully, so there's nothing left here that needs the
+    // sender's attention beyond what the error banner already told them.
+    if (failedProjectIds.length === 0) {
+      navigate(BACK_TARGET);
     }
   };
 
@@ -271,6 +377,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
             onExcludeClosedStatesChange={setExcludeClosedStates}
             excludedProjectKeys={excludedProjectKeysQuery.data ?? []}
             disabled={submitting}
+            onProjectKeysChange={setPickedProjectKeyById}
           />
         </Grid>
 
@@ -293,18 +400,28 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
             required
             value={subject}
             onChange={(e) => setSubject(e.target.value.slice(0, 200))}
+            disabled={submitting || !!retryProjectIds}
             helperText={
               subject.length >= 160 ? `${subject.length}/200` : undefined
             }
           />
         </Grid>
+        {retryProjectIds && (
+          <Grid size={{ xs: 12 }}>
+            <Typography variant="caption" color="text.secondary">
+              Subject, description, and the security label are locked while retrying failed
+              projects — this resend must match what the succeeded projects already got.
+              Change the audience above to start a new send instead.
+            </Typography>
+          </Grid>
+        )}
         <Grid size={{ xs: 12 }}>
           <FormControlLabel
             control={
               <Checkbox
                 size="small"
                 checked={isSecurityAnnouncement}
-                disabled={submitting}
+                disabled={submitting || !!retryProjectIds}
                 onChange={(e) => setIsSecurityAnnouncement(e.target.checked)}
               />
             }
@@ -335,7 +452,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
               minHeight={180}
               maxHeight={420}
               toolbarVariant="full"
-              disabled={submitting}
+              disabled={submitting || !!retryProjectIds}
             />
           </Box>
         </Grid>
@@ -348,6 +465,10 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
         onRunDryRun={() => void handleRunDryRun()}
       />
 
+      {sendProgress && (
+        <AnnouncementSendProgress progress={sendProgress} projectLabel={projectLabel} />
+      )}
+
       <Box
         sx={{
           display: "flex",
@@ -359,7 +480,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
           borderColor: "divider",
         }}
       >
-        <Button variant="outlined" onClick={() => navigate(BACK_TARGET)}>
+        <Button variant="outlined" onClick={() => navigate(BACK_TARGET)} disabled={submitting}>
           Cancel
         </Button>
         <Button
@@ -367,7 +488,11 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
           onClick={() => void handleSubmit()}
           disabled={!canSubmit}
         >
-          {submitting ? "Creating…" : "Create announcement"}
+          {submitting
+            ? "Creating…"
+            : retryProjectIds
+              ? `Retry ${retryProjectIds.length} failed project${retryProjectIds.length === 1 ? "" : "s"}`
+              : "Create announcement"}
         </Button>
       </Box>
     </Card>

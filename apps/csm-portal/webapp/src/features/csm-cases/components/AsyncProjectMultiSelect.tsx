@@ -30,6 +30,8 @@ import { useInfiniteProjectSearch } from "@features/csm-cases/api/useProjectSear
 interface ProjectOption {
   id: string;
   name: string;
+  /** The project's short key (e.g. "CUPPTSUB"), when the source data has one. */
+  key?: string;
 }
 
 interface AsyncProjectMultiSelectProps {
@@ -43,6 +45,14 @@ interface AsyncProjectMultiSelectProps {
    * label already-selected projects before any search has run.
    */
   nameSeed?: Map<string, string>;
+  /**
+   * Fires with the full selected option list (id, name, and key when known)
+   * every time the selection changes — for a caller that needs more than
+   * just the bare ids `onChange` gives it, e.g. to label a project by its
+   * short key elsewhere in the UI instead of its raw id.
+   */
+  onSelectedProjectsChange?: (selected: ProjectOption[]) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -57,6 +67,8 @@ export default function AsyncProjectMultiSelect({
   values,
   onChange,
   nameSeed,
+  onSelectedProjectsChange,
+  disabled,
 }: AsyncProjectMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -87,9 +99,13 @@ export default function AsyncProjectMultiSelect({
     }
   };
 
-  // Names captured when the user picks a project, so a chip keeps its label
-  // even once the search moves on to a different term.
+  // Names/keys captured when the user picks a project, so a chip (and any
+  // caller wired to onSelectedProjectsChange) keeps them even once the
+  // search moves on to a different term.
   const [pickedNames, setPickedNames] = useState<Map<string, string>>(
+    () => new Map(),
+  );
+  const [pickedKeys, setPickedKeys] = useState<Map<string, string>>(
     () => new Map(),
   );
 
@@ -102,15 +118,24 @@ export default function AsyncProjectMultiSelect({
     return m;
   }, [nameSeed, projects, pickedNames]);
 
+  const keyById = useMemo(() => {
+    const m = new Map<string, string>();
+    projects.forEach((p) => {
+      if (p.key) m.set(p.id, p.key);
+    });
+    pickedKeys.forEach((key, pid) => m.set(pid, key));
+    return m;
+  }, [projects, pickedKeys]);
+
   const selectedOptions: ProjectOption[] = useMemo(
-    () => values.map((v) => ({ id: v, name: nameById.get(v) ?? v })),
-    [values, nameById],
+    () => values.map((v) => ({ id: v, name: nameById.get(v) ?? v, key: keyById.get(v) })),
+    [values, nameById, keyById],
   );
 
   // Pool = current selection (so the field can render its chips) + the search
   // results, de-duplicated by id.
   const options: ProjectOption[] = useMemo(() => {
-    const results = projects.map((p) => ({ id: p.id, name: p.name || p.id }));
+    const results = projects.map((p) => ({ id: p.id, name: p.name || p.id, key: p.key }));
     const seen = new Set(values);
     return [...selectedOptions, ...results.filter((o) => !seen.has(o.id))];
   }, [projects, values, selectedOptions]);
@@ -122,6 +147,7 @@ export default function AsyncProjectMultiSelect({
       id={id}
       options={options}
       value={selectedOptions}
+      disabled={disabled}
       open={open}
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}
@@ -142,7 +168,19 @@ export default function AsyncProjectMultiSelect({
           next.forEach((o) => m.set(o.id, o.name));
           return m;
         });
+        // Rebuilt from `next` alone (the full current selection, each
+        // option's own key already resolved via keyById/selectedOptions
+        // above) rather than merged onto the previous map — a merge would
+        // let a deselected project's key linger in state indefinitely.
+        setPickedKeys(() => {
+          const m = new Map<string, string>();
+          next.forEach((o) => {
+            if (o.key) m.set(o.id, o.key);
+          });
+          return m;
+        });
         onChange(next.map((o) => o.id));
+        onSelectedProjectsChange?.(next);
       }}
       inputValue={input}
       onInputChange={(_event, value, reason) => {

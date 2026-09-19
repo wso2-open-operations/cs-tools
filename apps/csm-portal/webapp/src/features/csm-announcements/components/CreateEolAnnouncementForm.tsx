@@ -28,12 +28,15 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX } from "react";
+import { useCallback, useMemo, useState, type JSX } from "react";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useAnnouncementDryRun, DRY_RUN_TAG_LABEL } from "@features/csm-announcements/api/useAnnouncementDryRun";
 import { useResolveProductVersionAudience } from "@features/csm-announcements/api/useResolveProductVersionAudience";
 import AnnouncementDryRunCard from "@features/csm-announcements/components/AnnouncementDryRunCard";
+import AnnouncementSendProgress, {
+  type AnnouncementSendProgressState,
+} from "@features/csm-announcements/components/AnnouncementSendProgress";
 import ResolvedAudienceList from "@features/csm-announcements/components/ResolvedAudienceList";
 import {
   ANNOUNCEMENT_CASE_CREATE_CONCURRENCY_LIMIT,
@@ -88,6 +91,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sendProgress, setSendProgress] = useState<AnnouncementSendProgressState | null>(null);
 
   const postCase = usePostCsmCase();
 
@@ -105,6 +109,56 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
     productId || undefined,
     productVersionId || undefined,
   );
+
+  // id → short key ("CUPPTSUB"), so a failed project can be shown by
+  // something readable instead of its raw id — same idea as the
+  // customer-announcement form's own projectLabel.
+  const projectKeyById = useMemo(() => {
+    const m = new Map<string, string>();
+    resolvedAudience.projects.forEach((p) => {
+      if (p.key) m.set(p.id, p.key);
+    });
+    return m;
+  }, [resolvedAudience.projects]);
+  const projectLabel = useCallback(
+    (projectId: string) => projectKeyById.get(projectId) ?? projectId,
+    [projectKeyById],
+  );
+
+  // The full resolved audience for the current product/version.
+  const targetProjectIds = useMemo(
+    () => resolvedAudience.projects.map((p) => p.id),
+    [resolvedAudience.projects],
+  );
+
+  // When set, a prior submit left these (and only these) projects without
+  // an announcement — the next submit targets just this narrower list
+  // instead of the full audience again, so a retry after a partial failure
+  // can't create a second, duplicate case for a project that already
+  // succeeded (there's no idempotency key on the create call). Reset back
+  // to "submit the full audience" the moment the resolved audience itself
+  // changes (a different product/version) — same reasoning as the
+  // customer-announcement form's own retryProjectIds.
+  const [retryProjectIds, setRetryProjectIds] = useState<string[] | null>(null);
+  // Adjusting state during render (React's own recommended pattern for
+  // "reset state when a derived value changes") rather than an effect — see
+  // the customer-announcement form's own retryBaselineKey for why this
+  // compares by content (JSON.stringify of a *sorted* copy) rather than
+  // array reference: resolvedAudience.projects falls back to a fresh `[]`
+  // on every render while unresolved, so targetProjectIds is never
+  // referentially stable, and a refetch of the same audience isn't
+  // guaranteed to return the same project order either.
+  const targetProjectIdsKey = JSON.stringify([...targetProjectIds].sort());
+  const [retryBaselineKey, setRetryBaselineKey] = useState(targetProjectIdsKey);
+  if (targetProjectIdsKey !== retryBaselineKey) {
+    setRetryBaselineKey(targetProjectIdsKey);
+    setRetryProjectIds(null);
+    // The previous batch's own outcome no longer describes this audience —
+    // leaving it up would show stale failed-project chips/counts as if they
+    // applied to the newly selected product/version.
+    setSendProgress(null);
+  }
+  const submitProjectIds = retryProjectIds ?? targetProjectIds;
 
   const { runningDryRun, dryRunResult, canRunDryRun, handleRunDryRun } = useAnnouncementDryRun({
     subject,
@@ -124,7 +178,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
       // yesterday's count" — see the customer-announcement form's own
       // canSubmit for the identical reasoning.
       !resolvedAudience.isError &&
-      resolvedAudience.total > 0 &&
+      submitProjectIds.length > 0 &&
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
       !submitting,
@@ -133,7 +187,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
       productVersionId,
       resolvedAudience.isLoading,
       resolvedAudience.isError,
-      resolvedAudience.total,
+      submitProjectIds,
       subject,
       description,
       submitting,
@@ -145,9 +199,15 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
     setSubmitting(true);
 
     const trimmedSubject = subject.trim();
-    const targetProjectIds = resolvedAudience.projects.map((p) => p.id);
+    setSendProgress({
+      total: submitProjectIds.length,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      failedProjectIds: [],
+    });
     const results = await settleWithConcurrencyLimit(
-      targetProjectIds,
+      submitProjectIds,
       ANNOUNCEMENT_CASE_CREATE_CONCURRENCY_LIMIT,
       (projectId) =>
         postCase.mutateAsync({
@@ -156,32 +216,51 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
           subject: trimmedSubject,
           description,
         }),
+      (result, projectId) => {
+        setSendProgress((prev) =>
+          prev && {
+            ...prev,
+            completed: prev.completed + 1,
+            succeeded: prev.succeeded + (result.status === "fulfilled" ? 1 : 0),
+            failed: prev.failed + (result.status === "rejected" ? 1 : 0),
+            failedProjectIds:
+              result.status === "rejected"
+                ? [...prev.failedProjectIds, projectId]
+                : prev.failedProjectIds,
+          },
+        );
+      },
     );
     setSubmitting(false);
 
-    const failedProjectIds = targetProjectIds.filter((_, i) => results[i].status === "rejected");
+    const failedProjectIds = submitProjectIds.filter((_, i) => results[i].status === "rejected");
 
     if (failedProjectIds.length === 0) {
+      setRetryProjectIds(null);
       navigate(BACK_TARGET);
       return;
     }
 
-    const succeededCount = targetProjectIds.length - failedProjectIds.length;
-    if (succeededCount > 0) {
-      // Partial failure: the succeeded creates already landed and aren't
-      // retried automatically — same "navigate away, report exactly what
-      // still needs attention" shape as the customer-announcement flow.
-      showError(
-        `The announcement was created for ${succeededCount} of ${targetProjectIds.length} project${
-          targetProjectIds.length === 1 ? "" : "s"
-        }, but failed for project${failedProjectIds.length === 1 ? "" : "s"} ${failedProjectIds.join(
-          ", ",
-        )} — create it again for the failed project${failedProjectIds.length === 1 ? "" : "s"} only.`,
-      );
-      navigate(BACK_TARGET);
-    } else {
-      showError("Could not create the announcement. Please try again.");
-    }
+    // The next submit must target only these projects, not the full
+    // audience again — see retryProjectIds' own doc comment above.
+    setRetryProjectIds(failedProjectIds);
+
+    const succeededCount = submitProjectIds.length - failedProjectIds.length;
+    showError(
+      succeededCount > 0
+        ? `The announcement was created for ${succeededCount} of ${submitProjectIds.length} project${
+            submitProjectIds.length === 1 ? "" : "s"
+          }, but failed for project${failedProjectIds.length === 1 ? "" : "s"} ${failedProjectIds
+            .map(projectLabel)
+            .join(", ")} — click "Retry" to resend to just the failed project${
+            failedProjectIds.length === 1 ? "" : "s"
+          }.`
+        : "Could not create the announcement. Please try again.",
+    );
+    // Stay on this page instead of navigating away — at least one customer
+    // project never got the announcement, so the failed-project chips on
+    // the progress card above need to stay visible for the sender to act
+    // on, same reasoning as the customer-announcement form's own handleSubmit.
   };
 
   const selectedVersion = (versions ?? []).find((v) => v.id === productVersionId);
@@ -275,9 +354,18 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
             value={subject}
             onChange={(e) => setSubject(e.target.value.slice(0, 200))}
             helperText={subject.length >= 160 ? `${subject.length}/200` : undefined}
-            disabled={submitting}
+            disabled={submitting || !!retryProjectIds}
           />
         </Grid>
+        {retryProjectIds && (
+          <Grid size={{ xs: 12 }}>
+            <Typography variant="caption" color="text.secondary">
+              Subject and description are locked while retrying failed projects — this resend
+              must match what the succeeded projects already got. Change the product/version
+              above to start a new send instead.
+            </Typography>
+          </Grid>
+        )}
         <Grid size={{ xs: 12 }}>
           <Typography
             id="eol-announcement-description-label"
@@ -298,7 +386,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
               minHeight={180}
               maxHeight={420}
               toolbarVariant="full"
-              disabled={submitting}
+              disabled={submitting || !!retryProjectIds}
             />
           </Box>
         </Grid>
@@ -311,6 +399,10 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
         onRunDryRun={() => void handleRunDryRun()}
       />
 
+      {sendProgress && (
+        <AnnouncementSendProgress progress={sendProgress} projectLabel={projectLabel} />
+      )}
+
       <Box
         sx={{
           display: "flex",
@@ -322,11 +414,15 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
           borderColor: "divider",
         }}
       >
-        <Button variant="outlined" onClick={() => navigate(BACK_TARGET)}>
+        <Button variant="outlined" onClick={() => navigate(BACK_TARGET)} disabled={submitting}>
           Cancel
         </Button>
         <Button variant="contained" onClick={() => void handleSubmit()} disabled={!canSubmit}>
-          {submitting ? "Creating…" : "Create announcement"}
+          {submitting
+            ? "Creating…"
+            : retryProjectIds
+              ? `Retry ${retryProjectIds.length} failed project${retryProjectIds.length === 1 ? "" : "s"}`
+              : "Create announcement"}
         </Button>
       </Box>
     </Card>

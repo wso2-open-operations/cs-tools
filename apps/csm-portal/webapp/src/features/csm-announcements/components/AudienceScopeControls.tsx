@@ -46,6 +46,13 @@ interface AudienceScopeControlsProps {
    */
   excludedProjectKeys: string[];
   disabled?: boolean;
+  /**
+   * Fires with the picked projects' own short keys (e.g. "CUPPTSUB") whenever
+   * the "specific projects" selection changes — so a caller that needs to
+   * label a project by something more readable than its raw id (e.g. a
+   * failed-send report) has one available without a separate lookup.
+   */
+  onProjectKeysChange?: (keyById: Map<string, string>) => void;
 }
 
 /**
@@ -84,6 +91,7 @@ export default function AudienceScopeControls({
   onExcludeClosedStatesChange,
   excludedProjectKeys,
   disabled,
+  onProjectKeysChange,
 }: AudienceScopeControlsProps): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -110,6 +118,18 @@ export default function AudienceScopeControls({
           label="Projects"
           values={projectIds}
           onChange={onProjectIdsChange}
+          disabled={disabled}
+          onSelectedProjectsChange={
+            onProjectKeysChange
+              ? (selected) => {
+                  const keyById = new Map<string, string>();
+                  selected.forEach((o) => {
+                    if (o.key) keyById.set(o.id, o.key);
+                  });
+                  onProjectKeysChange(keyById);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -120,19 +140,6 @@ export default function AudienceScopeControls({
             tracked project except the ones excluded below. Review the resolved list
             before sending.
           </Typography>
-          {excludedProjectKeys.length > 0 && (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-              <Typography variant="caption" color="text.secondary">
-                Also always excludes these projects — configured, read-only, can&apos;t
-                be turned off here (change via CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS):
-              </Typography>
-              <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.5 }}>
-                {excludedProjectKeys.map((key) => (
-                  <Chip key={key} label={key} size="small" variant="outlined" />
-                ))}
-              </Stack>
-            </Box>
-          )}
           <FormControlLabel
             control={
               <Checkbox
@@ -155,6 +162,26 @@ export default function AudienceScopeControls({
             }
             label="Exclude Restricted / Suspended projects"
           />
+          {excludedProjectKeys.length > 0 && (
+            <Box>
+              <FormControlLabel
+                control={<Checkbox size="small" checked disabled />}
+                label="Exclude these configured projects (mandatory, can't be turned off here)"
+              />
+              <Stack
+                direction="row"
+                spacing={0.5}
+                sx={{ flexWrap: "wrap", gap: 0.5, ml: 4.5, mt: -0.5 }}
+              >
+                {excludedProjectKeys.map((key) => (
+                  <Chip key={key} label={key} size="small" variant="outlined" />
+                ))}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 4.5 }}>
+                Change via CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS.
+              </Typography>
+            </Box>
+          )}
         </Box>
       )}
     </Box>
