@@ -43,6 +43,7 @@ describe("isSimpleRepresentable", () => {
       engagementTypes: ["onboarding"],
       productNames: ["API Manager"],
       csTeams: ["g1"],
+      sreTeams: ["g2"],
       onboardingStatuses: ["Completed"],
     };
     expect(isSimpleRepresentable(filters)).toBe(true);
@@ -56,7 +57,6 @@ describe("isSimpleRepresentable", () => {
     // include-only multi-select, `excludeStates` is only representable via
     // the Advanced-mode "State"/"is not one of" row, same as `excludeTags`.
     ["excludeStates", { excludeStates: ["closed"] }],
-    ["sreTeams", { sreTeams: ["g1"] }],
     ["projectTypes", { projectTypes: ["Subscription"] }],
     ["escalationLevels", { escalationLevels: ["1"] }],
     ["hasEscalation", { hasEscalation: true }],

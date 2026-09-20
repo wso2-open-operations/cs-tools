@@ -26,6 +26,7 @@ import {
 import { Eye } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { Link as RouterLink, useLocation } from "react-router";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import ConversationStateChip from "@components/ConversationStateChip";
 import RelativeTime from "@components/RelativeTime";
 import UserRefLink from "@components/UserRefLink";
@@ -34,7 +35,10 @@ import ConversationPreviewDrawer from "@features/csm-projects/components/Convers
 import ConversationsFilterBar from "@features/csm-projects/components/ConversationsFilterBar";
 import { useSearchConversations } from "@features/csm-projects/api/useSearchConversations";
 import { DEFAULT_CONVERSATION_FILTERS, type ConversationsFilters } from "@features/csm-projects/utils/conversationState";
+import { getColumnPreferencesUserKey } from "@hooks/useColumnPreferences";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useFilterBarCollapsed } from "@hooks/useFilterBarCollapsed";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useNavTransition } from "@hooks/useNavTransition";
 import type { BeConversationView } from "@api/backend/types";
 
@@ -72,7 +76,13 @@ export default function ConversationsTab({ projectId }: ConversationsTabProps): 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const [filters, setFilters] = useState<ConversationsFilters>(DEFAULT_CONVERSATION_FILTERS);
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const currentUserEmail = useIdTokenClaims()?.email;
+  const currentUserId = useCurrentUser().user?.id;
+  const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
+    "conversations",
+    getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    false,
+  );
   const [previewRow, setPreviewRow] = useState<BeConversationView | null>(null);
 
   if (projectId !== previousProjectId) {
@@ -117,7 +127,7 @@ export default function ConversationsTab({ projectId }: ConversationsTabProps): 
         onChange={handleFiltersChange}
         onReset={() => handleFiltersChange(DEFAULT_CONVERSATION_FILTERS)}
         isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen((v) => !v)}
+        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
       />
 
       <Box

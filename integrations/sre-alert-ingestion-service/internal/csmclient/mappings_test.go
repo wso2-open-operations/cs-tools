@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/sre-alert-ingestion-service/internal/apierror"
 )
@@ -35,7 +36,7 @@ func TestCreateAlertIncidentMapping_Success(t *testing.T) {
 		gotPath = r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"map-1","alertNumber":"ALT0000001","source":"azure","uniqueIdentifier":"uid-1","alertStatus":"FIRING","incidentId":"inc-1","incidentNumber":"INC0001","createdAt":"2026-08-27T00:00:00Z"}`))
+		_, _ = w.Write([]byte(`{"id":"map-1","alertNumber":"ALT0000001","source":"azure","uniqueIdentifier":"uid-1","alertStatus":"FIRING","incidentId":"inc-1","incidentNumber":"INC0001","createdOn":"2026-08-27T00:00:00Z"}`))
 	}))
 	defer upstream.Close()
 
@@ -115,7 +116,7 @@ func TestLookupAlertIncidentMappings_ReturnsMappings(t *testing.T) {
 		gotPath = r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"mappings":[{"id":"map-2","alertNumber":"ALT0000002","source":"azure","uniqueIdentifier":"uid-1","alertStatus":"RESOLVED","incidentId":"inc-1","incidentNumber":"INC0001","createdAt":"2026-08-27T01:00:00Z"},{"id":"map-1","alertNumber":"ALT0000001","source":"azure","uniqueIdentifier":"uid-1","alertStatus":"FIRING","incidentId":"inc-1","incidentNumber":"INC0001","createdAt":"2026-08-27T00:00:00Z"}]}`))
+		_, _ = w.Write([]byte(`{"mappings":[{"id":"map-2","alertNumber":"ALT0000002","source":"azure","uniqueIdentifier":"uid-1","alertStatus":"RESOLVED","incidentId":"inc-1","incidentNumber":"INC0001","createdOn":"2026-08-27T01:00:00Z"},{"id":"map-1","alertNumber":"ALT0000001","source":"azure","uniqueIdentifier":"uid-1","alertStatus":"FIRING","incidentId":"inc-1","incidentNumber":"INC0001","createdOn":"2026-08-27T00:00:00Z"}]}`))
 	}))
 	defer upstream.Close()
 
@@ -156,7 +157,7 @@ func TestLookupAlertIncidentMappings_EmptyWhenNoneFound(t *testing.T) {
 	}
 }
 
-func TestSearchOpenIncidentByNumber_SendsNumberAndStateFilter(t *testing.T) {
+func TestSearchOpenIncidentByGroupTag_SendsTagStateAndWindowFilter(t *testing.T) {
 	var gotReq SearchIncidentsRequest
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotReq)
@@ -168,28 +169,33 @@ func TestSearchOpenIncidentByNumber_SendsNumberAndStateFilter(t *testing.T) {
 	tokenSrv := tokenServer(t)
 	client := newClient(Config{BaseURL: upstream.URL, TokenURL: tokenSrv.URL, ClientID: "id", ClientSecret: "secret"}, true)
 
-	result, found, err := client.SearchOpenIncidentByNumber(context.Background(), "INC0001")
+	since := time.Date(2026, 8, 27, 11, 45, 0, 0, time.UTC)
+	result, found, err := client.SearchOpenIncidentByGroupTag(context.Background(), "[group:azure:uid-1]", since)
 	if err != nil {
-		t.Fatalf("SearchOpenIncidentByNumber() error = %v, want nil", err)
+		t.Fatalf("SearchOpenIncidentByGroupTag() error = %v, want nil", err)
 	}
 	if !found || result.IncidentID != "inc-1" {
 		t.Fatalf("result = %+v found=%v, want inc-1/true", result, found)
 	}
-	if gotReq.Filters.Number == nil || *gotReq.Filters.Number != "INC0001" {
-		t.Errorf("Filters.Number = %v, want INC0001", gotReq.Filters.Number)
+	if gotReq.Filters.SearchQuery != "[group:azure:uid-1]" {
+		t.Errorf("Filters.SearchQuery = %q, want the group tag", gotReq.Filters.SearchQuery)
 	}
-	if len(gotReq.Filters.Filters) != 1 || gotReq.Filters.Filters[0].Field != "state" || gotReq.Filters.Filters[0].Op != "in" {
-		t.Fatalf("Filters.Filters = %+v, want a single state/in entry", gotReq.Filters.Filters)
+	if len(gotReq.Filters.Filters) != 2 {
+		t.Fatalf("Filters.Filters = %+v, want a state entry and a createdOn entry", gotReq.Filters.Filters)
+	}
+	stateFilter, windowFilter := gotReq.Filters.Filters[0], gotReq.Filters.Filters[1]
+	if stateFilter.Field != "state" || stateFilter.Op != "in" {
+		t.Errorf("Filters.Filters[0] = %+v, want field=state op=in", stateFilter)
 	}
 	wantStates := map[string]bool{"NEW": true, "IN_PROGRESS": true, "ON_HOLD": true}
-	for _, v := range gotReq.Filters.Filters[0].Values {
+	for _, v := range stateFilter.Values {
 		if !wantStates[v] {
 			t.Errorf("state filter includes %q, want only NEW/IN_PROGRESS/ON_HOLD", v)
 		}
 	}
 	for want := range wantStates {
 		found := false
-		for _, v := range gotReq.Filters.Filters[0].Values {
+		for _, v := range stateFilter.Values {
 			if v == want {
 				found = true
 			}
@@ -198,9 +204,15 @@ func TestSearchOpenIncidentByNumber_SendsNumberAndStateFilter(t *testing.T) {
 			t.Errorf("state filter is missing %q", want)
 		}
 	}
+	if windowFilter.Field != "createdOn" || windowFilter.Op != "gte" {
+		t.Errorf("Filters.Filters[1] = %+v, want field=createdOn op=gte", windowFilter)
+	}
+	if len(windowFilter.Values) != 1 || windowFilter.Values[0] != "2026-08-27T11:45:00Z" {
+		t.Errorf("createdOn filter values = %v, want [2026-08-27T11:45:00Z]", windowFilter.Values)
+	}
 }
 
-func TestSearchOpenIncidentByNumber_NoMatch(t *testing.T) {
+func TestSearchOpenIncidentByGroupTag_NoMatch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"incidents":[],"total":0,"offset":0,"limit":1}`))
@@ -210,9 +222,9 @@ func TestSearchOpenIncidentByNumber_NoMatch(t *testing.T) {
 	tokenSrv := tokenServer(t)
 	client := newClient(Config{BaseURL: upstream.URL, TokenURL: tokenSrv.URL, ClientID: "id", ClientSecret: "secret"}, true)
 
-	result, found, err := client.SearchOpenIncidentByNumber(context.Background(), "INC0002")
+	result, found, err := client.SearchOpenIncidentByGroupTag(context.Background(), "[group:azure:uid-none]", time.Now())
 	if err != nil {
-		t.Fatalf("SearchOpenIncidentByNumber() error = %v, want nil", err)
+		t.Fatalf("SearchOpenIncidentByGroupTag() error = %v, want nil", err)
 	}
 	if found || result != nil {
 		t.Errorf("result = %+v found=%v, want nil/false for no match", result, found)

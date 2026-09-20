@@ -320,3 +320,94 @@ export function caseSearchWithSort(
     { timeout: SEARCH_TIMEOUT_MS },
   );
 }
+
+/** Whether a response came from a POST to the conversations search. */
+function isConversationSearch(response: Response): boolean {
+  return (
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname.endsWith("/conversations/search")
+  );
+}
+
+/**
+ * Starts waiting for a conversations search matching the given criteria.
+ *
+ * Call this **before** the action, then await it after.
+ *
+ * The conversations list posts the same `filters` / `sortBy` shape as the cases
+ * search, to its own endpoint — so the search term, the state filter and the sort
+ * are all observable on the wire, which is the only place they are unambiguous:
+ * the list's heading reports the view, not the query.
+ *
+ * Only the fields given are matched. `stateKeys: false` matches a request that
+ * carries none, which is how a cleared filter is recognised.
+ *
+ * Note the field is `stateKeys` — not `stateIds`, as the cases search would
+ * suggest. Verified against the request the page builds.
+ *
+ * @param page - Test page.
+ * @param match - What the request must carry.
+ * @returns Promise for the matching search response.
+ */
+export function conversationSearchWith(
+  page: Page,
+  match: {
+    searchQuery?: string;
+    createdByMe?: boolean;
+    stateKeys?: boolean;
+    sortField?: string;
+    sortOrder?: string;
+  },
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      if (!isConversationSearch(response)) return false;
+      const postData = response.request().postData();
+      if (!postData) return false;
+      try {
+        const body = JSON.parse(postData) as {
+          filters?: {
+            searchQuery?: string;
+            createdByMe?: boolean;
+            stateKeys?: number[];
+          };
+          sortBy?: { field?: string; order?: string };
+        };
+        const filters = body.filters ?? {};
+
+        if (
+          match.searchQuery !== undefined &&
+          filters.searchQuery !== match.searchQuery
+        ) {
+          return false;
+        }
+        if (
+          match.createdByMe !== undefined &&
+          Boolean(filters.createdByMe) !== match.createdByMe
+        ) {
+          return false;
+        }
+        if (match.stateKeys !== undefined) {
+          const hasStates = !!filters.stateKeys && filters.stateKeys.length > 0;
+          if (hasStates !== match.stateKeys) return false;
+        }
+        if (
+          match.sortField !== undefined &&
+          body.sortBy?.field !== match.sortField
+        ) {
+          return false;
+        }
+        if (
+          match.sortOrder !== undefined &&
+          body.sortBy?.order?.toLowerCase() !== match.sortOrder.toLowerCase()
+        ) {
+          return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { timeout: SEARCH_TIMEOUT_MS },
+  );
+}

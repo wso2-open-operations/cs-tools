@@ -46,7 +46,6 @@ const mockCaseDetails: Partial<CaseDetails> = {
   status: { id: "1", label: "Open" },
   closedOn: null,
   closedBy: null,
-  closeNotes: null,
   hasAutoClosed: null,
 };
 
@@ -150,15 +149,13 @@ describe("CaseDetailsDetailsPanel", () => {
         status: { id: "3", label: "Closed" },
         closedOn: "2026-02-20 01:34:44",
         closedBy: { id: "bcc4881f", name: "Anuradha Basnayake" },
-        closeNotes: "Resolved successfully",
       },
     });
     expect(screen.getByText("Closed Case Details")).toBeInTheDocument();
     expect(screen.getByText("Closed On")).toBeInTheDocument();
     expect(screen.getByText("Closed By")).toBeInTheDocument();
-    expect(screen.getByText("Close Notes")).toBeInTheDocument();
+    expect(screen.queryByText("Close Notes")).not.toBeInTheDocument();
     expect(screen.getByText("Anuradha Basnayake")).toBeInTheDocument();
-    expect(screen.getByText("Resolved successfully")).toBeInTheDocument();
   });
 
   it("should not render Closed Case Details when case is not closed", () => {

@@ -381,4 +381,30 @@ describe("CsmCaseCommentBubble", () => {
     );
     expect(screen.getByText("Customer")).toBeInTheDocument();
   });
+
+  it("marks an internal work note with a persistent 'Internal note' chip", () => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          authorRole: "wso2_engineer",
+          bodyHtml: "<p>Only the team should see this.</p>",
+          internal: true,
+        })}
+      />,
+    );
+    expect(screen.getByText("Internal note")).toBeInTheDocument();
+  });
+
+  it("does not show the 'Internal note' chip on a public comment", () => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          authorRole: "wso2_engineer",
+          bodyHtml: "<p>Visible to the customer.</p>",
+          internal: false,
+        })}
+      />,
+    );
+    expect(screen.queryByText("Internal note")).not.toBeInTheDocument();
+  });
 });

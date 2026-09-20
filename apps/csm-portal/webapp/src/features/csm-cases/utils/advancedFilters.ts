@@ -40,11 +40,13 @@ import { ALL_CASE_TYPES, CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseT
  * comment on that enum, which mirrors the entity-service's
  * `caseFilterFieldSet` exactly.
  *
- * Deliberately excludes two fields a hand-off brief once listed
- * (`accountId`, `resolvedOn`): neither appears in `BeCaseFieldFilterField`,
- * so the backend would reject them — widening that enum is a backend
- * contract change, out of scope for this FE-only builder. Flagged in
- * `PROGRESS.md`, not silently worked around.
+ * Deliberately excludes `resolvedOn`, one of two fields a hand-off brief
+ * once listed as candidates (the other, `accountId`, is now included below
+ * — it's a real, backend-accepted field with both `in` and `notIn` support,
+ * mirroring `projectId`). `resolvedOn` still doesn't appear in
+ * `BeCaseFieldFilterField`, so the backend would reject it — widening that
+ * enum is a backend contract change, out of scope for this FE-only builder.
+ * Flagged in `PROGRESS.md`, not silently worked around.
  *
  * `tag`, `projectOnboardingStatus`, and `creTeam` were briefly excluded here
  * (2026-08-31) on the theory that a field with its own dedicated Simple-grid
@@ -63,6 +65,7 @@ export type AdvancedFilterField =
   | "type"
   | "assignedUserId"
   | "projectId"
+  | "accountId"
   | "product"
   | "creTeam"
   | "tag"
@@ -122,6 +125,11 @@ export type AdvancedFilterValueKind =
    * same type-to-search project picker the Simple grid's own "Project"
    * control uses. */
   | "asyncProjectMultiSelect"
+  /** {@link AsyncAccountMultiSelect} — the `accountId` row's value input
+   * (both `in` and `notIn` ops), a type-to-search account picker backed by
+   * `POST /accounts/search` (the same endpoint `CsmAccountsPage`'s account
+   * list already searches via `useSearchAccounts`). */
+  | "asyncAccountMultiSelect"
   /** {@link ProductNameMultiSelect} — the `product` row's value input, same
    * type-to-search product-name picker the Simple grid's own "Product"
    * control uses. */
@@ -224,7 +232,18 @@ export const ADVANCED_FILTER_FIELDS: AdvancedFilterFieldMeta[] = [
   {
     field: "projectId",
     label: "Project",
-    ops: [{ op: "in", label: "is one of", valueKind: "asyncProjectMultiSelect" }],
+    ops: [
+      { op: "in", label: "is one of", valueKind: "asyncProjectMultiSelect" },
+      { op: "notIn", label: "is not one of", valueKind: "asyncProjectMultiSelect" },
+    ],
+  },
+  {
+    field: "accountId",
+    label: "Account",
+    ops: [
+      { op: "in", label: "is one of", valueKind: "asyncAccountMultiSelect" },
+      { op: "notIn", label: "is not one of", valueKind: "asyncAccountMultiSelect" },
+    ],
   },
   {
     field: "product",
@@ -275,9 +294,13 @@ export const ADVANCED_FILTER_FIELDS: AdvancedFilterFieldMeta[] = [
   {
     // Options are supplied at render time by `AdvancedFiltersBuilder` (the
     // `sreTeamOptions` prop, computed once in `CasesFilterBar.tsx` from the
-    // same `useTeams(true)` fetch the "CRE Team" (`creTeam`) bar control
-    // uses) — not listed statically here, since the team registry is
-    // fetched data, not a fixed enum like `projectType`/`issueType` above.
+    // same `useTeams(true)` fetch the "CRE Team" (`creTeam`) and "SRE Team"
+    // bar controls use) — not listed statically here, since the team
+    // registry is fetched data, not a fixed enum like `projectType`/
+    // `issueType` above. Has its own dedicated Simple-mode bar control too
+    // (mirroring `creTeam`), per the same unification this file's own top
+    // doc comment describes: one `CasesFilters` property, rendered as a
+    // dedicated control in Simple mode and this generic row in Advanced.
     field: "sreTeam",
     label: "SRE team",
     ops: [{ op: "in", label: "is one of", valueKind: "multiSelect" }],

@@ -37,16 +37,17 @@ type snDeployedProductsResponse struct {
 }
 
 type snDeployedProduct struct {
-	ID         string                    `json:"id"`
-	Deployment snDeployedProductRef      `json:"deployment"`
-	Product    snDeployedProductRef      `json:"product"`
-	Version    *snDeployedProductVersion `json:"version"`
-	Cores      *int                      `json:"cores"`
-	TPS        *float64                  `json:"tps"` // Ballerina decimal? serialises as 100.0
-	Category   *snDeployedProductRef     `json:"category"`
-	Updates    []snProductUpdate         `json:"updates"`
-	CreatedOn  string                    `json:"createdOn"`
-	UpdatedOn  string                    `json:"updatedOn"`
+	ID          string                    `json:"id"`
+	Deployment  snDeployedProductRef      `json:"deployment"`
+	Product     snDeployedProductRef      `json:"product"`
+	Version     *snDeployedProductVersion `json:"version"`
+	Cores       *int                      `json:"cores"`
+	TPS         *float64                  `json:"tps"` // Ballerina decimal? serialises as 100.0
+	Category    *snDeployedProductRef     `json:"category"`
+	Description *string                   `json:"description"`
+	Updates     []snProductUpdate         `json:"updates"`
+	CreatedOn   string                    `json:"createdOn"`
+	UpdatedOn   string                    `json:"updatedOn"`
 }
 
 // snProductUpdate is the wire shape of a single deployed-product update-history entry,
@@ -102,6 +103,11 @@ func fromSNProductUpdates(updates []snProductUpdate) []domain.ProductUpdateEntry
 type snDeployedProductRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Abbreviation is the short product key ("wso2am", "wso2is"), carried by
+	// the upstream ReferenceTableItem record for the product reference and
+	// absent on the others. It is the only identifier the product-updates
+	// catalogue recognises — see domain.ProductRef.
+	Abbreviation *string `json:"abbreviation"`
 }
 
 type snDeployedProductVersion struct {
@@ -118,7 +124,8 @@ type snDeployedProductSearchPayload struct {
 }
 
 type snDeployedProductFilters struct {
-	DeploymentIDs []string `json:"deploymentIds,omitempty"`
+	DeploymentIDs     []string `json:"deploymentIds,omitempty"`
+	ProductCategories []string `json:"productCategories,omitempty"`
 }
 
 type snDeployedProductService struct {
@@ -339,7 +346,10 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snDeployedProductSearchPayload{
-		Filters:    snDeployedProductFilters{DeploymentIDs: uuidsToSysids(req.DeploymentIDs)},
+		Filters: snDeployedProductFilters{
+			DeploymentIDs:     uuidsToSysids(req.DeploymentIDs),
+			ProductCategories: req.ProductCategories,
+		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	raw, err := s.client.Post(ctx, "/deployed-products/search", token, payload)
@@ -394,16 +404,21 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 		}
 
 		views = append(views, domain.DeployedProductView{
-			ID:         sysidToUUID(dp.ID),
-			Deployment: domain.EntityRef{ID: sysidToUUID(dp.Deployment.ID), Name: dp.Deployment.Name},
-			Product:    domain.EntityRef{ID: sysidToUUID(dp.Product.ID), Name: dp.Product.Name},
-			Version:    versionRef,
-			Cores:      dp.Cores,
-			TPS:        dp.TPS,
-			Category:   category,
-			Updates:    fromSNProductUpdates(dp.Updates),
-			CreatedOn:  createdOn,
-			UpdatedOn:  updatedOn,
+			ID:          sysidToUUID(dp.ID),
+			Deployment:  domain.EntityRef{ID: sysidToUUID(dp.Deployment.ID), Name: dp.Deployment.Name},
+			Description: dp.Description,
+			Product: domain.ProductRef{
+				ID:           sysidToUUID(dp.Product.ID),
+				Name:         dp.Product.Name,
+				Abbreviation: dp.Product.Abbreviation,
+			},
+			Version:   versionRef,
+			Cores:     dp.Cores,
+			TPS:       dp.TPS,
+			Category:  category,
+			Updates:   fromSNProductUpdates(dp.Updates),
+			CreatedOn: createdOn,
+			UpdatedOn: updatedOn,
 		})
 	}
 

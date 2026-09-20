@@ -17,6 +17,7 @@
 import Prism from "prismjs";
 import React from "react";
 import { createRoot } from "react-dom/client";
+import "./styles/print.css";
 import AppWithConfig from "./AppWithConfig";
 import { POST_LOGIN_REDIRECT_KEY } from "@layouts/postLoginRedirect";
 import { isTopLevelWindow } from "@utils/isTopLevelWindow";

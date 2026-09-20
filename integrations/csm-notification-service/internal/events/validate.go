@@ -82,8 +82,20 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if err := decodeStrict(raw, &p); err != nil {
 			return err
 		}
+		// Priority is deliberately NOT required here: entity-service only
+		// ever sets a severity (and so a Priority) for type=="case" — every
+		// other case type (service_request/security_report_analysis/
+		// announcement/engagement) genuinely has none, by design, not a
+		// data-quality bug (see entity-service's own validateCreateCaseRequest).
+		// Requiring it unconditionally used to reject case.created outright
+		// for every one of those types, before it ever reached dispatch's
+		// own CaseType branching — no email or Chat alert ever went out for
+		// them as a result. RenderCaseCreatedEmail already renders an empty
+		// Priority as a blank value with no ill effect, and
+		// SendSecurityReportAnalysisAlert/SendCaseCreatedAlert both already
+		// omit their severity-derived line entirely when it's empty.
 		if p.ReporterName == "" || p.ProjectName == "" || p.ProjectID == "" || p.CaseID == "" || p.CaseTitle == "" ||
-			p.CaseType == "" || p.Priority == "" || p.CreatedAt == "" || p.Description == "" ||
+			p.CaseType == "" || p.CreatedAt == "" || p.Description == "" ||
 			!validRecipients(p.Recipients) {
 			return fmt.Errorf("events: missing required field for %s", t)
 		}
@@ -230,6 +242,53 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		}
 		if p.CaseID != entityID {
 			return fmt.Errorf("events: payload caseId %q does not match entityId %q", p.CaseID, entityID)
+		}
+	case TypeCRPlanDateNotice:
+		var p CRPlanDateNoticePayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.ChangeRequestID == "" || p.Number == "" || p.Subject == "" || p.Kind == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if p.ChangeRequestID != entityID {
+			return fmt.Errorf("events: payload changeRequestId %q does not match entityId %q", p.ChangeRequestID, entityID)
+		}
+		// Kind and Audience are not independent: the kind decides who the
+		// notice is addressed to, and the audience decides the portal link
+		// and whether recipients go in To or BCC. A mismatched pair sends
+		// customer wording to an internal group, or puts an internal
+		// audience's addresses where a customer can read them.
+		switch {
+		case p.Kind == "customer_proposed" && p.Audience == "internal":
+		case p.Kind == "accepted" && p.Audience == "customer":
+		case p.Kind == "rejected" && p.Audience == "customer":
+		default:
+			return fmt.Errorf("events: %s has kind %q that does not go with audience %q", t, p.Kind, p.Audience)
+		}
+		if !validRecipients(p.Recipients) {
+			return fmt.Errorf("events: invalid recipients for %s", t)
+		}
+	case TypeCRApprovalRequested:
+		var p CRApprovalRequestedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		// Subject and recipients are what makes this sendable at all: the
+		// flow builds the subject (reproducing ServiceNow's per-branch
+		// wording) and resolves the audience, and a notice missing either is
+		// one this service cannot repair by retrying.
+		if p.ChangeRequestID == "" || p.Number == "" || p.State == "" || p.Subject == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if p.ChangeRequestID != entityID {
+			return fmt.Errorf("events: payload changeRequestId %q does not match entityId %q", p.ChangeRequestID, entityID)
+		}
+		if p.Audience != "internal" && p.Audience != "customer" {
+			return fmt.Errorf("events: %s has unknown audience %q", t, p.Audience)
+		}
+		if !validRecipients(p.Recipients) {
+			return fmt.Errorf("events: invalid recipients for %s", t)
 		}
 	default:
 		return fmt.Errorf("events: unknown event type %q", t)

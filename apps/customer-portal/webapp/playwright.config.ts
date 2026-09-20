@@ -74,8 +74,31 @@ export default defineConfig({
       },
   projects: [
     {
+      // Signs in and writes tests/e2e/storageState/session.json, which every
+      // spec then replays. Runs first because the test project depends on it,
+      // so a run always starts from a freshly minted session rather than a
+      // hand-captured one that may already have expired.
+      //
+      // Skips itself when no credentials are configured, leaving whatever
+      // bundle is on disk in place.
+      name: "auth",
+      testMatch: /auth\.setup\.ts$/,
+      use: {
+        ...devices["Desktop Chrome"],
+        // A password and a TOTP code are typed here. Traces and video capture
+        // keystrokes and DOM, so this project records neither — the artefacts
+        // would otherwise contain the credential in plain text.
+        trace: "off",
+        video: "off",
+      },
+    },
+    {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      dependencies: ["auth"],
+      // The setup project owns this file; excluding it here keeps the sign-in
+      // from also running as an ordinary test.
+      testIgnore: /auth\.setup\.ts$/,
     },
   ],
 });

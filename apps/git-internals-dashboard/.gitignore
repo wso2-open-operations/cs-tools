@@ -1,0 +1,31 @@
+# Go
+backend/*.exe
+backend/*.test
+backend/*.out
+/backend/bin/
+
+# Node
+node_modules/
+/webapp/dist/
+/webapp/coverage/
+*.tsbuildinfo
+
+# env files
+.env
+.env*.local
+!*.env.example
+
+# webapp runtime config (per-environment, never committed)
+webapp/public/config.js
+
+# editor / OS cruft
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.pem
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*

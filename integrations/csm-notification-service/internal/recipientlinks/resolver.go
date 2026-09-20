@@ -200,6 +200,27 @@ func (r *Resolver) CSMLink(caseID string) string {
 	return fmt.Sprintf("%s/cases/%s", r.csmBase, url.PathEscape(caseID))
 }
 
+// ChangeRequestLink builds the link in a change-request approval notice.
+//
+// Not CSMLink: that returns "<csmBase>/cases/<id>", and a change request is not
+// a case — the CSM portal serves it at /operations/change-requests/<id>, and
+// the customer portal nests its own copy under the project. The audience on the
+// notice picks between them, which is also why it must: an internal approver
+// linked into the customer portal lands somewhere they have no reason to be,
+// and a customer linked into the CSM portal lands somewhere they cannot go at
+// all.
+//
+// A customer notice with no project falls back to the CSM link rather than
+// building "/projects//operations/..." — a wrong link a recipient can recognise
+// beats a malformed one.
+func (r *Resolver) ChangeRequestLink(audience, changeRequestID, projectID string) string {
+	if audience == "customer" && projectID != "" {
+		return fmt.Sprintf("%s/projects/%s/operations/change-requests/%s",
+			r.customerBase, url.PathEscape(projectID), url.PathEscape(changeRequestID))
+	}
+	return fmt.Sprintf("%s/operations/change-requests/%s", r.csmBase, url.PathEscape(changeRequestID))
+}
+
 // IncidentLink builds the CSM portal's incident link directly — the same
 // no-recipient reasoning as CSMLink, applied to incident.created's Google
 // Chat alert. A publisher only supplies the incident's own identity

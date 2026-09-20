@@ -16,6 +16,7 @@
 
 import { type Locator, type Page, expect } from "../fixtures/test";
 import { CASE_DETAIL, CREATE_CASE, GET_HELP_BUTTON } from "../utils/selectors";
+import { projectPathPattern } from "../utils/ids";
 
 /** How long to allow for the create-case form to render. Well above the 5s
  * default expect timeout: the page waits on project details, features and
@@ -53,7 +54,7 @@ export class CaseCreatePage {
     // chat page instead of this form. Asserting the URL makes that divergence a
     // clear failure rather than a confusing missing-field error.
     await expect(this.page).toHaveURL(
-      new RegExp(`/projects/${projectId}/support/chat/create-case`),
+      projectPathPattern(projectId, "support/chat/create-case"),
     );
     await expect(
       this.page.getByRole("heading", { name: CREATE_CASE.heading }),

@@ -25,8 +25,10 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// ProjectStatsHandler handles HTTP requests for project-scoped metadata and
-// statistics, backed by the ServiceNow data source only.
+// ProjectStatsHandler handles HTTP requests for project-scoped statistics,
+// backed by the ServiceNow data source only. GET /projects/{id}/metadata
+// (also a ProjectStatsService method) is handled separately by
+// ProjectMetadataHandler, which does have a Postgres-backed implementation.
 type ProjectStatsHandler struct {
 	svc service.ProjectStatsService
 }
@@ -34,17 +36,6 @@ type ProjectStatsHandler struct {
 // NewProjectStatsHandler constructs a ProjectStatsHandler with the given service.
 func NewProjectStatsHandler(svc service.ProjectStatsService) *ProjectStatsHandler {
 	return &ProjectStatsHandler{svc: svc}
-}
-
-// GetProjectMetadata handles GET /projects/{id}/metadata.
-func (h *ProjectStatsHandler) GetProjectMetadata(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.GetProjectMetadata(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // GetProjectStats handles GET /projects/{id}/stats.

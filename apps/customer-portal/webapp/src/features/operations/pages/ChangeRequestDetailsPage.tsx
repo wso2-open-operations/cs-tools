@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate, useLocation } from "react-router";
+import { useNavigate, useLocation } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import { type JSX, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
@@ -74,10 +75,8 @@ import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequ
 export default function ChangeRequestDetailsPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const { projectId, changeRequestId } = useParams<{
-    projectId: string;
-    changeRequestId: string;
-  }>();
+  const projectId = useNormalizedIdParam("projectId");
+  const changeRequestId = useNormalizedIdParam("changeRequestId");
   const basePath = location.pathname.includes("/operations/")
     ? "operations"
     : "support";

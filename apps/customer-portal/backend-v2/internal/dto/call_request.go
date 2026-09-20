@@ -16,7 +16,11 @@
 
 package dto
 
-import "github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+import (
+	"strings"
+
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+)
 
 // CallRequestCreateResponse is the portal's response for POST /call-requests.
 type CallRequestCreateResponse struct {
@@ -27,10 +31,14 @@ type CallRequestCreateResponse struct {
 
 // MapCallRequestCreate builds the portal response from entity-service's CreateCallRequestResponse.
 func MapCallRequestCreate(r entity.CreateCallRequestResponse) CallRequestCreateResponse {
+	state := r.CallRequest.State.Label
+	if state == "" {
+		state = r.CallRequest.State.ID
+	}
 	return CallRequestCreateResponse{
 		ID:        r.CallRequest.ID,
 		CreatedOn: r.CallRequest.CreatedOn,
-		State:     r.CallRequest.State,
+		State:     state,
 	}
 }
 
@@ -48,30 +56,19 @@ type CallRequestCase struct {
 }
 
 // CallRequestSummary is one item of the portal's response for
-// POST /call-requests/search. Assignee/Notes/Plan/Attendees/ActionItems/
-// ActualDurationMin are agent-side fields entity-service populates once a
-// support engineer schedules or concludes the call — read-only information
-// for the customer, not something they set (see
-// dto.CallRequestUpdateRequest for the write-side restriction).
+// POST /cases/{caseId}/call-requests/search.
 type CallRequestSummary struct {
-	ID                 string               `json:"id"`
-	Number             string               `json:"number"`
-	Case               CallRequestCase      `json:"case"`
-	Reason             *string              `json:"reason,omitempty"`
-	PreferredTimes     []string             `json:"preferredTimes,omitempty"`
-	DurationMin        int                  `json:"durationMin"`
-	ScheduleTime       *string              `json:"scheduleTime,omitempty"`
-	MeetingLink        *string              `json:"meetingLink,omitempty"`
-	CreatedOn          string               `json:"createdOn"`
-	UpdatedOn          string               `json:"updatedOn"`
-	State              CallRequestStateInfo `json:"state"`
-	CancellationReason *string              `json:"cancellationReason,omitempty"`
-	Assignee           *string              `json:"assignee,omitempty"`
-	Notes              *string              `json:"notes,omitempty"`
-	Plan               *string              `json:"plan,omitempty"`
-	Attendees          *string              `json:"attendees,omitempty"`
-	ActionItems        *string              `json:"actionItems,omitempty"`
-	ActualDurationMin  *int                 `json:"actualDurationMin,omitempty"`
+	ID             string               `json:"id"`
+	Number         string               `json:"number"`
+	Case           CallRequestCase      `json:"case"`
+	Reason         *string              `json:"reason,omitempty"`
+	PreferredTimes []string             `json:"preferredTimes,omitempty"`
+	DurationMin    int                  `json:"durationMin"`
+	ScheduleTime   *string              `json:"scheduleTime,omitempty"`
+	MeetingLink    *string              `json:"meetingLink,omitempty"`
+	CreatedOn      string               `json:"createdOn"`
+	UpdatedOn      string               `json:"updatedOn"`
+	State          CallRequestStateInfo `json:"state"`
 }
 
 // CallRequestSearchFilters holds the optional filter criteria for
@@ -89,6 +86,16 @@ type CallRequestSearchFilters struct {
 type CallRequestSearchRequest struct {
 	Filters    CallRequestSearchFilters `json:"filters"`
 	Pagination entity.Pagination        `json:"pagination"`
+}
+
+// toDashedID converts an identifier (either a dashed UUID or a 32-hex sysid)
+// to a canonical lowercase 8-4-4-4-12 dashed UUID string expected by entity-service.
+func toDashedID(id string) string {
+	clean := strings.ToLower(strings.ReplaceAll(id, "-", ""))
+	if len(clean) == 32 {
+		return clean[0:8] + "-" + clean[8:12] + "-" + clean[12:16] + "-" + clean[16:20] + "-" + clean[20:32]
+	}
+	return strings.ToLower(id)
 }
 
 // BuildEntitySearchCallRequestsRequest translates the portal's request into
@@ -109,7 +116,7 @@ func BuildEntitySearchCallRequestsRequest(caseID string, req CallRequestSearchRe
 		filters = &entity.SearchCallRequestsFilters{States: states}
 	}
 	return entity.SearchCallRequestsRequest{
-		CaseID:     caseID,
+		CaseID:     toDashedID(caseID),
 		Filters:    filters,
 		Pagination: req.Pagination,
 	}
@@ -131,24 +138,17 @@ func MapSearchCallRequests(r entity.SearchCallRequestsResponse) SearchCallReques
 	items := make([]CallRequestSummary, 0, len(r.CallRequests))
 	for _, v := range r.CallRequests {
 		items = append(items, CallRequestSummary{
-			ID:                 v.ID,
-			Number:             v.Number,
-			Case:               CallRequestCase{ID: v.Case.ID, Name: v.Case.Name, Number: v.Case.Number},
-			Reason:             v.Reason,
-			PreferredTimes:     v.PreferredTimes,
-			DurationMin:        v.DurationMin,
-			ScheduleTime:       v.ScheduleTime,
-			MeetingLink:        v.MeetingLink,
-			CreatedOn:          v.CreatedOn,
-			UpdatedOn:          v.UpdatedOn,
-			State:              CallRequestStateInfo{ID: v.State.ID, Label: v.State.Label},
-			CancellationReason: v.CancellationReason,
-			Assignee:           v.Assignee,
-			Notes:              v.Notes,
-			Plan:               v.Plan,
-			Attendees:          v.Attendees,
-			ActionItems:        v.ActionItems,
-			ActualDurationMin:  v.ActualDurationMin,
+			ID:             v.ID,
+			Number:         v.Number,
+			Case:           CallRequestCase{ID: v.Case.ID, Name: v.Case.Name, Number: v.Case.Number},
+			Reason:         v.Reason,
+			PreferredTimes: v.PreferredTimes,
+			DurationMin:    v.DurationMin,
+			ScheduleTime:   v.ScheduleTime,
+			MeetingLink:    v.MeetingLink,
+			CreatedOn:      v.CreatedOn,
+			UpdatedOn:      v.UpdatedOn,
+			State:          CallRequestStateInfo{ID: v.State.ID, Label: v.State.Label},
 		})
 	}
 	return SearchCallRequestsResponse{

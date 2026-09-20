@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
@@ -31,16 +31,26 @@ vi.mock("@api/useGetProjectFilters", () => ({
   }),
 }));
 
+const mutateMock = vi.fn();
+const postCommentMutateMock = vi.fn();
+
 vi.mock("@features/support/api/usePatchCase", () => ({
-  usePatchCase: () => ({ mutate: vi.fn(), isPending: false }),
+  usePatchCase: () => ({ mutate: mutateMock, isPending: false }),
 }));
 
+vi.mock("@features/support/api/usePostComment", () => ({
+  usePostComment: () => ({ mutate: postCommentMutateMock, isPending: false }),
+}));
+
+const showSuccessMock = vi.fn();
+const showErrorMock = vi.fn();
+
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({
-  useSuccessBanner: () => ({ showSuccess: vi.fn() }),
+  useSuccessBanner: () => ({ showSuccess: showSuccessMock }),
 }));
 
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
-  useErrorBanner: () => ({ showError: vi.fn() }),
+  useErrorBanner: () => ({ showError: showErrorMock }),
 }));
 
 function renderActionRow(
@@ -61,6 +71,13 @@ function renderActionRow(
 }
 
 describe("CaseDetailsActionRow", () => {
+  beforeEach(() => {
+    mutateMock.mockReset();
+    postCommentMutateMock.mockReset();
+    showSuccessMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
   it("should render Close action for open status when case can be patched", () => {
     renderActionRow({ statusLabel: "Open" });
     expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
@@ -108,5 +125,124 @@ describe("CaseDetailsActionRow", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Open Related Case" }));
     expect(onOpenRelatedCase).toHaveBeenCalledTimes(1);
+  });
+
+  describe("Reject Solution", () => {
+    it("opens the reject dialog instead of the bare confirm dialog", () => {
+      renderActionRow({ statusLabel: "Solution Proposed" });
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+
+      expect(
+        screen.getByLabelText("Reason for rejecting the solution"),
+      ).toBeInTheDocument();
+      expect(postCommentMutateMock).not.toHaveBeenCalled();
+      expect(mutateMock).not.toHaveBeenCalled();
+    });
+
+    it("aborts with no comment and no state change when Cancel is clicked", () => {
+      renderActionRow({ statusLabel: "Solution Proposed" });
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(postCommentMutateMock).not.toHaveBeenCalled();
+      expect(mutateMock).not.toHaveBeenCalled();
+    });
+
+    it("posts the comment before flipping state, in that order, when a reason is given", () => {
+      postCommentMutateMock.mockImplementation((_vars, options) => {
+        options?.onSuccess?.();
+      });
+      mutateMock.mockImplementation((_body, options) => {
+        options?.onSuccess?.();
+        options?.onSettled?.();
+      });
+
+      renderActionRow({ statusLabel: "Solution Proposed" });
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+      fireEvent.change(
+        screen.getByLabelText("Reason for rejecting the solution"),
+        { target: { value: "Still failing" } },
+      );
+      // The row's own action buttons are aria-hidden while the modal is open,
+      // so only the dialog's confirm button matches here.
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+
+      expect(postCommentMutateMock).toHaveBeenCalledTimes(1);
+      expect(postCommentMutateMock.mock.calls[0]![0]).toEqual({
+        caseId: "case-1",
+        body: {
+          content:
+            "Proposed solution was rejected with following feedback:<br>Still failing",
+          type: "comments",
+        },
+      });
+      expect(mutateMock).toHaveBeenCalledTimes(1);
+      expect(mutateMock.mock.calls[0]![0]).toEqual({ stateKey: 1003 });
+    });
+
+    it("escapes HTML in the reason before it is spliced into the comment", () => {
+      postCommentMutateMock.mockImplementation((_vars, options) => {
+        options?.onSuccess?.();
+      });
+      mutateMock.mockImplementation((_body, options) => {
+        options?.onSuccess?.();
+        options?.onSettled?.();
+      });
+
+      renderActionRow({ statusLabel: "Solution Proposed" });
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+      fireEvent.change(
+        screen.getByLabelText("Reason for rejecting the solution"),
+        { target: { value: "<b>still</b> broken & unusable" } },
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+
+      expect(postCommentMutateMock.mock.calls[0]![0].body.content).toBe(
+        "Proposed solution was rejected with following feedback:<br>" +
+          "&lt;b&gt;still&lt;/b&gt; broken &amp; unusable",
+      );
+    });
+
+    it("still posts a comment (no content omission) when the reason is left blank", () => {
+      postCommentMutateMock.mockImplementation((_vars, options) => {
+        options?.onSuccess?.();
+      });
+      mutateMock.mockImplementation((_body, options) => {
+        options?.onSuccess?.();
+        options?.onSettled?.();
+      });
+
+      renderActionRow({ statusLabel: "Solution Proposed" });
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+
+      expect(postCommentMutateMock.mock.calls[0]![0]).toEqual({
+        caseId: "case-1",
+        body: {
+          content:
+            "Proposed solution was rejected. No additional feedback was provided.",
+          type: "comments",
+        },
+      });
+      expect(mutateMock.mock.calls[0]![0]).toEqual({ stateKey: 1003 });
+    });
+
+    it("never attempts the state PATCH when posting the comment fails", () => {
+      postCommentMutateMock.mockImplementation((_vars, options) => {
+        options?.onError?.(new Error("comment failed"));
+      });
+
+      renderActionRow({ statusLabel: "Solution Proposed" });
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+      fireEvent.click(screen.getByRole("button", { name: "Reject Solution" }));
+
+      expect(postCommentMutateMock).toHaveBeenCalledTimes(1);
+      expect(mutateMock).not.toHaveBeenCalled();
+      expect(showErrorMock).toHaveBeenCalledWith("comment failed");
+      // Dialog stays open so the customer doesn't lose their typed reason.
+      expect(
+        screen.getByLabelText("Reason for rejecting the solution"),
+      ).toBeInTheDocument();
+    });
   });
 });

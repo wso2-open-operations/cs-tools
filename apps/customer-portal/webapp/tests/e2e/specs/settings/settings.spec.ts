@@ -38,8 +38,9 @@
 import { test, expect, withSession } from "../../fixtures/test";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { PROJECTS, SETTINGS_USER_INPUT } from "../../config/testData";
-import { SETTINGS } from "../../utils/selectors";
+import { GET_HELP_BUTTON, SETTINGS } from "../../utils/selectors";
 import { expectSuccess } from "../../utils/caseFlows";
+import { projectPathPattern } from "../../utils/ids";
 
 withSession(test);
 
@@ -62,7 +63,7 @@ test.describe("Settings", () => {
     await settings.openViaSideNav(project.id);
 
     await expect(page).toHaveURL(
-      new RegExp(`/projects/${project.id}/${SETTINGS.pathSegment}`),
+      projectPathPattern(project.id, SETTINGS.pathSegment),
     );
 
     // Soft, so one missing tab does not hide the state of the others.
@@ -279,5 +280,156 @@ test.describe("Settings", () => {
       `Settings: font size cycled through ${SETTINGS.display.fontSizes.length} ` +
         `options and restored to ${original}`,
     );
+  });
+
+  //
+  // AI Assistant tab.
+  //
+  // ⚠️ WRITES: the toggle sets `hasAgent` on the project, which changes the
+  // portal beyond this page — with the agent on, Get Help opens the Novera chat
+  // instead of the create-case form. The test therefore restores whatever state
+  // it found from `finally`, and a run that died mid-flow would leave the project
+  // switched.
+  //
+  test.describe("AI Assistant", () => {
+    test("enables the Novera chat assistant", async ({ page }) => {
+      test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
+
+      const settings = new SettingsPage(page);
+      await settings.openViaSideNav(project.id);
+      await settings.openTab(SETTINGS.tabs.aiAssistant);
+
+      await expect(settings.capabilitiesSection()).toBeVisible();
+      await expect(settings.noveraLabel()).toBeVisible();
+
+      const novera = SETTINGS.aiAssistant.novera;
+
+      // Wait for the switch to become interactive before reading it. It renders
+      // disabled while the project details load, so `isChecked()` — which does
+      // not retry — can sample a state that is still arriving. That matters more
+      // here than elsewhere because the value drives the skip below: a stale
+      // read either skips a healthy test or sends it on to "enable" a toggle
+      // that is already on. Same synchronisation as setNoveraEnabled().
+      await expect(settings.noveraToggle()).toBeEnabled({ timeout: 30_000 });
+
+      const wasEnabled = await settings.noveraToggle().isChecked();
+
+      // The scenario starts from off. If the project is already on, this has
+      // nothing to enable — skipped rather than silently switching it off first,
+      // which would make the test change state it did not intend to.
+      test.skip(
+        wasEnabled,
+        `Novera is already enabled on this project, so there is nothing to ` +
+          `switch on. Disable it to run this test.`,
+      );
+
+      // Off to begin with: the chip reports it and the toggle is unchecked.
+      await expect(settings.noveraChip(novera.inactiveChip)).toBeVisible();
+      await expect(settings.noveraToggle()).not.toBeChecked();
+
+      try {
+        const response = await settings.setNovera(project.id, true);
+        await expectSuccess(response, "enable Novera");
+
+        // `hasAgent` on the wire, since the chip below is the UI's report of it
+        // rather than the change itself.
+        const payload = JSON.parse(response.request().postData() ?? "{}") as {
+          hasAgent?: boolean;
+        };
+        expect(payload.hasAgent).toBe(true);
+
+        await expect(settings.noveraToggle()).toBeChecked();
+        await expect(settings.noveraChip(novera.activeChip)).toBeVisible({
+          timeout: 30_000,
+        });
+        await expect(settings.noveraChip(novera.inactiveChip)).toHaveCount(0);
+
+        await expect
+          .soft(page.getByText(novera.successMessage))
+          .toBeVisible({ timeout: 30_000 });
+
+        // And the setting takes effect beyond this page: Get Help branches on the
+        // project's `hasAgent`, so with the assistant on it opens the Novera chat
+        // rather than the create-case form. This is the visible consequence of
+        // the toggle, and the reason the restore below matters — leaving it on
+        // sends every create-case spec to the chat instead.
+        await page
+          .getByRole("button", { name: GET_HELP_BUTTON, exact: true })
+          .click();
+
+        await expect(page).toHaveURL(
+          projectPathPattern(project.id, novera.getHelpPathWhenEnabled),
+          { timeout: 30_000 },
+        );
+        await expect(page).not.toHaveURL(
+          new RegExp(novera.getHelpPathWhenDisabled),
+        );
+
+        // And the chat page actually rendered: the URL changes before the route
+        // swaps, so its own prompt is what shows a user would land on the
+        // assistant rather than a half-navigated shell.
+        await expect(
+          page.getByText(novera.getHelpChatHeading, { exact: true }),
+        ).toBeVisible({ timeout: 30_000 });
+
+        // Back to settings. Direct, not through the side nav: the project is
+        // left switched on at this point, so the shortest path back is the right
+        // one.
+        await settings.open(project.id);
+        await settings.openTab(SETTINGS.tabs.aiAssistant);
+
+        // The state carried across the navigation, so the tab opens showing the
+        // assistant on. Given a proper timeout: the page has just remounted and
+        // the switch is disabled while the project details refetch, so the 5s
+        // default lands in that window.
+        await expect(settings.noveraToggle()).toBeChecked({ timeout: 30_000 });
+        await expect(settings.noveraChip(novera.activeChip)).toBeVisible({
+          timeout: 30_000,
+        });
+
+        // And off again — asserted as a step of its own rather than left to the
+        // cleanup below, since switching off is as much a behaviour as switching
+        // on and deserves the same checks.
+        const disableResponse = await settings.setNovera(project.id, false);
+        await expectSuccess(disableResponse, "disable Novera");
+
+        const disablePayload = JSON.parse(
+          disableResponse.request().postData() ?? "{}",
+        ) as { hasAgent?: boolean };
+        expect(disablePayload.hasAgent).toBe(false);
+
+        await expect(settings.noveraToggle()).not.toBeChecked({
+          timeout: 30_000,
+        });
+        await expect(settings.noveraChip(novera.inactiveChip)).toBeVisible({
+          timeout: 30_000,
+        });
+        await expect(settings.noveraChip(novera.activeChip)).toHaveCount(0);
+      } finally {
+        // A safety net, not the disable step — that is asserted above. This only
+        // does anything when the flow failed part-way and left the agent on,
+        // which would change how Get Help behaves for every later spec.
+        //
+        // Reopens the page first — the failure that brings us here may well have
+        // left the browser somewhere else entirely, where the toggle does not
+        // exist and the check below would hang rather than restore anything.
+        await settings
+          .open(project.id)
+          .then(() => settings.openTab(SETTINGS.tabs.aiAssistant))
+          .catch(() => undefined);
+
+        const stillOn = await settings
+          .noveraToggle()
+          .isChecked()
+          .catch(() => false);
+        if (stillOn) {
+          await settings.setNovera(project.id, false).catch(() => undefined);
+        }
+      }
+
+      console.log(
+        `Settings: Novera enabled, Get Help opened the chat, then disabled again`,
+      );
+    });
   });
 });

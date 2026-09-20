@@ -26,7 +26,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// DeploymentRepository defines the persistence operations for the deployments table.
+// DeploymentRepository defines the persistence operations for the
+// deployment table (migration 000013).
 type DeploymentRepository interface {
 	// SearchDeployments returns a filtered, paginated slice of enriched deployment
 	// views together with the total count of matching rows before pagination.
@@ -48,7 +49,15 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 	filterArgs := []any{}
 	argIdx := 1
 
-	where := "WHERE 1=1"
+	// deployment.project_id is nullable (migration 000013 sets it NULL when
+	// the owning project is deleted). The data query below inner-joins
+	// project and so can never return such a row; without this predicate
+	// the count query would still include it, inflating total relative to
+	// what's actually returned. DeploymentView.Project is a non-pointer
+	// EntityRef, so switching the join to LEFT instead isn't a safe
+	// alternative -- that would need a response-contract change (a nullable
+	// Project field) and nullable scan handling, not just a query fix.
+	where := "WHERE d.project_id IS NOT NULL"
 
 	if len(req.ProjectIDs) > 0 {
 		// Cast the parameter to uuid[] so the column stays uncast and idx_deployments_project_id is usable.
@@ -77,18 +86,27 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM deployments d " + where
+	countQuery := "SELECT COUNT(*) FROM deployment d " + where
 
+	// deployment.created_by is a plain VARCHAR audit string (an email, by
+	// this codebase's own convention -- see e.g. commentService writing the
+	// caller's resolved email into comment.created_by), never a UUID FK
+	// into "user". A plain "= u.id" join here would either fail to
+	// type-check or silently match nothing. Resolve it by email instead,
+	// LEFT JOIN so a deployment created by an unrecognized identity still
+	// returns a row -- CreatedBy comes back nil rather than a fabricated
+	// EntityRef with an empty id (see the domain package's own
+	// "empty strings must never appear" convention).
 	dataQuery := fmt.Sprintf(
 		`SELECT d.id, d.number, d.name, d.type::TEXT, d.description,
-		        d.created_at, d.updated_at,
-		        u.id, u.first_name || ' ' || u.last_name,
+		        d.created_on, d.updated_on,
+		        u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')),
 		        p.id, p.name
-		 FROM deployments d
-		 JOIN users u    ON d.created_by  = u.id
-		 JOIN projects p ON d.project_id  = p.id
+		 FROM deployment d
+		 LEFT JOIN "user" u ON LOWER(u.email) = LOWER(d.created_by)
+		 JOIN project p ON d.project_id = p.id
 		 %s
-		 ORDER BY d.created_at DESC, d.id
+		 ORDER BY d.created_on DESC, d.id
 		 LIMIT $%d OFFSET $%d`,
 		where, argIdx, argIdx+1,
 	)
@@ -116,14 +134,21 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 		result := make([]domain.DeploymentView, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var d domain.DeploymentView
-			d.CreatedBy = &domain.EntityRef{}
+			var creatorID, creatorName *string
 			if err := rows.Scan(
 				&d.ID, &d.Number, &d.Name, &d.Type, &d.Description,
 				&d.CreatedOn, &d.UpdatedOn,
-				&d.CreatedBy.ID, &d.CreatedBy.Name,
+				&creatorID, &creatorName,
 				&d.Project.ID, &d.Project.Name,
 			); err != nil {
 				return fmt.Errorf("scan deployment: %w", err)
+			}
+			if creatorID != nil {
+				name := ""
+				if creatorName != nil {
+					name = *creatorName
+				}
+				d.CreatedBy = &domain.EntityRef{ID: *creatorID, Name: name}
 			}
 			result = append(result, d)
 		}

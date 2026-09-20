@@ -15,7 +15,8 @@
 // under the License.
 
 import { useEffect, useRef, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@features/support/api/useGetCaseDetails";
@@ -30,10 +31,8 @@ import { ANNOUNCEMENT_DETAILS_FETCH_ERROR_BANNER } from "@features/announcements
  */
 export default function AnnouncementDetailsPage(): JSX.Element {
   const navigate = useNavigate();
-  const { projectId, caseId } = useParams<{
-    projectId: string;
-    caseId: string;
-  }>();
+  const projectId = useNormalizedIdParam("projectId");
+  const caseId = useNormalizedIdParam("caseId");
   const { showLoader, hideLoader } = useLoader();
   const { showError } = useErrorBanner();
 

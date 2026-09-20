@@ -5962,6 +5962,21 @@ components:
           description: Limit for pagination
           format: int64
       description: Pagination information.
+    ProductVulnerabilityPagination:
+      type: object
+      properties:
+        offset:
+          minimum: 0
+          type: integer
+          description: Offset for pagination
+          format: int64
+        limit:
+          minimum: 1
+          maximum: 5000
+          type: integer
+          description: Limit for pagination
+          format: int64
+      description: Pagination information for product vulnerability searches (supports bulk fetches).
     Product:
       required:
       - class
@@ -6136,7 +6151,7 @@ components:
         sortBy:
           $ref: '#/components/schemas/SortBy'
         pagination:
-          $ref: '#/components/schemas/Pagination'
+          $ref: '#/components/schemas/ProductVulnerabilityPagination'
       additionalProperties: false
       description: Payload for searching product vulnerabilities.
     ProductsResponse:

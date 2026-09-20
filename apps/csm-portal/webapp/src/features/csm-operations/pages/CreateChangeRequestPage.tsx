@@ -15,26 +15,26 @@
 // under the License.
 
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   AdapterDateFns,
   Alert,
+  alpha,
   Box,
   Button,
   Card,
   DatePickers,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
+  Switch,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
-import { ArrowLeft, ChevronDown } from "@wso2/oxygen-ui-icons-react";
-import { useRef, useState, type JSX } from "react";
+import { ArrowLeft, Link2 } from "@wso2/oxygen-ui-icons-react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -45,13 +45,23 @@ import { usePostChangeRequest } from "@features/csm-operations/api/usePostChange
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useSearchGroups } from "@api/useSearchGroups";
-import { useSearchUsersByName } from "@api/useSearchUsersByName";
-import { useSearchServiceRequestsForSelect } from "@features/csm-operations/api/useSearchServiceRequestsForSelect";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
+import { useSearchParentRecordsForSelect } from "@features/csm-operations/api/useSearchParentRecordsForSelect";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import {
+  changeRequestDraftKey,
   changeRequestStateLabel,
+  clearChangeRequestDraft,
   CLONE_SOURCE_GAP_MESSAGE,
+  decodeParentRecordValue,
+  encodeParentRecordValue,
+  loadChangeRequestDraft,
+  parentRecordLabel,
+  saveChangeRequestDraft,
+  type ChangeRequestDraftContext,
   type CloneChangeRequestNavState,
+  type CreateChangeRequestFromIncidentNavState,
+  type ParentRecordOption,
 } from "@features/csm-operations/utils/changeRequests";
 import type { CreateChangeRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
 import type {
@@ -59,7 +69,6 @@ import type {
   BeChangeRequestPriority,
   BeChangeRequestState,
   BeChangeRequestType,
-  BeCaseSearchView,
   BeCreateChangeRequestPayload,
   BeGroup,
   BeUser,
@@ -118,15 +127,6 @@ function userLabel(u: BeUser): string {
   return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || u.id || "";
 }
 
-/**
- * Display label for an originating-service-request option, as
- * "CS0001234 — subject". Number and subject are both optional on the search
- * view, so it degrades to whichever exists and finally to the id.
- */
-function caseSearchLabel(c: BeCaseSearchView): string {
-  return [c.number, c.subject].filter(Boolean).join(" — ") || c.id;
-}
-
 /** `datetime-local` input value ("YYYY-MM-DDTHH:MM") to the BE's expected
  * "YYYY-MM-DD HH:MM:SS" string. */
 function toBackendDateTime(localValue: string): string {
@@ -173,11 +173,12 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const postChangeRequest = usePostChangeRequest();
   const patchChangeRequest = usePatchChangeRequest();
 
-  // This form can be opened two ways, each carrying its own router state
+  // This form can be opened three ways, each carrying its own router state
   // (not query params) — read once: this form's state is what the user edits
   // from here on, so a later change to the *source* record must not reach
-  // back in and overwrite what they've typed. The two shapes are mutually
-  // exclusive; narrow on `caseId`, the field only the latter carries.
+  // back in and overwrite what they've typed. The three shapes are mutually
+  // exclusive; narrow on `caseId`/`incidentId`, the fields only the latter two
+  // carry.
   //   - Clone, from a change request's "Clone" action — see
   //     CsmChangeRequestDetailPage.tsx's cloneChangeRequest and
   //     buildCloneChangeRequestNavState's doc comment for exactly which
@@ -188,15 +189,25 @@ export default function CreateChangeRequestPage(): JSX.Element {
   //     originating service request (and its project, for scoping the
   //     picker's search) so the "Originating service request" field below
   //     starts pre-selected rather than blank.
+  //   - An incident's own "Create change request…" action — see
+  //     CsmIncidentDetailPage.tsx and CreateChangeRequestFromIncidentNavState's
+  //     doc comment. Pre-selects that incident as the intended parent, but see
+  //     `isIncidentParentSelected` below: submitting with an incident selected
+  //     is gated until the backend accepts one.
   const location = useLocation();
   const locationState = location.state as
     | CloneChangeRequestNavState
     | CreateChangeRequestFromCaseNavState
+    | CreateChangeRequestFromIncidentNavState
     | undefined;
   const cloneState =
-    locationState && !("caseId" in locationState) ? locationState : undefined;
+    locationState && !("caseId" in locationState) && !("incidentId" in locationState)
+      ? locationState
+      : undefined;
   const fromCaseState =
     locationState && "caseId" in locationState ? locationState : undefined;
+  const fromIncidentState =
+    locationState && "incidentId" in locationState ? locationState : undefined;
 
   // Set when opened from a list/detail page's own "Create change request"
   // action with `state: { from: ... }` (same convention as the 4 case-type
@@ -206,10 +217,30 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const backState = location.state as { from?: string } | undefined;
   const backTarget = backState?.from ?? OPERATIONS_CHANGE_REQUESTS_PATH;
 
+  // This route unmounts (losing all local state) whenever the user navigates
+  // to another operations tab, and remounts fresh on the way back — without
+  // this, that remount re-seeds every field from the *original*
+  // cloneState/fromCaseState/fromIncidentState again, discarding anything
+  // typed in between. `draftKey` scopes a sessionStorage draft to this exact
+  // entry context (see `changeRequestDraftKey`'s doc comment for why); `draft`
+  // is read once, at mount, via a lazy `useState` initializer — every field
+  // below seeds from it in preference to the nav-state source when present.
+  const draftContext: ChangeRequestDraftContext = cloneState
+    ? { kind: "clone", sourceNumber: cloneState.sourceNumber }
+    : fromCaseState
+      ? { kind: "case", caseId: fromCaseState.caseId }
+      : fromIncidentState
+        ? { kind: "incident", incidentId: fromIncidentState.incidentId }
+        : { kind: "new" };
+  const draftKey = changeRequestDraftKey(draftContext);
+  const [draft] = useState(() => loadChangeRequestDraft(draftKey));
+
   // Slice on seed as well as on change: a source record at or beyond the cap
   // would otherwise load untrimmed, show a negative characters-left count, and
   // submit over-length if the user never edits the field.
-  const [subject, setSubject] = useState((cloneState?.subject ?? "").slice(0, SUBJECT_MAX));
+  const [subject, setSubject] = useState(
+    draft?.subject ?? (cloneState?.subject ?? "").slice(0, SUBJECT_MAX),
+  );
   // Pre-selected to match the legacy ServiceNow form's own defaults, rather
   // than leaving every dropdown blank — most change requests are Normal
   // type, Low impact. Priority has no default there either ("-- None --"),
@@ -220,42 +251,78 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // editable here at all — see BeCreateChangeRequestPayload's doc comment:
   // `category` is 99.9% left at its default on real records and `risk`
   // isn't a field on the real ServiceNow CR form.
-  const [type, setType] = useState<string>(cloneState?.type ?? "normal");
-  const [impact, setImpact] = useState<string>(cloneState?.impact ?? "low");
-  const [priority, setPriority] = useState<string>(UNSET);
+  const [type, setType] = useState<string>(draft?.type ?? cloneState?.type ?? "normal");
+  const [impact, setImpact] = useState<string>(draft?.impact ?? cloneState?.impact ?? "low");
+  const [priority, setPriority] = useState<string>(draft?.priority ?? UNSET);
   // Always "new" regardless of the source record's own state/schedule/
   // approval — cloning must never carry an approval or a stale window
-  // across into the new change request.
-  const [state, setState] = useState<string>("new");
-  const [plannedStartDate, setPlannedStartDate] = useState("");
-  const [plannedEndDate, setPlannedEndDate] = useState("");
-  const [description, setDescription] = useState(cloneState?.description ?? "");
-  const [justification, setJustification] = useState(cloneState?.justification ?? "");
-  const [implementationPlan, setImplementationPlan] = useState("");
-  const [riskImpactAnalysis, setRiskImpactAnalysis] = useState("");
-  const [backoutPlan, setBackoutPlan] = useState("");
-  const [testPlan, setTestPlan] = useState(cloneState?.testPlan ?? "");
-  const [groupId, setGroupId] = useState("");
-  const [assignedEngineerId, setAssignedEngineerId] = useState(
-    cloneState?.assignedEngineerId ?? "",
+  // across into the new change request. A restored draft is the one
+  // exception: it reflects wherever the user's own in-progress edit left this
+  // field (still just "new"/"assess"/"authorize" — the same options remain
+  // selectable either way), not the clone source's state.
+  const [state, setState] = useState<string>(draft?.state ?? "new");
+  const [plannedStartDate, setPlannedStartDate] = useState(draft?.plannedStartDate ?? "");
+  const [plannedEndDate, setPlannedEndDate] = useState(draft?.plannedEndDate ?? "");
+  const [description, setDescription] = useState(draft?.description ?? cloneState?.description ?? "");
+  const [justification, setJustification] = useState(
+    draft?.justification ?? cloneState?.justification ?? "",
   );
-  const [requestedById, setRequestedById] = useState("");
-  // The service request this change request was raised from, when picked.
-  // Not part of BeCreateChangeRequestPayload — see handleSubmit's comment.
-  // Pre-selected when opened from that service request's own "Create change
-  // request…" action; stays fully editable from there — the field remains a
-  // normal AsyncEntitySelect, not a locked/read-only control, so a wrong
-  // pre-fill (or a genuine need to link a different service request instead)
-  // can still be corrected without leaving the form.
-  const [caseId, setCaseId] = useState(fromCaseState?.caseId ?? "");
-  // Display label for the pre-filled `caseId` above until a fresh search for
-  // the same id resolves one from the backend (see AsyncEntitySelect's
+  const [implementationPlan, setImplementationPlan] = useState(draft?.implementationPlan ?? "");
+  const [riskImpactAnalysis, setRiskImpactAnalysis] = useState(draft?.riskImpactAnalysis ?? "");
+  const [backoutPlan, setBackoutPlan] = useState(draft?.backoutPlan ?? "");
+  const [testPlan, setTestPlan] = useState(draft?.testPlan ?? cloneState?.testPlan ?? "");
+  const [isPlanningVisibleToCustomers, setIsPlanningVisibleToCustomers] = useState(
+    draft?.isPlanningVisibleToCustomers ?? false,
+  );
+  const [groupId, setGroupId] = useState(draft?.groupId ?? "");
+  const [assignedEngineerId, setAssignedEngineerId] = useState(
+    draft?.assignedEngineerId ?? cloneState?.assignedEngineerId ?? "",
+  );
+  const [requestedById, setRequestedById] = useState(draft?.requestedById ?? "");
+  // The service request or incident this change request was raised from,
+  // when picked — encoded as `"sr:<id>"`/`"inc:<id>"` (see
+  // `encodeParentRecordValue`) since the underlying picker searches both
+  // kinds of record at once and a bare id can't otherwise say which kind it
+  // is. Not part of BeCreateChangeRequestPayload — see handleSubmit's
+  // comment. Pre-selected when opened from a service request's or an
+  // incident's own "Create change request…" action; stays fully editable
+  // from there — the field remains a normal AsyncEntitySelect, not a locked/
+  // read-only control, so a wrong pre-fill (or a genuine need to link a
+  // different record instead) can still be corrected without leaving the
+  // form.
+  const [parentValue, setParentValue] = useState(
+    draft?.parentValue ??
+      (fromCaseState
+        ? encodeParentRecordValue("service_request", fromCaseState.caseId)
+        : fromIncidentState
+          ? encodeParentRecordValue("incident", fromIncidentState.incidentId)
+          : ""),
+  );
+  // Decoded once per render — `undefined` when nothing is selected or the
+  // value doesn't parse (never expected in practice, but AsyncEntitySelect's
+  // `value` is a plain string so this stays defensive).
+  const parentSelection = decodeParentRecordValue(parentValue);
+  // The live `PATCH /change-requests/{id}` write only ever resolves `caseId`
+  // against the case table (see this file's own header note and
+  // `changeRequests.ts`'s "Originating service request picker" section for
+  // the verified-live reason) — an incident result can be found by the
+  // picker, but never submitted, until the backend adds a path for it.
+  const isIncidentParentSelected = parentSelection?.kind === "incident";
+  // Display label for a pre-filled `parentValue` above until a fresh search
+  // for the same id resolves one from the backend (see AsyncEntitySelect's
   // `knownLabel`).
   const fromCaseKnownLabel = fromCaseState
-    ? caseSearchLabel({
+    ? parentRecordLabel({
         id: fromCaseState.caseId,
         number: fromCaseState.caseNumber,
         subject: fromCaseState.caseSubject,
+      })
+    : undefined;
+  const fromIncidentKnownLabel = fromIncidentState
+    ? parentRecordLabel({
+        id: fromIncidentState.incidentId,
+        number: fromIncidentState.incidentNumber,
+        subject: fromIncidentState.incidentSubject,
       })
     : undefined;
 
@@ -266,16 +333,71 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // emptiness) gates it so manually clearing the field afterward sticks.
   // Adjusted during render (React's recommended pattern for this) rather
   // than in an effect, which would call setState synchronously post-commit.
+  // Starts already "done" when restoring a draft — the restored
+  // `requestedById` already reflects whatever this field held (auto-filled,
+  // cleared, or reassigned) when the user last edited it, and auto-fill
+  // running again here would stomp a deliberate clear.
   const { data: me } = useGetUsersMe();
   const meLabel = me ? userLabel(me) : undefined;
-  const autoFilledRequester = useRef(false);
+  const autoFilledRequester = useRef(draft !== null);
   if (me?.id && !autoFilledRequester.current) {
     autoFilledRequester.current = true;
     setRequestedById(me.id);
   }
 
+  // Writes the form's current values back to this entry context's draft on
+  // every change, so a later unmount/remount (switching operations tabs and
+  // back) restores them instead of re-seeding from the original clone/case/
+  // incident source. See `changeRequestDraftKey`'s doc comment for why the
+  // key is scoped per entry context.
+  useEffect(() => {
+    saveChangeRequestDraft(draftKey, {
+      subject,
+      type,
+      impact,
+      priority,
+      state,
+      plannedStartDate,
+      plannedEndDate,
+      description,
+      justification,
+      implementationPlan,
+      riskImpactAnalysis,
+      backoutPlan,
+      testPlan,
+      isPlanningVisibleToCustomers,
+      groupId,
+      assignedEngineerId,
+      requestedById,
+      parentValue,
+    });
+  }, [
+    draftKey,
+    subject,
+    type,
+    impact,
+    priority,
+    state,
+    plannedStartDate,
+    plannedEndDate,
+    description,
+    justification,
+    implementationPlan,
+    riskImpactAnalysis,
+    backoutPlan,
+    testPlan,
+    isPlanningVisibleToCustomers,
+    groupId,
+    assignedEngineerId,
+    requestedById,
+    parentValue,
+  ]);
+
   const isSubmitting = postChangeRequest.isPending || patchChangeRequest.isPending;
-  const canSubmit = subject.trim().length > 0 && !isSubmitting;
+  // `isIncidentParentSelected` blocks submit entirely rather than just
+  // skipping the PATCH — see its own doc comment above for why sending the
+  // create-then-PATCH flow through with an incident's id would 404.
+  const canSubmit = subject.trim().length > 0 && !isSubmitting && !isIncidentParentSelected;
   // Non-blocking: a past planned start/end is unusual but not forbidden
   // (e.g. logging a change that already happened), so this only warns.
   const plannedStartIsPast = isPastDateTime(parseDateTimeLocal(plannedStartDate));
@@ -302,26 +424,39 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
     if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
     if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
+    payload.isPlanningVisibleToCustomers = isPlanningVisibleToCustomers;
     if (groupId.trim()) payload.groupId = groupId.trim();
     if (assignedEngineerId.trim()) payload.assignedEngineerId = assignedEngineerId.trim();
     if (requestedById.trim()) payload.requestedById = requestedById.trim();
 
     postChangeRequest.mutate(payload, {
       onSuccess: (created) => {
+        // The change request this draft was building now exists — drop it so
+        // a later visit to this same entry context (e.g. cloning the same
+        // source record again) starts clean rather than restoring this
+        // already-submitted content. Cleared regardless of how the follow-up
+        // PATCH below resolves; that's a separate, already-created record's
+        // linkage, not a reason to keep this draft around.
+        clearChangeRequestDraft(draftKey);
         const createdId = created.changeRequest.id;
         // POST /change-requests can't carry the originating-service-request
         // link (it isn't an accepted create field), so it's set with a
         // follow-up PATCH once the change request exists. A failed PATCH
         // still leaves a valid, created change request — navigate there
         // regardless, but surface the link failure rather than hiding it.
-        if (!caseId) {
+        // `canSubmit` already blocks this branch from ever running with an
+        // incident selected, so `parentSelection` here is either unset or a
+        // service request.
+        const resolvedCaseId =
+          parentSelection?.kind === "service_request" ? parentSelection.id : undefined;
+        if (!resolvedCaseId) {
           navigate(`/operations/change-requests/${createdId}`, {
             state: { from: backTarget },
           });
           return;
         }
         patchChangeRequest.mutate(
-          { id: createdId, patch: { caseId } },
+          { id: createdId, patch: { caseId: resolvedCaseId } },
           {
             onSuccess: () =>
               navigate(`/operations/change-requests/${createdId}`, {
@@ -348,6 +483,15 @@ export default function CreateChangeRequestPage(): JSX.Element {
         showError(msg, err);
       },
     });
+  };
+
+  // Explicit "I'm abandoning this" signal from the user, unlike navigating to
+  // another operations tab mid-edit (which the draft above exists to survive)
+  // — Back and Cancel both drop the draft before leaving, so returning to
+  // this same entry context later starts clean.
+  const handleCancel = (): void => {
+    clearChangeRequestDraft(draftKey);
+    navigate(backTarget);
   };
 
   // Shared renderer for a "-- Select --" dropdown, matching the pattern used
@@ -425,7 +569,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
       <Button
         variant="text"
         startIcon={<ArrowLeft size={16} />}
-        onClick={() => navigate(backTarget)}
+        onClick={handleCancel}
         sx={{ mb: 1 }}
       >
         Back
@@ -445,8 +589,15 @@ export default function CreateChangeRequestPage(): JSX.Element {
       {fromCaseState && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Linking to {fromCaseState.caseNumber ?? "the service request"} — its id is
-          carried through automatically as the Originating service request below (see
-          "More options").
+          carried through automatically as the Originating service request field below.
+        </Alert>
+      )}
+      {fromIncidentState && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Opened from {fromIncidentState.incidentNumber ?? "an incident"} — it's pre-filled below
+          as the intended parent, but linking a change request directly to an incident isn't
+          supported by the backend yet. You'll need to remove it (or link a service request
+          instead) before this form can be submitted.
         </Alert>
       )}
 
@@ -464,6 +615,76 @@ export default function CreateChangeRequestPage(): JSX.Element {
             placeholder="Short summary of the change"
             helperText={charsLeftHelper(subject, SUBJECT_MAX)}
           />
+
+          {/* Deliberately called out with its own bordered/tinted panel near
+              the top of the form, not just another inlined field — this used
+              to sit at the bottom of a collapsed "More options" section,
+              where it was easy to skip entirely. The change request/service
+              request link has no way to be added back in after creation
+              except through this same field on the detail page's edit
+              dialog, so a user who skips it here has to notice and fix that
+              gap later. The treatment (bordered box, tinted background,
+              icon + heavier label) mirrors the emphasis ProjectSelectionField
+              gives its own "must not get this wrong" field. */}
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 1,
+              p: 2,
+              borderRadius: 1,
+              border: "1px solid",
+              borderColor: "primary.main",
+              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.06),
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ display: "flex", color: "primary.main" }}>
+                <Link2 size={16} aria-hidden />
+              </Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Originating service request or incident
+              </Typography>
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              {fromCaseState
+                ? "Pre-filled from the service request you opened this from — change it below if that's not right."
+                : fromIncidentState
+                  ? "Pre-filled from the incident you opened this from — change it below if that's not right."
+                  : "If this change request was raised from a service request or incident, link it here — search by CS or INC number. It's much harder to find and add later."}
+            </Typography>
+            <AsyncEntitySelect<ParentRecordOption>
+              id="cr-originating-service-request"
+              label="Originating service request or incident"
+              placeholder="Search service requests or incidents…"
+              value={parentValue}
+              onChange={setParentValue}
+              disabled={isSubmitting}
+              // Opened from a service request's own "Create change
+              // request…" action: its project is threaded through as
+              // `searchExtra` so the search prefers service requests
+              // from the same project first (see
+              // useSearchServiceRequestsForSelect's doc comment for how
+              // that stays additive, not a hard filter). Opened any
+              // other way (this page's own "New change request" entry
+              // point, a Clone, or an incident's own entry point) there's
+              // no case context at all, so `searchExtra` is undefined and
+              // the search stays exactly the unscoped, system-wide search
+              // it's always been.
+              useSearch={useSearchParentRecordsForSelect}
+              searchExtra={fromCaseState?.projectId}
+              getId={(o) => encodeParentRecordValue(o.kind, o.id)}
+              getLabel={parentRecordLabel}
+              knownLabel={fromCaseKnownLabel ?? fromIncidentKnownLabel}
+            />
+            {isIncidentParentSelected && (
+              <Alert severity="warning">
+                Linking a change request directly to an incident isn&apos;t available yet —
+                pending a backend change. Submitting is disabled while an incident is selected
+                here; pick a service request instead, or clear this field, to continue.
+              </Alert>
+            )}
+          </Box>
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Box sx={{ flex: "1 1 200px" }}>
@@ -506,6 +727,25 @@ export default function CreateChangeRequestPage(): JSX.Element {
           )}
           {renderEditorField("cr-backout-plan", "Backout plan", backoutPlan, setBackoutPlan)}
           {renderEditorField("cr-test-plan", "Test plan", testPlan, setTestPlan)}
+
+          <FormControlLabel
+            sx={{ ml: 0, justifyContent: "space-between", width: "100%" }}
+            labelPlacement="start"
+            control={
+              <Switch
+                size="small"
+                checked={isPlanningVisibleToCustomers}
+                onChange={(e) => setIsPlanningVisibleToCustomers(e.target.checked)}
+                disabled={isSubmitting}
+                inputProps={{ "aria-label": "Implementation Plan visible to customers" }}
+              />
+            }
+            label={
+              <Typography variant="body2" color="text.secondary">
+                Implementation Plan visible to customers
+              </Typography>
+            }
+          />
 
           <Typography variant="subtitle2" sx={{ mt: 1 }}>
             Schedule
@@ -564,108 +804,62 @@ export default function CreateChangeRequestPage(): JSX.Element {
             </Box>
           </LocalizationProvider>
 
-          {/* Everything below is optional and used less often at creation
-              time — collapsed by default so the form isn't dominated by
-              fields most requests won't need up front. */}
-          <Accordion
-            disableGutters
-            // Auto-expanded when cloning and an engineer carried over, or
-            // when opened from a service request with its id pre-filled
-            // below, so the prefilled value isn't hidden behind a collapsed
-            // section.
-            defaultExpanded={!!cloneState?.assignedEngineerId || !!fromCaseState}
-            sx={{ "&:before": { display: "none" }, mt: 1 }}
-          >
-            <AccordionSummary expandIcon={<ChevronDown size={16} />}>
-              <Typography variant="body2" color="text.secondary">
-                More options (optional)
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-                <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeGroup>
-                    id="cr-group"
-                    label="Assignment group"
-                    placeholder="Search groups…"
-                    value={groupId}
-                    onChange={setGroupId}
-                    disabled={isSubmitting}
-                    useSearch={useSearchGroups}
-                    getId={(g) => g.id}
-                    getLabel={(g) => g.name}
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeUser>
-                    id="cr-assigned-engineer"
-                    label="Assigned to"
-                    placeholder="Search people…"
-                    value={assignedEngineerId}
-                    onChange={setAssignedEngineerId}
-                    disabled={isSubmitting}
-                    useSearch={useSearchUsersByName}
-                    // useSearchUsersByName filters out any user without an id,
-                    // so every option here is guaranteed to have one.
-                    getId={(u) => u.id!}
-                    getLabel={userLabel}
-                    knownLabel={cloneState?.assignedEngineerLabel}
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeUser>
-                    id="cr-requested-by"
-                    label="Requested by"
-                    placeholder="Search people…"
-                    value={requestedById}
-                    onChange={setRequestedById}
-                    disabled={isSubmitting}
-                    useSearch={useSearchUsersByName}
-                    // useSearchUsersByName filters out any user without an id,
-                    // so every option here is guaranteed to have one.
-                    getId={(u) => u.id!}
-                    getLabel={userLabel}
-                    knownLabel={meLabel}
-                    helperText="Defaults to you — clear it if this wasn't your request."
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeCaseSearchView>
-                    id="cr-originating-service-request"
-                    label="Originating service request"
-                    placeholder="Search service requests…"
-                    value={caseId}
-                    onChange={setCaseId}
-                    disabled={isSubmitting}
-                    // Opened from a service request's own "Create change
-                    // request…" action: its project is threaded through as
-                    // `searchExtra` so the search prefers service requests
-                    // from the same project first (see
-                    // useSearchServiceRequestsForSelect's doc comment for how
-                    // that stays additive, not a hard filter). Opened any
-                    // other way (this page's own "New change request" entry
-                    // point, or a Clone) there's no case context at all, so
-                    // `searchExtra` is undefined and the search stays exactly
-                    // the unscoped, system-wide search it's always been.
-                    useSearch={useSearchServiceRequestsForSelect}
-                    searchExtra={fromCaseState?.projectId}
-                    getId={(c) => c.id}
-                    getLabel={caseSearchLabel}
-                    knownLabel={fromCaseKnownLabel}
-                    helperText={
-                      fromCaseState
-                        ? "Pre-filled from the service request you opened this from — change it if that's not right."
-                        : "Links this change request back to the service request it was raised from."
-                    }
-                  />
-                </Box>
-              </Box>
-            </AccordionDetails>
-          </Accordion>
+          <Typography variant="subtitle2" sx={{ mt: 1 }}>
+            More options
+          </Typography>
+
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            <Box sx={{ flex: "1 1 220px" }}>
+              <AsyncEntitySelect<BeGroup>
+                id="cr-group"
+                label="Assignment group"
+                placeholder="Search groups…"
+                value={groupId}
+                onChange={setGroupId}
+                disabled={isSubmitting}
+                useSearch={useSearchGroups}
+                getId={(g) => g.id}
+                getLabel={(g) => g.name}
+              />
+            </Box>
+            <Box sx={{ flex: "1 1 220px" }}>
+              <AsyncEntitySelect<BeUser>
+                id="cr-assigned-engineer"
+                label="Assigned to"
+                placeholder="Search people…"
+                value={assignedEngineerId}
+                onChange={setAssignedEngineerId}
+                disabled={isSubmitting}
+                useSearch={useSearchInternalUsersByName}
+                // useSearchUsersByName filters out any user without an id,
+                // so every option here is guaranteed to have one.
+                getId={(u) => u.id!}
+                getLabel={userLabel}
+                knownLabel={cloneState?.assignedEngineerLabel}
+              />
+            </Box>
+            <Box sx={{ flex: "1 1 220px" }}>
+              <AsyncEntitySelect<BeUser>
+                id="cr-requested-by"
+                label="Requested by"
+                placeholder="Search people…"
+                value={requestedById}
+                onChange={setRequestedById}
+                disabled={isSubmitting}
+                useSearch={useSearchInternalUsersByName}
+                // useSearchUsersByName filters out any user without an id,
+                // so every option here is guaranteed to have one.
+                getId={(u) => u.id!}
+                getLabel={userLabel}
+                knownLabel={meLabel}
+                helperText="Defaults to you — clear it if this wasn't your request."
+              />
+            </Box>
+          </Box>
         </Box>
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
-          <Button variant="outlined" onClick={() => navigate(backTarget)}>
+          <Button variant="outlined" onClick={handleCancel}>
             Cancel
           </Button>
           <Button

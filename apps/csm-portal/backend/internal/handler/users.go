@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -61,6 +62,15 @@ type UsersHandler struct {
 	// tell whether AttachmentStorageHandler's routes are reachable without
 	// probing them.
 	sftpgoAttachmentStorageEnabled bool
+	// dashboardDesignerEmails is the startup-resolved DASHBOARD_DESIGNER_EMAILS
+	// allow-list (see loadDashboardDesignerEmails in cmd/server/main.go), keyed
+	// by lower-cased email. GET /users/me grants a caller whose email is in
+	// this set a synthetic "dashboard_designer" role on top of whatever the
+	// entity service reports -- the dashboard builder's admin gate is
+	// FE-only and role-based, and this is how a caller gets that access
+	// without being handed the full "admin" role. Nil (the zero value, and
+	// the common case when the env var is unset) means nobody gets it.
+	dashboardDesignerEmails map[string]struct{}
 }
 
 // NewUsersHandler creates a UsersHandler backed by the given SCIM and entity
@@ -68,8 +78,16 @@ type UsersHandler struct {
 // mirrors the same runtime flag value main.go uses to decide whether to
 // register AttachmentStorageHandler's routes (SFTPGO_ATTACHMENT_STORAGE_ENABLED),
 // so GET /users/me can tell the frontend whether those routes are reachable.
-func NewUsersHandler(scim scimClient, entity entityUserClient, dir *directory.Directory, sftpgoAttachmentStorageEnabled bool) *UsersHandler {
-	return &UsersHandler{scim: scim, entity: entity, dir: dir, sftpgoAttachmentStorageEnabled: sftpgoAttachmentStorageEnabled}
+// dashboardDesignerEmails is the startup-resolved DASHBOARD_DESIGNER_EMAILS
+// allow-list; see the field doc comment on UsersHandler.
+func NewUsersHandler(scim scimClient, entity entityUserClient, dir *directory.Directory, sftpgoAttachmentStorageEnabled bool, dashboardDesignerEmails map[string]struct{}) *UsersHandler {
+	return &UsersHandler{
+		scim:                           scim,
+		entity:                         entity,
+		dir:                            dir,
+		sftpgoAttachmentStorageEnabled: sftpgoAttachmentStorageEnabled,
+		dashboardDesignerEmails:        dashboardDesignerEmails,
+	}
 }
 
 // userMeResponse is the GET /users/me response shape.
@@ -137,6 +155,21 @@ type userUpdateResponse struct {
 	TimeZone    *string `json:"timeZone,omitempty"`
 }
 
+// appendRoleIfMissing returns roles with role appended, unless it is already
+// present (case-sensitive: role names are lower_snake_case platform
+// vocabulary, and an exact duplicate is what this guards against, not a
+// differently-cased variant). Works correctly starting from a nil roles
+// slice, which is the common case for a caller with no entity-reported
+// roles at all.
+func appendRoleIfMissing(roles []string, role string) []string {
+	for _, r := range roles {
+		if r == role {
+			return roles
+		}
+	}
+	return append(roles, role)
+}
+
 // GetMe handles GET /users/me.
 // id, firstName, lastName, timeZone, and roles are sourced from the entity service.
 // phoneNumber is sourced from SCIM.
@@ -174,6 +207,16 @@ func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 			resp.Roles = entityResp.Roles
 		}
 		resp.Team = h.teamForGroups(entityResp.Groups)
+	}
+
+	// The dashboard_designer grant is BFF-local truth, independent of the
+	// entity service: it must still apply even when the entity response
+	// above failed to parse (the else branch never ran, so resp.Roles is
+	// still nil here), because "the entity response happened to be
+	// malformed" is not a defensible reason to withhold access this layer
+	// grants entirely on its own.
+	if _, ok := h.dashboardDesignerEmails[strings.ToLower(user.Email)]; ok {
+		resp.Roles = appendRoleIfMissing(resp.Roles, "dashboard_designer")
 	}
 
 	scimInfo, err := h.scim.SearchUser(r.Context(), user.Email)

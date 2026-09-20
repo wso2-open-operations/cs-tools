@@ -29,6 +29,7 @@ import (
 var incidentFilterFieldSet = map[string]bool{
 	"state": true, "assignmentGroupId": true, "businessServiceId": true,
 	"createdOn": true, "slaViolated": true, "madeSla": true, "productName": true,
+	"assignedUserId": true,
 }
 
 // incidentFilterOpSet is the exact set of IncidentFieldFilter.Op values
@@ -129,6 +130,12 @@ type parsedIncidentFilters struct {
 	// ProductNames are the values of a "productName" "in" filter, matched as a
 	// union against the incident's backing business_service name.
 	ProductNames []string
+	// AssignedUserIDs are sys_user UUIDs (not yet converted to sysids -- that
+	// conversion happens where the outbound payload is built, same as
+	// AssignmentGroupIDs above). Wire field name is "assignedUserId" (singular,
+	// matching case search's own convention); it is sent to Ballerina/SN as the
+	// plural "assignedUserIds" JSON key.
+	AssignedUserIDs []string
 }
 
 // ParseIncidentFieldFilters translates the incident-search wire contract's
@@ -243,6 +250,18 @@ func ParseIncidentFieldFilters(filters []domain.IncidentFieldFilter, now time.Ti
 				return parsedIncidentFilters{}, err
 			}
 			p.ProductNames = append(p.ProductNames, f.Values...)
+
+		case "assignedUserId":
+			if f.Op != "in" {
+				return parsedIncidentFilters{}, badIncidentFilterCombo(f)
+			}
+			if err := requireIncidentFilterValues(f); err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			if err := validateUUIDs("filters: assignedUserId", f.Values); err != nil {
+				return parsedIncidentFilters{}, err
+			}
+			p.AssignedUserIDs = append(p.AssignedUserIDs, f.Values...)
 		}
 	}
 

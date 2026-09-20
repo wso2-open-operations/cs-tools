@@ -37,6 +37,7 @@ import type {
   BeCreateCaseGithubIssuePayload,
   BeCreateCaseGithubIssueResponse,
 } from "@api/backend/types";
+import { useGetGithubIssueRepoOptions } from "@features/csm-cases/api/useGetGithubIssueRepoOptions";
 
 // ---------------------------------------------------------------------------
 // Option lists. Every select starts unset ("" → "-- Select --") and omits its
@@ -62,16 +63,11 @@ const SEVERITY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "P3", label: "P3 - Medium" },
 ];
 
-// Cloud-case repositories. owner is fixed to wso2-enterprise; the value is the
-// repo. Sent as repoOverride to bypass the SN product-unit routing (which only
-// covers on-prem/product-unit-mapped cases).
-const REPO_OWNER = "wso2-enterprise";
-const REPO_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "asgardeo-product", label: "Asgardeo" },
-  { value: "choreo", label: "WSO2 Developer Platform (Choreo)" },
-  { value: "wso2-apim-internal", label: "Bijira / API Manager" },
-  { value: "wso2-integration-internal", label: "Devant / Integration" },
-];
+// Cloud-case repositories. Fetched from GET /metadata's
+// githubIssueRepoOptions field (useGetGithubIssueRepoOptions) rather than
+// hardcoded here — each option
+// carries its own real owner/repo, sent as repoOverride to bypass the SN
+// product-unit routing (which only covers on-prem/product-unit-mapped cases).
 
 // ---------------------------------------------------------------------------
 // Types
@@ -155,6 +151,30 @@ export function CreateGithubIssueDialog({
   const [confirmPayload, setConfirmPayload] =
     useState<BeCreateCaseGithubIssuePayload | null>(null);
 
+  // The parent only mounts this dialog once it's actually opened (see
+  // CsmCaseDetailPage.tsx's `githubIssueOpen &&` guard), so this only fires
+  // per open, not on every case detail page load. `repoOptions` itself is
+  // only ever rendered when `showRepoField` is true.
+  const {
+    data: repoOptionsData,
+    isLoading: repoOptionsLoading,
+    isError: repoOptionsError,
+  } = useGetGithubIssueRepoOptions();
+  const repoOptions = repoOptionsData ?? [];
+  // Until this resolves (success or a confirmed-empty catalogue), a cloud
+  // case's submission must not be allowed through: handleSubmit only sets
+  // repoOverride when a repo is actually selected, and no repo can be
+  // selected before repoOptions is populated. Letting canSubmit go true in
+  // that window would silently fall back to product-unit routing — which
+  // this dialog's own doc comment above says only applies to non-cloud
+  // projects — for a case where the engineer never got the chance to choose.
+  const repoOptionsUnavailable =
+    showRepoField && (repoOptionsLoading || repoOptionsError);
+  const repoSelectOptions = repoOptions.map((o) => ({
+    value: o.value,
+    label: o.displayLabel,
+  }));
+
   // Type drives which fields apply — see the component doc comment above.
   const showSeverity = type === "Type/Incident";
   const requireSeverity = type === "Type/Incident";
@@ -187,7 +207,10 @@ export function CreateGithubIssueDialog({
     description.trim().length > 0 &&
     (!requireSeverity || !!priorityLevel) &&
     (!requireUpdateLevel || updateLevel.trim().length > 0) &&
-    (!requirePublicIssueUrl || publicIssueUrl.trim().length > 0);
+    (!requirePublicIssueUrl || publicIssueUrl.trim().length > 0) &&
+    !repoOptionsUnavailable;
+
+  const selectedRepoOption = repoOptions.find((o) => o.value === repo);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -203,15 +226,18 @@ export function CreateGithubIssueDialog({
     // Priority only carries meaning for incidents on the SN side; send it
     // whenever the user picked one and let the SN side decide to apply it.
     if (priorityLevel) payload.priorityLevel = priorityLevel;
-    if (repo) payload.repoOverride = { owner: REPO_OWNER, repo };
+    if (selectedRepoOption) {
+      payload.repoOverride = {
+        owner: selectedRepoOption.owner,
+        repo: selectedRepoOption.repo,
+      };
+    }
     if (showHotFix && hotFix) payload.hotFixRequired = true;
     if (regression) payload.regression = true;
 
     onOpenConfirm?.();
     setConfirmPayload(payload);
   };
-
-  const repoLabel = REPO_OPTIONS.find((o) => o.value === repo)?.label;
 
   // Shared renderer for a "-- Select --" dropdown.
   const renderSelect = <V extends string>(
@@ -221,8 +247,14 @@ export function CreateGithubIssueDialog({
     onChange: (v: V) => void,
     options: Array<{ value: V; label: string }>,
     required?: boolean,
+    extraDisabled?: boolean,
   ): JSX.Element => (
-    <FormControl fullWidth size="small" disabled={submitting} required={required}>
+    <FormControl
+      fullWidth
+      size="small"
+      disabled={submitting || extraDisabled}
+      required={required}
+    >
       <InputLabel id={`${id}-label`} shrink>
         {label}
       </InputLabel>
@@ -348,7 +380,9 @@ export function CreateGithubIssueDialog({
               "Choose repository",
               repo,
               setRepo,
-              REPO_OPTIONS,
+              repoSelectOptions,
+              false,
+              repoOptionsLoading,
             )}
         </Box>
       </DialogContent>
@@ -415,8 +449,8 @@ export function CreateGithubIssueDialog({
             <DialogContent>
               <Typography variant="body2">
                 This files a real issue in{" "}
-                {repoLabel
-                  ? `wso2-enterprise/${repo} (${repoLabel})`
+                {selectedRepoOption
+                  ? `${selectedRepoOption.owner}/${selectedRepoOption.repo} (${selectedRepoOption.displayLabel})`
                   : "a WSO2 product repository, routed automatically by the case's product"}
                 . Make sure no sensitive information is included.
               </Typography>

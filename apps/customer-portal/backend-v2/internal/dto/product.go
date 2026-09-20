@@ -82,9 +82,28 @@ func BuildEntitySearchProductsRequestFromQuery(req GetProductsRequest) entity.Se
 	return entity.SearchProductsRequest{Pagination: req.Pagination}
 }
 
-// FilterProductsByClass keeps only products whose Class matches want
-// (case-insensitive), applied after MapSearchProducts since entity-service
-// can't filter by class server-side (see GetProductsRequest's doc comment).
+// normalizeProductClass folds a product class value into one comparable
+// form: trimmed, lowercased, with spaces rewritten as underscores.
+//
+// The two sides of this comparison speak different dialects of the same
+// value. The frontend sends the portal's own enum ("product_model" —
+// PRODUCT_CLASS in the webapp's productConstants.ts, matching the Ballerina
+// backend's entity:ProductClass), because the Ballerina backend's upstream
+// accepted that spelling as a server-side filter. entity-service instead
+// passes ServiceNow's display label straight through ("Product Model").
+// Case-insensitive comparison alone never bridged the space/underscore
+// difference, so GET /products?class=product_model filtered out every item
+// on the page and returned `"products": []` alongside a non-zero
+// totalRecords.
+func normalizeProductClass(s string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), " ", "_")
+}
+
+// FilterProductsByClass keeps only products whose Class matches want, compared
+// through normalizeProductClass so the frontend's enum spelling and
+// ServiceNow's display label resolve to the same value. Applied after
+// MapSearchProducts since entity-service can't filter by class server-side
+// (see GetProductsRequest's doc comment).
 // This is necessarily best-effort: TotalRecords/HasMore still describe
 // entity-service's unfiltered page, since entity-service computed pagination
 // before this backend ever saw (or could exclude) an off-class item — a
@@ -105,7 +124,7 @@ func FilterProductsByClass(r SearchProductsResponse, want string) SearchProducts
 	}
 	filtered := make([]ProductSummary, 0, len(r.Products))
 	for _, p := range r.Products {
-		if p.Class != nil && strings.EqualFold(*p.Class, want) {
+		if p.Class != nil && normalizeProductClass(*p.Class) == normalizeProductClass(want) {
 			filtered = append(filtered, p)
 		}
 	}

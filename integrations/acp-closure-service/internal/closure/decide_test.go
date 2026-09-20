@@ -24,8 +24,8 @@ import (
 // TestNoticeWindow_IsTerminal covers the single canonical "is this the
 // terminal/day-0 window" predicate — added so callers needing this check
 // (e.g. sweep.go's subject/body builders) share one definition instead of
-// each independently comparing against NoticeWindow0 (PR #1440 review,
-// Sajith Ekanayake: that re-derivation had already gone wrong once).
+// each independently comparing against NoticeWindow0 (Sajith Ekanayake:
+// that re-derivation had already gone wrong once).
 func TestNoticeWindow_IsTerminal(t *testing.T) {
 	tests := []struct {
 		window NoticeWindow

@@ -37,7 +37,7 @@ import {
   TagsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
-import { useSearchUsersByName } from "@api/useSearchUsersByName";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import type { WatchListMember } from "@features/csm-cases/components/CaseDetailWidgets";
 import type {
   CaseAttachment,
@@ -79,10 +79,10 @@ function AttachmentsWidgetHarness({
 }
 
 vi.mock("@api/useSearchUsersByName", () => ({
-  useSearchUsersByName: vi.fn(),
+  useSearchInternalUsersByName: vi.fn(),
 }));
 
-const mockUseSearchUsersByName = vi.mocked(useSearchUsersByName);
+const mockUseSearchUsersByName = vi.mocked(useSearchInternalUsersByName);
 
 /** Two searchable people, one of whom (`WATCHER_TWO_ID`) is already watching. */
 function mockCandidates(): void {

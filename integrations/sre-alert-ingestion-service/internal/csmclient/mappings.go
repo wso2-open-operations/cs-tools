@@ -64,7 +64,7 @@ type AlertIncidentMappingView struct {
 	AlertStatus      string  `json:"alertStatus"`
 	IncidentID       string  `json:"incidentId"`
 	IncidentNumber   *string `json:"incidentNumber,omitempty"`
-	CreatedAt        string  `json:"createdAt"`
+	CreatedOn        string  `json:"createdOn"`
 }
 
 // lookupAlertIncidentMappingsResponse is the response body for

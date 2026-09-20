@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -139,9 +140,37 @@ func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	projectID := r.PathValue("projectId")
 	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	if projectID == "" || !uuidRe.MatchString(projectID) || id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	// The route is /projects/{projectId}/deployments/{id}, but entity-service's
+	// PATCH /deployments/{id} is keyed on the deployment alone and has no
+	// project field to scope it with — unlike UpdateDeployedProduct, whose
+	// request carries a DeploymentID the portal injects from the path for
+	// exactly this purpose. Without a check here the path's project segment is
+	// decorative: any deployment id would be updated under any project the
+	// caller happens to name.
+	//
+	// So the pairing is verified first. The search is project-scoped, and
+	// entity-service applies the caller's own access to it, which makes this
+	// one call serve as both checks: a deployment in a project the caller
+	// cannot reach does not come back, and neither does one that simply is not
+	// in this project.
+	ok, err := h.deploymentBelongsToProject(r.Context(), projectID, id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchDeployments failed", "userID", user.UserID, "projectID", projectID, "deploymentID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update deployment.")
+		return
+	}
+	if !ok {
+		// Deliberately 404, not 403: "exists but is not yours" and "does not
+		// exist" must be indistinguishable, or this becomes an oracle for
+		// enumerating other customers' deployment ids.
+		writeError(w, http.StatusNotFound, "Deployment not found.")
 		return
 	}
 
@@ -177,6 +206,49 @@ func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSONValue(w, http.StatusOK, dto.MapDeploymentUpdate(result))
+}
+
+// deploymentScopeCheckPageLimit is the page size used when confirming a
+// deployment belongs to a project. entity-service caps a search limit at 100,
+// so asking for more would simply be clamped.
+const deploymentScopeCheckPageLimit = 100
+
+// deploymentScopeCheckMaxPages bounds that walk. A project with more than
+// 10,000 deployments does not exist in practice, and an unbounded loop driven
+// by an upstream total is a denial-of-service waiting to happen — a wrong or
+// hostile Total would otherwise keep this handler paging indefinitely.
+const deploymentScopeCheckMaxPages = 100
+
+// deploymentBelongsToProject reports whether deploymentID is one of projectID's
+// deployments, as seen by the calling user.
+//
+// entity-service exposes no deployment get-by-id, so this is the only way to
+// establish the pairing: search the project's deployments and look for the id.
+// The search is evaluated with the caller's own access upstream, so a false
+// result covers both "not in this project" and "not visible to you" — the
+// caller must not be able to tell those apart (see the call site).
+func (h *DeploymentHandler) deploymentBelongsToProject(ctx context.Context, projectID, deploymentID string) (bool, error) {
+	for page := 0; page < deploymentScopeCheckMaxPages; page++ {
+		offset := page * deploymentScopeCheckPageLimit
+		resp, err := h.entity.SearchDeployments(ctx, entity.SearchDeploymentsRequest{
+			ProjectIDs: []string{projectID},
+			Pagination: entity.Pagination{Limit: deploymentScopeCheckPageLimit, Offset: offset},
+		})
+		if err != nil {
+			return false, err
+		}
+		for _, d := range resp.Deployments {
+			if strings.EqualFold(d.ID, deploymentID) {
+				return true, nil
+			}
+		}
+		// Stop on an empty page as well as on HasMore, so a response that never
+		// clears HasMore cannot spin this loop to its page cap.
+		if len(resp.Deployments) == 0 || !resp.HasMore {
+			return false, nil
+		}
+	}
+	return false, nil
 }
 
 // PatchDeploymentAttachment handles

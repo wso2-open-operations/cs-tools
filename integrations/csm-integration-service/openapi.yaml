@@ -3,9 +3,11 @@ info:
   title: CSM Integration Service API
   version: 1.0.0
   description: >
-    Project/account search and their Contacts sub-resource, for third-party (M2M)
-    consumers. Fronted by Choreo's API Manager gateway (subscription + client
-    credentials) — this service performs no inbound auth of its own.
+    Project/account search and their Contacts sub-resource, a subset of case
+    operations, incident creation and search, and alert-incident mapping
+    create/lookup, for third-party (M2M) consumers. Fronted by Choreo's API
+    Manager gateway (subscription + client credentials) — this service
+    performs no inbound auth of its own.
 security:
   - oauth2ClientCredentials: []
 servers:
@@ -341,6 +343,635 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}:
+    patch:
+      summary: Update a case's state, severity, or workState (or other fields on ServiceNow).
+      description: >
+        The request body is forwarded to the entity service verbatim; the
+        entity service enforces its own field-combination rules (e.g. exactly
+        one of state/severity/workState) and 400s otherwise. Unlike
+        PATCH /projects/{id}, whether this operation requires a forwarded
+        end-user identity token depends on entity-service's own data source.
+        On a Postgres data source, a state/severity/workState update (optionally
+        combined with resolutionCode/cause/closeNotes when state is closed or
+        solution_proposed) succeeds through this M2M-only service — no token
+        check on that path. Every other field this shape accepts (watchList,
+        assigneeEmail, type and its companions, parentId, relatedCaseId,
+        autocloseHoldUntil, subject, description, deploymentId,
+        deployedProductId, the fix-ETA group, acknowledge, workaroundProvided)
+        is Postgres-rejected with 400, not proxied through to a token check.
+        On a ServiceNow data source, every field this operation accepts —
+        including a bare state/severity/workState update — requires a
+        forwarded identity token this service cannot supply, so every call
+        currently receives a mapped 401 there, with no field combination that
+        succeeds.
+      operationId: patchCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Case fields to update. Field-combination rules are enforced upstream.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseUpdateRequest'
+      responses:
+        "200":
+          description: The case was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always when entity-service runs a ServiceNow data source, given this service's M2M-only design; not returned on a Postgres data source, where an unsupported field is a 400 instead)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}/comments:
+    post:
+      summary: Add a comment to a case.
+      description: >
+        This entity-service operation requires a forwarded end-user identity
+        token unconditionally, on both data sources — the comment's author is
+        resolved from that token. This service is strictly M2M with no
+        mechanism to supply one, so calls here currently always receive a
+        mapped 401. Kept for API-shape completeness, not because it currently
+        succeeds. The request body is forwarded to the entity service
+        verbatim.
+      operationId: createCaseComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCommentCreateRequest'
+      responses:
+        "201":
+          description: The comment was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentCreateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /opportunities/search:
+    post:
+      summary: Search opportunities.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Read-only:
+        this operation does not require a forwarded end-user identity token, so a
+        pure M2M call through this service succeeds (unlike the ServiceNow-backed
+        write operations elsewhere in this API).
+      operationId: searchOpportunities
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchOpportunitiesRequest'
+      responses:
+        "200":
+          description: Opportunities matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchOpportunitiesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /opportunities/{id}:
+    get:
+      summary: Get an opportunity by ID.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Read-only:
+        this operation does not require a forwarded end-user identity token, so a
+        pure M2M call through this service succeeds.
+      operationId: getOpportunity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The opportunity with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Opportunity'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /invoices/search:
+    post:
+      summary: Search invoices.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Read-only:
+        this operation does not require a forwarded end-user identity token, so a
+        pure M2M call through this service succeeds.
+      operationId: searchInvoices
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchInvoicesRequest'
+      responses:
+        "200":
+          description: Invoices matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchInvoicesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /invoices/{id}:
+    get:
+      summary: Get an invoice by ID.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. Read-only:
+        this operation does not require a forwarded end-user identity token, so a
+        pure M2M call through this service succeeds.
+      operationId: getInvoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /project-opportunity-links/search:
+    post:
+      summary: Search project-opportunity links.
+      description: >
+        ServiceNow data source only; there is no Postgres equivalent. A project can
+        have more than one linked opportunity — one row per link — so this always
+        returns a list. No by-id fetch: the underlying data has no single-record
+        endpoint. Read-only: this operation does not require a forwarded end-user
+        identity token, so a pure M2M call through this service succeeds.
+      operationId: searchProjectOpportunityLinks
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProjectOpportunityLinksRequest'
+      responses:
+        "200":
+          description: Project-opportunity links matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProjectOpportunityLinksResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /incidents:
+    post:
+      summary: Create an incident.
+      description: >
+        ServiceNow-backed. The request body is forwarded to the entity service
+        verbatim. This operation requires a forwarded end-user identity token
+        on the entity-service side; this service is strictly M2M with no
+        mechanism to supply one, so every call here currently receives a
+        mapped 401. Kept for API-shape completeness, not because it currently
+        succeeds.
+      operationId: createIncident
+      requestBody:
+        description: Incident details.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        "201":
+          description: The incident was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIncidentResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, for this operation, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /incidents/search:
+    post:
+      summary: Search incidents.
+      description: >
+        ServiceNow-backed, same as POST /incidents. This operation requires a
+        forwarded end-user identity token on the entity-service side; this
+        service is strictly M2M with no mechanism to supply one, so every
+        call here currently receives a mapped 401. Kept for API-shape
+        completeness, not because it currently succeeds.
+      operationId: searchIncidents
+      requestBody:
+        description: Incident search payload.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchIncidentsRequest'
+      responses:
+        "200":
+          description: Incidents matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchIncidentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, for this operation, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alert-incident-mappings:
+    post:
+      summary: Create an alert-incident mapping.
+      description: >
+        Postgres-only entity-service operation with no ServiceNow dependency —
+        unlike POST /incidents above, this does not require a forwarded
+        end-user identity token, so this service's M2M identity is sufficient
+        and the call is expected to actually succeed today. The request body
+        is forwarded to the entity service verbatim.
+      operationId: createAlertIncidentMapping
+      requestBody:
+        description: Alert-incident mapping details.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertIncidentMappingRequest'
+      responses:
+        "201":
+          description: The alert-incident mapping was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertIncidentMappingView'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (Choreo gateway rejected an unauthenticated M2M caller; not expected from the entity service itself for this operation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Conflict (an alert-incident mapping with this alertNumber already exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alert-incident-mappings/lookup:
+    post:
+      summary: Look up alert-incident mappings by source and unique identifier.
+      description: >
+        Postgres-only entity-service operation with no ServiceNow dependency —
+        same situation as POST /alert-incident-mappings above; expected to
+        actually succeed today. Returns an empty `mappings` array (not 404)
+        when nothing matches.
+      operationId: lookupAlertIncidentMappings
+      requestBody:
+        description: Lookup criteria.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupAlertIncidentMappingsRequest'
+      responses:
+        "200":
+          description: Alert-incident mappings matching the lookup criteria (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupAlertIncidentMappingsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (Choreo gateway rejected an unauthenticated M2M caller; not expected from the entity service itself for this operation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /vulnerabilities/sync:
     post:
       summary: Full-replace sync of product-vulnerability records.
@@ -542,9 +1173,11 @@ components:
         startDate:
           type: string
           format: date-time
+          nullable: true
         endDate:
           type: string
           format: date-time
+          nullable: true
         createdOn:
           type: string
           format: date-time
@@ -686,6 +1319,538 @@ components:
           type: string
         project:
           $ref: '#/components/schemas/ProjectUpdateResult'
+
+    CaseUpdateRequest:
+      type: object
+      minProperties: 1
+      description: >
+        state, severity, and workState are mutually exclusive of each other
+        and of every other field in this request — exactly one of them, or
+        one combination of the other (ServiceNow-only) fields, is required
+        per call. Only state/severity/workState succeed through this
+        M2M-only service; every other field requires a forwarded end-user
+        identity token this service cannot supply. See the entity service's
+        own OpenAPI spec for the full field set and combination rules — this
+        is deliberately not fully re-specified here.
+      properties:
+        state:
+          type: string
+        severity:
+          type: string
+        workState:
+          type: string
+      additionalProperties: true
+
+    CaseUpdateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        state:
+          type: string
+        severity:
+          type: string
+        workState:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    CaseUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        case:
+          $ref: '#/components/schemas/CaseUpdateResult'
+
+    CaseCommentCreateRequest:
+      type: object
+      required:
+        - type
+        - content
+      properties:
+        type:
+          type: string
+          description: Comment type, e.g. comment, work_note, or activity.
+        content:
+          type: string
+
+    CaseCommentCreateResult:
+      type: object
+      properties:
+        id:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    CaseCommentCreateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        comment:
+          $ref: '#/components/schemas/CaseCommentCreateResult'
+
+    EntityRef:
+      type: object
+      description: A minimal reference to another entity — id plus a display name.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+
+    SearchOpportunitiesRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        accountId:
+          type: string
+          format: uuid
+          description: Restrict to opportunities linked to this account.
+
+    Opportunity:
+      type: object
+      description: >
+        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
+        no Postgres equivalent). Every field but id is nullable — ServiceNow can
+        omit any of them entirely for a sparsely-populated row.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        account:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        eulaVersion:
+          type: string
+          nullable: true
+        eulaVersionDecimal:
+          type: string
+          nullable: true
+
+    SearchOpportunitiesResponse:
+      type: object
+      properties:
+        opportunities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Opportunity'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchInvoicesRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        opportunityId:
+          type: string
+          format: uuid
+          description: Restrict to invoices linked to this opportunity.
+
+    Invoice:
+      type: object
+      description: >
+        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
+        no Postgres equivalent). Every field but id is nullable — ServiceNow can
+        omit any of them entirely for a sparsely-populated row.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        invoicedAmount:
+          type: string
+          nullable: true
+        invoiceDate:
+          type: string
+          format: date
+          nullable: true
+        invoicedPaidDate:
+          type: string
+          format: date
+          nullable: true
+          description: Date the invoice was paid, if paid.
+        invoicedDueDate:
+          type: string
+          format: date
+          nullable: true
+        invoiceOriginalDueDate:
+          type: string
+          format: date
+          nullable: true
+          description: The invoice's original due date before any extension.
+        opportunity:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        classification:
+          type: string
+          nullable: true
+          description: Short classification code (e.g. "CL").
+
+    SearchInvoicesResponse:
+      type: object
+      properties:
+        invoices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invoice'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProjectOpportunityLinksRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        projectId:
+          type: string
+          format: uuid
+          description: Restrict to links for this project.
+        opportunityId:
+          type: string
+          format: uuid
+          description: Restrict to links for this opportunity.
+
+    ProjectOpportunityLink:
+      type: object
+      description: >
+        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
+        no Postgres equivalent). Every field but id is nullable — ServiceNow can
+        omit either reference entirely for a sparsely-populated row.
+      properties:
+        id:
+          type: string
+          format: uuid
+        project:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        opportunity:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+
+    SearchProjectOpportunityLinksResponse:
+      type: object
+      properties:
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOpportunityLink'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    CreateIncidentRequest:
+      type: object
+      required:
+        - callerId
+        - category
+        - serviceId
+        - impact
+        - urgency
+        - subject
+      properties:
+        callerId:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
+        subcategory:
+          type: string
+          description: >
+            One of a large fixed set of subcategory codes (e.g. DHCP, MEMORY,
+            PHISHING). Not enumerated here in full; forwarded verbatim to the
+            entity service, which validates it.
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+        configurationItemId:
+          type: string
+          format: uuid
+        contactType:
+          type: string
+          enum:
+            - SELF_SERVICE
+            - EMAIL
+            - WALK_IN
+            - AZURE
+            - EMAIL_INTERNAL
+            - SITE_247
+            - DIRECT
+            - PHONE
+            - SENTINEL
+            - VIRTUAL_AGENT
+            - CHAT
+            - EMAIL_EXTERNAL
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        watchList:
+          type: array
+          items:
+            type: string
+        additionalComments:
+          type: string
+        workNotes:
+          type: string
+        parentId:
+          type: string
+        parentIncidentId:
+          type: string
+        changeRequestId:
+          type: string
+        problemId:
+          type: string
+        causedById:
+          type: string
+
+    CreateIncidentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          type: object
+          properties:
+            id:
+              type: string
+            number:
+              type: string
+            createdOn:
+              type: string
+              format: date-time
+            createdBy:
+              type: string
+
+    SearchIncidentsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Case-insensitive free-text match against incident fields.
+            priorities:
+              type: array
+              items:
+                type: string
+                enum: [HIGH, MEDIUM, LOW]
+            parentIds:
+              type: array
+              items:
+                type: string
+            number:
+              type: string
+              description: Exact match against the incident's human-readable number (e.g. "INC0010001").
+            filters:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  op:
+                    type: string
+                  values:
+                    type: array
+                    items:
+                      type: string
+              description: >
+                Generic field/op/values filter array. Forwarded verbatim; the
+                entity service validates the supported field/op combinations.
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn, openedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchIncidentView:
+      type: object
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        openedOn:
+          type: string
+          format: date-time
+        subject:
+          type: string
+        caller:
+          type: object
+          additionalProperties: true
+        priority:
+          type: string
+        state:
+          type: string
+        category:
+          type: string
+        parent:
+          type: object
+          additionalProperties: true
+        parentIncident:
+          type: object
+          additionalProperties: true
+        assignmentGroup:
+          type: object
+          additionalProperties: true
+        assignedTo:
+          type: object
+          additionalProperties: true
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+
+    SearchIncidentsResponse:
+      type: object
+      properties:
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchIncidentView'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CreateAlertIncidentMappingRequest:
+      type: object
+      required:
+        - alertNumber
+        - source
+        - alertStatus
+        - incidentId
+      properties:
+        alertNumber:
+          type: string
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+        service:
+          type: string
+        metricName:
+          type: string
+        alertStatus:
+          type: string
+        incidentId:
+          type: string
+          format: uuid
+        incidentNumber:
+          type: string
+
+    LookupAlertIncidentMappingsRequest:
+      type: object
+      required:
+        - source
+        - uniqueIdentifier
+      properties:
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+
+    AlertIncidentMappingView:
+      type: object
+      properties:
+        id:
+          type: string
+        alertNumber:
+          type: string
+        source:
+          type: string
+        uniqueIdentifier:
+          type: string
+        service:
+          type: string
+        metricName:
+          type: string
+        alertStatus:
+          type: string
+        incidentId:
+          type: string
+        incidentNumber:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    LookupAlertIncidentMappingsResponse:
+      type: object
+      properties:
+        mappings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertIncidentMappingView'
 
     ProductVulnerabilitySyncPayload:
       type: array

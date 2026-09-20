@@ -35,6 +35,7 @@ import {
   useColumnPreferences,
 } from "@hooks/useColumnPreferences";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useFilterBarCollapsed } from "@hooks/useFilterBarCollapsed";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -155,13 +156,14 @@ interface CsmIssuesViewProps {
   /** Hide the project filter control (use when the view is project-scoped). */
   hideProjectFilter?: boolean;
   /**
-   * Hide the "Onboarding status"/"CRE Team" Simple-mode controls — see
-   * `CasesFilterBar`'s own doc comments. Pass when the view is already
-   * scoped to one project (both are per-project attributes, so filtering by
-   * them on a single-project view is a no-op).
+   * Hide the "Onboarding status"/"CRE Team"/"SRE Team" Simple-mode controls
+   * — see `CasesFilterBar`'s own doc comments. Pass when the view is
+   * already scoped to one project (all three are per-project attributes,
+   * so filtering by them on a single-project view is a no-op).
    */
   hideOnboardingStatusFilter?: boolean;
   hideCreTeamFilter?: boolean;
+  hideSreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
   /**
@@ -226,6 +228,7 @@ export default function CsmIssuesView({
   hideProjectFilter,
   hideOnboardingStatusFilter,
   hideCreTeamFilter,
+  hideSreTeamFilter,
   showEngagementTypeFilter,
   showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
@@ -283,7 +286,6 @@ export default function CsmIssuesView({
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
-  const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [sortField, setSortField] = useState<CasesSortField>(
     DEFAULT_CASES_SORT.field,
   );
@@ -395,6 +397,11 @@ export default function CsmIssuesView({
   const api = useBackendApi();
   const currentUserEmail = useIdTokenClaims()?.email;
   const currentUserId = useCurrentUser().user?.id;
+  const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
+    "cases",
+    getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    true,
+  );
 
   // "Customise columns" — off unless a caller opts in (see `enableColumnCustomization`'s
   // doc). `showSeverityColumn` mirrors the exact gate `CasesList` itself is given below
@@ -618,7 +625,7 @@ export default function CsmIssuesView({
         onChange={setFilters}
         onReset={() => setFilters(DEFAULT_CASES_FILTERS)}
         isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen((v) => !v)}
+        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
         showSeverityFilter={showSeverityFilter}
@@ -627,6 +634,7 @@ export default function CsmIssuesView({
         hideProjectFilter={hideProjectFilter}
         hideOnboardingStatusFilter={hideOnboardingStatusFilter}
         hideCreTeamFilter={hideCreTeamFilter}
+        hideSreTeamFilter={hideSreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
       />
 

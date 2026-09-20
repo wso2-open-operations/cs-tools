@@ -127,3 +127,20 @@ func (h *IncidentHandler) AggregateIncidents(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// HandOffIncidentToSpecialist handles POST /incidents/{id}/specialist-handoffs.
+func (h *IncidentHandler) HandOffIncidentToSpecialist(w http.ResponseWriter, r *http.Request) {
+	var req domain.HandOffIncidentToSpecialistRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.IncidentID = r.PathValue("id")
+	resp, err := h.svc.HandOffIncidentToSpecialist(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}

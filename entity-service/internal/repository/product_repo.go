@@ -26,7 +26,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// ProductRepository defines the persistence operations for the products table.
+// ProductRepository defines the persistence operations for the product table
+// (migration 000010). domain.Product.Class (values "software"/"service")
+// maps to the real product.category column (product_category_enum: SOFTWARE/
+// SERVICE) -- there is no "class" column or "product_class_enum" type in the
+// migrations; category is the one real column with matching semantics
+// (manufacturer/business_unit/unit are different classification axes on the
+// same table, not substitutes for this one).
 type ProductRepository interface {
 	// SearchProducts returns a filtered, paginated slice of products together
 	// with the total count of matching rows before pagination.
@@ -59,17 +65,17 @@ func (r *productRepo) SearchProducts(ctx context.Context, req domain.SearchProdu
 	}
 
 	if req.Class != "" {
-		where += fmt.Sprintf(" AND class = $%d::product_class_enum", argIdx)
-		filterArgs = append(filterArgs, req.Class)
+		where += fmt.Sprintf(" AND category = $%d::product_category_enum", argIdx)
+		filterArgs = append(filterArgs, strings.ToUpper(string(req.Class)))
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM products " + where
+	countQuery := "SELECT COUNT(*) FROM product " + where
 
 	dataQuery := fmt.Sprintf(
-		`SELECT id, name, class, created_at, updated_at
-		 FROM products %s
-		 ORDER BY created_at DESC, id
+		`SELECT id, name, category, created_on, updated_on
+		 FROM product %s
+		 ORDER BY created_on DESC, id
 		 LIMIT $%d OFFSET $%d`,
 		where, argIdx, argIdx+1,
 	)
@@ -97,9 +103,11 @@ func (r *productRepo) SearchProducts(ctx context.Context, req domain.SearchProdu
 		result := make([]domain.Product, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var p domain.Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.Class, &p.CreatedOn, &p.UpdatedOn); err != nil {
+			var category string
+			if err := rows.Scan(&p.ID, &p.Name, &category, &p.CreatedOn, &p.UpdatedOn); err != nil {
 				return fmt.Errorf("scan product: %w", err)
 			}
+			p.Class = domain.ProductClass(strings.ToLower(category))
 			result = append(result, p)
 		}
 		if err := rows.Err(); err != nil {

@@ -33,8 +33,8 @@ import {
   isChoiceField,
   isDateTimeField,
   isDescriptionField,
-  isFileCopyPathField,
   isMultiLineField,
+  isVariableRequired,
   usableChoices,
   variableLabel,
 } from "@features/csm-operations/utils/catalogVariables";
@@ -56,6 +56,18 @@ interface CatalogVariableFieldsProps {
  * Yes/No select, multi-line text, datetime picker, rich-text Description, or
  * single-line text. File Copy Path fields are optional; attachment fields are
  * handled by the page's shared attachments section and are not rendered here.
+ *
+ * Respects the additive per-variable metadata from
+ * `CHANGES-sr-variable-metadata.md` (`BeCatalogItemVariable`): required-ness
+ * comes from `isVariableRequired` (the real `mandatory` flag when the
+ * backend supplies one, falling back to the old hot fix otherwise);
+ * `readOnly` disables the control rather than hiding it (the value is still
+ * shown so the engineer can see what will be submitted); `maxLength`
+ * constrains free-text inputs; a declared `validation` regex is checked
+ * client-side and its `message` shown as the field's error text.
+ * `active`/`hidden` are NOT re-checked here — the caller (`variables` prop)
+ * is expected to already be filtered through `getUserEditableVariables`,
+ * which excludes both.
  */
 export default function CatalogVariableFields({
   variables,
@@ -68,6 +80,22 @@ export default function CatalogVariableFields({
         {variables.map((v) => {
           const value = values[v.id] ?? "";
           const label = variableLabel(v);
+          const required = isVariableRequired(v);
+          const readOnly = v.readOnly === true;
+          // Checked client-side only when there's something to check and a
+          // rule to check it against — matches
+          // `getFirstFieldFailingValidation`'s own skip-when-empty rule so
+          // the per-field error here and the page-level submit gate agree.
+          let validationError: string | undefined;
+          if (v.validation?.regex && value.trim()) {
+            try {
+              if (!new RegExp(v.validation.regex).test(value.trim())) {
+                validationError = v.validation.message;
+              }
+            } catch {
+              // Malformed backend regex — don't let it block the field.
+            }
+          }
 
           // A supplied choice list wins over every type heuristic below: it
           // is the backing data source's own answer set for this question, so
@@ -78,13 +106,9 @@ export default function CatalogVariableFields({
           const choices = usableChoices(v);
           if (choices.length > 0) {
             const labelId = `sr-var-${v.id}-label`;
-            // Same required rule as the control this replaces for a given
-            // variable — File Copy Path stays optional, everything else is
-            // mandatory. No mandatory flag exists in the contract yet.
-            const required = !isFileCopyPathField(v);
             return (
               <Grid key={v.id} size={{ xs: 12, sm: 6 }}>
-                <FormControl fullWidth size="small" required={required}>
+                <FormControl fullWidth size="small" required={required} disabled={readOnly}>
                   <InputLabel id={labelId} shrink={value !== ""} sx={{ top: "0px !important" }}>
                     {label}
                   </InputLabel>
@@ -112,7 +136,7 @@ export default function CatalogVariableFields({
             const labelId = `sr-var-${v.id}-label`;
             return (
               <Grid key={v.id} size={{ xs: 12, sm: 6 }}>
-                <FormControl fullWidth size="small" required>
+                <FormControl fullWidth size="small" required={required} disabled={readOnly}>
                   <InputLabel id={labelId} shrink={value !== ""} sx={{ top: "0px !important" }}>
                     {label}
                   </InputLabel>
@@ -140,7 +164,7 @@ export default function CatalogVariableFields({
                   color="text.secondary"
                   sx={{ display: "block", mb: 0.5 }}
                 >
-                  {label} *
+                  {label} {required ? "*" : ""}
                 </Typography>
                 <Box role="group" aria-label={label}>
                   <Editor
@@ -150,6 +174,7 @@ export default function CatalogVariableFields({
                     minHeight={150}
                     maxHeight="300px"
                     toolbarVariant="full"
+                    disabled={readOnly}
                   />
                 </Box>
               </Grid>
@@ -163,11 +188,17 @@ export default function CatalogVariableFields({
                   label={label}
                   size="small"
                   fullWidth
-                  required
+                  required={required}
+                  disabled={readOnly}
                   multiline
                   minRows={4}
                   value={value}
                   onChange={(e) => onChange(v.id, e.target.value)}
+                  error={!!validationError}
+                  helperText={validationError}
+                  slotProps={
+                    v.maxLength ? { htmlInput: { maxLength: v.maxLength } } : undefined
+                  }
                 />
               </Grid>
             );
@@ -187,8 +218,9 @@ export default function CatalogVariableFields({
                         : "",
                     )
                   }
+                  disabled={readOnly}
                   slotProps={{
-                    textField: { size: "small", fullWidth: true, required: true },
+                    textField: { size: "small", fullWidth: true, required },
                     field: { clearable: true },
                   }}
                 />
@@ -196,17 +228,19 @@ export default function CatalogVariableFields({
             );
           }
 
-          // File Copy Path is an optional plain text input.
-          const optional = isFileCopyPathField(v);
           return (
             <Grid key={v.id} size={{ xs: 12 }}>
               <TextField
                 label={label}
                 size="small"
                 fullWidth
-                required={!optional}
+                required={required}
+                disabled={readOnly}
                 value={value}
                 onChange={(e) => onChange(v.id, e.target.value)}
+                error={!!validationError}
+                helperText={validationError}
+                slotProps={v.maxLength ? { htmlInput: { maxLength: v.maxLength } } : undefined}
               />
             </Grid>
           );

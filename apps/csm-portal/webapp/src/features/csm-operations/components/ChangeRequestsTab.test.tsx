@@ -41,6 +41,20 @@ vi.mock("@features/csm-dashboard/api/useTeams", () => ({
   useTeams: () => ({ data: [], isLoading: false }),
 }));
 
+// The filter bar's Project control (`AsyncProjectMultiSelect`) goes through
+// the same shared infinite-query hook the cases list uses — stub it out for
+// the same "no QueryClientProvider" reason as the SRE Team mock above.
+vi.mock("@features/csm-cases/api/useProjectSearch", () => ({
+  useInfiniteProjectSearch: () => ({
+    projects: [],
+    isFetching: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    isError: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+
 // Only the column picker's storage key derives from the signed-in user.
 vi.mock("@context/current-user/CurrentUserContext", () => ({
   useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),

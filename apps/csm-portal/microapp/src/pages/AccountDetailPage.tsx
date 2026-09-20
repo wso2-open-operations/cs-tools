@@ -92,7 +92,7 @@ export default function AccountDetailPage() {
             />
           </MetaRow>
           <Divider />
-          <MetaRow label="Account owner">
+          <MetaRow label="Account manager">
             <MetaValue>{a.ownerName || a.ownerId || "—"}</MetaValue>
           </MetaRow>
           <Divider />

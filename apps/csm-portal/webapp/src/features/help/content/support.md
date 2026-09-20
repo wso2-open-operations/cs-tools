@@ -83,6 +83,12 @@ request** action is disabled in both places: closed cases are read-only.
 Service requests aren't available on every project. If the selected project isn't eligible,
 the create form shows a warning and blocks submission.
 
+If the case's project has an onboarding engagement currently in progress, an **Onboarding**
+chip appears alongside the case's severity and state chips at the top of the page. Hover it
+to see the onboarding owner (or "Unassigned" if none is set yet); it's just a pointer back to
+the project's own **Onboarding Owner** field (see Customers → Projects) and disappears once
+onboarding moves past "in progress."
+
 **Escalation** shows the case's current level (EL0 "not escalated" through EL5 "CEO") as a
 badge, with a read-only history of every past escalate/de-escalate step below it — who made
 each change, when, and their stated reason. **Escalate** and **De-escalate** buttons sit next
@@ -135,6 +141,13 @@ customer, or an **internal note**:
 Comments in the timeline are color/role-tagged (Customer, WSO2, System, AI Agent) so you can
 scan who said what at a glance, and each has a permalink (click the timestamp) for referencing
 a specific comment.
+
+Moving a case to **Awaiting info** or **Solution proposed** while it has no public comment yet
+(only internal notes, or none at all) shows a confirm dialog first — the customer would
+otherwise see the case pause on them, or a solution appear, with no explanation of why or
+what's proposed. **Add a comment first** closes the dialog with no change to the case;
+**Proceed anyway** goes ahead with the transition regardless. No other state transition is
+gated this way.
 
 **Request update…**, in the case's **More** menu, posts a customer-visible comment nudging the
 customer for a response — pick a first, second, or final reminder (each shown as a read-only

@@ -18,6 +18,9 @@ package entity
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -202,6 +205,49 @@ type ProjectFeatures struct {
 	HasUsageMetricsReadAccess      bool               `json:"hasUsageMetricsReadAccess"`
 	DefaultCaseProductCategories   []string           `json:"defaultCaseProductCategories,omitempty"`
 	SrProductCategories            []string           `json:"srProductCategories,omitempty"`
+}
+
+// UpdateProjectRequest is the body for PATCH /projects/{id}, which patches a
+// project's AI chat assistant (Novera) settings.
+//
+// Both fields are pointers and omitempty: entity-service accepts exactly ONE
+// per request, so a bool would make "false" indistinguishable from "absent"
+// and every request would look like it set both.
+type UpdateProjectRequest struct {
+	// HasAgent turns the AI assistant on or off for the project.
+	HasAgent *bool `json:"hasAgent,omitempty"`
+	// HasKbReferences controls whether the assistant cites knowledge-base
+	// articles in its answers.
+	HasKbReferences *bool `json:"hasKbReferences,omitempty"`
+}
+
+// FieldCount reports how many settings the request actually sets. The upstream
+// rejects anything other than one, and checking here turns a 400 round trip
+// into an immediate, specific error.
+func (r UpdateProjectRequest) FieldCount() int {
+	n := 0
+	if r.HasAgent != nil {
+		n++
+	}
+	if r.HasKbReferences != nil {
+		n++
+	}
+	return n
+}
+
+// UpdateProjectResponse is entity-service's reply to PATCH /projects/{id}.
+type UpdateProjectResponse struct {
+	Message string            `json:"message"`
+	Project UpdatedProjectRef `json:"project"`
+}
+
+// UpdatedProjectRef is the project as it stands after the patch. Only the
+// fields the caller needs to confirm the change; entity-service returns more.
+type UpdatedProjectRef struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	HasAgent        *bool  `json:"hasAgent,omitempty"`
+	HasKbReferences *bool  `json:"hasKbReferences,omitempty"`
 }
 
 // ProjectMetadataResponse is entity-service's response for GET /projects/{id}/metadata.
@@ -785,6 +831,7 @@ type CaseView struct {
 	// Nullable throughout — nil means the upstream gave no value.
 	SLAResponseTime       *string    `json:"slaResponseTime"`
 	ClosedBy              *EntityRef `json:"closedBy"`
+	CloseNotes            *string    `json:"closeNotes"`
 	HasAutoClosed         *bool      `json:"hasAutoClosed"`
 	EngagementStartDate   *string    `json:"engagementStartDate"`
 	EngagementEndDate     *string    `json:"engagementEndDate"`
@@ -904,11 +951,62 @@ type CreateDeployedProductRequest struct {
 	Description  *string  `json:"description,omitempty"`
 }
 
+// parseFlexibleTime parses datetime or date-only values from multiple formats
+// returned across ServiceNow, Choreo, and Go entity-service backends.
+func parseFlexibleTime(v any) (*time.Time, error) {
+	if v == nil {
+		return nil, nil
+	}
+	switch val := v.(type) {
+	case string:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return nil, nil
+		}
+		layouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02 15:04:05",
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02T15:04:05",
+			"01-02-2006 15:04:05",
+			"2006-01-02",
+		}
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, val); err == nil {
+				return &t, nil
+			}
+		}
+		return nil, fmt.Errorf("cannot parse date %q", val)
+	default:
+		return nil, fmt.Errorf("unexpected date type %T", v)
+	}
+}
+
 // CreatedDeployedProduct carries the key fields of a newly created deployed product.
 type CreatedDeployedProduct struct {
 	ID        string    `json:"id"`
 	CreatedOn time.Time `json:"createdOn"`
 	CreatedBy string    `json:"createdBy"`
+}
+
+func (p *CreatedDeployedProduct) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID        string `json:"id"`
+		CreatedOn any    `json:"createdOn"`
+		CreatedBy string `json:"createdBy"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ID = raw.ID
+	p.CreatedBy = raw.CreatedBy
+	if t, err := parseFlexibleTime(raw.CreatedOn); err != nil {
+		return err
+	} else if t != nil {
+		p.CreatedOn = *t
+	}
+	return nil
 }
 
 // CreateDeployedProductResponse is entity-service's response for POST /deployed-products.
@@ -917,7 +1015,15 @@ type CreateDeployedProductResponse struct {
 	DeployedProduct CreatedDeployedProduct `json:"deployedProduct"`
 }
 
+// DeployedProductFilters scopes deployed-product search by deployment, project, or category.
+type DeployedProductFilters struct {
+	DeploymentIDs     []string `json:"deploymentIds,omitempty"`
+	ProjectIDs        []string `json:"projectIds,omitempty"`
+	ProductCategories []string `json:"productCategories,omitempty"`
+}
+
 // SearchDeployedProductsRequest is the input for POST /deployed-products/search.
+// DeploymentIDs scopes results to the given deployments; it is the only filter besides pagination.
 type SearchDeployedProductsRequest struct {
 	Pagination    Pagination `json:"pagination"`
 	DeploymentIDs []string   `json:"deploymentIds,omitempty"`
@@ -931,19 +1037,174 @@ type DeployedProductVersionRef struct {
 	SupportEoLDate *time.Time `json:"supportEoLDate"`
 }
 
+func (v *DeployedProductVersionRef) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		ReleasedDate   any    `json:"releasedDate"`
+		ReleasedOn     any    `json:"releasedOn"`
+		SupportEoLDate any    `json:"supportEoLDate"`
+		EndOfLifeOn    any    `json:"endOfLifeOn"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	v.ID = raw.ID
+	v.Name = raw.Name
+
+	rel := raw.ReleasedDate
+	if rel == nil {
+		rel = raw.ReleasedOn
+	}
+	if rel != nil {
+		if t, err := parseFlexibleTime(rel); err != nil {
+			return err
+		} else if t != nil {
+			v.ReleasedDate = t
+		}
+	}
+
+	eol := raw.SupportEoLDate
+	if eol == nil {
+		eol = raw.EndOfLifeOn
+	}
+	if eol != nil {
+		if t, err := parseFlexibleTime(eol); err != nil {
+			return err
+		} else if t != nil {
+			v.SupportEoLDate = t
+		}
+	}
+	return nil
+}
+
 // DeployedProductView is a single search result item from POST /deployed-products/search.
 // Cores, TPS, and Category are ServiceNow-only fields, always nil on the
 // Postgres data source.
 type DeployedProductView struct {
 	ID         string                     `json:"id"`
 	Deployment EntityRef                  `json:"deployment"`
-	Product    EntityRef                  `json:"product"`
+	Product    ProductEntityRef           `json:"product"`
 	Version    *DeployedProductVersionRef `json:"version"`
 	Cores      *string                    `json:"cores"`
 	TPS        *string                    `json:"tps"`
 	Category   *string                    `json:"category"`
-	CreatedOn  time.Time                  `json:"createdOn"`
-	UpdatedOn  time.Time                  `json:"updatedOn"`
+	// Description is the customer's own note about this deployed product.
+	// Editable via PATCH, so the read path must carry it too — without it a
+	// client cannot show the current value before changing it.
+	Description *string `json:"description"`
+	// Updates is the deployed product's update-level history as recorded
+	// upstream. entity-service has always returned it; this backend simply
+	// never decoded it, which left the portal unable to work out which update
+	// levels are still pending for a deployment.
+	Updates   []ProductUpdateEntry `json:"updates"`
+	CreatedOn time.Time            `json:"createdOn"`
+	UpdatedOn time.Time            `json:"updatedOn"`
+}
+
+// ProductEntityRef mirrors entity-service's ProductRef: a product reference
+// carrying the short key ServiceNow holds alongside the display name.
+//
+// Abbreviation ("wso2am", "wso2is") is the only identifier the product-updates
+// service recognises — it keys update levels by that, while Name is the display
+// form ("WSO2 API Manager"). The two vocabularies have no overlap, so dropping
+// this field is what left deployed products unmatchable against the update
+// catalogue.
+type ProductEntityRef struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Abbreviation *string `json:"abbreviation,omitempty"`
+}
+
+// ProductUpdateEntry mirrors entity-service's ProductUpdateEntry — one
+// update-level change recorded against a deployed product.
+type ProductUpdateEntry struct {
+	UpdateLevel int `json:"updateLevel"`
+	// Date is a date-only "YYYY-MM-DD" string, matching the upstream wire format.
+	Date    string  `json:"date"`
+	Details *string `json:"details"`
+}
+
+func (d *DeployedProductView) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID          string                     `json:"id"`
+		Deployment  EntityRef                  `json:"deployment"`
+		Product     ProductEntityRef           `json:"product"`
+		Version     *DeployedProductVersionRef `json:"version"`
+		Cores       json.RawMessage            `json:"cores"`
+		TPS         json.RawMessage            `json:"tps"`
+		Category    json.RawMessage            `json:"category"`
+		Description *string                    `json:"description"`
+		Updates     []ProductUpdateEntry       `json:"updates"`
+		CreatedOn   any                        `json:"createdOn"`
+		UpdatedOn   any                        `json:"updatedOn"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	d.ID = raw.ID
+	d.Deployment = raw.Deployment
+	d.Product = raw.Product
+	d.Version = raw.Version
+	d.Updates = raw.Updates
+	d.Description = raw.Description
+
+	if len(raw.Cores) > 0 && string(raw.Cores) != "null" {
+		var s string
+		if err := json.Unmarshal(raw.Cores, &s); err == nil {
+			d.Cores = &s
+		} else {
+			var n float64
+			if err := json.Unmarshal(raw.Cores, &n); err == nil {
+				str := fmt.Sprintf("%.0f", n)
+				d.Cores = &str
+			}
+		}
+	}
+
+	if len(raw.TPS) > 0 && string(raw.TPS) != "null" {
+		var s string
+		if err := json.Unmarshal(raw.TPS, &s); err == nil {
+			d.TPS = &s
+		} else {
+			var f float64
+			if err := json.Unmarshal(raw.TPS, &f); err == nil {
+				str := strconv.FormatFloat(f, 'f', -1, 64)
+				d.TPS = &str
+			}
+		}
+	}
+
+	if len(raw.Category) > 0 && string(raw.Category) != "null" {
+		var s string
+		if err := json.Unmarshal(raw.Category, &s); err == nil {
+			d.Category = &s
+		} else {
+			var obj struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(raw.Category, &obj); err == nil {
+				if obj.Name != "" {
+					d.Category = &obj.Name
+				} else if obj.ID != "" {
+					d.Category = &obj.ID
+				}
+			}
+		}
+	}
+
+	if t, err := parseFlexibleTime(raw.CreatedOn); err != nil {
+		return err
+	} else if t != nil {
+		d.CreatedOn = *t
+	}
+	if t, err := parseFlexibleTime(raw.UpdatedOn); err != nil {
+		return err
+	} else if t != nil {
+		d.UpdatedOn = *t
+	}
+	return nil
 }
 
 // SearchDeployedProductsResponse is entity-service's response for POST /deployed-products/search.
@@ -953,6 +1214,26 @@ type SearchDeployedProductsResponse struct {
 	Limit            int                   `json:"limit"`
 	Offset           int                   `json:"offset"`
 	HasMore          bool                  `json:"hasMore"`
+}
+
+func (r *SearchDeployedProductsResponse) UnmarshalJSON(data []byte) error {
+	type Alias SearchDeployedProductsResponse
+	aux := struct {
+		*Alias
+		TotalRecords int `json:"totalRecords"`
+	}{
+		Alias: (*Alias)(r),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if r.Total == 0 && aux.TotalRecords > 0 {
+		r.Total = aux.TotalRecords
+	}
+	if !r.HasMore && r.Limit > 0 && r.Offset+r.Limit < r.Total {
+		r.HasMore = true
+	}
+	return nil
 }
 
 // UpdateDeployedProductRequest is the input for PATCH /deployed-products/{id}.
@@ -969,7 +1250,16 @@ type UpdateDeployedProductRequest struct {
 	Cores        *int            `json:"cores,omitempty"`
 	TPS          *float64        `json:"tps,omitempty"`
 	Description  json.RawMessage `json:"description,omitempty"`
-	Active       *bool           `json:"active,omitempty"`
+	// Updates whole-array-replaces the deployed product's update-level history.
+	//
+	// It is a pointer to a slice, not a slice, so that a caller-supplied empty
+	// array (clear the history) stays distinguishable from an absent field
+	// (leave it alone): encoding/json's omitempty drops a zero-length slice
+	// regardless of nil-ness, so only a non-nil pointer to an empty slice
+	// serialises as "[]" rather than being dropped. entity-service's own SN
+	// payload uses the same shape for the same reason.
+	Updates *[]ProductUpdateEntry `json:"updates,omitempty"`
+	Active  *bool                 `json:"active,omitempty"`
 }
 
 // UpdatedDeployedProduct carries the fields that may change after an update.
@@ -977,6 +1267,25 @@ type UpdatedDeployedProduct struct {
 	ID        string    `json:"id"`
 	UpdatedOn time.Time `json:"updatedOn"`
 	UpdatedBy string    `json:"updatedBy"`
+}
+
+func (p *UpdatedDeployedProduct) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID        string `json:"id"`
+		UpdatedOn any    `json:"updatedOn"`
+		UpdatedBy string `json:"updatedBy"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ID = raw.ID
+	p.UpdatedBy = raw.UpdatedBy
+	if t, err := parseFlexibleTime(raw.UpdatedOn); err != nil {
+		return err
+	} else if t != nil {
+		p.UpdatedOn = *t
+	}
+	return nil
 }
 
 // UpdateDeployedProductResponse is entity-service's response for PATCH /deployed-products/{id}.
@@ -1588,6 +1897,7 @@ type SearchChangeRequestView struct {
 	Type             *string    `json:"type"`
 	CreatedOn        string     `json:"createdOn"`
 	UpdatedOn        string     `json:"updatedOn"`
+	UpdatedBy        string     `json:"updatedBy,omitempty"`
 }
 
 // SearchChangeRequestsResponse is entity-service's response for POST /change-requests/search.
@@ -1707,10 +2017,10 @@ type CreateCallRequestRequest struct {
 
 // CallRequestCreated carries the key fields of a newly created call request.
 type CallRequestCreated struct {
-	ID        string `json:"id"`
-	CreatedOn string `json:"createdOn"`
-	CreatedBy string `json:"createdBy"`
-	State     string `json:"state"`
+	ID        string           `json:"id"`
+	CreatedOn string           `json:"createdOn"`
+	CreatedBy string           `json:"createdBy"`
+	State     CallRequestState `json:"state"`
 }
 
 // CreateCallRequestResponse is entity-service's response for POST /call-requests.
@@ -1719,11 +2029,51 @@ type CreateCallRequestResponse struct {
 	CallRequest CallRequestCreated `json:"callRequest"`
 }
 
-// CallRequestState holds the state of a call request: ID is the string state
-// enum key, Label is the human-readable display label.
+// CallRequestState holds the state of a call request: ID is the state
+// enum key or numeric choice key string, Label is the human-readable display label.
 type CallRequestState struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+}
+
+// UnmarshalJSON handles string enum, numeric choice key, or ChoiceListItem object formats.
+func (s *CallRequestState) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	// Case 1: Raw string enum (e.g. "pending_on_wso2")
+	if data[0] == '"' {
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return err
+		}
+		s.ID = str
+		s.Label = str
+		return nil
+	}
+	// Case 2: Object with ID (int or string) and Label (e.g. {"id": 2, "label": "Pending on WSO2"})
+	var raw struct {
+		ID    json.RawMessage `json:"id"`
+		Label string          `json:"label"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.Label = raw.Label
+	if len(raw.ID) > 0 {
+		var num int
+		if err := json.Unmarshal(raw.ID, &num); err == nil {
+			s.ID = strconv.Itoa(num)
+		} else {
+			var str string
+			if err := json.Unmarshal(raw.ID, &str); err == nil {
+				s.ID = str
+			} else {
+				s.ID = string(raw.ID)
+			}
+		}
+	}
+	return nil
 }
 
 // CallRequestCaseRef is a reference to a case embedded in a call request.

@@ -291,6 +291,15 @@ type AccountView struct {
 	CreatedOn        string     `json:"createdOn"`
 	CreatedBy        *string    `json:"createdBy"`
 	UpdatedOn        string     `json:"updatedOn"`
+	// IsPartner is whether this account is itself a partner organization. Named/derived at
+	// this layer from ServiceNow's raw `customer_account.partner` passthrough (ServiceNow
+	// data source only).
+	IsPartner *bool `json:"isPartner"`
+	// HasPrimaryPartner is whether this account has a primary partner account set. Derived
+	// at this layer as "ServiceNow's customer_account.u_primary_partner_account_id reference
+	// is non-nil" -- the raw reference itself is not exposed, only this boolean (ServiceNow
+	// data source only).
+	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
 }
 
 // SearchAccountsResponse is the paginated result of an account search, unified
@@ -337,6 +346,50 @@ type AccountDetail struct {
 	CreatedOn        string     `json:"createdOn"`
 	CreatedBy        *string    `json:"createdBy"`
 	UpdatedOn        string     `json:"updatedOn"`
+	// IsPartner is whether this account is itself a partner organization (ServiceNow data
+	// source only). Mirrors AccountView.IsPartner.
+	IsPartner *bool `json:"isPartner"`
+	// HasPrimaryPartner is whether this account has a primary partner account set
+	// (ServiceNow data source only). Mirrors AccountView.HasPrimaryPartner.
+	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
+}
+
+const (
+	SalesforceEventCreated   = "CREATED"
+	SalesforceEventUpdated   = "UPDATED"
+	SalesforceEventDeleted   = "DELETED"
+	SalesforceEventRestored  = "RESTORED"
+	SalesforceEventUndefined = "UNDEFINED"
+	SalesforceEntityAccount  = "Account"
+	SalesforceSyncActor      = "salesforce-sync"
+)
+
+// SalesforceEventRequest is the ASB envelope POSTed to /salesforce/events.
+type SalesforceEventRequest struct {
+	EventType   string `json:"eventType"`
+	Entity      string `json:"entity"`
+	ReferenceID string `json:"referenceId"`
+}
+
+// SalesforceAccountUpsert is the mapped Salesforce Account written to account.
+type SalesforceAccountUpsert struct {
+	SfID                      string
+	Name                      string
+	Number                    string
+	Industry                  *string
+	Region                    *string
+	GlobalPod                 *string
+	Phone                     *string
+	KeepExistingPhone         bool
+	SalesRegion               *string
+	SubRegion                 *string
+	AccountVertical           *string
+	LifeCycle                 *string
+	NAICSIndustry             *string
+	SubIndustry               *string
+	Classification            *string
+	TechnicalOwnerID          *string
+	SecondaryTechnicalOwnerID *string
 }
 
 // SubscriptionType classifies the subscription type of a project.
@@ -366,17 +419,24 @@ const (
 	ClosureStatusSuspended  ClosureStatus = "suspended"
 )
 
-// Project represents a customer project linked to an account.
+// Project represents a customer project linked to an account. This is an
+// internal repository<->service handoff type for SearchProjects, never
+// serialized directly to a caller (ProjectView is). AccountID/StartDate/
+// EndDate are pointers because project.account_id/start_date/end_date
+// (migration 000009) are all nullable columns and genuinely NULL on live
+// data (confirmed: 14/1956, 13/1956, 14/1956 rows respectively) -- matching
+// ProjectDetailsView's own StartDate/EndDate, which document the same
+// "may legitimately be unset" reality.
 type Project struct {
 	ID               string           `json:"id"`
-	AccountID        string           `json:"accountId"`
+	AccountID        *string          `json:"accountId"`
 	SfID             string           `json:"sfId"`
 	Name             string           `json:"name"`
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
 	ClosureStatus    *ClosureStatus   `json:"closureStatus"`
-	StartDate        time.Time        `json:"startDate"`
-	EndDate          time.Time        `json:"endDate"`
+	StartDate        *time.Time       `json:"startDate"`
+	EndDate          *time.Time       `json:"endDate"`
 	CreatedOn        time.Time        `json:"createdOn"`
 	UpdatedOn        time.Time        `json:"updatedOn"`
 }
@@ -396,6 +456,10 @@ type ProjectAccountRef struct {
 	// Ballerina's ProjectResponse.account and the portal's ProjectDetailsAccount.
 	OwnerEmail          *string `json:"ownerEmail"`
 	TechnicalOwnerEmail *string `json:"technicalOwnerEmail"`
+	// IsPartner is whether this project's linked account is itself a partner organization
+	// (ServiceNow data source only). Mirrors AccountView.IsPartner, surfaced through the
+	// project's nested account object; there is no project-level primary-partner concept.
+	IsPartner *bool `json:"isPartner"`
 }
 
 // ProjectClosureFields groups the ServiceNow-only closure-tracking fields
@@ -457,10 +521,14 @@ type ProjectDetailsView struct {
 	Name             string            `json:"name"`
 	Key              string            `json:"key"`
 	SubscriptionType SubscriptionType  `json:"subscriptionType"`
-	StartDate        time.Time         `json:"startDate"`
-	EndDate          time.Time         `json:"endDate"`
-	CreatedOn        time.Time         `json:"createdOn"`
-	UpdatedOn        time.Time         `json:"updatedOn"`
+	// StartDate/EndDate are pointers: ServiceNow may legitimately leave either
+	// unset on a project, and a nil date must round-trip as JSON null rather
+	// than a fabricated zero-value timestamp. Matches ProjectView's StartDate/
+	// EndDate, and the other optional dates on this struct (GoLiveDate, etc.).
+	StartDate *time.Time `json:"startDate"`
+	EndDate   *time.Time `json:"endDate"`
+	CreatedOn time.Time  `json:"createdOn"`
+	UpdatedOn time.Time  `json:"updatedOn"`
 	ProjectEngagementFields
 	// HasSr is the backing data source's own precomputed answer to whether
 	// this project is eligible to raise service requests.
@@ -470,7 +538,7 @@ type ProjectDetailsView struct {
 	// onboarding. Nil when no owner is assigned — most projects, since only
 	// onboarding-enabled projects have one. Currently populated only from
 	// the ServiceNow data source.
-	OnboardingOwner *PersonRef `json:"onboardingOwner,omitempty"`
+	OnboardingOwner *PersonRef `json:"onboardingOwner"`
 }
 
 // ProjectUpdateRequest is the input for PATCH /projects/{id} (ServiceNow data
@@ -530,6 +598,38 @@ type SearchProjectsRequest struct {
 	// converted to the backing data source's internal id before dispatch
 	// (ServiceNow data source only).
 	AccountID string `json:"accountId"`
+	// OnboardingStatus filters to projects whose onboarding status is one of
+	// the given values (ServiceNow data source only).
+	OnboardingStatus []string `json:"onboardingStatus"`
+	// ArrTodayGte filters to projects whose linked account's current ARR is
+	// greater than or equal to this value (ServiceNow data source only).
+	ArrTodayGte string `json:"arrTodayGte"`
+	// SubRegion filters to projects whose linked account is in this sub-region
+	// (ServiceNow data source only).
+	SubRegion string `json:"subRegion"`
+}
+
+// ProjectSearchAccountRef is the account reference embedded in a project
+// search result. Richer than EntityRef — which is reused across many
+// unrelated non-account references elsewhere in this file — because the
+// onboarding-scoped dashboard queries need the account's region, sub-region,
+// and current ARR alongside the plain id/name every project search already
+// returned. Mirrors the account fields ProjectAccountRef already carries for
+// the single-project detail response; kept as its own type rather than
+// reusing ProjectAccountRef directly because that type also carries
+// detail-only fields (tier, agent/KB flags, owner emails) that have no place
+// on a list row.
+type ProjectSearchAccountRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Region/SubRegion/ArrToday are nil when the backing data source has no
+	// value recorded (ServiceNow data source only).
+	Region    *string `json:"region"`
+	SubRegion *string `json:"subRegion"`
+	ArrToday  *string `json:"arrToday"`
+	// IsPartner is whether this project's linked account is itself a partner organization
+	// (ServiceNow data source only). Mirrors ProjectAccountRef.IsPartner.
+	IsPartner *bool `json:"isPartner"`
 }
 
 // ProjectView is the unified search result shape returned for all data sources.
@@ -552,8 +652,15 @@ type ProjectView struct {
 	// ProjectListItem types it as a required number.
 	ActiveCasesCount int `json:"activeCasesCount"`
 	// Account is nil when the project has no linked account (ServiceNow data source only).
-	Account *EntityRef `json:"account"`
+	Account *ProjectSearchAccountRef `json:"account"`
 	ProjectClosureFields
+	// OnboardingStatus is the project's onboarding status, nil when not
+	// tracked for this project (ServiceNow data source only).
+	OnboardingStatus *string `json:"onboardingStatus"`
+	// OnboardingOwner is the person assigned to run this project's
+	// onboarding. Nil when no owner is assigned — most projects, since only
+	// onboarding-enabled projects have one (ServiceNow data source only).
+	OnboardingOwner *PersonRef `json:"onboardingOwner"`
 }
 
 // SearchProjectsResponse is the paginated result of a project search.
@@ -563,6 +670,113 @@ type SearchProjectsResponse struct {
 	Limit    int           `json:"limit"`
 	Offset   int           `json:"offset"`
 	HasMore  bool          `json:"hasMore"`
+}
+
+// --- opportunities, invoices, project-opportunity links (ServiceNow data source only) ---
+//
+// Sourced from ServiceNow's Salesforce-sync tables (u_sf_opportunity, u_sf_invoice,
+// u_sf_link_opportunity) via the Ballerina entity-service's generic Table API reads -- there
+// is no scoped-app resource and no Postgres equivalent for any of these three. Read-only: no
+// write path is exposed for any of them.
+
+// Opportunity is a sales opportunity, optionally linked to an account (ServiceNow data source
+// only). Every field but ID is nilable: ServiceNow can omit any of them entirely for a
+// sparsely-populated row.
+type Opportunity struct {
+	ID   string  `json:"id"`
+	Name *string `json:"name"`
+	// Account is the opportunity's linked account, nil when absent.
+	Account            *EntityRef `json:"account"`
+	EulaVersion        *string    `json:"eulaVersion"`
+	EulaVersionDecimal *string    `json:"eulaVersionDecimal"`
+}
+
+// SearchOpportunitiesRequest is the input for searching opportunities (ServiceNow data
+// source only).
+type SearchOpportunitiesRequest struct {
+	Pagination Pagination `json:"pagination"`
+	// AccountID filters to opportunities linked to this account. Platform UUID, converted to
+	// the backing data source's internal id before dispatch.
+	AccountID string `json:"accountId"`
+}
+
+// SearchOpportunitiesResponse is the paginated result of an opportunity search.
+type SearchOpportunitiesResponse struct {
+	Opportunities []Opportunity `json:"opportunities"`
+	Total         int           `json:"total"`
+	Limit         int           `json:"limit"`
+	Offset        int           `json:"offset"`
+	HasMore       bool          `json:"hasMore"`
+}
+
+// Invoice is a billing invoice, optionally linked to an opportunity (ServiceNow data source
+// only). Every field but ID is nilable: ServiceNow can omit any of them entirely for a
+// sparsely-populated row.
+type Invoice struct {
+	ID             string  `json:"id"`
+	Name           *string `json:"name"`
+	InvoicedAmount *string `json:"invoicedAmount"`
+	// InvoiceDate is a date-only value (YYYY-MM-DD), matching openapi.yaml's `format: date`.
+	InvoiceDate *string `json:"invoiceDate"`
+	// InvoicedPaidDate is the date the invoice was paid, nil if unpaid or not tracked.
+	InvoicedPaidDate *string `json:"invoicedPaidDate"`
+	InvoicedDueDate  *string `json:"invoicedDueDate"`
+	// InvoiceOriginalDueDate is the invoice's original due date before any extension
+	// (ServiceNow `u_original_invoice_due_date`).
+	InvoiceOriginalDueDate *string `json:"invoiceOriginalDueDate"`
+	// Opportunity is the invoice's linked opportunity, nil when absent.
+	Opportunity *EntityRef `json:"opportunity"`
+	// Classification is a short code (e.g. "CL"), nil when not set.
+	Classification *string `json:"classification"`
+}
+
+// SearchInvoicesRequest is the input for searching invoices (ServiceNow data source only).
+type SearchInvoicesRequest struct {
+	Pagination Pagination `json:"pagination"`
+	// OpportunityID filters to invoices linked to this opportunity. Platform UUID, converted
+	// to the backing data source's internal id before dispatch.
+	OpportunityID string `json:"opportunityId"`
+}
+
+// SearchInvoicesResponse is the paginated result of an invoice search.
+type SearchInvoicesResponse struct {
+	Invoices []Invoice `json:"invoices"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+	HasMore  bool      `json:"hasMore"`
+}
+
+// ProjectOpportunityLink links a project to an opportunity (ServiceNow data source only). A
+// project may have more than one linked opportunity -- one row per link. Every field but ID
+// is nilable: ServiceNow can omit either reference entirely for a sparsely-populated row.
+type ProjectOpportunityLink struct {
+	ID          string     `json:"id"`
+	Project     *EntityRef `json:"project"`
+	Opportunity *EntityRef `json:"opportunity"`
+}
+
+// SearchProjectOpportunityLinksRequest is the input for searching project-opportunity links
+// (ServiceNow data source only). At least one of ProjectID/OpportunityID should be supplied by
+// the caller; an entirely unfiltered search is allowed but returns every link row.
+type SearchProjectOpportunityLinksRequest struct {
+	Pagination Pagination `json:"pagination"`
+	// ProjectID filters to links for this project. Platform UUID, converted to the backing
+	// data source's internal id before dispatch.
+	ProjectID string `json:"projectId"`
+	// OpportunityID filters to links for this opportunity. Platform UUID, converted to the
+	// backing data source's internal id before dispatch.
+	OpportunityID string `json:"opportunityId"`
+}
+
+// SearchProjectOpportunityLinksResponse is the paginated result of a project-opportunity
+// link search.
+type SearchProjectOpportunityLinksResponse struct {
+	Links   []ProjectOpportunityLink `json:"links"`
+	Total   int                      `json:"total"`
+	Limit   int                      `json:"limit"`
+	Offset  int                      `json:"offset"`
+	HasMore bool                     `json:"hasMore"`
 }
 
 // --- project metadata/stats (ServiceNow data source only) ---
@@ -996,16 +1210,40 @@ type DeployedProductVersionRef struct {
 type DeployedProductView struct {
 	ID         string                     `json:"id"`
 	Deployment EntityRef                  `json:"deployment"`
-	Product    EntityRef                  `json:"product"`
+	Product    ProductRef                 `json:"product"`
 	Version    *DeployedProductVersionRef `json:"version"`
 	Cores      *int                       `json:"cores"`
 	TPS        *float64                   `json:"tps"`
 	Category   *string                    `json:"category"`
+	// Description is the customer's own free-text note about this deployed
+	// product. It is editable through the update endpoint, so it has to be
+	// readable here too — otherwise a client cannot show the current value
+	// before changing it.
+	Description *string `json:"description"`
 	// Updates is the deployed product's update-level history, most-recent-first as
 	// returned by the backing data source. Nil/empty when none have been recorded.
 	Updates   []ProductUpdateEntry `json:"updates"`
 	CreatedOn time.Time            `json:"createdOn"`
 	UpdatedOn time.Time            `json:"updatedOn"`
+}
+
+// ProductRef is a reference to a product, carrying the short key ServiceNow
+// holds alongside the display name.
+//
+// It exists rather than reusing EntityRef because Abbreviation is the only
+// identifier the product-updates catalogue understands: that service keys its
+// update levels as "wso2am"/"wso2is"/"wso2mi", while Name is the display form
+// ("WSO2 API Manager"). Without this field a caller has no way to look up a
+// deployed product's update levels, since the two vocabularies share nothing.
+//
+// It is the same key ServiceNow matches on in cmdb_software_product_model, so
+// it is the product's identity rather than a convenience alias.
+type ProductRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Abbreviation is absent on the Postgres data source, whose products table
+	// has no equivalent column — it is populated only from ServiceNow.
+	Abbreviation *string `json:"abbreviation,omitempty"`
 }
 
 // ProductUpdateEntry records a single update-level change applied to a deployed product
@@ -1019,10 +1257,13 @@ type ProductUpdateEntry struct {
 }
 
 // SearchDeployedProductsRequest is the input for a deployed-product search operation.
-// DeploymentIDs scopes results to the given deployments; it is the only filter besides pagination.
+// DeploymentIDs scopes results to the given deployments. ProductCategories, when non-empty,
+// additionally filters results to deployed products in one of the given categories (e.g.
+// "pdp"); it is optional and combines with DeploymentIDs rather than replacing it.
 type SearchDeployedProductsRequest struct {
-	Pagination    Pagination `json:"pagination"`
-	DeploymentIDs []string   `json:"deploymentIds"`
+	Pagination        Pagination `json:"pagination"`
+	DeploymentIDs     []string   `json:"deploymentIds"`
+	ProductCategories []string   `json:"productCategories,omitempty"`
 }
 
 // SearchDeployedProductsResponse is the paginated result of a deployed-product search.
@@ -1226,6 +1467,7 @@ const (
 	CaseSortFieldUpdatedOn CaseSortField = "updatedOn"
 	CaseSortFieldSeverity  CaseSortField = "severity"
 	CaseSortFieldState     CaseSortField = "state"
+	CaseSortFieldAssignee  CaseSortField = "assignee"
 )
 
 // CaseSortOrder controls the sort direction.
@@ -1246,22 +1488,35 @@ type CaseSort struct {
 // ClosedOn and WorkState are the only nullable fields; all others are required.
 // Used as the response for write operations (create/update).
 type Case struct {
-	ID                string         `json:"id"`
-	Number            string         `json:"number"`
-	InternalID        string         `json:"internalId"`
-	CreatedBy         string         `json:"createdBy"`
-	ProjectID         string         `json:"projectId"`
-	DeploymentID      string         `json:"deploymentId"`
-	DeployedProductID string         `json:"deployedProductId"`
-	Subject           string         `json:"subject"`
-	Description       string         `json:"description"`
-	Severity          CaseSeverity   `json:"severity"`
-	IssueType         CaseIssueType  `json:"issueType"`
-	State             CaseState      `json:"state"`
-	WorkState         *CaseWorkState `json:"workState"`
-	CreatedOn         time.Time      `json:"createdOn"`
-	UpdatedOn         time.Time      `json:"updatedOn"`
-	ClosedOn          *time.Time     `json:"closedOn"`
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	// InternalID (work_item.wso2_id) stays a required, non-nullable string
+	// ("" when the column is NULL/blank) -- entity-service's own OpenAPI
+	// spec, the customer-portal Ballerina client, and backend-v2 all
+	// declare it non-nullable, so this can't become *string without a
+	// coordinated cross-repo contract change. See case_repo.go's own
+	// comment on this for the scan-side fix that avoids a NULL-scan panic
+	// without changing this wire type.
+	InternalID        string `json:"internalId"`
+	CreatedBy         string `json:"createdBy"`
+	ProjectID         string `json:"projectId"`
+	DeploymentID      string `json:"deploymentId"`
+	DeployedProductID string `json:"deployedProductId"`
+	Subject           string `json:"subject"`
+	Description       string `json:"description"`
+	// Severity/IssueType are null in practice for most real cases (confirmed
+	// against production data: ~86%/~99% of cases have no severity/issue
+	// type set on "case") -- not an edge case, the common case.
+	Severity  *CaseSeverity  `json:"severity"`
+	IssueType *CaseIssueType `json:"issueType"`
+	// State is null only for a handful of real cases, but "case".state is
+	// nullable and observed null in practice, so this stays consistent with
+	// Severity/IssueType rather than assuming it never happens.
+	State     *CaseState     `json:"state"`
+	WorkState *CaseWorkState `json:"workState"`
+	CreatedOn time.Time      `json:"createdOn"`
+	UpdatedOn time.Time      `json:"updatedOn"`
+	ClosedOn  *time.Time     `json:"closedOn"`
 }
 
 // AssignedEngineerRef is a compact reference to an assigned support engineer.
@@ -1410,14 +1665,19 @@ type DeployedProductRef struct {
 
 // CaseView is the enriched read representation of a case.
 type CaseView struct {
-	ID             string         `json:"id"`
-	Number         string         `json:"number"`
-	InternalID     string         `json:"internalId"`
-	Subject        string         `json:"subject"`
-	Description    string         `json:"description"`
-	Severity       CaseSeverity   `json:"severity"`
-	IssueType      CaseIssueType  `json:"issueType"`
-	State          CaseState      `json:"state"`
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	// InternalID (work_item.wso2_id) stays a required, non-nullable string
+	// -- see domain.Case's own doc comment for why.
+	InternalID  string `json:"internalId"`
+	Subject     string `json:"subject"`
+	Description string `json:"description"`
+	// Severity/IssueType/State are null in practice for a large share of
+	// real cases -- see domain.Case's own doc comment for the confirmed
+	// production null rates.
+	Severity       *CaseSeverity  `json:"severity"`
+	IssueType      *CaseIssueType `json:"issueType"`
+	State          *CaseState     `json:"state"`
 	WorkState      *CaseWorkState `json:"workState"`
 	Type           *string        `json:"type"`
 	EngagementType *string        `json:"engagementType"`
@@ -1427,8 +1687,11 @@ type CaseView struct {
 	// CreatedBy is the canonical user reference for the case creator. Its id is
 	// populated only where the backing data source already supplies one, and
 	// null otherwise: see UserReference.
-	CreatedBy              *UserReference      `json:"createdBy"`
-	ProjectDetails         EntityRef           `json:"project"`
+	CreatedBy *UserReference `json:"createdBy"`
+	// ProjectDetails is null for a case with no project linked -- a real,
+	// valid state on the Postgres data source (work_item.project_id has no
+	// NOT NULL constraint).
+	ProjectDetails         *EntityRef          `json:"project"`
 	DeploymentDetails      *EntityRef          `json:"deployment"`
 	DeployedProductDetails *DeployedProductRef `json:"deployedProduct"`
 	Catalog                *EntityRef          `json:"catalog"`
@@ -1472,7 +1735,8 @@ type CaseView struct {
 	ResolutionCode  *CaseResolutionCode `json:"resolutionCode"`
 	Cause           *CaseCause          `json:"cause"`
 	ResolutionNotes *string             `json:"resolutionNotes"`
-	// WatchList is the set of users watching the case (ServiceNow data source only).
+	// WatchList is the set of users watching the case. For the Postgres data
+	// source this is backed by work_item_watcher (migration 000040).
 	WatchList []WatchListUser `json:"watchList,omitempty"`
 	// AutoclosureStep indicates where the case sits in ServiceNow's staged auto-closure
 	// sequence: DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT. Read-only —
@@ -1510,6 +1774,7 @@ type CaseView struct {
 	// Names mirror the Ballerina entity-service CaseResponse record.
 	SLAResponseTime       *string    `json:"slaResponseTime"`
 	ClosedBy              *EntityRef `json:"closedBy"`
+	CloseNotes            *string    `json:"closeNotes"`
 	HasAutoClosed         *bool      `json:"hasAutoClosed"`
 	EngagementStartDate   *string    `json:"engagementStartDate"`
 	EngagementEndDate     *string    `json:"engagementEndDate"`
@@ -1579,9 +1844,13 @@ type CaseFilterBranch struct {
 // where the pre-redesign per-field validation and query/payload-building
 // logic still lives, unchanged.
 type ParsedCaseFilters struct {
-	Types             []string
-	ProjectIDs        []string
-	DeploymentIDs     []string
+	Types         []string
+	ProjectIDs    []string
+	DeploymentIDs []string
+	// ExcludeProjectIDs filters to cases whose project is NOT one of these
+	// project UUIDs (optional). Inverse of ProjectIDs, and the two are
+	// independent: a request may carry either, both, or neither.
+	ExcludeProjectIDs []string
 	States            []CaseState
 	Severities        []CaseSeverity
 	IssueTypes        []CaseIssueType
@@ -1654,6 +1923,10 @@ type ParsedCaseFilters struct {
 	SreTeamIDs []string
 	// AccountIDs filters to cases belonging to one of these customer_account UUIDs (optional).
 	AccountIDs []string
+	// ExcludeAccountIDs filters to cases whose parent account is NOT one of
+	// these customer_account UUIDs (optional). Inverse of AccountIDs, and the
+	// two are independent: a request may carry either, both, or neither.
+	ExcludeAccountIDs []string
 	// Unassigned, when true, filters to cases with no assigned engineer. false and
 	// omitted are treated identically (optional).
 	Unassigned bool
@@ -1800,7 +2073,9 @@ type AggregateResponse struct {
 // SearchCaseView is the unified case representation returned in search results.
 // Fields absent for a given data source are nil.
 type SearchCaseView struct {
-	ID         string `json:"id"`
+	ID string `json:"id"`
+	// InternalID (work_item.wso2_id) stays a required, non-nullable string
+	// -- see domain.Case's own doc comment for why.
 	InternalID string `json:"internalId"`
 	Number     string `json:"number"`
 	CreatedOn  string `json:"createdOn"`
@@ -1812,7 +2087,7 @@ type SearchCaseView struct {
 	Subject        *string        `json:"subject"`
 	Description    *string        `json:"description"`
 	IssueType      *string        `json:"issueType"`
-	State          string         `json:"state"`
+	State          *string        `json:"state"`
 	Severity       *string        `json:"severity"`
 	Catalog        *EntityRef     `json:"catalog"`
 	CatalogItem    *EntityRef     `json:"catalogItem"`
@@ -1821,7 +2096,10 @@ type SearchCaseView struct {
 	EngagementType *string        `json:"engagementType"`
 	WorkState      *string        `json:"workState"`
 	Type           string         `json:"type"`
-	Project        EntityRef      `json:"project"`
+	// Project is null for a case with no project linked -- a real, valid
+	// state on the Postgres data source (work_item.project_id has no NOT
+	// NULL constraint).
+	Project *EntityRef `json:"project"`
 	// ProjectKey is the project's short human-readable key (e.g. "TESTQUERYSUB").
 	// Populated for the ServiceNow data source only; null otherwise.
 	ProjectKey      *string    `json:"projectKey"`
@@ -1916,10 +2194,11 @@ type UpdateCaseRequest struct {
 	// CreateCaseRequest.Variables. Optional even when transferring into
 	// service_request -- a catalog item with no questions has nothing to answer.
 	Variables []Variable `json:"variables"`
-	// WatchList replaces the case's watch list wholesale with the given platform
-	// user UUIDs. It is a pointer so an absent field and an explicitly empty list
-	// are distinguishable: nil leaves the watch list untouched, while an empty
-	// list clears it.
+	// WatchList replaces the case's watch list wholesale with the given watcher
+	// emails (Customer Portal / Ballerina). Platform user UUIDs are still
+	// accepted and resolved to emails for CSM callers. It is a pointer so an
+	// absent field and an explicitly empty list are distinguishable: nil leaves
+	// the watch list untouched, while an empty list clears it.
 	WatchList      *[]string           `json:"watchList"`
 	AssigneeEmail  *string             `json:"assigneeEmail"`
 	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
@@ -2006,11 +2285,11 @@ type CaseLabelRef struct {
 
 // UpdatedCase carries the fields of a case that may change after an update.
 type UpdatedCase struct {
-	ID        string       `json:"id"`
-	UpdatedOn time.Time    `json:"updatedOn"`
-	UpdatedBy string       `json:"updatedBy,omitempty"`
-	State     CaseState    `json:"state,omitempty"`
-	Severity  CaseSeverity `json:"severity,omitempty"`
+	ID        string        `json:"id"`
+	UpdatedOn time.Time     `json:"updatedOn"`
+	UpdatedBy string        `json:"updatedBy,omitempty"`
+	State     *CaseState    `json:"state,omitempty"`
+	Severity  *CaseSeverity `json:"severity,omitempty"`
 	// Type echoes the case's new type back on a successful transfer.
 	// EngagementType/CatalogID/CatalogItemID/Variables aren't echoed -- same as every
 	// other field this update accepts alongside a type-defining field (subject,
@@ -2134,9 +2413,11 @@ type CreateCaseRequest struct {
 	CatalogItemID string     `json:"catalogItemId"`
 	Variables     []Variable `json:"variables"`
 	// Optional fields
-	RelatedCaseID  string   `json:"relatedCaseId"`
-	ConversationID string   `json:"conversationId"`
-	WatchList      []string `json:"watchList"`
+	RelatedCaseID  string `json:"relatedCaseId"`
+	ConversationID string `json:"conversationId"`
+	// WatchList is watcher emails (Customer Portal / Ballerina). Platform user
+	// UUIDs are still accepted and resolved to emails for CSM callers.
+	WatchList []string `json:"watchList"`
 	// For security_report_analysis type
 	Attachments []CaseAttachment `json:"attachments"`
 	// For engagement type
@@ -2635,6 +2916,14 @@ const (
 	ChangeRequestTypeModel              ChangeRequestType = "model"
 	ChangeRequestTypeSiteReliabilityOps ChangeRequestType = "site_reliability_ops"
 	ChangeRequestTypeAzure              ChangeRequestType = "azure"
+	// The following four have no ServiceNow-data-source equivalent today --
+	// added for change_request.change_model (migration 000055), whose real
+	// enum values only partially overlap this type's existing ones (see
+	// changeRequestChangeModelToType in change_request_repo.go).
+	ChangeRequestTypeChangeRegistration  ChangeRequestType = "change_registration"
+	ChangeRequestTypeCloudInfrastructure ChangeRequestType = "cloud_infrastructure"
+	ChangeRequestTypeInfra               ChangeRequestType = "infra"
+	ChangeRequestTypeUnauthorizedChange  ChangeRequestType = "unauthorized_change"
 )
 
 // ChangeRequestState represents the current workflow state of a change request.
@@ -2727,6 +3016,29 @@ type CreateChangeRequestRequest struct {
 	PlannedEndDate      *string                `json:"plannedEndDate,omitempty"`
 	Comment             *string                `json:"comment,omitempty"`
 	WorkNote            *string                `json:"workNote,omitempty"`
+	// AffectedServicesText, AffectedComponentsText, RollbackDurationText,
+	// CustomerGroupID, EnvironmentIDs, DeploymentProductIDs, and DurationInput
+	// are field-parity additions -- see PatchChangeRequestRequest for the
+	// shared documentation of each. On create there is no prior value to
+	// clear, so none of them need tri-state handling here.
+	AffectedServicesText   *string  `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText *string  `json:"affectedComponentsText,omitempty"`
+	RollbackDurationText   *string  `json:"rollbackDurationText,omitempty"`
+	CustomerGroupID        *string  `json:"customerGroupId,omitempty"`
+	EnvironmentIDs         []string `json:"environmentIds,omitempty"`
+	DeploymentProductIDs   []string `json:"deploymentProductIds,omitempty"`
+	// DurationInput is the calendar duration in whole seconds. It is accepted
+	// only when it exactly matches the effective planned window (PlannedStartDate
+	// to PlannedEndDate, in this same request): the backing data source derives
+	// calendar_duration nowhere else, and a divergent value would silently
+	// disagree with the planned window on a column a customer-facing calendar
+	// view reads.
+	DurationInput *int `json:"durationInput,omitempty"`
+	// IsPlanningVisibleToCustomers ("Implementation Plan visible to customers")
+	// controls whether the Implementation Plan is exposed to the customer on
+	// the customer-facing portal. Optional; when omitted, the backing data
+	// source's own default applies.
+	IsPlanningVisibleToCustomers *bool `json:"isPlanningVisibleToCustomers,omitempty"`
 }
 
 // CreateChangeRequestResponse is the output for POST /change-requests.
@@ -2835,6 +3147,8 @@ type SearchChangeRequestView struct {
 	Deployment       *EntityRef `json:"deployment"`
 	DeployedProduct  *EntityRef `json:"deployedProduct"`
 	Product          *EntityRef `json:"product"`
+	Service          *EntityRef `json:"service"`
+	ServiceOffering  *EntityRef `json:"serviceOffering"`
 	AssignedEngineer *EntityRef `json:"assignedEngineer"`
 	AssignedTeam     *EntityRef `json:"assignedTeam"`
 	PlannedStartOn   *string    `json:"plannedStartOn"`
@@ -2894,6 +3208,37 @@ type CatalogItemVariable struct {
 	// and carry none, so the field is omitted entirely rather than emitted as
 	// an empty list on every variable.
 	Choices []CatalogVariableChoice `json:"choices,omitempty"`
+	// Name is the key this variable writes into the case's variable data.
+	Name *string `json:"name"`
+	// Mandatory reports whether the backing data source marks this variable
+	// mandatory. Not enforced on case create -- a caller intending to require it
+	// must check this client-side.
+	Mandatory bool `json:"mandatory"`
+	// Active reports whether the variable is active on the catalog item.
+	Active bool `json:"active"`
+	// ReadOnly reports whether the variable is read-only on the form.
+	ReadOnly bool `json:"readOnly"`
+	// Hidden reports whether the variable is hidden on the form.
+	Hidden bool `json:"hidden"`
+	// DefaultValue is the variable's declared default, or nil if it has none.
+	DefaultValue *string `json:"defaultValue"`
+	// MaxLength is the declared maximum length for a text-type variable, or nil
+	// if undeclared.
+	MaxLength *int `json:"maxLength"`
+	// ReferenceTable is the backing table name for a reference-type variable, or
+	// nil for any other type.
+	ReferenceTable *string `json:"referenceTable"`
+	// Validation is the named validation rule the backing data source declares
+	// for this variable's value, or nil if it declares none.
+	Validation *CatalogVariableValidation `json:"validation"`
+}
+
+// CatalogVariableValidation is a named validation rule the backing data source declares for a
+// catalog item variable's value.
+type CatalogVariableValidation struct {
+	Name    string `json:"name"`
+	Regex   string `json:"regex"`
+	Message string `json:"message"`
 }
 
 // CatalogVariableChoice is one selectable option on a choice-based catalog item
@@ -2918,8 +3263,8 @@ type SearchContactsFilters struct {
 	SearchQuery string `json:"searchQuery"`
 }
 
-// ProjectContact is a contact associated with a project. Supported by the
-// ServiceNow data source only; there is no Postgres equivalent.
+// ProjectContact is a contact associated with a project. For the Postgres
+// data source, backed by the project_contact table (migration 000022).
 type ProjectContact struct {
 	// ID is the contact's user id, for linking a row to that user's profile. Nil when
 	// the row has no contact record linked, or when the backing instance predates the
@@ -2967,8 +3312,8 @@ type SearchProjectContactsResponse struct {
 	Offset   int              `json:"offset"`
 }
 
-// AccountContact is a contact associated with an account. Supported by the
-// ServiceNow data source only; there is no Postgres equivalent.
+// AccountContact is a contact associated with an account. For the Postgres
+// data source, backed by the account_contact table (migration 000020).
 type AccountContact struct {
 	Name      string `json:"name"`
 	Email     string `json:"email"`
@@ -2999,6 +3344,8 @@ type PatchChangeRequestRequest struct {
 	CaseID             *string              `json:"caseId,omitempty"`
 	DeploymentID       *string              `json:"deploymentId,omitempty"`
 	DeployedProductID  *string              `json:"deployedProductId,omitempty"`
+	ServiceID          *string              `json:"serviceId,omitempty"`
+	ServiceOfferingID  *string              `json:"serviceOfferingId,omitempty"`
 	AssignedEngineerID *string              `json:"assignedEngineerId,omitempty"`
 	AssignedTeamID     *string              `json:"assignedTeamId,omitempty"`
 	PlannedStartOn     *string              `json:"plannedStartOn,omitempty"`
@@ -3015,6 +3362,46 @@ type PatchChangeRequestRequest struct {
 	IsCustomerApproved *bool                `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool                `json:"isCustomerReviewed,omitempty"`
 	RequestApproval    *bool                `json:"requestApproval,omitempty"`
+	// IsPlanningVisibleToCustomers ("Implementation Plan visible to customers")
+	// controls whether the Implementation Plan is exposed to the customer on
+	// the customer-facing portal. Like IsCustomerApproved/IsCustomerReviewed
+	// above, a plain *bool is sufficient here: nil means omitted, and a
+	// non-nil pointer -- including one pointing at false -- is forwarded
+	// as-is, so an explicit false is never confused with "not provided".
+	IsPlanningVisibleToCustomers *bool `json:"isPlanningVisibleToCustomers,omitempty"`
+
+	// The fields below are the change-request field-parity additions. Except
+	// Comment and WorkNote (journal entries, append-only, cannot be cleared),
+	// every one of them uses a pointer-to-pointer to distinguish three states:
+	//   - nil outer pointer: field omitted -- leave the value unchanged
+	//   - non-nil outer, nil inner: explicit null -- clear the value
+	//   - non-nil outer, non-nil inner: set the value
+	// EnvironmentIDs/DeploymentProductIDs use a single pointer instead: nil
+	// means omitted, and any non-nil slice (including an explicitly empty one)
+	// replaces the whole list -- the same convention CreateIncidentRequest's
+	// WatchList already uses, since an array field has no separate "null" state
+	// worth distinguishing from "empty".
+	ImplementationPlan     **string                `json:"implementationPlan"`
+	Priority               **ChangeRequestPriority `json:"priority"`
+	Category               **ChangeRequestCategory `json:"category"`
+	RequestedByID          **string                `json:"requestedById"`
+	AffectedServicesText   **string                `json:"affectedServicesText"`
+	AffectedComponentsText **string                `json:"affectedComponentsText"`
+	// RollbackDurationText is a raw, unvalidated string (e.g. "2 hours");
+	// parsing or normalizing it is a decision for the layer above, not this one.
+	RollbackDurationText **string  `json:"rollbackDurationText"`
+	CustomerGroupID      **string  `json:"customerGroupId"`
+	EnvironmentIDs       *[]string `json:"environmentIds"`
+	DeploymentProductIDs *[]string `json:"deploymentProductIds"`
+	// Comment and WorkNote append a new journal entry; they reject an empty or
+	// whitespace-only value, and neither can be used to clear anything.
+	Comment  *string `json:"comment,omitempty"`
+	WorkNote *string `json:"workNote,omitempty"`
+	// DurationInput is the calendar duration in whole seconds. It is accepted
+	// only when it exactly matches the effective planned window: PlannedStartOn
+	// if provided in this same request, else the change request's stored start,
+	// and likewise for the end. See CreateChangeRequestRequest.DurationInput.
+	DurationInput **int `json:"durationInput"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
@@ -3193,6 +3580,43 @@ type ChangeRequest struct {
 	ApprovedBy          *EntityRef `json:"approvedBy"`
 	ApprovedOn          *string    `json:"approvedOn"`
 	LegalNextStates     []string   `json:"legalNextStates"`
+
+	// The fields below are change-request field-parity additions. All 20 are
+	// present on GET /change-requests/{id} and the PATCH receipt (both share
+	// the same mapper); none are on the search response, which was
+	// deliberately left untouched.
+
+	// Group B -- the create path already writes these; this is the first time
+	// they are read back.
+	ImplementationPlan *string    `json:"implementationPlan"`
+	Priority           *string    `json:"priority"`
+	Category           *string    `json:"category"`
+	RequestedBy        *EntityRef `json:"requestedBy"`
+
+	// Group C1 -- real content the shared API did not surface before.
+	AffectedServicesText   *string     `json:"affectedServicesText"`
+	AffectedComponentsText *string     `json:"affectedComponentsText"`
+	RollbackDurationText   *string     `json:"rollbackDurationText"`
+	Environments           []EntityRef `json:"environments"`
+	DeploymentProducts     []EntityRef `json:"deploymentProducts"`
+	CustomerGroup          *EntityRef  `json:"customerGroup"`
+
+	// Group C2 -- carried for parity, read-through only; no write path is
+	// exposed for any of these seven.
+	// ChangeRequestType is named to avoid colliding with the ChangeRequestType
+	// enum type; it is a distinct, unvalidated choice-list value.
+	ChangeRequestType            *string     `json:"changeRequestType"`
+	Likelihood                   *string     `json:"likelihood"`
+	IsPlanningVisibleToCustomers bool        `json:"isPlanningVisibleToCustomers"`
+	ConfirmCustomerUpdatedDate   *string     `json:"confirmCustomerUpdatedDate"`
+	CustomerUpdatedOn            *string     `json:"customerUpdatedOn"`
+	Labels                       []string    `json:"labels"`
+	Deployments                  []EntityRef `json:"deployments"`
+
+	// Group D -- system-maintained, read-only in the dictionary.
+	WorkStart    *string `json:"workStart"`
+	WorkEnd      *string `json:"workEnd"`
+	GitReference *string `json:"gitReference"`
 }
 
 // ChangeRequestApproverType is a string enum for the kind of approver assigned to an
@@ -4130,6 +4554,21 @@ const (
 	IncidentUrgencyLow    IncidentUrgency = "LOW"
 )
 
+// IncidentResolutionCode represents the resolution code recorded when closing an incident.
+// A friendly domain key, mapped to the data source's own close-code value via
+// snIncidentResolutionCodeKeyMap before being sent downstream -- same convention as
+// IncidentCategory/IncidentImpact/etc.
+type IncidentResolutionCode string
+
+const (
+	IncidentResolutionCodeSolvedWorkaround         IncidentResolutionCode = "SOLVED_WORKAROUND"
+	IncidentResolutionCodeSolvedPermanently        IncidentResolutionCode = "SOLVED_PERMANENTLY"
+	IncidentResolutionCodeNotSolvedNotReproducible IncidentResolutionCode = "NOT_SOLVED_NOT_REPRODUCIBLE"
+	IncidentResolutionCodeFalseAlarm               IncidentResolutionCode = "FALSE_ALARM"
+	IncidentResolutionCodeDuplicate                IncidentResolutionCode = "DUPLICATE"
+	IncidentResolutionCodeNotActionable            IncidentResolutionCode = "NOT_ACTIONABLE"
+)
+
 // CreateIncidentRequest is the input for POST /incidents.
 type CreateIncidentRequest struct {
 	CallerID            string               `json:"callerId"`
@@ -4168,32 +4607,32 @@ type CreateIncidentResponse struct {
 // UpdateIncidentRequest is the input for PATCH /incidents/{id}. All fields are optional,
 // but at least one must be provided.
 type UpdateIncidentRequest struct {
-	ID                  string               `json:"-"`
-	Subject             *string              `json:"subject,omitempty"`
-	Priority            *IncidentPriority    `json:"priority,omitempty"`
-	State               *IncidentState       `json:"state,omitempty"`
-	Category            *IncidentCategory    `json:"category,omitempty"`
-	Subcategory         *IncidentSubcategory `json:"subcategory,omitempty"`
-	ContactType         *IncidentContactType `json:"contactType,omitempty"`
-	Impact              *IncidentImpact      `json:"impact,omitempty"`
-	Urgency             *IncidentUrgency     `json:"urgency,omitempty"`
-	ResolutionCode      *string              `json:"resolutionCode,omitempty"`
-	ParentID            *string              `json:"parentId,omitempty"`
-	ParentIncidentID    *string              `json:"parentIncidentId,omitempty"`
-	AssignmentGroupID   *string              `json:"assignmentGroupId,omitempty"`
-	AssignedEngineerID  *string              `json:"assignedEngineerId,omitempty"`
-	ServiceID           *string              `json:"serviceId,omitempty"`
-	ServiceOfferingID   *string              `json:"serviceOfferingId,omitempty"`
-	ConfigurationItemID *string              `json:"configurationItemId,omitempty"`
-	ChangeRequestID     *string              `json:"changeRequestId,omitempty"`
-	ProblemID           *string              `json:"problemId,omitempty"`
-	CausedByID          *string              `json:"causedById,omitempty"`
-	ResolvedByID        *string              `json:"resolvedById,omitempty"`
-	ResolutionNotes     *string              `json:"resolutionNotes,omitempty"`
-	IncidentReport      *string              `json:"incidentReport,omitempty"`
-	AdditionalComments  *string              `json:"additionalComments,omitempty"`
-	WorkNotes           *string              `json:"workNotes,omitempty"`
-	WatchList           *[]string            `json:"watchList,omitempty"`
+	ID                  string                  `json:"-"`
+	Subject             *string                 `json:"subject,omitempty"`
+	Priority            *IncidentPriority       `json:"priority,omitempty"`
+	State               *IncidentState          `json:"state,omitempty"`
+	Category            *IncidentCategory       `json:"category,omitempty"`
+	Subcategory         *IncidentSubcategory    `json:"subcategory,omitempty"`
+	ContactType         *IncidentContactType    `json:"contactType,omitempty"`
+	Impact              *IncidentImpact         `json:"impact,omitempty"`
+	Urgency             *IncidentUrgency        `json:"urgency,omitempty"`
+	ResolutionCode      *IncidentResolutionCode `json:"resolutionCode,omitempty"`
+	ParentID            *string                 `json:"parentId,omitempty"`
+	ParentIncidentID    *string                 `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string                 `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string                 `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string                 `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string                 `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string                 `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string                 `json:"changeRequestId,omitempty"`
+	ProblemID           *string                 `json:"problemId,omitempty"`
+	CausedByID          *string                 `json:"causedById,omitempty"`
+	ResolvedByID        *string                 `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string                 `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string                 `json:"incidentReport,omitempty"`
+	AdditionalComments  *string                 `json:"additionalComments,omitempty"`
+	WorkNotes           *string                 `json:"workNotes,omitempty"`
+	WatchList           *[]string               `json:"watchList,omitempty"`
 }
 
 // UpdateIncidentResponse is the output for PATCH /incidents/{id}.
@@ -4249,6 +4688,110 @@ type IncidentView struct {
 	ResolvedBy      *string `json:"resolvedBy"`
 	ResolvedOn      *string `json:"resolvedOn"`
 	IncidentReport  *string `json:"incidentReport"`
+	// SpecialistHandoff is the derived summary of a specialist-group handoff, null when the
+	// incident has never been handed off. Nothing is persisted for it: the backing data
+	// source recomputes it at read time, so a handoff performed through its own native UI
+	// reads identically to one performed through HandOffIncidentToSpecialist.
+	SpecialistHandoff *IncidentSpecialistHandoffSummary `json:"specialistHandoff"`
+}
+
+// IncidentSpecialistHandoffReasonCode is why an incident could not be resolved through the
+// runbook, supplied on a specialist handoff request.
+type IncidentSpecialistHandoffReasonCode string
+
+const (
+	IncidentSpecialistHandoffReasonNoRunbook         IncidentSpecialistHandoffReasonCode = "no-runbook"
+	IncidentSpecialistHandoffReasonRunbookNotWorking IncidentSpecialistHandoffReasonCode = "runbook-not-working"
+)
+
+// IncidentSpecialistHandoffEscalationTeam is a specialist sub-team; only meaningful when the
+// incident routes to the specialist group family that has sub-teams, ignored otherwise.
+type IncidentSpecialistHandoffEscalationTeam string
+
+const (
+	IncidentSpecialistHandoffTeamChoreoRuntime IncidentSpecialistHandoffEscalationTeam = "choreo-runtime-team"
+	IncidentSpecialistHandoffTeamChoreoAPIM    IncidentSpecialistHandoffEscalationTeam = "choreo-apim-team"
+)
+
+// HandOffIncidentToSpecialistRequest is the input for
+// POST /incidents/{id}/specialist-handoffs: hands the incident off to its specialist group in
+// one atomic call -- moves the incident to the specialist group for its business service,
+// clears the assignee, opens a runbook-gap task, and (by default) files an internal issue for
+// the receiving team.
+type HandOffIncidentToSpecialistRequest struct {
+	IncidentID string `json:"-"`
+	// ReasonCode is required: why the incident could not be resolved through the runbook.
+	ReasonCode IncidentSpecialistHandoffReasonCode `json:"reasonCode"`
+	// EscalationTeam is optional and only meaningful for a Choreo-routed handoff.
+	EscalationTeam *IncidentSpecialistHandoffEscalationTeam `json:"escalationTeam,omitempty"`
+	// CreateGithubIssue defaults to true upstream when omitted; set false to suppress the
+	// internal issue, e.g. on a re-handoff or when one already exists.
+	CreateGithubIssue *bool `json:"createGithubIssue,omitempty"`
+}
+
+// IncidentSpecialistHandoffTask is the runbook-gap task opened for the specialist team as
+// part of a handoff.
+type IncidentSpecialistHandoffTask struct {
+	ID      string `json:"id"`
+	Number  string `json:"number"`
+	Subject string `json:"subject"`
+}
+
+// IncidentSpecialistHandoffGithubIssue is the internal issue filed for the receiving
+// specialist team, present only when creation was requested and succeeded.
+type IncidentSpecialistHandoffGithubIssue struct {
+	URL    string `json:"url"`
+	Number int    `json:"number"`
+	Repo   string `json:"repo"`
+}
+
+// IncidentSpecialistHandoffResult is the "handoff" object within
+// HandOffIncidentToSpecialistResponse.
+type IncidentSpecialistHandoffResult struct {
+	AssignmentGroup         EntityRef                                `json:"assignmentGroup"`
+	PreviousAssignmentGroup *EntityRef                               `json:"previousAssignmentGroup"`
+	ReasonCode              IncidentSpecialistHandoffReasonCode      `json:"reasonCode"`
+	ReasonDescription       string                                   `json:"reasonDescription"`
+	EscalationTeam          *IncidentSpecialistHandoffEscalationTeam `json:"escalationTeam"`
+	Task                    IncidentSpecialistHandoffTask            `json:"task"`
+	GithubIssue             *IncidentSpecialistHandoffGithubIssue    `json:"githubIssue"`
+	// GithubIssueError explains why the internal issue could not be created, when creation
+	// was requested but failed. The handoff itself still succeeds -- callers must surface
+	// this rather than report a clean success when it is non-nil.
+	GithubIssueError *string      `json:"githubIssueError"`
+	Incident         IncidentView `json:"incident"`
+}
+
+// HandOffIncidentToSpecialistResponse is the response for
+// POST /incidents/{id}/specialist-handoffs.
+type HandOffIncidentToSpecialistResponse struct {
+	Message string                          `json:"message"`
+	Handoff IncidentSpecialistHandoffResult `json:"handoff"`
+}
+
+// IncidentSpecialistHandoffSummaryTask is the linked runbook-gap task referenced from
+// IncidentSpecialistHandoffSummary.
+type IncidentSpecialistHandoffSummaryTask struct {
+	Number     string  `json:"number"`
+	Subject    string  `json:"subject"`
+	State      *string `json:"state"`
+	StateLabel *string `json:"stateLabel"`
+}
+
+// IncidentSpecialistHandoffSummary is the derived summary of a specialist handoff, surfaced
+// on IncidentView.SpecialistHandoff. Nothing is persisted for it: it is recomputed at read
+// time from the incident's own journal, assignment group, and linked runbook task, so a
+// handoff performed through the backing data source's own native UI reads identically to one
+// performed through HandOffIncidentToSpecialist.
+type IncidentSpecialistHandoffSummary struct {
+	ReasonCode        IncidentSpecialistHandoffReasonCode      `json:"reasonCode"`
+	ReasonDescription string                                   `json:"reasonDescription"`
+	EscalationTeam    *IncidentSpecialistHandoffEscalationTeam `json:"escalationTeam"`
+	HandedOffAt       string                                   `json:"handedOffAt"`
+	HandedOffBy       *string                                  `json:"handedOffBy"`
+	AssignmentGroup   EntityRef                                `json:"assignmentGroup"`
+	Task              IncidentSpecialistHandoffSummaryTask     `json:"task"`
+	GithubIssueURL    *string                                  `json:"githubIssueUrl"`
 }
 
 // ProblemFieldFilter is a single predicate in a problem search's generic
@@ -4615,6 +5158,281 @@ type SearchConversationsResponse struct {
 	Total         int                      `json:"total"`
 	Offset        int                      `json:"offset"`
 	Limit         int                      `json:"limit"`
+}
+
+// ---------------------------------------------------------------------------
+// Outages
+// ---------------------------------------------------------------------------
+
+// OutageType classifies an outage record. The backing data source keeps its
+// list of choices live (configurable independently of this platform), but
+// only these three are documented and supported today; an unrecognized
+// value returned by the backing service is passed through as a plain label
+// rather than mapped to one of these constants.
+type OutageType string
+
+const (
+	OutageTypeOutage      OutageType = "outage"
+	OutageTypeDegradation OutageType = "degradation"
+	OutageTypePlanned     OutageType = "planned"
+)
+
+// OutageStatus is derived by the backing data source from whether an outage
+// has an end time -- it is never stored or accepted as input.
+type OutageStatus string
+
+const (
+	OutageStatusInProgress OutageStatus = "in_progress"
+	OutageStatusResolved   OutageStatus = "resolved"
+)
+
+// OutageCommunicationChannel is the audience for a single outage communication
+// entry. "external" is the only publishing channel: when the outage's
+// configuration item resolves to a monitored cloud, an external communication
+// is echoed verbatim on the public status page.
+type OutageCommunicationChannel string
+
+const (
+	OutageCommunicationChannelExternal   OutageCommunicationChannel = "external"
+	OutageCommunicationChannelInternal   OutageCommunicationChannel = "internal"
+	OutageCommunicationChannelAdditional OutageCommunicationChannel = "additional"
+)
+
+// OutageSortField enumerates the columns available for sorting outage search results.
+type OutageSortField string
+
+const (
+	OutageSortFieldBegin     OutageSortField = "begin"
+	OutageSortFieldEnd       OutageSortField = "end"
+	OutageSortFieldNumber    OutageSortField = "number"
+	OutageSortFieldCreatedOn OutageSortField = "createdOn"
+	OutageSortFieldUpdatedOn OutageSortField = "updatedOn"
+)
+
+// OutageSortOrder controls the sort direction for an outage search.
+type OutageSortOrder string
+
+const (
+	OutageSortOrderAsc  OutageSortOrder = "asc"
+	OutageSortOrderDesc OutageSortOrder = "desc"
+)
+
+// OutageSort specifies the sort field and direction for outage search results.
+type OutageSort struct {
+	Field OutageSortField `json:"field"`
+	Order OutageSortOrder `json:"order"`
+}
+
+// OutageConfigurationItemRef is a compact reference to a configuration item as
+// seen from an outage: it carries ClassName in addition to id/name because the
+// publication-safety logic (see Outage.PublishesToStatusPage) depends on the
+// CI's class, and callers benefit from seeing it without a second lookup.
+type OutageConfigurationItemRef struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ClassName string `json:"className"`
+}
+
+// OutageIncidentRef is a compact reference to the incident an outage is linked to.
+type OutageIncidentRef struct {
+	ID               string  `json:"id"`
+	Number           string  `json:"number"`
+	ShortDescription string  `json:"shortDescription"`
+	State            *string `json:"state"`
+}
+
+// Outage is the full outage representation returned on create, update, and
+// search. PublishesToStatusPage and StatusPageCloud are computed by the
+// backing data source, never stored, and must be surfaced exactly as
+// received -- they are the only signal that an outage is publicly visible.
+type Outage struct {
+	ID                         string                       `json:"id"`
+	Number                     string                       `json:"number"`
+	Type                       *string                      `json:"type"`
+	Status                     *string                      `json:"status"`
+	Begin                      string                       `json:"begin"`
+	End                        *string                      `json:"end"`
+	Duration                   *string                      `json:"duration"`
+	ShortDescription           string                       `json:"shortDescription"`
+	ConfigurationItem          *OutageConfigurationItemRef  `json:"configurationItem"`
+	Incident                   *OutageIncidentRef           `json:"incident"`
+	AffectedConfigurationItems []OutageConfigurationItemRef `json:"affectedConfigurationItems"`
+	PublishesToStatusPage      bool                         `json:"publishesToStatusPage"`
+	StatusPageCloud            *string                      `json:"statusPageCloud"`
+	CreatedOn                  string                       `json:"createdOn"`
+	CreatedBy                  string                       `json:"createdBy"`
+	UpdatedOn                  string                       `json:"updatedOn"`
+	UpdatedBy                  string                       `json:"updatedBy"`
+}
+
+// OutageCommunicationCounts summarizes the number of communication entries on
+// an outage per channel. Only present on the single-outage detail view.
+type OutageCommunicationCounts struct {
+	External   int `json:"external"`
+	Internal   int `json:"internal"`
+	Additional int `json:"additional"`
+}
+
+// OutageDetail is the response for GET /outages/{id}: the full outage shape
+// plus per-channel communication counts.
+type OutageDetail struct {
+	Outage
+	CommunicationCounts OutageCommunicationCounts `json:"communicationCounts"`
+}
+
+// CreateOutageRequest is the input for POST /outages. Type, Begin, and
+// ShortDescription are required. AcknowledgePublicPublication is required
+// only when ConfigurationItemID resolves to a monitored cloud; the backing
+// data source enforces that, not this layer.
+type CreateOutageRequest struct {
+	Type                         OutageType `json:"type"`
+	Begin                        string     `json:"begin"`
+	End                          *string    `json:"end,omitempty"`
+	ShortDescription             string     `json:"shortDescription"`
+	ConfigurationItemID          *string    `json:"configurationItemId,omitempty"`
+	IncidentID                   *string    `json:"incidentId,omitempty"`
+	ExternalCommunication        *string    `json:"externalCommunication,omitempty"`
+	InternalCommunication        *string    `json:"internalCommunication,omitempty"`
+	AcknowledgePublicPublication *bool      `json:"acknowledgePublicPublication,omitempty"`
+}
+
+// CreateOutageResponse is the response for POST /outages.
+type CreateOutageResponse struct {
+	Message string `json:"message"`
+	Outage  Outage `json:"outage"`
+}
+
+// PatchOutageRequest is the input for PATCH /outages/{id}. At least one field
+// must be provided. End uses a pointer-to-pointer to distinguish three states:
+//   - nil outer pointer: field omitted -- leave end unchanged
+//   - non-nil outer, nil inner (*End == nil): explicit null -- reopen the outage
+//   - non-nil outer, non-nil inner: close (or move) the end time
+//
+// Closing an outage is done by setting End; there is no separate state field
+// or close verb.
+type PatchOutageRequest struct {
+	ID                           string      `json:"-"`
+	Type                         *OutageType `json:"type,omitempty"`
+	Begin                        *string     `json:"begin,omitempty"`
+	End                          **string    `json:"end"`
+	ShortDescription             *string     `json:"shortDescription,omitempty"`
+	ConfigurationItemID          *string     `json:"configurationItemId,omitempty"`
+	IncidentID                   *string     `json:"incidentId,omitempty"`
+	AcknowledgePublicPublication *bool       `json:"acknowledgePublicPublication,omitempty"`
+}
+
+// PatchOutageResponse is the response for PATCH /outages/{id}.
+type PatchOutageResponse struct {
+	Message string `json:"message"`
+	Outage  Outage `json:"outage"`
+}
+
+// SearchOutagesFilters holds the optional filter criteria for an outage search.
+type SearchOutagesFilters struct {
+	Types                []OutageType   `json:"types,omitempty"`
+	Statuses             []OutageStatus `json:"statuses,omitempty"`
+	ConfigurationItemIDs []string       `json:"configurationItemIds,omitempty"`
+	IncidentIDs          []string       `json:"incidentIds,omitempty"`
+	// BeginFrom/BeginTo bound the search window. When BeginFrom is omitted, the
+	// backing data source defaults it to six months back and reports the
+	// applied bound on SearchOutagesResponse -- the table is otherwise
+	// dominated by a historical bulk load.
+	BeginFrom     *string `json:"beginFrom,omitempty"`
+	BeginTo       *string `json:"beginTo,omitempty"`
+	PublishedOnly *bool   `json:"publishedOnly,omitempty"`
+	SearchTerm    string  `json:"searchTerm,omitempty"`
+}
+
+// SearchOutagesRequest is the input for POST /outages/search.
+type SearchOutagesRequest struct {
+	Filters    SearchOutagesFilters `json:"filters"`
+	SortBy     OutageSort           `json:"sortBy"`
+	Pagination Pagination           `json:"pagination"`
+}
+
+// SearchOutagesResponse is the paginated result of an outage search.
+// AppliedBeginFrom and BeginFromDefaulted report what begin-date bound was
+// actually used, so a caller never has to guess whether an implicit default
+// was applied.
+type SearchOutagesResponse struct {
+	Outages            []Outage `json:"outages"`
+	Total              int      `json:"total"`
+	Limit              int      `json:"limit"`
+	Offset             int      `json:"offset"`
+	AppliedBeginFrom   string   `json:"appliedBeginFrom"`
+	BeginFromDefaulted bool     `json:"beginFromDefaulted"`
+}
+
+// AddOutageCommunicationRequest is the input for POST /outages/{id}/communications.
+// AcknowledgePublicPublication mirrors the same gate CreateOutageRequest uses:
+// it is required only when Channel is external and the outage is publicly
+// visible; the backing data source enforces that, not this layer.
+type AddOutageCommunicationRequest struct {
+	OutageID                     string                     `json:"-"`
+	Channel                      OutageCommunicationChannel `json:"channel"`
+	Body                         string                     `json:"body"`
+	AcknowledgePublicPublication *bool                      `json:"acknowledgePublicPublication,omitempty"`
+}
+
+// OutageCommunication is a single communication journal entry on an outage.
+// IsPublic is true only for the external channel, whose entries are echoed
+// verbatim on the public status page when the outage publishes.
+type OutageCommunication struct {
+	ID        string                     `json:"id"`
+	Channel   OutageCommunicationChannel `json:"channel"`
+	Body      string                     `json:"body"`
+	IsPublic  bool                       `json:"isPublic"`
+	CreatedOn string                     `json:"createdOn"`
+	CreatedBy string                     `json:"createdBy"`
+}
+
+// AddOutageCommunicationResponse is the response for POST /outages/{id}/communications.
+type AddOutageCommunicationResponse struct {
+	Message       string              `json:"message"`
+	Communication OutageCommunication `json:"communication"`
+}
+
+// SearchOutageCommunicationsRequest is the input for POST /outages/{id}/communications/search.
+type SearchOutageCommunicationsRequest struct {
+	OutageID   string                       `json:"-"`
+	Channels   []OutageCommunicationChannel `json:"channels,omitempty"`
+	Pagination Pagination                   `json:"pagination"`
+}
+
+// SearchOutageCommunicationsResponse is the paginated result of an outage
+// communication search.
+type SearchOutageCommunicationsResponse struct {
+	Communications []OutageCommunication `json:"communications"`
+	Total          int                   `json:"total"`
+	Limit          int                   `json:"limit"`
+	Offset         int                   `json:"offset"`
+}
+
+// OutageChoice is a single selectable value in outage metadata, e.g. a type or
+// status choice.
+type OutageChoice struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// OutageCommunicationChannelMeta describes one communication channel and
+// whether entries written to it are publicly visible. Value carries the same
+// wire value as OutageCommunicationChannel (external/internal/additional).
+type OutageCommunicationChannelMeta struct {
+	Value    string `json:"value"`
+	Label    string `json:"label"`
+	IsPublic bool   `json:"isPublic"`
+}
+
+// OutageMetadataResponse is the response for GET /outages/metadata: the live
+// choice lists a caller needs to render an outage create/edit form, including
+// the monitored-cloud list so the caller can warn about public visibility
+// before a save rather than after a 409.
+type OutageMetadataResponse struct {
+	Types                 []OutageChoice                   `json:"types"`
+	Statuses              []OutageChoice                   `json:"statuses"`
+	CommunicationChannels []OutageCommunicationChannelMeta `json:"communicationChannels"`
+	StatusPageClouds      []string                         `json:"statusPageClouds"`
 }
 
 // ConversationDetails is the response for GET /conversations/{id}.
@@ -5787,4 +6605,61 @@ type UpdateKnowledgeBaseActiveRequest struct {
 type CreateKBManagerRequest struct {
 	KnowledgeBaseID string `json:"knowledgeBaseId"`
 	UserID          string `json:"userId"`
+}
+
+// AlertIncidentMappingView is the durable record of one monitoring alert
+// that was grouped onto a CSM incident — e.g. a firing event and a later
+// resolved event for the same underlying condition both map onto the same
+// incident rather than each creating its own. Like SLAClock and
+// ScheduledTaskRun, this is CSM-native data with no ServiceNow equivalent
+// and is always backed by Postgres regardless of DATA_SOURCE.
+//
+// Source/UniqueIdentifier together identify the correlation key a caller
+// uses to find prior alerts for the same underlying condition (see
+// LookupAlertIncidentMappingsRequest); which sources exist and how they
+// derive UniqueIdentifier is a policy decision made entirely by whatever
+// ingests the alert, not something this service tracks.
+type AlertIncidentMappingView struct {
+	ID          string `json:"id"`
+	AlertNumber string `json:"alertNumber"`
+	Source      string `json:"source"`
+	// UniqueIdentifier is the correlation key within Source used to group
+	// related alerts (e.g. the monitoring system's own alert group/fingerprint
+	// id) — optional, since not every source can supply one.
+	UniqueIdentifier *string `json:"uniqueIdentifier,omitempty"`
+	Service          *string `json:"service,omitempty"`
+	MetricName       *string `json:"metricName,omitempty"`
+	AlertStatus      string  `json:"alertStatus"`
+	IncidentID       string  `json:"incidentId"`
+	IncidentNumber   *string `json:"incidentNumber,omitempty"`
+	CreatedOn        string  `json:"createdOn"`
+}
+
+// CreateAlertIncidentMappingRequest is the request body for
+// POST /alert-incident-mappings.
+type CreateAlertIncidentMappingRequest struct {
+	AlertNumber      string  `json:"alertNumber"`
+	Source           string  `json:"source"`
+	UniqueIdentifier *string `json:"uniqueIdentifier,omitempty"`
+	Service          *string `json:"service,omitempty"`
+	MetricName       *string `json:"metricName,omitempty"`
+	AlertStatus      string  `json:"alertStatus"`
+	IncidentID       string  `json:"incidentId"`
+	IncidentNumber   *string `json:"incidentNumber,omitempty"`
+}
+
+// LookupAlertIncidentMappingsRequest is the request body for
+// POST /alert-incident-mappings/lookup — finds every alert already grouped
+// onto an incident for the same (Source, UniqueIdentifier) correlation key.
+type LookupAlertIncidentMappingsRequest struct {
+	Source           string `json:"source"`
+	UniqueIdentifier string `json:"uniqueIdentifier"`
+}
+
+// LookupAlertIncidentMappingsResponse is the response body for
+// POST /alert-incident-mappings/lookup. Mappings is most-recent-first
+// (ORDER BY created_at DESC) and empty (never null) when nothing matches —
+// absence is a valid result for a lookup, not a 404.
+type LookupAlertIncidentMappingsResponse struct {
+	Mappings []AlertIncidentMappingView `json:"mappings"`
 }

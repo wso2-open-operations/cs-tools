@@ -345,13 +345,26 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 			}
 
 		case "projectId":
-			if f.Op != "in" {
+			switch f.Op {
+			case "in":
+				if err := requireCaseFilterValues(f); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				if err := validateUUIDs("filters: projectId", f.Values); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				p.ProjectIDs = append(p.ProjectIDs, f.Values...)
+			case "notIn":
+				if err := requireCaseFilterValues(f); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				if err := validateUUIDs("filters: projectId", f.Values); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				p.ExcludeProjectIDs = append(p.ExcludeProjectIDs, f.Values...)
+			default:
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
-			if err := requireCaseFilterValues(f); err != nil {
-				return domain.ParsedCaseFilters{}, err
-			}
-			p.ProjectIDs = append(p.ProjectIDs, f.Values...)
 
 		case "deploymentId":
 			if f.Op != "in" {
@@ -523,16 +536,26 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 			p.SreTeamIDs = append(p.SreTeamIDs, f.Values...)
 
 		case "accountId":
-			if f.Op != "in" {
+			switch f.Op {
+			case "in":
+				if err := requireCaseFilterValues(f); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				if err := validateUUIDs("filters: accountId", f.Values); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				p.AccountIDs = append(p.AccountIDs, f.Values...)
+			case "notIn":
+				if err := requireCaseFilterValues(f); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				if err := validateUUIDs("filters: accountId", f.Values); err != nil {
+					return domain.ParsedCaseFilters{}, err
+				}
+				p.ExcludeAccountIDs = append(p.ExcludeAccountIDs, f.Values...)
+			default:
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
-			if err := requireCaseFilterValues(f); err != nil {
-				return domain.ParsedCaseFilters{}, err
-			}
-			if err := validateUUIDs("filters: accountId", f.Values); err != nil {
-				return domain.ParsedCaseFilters{}, err
-			}
-			p.AccountIDs = append(p.AccountIDs, f.Values...)
 
 		case "resolutionNotes":
 			// isNotEmpty has no prior equivalent: false and omitted were
@@ -783,6 +806,10 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"sreTeam\" is not supported inside an OR group"}
 	case len(parsed.AccountIDs) > 0:
 		return &apierror.ValidationError{Msg: "anyOf: field \"accountId\" is not supported inside an OR group"}
+	case len(parsed.ExcludeProjectIDs) > 0:
+		return &apierror.ValidationError{Msg: "anyOf: field \"projectId\" (notIn) is not supported inside an OR group"}
+	case len(parsed.ExcludeAccountIDs) > 0:
+		return &apierror.ValidationError{Msg: "anyOf: field \"accountId\" (notIn) is not supported inside an OR group"}
 	case len(parsed.ExcludeStates) > 0:
 		// state+in is supported inside a branch (CaseFilterGroup.States);
 		// state+notIn is not modeled there.

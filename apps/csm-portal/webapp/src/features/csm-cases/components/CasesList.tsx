@@ -76,9 +76,9 @@ interface CasesListProps {
    * every other caller of `CasesList` already gets it. */
   optionalColumns?: CaseOptionalColumnId[];
   /** Which column is currently driving the server-side sort — Updated and
-   * State are always present; Created and Severity only sort when their own
-   * optional column is visible (see `OPTIONAL_COLUMN_SORT_FIELD`). Pass all
-   * four of `sortField` / `sortOrder` / `onSortFieldChange` /
+   * State are always present; Created, Severity, and Assignee only sort when
+   * their own optional column is visible (see `OPTIONAL_COLUMN_SORT_FIELD`).
+   * Pass all four of `sortField` / `sortOrder` / `onSortFieldChange` /
    * `onSortOrderChange` together for sortable headers, or omit all four for
    * plain (non-interactive) ones — a caller that only wants the legacy
    * "Updated" toggle can still do that by wiring only the "Updated" click
@@ -99,11 +99,12 @@ interface CasesListProps {
 }
 
 /** Maps the optional columns that double as sort headers to the field they
- * sort by. Columns not listed here (Product, Type, Assignee, Customer) have
- * no server-side sort of their own. */
+ * sort by. Columns not listed here (Product, Type, Issue Type, Created By,
+ * Customer, Escalation Level) have no server-side sort of their own. */
 const OPTIONAL_COLUMN_SORT_FIELD: Partial<Record<CaseOptionalColumnId, CasesSortField>> = {
   createdAt: "createdOn",
   severity: "severity",
+  assignee: "assignee",
 };
 
 function renderOptionalCell(id: CaseOptionalColumnId, c: CsmCaseRow): JSX.Element {

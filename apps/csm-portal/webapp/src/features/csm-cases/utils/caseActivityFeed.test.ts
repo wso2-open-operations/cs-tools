@@ -15,8 +15,8 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
-import { compareFeedEntries, type FeedEntry } from "./caseActivityFeed";
+import type { CaseAuditEntry, CsmCaseComment } from "@features/csm-cases/types/csmCases";
+import { compareFeedEntries, describeAuditEntry, type FeedEntry } from "./caseActivityFeed";
 
 function commentEntry(
   id: string,
@@ -73,5 +73,64 @@ describe("compareFeedEntries", () => {
     const b = commentEntry("b", ts, "customer");
     expect(compareFeedEntries(a, b)).toBeLessThan(0);
     expect(compareFeedEntries(b, a)).toBeGreaterThan(0);
+  });
+});
+
+describe("describeAuditEntry", () => {
+  function auditEntry(overrides: Partial<CaseAuditEntry> = {}): CaseAuditEntry {
+    return {
+      id: "audit-1",
+      kind: "field_change",
+      actor: "Jane Doe",
+      createdAt: "2026-07-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("describes a single field change as 'Label: old → new'", () => {
+    const entry = auditEntry({
+      changes: [{ field: "state", fieldLabel: "State", previousValue: "New", newValue: "Work in Progress" }],
+    });
+    expect(describeAuditEntry(entry)).toBe("State: New → Work in Progress");
+  });
+
+  it("joins multiple field changes from the same transaction with a semicolon", () => {
+    const entry = auditEntry({
+      changes: [
+        { field: "state", fieldLabel: "State", previousValue: "New", newValue: "Work in Progress" },
+        { field: "assignee", fieldLabel: "Assignee", previousValue: undefined, newValue: "Jane Doe" },
+      ],
+    });
+    expect(describeAuditEntry(entry)).toBe(
+      "State: New → Work in Progress; Assignee: Jane Doe",
+    );
+  });
+
+  it("renders 'cleared' when a field's new value is absent", () => {
+    const entry = auditEntry({
+      changes: [{ field: "assignee", fieldLabel: "Assignee", previousValue: "Jane Doe", newValue: undefined }],
+    });
+    expect(describeAuditEntry(entry)).toBe("Assignee: Jane Doe → cleared");
+  });
+
+  it("falls back to the entry's own description when there are no structured changes", () => {
+    const entry = auditEntry({ changes: undefined, description: "Case escalated to EL2" });
+    expect(describeAuditEntry(entry)).toBe("Case escalated to EL2");
+  });
+
+  it("formats a timestamp-shaped field value in the user's locale rather than showing the raw ISO string", () => {
+    const entry = auditEntry({
+      changes: [
+        {
+          field: "slaBreach",
+          fieldLabel: "SLA breach",
+          previousValue: "2026-07-01T00:00:00Z",
+          newValue: "2026-07-02T00:00:00Z",
+        },
+      ],
+    });
+    const described = describeAuditEntry(entry);
+    expect(described).not.toContain("2026-07-01T00:00:00Z");
+    expect(described.startsWith("SLA breach:")).toBe(true);
   });
 });

@@ -282,6 +282,17 @@ export default function CaseTabIsolatedRouter({
       aria-labelledby={tabElementId(tab.id)}
       data-testid={tabPanelElementId(tab.id)}
       onScroll={handleScroll}
+      // Only the currently-visible tab's panel gets `csm-print-expand` — see
+      // that class's own doc comment in `print.css`. It forces
+      // `display: block` under `@media print`, so applying it unconditionally
+      // (relying on the sibling `hidden` attribute alone to keep the other,
+      // backgrounded tabs off-screen) would fight that attribute: `hidden`'s
+      // `display: none` comes from the UA stylesheet with no `!important`,
+      // and this class's print rule — which does carry `!important`, by
+      // necessity, to win over this element's own inline `display: none` —
+      // would override it and print every open-but-inactive case tab's
+      // content at once instead of just the one on screen.
+      className={isVisible ? "csm-print-expand" : undefined}
       style={{
         display: isVisible ? "flex" : "none",
         flexDirection: "column",

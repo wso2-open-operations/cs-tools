@@ -57,7 +57,7 @@ func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r
 	}
 
 	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	if deploymentID == "" || !isUUIDOrSysID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -95,7 +95,7 @@ func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r 
 	}
 
 	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	if deploymentID == "" || !isUUIDOrSysID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -108,6 +108,11 @@ func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r 
 	var req dto.DeployedProductCreateRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if !isUUIDOrSysID(req.ProductID) || !isUUIDOrSysID(req.VersionID) || !isUUIDOrSysID(req.ProjectID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
 
@@ -138,7 +143,7 @@ func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *
 
 	deploymentID := r.PathValue("deploymentId")
 	id := r.PathValue("id")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) || id == "" || !uuidRe.MatchString(id) {
+	if deploymentID == "" || !isUUIDOrSysID(deploymentID) || id == "" || !isUUIDOrSysID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -155,15 +160,22 @@ func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *
 	}
 	req := dto.BuildEntityUpdateDeployedProductRequest(id, deploymentID, portalReq)
 	// entity-service requires exactly one of the detail-fields group
-	// (cores/tps/description) or active=false — never both, never neither.
-	detailFieldsSet := req.Cores != nil || req.TPS != nil || len(req.Description) > 0
+	// (cores/tps/description/updates) or active=false — never both, never
+	// neither. Mirrors its own hasDetailFields check in
+	// snDeployedProductService.UpdateDeployedProduct; keep the two in step.
+	//
+	// updates counts as a detail field there, and omitting it here rejected the
+	// Update History tab's save outright: that dialog sends updates on its own,
+	// which satisfied neither branch and came back as "provide either ... or
+	// active".
+	detailFieldsSet := req.Cores != nil || req.TPS != nil || len(req.Description) > 0 || req.Updates != nil
 	activeSet := req.Active != nil
 	if detailFieldsSet == activeSet {
-		writeError(w, http.StatusBadRequest, "Provide either cores/tps/description or active, but not both.")
+		writeError(w, http.StatusBadRequest, "Provide either cores/tps/description/updates or active, but not both.")
 		return
 	}
 
-	result, err := h.entity.UpdateDeployedProduct(r.Context(), id, req)
+	result, err := h.entity.UpdateDeployedProduct(r.Context(), toDashedID(id), req)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity UpdateDeployedProduct failed", "userID", user.UserID, "deployedProductID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update deployed product.")
@@ -207,7 +219,7 @@ func (h *DeployedProductHandler) SearchDeployedProductMetrics(w http.ResponseWri
 
 	deploymentID := r.PathValue("deploymentId")
 	productID := r.PathValue("productId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(productID) {
+	if !isUUIDOrSysID(deploymentID) || !isUUIDOrSysID(productID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -226,8 +238,8 @@ func (h *DeployedProductHandler) SearchDeployedProductMetrics(w http.ResponseWri
 		return
 	}
 
-	entityReq := entity.DeployedProductMetricsRequest{DeploymentID: deploymentID, StartDate: req.StartDate, EndDate: req.EndDate}
-	result, err := h.entity.SearchDeployedProductMetrics(r.Context(), productID, entityReq)
+	entityReq := entity.DeployedProductMetricsRequest{DeploymentID: toDashedID(deploymentID), StartDate: req.StartDate, EndDate: req.EndDate}
+	result, err := h.entity.SearchDeployedProductMetrics(r.Context(), toDashedID(productID), entityReq)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployedProductMetrics failed", "userID", user.UserID, "deployedProductID", productID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve metrics for the deployed product.")
@@ -248,7 +260,7 @@ func (h *DeployedProductHandler) SearchDeployedProductUsageCounts(w http.Respons
 
 	deploymentID := r.PathValue("deploymentId")
 	productID := r.PathValue("productId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(productID) {
+	if !isUUIDOrSysID(deploymentID) || !isUUIDOrSysID(productID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -267,8 +279,8 @@ func (h *DeployedProductHandler) SearchDeployedProductUsageCounts(w http.Respons
 		return
 	}
 
-	entityReq := entity.DeployedProductUsageCountsRequest{DeploymentID: deploymentID, StartDate: req.StartDate, EndDate: req.EndDate}
-	result, err := h.entity.SearchDeployedProductUsageCounts(r.Context(), productID, entityReq)
+	entityReq := entity.DeployedProductUsageCountsRequest{DeploymentID: toDashedID(deploymentID), StartDate: req.StartDate, EndDate: req.EndDate}
+	result, err := h.entity.SearchDeployedProductUsageCounts(r.Context(), toDashedID(productID), entityReq)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployedProductUsageCounts failed", "userID", user.UserID, "deployedProductID", productID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve metrics usage counts for the deployed product.")

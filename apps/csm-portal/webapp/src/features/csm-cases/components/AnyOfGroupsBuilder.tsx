@@ -33,6 +33,7 @@ import type { JSX } from "react";
 import MultiSelectField from "@components/MultiSelectField";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
 import AsyncAssignedUserIdMultiSelect from "@features/csm-cases/components/AsyncAssignedUserIdMultiSelect";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import {
   ANY_OF_FILTER_FIELDS,
   defaultAnyOfBranch,
@@ -205,6 +206,8 @@ export default function AnyOfGroupsBuilder({
                           onChange={(next) =>
                             updateRow(branchIndex, rowIndex, { ...row, values: next })
                           }
+                          roleIds={INTERNAL_USER_ROLES}
+                          active
                         />
                       )}
                     </Box>

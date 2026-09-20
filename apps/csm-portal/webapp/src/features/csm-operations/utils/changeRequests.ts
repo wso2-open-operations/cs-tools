@@ -264,6 +264,10 @@ export interface ChangeRequestFilters {
    * `{ field: "assignmentGroupId", op: "in" }` filter entry (see
    * `buildChangeRequestSearchFilters`), not a named payload field. */
   sreTeamIds: string[];
+  /** Selected project ids — sent as the named `projectIds` payload field
+   * (see `buildChangeRequestSearchFilters`), matching the entity-service's
+   * own field name for this search. */
+  projectIds: string[];
 }
 
 export const DEFAULT_CR_FILTERS: ChangeRequestFilters = {
@@ -273,6 +277,7 @@ export const DEFAULT_CR_FILTERS: ChangeRequestFilters = {
   closedStartDate: "",
   closedEndDate: "",
   sreTeamIds: [],
+  projectIds: [],
 };
 
 /** Count non-search active filters (used for the badge on the Filters button). */
@@ -282,7 +287,8 @@ export function countActiveCRFilters(filters: ChangeRequestFilters): number {
     (filters.impacts.length > 0 ? 1 : 0) +
     (filters.closedStartDate ? 1 : 0) +
     (filters.closedEndDate ? 1 : 0) +
-    (filters.sreTeamIds.length > 0 ? 1 : 0)
+    (filters.sreTeamIds.length > 0 ? 1 : 0) +
+    (filters.projectIds.length > 0 ? 1 : 0)
   );
 }
 
@@ -320,6 +326,7 @@ export function buildChangeRequestSearchFilters(
         { field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds },
       ],
     }),
+    ...(filters.projectIds.length > 0 && { projectIds: filters.projectIds }),
   };
 }
 
@@ -338,8 +345,11 @@ export function buildChangeRequestSearchFilters(
 //   - `priority` is write-only — accepted by create, never present on the
 //     read response — so there is no source value to copy from, ever,
 //     regardless of how the form is wired.
-//   - `implementationPlan` and `riskImpactAnalysis` are write-only for the
-//     same reason.
+//   - `riskImpactAnalysis` is write-only for the same reason.
+//     (`implementationPlan` was write-only too, but the read side now
+//     returns it — see `BeChangeRequestDetail.implementationPlan` — so it's
+//     no longer part of this gap. It isn't wired into the clone fields
+//     below yet, though: that's a separate feature decision, not a gap.)
 //   - `impactDescription`, `serviceOutage`, `communicationPlan`, and
 //     `rollbackPlan` are read-only today — the create payload has no field
 //     for any of them.
@@ -418,3 +428,199 @@ export const CLONE_SOURCE_GAP_MESSAGE =
   "Priority, implementation plan, risk/impact analysis, backout plan, assignment group, " +
   "linked project/case, and affected product aren't available to copy and need to be re-entered. " +
   "Deployment, schedule, and approval fields are intentionally left blank for you to set for the new environment.";
+
+// ---------------------------------------------------------------------------
+// "Originating service request" picker — unified parent-record search
+//
+// The create form's picker searches both service requests (by CS number) and
+// incidents (by INC number) — see `useSearchParentRecordsForSelect`. But the
+// live `PATCH /change-requests/{id}` write (`ChangeRequestUtils.
+// patchChangeRequestFields` in the shared ServiceNow scoped app) only ever
+// resolves `caseId` against the `sn_customerservice_case` table — passing an
+// incident's sys_id through that same call 404s. Until the backend adds a
+// path for a change request to link directly to an incident, an incident
+// result can be *found* by this picker (so the UI is ready the moment that
+// ships) but must never be *submitted* — see `CreateChangeRequestPage`'s
+// `isIncidentParentSelected` gate.
+// ---------------------------------------------------------------------------
+
+export type ParentRecordKind = "service_request" | "incident";
+
+/** A single option in the unified service-request/incident picker. */
+export interface ParentRecordOption {
+  kind: ParentRecordKind;
+  id: string;
+  number?: string | null;
+  subject?: string | null;
+}
+
+const PARENT_RECORD_VALUE_PREFIX: Record<ParentRecordKind, string> = {
+  service_request: "sr:",
+  incident: "inc:",
+};
+
+/**
+ * Encodes a `ParentRecordOption`'s kind and id into the single string id
+ * `AsyncEntitySelect` (and this page's `caseId` state) works with — the kind
+ * has to travel with the id since a plain incident id and a plain case id are
+ * both opaque UUIDs the form otherwise can't tell apart.
+ */
+export function encodeParentRecordValue(kind: ParentRecordKind, id: string): string {
+  return `${PARENT_RECORD_VALUE_PREFIX[kind]}${id}`;
+}
+
+/** Reverses {@link encodeParentRecordValue}; `undefined` for an empty/unrecognized value. */
+export function decodeParentRecordValue(
+  value: string,
+): { kind: ParentRecordKind; id: string } | undefined {
+  if (value.startsWith(PARENT_RECORD_VALUE_PREFIX.service_request)) {
+    return {
+      kind: "service_request",
+      id: value.slice(PARENT_RECORD_VALUE_PREFIX.service_request.length),
+    };
+  }
+  if (value.startsWith(PARENT_RECORD_VALUE_PREFIX.incident)) {
+    return { kind: "incident", id: value.slice(PARENT_RECORD_VALUE_PREFIX.incident.length) };
+  }
+  return undefined;
+}
+
+/**
+ * Display label for a parent-record option, as "CS0001234 — subject" (service
+ * request) or "INC0001234 — subject" (incident) — number and subject are both
+ * optional on the underlying search views, so it degrades to whichever exists
+ * and finally to the id.
+ */
+export function parentRecordLabel(o: {
+  id: string;
+  number?: string | null;
+  subject?: string | null;
+}): string {
+  return [o.number, o.subject].filter(Boolean).join(" — ") || o.id;
+}
+
+/**
+ * Router state carried from an incident's own "Create change request…" action
+ * (`CsmIncidentDetailPage`) to `/operations/change-requests/new`, mirroring
+ * `CreateChangeRequestFromCaseNavState` — pre-selects that incident as the
+ * intended parent so the picker starts populated rather than blank. Unlike
+ * the service-request entry point, submitting with this pre-fill in place is
+ * gated (see this file's header comment) until the backend accepts an
+ * incident-linked change request.
+ */
+export interface CreateChangeRequestFromIncidentNavState {
+  incidentId: string;
+  incidentNumber?: string;
+  incidentSubject?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Create-form in-progress draft persistence
+//
+// CreateChangeRequestPage is a normal route (`/change-requests/new`), not a
+// tab kept alive by a persistent tab router — navigating to another
+// operations tab unmounts it, and navigating back remounts it fresh, which
+// would otherwise re-seed every field from the *original* clone/service-
+// request/incident source again and silently discard anything the user had
+// typed. sessionStorage (not a backend draft) closes that gap: the form
+// writes its own state back on every change and restores from it on mount,
+// scoped per browser tab (sessionStorage, not localStorage) so two tabs
+// editing different change requests never collide.
+
+/** Every field CreateChangeRequestPage keeps as local state, persisted as a
+ * single JSON draft so restoring it is a straight round-trip into useState's
+ * initializers. */
+export interface ChangeRequestDraft {
+  subject: string;
+  type: string;
+  impact: string;
+  priority: string;
+  state: string;
+  plannedStartDate: string;
+  plannedEndDate: string;
+  description: string;
+  justification: string;
+  implementationPlan: string;
+  riskImpactAnalysis: string;
+  backoutPlan: string;
+  testPlan: string;
+  isPlanningVisibleToCustomers: boolean;
+  groupId: string;
+  assignedEngineerId: string;
+  requestedById: string;
+  parentValue: string;
+}
+
+/** Which of the create form's three entry points (or none — opened fresh) a
+ * draft belongs to. Mirrors the mutually-exclusive nav-state shapes the page
+ * itself narrows on. */
+export type ChangeRequestDraftContext =
+  | { kind: "clone"; sourceNumber?: string }
+  | { kind: "case"; caseId: string }
+  | { kind: "incident"; incidentId: string }
+  | { kind: "new" };
+
+const DRAFT_STORAGE_PREFIX = "csm.createChangeRequest.draft.";
+
+/**
+ * The sessionStorage key an in-progress draft is saved under, scoped to the
+ * specific entry context the form was opened with. This is deliberate, not
+ * incidental: a single shared key would mean navigating to this same route
+ * for a *different* clone source (or a from-scratch change request, or a
+ * different originating service request/incident) would silently load a
+ * stale, mismatched draft left over from an earlier, unrelated in-progress
+ * edit — arguably worse than today's bug, since the wrong content would look
+ * plausible rather than obviously reset.
+ */
+export function changeRequestDraftKey(context: ChangeRequestDraftContext): string {
+  switch (context.kind) {
+    case "clone":
+      // Falls back to a fixed suffix on the (unexpected) case where a cloned
+      // record carries no number at all, rather than collapsing into the
+      // same key as the from-scratch path.
+      return `${DRAFT_STORAGE_PREFIX}clone:${context.sourceNumber ?? "unknown"}`;
+    case "case":
+      return `${DRAFT_STORAGE_PREFIX}case:${context.caseId}`;
+    case "incident":
+      return `${DRAFT_STORAGE_PREFIX}incident:${context.incidentId}`;
+    case "new":
+      return `${DRAFT_STORAGE_PREFIX}new`;
+  }
+}
+
+/** Reads back a previously saved draft for `key`, or `null` when there is
+ * none — including when sessionStorage is unavailable or the stored value
+ * doesn't parse, so a corrupt/foreign entry degrades to "no draft" rather
+ * than throwing during render. */
+export function loadChangeRequestDraft(key: string): ChangeRequestDraft | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as ChangeRequestDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persists the form's current field values under `key`. Best-effort:
+ * sessionStorage can throw (quota, private-mode restrictions) and losing
+ * draft persistence is a degraded experience, not a reason to break the
+ * form, so a failure here is swallowed. */
+export function saveChangeRequestDraft(key: string, draft: ChangeRequestDraft): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // See doc comment above.
+  }
+}
+
+/** Removes the draft at `key` — called once the change request this draft
+ * was building has actually been created, or the user explicitly cancels, so
+ * a later visit to the same entry context starts clean instead of restoring
+ * stale content. */
+export function clearChangeRequestDraft(key: string): void {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // See saveChangeRequestDraft's doc comment.
+  }
+}

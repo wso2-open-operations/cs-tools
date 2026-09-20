@@ -245,6 +245,22 @@ type WidgetTemplate struct {
 	// ResourceType is a caller (frontend/config-author) mistake, surfaced by
 	// that resource's own /search endpoint, not caught here.
 	SortBy map[string]any `json:"sortBy,omitempty"`
+	// InlineDrilldown is only meaningful for Shape pie/bar: false (the
+	// default/absent case) is existing behavior unchanged -- clicking a
+	// slice/bar navigates away to that criteria's own list view. true tells
+	// the frontend to instead expand the clicked slice's filtered list
+	// inline on the tile, without navigating. This backend does not decide
+	// or render anything about that choice -- exactly like Slices/GroupBy/
+	// Columns, it is passed through unmodified for the frontend to act on;
+	// a no-op if set on a count/list widget, the same way Columns/SortBy
+	// are no-ops outside their own shape.
+	InlineDrilldown bool `json:"inlineDrilldown,omitempty"`
+	// InlineLabels is only meaningful for Shape pie: opts a widget into
+	// rendering each slice's label+value on the ring itself with a leader
+	// line, instead of a donut plus separate legend list. Absent/false is a
+	// no-op -- this backend only passes it through, exactly like
+	// InlineDrilldown.
+	InlineLabels bool `json:"inlineLabels,omitempty"`
 
 	// legacyFilters holds a pre-rename config's "filters" key so
 	// migrateLegacyWidgetKeys can move it into Query. Unexported so it can

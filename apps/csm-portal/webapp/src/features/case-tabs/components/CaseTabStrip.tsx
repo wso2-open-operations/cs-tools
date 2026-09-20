@@ -72,6 +72,138 @@ type MenuAnchorPosition = { top: number; left: number };
 
 const ARROW_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 
+/** Rounded-top, flat-bottom corner radius — a real tab's own silhouette
+ * (a folder-tab shape), not a fully-rounded floating pill. A fully-rounded
+ * shape is what reads as "a chip" rather than "a tab" even once every other
+ * chip-like trait (visible border, small size) is removed — reported live
+ * ("still I can see chips") against the active tab specifically, which had
+ * kept the all-around-rounded shape from an earlier version of this fix. */
+const TAB_CORNER_RADIUS = "8px 8px 0 0";
+/** Taller than a stock `size="small"` Chip's own 24px — closer to a real
+ * browser tab's proportions, which read noticeably taller/more substantial
+ * than a small metadata chip. */
+const TAB_HEIGHT = 32;
+
+/**
+ * The active tab's fill — the one place in this component that genuinely has
+ * to branch on light vs. dark, because "the active tab is the lightest thing
+ * in the strip" needs a *different* color in each, not a different token:
+ *  - Light theme: solid white on a grey strip, exactly like a real browser's
+ *    — anything translucent barely lifts off an already-light strip and was
+ *    reported live as not white enough.
+ *  - Dark theme: a solid grey. White here (translucent or not) renders as a
+ *    glaring block against a navy strip — reported live — while a wash faint
+ *    enough to avoid that stops reading as a distinct tab at all. Grey sits
+ *    between the two: clearly lighter than the strip, still dark enough to
+ *    keep the ambient near-white label legible on top of it.
+ *
+ * A literal color rather than a palette token because no token means "lighter
+ * than the ambient surface in either mode" — the `background.*` tokens flip
+ * their absolute lightness between the two themes (an earlier version used
+ * `background.default`, which made the active tab the DARKEST thing in the
+ * strip under the dark theme), and `action.selected` is an overlay tuned for
+ * a subtle table-row highlight, too faint to pick the open tab out at a
+ * glance. Both of those were reported live too.
+ *
+ * Scoped with `applyStyles("dark", …)` rather than a `palette.mode === "dark"`
+ * check. This app drives theming through MUI CssVars, where `palette.mode`
+ * stays pinned to the default scheme no matter which one is actually showing —
+ * so a mode check here always took the light branch, and the dark theme
+ * rendered a white tab with a white (invisible) label on it. `applyStyles`
+ * emits a scheme-scoped selector instead, which is the mechanism the rest of
+ * this app's per-scheme styling already uses (see `CaseMetaBand`, the a11y
+ * theme overrides). Never reach for `palette.mode` in this codebase.
+ *
+ * Typed structurally rather than against the theme type — these two members
+ * are all this needs, and MUI passes the real theme at call time.
+ */
+type ColorSchemeAwareTheme = {
+  palette: { grey: { 700: string }; common: { white: string } };
+  applyStyles: (
+    scheme: "dark" | "light",
+    styles: Record<string, unknown>,
+  ) => Record<string, unknown>;
+};
+
+function activeTabFillStyles(theme: ColorSchemeAwareTheme): Record<string, unknown> {
+  return {
+    backgroundColor: theme.palette.common.white,
+    ...theme.applyStyles("dark", { backgroundColor: theme.palette.grey[700] }),
+  };
+}
+
+/**
+ * Shared chip styling for the browser-tab look: a rounded-top/flat-bottom
+ * "folder tab" shape (not a fully-rounded pill), a taller-than-stock height,
+ * and — for the *active* tab only — `activeTabFillStyles` (see its own
+ * comment for why that one is per-scheme) plus a theme-accent bottom rule
+ * sitting on the strip's own divider line, so it reads as continuous with the
+ * page below it. An inactive tab is fully transparent, showing the strip's
+ * own tinted toolbar backdrop through untouched.
+ *
+ * Returns an `sx` *callback*, not a plain object, because that fill has to be
+ * resolved per colour scheme off the real theme. Call sites therefore pass it
+ * through directly (`sx={tabChipSx(active)}`) or, when they have extra styles
+ * of their own to add, in `sx`'s array form — spreading it into an object
+ * literal would spread a function and silently drop every style in it.
+ *
+ * Two early passes here, both corrected against live reference screenshots,
+ * are worth not repeating: inactive tabs each kept a visible `outlined`
+ * border (they still read as separate chips), and the active tab was a small,
+ * fully-rounded floating pill with gaps on every side rather than a
+ * flat-bottomed shape merged into the page below.
+ */
+function tabChipSx(active: boolean): (theme: ColorSchemeAwareTheme) => Record<string, unknown> {
+  return (theme) => ({
+    flexShrink: 0,
+    maxWidth: 220,
+    height: TAB_HEIGHT,
+    cursor: "pointer",
+    borderRadius: TAB_CORNER_RADIUS,
+    ...(active
+      ? {
+          // Per-scheme — see `activeTabFillStyles`. The label keeps the
+          // ambient `text.primary` under either theme rather than an inverted
+          // one of its own, which both fills are chosen to stay legible
+          // against; the bold weight and the accent rule below carry the rest
+          // of the emphasis, so the fill doesn't have to do it alone.
+          ...activeTabFillStyles(theme),
+          fontWeight: 600,
+          // A theme-accent rule along the bottom edge — a second, unambiguous
+          // "this one is open" signal beyond the fill color alone, and the
+          // reason the strip itself has NO bottom padding (see this
+          // component's own strip `Box`): tabs sit flush on the strip's
+          // bottom edge, so this rule lands directly on the strip's own
+          // divider line and reads as one accent line rather than a second
+          // line floating above it.
+          //
+          // An earlier version instead kept the strip's padding and pushed
+          // this chip down over it with `position: relative; bottom: -9px`.
+          // That is exactly the 9px the tablist's own `overflowY: "hidden"`
+          // clips away, so the border silently never painted at all — the two
+          // rules were added for unrelated reasons and quietly cancelled each
+          // other. Keep this tab inside its container's own box; don't
+          // reintroduce a negative offset here.
+          borderBottom: "2px solid",
+          borderBottomColor: "primary.main",
+          // No additional hover treatment: this tab is already the most
+          // prominent one, so hovering it shouldn't visibly change further.
+          "&:hover": activeTabFillStyles(theme),
+        }
+      : {
+          bgcolor: "transparent",
+          // Explicit and deliberately far weaker than the active tab's own
+          // light fill above — relying on Chip's own built-in
+          // default hover treatment left hovering an inactive tab looking
+          // about as prominent as the actual active tab, reported live as
+          // "hover and active color seem similar" (unlike a real browser,
+          // where a hover preview is clearly weaker than the genuinely
+          // active tab).
+          "&:hover": { bgcolor: "action.hover" },
+        }),
+  });
+}
+
 /**
  * Browser-tab-like strip for in-app open tabs, rendered by `CaseTabStripBar`
  * above the routed page content. Presentational: all open/close/activate
@@ -194,7 +326,21 @@ export default function CaseTabStrip({
         alignItems: "center",
         gap: 0.5,
         px: 3,
-        py: 1,
+        pt: 1,
+        // No bottom padding, so the tabs sit flush on the strip's own bottom
+        // edge and the active tab's accent rule (see `tabChipSx`) lands
+        // directly on the divider below instead of floating above it as a
+        // separate second line — which is how it read while this was a
+        // symmetric `py: 1`.
+        pb: 0,
+        // A recessed "toolbar" backdrop: a *darkening* overlay, so the strip
+        // stays in the same family as the page content below it under either
+        // theme. Deliberately not `action.hover`, which lightens under the
+        // dark theme — that turned the whole strip into a pale slate band
+        // floating above a much darker page, a far heavier separation than a
+        // tab strip should draw, and it left the active tab's own light fill
+        // with almost nothing to stand out against.
+        bgcolor: "rgba(0, 0, 0, 0.18)",
         borderBottom: 1,
         borderColor: "divider",
         flexShrink: 0,
@@ -213,8 +359,23 @@ export default function CaseTabStrip({
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: 0.75,
+          // Adjacent tabs touch — no gap between them — matching a real
+          // browser tab strip; each tab's own distinct fill (see
+          // `tabChipSx`) is what visually separates one from the next.
+          gap: 0,
           overflowX: "auto",
+          // Explicit, not left to default: per the CSS overflow spec, a box
+          // with `overflow-x` set to anything other than `visible` and no
+          // explicit `overflow-y` has its *other* axis computed as `auto`
+          // too, not `visible` — so this box was silently scrollable
+          // vertically as well, and the `::-webkit-scrollbar` styling below
+          // (meant only for the horizontal scrollbar) applied to that
+          // unwanted vertical one too, rendering a short vertical grey
+          // thumb at the strip's right edge, right next to the kebab button
+          // — reported live as "a scroll icon" there. This box's content
+          // never needs to scroll vertically; only cutting off that axis
+          // explicitly stops the browser from offering to.
+          overflowY: "hidden",
           minWidth: 0,
           flex: 1,
           "&::-webkit-scrollbar": { height: 6 },
@@ -238,15 +399,9 @@ export default function CaseTabStrip({
               aria-selected={pinnedTab.active}
               tabIndex={activeKey === PINNED_KEY ? 0 : -1}
               label={pinnedTab.label}
-              variant={pinnedTab.active ? "filled" : "outlined"}
+              variant="filled"
               onClick={pinnedTab.onClick}
-              sx={{
-                flexShrink: 0,
-                maxWidth: 220,
-                cursor: "pointer",
-                fontStyle: "italic",
-                ...(pinnedTab.active ? { bgcolor: "action.selected", fontWeight: 600 } : {}),
-              }}
+              sx={[tabChipSx(pinnedTab.active), { fontStyle: "italic" }]}
             />
           </Tooltip>
         )}
@@ -264,7 +419,7 @@ export default function CaseTabStrip({
                 aria-selected={active}
                 tabIndex={activeKey === tab.id ? 0 : -1}
                 label={label}
-                variant={active ? "filled" : "outlined"}
+                variant="filled"
                 onClick={() => onActivate(tab.id)}
                 onContextMenu={(e: ReactMouseEvent<HTMLElement>) => {
                   e.stopPropagation();
@@ -291,12 +446,7 @@ export default function CaseTabStrip({
                 // file's own test for how it's exercised: by test id, not by
                 // an accessible name, until oxygen-ui/MUI's `Chip` exposes
                 // one for `deleteIcon` directly).
-                sx={{
-                  flexShrink: 0,
-                  maxWidth: 220,
-                  cursor: "pointer",
-                  ...(active ? { bgcolor: "action.selected", fontWeight: 600 } : {}),
-                }}
+                sx={tabChipSx(active)}
               />
             </Tooltip>
           );

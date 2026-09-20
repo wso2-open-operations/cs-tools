@@ -20,11 +20,6 @@ import DirectoryMemberPage from "@features/csm-admin/components/DirectoryMemberP
 /** A group's member list (`/admin/groups/:id`), filtered by `groupIds`. */
 export default function GroupMembersPage(): JSX.Element {
   return (
-    <DirectoryMemberPage
-      filterKey="groupIds"
-      entityNoun="group"
-      listPath="/admin/groups"
-      listLabel="Groups"
-    />
+    <DirectoryMemberPage filterKey="groupIds" entityNoun="group" listPath="/admin/groups" />
   );
 }

@@ -337,6 +337,46 @@ func (c *GoogleChatClient) SendCaseCreatedAlert(ctx context.Context, product, se
 	return c.sendCard(ctx, product, msg)
 }
 
+// SendSecurityReportAnalysisAlert posts a card message announcing a newly
+// created case of type "security_report_analysis", to the Google Chat
+// space configured for product. A dedicated card rather than a variant of
+// SendCaseCreatedAlert: that card's severity line only makes sense for
+// type=="case" (severity is only ever set for that type — see
+// entity-service's own validateCreateCaseRequest/sla_policy.go), so this
+// shows a fixed case-type label instead of a severity line. Same header
+// convention as SendCaseCreatedAlert (case ref + "🆕" marker as the title,
+// case subject as the subtitle) and the same single "View case" link, not
+// a button and not an "acknowledge" action — matching the product
+// decision behind SendCaseCreatedAlert's own single consistent link (see
+// that function's own doc comment).
+func (c *GoogleChatClient) SendSecurityReportAnalysisAlert(ctx context.Context, product, caseNumber, wso2CaseID, productName, title, team, caseLink string) error {
+	if caseNumber == "" {
+		return fmt.Errorf("notifications: caseNumber is required")
+	}
+	var lines []string
+	if team != "" {
+		lines = append(lines, teamPart(team))
+	}
+	lines = append(lines, "<b>Security Report Analysis</b>")
+	if productName != "" {
+		lines = append(lines, caseAlertLine(`<b>%s</b>`, productName))
+	}
+	lines = append(lines, caseAlertLine(`<a href="%s">View case</a>`, caseLink))
+	text := strings.Join(lines, "<br>")
+	msg := chatCardMessage{
+		CardsV2: []chatCardWrapper{
+			{
+				CardID: "security-report-analysis-created-alert",
+				Card: chatCard{
+					Header:   &chatCardHeader{Title: "🆕 " + chatHeaderCaseRef(caseNumber, wso2CaseID), Subtitle: title},
+					Sections: []chatCardSection{{Widgets: []chatCardWidget{{TextParagraph: &chatTextParagraph{Text: text}}}}},
+				},
+			},
+		},
+	}
+	return c.sendCard(ctx, product, msg)
+}
+
 // SendCaseAcknowledgedAlert posts a three-line card message announcing
 // that a case was acknowledged, to the same Google Chat space as its
 // case.created alert — no header, no button, and deliberately no leading

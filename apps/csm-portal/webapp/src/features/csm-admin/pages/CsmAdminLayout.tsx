@@ -54,27 +54,31 @@ const USER_MANAGEMENT_INDEX_PATH = "/admin/user-management";
  * app's own convention: a destination-specific label is only for a button
  * whose target is genuinely always the same place, which this one no longer is.
  *
- * The "Dashboards" tab is additionally filtered by the signed-in user's own
- * admin role (frontend-only — see `dashboardBuilderAccess.ts` for why this
- * tab specifically needs it, unlike its sibling). This never removes a tab
+ * The "Dashboards" tab is additionally filtered by whether the signed-in
+ * user has dashboard-builder access — `admin` or `dashboard_designer`
+ * (frontend-only — see `dashboardBuilderAccess.ts` for why this tab
+ * specifically needs it, unlike its sibling). This never removes a tab
  * `CSM_PORTAL_FEATURE_OVERRIDES` itself hid/marked WIP — it only ever narrows
- * what a non-admin sees further.
+ * what a caller without that access sees further.
  */
 export default function CsmAdminLayout(): JSX.Element {
   const { user } = useCurrentUser();
-  const isAdmin = hasDashboardBuilderAccess(user?.roles);
+  const hasDashboardsTabAccess = hasDashboardBuilderAccess(user?.roles);
   const allTabs = useRouteTabs("admin");
   const tabs = useMemo(() => {
-    const visible = allTabs.tabs.filter((tab) => tab.node.id !== "admin.dashboards" || isAdmin);
+    const visible = allTabs.tabs.filter(
+      (tab) => tab.node.id !== "admin.dashboards" || hasDashboardsTabAccess,
+    );
     // `allTabs.activeKey` was resolved against the UNFILTERED list — if
-    // filtering it out here just removed the active one (a non-admin whose
-    // URL still names it), fall back to this narrower list's own first tab
-    // rather than handing `<Tabs>` a `value` with no matching `<Tab>`.
+    // filtering it out here just removed the active one (a caller without
+    // access whose URL still names it), fall back to this narrower list's
+    // own first tab rather than handing `<Tabs>` a `value` with no matching
+    // `<Tab>`.
     const activeKey = visible.some((tab) => tab.key === allTabs.activeKey)
       ? allTabs.activeKey
       : (visible[0]?.key ?? "");
     return { ...allTabs, tabs: visible, activeKey };
-  }, [allTabs, isAdmin]);
+  }, [allTabs, hasDashboardsTabAccess]);
 
   const location = useLocation();
   const { pathname } = location;

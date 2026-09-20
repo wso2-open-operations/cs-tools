@@ -236,6 +236,40 @@ describe("advanced filters (`af` param)", () => {
     expect(round.advancedFilters).toEqual(advancedFilters);
   });
 
+  // `projectId`/`notIn` has no typed `CasesFilters` slot of its own (only
+  // `projectId`/`in` does, via `filters.projects`) -- it stays in the untyped
+  // `advancedFilters` array mechanism, same as any other field with no typed
+  // adapter, and still round-trips losslessly through the URL.
+  it("round-trips a `projectId`/`notIn` row through the URL", () => {
+    const advancedFilters: AdvancedFilterRow[] = [
+      { field: "projectId", op: "notIn", values: ["proj-1", "proj-2"] },
+    ];
+    const filters: CasesFilters = { ...DEFAULT_CASES_FILTERS, advancedFilters };
+    const round = readCasesFiltersFromUrl(writeCasesFiltersToUrl(filters));
+    expect(round.advancedFilters).toEqual(advancedFilters);
+  });
+
+  // `accountId` is a brand-new field with no typed `CasesFilters` slot at
+  // all -- both its `in` and `notIn` ops go through the same untyped
+  // `advancedFilters` array mechanism.
+  it("round-trips an `accountId`/`in` row through the URL", () => {
+    const advancedFilters: AdvancedFilterRow[] = [
+      { field: "accountId", op: "in", values: ["acct-1", "acct-2"] },
+    ];
+    const filters: CasesFilters = { ...DEFAULT_CASES_FILTERS, advancedFilters };
+    const round = readCasesFiltersFromUrl(writeCasesFiltersToUrl(filters));
+    expect(round.advancedFilters).toEqual(advancedFilters);
+  });
+
+  it("round-trips an `accountId`/`notIn` row through the URL", () => {
+    const advancedFilters: AdvancedFilterRow[] = [
+      { field: "accountId", op: "notIn", values: ["acct-3"] },
+    ];
+    const filters: CasesFilters = { ...DEFAULT_CASES_FILTERS, advancedFilters };
+    const round = readCasesFiltersFromUrl(writeCasesFiltersToUrl(filters));
+    expect(round.advancedFilters).toEqual(advancedFilters);
+  });
+
   // `escalation` now has a typed `CasesFilters` slot (`hasEscalation`, see
   // `filterFieldAdapters.ts`'s typed-adapter registry) — an `af` row
   // targeting it is folded (`normalizeCasesFilters`) into that real property

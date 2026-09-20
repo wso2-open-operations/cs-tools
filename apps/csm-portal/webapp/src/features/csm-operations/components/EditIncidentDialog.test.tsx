@@ -46,7 +46,7 @@ vi.mock("@api/useSearchConfigurationItems", () => ({
   useSearchConfigurationItems: (...args: unknown[]) => useSearchConfigurationItemsMock(...(args as [])),
 }));
 vi.mock("@api/useSearchUsersByName", () => ({
-  useSearchUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
+  useSearchInternalUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
 }));
 vi.mock("@features/csm-operations/api/useSearchIncidentsForSelect", () => ({
   useSearchIncidentsExcludingSelf: (...args: unknown[]) => useSearchIncidentsExcludingSelfMock(...(args as [])),

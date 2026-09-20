@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/sre-alert-ingestion-service/internal/alertpayload"
@@ -62,15 +63,16 @@ type IncidentCreator interface {
 	// (csmclient.DedupTag) already exists. See attempt's doc comment for
 	// when and why this is called, and the fail-open behavior on error.
 	SearchIncidentByTag(ctx context.Context, tag string) (*csmclient.CreateIncidentResult, bool, error)
-	// SearchOpenIncidentByNumber confirms whether the incident identified by
-	// number is still open (not Resolved/Closed/Cancelled). See tryGroup for
-	// when this is called and the fail-open behavior on error.
-	SearchOpenIncidentByNumber(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error)
-	// LookupAlertIncidentMappings finds any earlier alert(s) recorded against
-	// (source, uniqueIdentifier), most-recent-first. See tryGroup.
-	LookupAlertIncidentMappings(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error)
+	// SearchOpenIncidentByGroupTag looks up whether an earlier alert
+	// reporting the same (source, uniqueIdentifier) condition already has a
+	// still-open incident created within Config.GroupWindow. See tryGroup
+	// for when this is called and the fail-open behavior on error.
+	SearchOpenIncidentByGroupTag(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error)
 	// CreateAlertIncidentMapping records one alert against the incident it
-	// ended up delivered to. See tryGroup and attempt's post-create call.
+	// ended up delivered to — a best-effort CSM-side audit trail of the
+	// alert->incident relationship, kept for visibility even though the
+	// grouping *decision* itself (tryGroup, above) no longer depends on
+	// this being readable. See tryGroup and attempt's post-create call.
 	CreateAlertIncidentMapping(ctx context.Context, req csmclient.CreateAlertIncidentMappingRequest) (*csmclient.AlertIncidentMappingView, error)
 }
 
@@ -94,6 +96,14 @@ type Config struct {
 	// PollInterval controls how often the worker *looks*, backoff controls
 	// which rows it's willing to *act on* once it looks.
 	PollInterval time.Duration
+	// GroupWindow bounds how far back tryGroup's incident search looks for
+	// an earlier alert's still-open incident to attach to — an alert whose
+	// matching incident was created before now-GroupWindow is treated as
+	// not groupable, even if it's still open. Defaults to 15 minutes if
+	// <= 0, the one concrete parameter carried over from a ServiceNow prod
+	// flow design this mirrors in spirit (see csmclient.GroupTag's doc
+	// comment for what was and wasn't actually portable from it).
+	GroupWindow time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -105,6 +115,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.PollInterval <= 0 {
 		c.PollInterval = 15 * time.Second
+	}
+	if c.GroupWindow <= 0 {
+		c.GroupWindow = 15 * time.Minute
 	}
 	return c
 }
@@ -377,57 +390,60 @@ func (w *Worker) attempt(ctx context.Context, row store.AlertRecord) {
 }
 
 // tryGroup implements this alert's incident-grouping check: an earlier
-// alert reporting the same (source, uniqueIdentifier) condition may already
-// have an open incident, in which case this alert should attach to it (via
-// a recorded alert-incident-mapping row) instead of a new one being
-// created. Called only when bp.UniqueIdentifier is non-empty (see attempt).
+// alert reporting the same (source, uniqueIdentifier) condition, within
+// Config.GroupWindow, may already have a still-open incident — found by
+// searching for csmclient.GroupTag(bp.Source, bp.UniqueIdentifier), the tag
+// internal/handler.buildSubject embeds in every such incident's Subject at
+// creation time. If found, this alert attaches to it instead of a new one
+// being created. Called only when bp.UniqueIdentifier is non-empty (see
+// attempt).
 //
-// Returns grouped=true, plus the existing incident's id/number, only when
-// both the lookup and the open-state confirmation succeed. Any failure
-// anywhere along this path — the lookup call erroring, no mapping found, a
-// mapping found but with no recorded incident number to confirm against, or
-// the open-state confirmation call itself erroring or finding the incident
-// no longer open — returns grouped=false, so attempt() falls through to the
-// existing create-or-dedup-search flow unchanged. This mirrors the same
-// fail-open philosophy as the pre-retry dedup check above: "we couldn't
-// confirm this is groupable" is never treated as "assume it is."
+// This needs a single search call, not the lookup-then-confirm two-step an
+// earlier design used (a separate alert-incident-mapping lookup, then a
+// second call to confirm the matched incident was still open) — the state
+// and time-window filters are sent as part of the same search, so a match
+// is only ever returned already-confirmed-open-and-in-window.
 //
-// This is a known, accepted v1 limitation, not a bug: the open-state
-// confirmation (SearchOpenIncidentByNumber) is ServiceNow-backed, like every
-// other csmclient search call in this service, and 401s on every call today
-// (see internal/csmclient/search.go and this service's CLAUDE.md) — so in
+// Returns grouped=false, falling through to the existing create-or-dedup-
+// search flow unchanged, on any failure: the search call itself erroring,
+// or no match found. This mirrors the same fail-open philosophy as the
+// pre-retry dedup check above: "we couldn't confirm this is groupable" is
+// never treated as "assume it is."
+//
+// This is a known, accepted v1 limitation, not a bug: the search
+// (SearchOpenIncidentByGroupTag) is ServiceNow-backed, like every other
+// csmclient search call in this service, and 401s on every call today (see
+// internal/csmclient/search.go and this service's CLAUDE.md) — so in
 // production this always falls open to "not groupable, proceed as before"
 // until that infrastructure gap is closed. The grouping feature itself is
 // structurally complete and ready for that day; it does not attempt to work
 // around the gap.
 func (w *Worker) tryGroup(ctx context.Context, row store.AlertRecord, bp alertpayload.Payload) (incidentID, incidentNumber string, grouped bool) {
-	mappings, err := w.csm.LookupAlertIncidentMappings(ctx, bp.Source, bp.UniqueIdentifier)
-	if err != nil {
-		slog.WarnContext(ctx, "worker: incident-grouping lookup failed, proceeding without grouping (fail-open)", "id", row.ID, "alertNumber", row.AlertNumber, "err", err)
-		return "", "", false
-	}
-	if len(mappings) == 0 {
-		return "", "", false
-	}
-
-	// mappings is most-recent-first per the lookup contract.
-	latest := mappings[0]
-	if latest.IncidentNumber == nil || *latest.IncidentNumber == "" {
-		slog.WarnContext(ctx, "worker: incident-grouping match has no recorded incident number, cannot confirm open state, proceeding without grouping", "id", row.ID, "alertNumber", row.AlertNumber, "matchedMappingID", latest.ID)
+	// handler.AlertRequest.validate rejects csmclient.TagDelimiterChars in
+	// Source/UniqueIdentifier on ingress, but that check postdates rows
+	// already buffered by then — a legacy row's persisted payload can still
+	// carry one. Building GroupTag from an unvalidated field lets distinct
+	// (source, uniqueIdentifier) pairs collide on the same tag (e.g.
+	// ("a", "b:c") and ("a:b", "c")), grouping this alert onto the wrong
+	// incident and skipping CreateIncident. Bypass grouping instead —
+	// falling through to the normal create/dedup path is always safe.
+	if strings.ContainsAny(bp.Source, csmclient.TagDelimiterChars) || strings.ContainsAny(bp.UniqueIdentifier, csmclient.TagDelimiterChars) {
+		slog.WarnContext(ctx, "worker: persisted source/uniqueIdentifier contains a tag delimiter, skipping grouping for this alert", "id", row.ID, "alertNumber", row.AlertNumber)
 		return "", "", false
 	}
 
-	existing, found, serr := w.csm.SearchOpenIncidentByNumber(ctx, *latest.IncidentNumber)
+	tag := csmclient.GroupTag(bp.Source, bp.UniqueIdentifier)
+	since := w.now().Add(-w.cfg.GroupWindow)
+	existing, found, serr := w.csm.SearchOpenIncidentByGroupTag(ctx, tag, since)
 	if serr != nil {
-		slog.WarnContext(ctx, "worker: incident-grouping open-state confirmation failed, proceeding without grouping (known limitation, fail-open — see tryGroup doc comment)", "id", row.ID, "alertNumber", row.AlertNumber, "err", serr)
+		slog.WarnContext(ctx, "worker: incident-grouping search failed, proceeding without grouping (known limitation, fail-open — see tryGroup doc comment)", "id", row.ID, "alertNumber", row.AlertNumber, "err", serr)
 		return "", "", false
 	}
 	if !found {
-		slog.InfoContext(ctx, "worker: incident-grouping match's incident is not open (resolved/closed/cancelled), proceeding without grouping", "id", row.ID, "alertNumber", row.AlertNumber, "incidentNumber", *latest.IncidentNumber)
 		return "", "", false
 	}
 
-	slog.InfoContext(ctx, "worker: grouping alert onto an earlier alert's still-open incident", "id", row.ID, "alertNumber", row.AlertNumber, "incidentID", existing.IncidentID, "incidentNumber", existing.IncidentNumber)
+	slog.InfoContext(ctx, "worker: grouping alert onto an earlier alert's still-open incident within the group window", "id", row.ID, "alertNumber", row.AlertNumber, "incidentID", existing.IncidentID, "incidentNumber", existing.IncidentNumber, "groupWindow", w.cfg.GroupWindow.String())
 	w.recordMapping(ctx, row, bp, existing.IncidentID, existing.IncidentNumber)
 	return existing.IncidentID, existing.IncidentNumber, true
 }

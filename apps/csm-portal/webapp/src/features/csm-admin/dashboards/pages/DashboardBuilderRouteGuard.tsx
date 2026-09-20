@@ -40,7 +40,9 @@ export default function DashboardBuilderRouteGuard(): JSX.Element {
   }
 
   if (!hasDashboardBuilderAccess(user?.roles)) {
-    return <Error403Page message="You need the admin role to open the dashboard builder." />;
+    return (
+      <Error403Page message="You need the admin role, or dashboard_designer access, to open the dashboard builder." />
+    );
   }
 
   return <Outlet />;

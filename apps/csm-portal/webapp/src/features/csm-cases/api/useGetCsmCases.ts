@@ -68,8 +68,8 @@ const EXACT_MATCH_LIMIT = 5;
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
  * limit (≤ the backend's page-size cap, `BE_MAX_PAGE_LIMIT`). `sortField`
  * (default `"updatedOn"`) picks which column drives the server-side sort —
- * `createdOn`, `updatedOn`, `severity`, or `state` — and `sortOrder` (default
- * `"desc"`) controls direction, so the cases page loads the most recently
+ * `createdOn`, `updatedOn`, `severity`, `state`, or `assignee` — and
+ * `sortOrder` (default `"desc"`) controls direction, so the cases page loads the most recently
  * updated cases on arrival by default but can be flipped or repointed at a
  * different column. `enabled` is an optional escape hatch to suspend the
  * fetch.

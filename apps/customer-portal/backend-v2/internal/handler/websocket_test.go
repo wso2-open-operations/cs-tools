@@ -22,8 +22,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/gorilla/websocket"
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/aichatagent"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
@@ -267,6 +271,8 @@ func TestHandleWebSocket_RejectsUnauthenticated(t *testing.T) {
 
 // stubEntity is an entityCommentCreator whose GetProject result is scripted.
 type stubEntity struct {
+	mu sync.Mutex
+
 	project entity.ProjectDetailsView
 	err     error
 	calls   int
@@ -278,24 +284,118 @@ type stubEntity struct {
 	// updatedStates records every state UpdateConversation was asked to set, so
 	// a test can assert the transition was skipped rather than merely reordered.
 	updatedStates []string
+
+	createdConversation     entity.CreateConversationResponse
+	createdConversationErr  error
+	createConversationCalls int
+	lastCreateReq           entity.CreateConversationRequest
+
+	commentsCreated []entity.CreateCommentRequest
 }
 
 func (s *stubEntity) GetProject(_ context.Context, _ string) (entity.ProjectDetailsView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	return s.project, s.err
 }
 
-func (s *stubEntity) CreateComment(_ context.Context, _ entity.CreateCommentRequest) (entity.CreateCommentResponse, error) {
+func (s *stubEntity) CreateComment(_ context.Context, req entity.CreateCommentRequest) (entity.CreateCommentResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.commentsCreated = append(s.commentsCreated, req)
 	return entity.CreateCommentResponse{}, nil
 }
 
+func (s *stubEntity) CreateConversation(_ context.Context, req entity.CreateConversationRequest) (entity.CreateConversationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.createConversationCalls++
+	s.lastCreateReq = req
+	if s.createdConversationErr != nil {
+		return entity.CreateConversationResponse{}, s.createdConversationErr
+	}
+	if s.createdConversation.Conversation.ID == "" {
+		return entity.CreateConversationResponse{
+			Conversation: entity.CreatedConversation{ID: "33333333-3333-3333-3333-333333333333"},
+		}, nil
+	}
+	return s.createdConversation, nil
+}
+
 func (s *stubEntity) UpdateConversation(_ context.Context, _ string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.updatedStates = append(s.updatedStates, req.State)
 	return entity.UpdateConversationResponse{}, nil
 }
 
 func (s *stubEntity) GetConversation(_ context.Context, _ string) (entity.ConversationDetails, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.conversation, s.conversationErr
+}
+
+func (s *stubEntity) getCreateConversationCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createConversationCalls
+}
+
+func (s *stubEntity) getLastCreateReq() entity.CreateConversationRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastCreateReq
+}
+
+// stubStreamer is a mock wsStreamer for WebSocket tests.
+type stubStreamer struct {
+	mu sync.Mutex
+
+	lastSessionID string
+	lastPayload   string
+	streamCalls   int
+	streamErr     error
+	result        map[string]json.RawMessage
+}
+
+func (s *stubStreamer) StreamChat(_ context.Context, sessionID, payload string, caller aichatagent.BrowserConn) (map[string]json.RawMessage, error) {
+	s.mu.Lock()
+	s.streamCalls++
+	s.lastSessionID = sessionID
+	s.lastPayload = payload
+	err := s.streamErr
+	res := s.result
+	s.mu.Unlock()
+
+	if err != nil {
+		return nil, err
+	}
+	// Emit a final event so the client knows the turn is complete
+	_ = caller.WriteMessage(websocket.TextMessage, []byte(`{"type":"final","payload":{"message":"response text"}}`))
+
+	if res != nil {
+		return res, nil
+	}
+	return map[string]json.RawMessage{
+		"message": json.RawMessage(`"response text"`),
+	}, nil
+}
+
+func (s *stubStreamer) SendSideChannel(_ context.Context, _ string, _ string, _ aichatagent.BrowserConn) error {
+	return nil
+}
+
+func (s *stubStreamer) getCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.streamCalls
+}
+
+func (s *stubStreamer) getLastSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastSessionID
 }
 
 // TestHandleWebSocket_ProjectAccessGatesTheUpgrade asserts the account lookup
@@ -338,5 +438,314 @@ func TestHandleWebSocket_ValidatesSessionIDAfterAuth(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestHandleWebSocket_CreateConversation asserts that an incoming message with an
+// empty conversationId dynamically creates a new conversation, returns a
+// conversation_created event, and streams the AI agent's response.
+func TestHandleWebSocket_CreateConversation(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+	const createdConvID = "33333333-3333-3333-3333-333333333333"
+
+	v := &stubValidator{accept: "good-token"}
+	e := &stubEntity{
+		project: entity.ProjectDetailsView{
+			ID:      projectID,
+			Account: entity.ProjectAccountRef{ID: "acc-1"},
+		},
+		createdConversation: entity.CreateConversationResponse{
+			Conversation: entity.CreatedConversation{ID: createdConvID},
+		},
+	}
+	ai := &stubStreamer{}
+	h := NewWebSocketHandler(ai, e, v, nil)
+
+	s := httptest.NewServer(http.HandlerFunc(h.HandleWebSocket))
+	defer s.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http") + "/ws?sessionId=" + projectID
+	dialer := websocket.Dialer{
+		Subprotocols: []string{"cs-customer-portal", "good-token"},
+	}
+
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	defer func() { _ = conn.Close() }()
+
+	// 1. Send user_message with empty conversationId
+	msg := map[string]any{
+		"type":           "user_message",
+		"conversationId": "",
+		"message":        "Hello, I need help",
+	}
+	msgBytes, _ := json.Marshal(msg)
+	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		t.Fatalf("write message failed: %v", err)
+	}
+
+	// 2. Expect conversation_created event
+	_, respData, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read message failed: %v", err)
+	}
+	var evt wsEvent
+	if err := json.Unmarshal(respData, &evt); err != nil {
+		t.Fatalf("unmarshal event failed: %v", err)
+	}
+	if evt.Type != "conversation_created" {
+		t.Errorf("type = %q, want conversation_created", evt.Type)
+	}
+	if evt.ConversationID != createdConvID {
+		t.Errorf("conversationId = %q, want %q", evt.ConversationID, createdConvID)
+	}
+
+	// Read the stream response from turn 1 so turn 1 completes
+	_, respData2, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read turn 1 final message failed: %v", err)
+	}
+	var evtFinal wsEvent
+	if err := json.Unmarshal(respData2, &evtFinal); err != nil {
+		t.Fatalf("unmarshal turn 1 final failed: %v", err)
+	}
+	if evtFinal.Type != "final" {
+		t.Errorf("type = %q, want final", evtFinal.Type)
+	}
+
+	// Verify CreateConversation was called with projectID and initial message
+	if e.getCreateConversationCalls() != 1 {
+		t.Errorf("CreateConversation called %d times, want 1", e.getCreateConversationCalls())
+	}
+	lastReq := e.getLastCreateReq()
+	if lastReq.ProjectID != projectID {
+		t.Errorf("CreateConversation ProjectID = %q, want %q", lastReq.ProjectID, projectID)
+	}
+	if lastReq.InitialMessage != "Hello, I need help" {
+		t.Errorf("CreateConversation InitialMessage = %q, want 'Hello, I need help'", lastReq.InitialMessage)
+	}
+
+	// Verify StreamChat was called with sessionID = projectID + ":" + createdConvID
+	expectedSessionID := projectID + ":" + createdConvID
+	if ai.getLastSessionID() != expectedSessionID {
+		t.Errorf("StreamChat sessionID = %q, want %q", ai.getLastSessionID(), expectedSessionID)
+	}
+
+	// 3. Send follow-up turn omitting conversationId (connection reuses active conversation)
+	msg2 := map[string]any{
+		"type":           "user_message",
+		"conversationId": "",
+		"message":        "Second question",
+	}
+	msg2Bytes, _ := json.Marshal(msg2)
+	if err := conn.WriteMessage(websocket.TextMessage, msg2Bytes); err != nil {
+		t.Fatalf("write follow-up failed: %v", err)
+	}
+
+	// Read turn 2 stream response
+	_, respData3, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read turn 2 final message failed: %v", err)
+	}
+	var evtFinal2 wsEvent
+	if err := json.Unmarshal(respData3, &evtFinal2); err != nil {
+		t.Fatalf("unmarshal turn 2 final failed: %v", err)
+	}
+	if evtFinal2.Type != "final" {
+		t.Errorf("type = %q, want final", evtFinal2.Type)
+	}
+
+	// Verify CreateConversation was NOT called again (calls remain 1)
+	if e.getCreateConversationCalls() != 1 {
+		t.Errorf("CreateConversation called %d times on follow-up, want 1", e.getCreateConversationCalls())
+	}
+	if ai.getCalls() != 2 {
+		t.Errorf("StreamChat called %d times, want 2", ai.getCalls())
+	}
+	if ai.getLastSessionID() != expectedSessionID {
+		t.Errorf("StreamChat sessionID on follow-up = %q, want %q", ai.getLastSessionID(), expectedSessionID)
+	}
+}
+
+// TestHandleWebSocket_EmptyMessageOnNewConversation asserts that sending an empty
+// message when starting a conversation returns an error event.
+func TestHandleWebSocket_EmptyMessageOnNewConversation(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+
+	v := &stubValidator{accept: "good-token"}
+	e := &stubEntity{
+		project: entity.ProjectDetailsView{
+			ID:      projectID,
+			Account: entity.ProjectAccountRef{ID: "acc-1"},
+		},
+	}
+	ai := &stubStreamer{}
+	h := NewWebSocketHandler(ai, e, v, nil)
+
+	s := httptest.NewServer(http.HandlerFunc(h.HandleWebSocket))
+	defer s.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http") + "/ws?sessionId=" + projectID
+	dialer := websocket.Dialer{
+		Subprotocols: []string{"cs-customer-portal", "good-token"},
+	}
+
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	defer func() { _ = conn.Close() }()
+
+	msg := map[string]any{
+		"type":           "user_message",
+		"conversationId": "",
+		"message":        "   ",
+	}
+	msgBytes, _ := json.Marshal(msg)
+	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		t.Fatalf("write message failed: %v", err)
+	}
+
+	_, respData, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read message failed: %v", err)
+	}
+	var evt wsEvent
+	if err := json.Unmarshal(respData, &evt); err != nil {
+		t.Fatalf("unmarshal event failed: %v", err)
+	}
+	if evt.Type != "error" {
+		t.Errorf("type = %q, want error", evt.Type)
+	}
+	if evt.Message != "Message is required to start a new conversation." {
+		t.Errorf("message = %q, want 'Message is required to start a new conversation.'", evt.Message)
+	}
+	if got := e.getCreateConversationCalls(); got != 0 {
+		t.Errorf("CreateConversation was called %d times, want 0", got)
+	}
+}
+
+// TestHandleWebSocket_InvalidConversationID asserts that an invalid UUID conversationId
+// returns an error event.
+func TestHandleWebSocket_InvalidConversationID(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+
+	v := &stubValidator{accept: "good-token"}
+	e := &stubEntity{
+		project: entity.ProjectDetailsView{
+			ID:      projectID,
+			Account: entity.ProjectAccountRef{ID: "acc-1"},
+		},
+	}
+	ai := &stubStreamer{}
+	h := NewWebSocketHandler(ai, e, v, nil)
+
+	s := httptest.NewServer(http.HandlerFunc(h.HandleWebSocket))
+	defer s.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http") + "/ws?sessionId=" + projectID
+	dialer := websocket.Dialer{
+		Subprotocols: []string{"cs-customer-portal", "good-token"},
+	}
+
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	defer func() { _ = conn.Close() }()
+
+	msg := map[string]any{
+		"type":           "user_message",
+		"conversationId": "not-a-valid-uuid",
+		"message":        "Hello",
+	}
+	msgBytes, _ := json.Marshal(msg)
+	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		t.Fatalf("write message failed: %v", err)
+	}
+
+	_, respData, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read message failed: %v", err)
+	}
+	var evt wsEvent
+	if err := json.Unmarshal(respData, &evt); err != nil {
+		t.Fatalf("unmarshal event failed: %v", err)
+	}
+	if evt.Type != "error" {
+		t.Errorf("type = %q, want error", evt.Type)
+	}
+	if evt.Message != "Invalid conversation ID." {
+		t.Errorf("message = %q, want 'Invalid conversation ID.'", evt.Message)
+	}
+}
+
+// TestHandleWebSocket_CreateConversationError asserts that a failure in entity
+// CreateConversation emits an error event to the client.
+func TestHandleWebSocket_CreateConversationError(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+
+	v := &stubValidator{accept: "good-token"}
+	e := &stubEntity{
+		project: entity.ProjectDetailsView{
+			ID:      projectID,
+			Account: entity.ProjectAccountRef{ID: "acc-1"},
+		},
+		createdConversationErr: errors.New("upstream entity service down"),
+	}
+	ai := &stubStreamer{}
+	h := NewWebSocketHandler(ai, e, v, nil)
+
+	s := httptest.NewServer(http.HandlerFunc(h.HandleWebSocket))
+	defer s.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http") + "/ws?sessionId=" + projectID
+	dialer := websocket.Dialer{
+		Subprotocols: []string{"cs-customer-portal", "good-token"},
+	}
+
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	defer func() { _ = conn.Close() }()
+
+	msg := map[string]any{
+		"type":           "user_message",
+		"conversationId": "",
+		"message":        "Hello, I need help",
+	}
+	msgBytes, _ := json.Marshal(msg)
+	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		t.Fatalf("write message failed: %v", err)
+	}
+
+	_, respData, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read message failed: %v", err)
+	}
+	var evt wsEvent
+	if err := json.Unmarshal(respData, &evt); err != nil {
+		t.Fatalf("unmarshal event failed: %v", err)
+	}
+	if evt.Type != "error" {
+		t.Errorf("type = %q, want error", evt.Type)
+	}
+	if evt.Message != "Failed to create a new conversation." {
+		t.Errorf("message = %q, want 'Failed to create a new conversation.'", evt.Message)
 	}
 }

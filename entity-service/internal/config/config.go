@@ -19,9 +19,11 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // DataSource identifies which backend the service reads from.
@@ -43,6 +45,15 @@ type Config struct {
 	DBName     string
 	DBSSLMode  string
 	ServerPort string
+	// HealthPort is the listen port for the separate, minimal health
+	// server (internal/server.NewHealthServer). It is deliberately NOT
+	// ServerPort: that mux carries every business route and is exposed at
+	// organization visibility, while the health server is exposed
+	// publicly so external alerting can reach it without credentials.
+	// Separate listeners mean the public deployment surface is only ever
+	// the handful of routes registered on the health mux — no basePath or
+	// gateway rule stands between a misconfiguration and the whole API.
+	HealthPort string
 	// DataSource controls which backend is used. Defaults to "postgres".
 	DataSource DataSource
 	// ServiceNowIntegrationServiceBaseURL is the base URL for the ServiceNow integration service API.
@@ -71,6 +82,27 @@ type Config struct {
 	// constructs EventPublisherService when both this is true AND
 	// EventHubBroker is set.
 	EventPublishingEnabled bool
+	// CRNoticesEnabled turns on the change-request notice drainer: the poller
+	// that reads event_outbox and asks csm-notification-service to send the
+	// approval and plan-start-date mails.
+	//
+	// OFF BY DEFAULT, AND THAT IS THE POINT. ServiceNow still sends these
+	// notices today. Turning this on is a paired change with disabling its
+	// ServiceNow counterparts -- two senders for one event means every
+	// approver gets the mail twice -- so it must never come on merely because
+	// a database happens to be configured.
+	CRNoticesEnabled bool
+	// CREventHubTopic is the topic the change-request notices are published
+	// to. SEPARATE FROM EventHubTopic ON PURPOSE. Every consumer group reads
+	// its whole topic, so putting these on case-events would make the case
+	// consumer read and discard every change-request record, and vice versa.
+	// A distinct topic is what actually isolates the two volumes; a distinct
+	// consumer group alone would only isolate the processing.
+	CREventHubTopic string
+	// CRNoticePollInterval is how often to poll event_outbox when the last
+	// pass came back short. A backlog drains at full speed regardless, so this
+	// governs only the idle case: notice latency against query volume.
+	CRNoticePollInterval time.Duration
 	// SupportEngineerRole is the ServiceNow role name (e.g. an org-specific
 	// "sn_*" role) whose presence on a case comment's resolved author marks
 	// that comment as a qualifying support-engineer response — see
@@ -96,6 +128,15 @@ type Config struct {
 	// nothing to do with case state) — the two are read by separate
 	// processes/environments and don't interact.
 	CustomerRoles []string
+	// SalesEntity* is the Choreo connection to REST sales/sales-entity-service
+	// (POST /customer-search), not GraphQL sales/entity-graphql-service and not
+	// Salesforce. The four connection fields are all-or-nothing like Event Hub.
+	// Scopes are optional (same as SERVICENOW_INTEGRATION_SERVICE_SCOPES).
+	SalesEntityBaseURL      string
+	SalesEntityTokenURL     string
+	SalesEntityClientID     string
+	SalesEntityClientSecret string
+	SalesEntityScopes       string
 }
 
 // Load reads configuration from environment variables and returns a populated
@@ -110,6 +151,7 @@ func Load() *Config {
 		DBName:                                   os.Getenv("DB_NAME"),
 		DBSSLMode:                                os.Getenv("DB_SSLMODE"),
 		ServerPort:                               getEnvOrDefault("SERVER_PORT", "8080"),
+		HealthPort:                               getEnvOrDefault("HEALTH_PORT", "8081"),
 		DataSource:                               DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
 		ServiceNowIntegrationServiceBaseURL:      os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
 		ServiceNowIntegrationServiceTokenURL:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
@@ -120,8 +162,16 @@ func Load() *Config {
 		EventHubConnectionString:                 os.Getenv("EVENT_HUB_CONNECTION_STRING"),
 		EventHubTopic:                            os.Getenv("EVENT_HUB_TOPIC"),
 		EventPublishingEnabled:                   os.Getenv("EVENT_PUBLISHING_ENABLED") == "true",
+		CRNoticesEnabled:                         os.Getenv("CR_NOTICES_ENABLED") == "true",
+		CREventHubTopic:                          getEnvOrDefault("CR_EVENT_HUB_TOPIC", "cr-events"),
+		CRNoticePollInterval:                     envDuration("CR_NOTICE_POLL_INTERVAL", 5*time.Second),
 		SupportEngineerRole:                      os.Getenv("SUPPORT_ENGINEER_ROLE"),
 		CustomerRoles:                            splitComma(os.Getenv("CUSTOMER_ROLES")),
+		SalesEntityBaseURL:                       os.Getenv("SALES_ENTITY_BASE_URL"),
+		SalesEntityTokenURL:                      os.Getenv("SALES_ENTITY_TOKEN_URL"),
+		SalesEntityClientID:                      os.Getenv("SALES_ENTITY_CLIENT_ID"),
+		SalesEntityClientSecret:                  os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
+		SalesEntityScopes:                        os.Getenv("SALES_ENTITY_SCOPES"),
 	}
 }
 
@@ -163,19 +213,53 @@ func (c *Config) HasDatabase() bool {
 }
 
 // Validate checks that the configuration is self-consistent. It returns an
-// error if DATA_SOURCE is an unrecognised value, if the DB variables are
-// missing when DATA_SOURCE=postgres or only partially set in either mode, if
+// error if SERVER_PORT/HEALTH_PORT are unusable or resolve to the same
+// port, if DATA_SOURCE is an unrecognised value, if the DB variables are
+// missing when DATA_SOURCE=postgres (see db.NewPoolIfNeeded) or only
+// partially set in either mode, if
 // SERVICENOW_INTEGRATION_SERVICE_BASE_URL is missing when
-// DATA_SOURCE=servicenow, or if EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/
-// EVENT_HUB_TOPIC are only partially set.
+// DATA_SOURCE=servicenow, if EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/
+// EVENT_HUB_TOPIC are only partially set, or if the SALES_ENTITY_* vars are
+// only partially set.
 func (c *Config) Validate() error {
+	// The health server is a separate listener precisely so that only its
+	// own routes are reachable at public visibility (see HealthPort). Two
+	// listeners cannot share a port: the second ListenAndServe would fail
+	// with "address already in use" after the first has already started
+	// serving, leaving the process up but one of the two ports dead. Reject
+	// that at startup, where it is unambiguous.
+	//
+	// Resolved to numbers first rather than compared as strings: "8080" and
+	// "08080" are the same TCP port but not the same string, so a string
+	// comparison would wave that pair through into exactly the half-dead
+	// startup described above. Resolving also rejects a port that could
+	// never be bound at all ("http-alt-typo", "99999") here, with the
+	// offending variable named, instead of at ListenAndServe time inside a
+	// goroutine.
+	serverPortNum, err := net.LookupPort("tcp", c.ServerPort)
+	if err != nil {
+		return fmt.Errorf("invalid SERVER_PORT %q: %w", c.ServerPort, err)
+	}
+	healthPortNum, err := net.LookupPort("tcp", c.HealthPort)
+	if err != nil {
+		return fmt.Errorf("invalid HEALTH_PORT %q: %w", c.HealthPort, err)
+	}
+	if serverPortNum == healthPortNum {
+		return fmt.Errorf("HEALTH_PORT (%s) must differ from SERVER_PORT (%s)", c.HealthPort, c.ServerPort)
+	}
+
 	switch c.DataSource {
 	case DataSourcePostgres, DataSourceServiceNow:
 		// valid
 	default:
 		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
 	}
-
+	// Postgres credentials are required only for DATA_SOURCE=postgres.
+	// servicenow mode skips the pool (db.NewPoolIfNeeded) so a local
+	// customer-portal can start without a reachable database. Side tables
+	// that have no ServiceNow equivalent are registered only when a pool
+	// is available — see routes.go.
+	//
 	// DB_USER/DB_PASSWORD/DB_NAME are required only when DATA_SOURCE=postgres,
 	// which serves every entity read and write from this pool.
 	//
@@ -233,7 +317,19 @@ func (c *Config) Validate() error {
 	if eventHubSet && !eventHubComplete {
 		return fmt.Errorf("EVENT_HUB_BROKER, EVENT_HUB_CONNECTION_STRING, and EVENT_HUB_TOPIC must be set together or not at all")
 	}
+	salesEntitySet := c.SalesEntityBaseURL != "" || c.SalesEntityTokenURL != "" || c.SalesEntityClientID != "" || c.SalesEntityClientSecret != "" || c.SalesEntityScopes != ""
+	if salesEntitySet && !c.SalesEntityConfigured() {
+		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
+	}
 	return nil
+}
+
+// SalesEntityConfigured reports whether every REST sales/sales-entity-service env var is set.
+func (c *Config) SalesEntityConfigured() bool {
+	return c.SalesEntityBaseURL != "" &&
+		c.SalesEntityTokenURL != "" &&
+		c.SalesEntityClientID != "" &&
+		c.SalesEntityClientSecret != ""
 }
 
 // DSN constructs a PostgreSQL connection string from the config fields.
@@ -248,4 +344,19 @@ func (c *Config) DSN() string {
 	q.Set("sslmode", c.DBSSLMode)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// envDuration reads a Go duration string (e.g. "5s", "500ms"), falling back to
+// def when unset or unparseable -- a typo should cost the override, not stop
+// the service starting.
+func envDuration(key string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
 }

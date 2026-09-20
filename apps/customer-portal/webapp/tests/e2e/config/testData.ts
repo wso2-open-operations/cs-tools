@@ -108,7 +108,7 @@ export interface ProjectFixture {
  */
 export const PROJECTS: Record<ProjectType, ProjectFixture> = {
   [ProjectType.SUBSCRIPTION]: {
-    id: "641058e63b5a87103e1e088aa4e45a13",
+    id: "641058e6-3b5a-8710-3e1e-088aa4e45a13",
     name: "Automation Test Customer Project - Subscription",
     projectKey: "",
     type: ProjectType.SUBSCRIPTION,
@@ -121,7 +121,7 @@ export const PROJECTS: Record<ProjectType, ProjectFixture> = {
     hasSecurityReport: true,
   },
   [ProjectType.MANAGED_CLOUD_SUBSCRIPTION]: {
-    id: "a0873629eba28f90fcf5f5dabad0cda0",
+    id: "a0873629-eba2-8f90-fcf5-f5dabad0cda0",
     name: "Automation Test MS Customer Project - Managed Cloud Subscription",
     projectKey: "AUTOMATIONTESTCUSMSSUB",
     type: ProjectType.MANAGED_CLOUD_SUBSCRIPTION,
@@ -134,7 +134,7 @@ export const PROJECTS: Record<ProjectType, ProjectFixture> = {
     hasSecurityReport: true,
   },
   [ProjectType.CLOUD_SUPPORT]: {
-    id: "cd9776ed3ba28b503e1e088aa4e45a81",
+    id: "cd9776ed-3ba2-8b50-3e1e-088aa4e45a81",
     name: "Automation Test Cloud Customer Project - Cloud Support",
     projectKey: "",
     type: ProjectType.CLOUD_SUPPORT,
@@ -185,6 +185,22 @@ export type IssueType = (typeof IssueType)[keyof typeof IssueType];
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-flow input data
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Reason submitted when escalating a case.
+ *
+ * The field is mandatory — Confirm Escalation stays disabled while it is empty —
+ * and the text is stored on the escalation record and shown in the Escalation
+ * Levels tooltip, so it is written to identify itself in the target
+ * environment rather than as filler. */
+/** Reason submitted when de-escalating. Optional in the modal — passed anyway
+ * so the reversal is as identifiable in the trail as the escalation was. */
+export const DEESCALATION_REASON =
+  "Automated E2E test de-escalation - please ignore. Reverting the " +
+  "escalation raised by the same test run.";
+
+export const ESCALATION_REASON =
+  "Automated E2E test escalation - please ignore. Raised to verify the " +
+  "escalation flow from EL0 to EL1.";
 
 /** Case content submitted by the create-case flow. */
 export interface CaseInput {
@@ -457,6 +473,47 @@ export const DEPLOYMENT_PRODUCT_INPUT = {
   editedCores: "8",
   editedTps: "200",
   invalidCores: "-5",
+} as const;
+
+/**
+ * The question the chat suite asks Novera.
+ *
+ * ⚠️ Submitting starts a real conversation, and there is no delete — so every run
+ * leaves one behind on the project. Deliberately free of anything that looks like
+ * personal data: the page runs the text past a PII check before starting the
+ * chat, and a match would open a warning dialog instead.
+ */
+export const NOVERA_CHAT_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  question: "how to configure wso2 api manager throttling",
+  /**
+   * Title for the case raised from the conversation.
+   *
+   * Only the title is set: the form arrives pre-populated from the chat, so the
+   * deployment, product, description, issue type and severity all come across
+   * auto-detected and are submitted as reviewed rather than chosen.
+   */
+  caseTitle: "Test case from Novera chat",
+  /** The follow-up sent after resuming the conversation. */
+  followUp: "tell more about",
+  /** A short question for the Enter-key case, kept distinct so a conversation it
+   * creates is recognisable as that test's. */
+  enterKeyQuestion: "how to check wso2 api manager logs",
+} as const;
+
+/**
+ * Content the engagement activity tests add.
+ *
+ * Fixed rather than stamped per run: a comment cannot be deleted, so the spec
+ * recognises its own earlier one instead of posting again. The attachment reuses
+ * the shared fixture file, kept in place for the listing assertions.
+ *
+ * Engagements are available on all three project types (see
+ * SIDE_NAV_VISIBILITY); Subscription is used because it has engagements to open.
+ */
+export const ENGAGEMENT_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  comment: "This is a test comment on an engagement from Automation Test",
 } as const;
 
 /**

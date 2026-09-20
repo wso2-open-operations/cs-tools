@@ -26,10 +26,9 @@ interface DirectoryMemberPageProps {
   filterKey: DirectoryMemberFilterKey;
   /** Singular noun, e.g. "role". */
   entityNoun: string;
-  /** Where the "Back" link and the breadcrumb send the user, e.g. "/admin/roles". */
+  /** Back's fallback target when `location.state.from` is absent (a direct/
+   * shared link), e.g. "/admin/roles". */
   listPath: string;
-  /** Plural label for the breadcrumb, e.g. "Roles". */
-  listLabel: string;
 }
 
 /**
@@ -40,17 +39,29 @@ interface DirectoryMemberPageProps {
  * thin per-entity pages (`RoleMembersPage`, `GroupMembersPage`,
  * `TeamMembersPage`) so each still has its own route component to test the
  * filter key against.
+ *
+ * Back reads `location.state.from`, falling back to `listPath` only when
+ * absent (a direct/shared link, or the entity's own directory row, which
+ * doesn't set `from` since for that caller `from` and `listPath` are the same
+ * place anyway). This used to be hardcoded to `listPath` unconditionally,
+ * reasoned as "only ever reached from the directory list" — that stopped
+ * being true once `DirectoryEntityChip` (a team/role/group chip rendered on
+ * a case, an account, and a user profile) started linking here too, and was
+ * reported live as a bug: "Back to Teams" from a case always dropped the
+ * caller on the plain Teams directory instead of back on the case. Once the
+ * destination is dynamic, the label has to be plain "Back" too (not a
+ * destination-specific one) — see this app's own Back-navigation convention.
  */
 export default function DirectoryMemberPage({
   filterKey,
   entityNoun,
   listPath,
-  listLabel,
 }: DirectoryMemberPageProps): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
-  const state = location.state as { name?: string } | null;
+  const state = location.state as { name?: string; from?: string } | null;
   const name = state?.name ?? id ?? "";
+  const backTarget = state?.from ?? listPath;
 
   if (!id) {
     return (
@@ -67,13 +78,13 @@ export default function DirectoryMemberPage({
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <Button
         component={RouterLink}
-        to={listPath}
+        to={backTarget}
         variant="text"
         size="small"
         startIcon={<ArrowLeft size={16} />}
         sx={{ alignSelf: "flex-start" }}
       >
-        Back to {listLabel}
+        Back
       </Button>
 
       <Box>

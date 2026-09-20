@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -46,7 +47,15 @@ func main() {
 	// (see this service's README/CLAUDE.md: the entire point is to not share
 	// fate with CSM's own availability). Apply migrations/0001_create_alert_buffer.up.sql
 	// against this DSN before first run; this process does not run migrations itself.
-	dbStore, err := store.NewPostgresStore(mustEnv("SRE_ALERT_DATABASE_URL"))
+	//
+	// Configured as discrete DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/
+	// DB_SSLMODE vars, not a single connection-string env var, matching
+	// entity-service's internal/config.Config — a hand-built
+	// postgres://user:password@host/db string requires the operator to
+	// manually percent-encode any reserved character in the password (a
+	// bare "?" gets read as the start of the query string), which
+	// url.UserPassword below does automatically.
+	dbStore, err := store.NewPostgresStore(buildDatabaseDSN())
 	if err != nil {
 		slog.Error("failed to connect to buffer database", "err", err)
 		os.Exit(1)
@@ -71,9 +80,32 @@ func main() {
 		APIBaseURL: os.Getenv("TWILIO_API_BASE_URL"),
 	})
 
-	w := worker.New(dbStore, csmClient, twilioClient, worker.Config{
+	googleChatClient := notifications.NewGoogleChatClient(notifications.GoogleChatConfig{
+		WebhookURL: os.Getenv("GOOGLE_CHAT_ESCALATION_WEBHOOK_URL"),
+	})
+
+	emailClient := notifications.NewEmailClient(notifications.EmailConfig{
+		BaseURL:      os.Getenv("EMAIL_SERVICE_BASE_URL"),
+		TokenURL:     os.Getenv("EMAIL_SERVICE_TOKEN_URL"),
+		ClientID:     os.Getenv("EMAIL_SERVICE_CLIENT_ID"),
+		ClientSecret: os.Getenv("EMAIL_SERVICE_CLIENT_SECRET"),
+		Scopes:       splitComma(os.Getenv("EMAIL_SERVICE_SCOPES")),
+		FromAddress:  os.Getenv("SRE_ALERT_ESCALATION_EMAIL_FROM"),
+		ToAddresses:  splitComma(os.Getenv("SRE_ALERT_ESCALATION_EMAIL_TO")),
+	})
+
+	// All three channels fire independently on escalation — deliberate
+	// redundancy, not a first-success-wins race. See
+	// notifications.MultiChannelEscalator's own doc comment.
+	escalator := notifications.NewMultiChannelEscalator(
+		twilioClient, googleChatClient, emailClient,
+		"SRE Alert Ingestion Service: incident delivery to CSM has been failing",
+	)
+
+	w := worker.New(dbStore, csmClient, escalator, worker.Config{
 		MaxRetries:   envInt("SRE_ALERT_MAX_RETRIES", 3),
 		PollInterval: time.Duration(envInt("SRE_ALERT_POLL_INTERVAL_SECONDS", 15)) * time.Second,
+		GroupWindow:  time.Duration(envInt("SRE_ALERT_GROUP_WINDOW_MINUTES", 15)) * time.Minute,
 	})
 
 	// callerID: a real, operator-provisioned CSM user id. CSM has no
@@ -83,9 +115,37 @@ func main() {
 	alertHandler := handler.NewAlertHandler(dbStore, mustEnv("SRE_ALERT_CALLER_ID"))
 	healthHandler := handler.NewHealthHandler(dbStore)
 
+	// SRE_ALERT_AUTH_USERS is required: this service's only inbound
+	// authentication is HTTP Basic Auth on POST /alerts (see the wiring
+	// comment below), so a missing/malformed value must fail startup, not
+	// silently leave the route unauthenticated. See internal/middleware.BasicAuth
+	// and cmd/gen-basic-auth-hash for the credential format and how to
+	// generate a hash.
+	authUsers, err := middleware.ParseBasicAuthUsers(mustEnv("SRE_ALERT_AUTH_USERS"))
+	if err != nil {
+		slog.Error("invalid SRE_ALERT_AUTH_USERS", "err", err)
+		os.Exit(1)
+	}
+	basicAuth := middleware.BasicAuth(authUsers)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler.Health)
-	mux.HandleFunc("POST /alerts", alertHandler.CreateAlert)
+	mux.Handle("POST /alerts", basicAuth(http.HandlerFunc(alertHandler.CreateAlert)))
+
+	// Vendor-adapter routes: each translates one vendor's own native
+	// alert-webhook payload into AlertRequest, then reuses the exact same
+	// validation/buffering/worker/grouping/dedup/escalation path as POST
+	// /alerts above (see internal/handler.AlertHandler.enqueueAlert). One
+	// dedicated route per vendor shape, not a single shared endpoint that
+	// branches on payload shape internally — deliberately simpler to reason
+	// about, route, and test than that alternative. Same basicAuth
+	// middleware as POST /alerts: every inbound route on this service
+	// authenticates itself, with no exceptions (see the comment on srv
+	// below).
+	mux.Handle("POST /alerts/adapters/azure", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromAzure)))
+	mux.Handle("POST /alerts/adapters/site24x7", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromSite24x7)))
+	mux.Handle("POST /alerts/adapters/opensearch", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromOpenSearch)))
+	mux.Handle("POST /alerts/adapters/grafana", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromGrafana)))
 
 	addr := ":" + envOrDefault("PORT", "8080")
 
@@ -110,9 +170,17 @@ func main() {
 
 	slog.Info("SRE Alert Ingestion Service started", "addr", addr)
 
-	// No Auth layer in this middleware chain — inbound requests are trusted at the
-	// Choreo API Manager gateway, not validated again in this service, matching
-	// csm-integration-service's own convention. See this service's CLAUDE.md.
+	// This service is deployed on AKS with no gateway/ingress auth layer in
+	// front of it — unlike this repo's other integrations/* services, which
+	// sit behind Choreo's API Manager and trust inbound requests at the
+	// gateway. So POST /alerts authenticates every request itself, end to
+	// end, via the per-route HTTP Basic Auth middleware wired above
+	// (middleware.BasicAuth) — that is this service's sole inbound
+	// authentication enforcement point, not a layer added on top of
+	// something else. GET /health deliberately stays unauthenticated so
+	// liveness/readiness probes don't need credentials. The outer chain
+	// below (SecurityHeaders/CorrelationID/Logger) applies to every route
+	// but performs no authentication of its own.
 	srv := &http.Server{
 		Handler: middleware.SecurityHeaders(
 			middleware.CorrelationID(
@@ -155,6 +223,47 @@ func main() {
 		slog.Warn("worker did not stop within the shutdown timeout")
 	}
 	slog.Info("SRE Alert Ingestion Service stopped")
+}
+
+// buildDatabaseDSN reads the discrete DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/
+// DB_NAME/DB_SSLMODE environment variables and builds a postgres:// DSN from
+// them via databaseDSN. DB_HOST/DB_PORT default to "localhost"/"5432";
+// DB_USER/DB_PASSWORD/DB_NAME are required (mustEnv exits the process if any
+// is unset); DB_SSLMODE has no default (an empty sslmode is a valid,
+// meaningful value — pgx applies its own default behavior for it).
+func buildDatabaseDSN() string {
+	return databaseDSN(
+		envOrDefault("DB_HOST", "localhost"),
+		envOrDefault("DB_PORT", "5432"),
+		mustEnv("DB_USER"),
+		mustEnv("DB_PASSWORD"),
+		mustEnv("DB_NAME"),
+		os.Getenv("DB_SSLMODE"),
+	)
+}
+
+// databaseDSN constructs a postgres:// connection string from discrete
+// host/port/user/password/name/sslmode parts, matching entity-service's
+// internal/config.Config.DSN(). Building it via net/url + url.UserPassword
+// (rather than string concatenation) means any reserved character in user or
+// password — "?", "@", "/", a space, etc. — is automatically percent-encoded,
+// so the resulting DSN always parses back to the exact input.
+func databaseDSN(host, port, user, password, name, sslmode string) string {
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		// net.JoinHostPort, not "+":" + port" — a bare IPv6 literal
+		// (DB_HOST=2001:db8::1) needs brackets ("[2001:db8::1]:5432") to
+		// keep its own colons from being read as the host:port separator;
+		// JoinHostPort adds them only when host contains a colon, so
+		// hostnames and IPv4 addresses are unaffected.
+		Host: net.JoinHostPort(host, port),
+		Path: name,
+	}
+	q := u.Query()
+	q.Set("sslmode", sslmode)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func mustEnv(key string) string {

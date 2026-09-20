@@ -45,6 +45,7 @@ export default function AppShellLayout({
   return (
     <Box
       data-testid="app-shell"
+      className="csm-print-expand"
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -59,6 +60,7 @@ export default function AppShellLayout({
       <Box
         component="header"
         data-testid="app-navbar"
+        className="csm-print-hide"
         sx={{
           flexShrink: 0,
           width: "100%",
@@ -70,6 +72,7 @@ export default function AppShellLayout({
       </Box>
 
       <Box
+        className="csm-print-expand"
         sx={{
           display: "flex",
           flex: 1,
@@ -85,6 +88,7 @@ export default function AppShellLayout({
           <Box
             component="aside"
             data-testid="app-sidebar"
+            className="csm-print-hide"
             sx={{ flexShrink: 0, minWidth: 0 }}
           >
             {sidebar}
@@ -94,6 +98,7 @@ export default function AppShellLayout({
         <Box
           component="main"
           data-testid="app-main"
+          className="csm-print-expand"
           sx={{
             display: "flex",
             flexDirection: "column",

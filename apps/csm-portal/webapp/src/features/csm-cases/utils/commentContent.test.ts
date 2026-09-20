@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertCodeTagsToHtml,
   hasDisplayableContent,
+  hasPublicComment,
   hasSingleCodeWrapper,
   linkifyBareUrls,
   stripAllCodeBlocks,
@@ -115,6 +116,37 @@ describe("hasDisplayableContent", () => {
         makeComment("[code][/code][code]Customer comment added[/code]"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("hasPublicComment", () => {
+  it("is false when comments is undefined (e.g. still loading)", () => {
+    expect(hasPublicComment(undefined)).toBe(false);
+  });
+
+  it("is false for an empty comment list", () => {
+    expect(hasPublicComment([])).toBe(false);
+  });
+
+  it("is false when every comment is an internal work note", () => {
+    expect(
+      hasPublicComment([{ ...makeComment("<p>Note</p>"), internal: true }]),
+    ).toBe(false);
+  });
+
+  it("is false when the only non-internal comment has no displayable content", () => {
+    expect(
+      hasPublicComment([{ ...makeComment("<p></p>"), internal: false }]),
+    ).toBe(false);
+  });
+
+  it("is true when at least one non-internal comment has real content", () => {
+    expect(
+      hasPublicComment([
+        { ...makeComment("<p>Internal only</p>"), internal: true },
+        { ...makeComment("<p>Visible to the customer</p>"), internal: false },
+      ]),
+    ).toBe(true);
   });
 });
 

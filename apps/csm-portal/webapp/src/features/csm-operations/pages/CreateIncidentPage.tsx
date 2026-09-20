@@ -43,7 +43,7 @@ import { useSearchGroups } from "@api/useSearchGroups";
 import { useSearchItServices } from "@api/useSearchItServices";
 import { useSearchServiceOfferings } from "@api/useSearchServiceOfferings";
 import { useSearchConfigurationItems } from "@api/useSearchConfigurationItems";
-import { useSearchUsersByName } from "@api/useSearchUsersByName";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
 import { computeIncidentPriority } from "@features/csm-operations/utils/incidentPriorityMatrix";
@@ -445,7 +445,7 @@ export default function CreateIncidentPage(): JSX.Element {
                   markTouched("callerId");
                 }}
                 disabled={postIncident.isPending}
-                useSearch={useSearchUsersByName}
+                useSearch={useSearchInternalUsersByName}
                 // useSearchUsersByName filters out any user without an id,
                 // so every option here is guaranteed to have one.
                 getId={(u) => u.id!}
@@ -543,7 +543,7 @@ export default function CreateIncidentPage(): JSX.Element {
                     value={assignedEngineerId}
                     onChange={setAssignedEngineerId}
                     disabled={postIncident.isPending}
-                    useSearch={useSearchUsersByName}
+                    useSearch={useSearchInternalUsersByName}
                     getId={(u) => u.id!}
                     getLabel={userLabel}
                   />
@@ -557,7 +557,7 @@ export default function CreateIncidentPage(): JSX.Element {
                 values={watchList}
                 onChange={setWatchList}
                 disabled={postIncident.isPending}
-                useSearch={useSearchUsersByName}
+                useSearch={useSearchInternalUsersByName}
                 getId={(u) => u.id!}
                 getLabel={userLabel}
                 helperText="Notified on updates to this incident."

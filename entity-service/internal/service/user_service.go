@@ -32,6 +32,10 @@ import (
 
 var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+// emailRE matches the Ballerina `Email` constraint used by the Customer Portal
+// backend (`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`).
+var emailRE = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+
 // validateUUIDs returns a ValidationError if any element of ids is not a valid UUID.
 func validateUUIDs(field string, ids []string) error {
 	for _, id := range ids {
@@ -40,6 +44,26 @@ func validateUUIDs(field string, ids []string) error {
 		}
 	}
 	return nil
+}
+
+// derefSeverity/derefState dereference domain.CaseView/Case's now-optional
+// Severity/State (nil in practice for most real Postgres cases, but always
+// set on the ServiceNow data source) to their plain zero-valued type, for a
+// caller (map lookup, string conversion, equality check) that predates
+// those fields becoming optional and only ever runs against the
+// ServiceNow-backed path where a nil is not actually expected.
+func derefSeverity(s *domain.CaseSeverity) domain.CaseSeverity {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func derefState(s *domain.CaseState) domain.CaseState {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // validateDateRange enforces the same rules as the Ballerina reference's
@@ -142,9 +166,6 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchUsersResponse{}, err
 	}
-	if len(req.Filters.RoleIDs) > 0 {
-		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "roleIds filter is only supported for the ServiceNow data source"}
-	}
 	if len(req.Filters.UserIDs) > 0 || len(req.Filters.GroupIDs) > 0 || len(req.Filters.GroupNames) > 0 {
 		return domain.SearchUsersResponse{}, &apierror.ValidationError{
 			Msg: "userIds, groupIds and groupNames filters are only supported for the ServiceNow data source"}
@@ -160,6 +181,9 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	}
 	if len(req.Filters.Emails) > 50 {
 		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "emails cannot contain more than 50 values"}
+	}
+	if len(req.Filters.RoleIDs) > 50 {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "roleIds cannot contain more than 50 values"}
 	}
 
 	users, total, err := s.repo.SearchUsers(ctx, req)
@@ -185,10 +209,13 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 // matching row. See case_service.go's identical pattern for CreateCase /
 // CreateCaseComment.
 //
-// Postgres users have no roles or group-membership tables (unlike the
-// ServiceNow data source), so Roles and Groups are always empty rather than
-// fabricated — the frontend's team/role resolution is simply a no-op for
-// this data source today.
+// Postgres has role/user_role tables (migrations 000004/000006 -- see
+// SearchUsers' roleIds filter, which does query them) and no group-membership
+// table at all. GetMe doesn't resolve either here: Roles is left empty rather
+// than queried, since no caller has asked for it on this path yet, and Groups
+// is always empty because there is genuinely nothing to resolve it from —
+// the frontend's team/role resolution is simply a no-op for this data source
+// today.
 func (s *userService) GetMe(ctx context.Context) (domain.GetUserMeResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
@@ -202,6 +229,16 @@ func (s *userService) GetMe(ctx context.Context) (domain.GetUserMeResponse, erro
 	if err != nil {
 		return domain.GetUserMeResponse{}, err
 	}
+	roles, err := s.repo.GetUserRoles(ctx, user.ID)
+	if err != nil {
+		return domain.GetUserMeResponse{}, err
+	}
+	// GetUserMeResponse.Groups's own doc comment: best-effort, empty rather
+	// than a failed request when the lookup errors.
+	groups, err := s.repo.GetUserGroups(ctx, user.ID)
+	if err != nil {
+		groups = []domain.UserGroupRef{}
+	}
 
 	firstName := user.FirstName
 	return domain.GetUserMeResponse{
@@ -210,8 +247,8 @@ func (s *userService) GetMe(ctx context.Context) (domain.GetUserMeResponse, erro
 		FirstName: &firstName,
 		LastName:  user.LastName,
 		TimeZone:  user.Timezone,
-		Roles:     []string{},
-		Groups:    []domain.UserGroupRef{},
+		Roles:     roles,
+		Groups:    groups,
 	}, nil
 }
 

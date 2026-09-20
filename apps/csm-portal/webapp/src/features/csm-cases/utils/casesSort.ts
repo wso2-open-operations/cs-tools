@@ -16,11 +16,16 @@
 
 /**
  * Sort fields the cases list exposes to the user via a clickable column
- * header: Created, Updated, Severity, and State. Matches `BeCaseSortField`
- * one-for-one (see `@api/backend/types`) — every value here is already
- * accepted end-to-end by `/cases/search`.
+ * header: Created, Updated, Severity, State, and Assignee. Matches
+ * `BeCaseSortField` one-for-one (see `@api/backend/types`) — every value here
+ * is already accepted end-to-end by `/cases/search`.
  */
-export type CasesSortField = "createdOn" | "updatedOn" | "severity" | "state";
+export type CasesSortField =
+  | "createdOn"
+  | "updatedOn"
+  | "severity"
+  | "state"
+  | "assignee";
 export type CasesSortOrder = "asc" | "desc";
 
 export const DEFAULT_CASES_SORT: {

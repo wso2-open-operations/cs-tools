@@ -55,16 +55,18 @@ describe("buildIncidentSearchFilters", () => {
   it("omits slaViolated entirely when the toggle is off", () => {
     const filters: IncidentFilters = { ...DEFAULT_INCIDENT_FILTERS, slaViolated: false };
     const built = buildIncidentSearchFilters(filters, "");
-    expect(built).not.toHaveProperty("slaViolated");
+    expect(built).not.toHaveProperty("filters");
     expect(Object.keys(built)).toEqual([]);
   });
 
-  it("sends slaViolated: true, never false, when the toggle is on", () => {
+  it("sends slaViolated as an eq/[\"true\"] generic filter entry, never a flat key or false", () => {
     const filters: IncidentFilters = { ...DEFAULT_INCIDENT_FILTERS, slaViolated: true };
-    expect(buildIncidentSearchFilters(filters, "")).toEqual({ slaViolated: true });
+    expect(buildIncidentSearchFilters(filters, "")).toEqual({
+      filters: [{ field: "slaViolated", op: "eq", values: ["true"] }],
+    });
   });
 
-  it("produces exact inclusive UTC bounds for a whole-day range", () => {
+  it("produces exact inclusive UTC bounds for a whole-day range as gte/lte createdOn entries", () => {
     // Verified against the real data source (see the API description on
     // BeIncidentSearchPayload): an inclusive May 2026 range is
     // 2026-05-01T00:00:00Z .. 2026-05-31T23:59:59Z, not the next midnight —
@@ -76,32 +78,35 @@ describe("buildIncidentSearchFilters", () => {
       createdEndDate: "2026-05-31",
     };
     expect(buildIncidentSearchFilters(filters, "")).toEqual({
-      startCreatedDate: "2026-05-01T00:00:00Z",
-      endCreatedDate: "2026-05-31T23:59:59Z",
+      filters: [
+        { field: "createdOn", op: "gte", values: ["2026-05-01T00:00:00Z"] },
+        { field: "createdOn", op: "lte", values: ["2026-05-31T23:59:59Z"] },
+      ],
     });
   });
 
   it("includes only the start bound when only createdStartDate is set", () => {
     const filters: IncidentFilters = { ...DEFAULT_INCIDENT_FILTERS, createdStartDate: "2026-05-01" };
     const built = buildIncidentSearchFilters(filters, "");
-    expect(built).toEqual({ startCreatedDate: "2026-05-01T00:00:00Z" });
-    expect(built).not.toHaveProperty("endCreatedDate");
+    expect(built).toEqual({
+      filters: [{ field: "createdOn", op: "gte", values: ["2026-05-01T00:00:00Z"] }],
+    });
   });
 
-  it("includes productNames only when at least one product is selected", () => {
+  it("includes a productName/in generic filter entry only when at least one product is selected", () => {
     expect(buildIncidentSearchFilters(DEFAULT_INCIDENT_FILTERS, "")).not.toHaveProperty(
-      "productNames",
+      "filters",
     );
     const filters: IncidentFilters = {
       ...DEFAULT_INCIDENT_FILTERS,
       products: ["Choreo", "Asgardeo"],
     };
     expect(buildIncidentSearchFilters(filters, "")).toEqual({
-      productNames: ["Choreo", "Asgardeo"],
+      filters: [{ field: "productName", op: "in", values: ["Choreo", "Asgardeo"] }],
     });
   });
 
-  it("includes priorities and searchQuery alongside the new filters", () => {
+  it("includes priorities and searchQuery alongside the generic filters array", () => {
     const filters: IncidentFilters = {
       search: "",
       priorities: ["CRITICAL", "HIGH"],
@@ -114,10 +119,12 @@ describe("buildIncidentSearchFilters", () => {
     expect(buildIncidentSearchFilters(filters, "timeout")).toEqual({
       searchQuery: "timeout",
       priorities: ["CRITICAL", "HIGH"],
-      slaViolated: true,
-      startCreatedDate: "2026-05-01T00:00:00Z",
-      endCreatedDate: "2026-05-31T23:59:59Z",
-      productNames: ["Choreo"],
+      filters: [
+        { field: "slaViolated", op: "eq", values: ["true"] },
+        { field: "createdOn", op: "gte", values: ["2026-05-01T00:00:00Z"] },
+        { field: "createdOn", op: "lte", values: ["2026-05-31T23:59:59Z"] },
+        { field: "productName", op: "in", values: ["Choreo"] },
+      ],
     });
   });
 
@@ -131,7 +138,23 @@ describe("buildIncidentSearchFilters", () => {
     });
   });
 
-  it("omits the generic filters array entirely when no SRE team is selected", () => {
+  it("merges slaViolated, createdOn, productName, and assignmentGroupId into one generic filters array", () => {
+    const filters: IncidentFilters = {
+      ...DEFAULT_INCIDENT_FILTERS,
+      slaViolated: true,
+      products: ["Choreo"],
+      sreTeamIds: ["team-apollo"],
+    };
+    expect(buildIncidentSearchFilters(filters, "")).toEqual({
+      filters: [
+        { field: "slaViolated", op: "eq", values: ["true"] },
+        { field: "productName", op: "in", values: ["Choreo"] },
+        { field: "assignmentGroupId", op: "in", values: ["team-apollo"] },
+      ],
+    });
+  });
+
+  it("omits the generic filters array entirely when no field-filter-backed control is set", () => {
     expect(buildIncidentSearchFilters(DEFAULT_INCIDENT_FILTERS, "")).not.toHaveProperty(
       "filters",
     );

@@ -65,9 +65,7 @@ function InfoRow({ label, value }: InfoRowProps): JSX.Element {
 export default function ProjectSuspendedNoticePage({
   project,
 }: ProjectSuspendedNoticePageProps): JSX.Element {
-  const suspendedOnLabel = formatDateLabel(project.suspendedOn);
   const startDateLabel = formatDateLabel(project.startDate);
-  const endDateLabel = formatDateLabel(project.endDate);
   const accountOwner = project.account?.ownerEmail ?? "—";
   const projectType = project.type?.label ?? "—";
   const reasons = project.suspensionReasons ?? [];
@@ -122,9 +120,8 @@ export default function ProjectSuspendedNoticePage({
             <InfoRow label="Project Name:" value={project.name} />
             <InfoRow label="Project Key:" value={project.key} />
             <InfoRow label="Project Type:" value={projectType} />
-            <InfoRow label="Account Owner:" value={accountOwner} />
+            <InfoRow label="Account Manager:" value={accountOwner} />
             <InfoRow label="Subscription Start Date:" value={startDateLabel} />
-            <InfoRow label="Subscription End Date:" value={endDateLabel} />
           </Stack>
 
           {/* Suspension reasons */}
@@ -151,21 +148,27 @@ export default function ProjectSuspendedNoticePage({
           )}
 
           {/* Suspension description */}
-          {(project.suspendedOn ?? project.endDate) && (
-            <>
-              <Divider />
-              <Box sx={{ px: 3, py: 3, bgcolor: "action.hover", display: "flex", alignItems: "flex-start", gap: 1.5 }}>
-                <AlertCircle size={18} style={{ marginTop: 2, flexShrink: 0, color: "var(--oxygen-palette-error-main, #f59e0b)" }} />
-                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.75 }}>
-                  This project was suspended on{" "}
-                  <Typography component="span" variant="body2" fontWeight={600} color="text.primary">
-                    {suspendedOnLabel !== "—" ? suspendedOnLabel : endDateLabel}
-                  </Typography>{" "}
-                  due to non renewal of the contracts upon the end of previous subscription period.
+          <>
+            <Divider />
+            <Box sx={{ px: 3, py: 3, bgcolor: "action.hover", display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+              <AlertCircle size={18} style={{ marginTop: 2, flexShrink: 0, color: "var(--oxygen-palette-error-main, #f59e0b)" }} />
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.75 }}>
+                This project has been suspended. Please contact your WSO2 Account Manager for
+                assistance or reach our Billing team at{" "}
+                <Typography
+                  component="a"
+                  href="mailto:billing@wso2.com"
+                  variant="body2"
+                  fontWeight={600}
+                  color="text.primary"
+                >
+                  billing@wso2.com
                 </Typography>
-              </Box>
-            </>
-          )}
+                .
+              </Typography>
+            </Box>
+          </>
+
         </CardContent>
       </Card>
 

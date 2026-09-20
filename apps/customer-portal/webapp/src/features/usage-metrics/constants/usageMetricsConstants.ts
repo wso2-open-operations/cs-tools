@@ -45,7 +45,7 @@ export const USAGE_TIME_RANGE_LABELS: Record<UsageTimeRange, string> = {
   [UsageTimeRange.CUSTOM]: "Custom range",
 };
 
-export const USAGE_METRICS_TIME_RANGE_HEADING = "Time Range:";
+export const USAGE_METRICS_TIME_RANGE_HEADING = "Time Range :";
 
 export const USAGE_METRICS_CUSTOM_RANGE_BUTTON = "Custom";
 

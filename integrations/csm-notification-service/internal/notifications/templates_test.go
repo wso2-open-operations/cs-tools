@@ -171,3 +171,90 @@ func TestRenderSeverityChangedEmail_ContainsOldAndNewSeverity(t *testing.T) {
 		t.Error("rendered email doesn't contain the new severity")
 	}
 }
+
+// TestRenderCRApprovalRequestedEmail_IsOneWellFormedDocument is a regression
+// test for a real bug: the template was assembled by splicing fragments of
+// status_changed.html together and ended up holding the document twice, with a
+// truncated "OCTYPE html>" where the second copy began. Every recipient would
+// have received two concatenated <html> documents -- invalid markup, and the
+// same failure this repo already hit once when debug mode merged two rendered
+// bodies into one email.
+//
+// It also pins the wording, since the spliced copy still said "Updated status
+// of ... to ...", offered an "Add Comment" link an email cannot action, and
+// called a change request a Case.
+func TestRenderCRApprovalRequestedEmail_IsOneWellFormedDocument(t *testing.T) {
+	got := RenderCRApprovalRequestedEmail(CRApprovalEmailData{
+		Number:        "CHG0031234",
+		State:         "ASSESS",
+		Audience:      "internal",
+		Team:          "Choreo",
+		GroupName:     "Devops Approval",
+		RequesterName: "Sasmitha",
+		ProjectName:   "Acme Cloud",
+		Link:          "https://csm.example/operations/change-requests/cr-1",
+	})
+
+	if n := strings.Count(got, "<!DOCTYPE"); n != 1 {
+		t.Errorf("rendered %d documents, want exactly 1 — a mail client shows only the first", n)
+	}
+	if n := strings.Count(got, "</html>"); n != 1 {
+		t.Errorf("found %d </html>, want exactly 1", n)
+	}
+	if strings.Contains(got, "OCTYPE html>\n<html") && !strings.Contains(got, "<!DOCTYPE html>\n<html") {
+		t.Error("found a truncated doctype — the template was spliced mid-tag")
+	}
+
+	// Every placeholder must be substituted. An unresolved one renders as an
+	// HTML comment, so it is invisible in a mail client: the recipient just
+	// sees a missing word, and no test catches it unless one looks here.
+	for _, slot := range []string{
+		"[CR_NUMBER]", "[STATE_LABEL]", "[AUDIENCE_LABEL]",
+		"[REQUESTER]", "[CR_LINK]", "[CONTEXT_LINE]", "[LOGO_SRC]",
+	} {
+		if strings.Contains(got, slot) {
+			t.Errorf("placeholder %s was never substituted", slot)
+		}
+	}
+
+	// Wording inherited from status_changed.html, all wrong here.
+	for _, wrong := range []string{"status update", "Updated status", "Add Comment", "View Case"} {
+		if strings.Contains(got, wrong) {
+			t.Errorf("found %q — leftover from the template this was derived from", wrong)
+		}
+	}
+
+	for _, want := range []string{
+		"CHG0031234", "Assess", "Devops Approval", "Sasmitha",
+		"View change request",
+		"https://csm.example/operations/change-requests/cr-1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered email does not mention %q", want)
+		}
+	}
+}
+
+// TestRenderCRApprovalRequestedEmail_MissingDetail: a change request with no
+// opener and no project still renders a sendable notice rather than a sentence
+// with a hole in it. This is the common case for a CR created by a sync rather
+// than a person.
+func TestRenderCRApprovalRequestedEmail_MissingDetail(t *testing.T) {
+	got := RenderCRApprovalRequestedEmail(CRApprovalEmailData{
+		Number:    "CHG-TEST-0001",
+		State:     "ASSESS",
+		Audience:  "internal",
+		GroupName: "Devops Approval",
+		Link:      "https://csm.example/operations/change-requests/cr-1",
+	})
+
+	if !strings.Contains(got, "Someone") {
+		t.Error("want a neutral subject for the sentence when no requester is known")
+	}
+	if strings.Contains(got, "Project .") || strings.Contains(got, "owned by .") {
+		t.Error("rendered a context line with an empty value in it")
+	}
+	if !strings.Contains(got, "Open the change request") {
+		t.Error("want the fallback context line when neither project nor team is known")
+	}
+}

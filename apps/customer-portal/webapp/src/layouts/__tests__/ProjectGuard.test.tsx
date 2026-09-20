@@ -20,12 +20,10 @@ import { describe, expect, it, vi } from "vitest";
 import ProjectGuard from "@layouts/ProjectGuard";
 import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
 
+const mockUseGetProjectDetails = vi.fn();
+
 vi.mock("@api/useGetProjectDetails", () => ({
-  default: () => ({
-    data: { id: "proj", closureState: "Active" },
-    error: null,
-    isLoading: false,
-  }),
+  default: () => mockUseGetProjectDetails(),
 }));
 
 vi.mock("react-router", async (importOriginal) => {
@@ -37,7 +35,102 @@ vi.mock("react-router", async (importOriginal) => {
 });
 
 describe("ProjectGuard", () => {
-  it("renders outlet when project loads successfully", () => {
+  it("renders outlet when project loads successfully and is active", () => {
+    mockUseGetProjectDetails.mockReturnValue({
+      data: { id: "proj", name: "Project", closureState: "Active" },
+      error: null,
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/projects/proj/dashboard"]}>
+        <ErrorPageProvider>
+          <Routes>
+            <Route path="/projects/:projectId/*" element={<ProjectGuard />} />
+          </Routes>
+        </ErrorPageProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("outlet")).toBeInTheDocument();
+  });
+
+  it("renders ProjectSuspendedNoticePage when closureState is Suspended", () => {
+    mockUseGetProjectDetails.mockReturnValue({
+      data: { id: "proj", name: "Project", closureState: "Suspended" },
+      error: null,
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/projects/proj/dashboard"]}>
+        <ErrorPageProvider>
+          <Routes>
+            <Route path="/projects/:projectId/*" element={<ProjectGuard />} />
+          </Routes>
+        </ErrorPageProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("outlet")).not.toBeInTheDocument();
+    expect(screen.getByText(/Project Suspension Notice/i)).toBeInTheDocument();
+  });
+
+  it("renders ProjectSuspendedNoticePage when closureState is lowercase suspended", () => {
+    mockUseGetProjectDetails.mockReturnValue({
+      data: { id: "proj", name: "Project", closureState: "suspended" },
+      error: null,
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/projects/proj/dashboard"]}>
+        <ErrorPageProvider>
+          <Routes>
+            <Route path="/projects/:projectId/*" element={<ProjectGuard />} />
+          </Routes>
+        </ErrorPageProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("outlet")).not.toBeInTheDocument();
+    expect(screen.getByText(/Project Suspension Notice/i)).toBeInTheDocument();
+  });
+
+  it("renders ProjectSuspendedNoticePage when project contract has ended (past endDate)", () => {
+    mockUseGetProjectDetails.mockReturnValue({
+      data: {
+        id: "proj",
+        name: "MC test",
+        closureState: "Open",
+        endDate: "2026-04-26",
+      },
+      error: null,
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/projects/proj/dashboard"]}>
+        <ErrorPageProvider>
+          <Routes>
+            <Route path="/projects/:projectId/*" element={<ProjectGuard />} />
+          </Routes>
+        </ErrorPageProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("outlet")).not.toBeInTheDocument();
+    expect(screen.getByText(/Project Suspension Notice/i)).toBeInTheDocument();
+  });
+
+  it("renders outlet when endDate is in the future", () => {
+    mockUseGetProjectDetails.mockReturnValue({
+      data: {
+        id: "proj",
+        name: "Active Project",
+        closureState: "Open",
+        endDate: "2099-12-31",
+      },
+      error: null,
+      isLoading: false,
+    });
+
     render(
       <MemoryRouter initialEntries={["/projects/proj/dashboard"]}>
         <ErrorPageProvider>

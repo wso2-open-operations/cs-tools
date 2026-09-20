@@ -85,6 +85,7 @@ export default function ConversationDetailPage(): JSX.Element {
     <Button
       variant="text"
       size="small"
+      className="csm-print-hide"
       startIcon={<ArrowLeft size={16} />}
       onClick={() => navigate(backTarget)}
       sx={{ alignSelf: "flex-start" }}

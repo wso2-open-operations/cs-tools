@@ -39,14 +39,19 @@ import {
 } from "@api/backend/mappers";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
-/** Page size used by the comments list. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
+/** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const COMMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on how many pages a single incident's comment trail can page
+ * through — see `useCsmCaseComments.ts`'s identical constant/reasoning. */
+const MAX_COMMENT_PAGES = 200;
 
 /**
- * Load all comments on an incident. Calls
- * `POST /incidents/{id}/comments/search` with a single wide page (limit
- * capped at BE_MAX_PAGE_LIMIT). Reuses the same generic BeComment shape as
- * case comments — only the referenceType widened upstream.
+ * Load *every* comment on an incident. Calls
+ * `POST /incidents/{id}/comments/search`, paging through
+ * `BE_MAX_PAGE_LIMIT`-sized requests until the BE reports no more
+ * (`hasMore`) — see `useCsmCaseComments.ts`'s identical fix/reasoning.
+ * Reuses the same generic BeComment shape as case comments — only the
+ * referenceType widened upstream.
  */
 export function useGetCsmIncidentComments(
   incidentId: string | undefined,
@@ -58,17 +63,23 @@ export function useGetCsmIncidentComments(
     queryFn: async (): Promise<CsmCaseComment[]> => {
       if (!incidentId) return [];
 
-      const payload: BeCaseCommentSearchPayload = {
-        pagination: { offset: 0, limit: COMMENTS_PAGE_LIMIT },
-      };
-      const response = await api.post<
-        BeCaseCommentSearchPayload,
-        BeCommentSearchResponse
-      >(
-        `/incidents/${encodeURIComponent(incidentId)}/comments/search`,
-        payload,
-      );
-      return (response.comments ?? []).map((comment) =>
+      const allComments: BeComment[] = [];
+      for (let page = 0; page < MAX_COMMENT_PAGES; page += 1) {
+        const payload: BeCaseCommentSearchPayload = {
+          pagination: { offset: page * COMMENTS_PAGE_LIMIT, limit: COMMENTS_PAGE_LIMIT },
+        };
+        const response = await api.post<
+          BeCaseCommentSearchPayload,
+          BeCommentSearchResponse
+        >(
+          `/incidents/${encodeURIComponent(incidentId)}/comments/search`,
+          payload,
+        );
+        const rows = response.comments ?? [];
+        allComments.push(...rows);
+        if (rows.length < COMMENTS_PAGE_LIMIT || !response.hasMore) break;
+      }
+      return allComments.map((comment) =>
         uiCommentFromBe(comment, { context: "case" }),
       );
     },

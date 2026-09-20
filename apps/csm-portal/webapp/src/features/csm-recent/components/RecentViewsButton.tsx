@@ -60,6 +60,7 @@ function groupByKind(
     incident: [],
     change_request: [],
     problem: [],
+    outage: [],
   };
   for (const e of entries) out[e.kind].push(e);
   return out;

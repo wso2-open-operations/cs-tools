@@ -88,22 +88,18 @@ func (m *mockProjectUpdater) UpdateProject(ctx context.Context, id string, body 
 }
 
 type mockNotifier struct {
-	sendFn     func(ctx context.Context, n notify.Notice) error
-	deliversFn func() bool
-	sent       []notify.Notice
+	// sendFn, when set, decides both the delivered result and the error
+	// for every call. Default (unset): delivered=false, err=nil — matches
+	// LoggingNotifier's real behavior, and is what most tests want since
+	// they're not exercising delivery-tracking specifically.
+	sendFn func(ctx context.Context, n notify.Notice) (bool, error)
+	sent   []notify.Notice
 }
 
-func (m *mockNotifier) Send(ctx context.Context, n notify.Notice) error {
+func (m *mockNotifier) Send(ctx context.Context, n notify.Notice) (bool, error) {
 	m.sent = append(m.sent, n)
 	if m.sendFn != nil {
 		return m.sendFn(ctx, n)
 	}
-	return nil
-}
-
-func (m *mockNotifier) Delivers() bool {
-	if m.deliversFn != nil {
-		return m.deliversFn()
-	}
-	return false
+	return false, nil
 }

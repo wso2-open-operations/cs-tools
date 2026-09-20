@@ -63,7 +63,7 @@ import {
 import { Link as RouterLink } from "react-router";
 import { formatBytes } from "@utils/formatBytes";
 import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityChip";
-import { useSearchUsersByName } from "@api/useSearchUsersByName";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
 import {
@@ -897,8 +897,8 @@ export function WatchersWidget({
             value=""
             onChange={addWatcher}
             disabled={isSaving}
-            useSearch={useSearchUsersByName}
-            // useSearchUsersByName drops any user without an id, so every
+            useSearch={useSearchInternalUsersByName}
+            // useSearchInternalUsersByName drops any user without an id, so every
             // option here is guaranteed to have one.
             getId={(u) => u.id!}
             getLabel={userLabel}

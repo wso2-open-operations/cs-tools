@@ -52,6 +52,15 @@ interface AsyncAssigneeMultiSelectProps {
    * screen) used to label already-selected engineers before any search runs.
    */
   nameSeed?: Map<string, string>;
+  /**
+   * Server-side role scoping passed straight through to
+   * {@link useInfiniteUserSearch}'s {@link UserSearchScope} — e.g. restrict
+   * this picker to internal staff only. Left unset, the search stays
+   * unscoped (this component's original behavior).
+   */
+  roleIds?: string[];
+  /** See {@link roleIds}; restrict to active accounts only. */
+  active?: boolean;
 }
 
 /**
@@ -68,6 +77,8 @@ export default function AsyncAssigneeMultiSelect({
   values,
   onChange,
   nameSeed,
+  roleIds,
+  active,
 }: AsyncAssigneeMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -83,7 +94,7 @@ export default function AsyncAssigneeMultiSelect({
     hasNextPage,
     isError,
     fetchNextPage,
-  } = useInfiniteUserSearch(query, open);
+  } = useInfiniteUserSearch(query, open, { roleIds, active });
 
   // Lazy-load the next page when the listbox is scrolled near its end.
   const handleListboxScroll = (event: React.UIEvent<HTMLElement>): void => {

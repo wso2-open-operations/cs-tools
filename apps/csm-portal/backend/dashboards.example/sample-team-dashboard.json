@@ -75,6 +75,7 @@
           }
         ]
       },
+      "inlineDrilldown": true,
       "slices": [
         {
           "label": "Critical",

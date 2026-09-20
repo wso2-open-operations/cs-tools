@@ -176,18 +176,63 @@ func (h *CaseHandler) resolveCurrentUserID(r *http.Request, user *middleware.Use
 	return me.ID
 }
 
-// isDeescalationAction reports whether a case-escalation request body's
-// "action" field is DEESCALATE (case-insensitive). A missing/empty action
-// defaults to ESCALATE per the entity service's own contract, so only an
-// explicit "DEESCALATE"/"deescalate"/etc. value counts.
-func isDeescalationAction(body []byte) bool {
-	var payload struct {
-		Action string `json:"action"`
+// validateCaseEscalationBody decodes and validates a case-escalation request
+// body against the entity service's CaseEscalationCreateRequest contract:
+// unknown fields are rejected, "action" (if present) must be exactly one of
+// the four literal forms the schema enumerates -- "ESCALATE", "escalate",
+// "DEESCALATE", "deescalate" -- (missing key defaults to ESCALATE; an
+// explicit "action": null is rejected, since the contract only permits an
+// omitted key or a string value, never a null), and "reason" is required and
+// non-blank unless the effective action is DEESCALATE. Returns the
+// normalized, upper-case effective action and whether the body is valid.
+//
+// "action" is decoded as json.RawMessage rather than *string because a *string
+// cannot distinguish an omitted key from an explicit "action": null -- both
+// decode to a nil pointer. json.RawMessage stays nil only when the key is
+// absent; when the key is present its raw bytes are captured verbatim
+// (including the literal `null`), so the two cases can be told apart.
+// "reason" does not need the same treatment: {"reason": null, ...} is already
+// correctly rejected by the existing nil-check below (a null reason yields no
+// usable reason, same as an absent one), so *string is sufficient there.
+func validateCaseEscalationBody(body []byte) (action string, ok bool) {
+	var req struct {
+		Reason *string         `json:"reason"`
+		Action json.RawMessage `json:"action"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return false
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return "", false
 	}
-	return strings.EqualFold(payload.Action, "DEESCALATE")
+	// Reject trailing data after the first JSON value (e.g. two concatenated
+	// JSON objects) -- json.Decoder.Decode only consumes the first value and
+	// silently leaves the rest unread.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return "", false
+	}
+
+	action = "ESCALATE"
+	if req.Action != nil {
+		var actionStr string
+		if err := json.Unmarshal(req.Action, &actionStr); err != nil {
+			// Covers both an explicit "action": null and any non-string value.
+			return "", false
+		}
+		switch actionStr {
+		case "ESCALATE", "escalate":
+			action = "ESCALATE"
+		case "DEESCALATE", "deescalate":
+			action = "DEESCALATE"
+		default:
+			return "", false
+		}
+	}
+
+	if action != "DEESCALATE" && (req.Reason == nil || strings.TrimSpace(*req.Reason) == "") {
+		return "", false
+	}
+
+	return action, true
 }
 
 // callerIsNotifiedOnCurrentEscalation reports whether the caller is one of the
@@ -1385,12 +1430,13 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if len(body) > 0 && !json.Valid(body) {
+	action, valid := validateCaseEscalationBody(body)
+	if !valid {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 
-	if isDeescalationAction(body) && !h.callerIsNotifiedOnCurrentEscalation(r, caseID, user) {
+	if action == "DEESCALATE" && !h.callerIsNotifiedOnCurrentEscalation(r, caseID, user) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}

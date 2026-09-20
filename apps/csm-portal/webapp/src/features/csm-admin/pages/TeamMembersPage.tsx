@@ -23,11 +23,6 @@ import DirectoryMemberPage from "@features/csm-admin/components/DirectoryMemberP
  */
 export default function TeamMembersPage(): JSX.Element {
   return (
-    <DirectoryMemberPage
-      filterKey="teamIds"
-      entityNoun="team"
-      listPath="/admin/teams"
-      listLabel="Teams"
-    />
+    <DirectoryMemberPage filterKey="teamIds" entityNoun="team" listPath="/admin/teams" />
   );
 }

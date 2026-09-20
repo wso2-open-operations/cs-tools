@@ -40,9 +40,12 @@ vi.mock("@features/csm-projects/components/WorkItemsTab", () => ({
 // present under vitest. `UserRefLink` (used for the Onboarding Owner cell)
 // resolves an unknown id through `useBackendApi` — same approach as
 // ProjectContactsTab.test.tsx. Every test here passes a known `userId`, so
-// the mocked `post` is never actually invoked.
+// the mocked `post` is never actually invoked. `get` backs
+// `useProjectMetadata` (used only to gate the "Create service request" menu
+// item) — resolving `null` exercises this page's fail-open path, same as an
+// unconfirmed/unloaded metadata response would.
 vi.mock("@api/backend/client", () => ({
-  useBackendApi: () => ({ post: vi.fn() }),
+  useBackendApi: () => ({ post: vi.fn(), get: vi.fn(() => Promise.resolve(null)) }),
 }));
 
 import CsmProjectDetailPage from "@features/csm-projects/pages/CsmProjectDetailPage";

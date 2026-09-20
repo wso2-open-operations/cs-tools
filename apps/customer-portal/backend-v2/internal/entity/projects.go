@@ -36,6 +36,17 @@ func (c *Client) GetProject(ctx context.Context, id string) (ProjectDetailsView,
 	return out, err
 }
 
+// UpdateProject patches a project's AI-assistant settings via
+// PATCH /projects/{id}.
+//
+// Only the two agent toggles are patchable, and entity-service accepts exactly
+// one per request — see UpdateProjectRequest.
+func (c *Client) UpdateProject(ctx context.Context, id string, req UpdateProjectRequest) (UpdateProjectResponse, error) {
+	var out UpdateProjectResponse
+	err := c.patchJSON(ctx, fmt.Sprintf("/projects/%s", url.PathEscape(id)), req, &out)
+	return out, err
+}
+
 // GetProjectMetadata calls GET /projects/{id}/metadata.
 //
 // NOTE: only entity-service's ServiceNow data source supports this route —

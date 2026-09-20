@@ -399,6 +399,60 @@ describe("case tabs — real BrowserRouter integration", () => {
     // doesn't close it.
     expect(screen.getByText("CS0001")).toBeInTheDocument();
   });
+
+  // Regression test: closing the LAST open case tab used to always land on
+  // that case type's list view (`basePathForKind`), even when the user had
+  // opened the tab from somewhere else entirely (the dashboard, in this
+  // test) — because `CaseTabsContentHost`'s close effect had no access to
+  // "where the user was before any case tab was opened"; only
+  // `CaseTabStripBar` tracked that (via `useCurrentLocationTab`), and the two
+  // components never shared it. Fixed by having `CaseTabsContentHost` read
+  // the same hook itself (see that component's own doc comment for why the
+  // two instances are always in lockstep) and fall back to its tracked path
+  // instead of `basePathForKind` when no tab remains active.
+  it("closing the last open case tab returns to the route live before any case tab opened, not the case-type list view", async () => {
+    sessionStorage.clear();
+    function AppWithDashboard() {
+      window.history.pushState({}, "", "/dashboard");
+      return (
+        <BrowserRouter>
+          <ErrorBannerProvider>
+            <CaseTabsBehaviorProvider>
+              <CaseTabsProvider>
+                <NavigateButton to="/cases/CS0001" label="go-to-cs0001" />
+                <CaseTabStripBar />
+                <CaseTabsContentHost />
+                <Routes>
+                  <Route path="/dashboard" element={<div>stub-dashboard</div>} />
+                  <Route path="/cases" element={<div>stub-case-list</div>} />
+                  <Route path="/cases/:caseId" element={<CaseDetailRouteSync kind="case" />} />
+                </Routes>
+              </CaseTabsProvider>
+            </CaseTabsBehaviorProvider>
+          </ErrorBannerProvider>
+        </BrowserRouter>
+      );
+    }
+    render(<AppWithDashboard />);
+    expect(screen.getByText("stub-dashboard")).toBeInTheDocument();
+
+    // Open the only case tab from the dashboard — never visiting the case
+    // list at all in this test, so a fallback to it (rather than back to the
+    // dashboard) would be unambiguously wrong, not just "a" plausible page.
+    fireEvent.click(screen.getByText("go-to-cs0001"));
+    await waitFor(() =>
+      expect(screen.getByTestId("stub-page-case-id")).toHaveTextContent("CS0001"),
+    );
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+
+    // Close that one and only case tab (the pinned "current location" tab
+    // isn't closable, so this is the sole `CancelIcon`).
+    fireEvent.click(screen.getByTestId("CancelIcon"));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+    expect(screen.getByText("stub-dashboard")).toBeInTheDocument();
+    expect(screen.queryByText("stub-case-list")).not.toBeInTheDocument();
+  });
 });
 
 /**

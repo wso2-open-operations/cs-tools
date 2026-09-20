@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useNavigate, useParams, useLocation } from "react-router";
+import { useNavigate, useLocation } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import {
   Avatar,
   Box,
@@ -276,10 +277,8 @@ function ConversationMsgBubble({
 export default function ConversationDetailsPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const { projectId, conversationId } = useParams<{
-    projectId: string;
-    conversationId: string;
-  }>();
+  const projectId = useNormalizedIdParam("projectId");
+  const conversationId = useNormalizedIdParam("conversationId");
 
   const locationState = location.state as {
     conversationSummary?: ChatHistoryItem;

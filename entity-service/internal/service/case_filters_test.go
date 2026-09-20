@@ -86,6 +86,45 @@ func TestParseCaseFieldFilters_NamedFieldTranslations(t *testing.T) {
 			},
 		},
 		{
+			name: "accountId notIn maps to ExcludeAccountIDs",
+			in: []domain.CaseFieldFilter{{
+				Field:  "accountId",
+				Op:     "notIn",
+				Values: []string{"00000000-0000-0000-0000-000000000000"},
+			}},
+			check: func(t *testing.T, p domain.ParsedCaseFilters) {
+				if len(p.ExcludeAccountIDs) != 1 || p.ExcludeAccountIDs[0] != "00000000-0000-0000-0000-000000000000" {
+					t.Fatalf("ExcludeAccountIDs = %v", p.ExcludeAccountIDs)
+				}
+				// notIn must never be folded into the positive allowlist: that
+				// would silently invert the predicate's meaning.
+				if len(p.AccountIDs) != 0 {
+					t.Fatalf("AccountIDs = %v, want empty: notIn must not populate the in list", p.AccountIDs)
+				}
+			},
+		},
+		{
+			name: "projectId in maps to ProjectIDs",
+			in:   []domain.CaseFieldFilter{{Field: "projectId", Op: "in", Values: []string{"00000000-0000-0000-0000-000000000000"}}},
+			check: func(t *testing.T, p domain.ParsedCaseFilters) {
+				if len(p.ProjectIDs) != 1 || p.ProjectIDs[0] != "00000000-0000-0000-0000-000000000000" {
+					t.Fatalf("ProjectIDs = %v", p.ProjectIDs)
+				}
+			},
+		},
+		{
+			name: "projectId notIn maps to ExcludeProjectIDs",
+			in:   []domain.CaseFieldFilter{{Field: "projectId", Op: "notIn", Values: []string{"11111111-1111-1111-1111-111111111111"}}},
+			check: func(t *testing.T, p domain.ParsedCaseFilters) {
+				if len(p.ExcludeProjectIDs) != 1 || p.ExcludeProjectIDs[0] != "11111111-1111-1111-1111-111111111111" {
+					t.Fatalf("ExcludeProjectIDs = %v", p.ExcludeProjectIDs)
+				}
+				if len(p.ProjectIDs) != 0 {
+					t.Fatalf("ProjectIDs = %v, want empty: notIn must not populate the in list", p.ProjectIDs)
+				}
+			},
+		},
+		{
 			name: "tag in maps to Tags",
 			in:   []domain.CaseFieldFilter{{Field: "tag", Op: "in", Values: []string{"patch"}}},
 			check: func(t *testing.T, p domain.ParsedCaseFilters) {
@@ -324,6 +363,11 @@ func TestParseCaseFieldFilters_Rejections(t *testing.T) {
 		{name: "internalId in unsupported", in: []domain.CaseFieldFilter{{Field: "internalId", Op: "in", Values: []string{"12345"}}}},
 		{name: "projectOnboardingStatus eq unsupported", in: []domain.CaseFieldFilter{{Field: "projectOnboardingStatus", Op: "eq", Values: []string{"Completed"}}}},
 		{name: "accountId malformed UUID", in: []domain.CaseFieldFilter{{Field: "accountId", Op: "in", Values: []string{"not-a-uuid"}}}},
+		{name: "accountId notIn malformed UUID", in: []domain.CaseFieldFilter{{Field: "accountId", Op: "notIn", Values: []string{"not-a-uuid"}}}},
+		{name: "accountId unsupported op", in: []domain.CaseFieldFilter{{Field: "accountId", Op: "eq", Values: []string{"00000000-0000-0000-0000-000000000000"}}}},
+		{name: "projectId unsupported op", in: []domain.CaseFieldFilter{{Field: "projectId", Op: "eq", Values: []string{"00000000-0000-0000-0000-000000000000"}}}},
+		{name: "projectId malformed UUID", in: []domain.CaseFieldFilter{{Field: "projectId", Op: "in", Values: []string{"not-a-uuid"}}}},
+		{name: "projectId notIn malformed UUID", in: []domain.CaseFieldFilter{{Field: "projectId", Op: "notIn", Values: []string{"not-a-uuid"}}}},
 		{name: "slaBreached with unsupported op", in: []domain.CaseFieldFilter{{Field: "slaBreached", Op: "in", Values: []string{"true"}}}},
 		{name: "slaBreached with non-boolean value", in: []domain.CaseFieldFilter{{Field: "slaBreached", Op: "eq", Values: []string{"yes"}}}},
 		{name: "slaBreached with more than one value", in: []domain.CaseFieldFilter{{Field: "slaBreached", Op: "eq", Values: []string{"true", "false"}}}},
@@ -563,6 +607,42 @@ func TestParseCaseFieldFilterGroups_RejectsStateNotIn(t *testing.T) {
 	const want = `anyOf: field "state" (notIn) is not supported inside an OR group`
 	if ve.Msg != want {
 		t.Errorf("Msg = %q, want %q", ve.Msg, want)
+	}
+}
+
+// projectId+in and accountId+in are supported inside an OR branch (via
+// CaseFilterGroup.ProjectIDs, and accountId+in is separately rejected
+// elsewhere), but neither's notIn side is modeled there -- accepting it would
+// drop the exclusion and widen the branch's result set, same reasoning as
+// state+notIn above.
+func TestParseCaseFieldFilterGroups_RejectsProjectIdAndAccountIdNotIn(t *testing.T) {
+	cases := []struct {
+		name   string
+		branch domain.CaseFilterBranch
+		want   string
+	}{
+		{
+			name:   "projectId notIn",
+			branch: domain.CaseFilterBranch{Filters: []domain.CaseFieldFilter{{Field: "projectId", Op: "notIn", Values: []string{"00000000-0000-0000-0000-000000000000"}}}},
+			want:   `anyOf: field "projectId" (notIn) is not supported inside an OR group`,
+		},
+		{
+			name:   "accountId notIn",
+			branch: domain.CaseFilterBranch{Filters: []domain.CaseFieldFilter{{Field: "accountId", Op: "notIn", Values: []string{"00000000-0000-0000-0000-000000000000"}}}},
+			want:   `anyOf: field "accountId" (notIn) is not supported inside an OR group`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseCaseFieldFilterGroups([]domain.CaseFilterBranch{tc.branch})
+			var ve *apierror.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v (%T), want *apierror.ValidationError", err, err)
+			}
+			if ve.Msg != tc.want {
+				t.Errorf("Msg = %q, want %q", ve.Msg, tc.want)
+			}
+		})
 	}
 }
 

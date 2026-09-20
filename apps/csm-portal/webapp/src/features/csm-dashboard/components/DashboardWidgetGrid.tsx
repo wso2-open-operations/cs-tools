@@ -16,15 +16,18 @@
 
 import { Box, Divider, Typography } from "@wso2/oxygen-ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState, type JSX, type ReactNode } from "react";
+import { Fragment, useRef, useState, type JSX, type ReactNode } from "react";
 import type { BeDashboardWidget } from "@api/backend/types";
 import DashboardWidgetTile from "@features/csm-dashboard/components/DashboardWidgetTile";
+import WidgetInlineDrilldownPanel from "@features/csm-dashboard/components/WidgetInlineDrilldownPanel";
+import type { PieSliceResult } from "@features/csm-dashboard/api/useWidgetPieData";
 import RefreshButton from "@components/RefreshButton";
 import { resolveWidgetText } from "@features/csm-dashboard/utils/widgetTextPlaceholder";
 import { invalidateWidgetQueries } from "@features/csm-dashboard/utils/invalidateWidgetQueries";
 import {
   WIDGET_GRID_SX,
   groupWidgetsBySection,
+  type WidgetGroup,
 } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import { resolveDateRangeFilterPlaceholder } from "@features/csm-dashboard/utils/dateRangeFilterPlaceholder";
 
@@ -155,6 +158,22 @@ export default function DashboardWidgetGrid({
   dateRangeTo,
 }: DashboardWidgetGridProps): JSX.Element {
   const queryClient = useQueryClient();
+  // Which widget's own slice (if any) is currently expanded into a
+  // full-width inline-drilldown panel (see `WidgetInlineDrilldownPanel`,
+  // rendered once per section — after that section's ENTIRE widget list,
+  // not as a sibling inserted right after the specific widget that was
+  // clicked — see `renderExpandedPanel`'s own doc comment for why) —
+  // lifted up here, out of `DashboardWidgetTile`, specifically so the
+  // expanded list can render at full grid width instead of nested inside
+  // the tile's own (narrow, `gridWidth`-sized) `Card`. Singular by design:
+  // only one widget's own
+  // slice is ever expanded at a time, across the whole grid — expanding a
+  // different widget's slice (or a different slice of the SAME widget)
+  // replaces whatever was previously expanded, it does not add a second
+  // panel. `null` means nothing is expanded anywhere in this grid.
+  const [expanded, setExpanded] = useState<{ widgetId: string; slice: PieSliceResult } | null>(
+    null,
+  );
   // Per-section refresh tracks its own in-flight state, keyed by section.
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
   // A section can bundle multiple widgets/queries, so there's no single
@@ -165,6 +184,53 @@ export default function DashboardWidgetGrid({
   // resolves after the matched queries have refetched, not just been
   // marked stale).
   const [sectionLastRefreshedAt, setSectionLastRefreshedAt] = useState<Record<string, number>>({});
+
+  // Per-widget-id caches so an UNRELATED tile's own props stay referentially
+  // stable across an `expanded` state change elsewhere in the grid — without
+  // this, `resolveDateRangeFilterPlaceholder` returning a fresh object and a
+  // fresh `onExpandChange` closure on every render of this component would
+  // give every tile new prop identities on every click anywhere on the
+  // page, which is exactly what `DashboardWidgetTile`'s own `React.memo`
+  // (see that component) needs to NOT be true in order to actually skip
+  // re-rendering a widget nowhere near the one that was clicked. Both are
+  // plain `useRef` maps (not `useMemo`) because they're populated from
+  // inside `renderTile`, which itself runs inside a `.map()` over a
+  // per-section widget list — calling a memoizing hook from inside that
+  // loop would violate the rules of hooks (a variable number of hook calls
+  // across renders whenever the widget count differs from render to
+  // render); a manually-invalidated cache sidesteps that entirely.
+  const resolvedFiltersCache = useRef(new Map<string, { key: string; value: Record<string, unknown> }>());
+  const getResolvedFilters = (widget: BeDashboardWidget): Record<string, unknown> => {
+    // `dateRangeFrom`/`dateRangeTo` are the only two things outside
+    // `widget.query` itself that `resolveDateRangeFilterPlaceholder` reads —
+    // both folded into the cache key so a date-range change still recomputes
+    // (and so still reaches every widget that references the placeholder),
+    // while an unrelated `expanded` change (which touches neither) reuses
+    // the previous render's own object.
+    const key = JSON.stringify([widget.query ?? {}, dateRangeFrom, dateRangeTo]);
+    const cached = resolvedFiltersCache.current.get(widget.widgetId);
+    if (cached && cached.key === key) return cached.value;
+    const value = resolveDateRangeFilterPlaceholder(widget.query ?? {}, dateRangeFrom, dateRangeTo);
+    resolvedFiltersCache.current.set(widget.widgetId, { key, value });
+    return value;
+  };
+  // One stable `onExpandChange` closure per widget id, for the same reason
+  // as `getResolvedFilters` above — `setExpanded` itself is guaranteed
+  // referentially stable by React (a `useState` setter), so a closure
+  // captured once per widget id and reused forever needs no dependency
+  // array/invalidation of its own; it never has stale-closure risk because
+  // it never reads any state directly, it only ever calls `setExpanded`
+  // with an updater-free, fully-computed next value derived from its own
+  // arguments.
+  const onExpandChangeCache = useRef(new Map<string, (slice: PieSliceResult | null) => void>());
+  const getOnExpandChange = (widgetId: string): ((slice: PieSliceResult | null) => void) => {
+    let handler = onExpandChangeCache.current.get(widgetId);
+    if (!handler) {
+      handler = (slice) => setExpanded(slice ? { widgetId, slice } : null);
+      onExpandChangeCache.current.set(widgetId, handler);
+    }
+    return handler;
+  };
 
   const handleSectionRefresh = async (sectionKey: string, widgetIds: Set<string>): Promise<void> => {
     setRefreshingSections((prev) => new Set(prev).add(sectionKey));
@@ -180,8 +246,19 @@ export default function DashboardWidgetGrid({
     }
   };
 
+  // Renders ONLY this widget's own tile — no longer also renders the
+  // expanded inline-drilldown panel as an immediately-following sibling
+  // (see `renderExpandedPanel` below for where that moved and why). Kept as
+  // a plain `Box`, not a `Fragment`, now that there's only ever one grid
+  // item per widget here: a `Fragment` wrapper existed only to let a widget
+  // contribute two grid items (its own tile plus, conditionally, the panel
+  // right after it) from one `.map()` call, which is exactly the layout bug
+  // this fix removes.
   const renderTile = (widget: BeDashboardWidget) => {
     const action = renderWidgetAction?.(widget);
+    const resolvedFilters = getResolvedFilters(widget);
+    const thisWidgetExpandedSlice =
+      expanded?.widgetId === widget.widgetId ? expanded.slice : null;
     return (
       <Box key={widget.widgetId} sx={{ position: "relative", ...widgetGridColumnSx(widget) }}>
         <DashboardWidgetTile
@@ -191,19 +268,22 @@ export default function DashboardWidgetGrid({
           resourceType={widget.resourceType}
           shape={widget.shape}
           // `widget.query` is legally absent for a slices-only pie/bar
-          // widget (see `BeDashboardWidget.query`'s doc comment) — default
-          // to `{}` here too, at the source, on top of `mergeWidgetFilters`
-          // and `useWidgetData`/`useWidgetPieData` already tolerating it.
-          // `resolveDateRangeFilterPlaceholder` is a no-op for every widget
-          // that doesn't carry `__dateRangeFrom__`/`__dateRangeTo__` (every
-          // widget today except `case_feedback`'s own two) — see that
-          // function's own doc comment.
-          filters={resolveDateRangeFilterPlaceholder(widget.query ?? {}, dateRangeFrom, dateRangeTo)}
+          // widget (see `BeDashboardWidget.query`'s doc comment) —
+          // default to `{}` here too, at the source, on top of
+          // `mergeWidgetFilters` and `useWidgetData`/`useWidgetPieData`
+          // already tolerating it. `resolveDateRangeFilterPlaceholder` is
+          // a no-op for every widget that doesn't carry
+          // `__dateRangeFrom__`/`__dateRangeTo__` (every widget today
+          // except `case_feedback`'s own two) — see that function's own
+          // doc comment.
+          filters={resolvedFilters}
           listLimit={widget.listLimit}
           slices={widget.slices}
           groupBy={widget.groupBy}
           columns={widget.columns}
           sortBy={widget.sortBy}
+          inlineDrilldown={widget.inlineDrilldown}
+          inlineLabels={widget.inlineLabels}
           selectedTeamCreGroupId={selectedTeamCreGroupId}
           selectedTeamSreGroupId={selectedTeamSreGroupId}
           selectedTeamLabel={selectedTeamLabel}
@@ -214,10 +294,50 @@ export default function DashboardWidgetGrid({
           // when) a builder action actually exists for this widget. See
           // `hideRefreshButton`'s own doc comment on `DashboardWidgetTile`.
           hideRefreshButton={Boolean(action)}
+          expandedSlice={thisWidgetExpandedSlice}
+          onExpandChange={getOnExpandChange(widget.widgetId)}
         />
         {action && (
           <Box sx={{ position: "absolute", top: 6, right: 6, zIndex: 2 }}>{action}</Box>
         )}
+      </Box>
+    );
+  };
+
+  // Renders the expanded inline-drilldown panel for `group` — but only if
+  // `expanded`'s own widget actually belongs to THIS section, and only
+  // ONCE, after every one of that section's own tiles rather than as a
+  // sibling inserted immediately after the specific widget that was
+  // clicked. That placement is the actual fix for the reported layout bug:
+  // inserting a `gridColumn: "1 / -1"` full-width item mid-row (right after
+  // whichever widget triggered it) forces CSS grid auto-placement to push
+  // every OTHER widget still queued for that same row onto a new row below
+  // it, even though none of them have anything to do with the click — the
+  // grid's own auto-flow can't place a later item beside an earlier one
+  // once a full-width item sits between them. Rendering the panel once,
+  // after the section's entire widget list, means every other tile in that
+  // section keeps its original row/position no matter which of the
+  // section's own widgets was expanded — only one full-width row ever
+  // appears, at the very end of that section.
+  const renderExpandedPanel = (group: WidgetGroup): ReactNode => {
+    if (!expanded) return null;
+    const widget = group.widgets.find((w) => w.widgetId === expanded.widgetId);
+    if (!widget) return null;
+    return (
+      <Box sx={{ gridColumn: "1 / -1" }}>
+        <WidgetInlineDrilldownPanel
+          widgetId={widget.widgetId}
+          displayName={widget.displayName}
+          resourceType={widget.resourceType}
+          filters={getResolvedFilters(widget)}
+          slice={expanded.slice}
+          listLimit={widget.listLimit}
+          columns={widget.columns}
+          selectedTeamCreGroupId={selectedTeamCreGroupId}
+          selectedTeamSreGroupId={selectedTeamSreGroupId}
+          selectedTeamLabel={selectedTeamLabel}
+          onClose={() => setExpanded(null)}
+        />
       </Box>
     );
   };
@@ -283,8 +403,14 @@ export default function DashboardWidgetGrid({
               {/* Rendered in the config's own array order — see this
                   component's doc comment on why the widget grouping/order
                   must follow `group.widgets` as-is, not a shape-based
-                  split. */}
-              <Box sx={WIDGET_GRID_SX}>{group.widgets.map(renderTile)}</Box>
+                  split. The expanded inline-drilldown panel (if this
+                  section owns the currently-expanded widget) renders once,
+                  after every tile — see `renderExpandedPanel`'s own doc
+                  comment for why. */}
+              <Box sx={WIDGET_GRID_SX}>
+                {group.widgets.map(renderTile)}
+                {renderExpandedPanel(group)}
+              </Box>
             </Box>
           </Fragment>
         );

@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Card, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
+import { Link as RouterLink } from "react-router";
 import { useDashboard } from "@features/csm-dashboard/api/useDashboard";
 import DashboardWidgetGrid from "@features/csm-dashboard/components/DashboardWidgetGrid";
 import DateRangeFilter, {
@@ -24,6 +25,10 @@ import DateRangeFilter, {
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
 import { WIDGET_GRID_SX } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import { hasDateRangeFilterPlaceholder } from "@features/csm-dashboard/utils/dateRangeFilterPlaceholder";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { hasDashboardBuilderAccess } from "@features/csm-admin/dashboards/utils/dashboardBuilderAccess";
+import { isDraftDrifted } from "@features/csm-admin/dashboards/utils/dashboardDrift";
+import { useDashboardDraft } from "@features/csm-admin/dashboards/utils/dashboardDraftsStorage";
 
 /** Placeholder tile count while the dashboard detail is in flight. */
 const PILOT_TILE_COUNT = 3;
@@ -64,6 +69,14 @@ interface AgentsLandingPagePilotProps {
  * independently. Today only the "agents_pilot" dashboard has real widgets
  * (see CsmDashboardPage.tsx), but this component is generic over any
  * dashboard id with widgets.
+ *
+ * A designer (`hasDashboardBuilderAccess`) with an unsaved local builder
+ * draft for this exact dashboard sees THAT draft's widgets rendered here
+ * instead of the deployed ones, with a banner making that substitution
+ * explicit — this is what makes the local-only builder actually useful for
+ * previewing a layout on the real page, not just in its own separate
+ * editor. Every other viewer (and a designer with no draft, or a
+ * byte-identical one) always sees the deployed widgets.
  */
 export default function AgentsLandingPagePilot({
   dashboardId,
@@ -72,6 +85,38 @@ export default function AgentsLandingPagePilot({
   selectedTeamLabel,
 }: AgentsLandingPagePilotProps): JSX.Element {
   const { data, isLoading, isError } = useDashboard(dashboardId);
+
+  // Surfaces the local dashboard-builder draft (if any) for THIS dashboard
+  // right on the page it's actually a draft OF, not just in the builder's
+  // own list page (`LocalDraftDriftChip`) — a designer switching back to
+  // "the real home dashboard" after editing shouldn't have to remember to
+  // check the builder to know they left local edits pending. Gated on
+  // `hasDashboardBuilderAccess` so this never affects any other viewer of
+  // the same dashboard, even though the `localStorage` draft itself is only
+  // ever written by a designer's own browser to begin with — see
+  // `dashboardBuilderAccess.ts`'s own doc comment on why this whole builder
+  // is local-only/temporary.
+  const { user } = useCurrentUser();
+  const canDesignDashboards = hasDashboardBuilderAccess(user?.roles);
+  const draft = useDashboardDraft(dashboardId);
+  const hasUnsavedDraft = canDesignDashboards && Boolean(draft) && isDraftDrifted(draft!, data ?? undefined);
+
+  // When a designer has an unsaved draft, the home page renders THAT
+  // (rather than the deployed dashboard) so they can preview their own
+  // in-progress layout on the page they actually use day to day — this is
+  // the whole point of a local-only builder; requiring a trip through the
+  // separate preview-only builder editor to see it defeats that purpose.
+  // Known limitation: `draft.widgets` does NOT include any shared
+  // `includeSections` the draft references (see `DashboardDraft.
+  // includeSections`'s own doc comment — those are expanded server-side,
+  // by `GET /dashboards/{id}`, only for a DEPLOYED dashboard) — a draft
+  // that adds/uses a shared section previews without it here. Acceptable
+  // for a temporary, local-only tool; revisit only if that gap is reported
+  // as confusing in practice.
+  const effectiveWidgets = useMemo(
+    () => (hasUnsavedDraft ? draft!.widgets : (data?.widgets ?? [])),
+    [hasUnsavedDraft, draft, data?.widgets],
+  );
 
   // Whether ANY widget on this loaded dashboard actually uses the
   // date-range placeholder (see `dateRangeFilterPlaceholder.ts`) — derived
@@ -84,10 +129,12 @@ export default function AgentsLandingPagePilot({
   // every other shape (see `BeDashboardWidget.query`'s own doc comment) — so
   // `query` alone is the complete check. Defaults to `false` (no control
   // rendered) while the dashboard is still loading/erroring, same as
-  // rendering no grid at all in those states below.
+  // rendering no grid at all in those states below. Derived from
+  // `effectiveWidgets`, not `data?.widgets` directly, so the control matches
+  // whichever set (draft or deployed) is actually being rendered.
   const showDateRangeFilter = useMemo(
-    () => (data?.widgets ?? []).some((w) => hasDateRangeFilterPlaceholder(w.query ?? {})),
-    [data?.widgets],
+    () => effectiveWidgets.some((w) => hasDateRangeFilterPlaceholder(w.query ?? {})),
+    [effectiveWidgets],
   );
   // Page-local UI state, not URL/query-param-backed: unlike the team
   // picker (a real selection that should survive a refresh/share — see
@@ -115,13 +162,29 @@ export default function AgentsLandingPagePilot({
         </Box>
       ) : (
         <>
+          {hasUnsavedDraft && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              You're viewing your unsaved local draft of this dashboard, not the deployed
+              version —{" "}
+              <Typography
+                component={RouterLink}
+                to={`/admin/dashboards/${dashboardId}`}
+                variant="inherit"
+                sx={{ fontWeight: 600, textDecoration: "underline" }}
+              >
+                open it in the dashboard builder
+              </Typography>{" "}
+              to keep editing, or clear it from the builder's list page to go back to the
+              deployed version.
+            </Alert>
+          )}
           {showDateRangeFilter && (
             <Box sx={{ mb: 2 }}>
               <DateRangeFilter value={dateRange} onChange={setDateRange} />
             </Box>
           )}
           <DashboardWidgetGrid
-            widgets={data?.widgets ?? []}
+            widgets={effectiveWidgets}
             selectedTeamCreGroupId={selectedTeamCreGroupId}
             selectedTeamSreGroupId={selectedTeamSreGroupId}
             selectedTeamLabel={selectedTeamLabel}

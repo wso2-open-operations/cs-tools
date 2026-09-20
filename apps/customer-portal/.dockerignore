@@ -1,0 +1,64 @@
+# Applies to builds whose context is this app root — see ./Dockerfile.
+#
+# Must live at the CONTEXT root, which is here. Docker reads .dockerignore from
+# the context, so one placed next to a Dockerfile in a subdirectory is silently
+# ignored — a failure mode with no error message, which is how secrets end up in
+# layers.
+#
+# It excludes from the build context, which is the working directory —
+# .gitignore has no bearing on what Docker sends to the daemon, so anything
+# untracked-but-present has to be listed here explicitly. That matters more at
+# this level than under webapp/: the context now spans all three units,
+# including the backend's real config.
+
+# --- Secrets -----------------------------------------------------------------
+
+# Real credentials for the automated sign-in. Git-ignored, but that does not
+# stop COPY — and a secret copied into a layer stays recoverable via
+# `docker history` even if a later step removes it. Pass these at run time with
+# --env-file instead.
+webapp/.env.e2e.local
+
+# Captured session tokens. Mounted at run time, never baked in, for the same
+# reason.
+webapp/tests/e2e/storageState
+
+# The backend's real credentials (config.toml.local is the tracked template;
+# Config.toml is the filled-in, git-ignored copy). Nothing here copies backend/,
+# but the context is sent to the daemon whole, so exclude it at the source.
+backend/Config.toml
+
+# Deploy-time webapp config: git-ignored and environment-specific.
+webapp/public/config.js
+
+# --- Host-built artifacts ----------------------------------------------------
+
+# Built on the host for darwin/arm64; copied over the image's Linux install they
+# produce binaries that cannot execute. The image runs its own pnpm install.
+# (This is also the bulk of the context — webapp alone is ~559M, nearly all of
+# it node_modules.)
+node_modules
+**/node_modules
+
+# Ballerina build output.
+backend/target
+
+# Vite build output.
+webapp/dist
+microapp/dist
+
+# Outputs from previous test runs; these are mounted out, not in.
+webapp/playwright-report
+webapp/test-results
+webapp/blob-report
+webapp/coverage
+webapp/.playwright
+
+# --- Not needed to run the suite ---------------------------------------------
+
+.git
+.github
+*.log
+.DS_Store
+.vscode
+.idea

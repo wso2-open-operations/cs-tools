@@ -40,6 +40,10 @@ const ERR_MSG_ESCALATION_REASON_REQUIRED = "Reason is required when escalating a
 const ERR_MSG_ESCALATION_INVALID_ACTION = "Invalid action. Allowed values are ESCALATE or DEESCALATE.";
 const ERR_MSG_CASE_NOT_FOUND_FOR_ESCALATION = "The case for which you're trying to create an escalation does not exist.";
 const ERR_MSG_CASE_CLOSED_FOR_ESCALATION = "Cannot create an escalation for a closed case.";
+const ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_CREATE = "Cannot add attachments to a closed case.";
+const ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_UPDATE = "Cannot update attachments on a closed case.";
+const ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_DELETE = "Cannot delete attachments from a closed case.";
+const ERR_MSG_CASE_NOT_CLOSED_FOR_FEEDBACK = "Cannot submit feedback for a case that is not closed.";
 
 // Default Pagination Values
 public const int DEFAULT_OFFSET = 0;

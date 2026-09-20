@@ -29,6 +29,15 @@ interface AsyncCreatedByMultiSelectProps {
   /** Selected engineer/reporter emails. */
   values: string[];
   onChange: (next: string[]) => void;
+  /**
+   * Server-side role scoping passed straight through to
+   * {@link useInfiniteUserSearch}'s {@link UserSearchScope} — e.g. restrict
+   * this picker to internal staff only. Left unset, the search stays
+   * unscoped (this component's original behavior).
+   */
+  roleIds?: string[];
+  /** See {@link roleIds}; restrict to active accounts only. */
+  active?: boolean;
 }
 
 /**
@@ -43,6 +52,8 @@ interface AsyncCreatedByMultiSelectProps {
 export default function AsyncCreatedByMultiSelect({
   values,
   onChange,
+  roleIds,
+  active,
 }: AsyncCreatedByMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -50,7 +61,7 @@ export default function AsyncCreatedByMultiSelect({
   const query = debounced.trim();
 
   const { users, isFetching, isFetchingNextPage, hasNextPage, isError, fetchNextPage } =
-    useInfiniteUserSearch(query, open);
+    useInfiniteUserSearch(query, open, { roleIds, active });
 
   const handleListboxScroll = (event: React.UIEvent<HTMLElement>): void => {
     const el = event.currentTarget;

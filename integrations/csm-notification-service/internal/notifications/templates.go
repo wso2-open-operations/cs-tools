@@ -42,6 +42,12 @@ var internalNoteTemplateRaw string
 //go:embed templates/severity_changed.html
 var severityChangedTemplateRaw string
 
+//go:embed templates/cr_approval_requested.html
+var crApprovalRequestedTemplateRaw string
+
+//go:embed templates/cr_plan_date_notice.html
+var crPlanDateNoticeTemplateRaw string
+
 // wso2LogoURL is WSO2's own official logo asset, served from wso2.cachefly.net
 // (WSO2's public CDN for site assets — not third-party hosting). An earlier
 // version embedded the logo as an inline base64 data: URI instead, avoiding
@@ -65,12 +71,14 @@ func bakeLogo(raw string) string {
 }
 
 var (
-	commentAddedTemplate    = bakeLogo(commentAddedTemplateRaw)
-	statusChangedTemplate   = bakeLogo(statusChangedTemplateRaw)
-	caseAssignedTemplate    = bakeLogo(caseAssignedTemplateRaw)
-	caseCreatedTemplate     = bakeLogo(caseCreatedTemplateRaw)
-	internalNoteTemplate    = bakeLogo(internalNoteTemplateRaw)
-	severityChangedTemplate = bakeLogo(severityChangedTemplateRaw)
+	commentAddedTemplate        = bakeLogo(commentAddedTemplateRaw)
+	statusChangedTemplate       = bakeLogo(statusChangedTemplateRaw)
+	crApprovalRequestedTemplate = bakeLogo(crApprovalRequestedTemplateRaw)
+	crPlanDateNoticeTemplate    = bakeLogo(crPlanDateNoticeTemplateRaw)
+	caseAssignedTemplate        = bakeLogo(caseAssignedTemplateRaw)
+	caseCreatedTemplate         = bakeLogo(caseCreatedTemplateRaw)
+	internalNoteTemplate        = bakeLogo(internalNoteTemplateRaw)
+	severityChangedTemplate     = bakeLogo(severityChangedTemplateRaw)
 )
 
 // htmlBlockBoundary matches the tags plainTextFromHTML treats as line
@@ -285,4 +293,143 @@ func RenderCaseCreatedEmail(data CaseCreatedEmailData) string {
 		"<!-- [COMMENT_LINK] -->", escapeHTML(data.CommentLink),
 	)
 	return replacer.Replace(tmpl)
+}
+
+// crStateLabels turn the domain state into the words a reader recognises. The
+// raw values are ServiceNow's own (ASSESS, CUSTOMER_APPROVAL, ...), which are
+// right for a payload and wrong for an email.
+var crStateLabels = map[string]string{
+	"ASSESS":            "Assess",
+	"AUTHORIZE":         "Authorize",
+	"REVIEW":            "Review",
+	"CUSTOMER_APPROVAL": "Customer Approval",
+	"CUSTOMER_REVIEW":   "Customer Review",
+}
+
+// CRApprovalEmailData holds every value substituted into the change-request
+// approval template.
+type CRApprovalEmailData struct {
+	Number        string
+	State         string
+	Audience      string
+	Team          string
+	GroupName     string
+	RequesterName string
+	ProjectName   string
+	Link          string
+}
+
+// RenderCRApprovalRequestedEmail fills in the "a change request needs your
+// approval" template.
+//
+// The SUBJECT is not built here — it arrives already rendered on the payload,
+// because csm-flow-service reproduces ServiceNow's per-branch wording verbatim
+// and keeping a second copy of that in step would guarantee they drift.
+func RenderCRApprovalRequestedEmail(d CRApprovalEmailData) string {
+	state := crStateLabels[d.State]
+	if state == "" {
+		// An unmapped state is still worth sending: better a slightly raw word
+		// in one line than no notice at all to someone waiting to approve.
+		state = d.State
+	}
+
+	audience := "your approval"
+	if d.GroupName != "" {
+		audience = d.GroupName
+	} else if d.Audience == "customer" {
+		audience = "customer approval"
+	}
+
+	var context string
+	switch {
+	case d.ProjectName != "" && d.Team != "":
+		context = "Project " + escapeHTML(d.ProjectName) + " · owned by " + escapeHTML(d.Team) + "."
+	case d.ProjectName != "":
+		context = "Project " + escapeHTML(d.ProjectName) + "."
+	case d.Team != "":
+		context = "Owned by " + escapeHTML(d.Team) + "."
+	default:
+		context = "Open the change request to review and act on it."
+	}
+
+	requester := d.RequesterName
+	if requester == "" {
+		requester = "Someone"
+	}
+
+	replacer := strings.NewReplacer(
+		"<!-- [CR_NUMBER] -->", escapeHTML(d.Number),
+		"<!-- [STATE_LABEL] -->", escapeHTML(state),
+		"<!-- [AUDIENCE_LABEL] -->", escapeHTML(audience),
+		"<!-- [REQUESTER] -->", escapeHTML(requester),
+		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
+		"<!-- [CONTEXT_LINE] -->", context,
+	)
+	return replacer.Replace(crApprovalRequestedTemplate)
+}
+
+// CRPlanDateEmailData is what the plan-start-date notice renders from.
+type CRPlanDateEmailData struct {
+	// Kind is "customer_proposed", "accepted" or "rejected" — it selects both
+	// the headline and the closing line.
+	Kind             string
+	Number           string
+	ActorName        string
+	ProjectName      string
+	ShortDescription string
+	Description      string
+	Link             string
+}
+
+// crPlanDateWording is the per-kind text, reproduced from the ServiceNow
+// templates verbatim — including "Reject the proposed plan start date" as a
+// past-tense sentence and "<name> customer has updated…", both of which read
+// oddly and are what the original sends.
+var crPlanDateWording = map[string]struct{ headlineSuffix, closing string }{
+	"customer_proposed": {
+		"customer has updated the <b>plan start date</b>",
+		"Customer has updated the plan start date. Please review the change.",
+	},
+	"accepted": {
+		"accepted the plan start date",
+		"The proposed plan start date accepted by the WSO2 Team.",
+	},
+	"rejected": {
+		"Reject the proposed plan start date",
+		"WSO2 Team request to change the plan start date.",
+	},
+}
+
+// RenderCRPlanDateNoticeEmail renders one plan-start-date notice.
+func RenderCRPlanDateNoticeEmail(d CRPlanDateEmailData) string {
+	w, ok := crPlanDateWording[d.Kind]
+	if !ok {
+		// An unmapped kind still sends: a plain statement beats no notice at
+		// all to someone waiting on a date.
+		w.headlineSuffix = "updated the plan start date"
+		w.closing = "Open the change request to review the change."
+	}
+
+	headline := escapeHTML(d.ActorName) + " " + w.headlineSuffix
+	if d.ActorName == "" {
+		// No resolvable actor: drop the empty leading space rather than
+		// rendering " customer has updated…".
+		headline = strings.ToUpper(w.headlineSuffix[:1]) + w.headlineSuffix[1:]
+	}
+
+	projectAndNumber := escapeHTML(d.Number)
+	if d.ProjectName != "" {
+		projectAndNumber = escapeHTML(d.ProjectName) + " / " + escapeHTML(d.Number)
+	}
+
+	replacer := strings.NewReplacer(
+		"<!-- [CR_NUMBER] -->", escapeHTML(d.Number),
+		"<!-- [HEADLINE] -->", headline,
+		"<!-- [PROJECT_AND_NUMBER] -->", projectAndNumber,
+		"<!-- [SHORT_DESCRIPTION] -->", escapeMultiline(d.ShortDescription),
+		"<!-- [DESCRIPTION] -->", escapeMultiline(d.Description),
+		"<!-- [CLOSING_LINE] -->", escapeHTML(w.closing),
+		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
+	)
+	return replacer.Replace(crPlanDateNoticeTemplate)
 }

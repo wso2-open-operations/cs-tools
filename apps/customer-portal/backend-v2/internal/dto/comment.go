@@ -151,6 +151,10 @@ func mapCommentInlineAttachments(in []entity.InlineAttachment) []CommentInlineAt
 func MapSearchComments(r entity.SearchCommentsResponse) SearchCommentsResponse {
 	comments := make([]CommentView, 0, len(r.Comments))
 	for _, c := range r.Comments {
+		// Work notes (internal WSO2 support annotations) must never reach the customer portal.
+		if c.Type == entity.CommentTypeWorkNote || string(c.Type) == "work_note" || string(c.Type) == "work_notes" {
+			continue
+		}
 		comments = append(comments, CommentView{
 			ID:        c.ID,
 			Content:   c.Content,

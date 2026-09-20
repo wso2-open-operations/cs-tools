@@ -23,6 +23,7 @@ import {
   invalidateTimecards,
   mapTimeCard,
   searchTimeCards,
+  useApprovalQueue,
   useBulkApproveCards,
   useRecentApprovers,
 } from "@features/csm-timecards/api/useTimeSheets";
@@ -229,6 +230,56 @@ function wrapper({ children }: { children: ReactNode }) {
   });
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
+
+describe("useApprovalQueue — states default/override", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+    postMock.mockResolvedValue(bePage([], 0, 0, 20));
+  });
+
+  it("defaults to states: ['submitted'] when the caller passes no states filter", async () => {
+    const { result } = renderHook(
+      () => useApprovalQueue(true, undefined, { page: 0, rowsPerPage: 20 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const body = postMock.mock.calls[0][1] as BeSearchTimeCardsPayload;
+    expect(body.filters?.approverId).toBe("eng-1");
+    expect(body.filters?.states).toEqual(["submitted"]);
+  });
+
+  it("respects the caller's own states instead of silently overriding them (the Approvals State filter)", async () => {
+    const { result } = renderHook(
+      () => useApprovalQueue(true, { states: ["approved"] }, { page: 0, rowsPerPage: 20 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const body = postMock.mock.calls[0][1] as BeSearchTimeCardsPayload;
+    expect(body.filters?.states).toEqual(["approved"]);
+  });
+
+  it("still respects the caller's own states when it's every reachable state (the 'All states' pick)", async () => {
+    const { result } = renderHook(
+      () =>
+        useApprovalQueue(
+          true,
+          { states: ["submitted", "approved", "rejected"] },
+          { page: 0, rowsPerPage: 20 },
+        ),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const body = postMock.mock.calls[0][1] as BeSearchTimeCardsPayload;
+    expect(body.filters?.states).toEqual(["submitted", "approved", "rejected"]);
+  });
+});
 
 describe("useBulkApproveCards", () => {
   beforeEach(() => {

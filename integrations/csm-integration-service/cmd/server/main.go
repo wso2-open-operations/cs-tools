@@ -50,7 +50,13 @@ func main() {
 	entityClient := entity.NewClient(cfg)
 	accountHandler := handler.NewAccountHandler(entityClient)
 	projectHandler := handler.NewProjectHandler(entityClient)
+	incidentHandler := handler.NewIncidentHandler(entityClient)
+	alertIncidentMappingHandler := handler.NewAlertIncidentMappingHandler(entityClient)
 	vulnerabilityHandler := handler.NewVulnerabilityHandler(entityClient)
+	caseHandler := handler.NewCaseHandler(entityClient)
+	opportunityHandler := handler.NewOpportunityHandler(entityClient)
+	invoiceHandler := handler.NewInvoiceHandler(entityClient)
+	projectOpportunityLinkHandler := handler.NewProjectOpportunityLinkHandler(entityClient)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +69,18 @@ func main() {
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
 	mux.HandleFunc("PATCH /projects/{id}", projectHandler.UpdateProject)
+	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
+	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
+	mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
+	mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
 	mux.HandleFunc("POST /vulnerabilities/sync", vulnerabilityHandler.SyncProductVulnerabilities)
+	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
+	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
+	mux.HandleFunc("POST /opportunities/search", opportunityHandler.SearchOpportunities)
+	mux.HandleFunc("GET /opportunities/{id}", opportunityHandler.GetOpportunity)
+	mux.HandleFunc("POST /invoices/search", invoiceHandler.SearchInvoices)
+	mux.HandleFunc("GET /invoices/{id}", invoiceHandler.GetInvoice)
+	mux.HandleFunc("POST /project-opportunity-links/search", projectOpportunityLinkHandler.SearchProjectOpportunityLinks)
 
 	addr := ":" + envOrDefault("PORT", "8080")
 

@@ -1,0 +1,100 @@
+/* Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/*
+ * Native browser print (Ctrl+P) support for the app's scrollable regions.
+ *
+ * `AppLayout` builds a fixed-viewport shell out of several nested
+ * `height: 100dvh` / `overflow: hidden` / `overflow: auto` containers (the
+ * shell root, `AppShellLayout`'s main column, the shared scrollable content
+ * region, and — for a case/incident/change-request opened as an in-app tab —
+ * that tab's own private scroll container, see `CaseTabIsolatedRouter`). That
+ * nesting is exactly what a screen needs, but a browser's print engine does
+ * NOT paginate an `overflow: auto`/`hidden` box's content across multiple
+ * printed pages — it clips to that box's own on-screen height, so anything
+ * below the first screenful (most of a case's comment trail, for a case with
+ * more than a handful of comments) is silently dropped from the printed
+ * output/PDF.
+ *
+ * The classes below are applied (see `AppLayout.tsx`, `AppShellLayout.tsx`,
+ * `CaseTabIsolatedRouter.tsx`, `CaseTabsWorkspace.tsx`) to exactly that chain
+ * of containers, and only take effect for `@media print`: on screen they are
+ * inert (no rule outside `@media print` below), so normal in-app scrolling,
+ * the kept-alive-in-background case tabs mechanism, and every other on-screen
+ * behavior are unaffected.
+ */
+@media print {
+  .csm-print-expand {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    /* `100dvh`/flex-basis sizing on these containers is meaningless once
+       content is allowed to flow across pages instead of a single fixed
+       viewport height. */
+    min-height: 0 !important;
+    flex: none !important;
+    display: block !important;
+    /* `AppShellLayout`'s `main` column sets a literal `width: 0` (paired
+       with `flex: "1 1 0"` on screen, so the column only ever gets exactly
+       its allotted flex share rather than sizing to content) — `flex: none`
+       above stops that box participating in flex layout at all under print,
+       which turns that same `width: 0` from "this flex item's basis" into
+       an actual block-level width constraint, collapsing this box (and
+       every `width: 100%` descendant resolving against it, e.g. AppLayout's
+       own content wrapper) to zero. Without this, print output for any page
+       inside that column renders blank/garbled rather than truncated. */
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  /* Chrome that has no place in a printed page/PDF: top nav, side nav, the
+     in-app case-tab strip, banners, and page-level controls (Back button,
+     lifecycle/action bars, refresh buttons, the reply composer) that only
+     make sense as interactive, on-screen affordances. Content marked
+     `hidden` (e.g. a background case tab not currently active) already stays
+     hidden regardless of this rule — this only ever hides currently-visible
+     chrome. */
+  .csm-print-hide {
+    display: none !important;
+  }
+
+  /*
+   * A chip/pill (e.g. a case's Tier badge, or a team name rendered via
+   * `DirectoryEntityChip`) sits inside a CSS grid/flex layout sized for a
+   * desktop viewport on screen. A printed page is narrower, and — because a
+   * MUI Chip's label (`.MuiChip-label`) truncates with `overflow: hidden` on
+   * screen — the chip's own automatic minimum width in that grid/flex layout
+   * is effectively zero (an overflow-hidden descendant doesn't hold its
+   * container open the way ordinary text would), so under print the grid
+   * track/flex item can be squeezed down to just the chip's own fixed
+   * padding, with none of its label text visible — reported live: two team
+   * chips on a case's Overview print as empty bordered pills, the label
+   * silently vanished rather than merely truncated. Reset every chip label
+   * to wrap instead of truncating, and stop the chip itself from being
+   * squeezed below its content, for print specifically — this doesn't
+   * change on-screen truncation at all.
+   */
+  .MuiChip-root {
+    height: auto !important;
+    min-width: max-content !important;
+  }
+  .MuiChip-label {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+  }
+}

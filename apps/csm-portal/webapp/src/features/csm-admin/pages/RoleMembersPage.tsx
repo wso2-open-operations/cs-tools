@@ -20,11 +20,6 @@ import DirectoryMemberPage from "@features/csm-admin/components/DirectoryMemberP
 /** A role's member list (`/admin/roles/:id`), filtered by `roleIds`. */
 export default function RoleMembersPage(): JSX.Element {
   return (
-    <DirectoryMemberPage
-      filterKey="roleIds"
-      entityNoun="role"
-      listPath="/admin/roles"
-      listLabel="Roles"
-    />
+    <DirectoryMemberPage filterKey="roleIds" entityNoun="role" listPath="/admin/roles" />
   );
 }

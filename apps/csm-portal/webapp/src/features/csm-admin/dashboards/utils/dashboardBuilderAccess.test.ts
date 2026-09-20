@@ -22,11 +22,20 @@ describe("hasDashboardBuilderAccess", () => {
     expect(hasDashboardBuilderAccess(["agent", "admin"])).toBe(true);
   });
 
-  it("matches case-insensitively", () => {
-    expect(hasDashboardBuilderAccess(["Admin"])).toBe(true);
+  it("is true when roles include dashboard_designer (without the full admin role)", () => {
+    expect(hasDashboardBuilderAccess(["agent", "dashboard_designer"])).toBe(true);
   });
 
-  it("is false without the admin role", () => {
+  it("is true when roles include both admin and dashboard_designer", () => {
+    expect(hasDashboardBuilderAccess(["admin", "dashboard_designer"])).toBe(true);
+  });
+
+  it("matches case-insensitively", () => {
+    expect(hasDashboardBuilderAccess(["Admin"])).toBe(true);
+    expect(hasDashboardBuilderAccess(["Dashboard_Designer"])).toBe(true);
+  });
+
+  it("is false without the admin or dashboard_designer role", () => {
     expect(hasDashboardBuilderAccess(["agent", "commenter"])).toBe(false);
   });
 

@@ -36,7 +36,7 @@ import { useSearchGroups } from "@api/useSearchGroups";
 import { useSearchItServices } from "@api/useSearchItServices";
 import { useSearchServiceOfferings } from "@api/useSearchServiceOfferings";
 import { useSearchConfigurationItems } from "@api/useSearchConfigurationItems";
-import { useSearchUsersByName } from "@api/useSearchUsersByName";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import { useSearchIncidentsExcludingSelf } from "@features/csm-operations/api/useSearchIncidentsForSelect";
 import { useSearchChangeRequestsForSelect } from "@features/csm-operations/api/useSearchChangeRequestsForSelect";
@@ -57,6 +57,10 @@ import {
   getLegalNextIncidentStates,
   incidentStateLabel,
 } from "@features/csm-operations/utils/incidents";
+import {
+  INCIDENT_RESOLUTION_CODES,
+  INCIDENT_RESOLUTION_CODE_LABELS,
+} from "@features/csm-operations/utils/incidentResolution";
 import type {
   BeChangeRequestSearchView,
   BeIncident,
@@ -64,6 +68,7 @@ import type {
   BeIncidentContactType,
   BeIncidentDetail,
   BeIncidentImpact,
+  BeIncidentResolutionCode,
   BeIncidentState,
   BeIncidentSubcategory,
   BeIncidentUrgency,
@@ -112,7 +117,7 @@ interface EditState {
   /** Write-only (see `BeUpdateIncidentPayload`) — `IncidentDetail` never
    * echoes these back, so they always start blank, unlike every other field
    * here. Required by ServiceNow to move `state` to `RESOLVED`/`CLOSED`. */
-  resolutionCode: string;
+  resolutionCode: BeIncidentResolutionCode | "";
   resolutionNotes: string;
   serviceId: string;
   serviceOfferingId: string;
@@ -168,7 +173,7 @@ function buildPatch(initial: EditState, next: EditState): BeUpdateIncidentPayloa
   if (next.impact !== initial.impact && next.impact) patch.impact = next.impact;
   if (next.urgency !== initial.urgency && next.urgency) patch.urgency = next.urgency;
   if (next.state !== initial.state && next.state) patch.state = next.state;
-  if (next.resolutionCode.trim()) patch.resolutionCode = next.resolutionCode.trim();
+  if (next.resolutionCode) patch.resolutionCode = next.resolutionCode;
   if (next.resolutionNotes.trim()) patch.resolutionNotes = next.resolutionNotes.trim();
   if (next.serviceId !== initial.serviceId) patch.serviceId = next.serviceId || null;
   if (next.serviceOfferingId !== initial.serviceOfferingId) patch.serviceOfferingId = next.serviceOfferingId || null;
@@ -256,7 +261,7 @@ export default function EditIncidentDialog({
     !!state.urgency &&
     !!state.state &&
     (!isTransitioningToResolved ||
-      (!!state.resolutionCode.trim() && !!state.resolutionNotes.trim()));
+      (!!state.resolutionCode && !!state.resolutionNotes.trim()));
 
   const set = <K extends keyof EditState>(key: K, value: EditState[K]): void =>
     setState((prev) => ({ ...prev, [key]: value }));
@@ -382,14 +387,31 @@ export default function EditIncidentDialog({
               <Typography variant="caption" color="text.secondary">
                 ServiceNow requires a resolution to move this incident to {incidentStateLabel(state.state)}.
               </Typography>
-              <TextField
-                label="Resolution code"
-                value={state.resolutionCode}
-                onChange={(e) => set("resolutionCode", e.target.value)}
-                disabled={isSaving}
-                fullWidth
-                size="small"
-              />
+              <FormControl fullWidth size="small">
+                <InputLabel
+                  id="edit-incident-resolution-code-label"
+                  shrink={state.resolutionCode !== ""}
+                  sx={{ top: "0px !important" }}
+                >
+                  Resolution code
+                </InputLabel>
+                <Select
+                  labelId="edit-incident-resolution-code-label"
+                  label="Resolution code"
+                  value={state.resolutionCode}
+                  notched={state.resolutionCode !== ""}
+                  disabled={isSaving}
+                  onChange={(e) =>
+                    set("resolutionCode", e.target.value as BeIncidentResolutionCode)
+                  }
+                >
+                  {INCIDENT_RESOLUTION_CODES.map((code) => (
+                    <MenuItem key={code} value={code}>
+                      {INCIDENT_RESOLUTION_CODE_LABELS[code]}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <TextField
                 label="Resolution notes"
                 value={state.resolutionNotes}
@@ -473,7 +495,7 @@ export default function EditIncidentDialog({
                 value={state.assignedEngineerId}
                 onChange={(v) => set("assignedEngineerId", v)}
                 disabled={isSaving}
-                useSearch={useSearchUsersByName}
+                useSearch={useSearchInternalUsersByName}
                 getId={(u) => u.id!}
                 getLabel={userLabel}
                 knownLabel={incident.assignedTo?.name}

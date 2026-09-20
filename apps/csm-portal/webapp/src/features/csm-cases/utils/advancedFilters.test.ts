@@ -71,6 +71,32 @@ describe("ADVANCED_FILTER_FIELDS — full unification", () => {
   it("`state` offers both `in` and `notIn`, same as the Simple grid's tri-state control", () => {
     expect(getAdvancedFilterFieldMeta("state")?.ops.map((o) => o.op)).toEqual(["in", "notIn"]);
   });
+
+  it("`projectId` offers both `in` and `notIn`, both backed by the async project picker", () => {
+    expect(getAdvancedFilterFieldMeta("projectId")?.ops.map((o) => o.op)).toEqual([
+      "in",
+      "notIn",
+    ]);
+    expect(getAdvancedFilterOpMeta("projectId", "in")?.valueKind).toBe(
+      "asyncProjectMultiSelect",
+    );
+    expect(getAdvancedFilterOpMeta("projectId", "notIn")?.valueKind).toBe(
+      "asyncProjectMultiSelect",
+    );
+  });
+
+  it("`accountId` is a real field offering both `in` and `notIn`, backed by the async account picker", () => {
+    expect(getAdvancedFilterFieldMeta("accountId")?.ops.map((o) => o.op)).toEqual([
+      "in",
+      "notIn",
+    ]);
+    expect(getAdvancedFilterOpMeta("accountId", "in")?.valueKind).toBe(
+      "asyncAccountMultiSelect",
+    );
+    expect(getAdvancedFilterOpMeta("accountId", "notIn")?.valueKind).toBe(
+      "asyncAccountMultiSelect",
+    );
+  });
 });
 
 describe("ADVANCED_FILTER_FIELDS — real suggestions instead of hand-typed values", () => {

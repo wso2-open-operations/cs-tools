@@ -691,3 +691,183 @@ func TestAggregateIncidents(t *testing.T) {
 		}
 	})
 }
+
+func TestHandOffIncidentToSpecialist(t *testing.T) {
+	const incidentID = "11111111-1111-1111-1111-111111111111"
+	const validBody = `{"reasonCode":"no-runbook","escalationTeam":"choreo-apim-team","createGithubIssue":true}`
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(validBody))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents//specialist-handoffs", strings.NewReader(validBody)))
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/inc-42/specialist-handoffs", strings.NewReader(validBody)))
+		r.SetPathValue("id", "inc-42")
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects missing reasonCode", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(`{}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects unknown reasonCode", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(`{"reasonCode":"give-up"}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects unknown escalationTeam", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(`{"reasonCode":"no-runbook","escalationTeam":"some-other-team"}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("accepts a body with reasonCode only", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(`{"reasonCode":"runbook-not-working"}`)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards ID and body to upstream and returns 200 with response", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			handOffIncidentFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedID = id
+				capturedBody = body
+				return []byte(`{"message":"Incident handed off to specialist group","handoff":{"assignmentGroup":{"id":"33333333-3333-3333-3333-333333333333","name":"Choreo APIM Special Ops"},"previousAssignmentGroup":null,"reasonCode":"no-runbook","reasonDescription":"Runbook is not available","escalationTeam":"choreo-apim-team","task":{"id":"44444444-4444-4444-4444-444444444444","number":"TASK0000123","subject":"[Runbook Task] test"},"githubIssue":{"url":"https://github.com/example/repo/issues/1","number":1,"repo":"repo"},"githubIssueError":null,"incident":{"id":"` + incidentID + `"}}}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(validBody)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != incidentID {
+			t.Errorf("upstream received id %q, want %q", capturedID, incidentID)
+		}
+		if string(capturedBody) != validBody {
+			t.Errorf("upstream received body %q, want %q", capturedBody, validBody)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "Incident handed off to specialist group" {
+			t.Errorf("message = %v, want %q", resp["message"], "Incident handed off to specialist group")
+		}
+	})
+
+	// A handoff can succeed (ServiceNow state committed) with the internal GitHub
+	// issue missing -- the upstream response is still 200 with a non-nil
+	// handoff.githubIssueError. This must reach the caller unchanged rather than
+	// being swallowed or reported as a clean success with the field stripped.
+	t.Run("passes through a non-nil githubIssueError on an otherwise-successful handoff", func(t *testing.T) {
+		client := &mockEntityIncidentClient{
+			handOffIncidentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"Incident handed off to specialist group","handoff":{"assignmentGroup":{"id":"33333333-3333-3333-3333-333333333333","name":"Choreo APIM Special Ops"},"previousAssignmentGroup":null,"reasonCode":"no-runbook","reasonDescription":"Runbook is not available","escalationTeam":null,"task":{"id":"44444444-4444-4444-4444-444444444444","number":"TASK0000123","subject":"[Runbook Task] test"},"githubIssue":null,"githubIssueError":"GitHub issue creation failed (401)","incident":{"id":"` + incidentID + `"}}}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(validBody)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.HandOffIncidentToSpecialist(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		resp := decodeJSON[map[string]any](t, w)
+		handoff, ok := resp["handoff"].(map[string]any)
+		if !ok {
+			t.Fatalf("response has no handoff object: %v", resp)
+		}
+		if handoff["githubIssueError"] != "GitHub issue creation failed (401)" {
+			t.Errorf("githubIssueError = %v, want %q", handoff["githubIssueError"], "GitHub issue creation failed (401)")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to hand off incident to specialist group.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					handOffIncidentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/specialist-handoffs", strings.NewReader(validBody)))
+				r.SetPathValue("id", incidentID)
+				w := httptest.NewRecorder()
+				h.HandOffIncidentToSpecialist(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

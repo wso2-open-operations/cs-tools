@@ -21,7 +21,7 @@ import type {
 } from "@features/usage-metrics/types/timeTracking";
 import type { AuthFetchFn } from "@features/support/api/fetchProjectCaseSearchResults";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 
 /**
  * Fetches all pages of case time cards for a project, used for CSV/PDF export.

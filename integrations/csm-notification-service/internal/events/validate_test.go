@@ -33,6 +33,7 @@ func TestValidate_Valid(t *testing.T) {
 		payload  string
 	}{
 		"case.created":                          {"CASE-1", TypeCaseCreated, `{"reporterName":"n","projectName":"p","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"d","recipients":["r@x.com"]}`},
+		"case.created omits priority (e.g. security_report_analysis, which has no severity)": {"CASE-1", TypeCaseCreated, `{"reporterName":"n","projectName":"p","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseType":"SECURITY_REPORT_ANALYSIS","createdAt":"2026-01-01","description":"d","recipients":["r@x.com"]}`},
 		"case.comment_added":                    {"CASE-1", TypeCommentAdded, `{"name":"n","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseComment":"c","commentId":"C-1","recipients":["r@x.com"]}`},
 		"case.status_changed":                   {"CASE-1", TypeStatusChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","newStatus":"Open","recipients":["r@x.com"]}`},
 		"case.assigned":                         {"CASE-1", TypeCaseAssigned, `{"assigneeName":"n","assigneeEmail":"e@x.com","projectId":"PROJ-1","caseId":"CASE-1","recipients":["r@x.com"]}`},
@@ -40,7 +41,7 @@ func TestValidate_Valid(t *testing.T) {
 		"case.severity_changed":                 {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
 		"incident.created":                      {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down","callTo":"+15551234567"}`},
 		"incident.created omits product/callTo": {"INC-1", TypeIncidentCreated, `{"title":"P1 outage","shortDescription":"Everything is down"}`},
-		"sla.clock.register":                    {"CASE-1", TypeSLAClockRegister, `{"caseId":"CASE-1","durations":{"response":"2h"}}`},
+		"sla.clock.register":                    {"CASE-1", TypeSLAClockRegister, `{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}`},
 		"sla.tier_reached":                      {"CASE-1", TypeSLATierReached, `{"caseId":"CASE-1","clockType":"response","tier":"50"}`},
 	}
 	for name, c := range cases {
@@ -110,6 +111,63 @@ func TestValidate_RequiresFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if err := Validate(c.entityID, c.typ, rawJSON(t, c.payload)); err == nil {
 				t.Error("Validate() = nil, want an error")
+			}
+		})
+	}
+}
+
+// The change-request notices carry an already-resolved audience, so the
+// validator is the only boundary between a malformed publisher and a real
+// mailbox. These are the rules it has to hold.
+func TestValidate_ChangeRequestRules(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	plan := func(kind, audience, number string) string {
+		return `{"changeRequestId":"` + id + `","number":"` + number +
+			`","kind":"` + kind + `","audience":"` + audience +
+			`","subject":"s","recipients":["r@x.com"]}`
+	}
+	approval := func(number string) string {
+		return `{"changeRequestId":"` + id + `","number":"` + number +
+			`","state":"ASSESS","audience":"internal","subject":"s","recipients":["r@x.com"]}`
+	}
+
+	rejected := map[string]struct {
+		typ     Type
+		payload string
+	}{
+		// Number is documented as required and is what a reader identifies the
+		// change request by; a notice without it names nothing.
+		"plan date missing number": {TypeCRPlanDateNotice, plan("accepted", "customer", "")},
+		"approval missing number":  {TypeCRApprovalRequested, approval("")},
+
+		// A mismatched kind/audience pair sends customer wording to an internal
+		// group, or puts an internal audience in BCC where the customer link is
+		// used. Each kind goes with exactly one audience.
+		"customer_proposed with customer": {TypeCRPlanDateNotice, plan("customer_proposed", "customer", "CHG1")},
+		"accepted with internal":          {TypeCRPlanDateNotice, plan("accepted", "internal", "CHG1")},
+		"rejected with internal":          {TypeCRPlanDateNotice, plan("rejected", "internal", "CHG1")},
+	}
+	for name, tc := range rejected {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(id, tc.typ, json.RawMessage(tc.payload)); err == nil {
+				t.Fatalf("Validate() = nil, want an error")
+			}
+		})
+	}
+
+	accepted := map[string]struct {
+		typ     Type
+		payload string
+	}{
+		"customer_proposed with internal": {TypeCRPlanDateNotice, plan("customer_proposed", "internal", "CHG1")},
+		"accepted with customer":          {TypeCRPlanDateNotice, plan("accepted", "customer", "CHG1")},
+		"rejected with customer":          {TypeCRPlanDateNotice, plan("rejected", "customer", "CHG1")},
+		"approval with number":            {TypeCRApprovalRequested, approval("CHG1")},
+	}
+	for name, tc := range accepted {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(id, tc.typ, json.RawMessage(tc.payload)); err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
 			}
 		})
 	}

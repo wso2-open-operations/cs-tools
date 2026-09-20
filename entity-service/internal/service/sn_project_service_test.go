@@ -82,6 +82,157 @@ func TestSNProjectService_SearchProjects_MapsAccountRef(t *testing.T) {
 	}
 }
 
+// TestSNProjectService_SearchProjects_MapsOnboardingScopedFields verifies that
+// the onboarding-scoped dashboard fields added to ServiceNow's project search
+// response are mapped into domain.ProjectView: top-level onboardingStatus and
+// onboardingOwner, and the account sub-object's region/subRegion/arrToday.
+func TestSNProjectService_SearchProjects_MapsOnboardingScopedFields(t *testing.T) {
+	const accountSysid = "4a6fc0623b16c31091404c6aa5e45a09"
+	const ownerSysid = "5b6fc0623b16c31091404c6aa5e45a10"
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"projects": []map[string]any{
+				{
+					"id": "11111111111111111111111111111111", "name": "Onboarding project", "key": "OBP",
+					"type":    map[string]any{"name": "Subscription"},
+					"endDate": "", "createdOn": "2026-01-01 00:00:00",
+					"account": map[string]any{
+						"id": accountSysid, "name": "Customer Portal Account",
+						"region": nil, "subRegion": "APAC", "arrToday": "0",
+					},
+					"onboardingStatus": "In-Progress",
+					"onboardingOwner":  map[string]any{"id": ownerSysid, "name": "a a", "email": "ff@ww.com"},
+				},
+			},
+			"totalRecords": 1, "offset": 0, "limit": 10,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	resp, err := svc.SearchProjects(contextWithUserIDToken("token"), domain.SearchProjectsRequest{
+		Pagination: domain.Pagination{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(resp.Projects))
+	}
+
+	p := resp.Projects[0]
+	if p.OnboardingStatus == nil || *p.OnboardingStatus != "In-Progress" {
+		t.Errorf("OnboardingStatus = %v, want \"In-Progress\"", p.OnboardingStatus)
+	}
+	if p.OnboardingOwner == nil {
+		t.Fatalf("OnboardingOwner = nil, want non-nil")
+	}
+	wantOwnerID := sysidToUUID(ownerSysid)
+	if p.OnboardingOwner.ID != wantOwnerID || p.OnboardingOwner.Name != "a a" {
+		t.Errorf("OnboardingOwner = %+v, want id=%s name=\"a a\"", p.OnboardingOwner, wantOwnerID)
+	}
+	if p.OnboardingOwner.Email == nil || *p.OnboardingOwner.Email != "ff@ww.com" {
+		t.Errorf("OnboardingOwner.Email = %v, want ff@ww.com", p.OnboardingOwner.Email)
+	}
+
+	if p.Account == nil {
+		t.Fatalf("Account = nil, want non-nil")
+	}
+	if p.Account.Region != nil {
+		t.Errorf("Account.Region = %v, want nil", *p.Account.Region)
+	}
+	if p.Account.SubRegion == nil || *p.Account.SubRegion != "APAC" {
+		t.Errorf("Account.SubRegion = %v, want APAC", p.Account.SubRegion)
+	}
+	if p.Account.ArrToday == nil || *p.Account.ArrToday != "0" {
+		t.Errorf("Account.ArrToday = %v, want \"0\"", p.Account.ArrToday)
+	}
+}
+
+// TestSNProjectService_SearchProjects_OnboardingScopedFieldsAbsent verifies
+// that a project with none of the onboarding-scoped fields tracked decodes
+// cleanly to nil OnboardingStatus/OnboardingOwner and nil account
+// region/subRegion/arrToday, rather than empty-string/zero-value
+// placeholders.
+func TestSNProjectService_SearchProjects_OnboardingScopedFieldsAbsent(t *testing.T) {
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"projects": []map[string]any{
+				{
+					"id": "22222222222222222222222222222222", "name": "Plain project", "key": "PLN",
+					"type":    map[string]any{"name": "Subscription"},
+					"endDate": "", "createdOn": "2026-01-01 00:00:00",
+					"account": map[string]any{"id": "", "name": ""},
+				},
+			},
+			"totalRecords": 1, "offset": 0, "limit": 10,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	resp, err := svc.SearchProjects(contextWithUserIDToken("token"), domain.SearchProjectsRequest{
+		Pagination: domain.Pagination{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p := resp.Projects[0]
+	if p.OnboardingStatus != nil {
+		t.Errorf("OnboardingStatus = %v, want nil", *p.OnboardingStatus)
+	}
+	if p.OnboardingOwner != nil {
+		t.Errorf("OnboardingOwner = %+v, want nil", p.OnboardingOwner)
+	}
+	if p.Account != nil {
+		t.Errorf("Account = %+v, want nil for a project with no linked account", p.Account)
+	}
+}
+
+// TestSNProjectService_SearchProjects_WiresOnboardingScopedFilters verifies
+// that OnboardingStatus/ArrTodayGte/SubRegion on the request are translated
+// into the corresponding keys on the Choreo request body's filters object,
+// matching digiops-cs's field names exactly.
+func TestSNProjectService_SearchProjects_WiresOnboardingScopedFilters(t *testing.T) {
+	var gotBody map[string]any
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"projects": []map[string]any{}, "totalRecords": 0, "offset": 0, "limit": 10,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	_, err := svc.SearchProjects(contextWithUserIDToken("token"), domain.SearchProjectsRequest{
+		Pagination:       domain.Pagination{Limit: 10},
+		OnboardingStatus: []string{"In-Progress", "Not-Started"},
+		ArrTodayGte:      "1000",
+		SubRegion:        "APAC",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	filters, ok := gotBody["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body missing filters object: %+v", gotBody)
+	}
+	gotStatuses, ok := filters["onboardingStatus"].([]any)
+	if !ok || len(gotStatuses) != 2 || gotStatuses[0] != "In-Progress" || gotStatuses[1] != "Not-Started" {
+		t.Errorf("filters.onboardingStatus = %v, want [In-Progress Not-Started]", filters["onboardingStatus"])
+	}
+	if filters["arrTodayGte"] != "1000" {
+		t.Errorf("filters.arrTodayGte = %v, want 1000", filters["arrTodayGte"])
+	}
+	if filters["subRegion"] != "APAC" {
+		t.Errorf("filters.subRegion = %v, want APAC", filters["subRegion"])
+	}
+}
+
 // TestSNProjectService_SearchProjects_MapsStartDate verifies that the date-only
 // startDate from ServiceNow's project search response is parsed into
 // domain.ProjectView.StartDate, and that a null or absent startDate maps to a
@@ -403,5 +554,113 @@ func TestSNProjectService_GetProjectByID_OnboardingFieldsAbsent(t *testing.T) {
 	}
 	if got.OnboardingOwner != nil {
 		t.Errorf("GetProjectByID OnboardingOwner = %+v, want nil", got.OnboardingOwner)
+	}
+}
+
+// TestSNProjectService_GetProjectByID_MapsStartEndDate verifies that populated
+// startDate/endDate values are parsed into non-nil domain.ProjectDetailsView
+// dates, so the empty-string handling added below doesn't regress the normal
+// case.
+func TestSNProjectService_GetProjectByID_MapsStartEndDate(t *testing.T) {
+	projectSysid := sysid32('d')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "Dated Project", "key": "DTD", "sfId": "sf-4",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "2026-01-01", "endDate": "2026-12-31",
+			"type":    map[string]any{"name": "Subscription"},
+			"account": map[string]any{"id": "", "name": ""},
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.StartDate == nil || !got.StartDate.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("GetProjectByID StartDate = %v, want 2026-01-01", got.StartDate)
+	}
+	if got.EndDate == nil || !got.EndDate.Equal(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("GetProjectByID EndDate = %v, want 2026-12-31", got.EndDate)
+	}
+}
+
+// TestSNProjectService_GetProjectByID_EmptyStartEndDate is the regression guard
+// for the bug where ServiceNow legitimately returning "" for a project's
+// startDate/endDate (field genuinely not set on that record) crashed
+// GetProjectByID with a time.Parse error instead of mapping to nil — a project
+// read must return normally with the date fields absent, not 500.
+func TestSNProjectService_GetProjectByID_EmptyStartEndDate(t *testing.T) {
+	projectSysid := sysid32('e')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "Undated Project", "key": "UND", "sfId": "sf-5",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "", "endDate": "",
+			"type":    map[string]any{"name": "Subscription"},
+			"account": map[string]any{"id": "", "name": ""},
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("GetProjectByID returned error for empty startDate/endDate (should map to nil, not error): %v", err)
+	}
+	if got.StartDate != nil {
+		t.Errorf("GetProjectByID StartDate = %v, want nil for empty upstream startDate", *got.StartDate)
+	}
+	if got.EndDate != nil {
+		t.Errorf("GetProjectByID EndDate = %v, want nil for empty upstream endDate", *got.EndDate)
+	}
+}
+
+// TestSNProjectService_GetProjectByID_EmptyOptionalDates is an audit-driven
+// regression guard for every other optional date on the project-detail
+// response — goLiveDate, goLivePlanDate, onboardingExpiryDate, and the
+// account's activationDate/deactivationDate. All five already routed through
+// optionalSNProjectDate before the startDate/endDate fix, so this pins that
+// they actually behave: empty string maps to nil, not a parse error or a
+// zero-value timestamp.
+func TestSNProjectService_GetProjectByID_EmptyOptionalDates(t *testing.T) {
+	projectSysid := sysid32('f')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "No Optional Dates", "key": "NOD", "sfId": "sf-6",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "2026-01-01", "endDate": "2026-12-31",
+			"type": map[string]any{"name": "Subscription"},
+			"account": map[string]any{
+				"id": "", "name": "", "activationDate": "", "deactivationDate": "",
+			},
+			"goLiveDate":           "",
+			"goLivePlanDate":       "",
+			"onboardingExpiryDate": "",
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("GetProjectByID returned error for empty optional dates (should map to nil, not error): %v", err)
+	}
+	if got.GoLiveDate != nil {
+		t.Errorf("GetProjectByID GoLiveDate = %v, want nil for empty upstream goLiveDate", *got.GoLiveDate)
+	}
+	if got.GoLivePlanDate != nil {
+		t.Errorf("GetProjectByID GoLivePlanDate = %v, want nil for empty upstream goLivePlanDate", *got.GoLivePlanDate)
+	}
+	if got.OnboardingExpiryDate != nil {
+		t.Errorf("GetProjectByID OnboardingExpiryDate = %v, want nil for empty upstream onboardingExpiryDate", *got.OnboardingExpiryDate)
+	}
+	if got.Account.ActivationDate != nil {
+		t.Errorf("GetProjectByID Account.ActivationDate = %v, want nil for empty upstream activationDate", *got.Account.ActivationDate)
+	}
+	if got.Account.DeactivationDate != nil {
+		t.Errorf("GetProjectByID Account.DeactivationDate = %v, want nil for empty upstream deactivationDate", *got.Account.DeactivationDate)
 	}
 }

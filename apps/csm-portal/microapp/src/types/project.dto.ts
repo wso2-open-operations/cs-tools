@@ -35,8 +35,8 @@ export interface ProjectDto {
   // webapp's own csmProjects.ts, which carries the same correction.
   key?: string;
   subscriptionType: ProjectSubscriptionType;
-  startDate?: string;
-  endDate?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   createdOn?: string;
   updatedOn?: string;
 }
@@ -76,8 +76,8 @@ export interface ProjectDetailDto {
   name: string;
   key?: string;
   subscriptionType: ProjectSubscriptionType;
-  startDate?: string;
-  endDate?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   createdOn?: string;
   updatedOn?: string;
   account?: ProjectAccountRefDto;

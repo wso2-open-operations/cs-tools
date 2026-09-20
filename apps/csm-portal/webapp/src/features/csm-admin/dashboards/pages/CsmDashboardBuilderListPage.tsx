@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -62,12 +63,14 @@ function LocalDraftDriftChip({ dashboardId }: { dashboardId: string }): JSX.Elem
 }
 
 /**
- * Admin-only landing page for the dashboard builder: every deployed
- * dashboard (`GET /dashboards`), each openable for edit, plus any local
- * draft that hasn't (yet) been opened from — or matched to — a deployed
- * one. There is no dashboard CRUD API; "Edit" always opens the builder
- * against a `localStorage` draft, seeded from the live dashboard the first
- * time it's opened (see `CsmDashboardBuilderEditorPage`).
+ * Landing page for the dashboard builder, gated to `admin`/`dashboard_designer`
+ * users (see `dashboardBuilderAccess.ts`): every deployed dashboard
+ * (`GET /dashboards`), each openable for edit, plus any local draft that
+ * hasn't (yet) been opened from — or matched to — a deployed one. There is
+ * no dashboard CRUD API; "Edit" always opens the builder against a
+ * `localStorage` draft, seeded from the live dashboard the first time it's
+ * opened (see `CsmDashboardBuilderEditorPage`). Temporary UI, see the info
+ * banner rendered below for why.
  */
 export default function CsmDashboardBuilderListPage(): JSX.Element {
   const navigate = useNavigate();
@@ -89,8 +92,33 @@ export default function CsmDashboardBuilderListPage(): JSX.Element {
     deleteDashboardDraft(id);
   };
 
+  // Clearing local edits on a DEPLOYED dashboard is more consequential than
+  // discarding an already-orphaned draft (there may be real in-progress
+  // unsaved changes), so — unlike `handleDiscardDraft`'s orphan-draft
+  // usage — this path confirms first. No in-app confirm-dialog primitive
+  // exists elsewhere in this codebase, so `window.confirm` is the
+  // documented minimal fallback here.
+  const handleClearLocalEdits = (id: string): void => {
+    if (!window.confirm("Clear local edits for this dashboard? This cannot be undone.")) {
+      return;
+    }
+    deleteDashboardDraft(id);
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {/* This whole builder is a stop-gap: it edits `localStorage` only, on
+          this browser, for this signed-in user — never anyone else's view of
+          the dashboard, and never the deployed definition. It exists to give
+          `admin`/`dashboard_designer` users a way to try out dashboard layouts
+          today; it's meant to be replaced once the AI-assisted dashboard
+          builder ships. */}
+      <Alert severity="info">
+        Changes you make here are stored only in this browser and are not applied for other
+        users — export the JSON and hand it to a maintainer to actually deploy a change. This is
+        a temporary dashboard-designing UI until the AI-assisted dashboard builder is ready.
+      </Alert>
+
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Typography variant="body2" color="text.secondary">
           Build or adjust a dashboard's widgets, then hand the exported JSON to a maintainer to
@@ -136,7 +164,19 @@ export default function CsmDashboardBuilderListPage(): JSX.Element {
           }}
         >
           {(dashboards ?? []).map((d) => (
-            <Card key={d.id} variant="outlined">
+            <Card key={d.id} variant="outlined" sx={{ position: "relative" }}>
+              {draftIds.has(d.id) && (
+                <Tooltip title="Clear local edits for this dashboard">
+                  <IconButton
+                    size="small"
+                    aria-label={`Clear local edits for ${d.displayName || d.id}`}
+                    onClick={() => handleClearLocalEdits(d.id)}
+                    sx={{ position: "absolute", top: 4, right: 4, zIndex: 1 }}
+                  >
+                    <Trash2 size={16} />
+                  </IconButton>
+                </Tooltip>
+              )}
               <CardActionArea
                 onClick={() => navigate(`/admin/dashboards/${d.id}`)}
                 sx={{

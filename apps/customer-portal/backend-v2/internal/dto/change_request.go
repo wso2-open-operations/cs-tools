@@ -220,8 +220,7 @@ func BuildEntitySearchChangeRequestsRequest(projectID string, req ChangeRequestS
 	}
 }
 
-// ChangeRequestDetails is the portal's response for GET /change-requests/{id}
-// and PATCH /change-requests/{id}.
+// ChangeRequestDetails is the portal's response for GET /change-requests/{id}.
 type ChangeRequestDetails struct {
 	ChangeRequestSummary
 	CreatedBy           string      `json:"createdBy"`
@@ -235,7 +234,6 @@ type ChangeRequestDetails struct {
 	HasCustomerReviewed bool        `json:"hasCustomerReviewed"`
 	ApprovedBy          *IDLabelRef `json:"approvedBy,omitempty"`
 	ApprovedOn          *string     `json:"approvedOn,omitempty"`
-	LegalNextStates     []string    `json:"legalNextStates,omitempty"`
 }
 
 // MapChangeRequestDetails builds the portal response from entity-service's ChangeRequest.
@@ -253,7 +251,23 @@ func MapChangeRequestDetails(r entity.ChangeRequest) ChangeRequestDetails {
 		HasCustomerReviewed:  r.HasCustomerReviewed,
 		ApprovedBy:           entityRefToIDLabel(r.ApprovedBy),
 		ApprovedOn:           r.ApprovedOn,
-		LegalNextStates:      r.LegalNextStates,
+	}
+}
+
+// ChangeRequestUpdateResponse is the portal's response for PATCH /change-requests/{id}.
+// Matches Ballerina v1 UpdatedChangeRequest and the webapp's PatchChangeRequestResponse contract.
+type ChangeRequestUpdateResponse struct {
+	ID        string `json:"id"`
+	UpdatedOn string `json:"updatedOn"`
+	UpdatedBy string `json:"updatedBy,omitempty"`
+}
+
+// MapChangeRequestUpdate builds the portal response from entity-service's PatchChangeRequestResponse.
+func MapChangeRequestUpdate(r entity.PatchChangeRequestResponse) ChangeRequestUpdateResponse {
+	return ChangeRequestUpdateResponse{
+		ID:        r.ChangeRequest.ID,
+		UpdatedOn: r.ChangeRequest.UpdatedOn,
+		UpdatedBy: r.ChangeRequest.UpdatedBy,
 	}
 }
 

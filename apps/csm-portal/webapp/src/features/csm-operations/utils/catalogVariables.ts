@@ -207,6 +207,14 @@ export function variableLabel(variable: BeCatalogItemVariable): string {
 /**
  * User-editable variables — excludes context and hidden fields, sorted by the
  * backend's display order. This is the set the form renders and validates.
+ *
+ * Also excludes a variable the backend itself marks `hidden: true` or
+ * `active: false` (the additive metadata from `CHANGES-sr-variable-metadata.md`
+ * — see `BeCatalogItemVariable`'s doc comment). Both are read as `undefined`
+ * for a variable the backend hasn't tagged (or, in tests, a hand-built
+ * fixture), which is treated as "not hidden"/"active" — the same as before
+ * this metadata existed — so this is additive filtering, not a behaviour
+ * change for untagged data.
  */
 export function getUserEditableVariables(
   variables: BeCatalogItemVariable[],
@@ -215,7 +223,9 @@ export function getUserEditableVariables(
     .filter(
       (v) =>
         !isContextField(v.questionText ?? "") &&
-        !isHiddenField(v.questionText ?? ""),
+        !isHiddenField(v.questionText ?? "") &&
+        v.hidden !== true &&
+        v.active !== false,
     )
     .sort(
       (a, b) =>
@@ -225,19 +235,78 @@ export function getUserEditableVariables(
 }
 
 /**
- * First empty required field label, or null if all are filled. Hot fix
- * (mirrors the customer portal): every typable field is mandatory; attachment
- * and File Copy Path fields are optional and skipped.
+ * Whether a variable must be filled in. Prefers the backend's own `mandatory`
+ * flag (the correct one — see the warning on `BeCatalogItemVariable.hasMandatory`)
+ * when present. Falls back to the pre-existing hot fix — every typable
+ * (non-attachment, non-File-Copy-Path) field required — only for a variable
+ * the backend hasn't tagged with `mandatory` at all, so this narrows rather
+ * than replaces the old behaviour as real data becomes available.
+ */
+export function isVariableRequired(variable: BeCatalogItemVariable): boolean {
+  if (typeof variable.mandatory === "boolean") return variable.mandatory;
+  return !isAttachmentField(variable) && !isFileCopyPathField(variable);
+}
+
+/**
+ * First empty required field label, or null if all are filled. Required-ness
+ * comes from {@link isVariableRequired}; attachment fields are always
+ * skipped here regardless of `mandatory` since they're collected by the
+ * page's separate attachments section, not this check.
  */
 export function getFirstEmptyRequiredField(
   variables: BeCatalogItemVariable[],
   values: Record<string, string>,
 ): string | null {
   for (const v of getUserEditableVariables(variables)) {
-    if (isAttachmentField(v) || isFileCopyPathField(v)) continue;
+    if (isAttachmentField(v) || !isVariableRequired(v)) continue;
     const raw = (values[v.id] ?? "").trim();
     const textContent = raw.replace(/<[^>]+>/g, "").trim();
     if (!textContent) return variableLabel(v);
+  }
+  return null;
+}
+
+/**
+ * First field whose current value exceeds the backend-declared `maxLength`,
+ * or null if none do. Description (rich text) and datetime fields are
+ * skipped — `maxLength` is documented as a single-line-text attribute
+ * (`CHANGES-sr-variable-metadata.md`) and HTML markup would make a raw
+ * character-count comparison meaningless for the former.
+ */
+export function getFirstFieldExceedingMaxLength(
+  variables: BeCatalogItemVariable[],
+  values: Record<string, string>,
+): { label: string; maxLength: number } | null {
+  for (const v of getUserEditableVariables(variables)) {
+    if (!v.maxLength || isDescriptionField(v.questionText ?? "") || isDateTimeField(v)) continue;
+    const raw = values[v.id] ?? "";
+    if (raw.length > v.maxLength) return { label: variableLabel(v), maxLength: v.maxLength };
+  }
+  return null;
+}
+
+/**
+ * First field whose current (non-empty) value fails its declared
+ * `validation.regex`, or null if all pass. Empty values are left to
+ * {@link getFirstEmptyRequiredField} — a required-but-empty field shouldn't
+ * also report a pattern mismatch.
+ */
+export function getFirstFieldFailingValidation(
+  variables: BeCatalogItemVariable[],
+  values: Record<string, string>,
+): { label: string; message: string } | null {
+  for (const v of getUserEditableVariables(variables)) {
+    if (!v.validation?.regex) continue;
+    const raw = (values[v.id] ?? "").trim();
+    if (!raw) continue;
+    let matches: boolean;
+    try {
+      matches = new RegExp(v.validation.regex).test(raw);
+    } catch {
+      // A malformed regex from the backend must not brick the form.
+      continue;
+    }
+    if (!matches) return { label: variableLabel(v), message: v.validation.message };
   }
   return null;
 }

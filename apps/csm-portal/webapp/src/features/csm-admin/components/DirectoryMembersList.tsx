@@ -28,6 +28,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
+import { useLocation } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import UserRefLink from "@components/UserRefLink";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
@@ -71,6 +72,12 @@ export default function DirectoryMembersList({
   entityNoun,
 }: DirectoryMembersListProps): JSX.Element {
   const navigate = useNavTransition();
+  const location = useLocation();
+  // UserProfilePage (`/people/:id`) already prefers `state.from` over its
+  // own `navigate(-1)` fallback when present — this just supplies it, so
+  // "Back" from a member's profile returns here (this member list) reliably,
+  // not only on a lucky same-tab, no-reload history pop.
+  const memberListPath = `${location.pathname}${location.search}${location.hash}`;
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
@@ -162,7 +169,8 @@ export default function DirectoryMembersList({
             ) : (
               users.map((u) => {
                 const profilePath = `/people/${encodeURIComponent(u.id)}`;
-                const goToProfile = (): void => navigate(profilePath);
+                const goToProfile = (): void =>
+                  navigate(profilePath, { state: { from: memberListPath } });
                 const handleRowKeyDown = (e: KeyboardEvent<HTMLTableRowElement>): void => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();

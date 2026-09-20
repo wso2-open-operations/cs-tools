@@ -197,6 +197,7 @@ export default function CaseMetaBand({
   // who's triaging it) that don't apply to a read-only announcement broadcast —
   // mirrors the hidden SLA/time-tracking/call-request tabs and action bar.
   const isAnnouncement = c.caseType === "announcement";
+  const isEngagement = c.caseType === "engagement";
   // Project type is encoded as the second " - "-delimited segment of the
   // project name (e.g. "Acme - Managed Cloud" → "Managed Cloud"). Temporary
   // until the backend exposes it as a first-class field.
@@ -338,6 +339,13 @@ export default function CaseMetaBand({
               {projectType}
             </Typography>
           </Cell>
+          {isEngagement && c.engagementType && (
+            <Cell label="Engagement type">
+              <Typography variant="body2" noWrap>
+                {c.engagementType}
+              </Typography>
+            </Cell>
+          )}
           {isAnnouncement && (
             <Cell label="State">
               <Box sx={{ minWidth: 0 }}>

@@ -82,8 +82,10 @@ describe("buildCloneChangeRequestNavState", () => {
     expect(keys).not.toContain("serviceOutage");
     expect(keys).not.toContain("communicationPlan");
     expect(keys).not.toContain("rollbackPlan");
-    // category/priority/risk/implementationPlan/riskImpactAnalysis are
-    // write-only — never returned by GET — so there is no source value ever.
+    // category/priority/risk/riskImpactAnalysis are write-only — never
+    // returned by GET — so there is no source value ever. `implementationPlan`
+    // is readable now too, but isn't wired into clone yet (separate feature
+    // decision), so it also must not appear here.
     expect(keys).not.toContain("category");
     expect(keys).not.toContain("priority");
     expect(keys).not.toContain("risk");
@@ -234,6 +236,12 @@ describe("countActiveCRFilters", () => {
       countActiveCRFilters({ ...DEFAULT_CR_FILTERS, sreTeamIds: ["team-apollo"] }),
     ).toBe(1);
   });
+
+  it("is 1 when a project filter is set", () => {
+    expect(
+      countActiveCRFilters({ ...DEFAULT_CR_FILTERS, projectIds: ["proj-1"] }),
+    ).toBe(1);
+  });
 });
 
 describe("buildChangeRequestSearchFilters", () => {
@@ -275,5 +283,20 @@ describe("buildChangeRequestSearchFilters", () => {
 
   it("omits the generic filters array entirely when no SRE team is selected", () => {
     expect(buildChangeRequestSearchFilters(DEFAULT_CR_FILTERS, "")).not.toHaveProperty("filters");
+  });
+
+  it("sends selected projects as the named projectIds field", () => {
+    expect(
+      buildChangeRequestSearchFilters(
+        { ...DEFAULT_CR_FILTERS, projectIds: ["proj-1", "proj-2"] },
+        "",
+      ),
+    ).toEqual({ projectIds: ["proj-1", "proj-2"] });
+  });
+
+  it("omits projectIds entirely when no project is selected", () => {
+    expect(buildChangeRequestSearchFilters(DEFAULT_CR_FILTERS, "")).not.toHaveProperty(
+      "projectIds",
+    );
   });
 });

@@ -155,7 +155,7 @@ func TestEngine_Handle_RegistersClockAndSeedsWakeEntries(t *testing.T) {
 	wake := &fakeWakeIndex{}
 	e := newTestEngine(entity, wake, &fakePublisher{})
 
-	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","durations":{"response":"2h"}}}`)}
+	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}}`)}
 	if err := e.Handle(context.Background(), record); err != nil {
 		t.Fatalf("Handle() error = %v, want nil", err)
 	}
@@ -196,7 +196,7 @@ func TestEngine_Handle_RejectsWholeRecordOnOneInvalidDuration(t *testing.T) {
 	wake := &fakeWakeIndex{}
 	e := newTestEngine(entity, wake, &fakePublisher{})
 
-	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","durations":{"response":"not-a-duration","resolution":"4h"}}}`)}
+	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"not-a-duration","resolution":"4h"}}}`)}
 	if err := e.Handle(context.Background(), record); err == nil {
 		t.Fatal("Handle() error = nil, want the whole record rejected for its one invalid duration")
 	}
@@ -210,7 +210,7 @@ func TestEngine_Handle_PropagatesRegisterError(t *testing.T) {
 	wake := &fakeWakeIndex{}
 	e := newTestEngine(entity, wake, &fakePublisher{})
 
-	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","durations":{"response":"2h"}}}`)}
+	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}}`)}
 	if err := e.Handle(context.Background(), record); err == nil {
 		t.Fatal("Handle() error = nil, want a propagated error")
 	}

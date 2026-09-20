@@ -1,0 +1,165 @@
+# =============================================================================
+# Git Internals Dashboard — backend runtime configuration.
+#
+# Operational tuning only: server networking, DB pool, in-process caches,
+# GitHub client pacing, background jobs, and API limits. Domain configuration
+# (tracked repos, status taxonomy, SLA budgets) lives in sla-config.yaml and
+# is NOT duplicated here.
+#
+# Non-secret by rule: tokens, DB URLs, and Asgardeo values live in env vars.
+# This file is committed to git.
+#
+# Path: config/app-config.yaml by default; override with APP_CONFIG_PATH
+# (absolute path recommended). If APP_CONFIG_PATH is unset and this file is
+# missing, the backend boots with the built-in defaults below and logs a
+# warning. If APP_CONFIG_PATH IS set and unreadable, boot fails.
+#
+# Precedence: environment variable > this file > built-in default.
+# Loaded once at process start; changes require a restart.
+# =============================================================================
+
+server:
+  # HTTP listen port. The PORT environment variable, when set, overrides this
+  # (Choreo/buildpacks inject PORT).
+  port: 8080
+  # Time allowed to read request headers before the connection is dropped.
+  readHeaderTimeoutSeconds: 10
+  # Whole-request read deadline. POST /sync/runs deliberately runs past this
+  # on a detached context — see jobs.syncRunDeadlineMinutes below.
+  readTimeoutSeconds: 30
+  # Whole-response write deadline.
+  writeTimeoutSeconds: 30
+  # Keep-alive idle timeout.
+  idleTimeoutSeconds: 60
+  # Grace period for in-flight requests after SIGTERM/SIGINT before exit.
+  shutdownTimeoutSeconds: 15
+  # Max bytes of request headers. 1048576 is net/http's own default; set
+  # explicitly so it is visible and tunable.
+  maxHeaderBytes: 1048576
+
+database:
+  # All keys below are optional. When a key is omitted, pgx's own default
+  # (or the value encoded in DATABASE_URL) applies unchanged. They ship
+  # commented out so the default deployment behaves exactly as before —
+  # notably maxConns, whose pgx default is max(4, NumCPU) and therefore
+  # cannot be expressed as a fixed literal.
+  #
+  # maxConns: 10
+  # minConns: 0
+  # maxConnLifetimeMinutes: 60
+  # maxConnIdleTimeMinutes: 30
+  # healthCheckPeriodSeconds: 60
+  # connectTimeoutSeconds: 10
+
+cache:
+  # In-process, per-replica TTL caches. Under multi-replica autoscaling a hit
+  # on one replica says nothing about another; that is fine for these
+  # read-mostly aggregates. Never used for anything needing cross-replica
+  # consistency (see internal/jobs for that).
+  overview:
+    ttlSeconds: 30
+    maxEntries: 100
+  timeseries:
+    ttlSeconds: 60
+    maxEntries: 100
+  titles:
+    # Issue titles are cached in memory only and never persisted.
+    ttlSeconds: 900
+    maxEntries: 5000
+
+github:
+  # GraphQL request deadline for search/detail queries.
+  requestTimeoutSeconds: 60
+  # Shorter deadline for the on-demand titles query.
+  titlesRequestTimeoutSeconds: 15
+  # Retry attempts after the first failure, for retryable statuses only.
+  maxRetries: 3
+  # Base unit for exponential backoff between retries.
+  retryBackoffUnitSeconds: 2
+  # Upper bound on how long we will honour GitHub's own Retry-After hint, so
+  # a huge value cannot stall a sync indefinitely.
+  retryAfterCapSeconds: 60
+  # Courtesy pacing between paginated GraphQL calls (secondary rate limit).
+  searchPageDelayMs: 250
+  detailPageDelayMs: 200
+  # Issues per batched titles GraphQL request.
+  titlesBatchSize: 100
+
+jobs:
+  # Deadline for one POST /sync/runs pass. Deliberately far above the server
+  # write timeout: the route runs on a detached context.
+  syncRunDeadlineMinutes: 15
+  # Timeout for releasing the Postgres advisory lock on the way out.
+  lockReleaseTimeoutSeconds: 5
+  # Keyset page size for one recompute pass.
+  recomputePageSize: 200
+  # NOTE: recomputeIntervalMinutes is NOT here — it lives in sla-config.yaml
+  # under `settings`, alongside the other SLA-math knobs. One source of
+  # truth per knob.
+
+seed:
+  # Courtesy gap between issues during `make seed` against real GitHub.
+  interIssueDelayMs: 150
+
+api:
+  # Request-validation limits. These mirror the ranges documented in
+  # openapi.yaml — changing a value here without updating openapi.yaml
+  # desynchronises the published contract from the running service.
+  issuesDefaultLimit: 200
+  issuesMaxLimit: 500
+  titlesMaxIds: 200
+  titlesMaxBodyBytes: 65536
+  timeseriesDefaultDays: 30
+  timeseriesMinDays: 7
+  timeseriesMaxDays: 365
+  # Max length of the free-text `priority` and `status` query parameters.
+  priorityParamMaxLength: 50
+  statusParamMaxLength: 50
+
+securityHeaders:
+  # Every key below is optional and ships commented out, same as `database:`
+  # above — the committed file resolves to exactly the built-in defaults, so
+  # editing this file changes nothing until a line here is actually
+  # uncommented or added. A key present here overrides that one default's
+  # value (or adds a brand-new header) without needing to repeat every other
+  # default; there is no way to remove a default header entirely, only to
+  # blank its value.
+  #
+  # Content-Security-Policy: "default-src 'none'; frame-ancestors 'none'"
+  # X-Content-Type-Options: nosniff
+  # X-Frame-Options: DENY
+  # Referrer-Policy: no-referrer
+  # X-Permitted-Cross-Domain-Policies: none
+  # Cache-Control: no-store
+  # Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+
+readiness:
+  # Deadline for the DB ping GET /readyz performs. Exceeded ⇒ not ready.
+  # Must be strictly less than server.writeTimeoutSeconds, otherwise
+  # net/http closes the connection before the handler can write its 503 and
+  # the probe reports a network error instead of a diagnosis. Setting this
+  # below database.connectTimeoutSeconds means the probe can fail before pgx
+  # even finishes dialling a *new* connection — a legitimate fail-fast
+  # choice on a cold pool, but a deliberate one.
+  timeoutSeconds: 2
+  # Reuse the last readiness result for this long; 0 disables caching. Kept
+  # small so a recovering database is picked up within one probe interval,
+  # while still collapsing concurrent probes (kubelet + gateway + any
+  # external monitor) into one DB round trip.
+  cacheTTLSeconds: 1
+  # Whether a saturated connection pool alone fails the probe. Default off:
+  # a load spike saturates every replica at roughly the same moment, and if
+  # saturation alone returns 503, every pod leaves the Service endpoints
+  # simultaneously and backpressure becomes a total outage. Saturation is
+  # always reported in the response body for operators/dashboards regardless
+  # of this setting.
+  failOnPoolSaturation: false
+  # acquiredConns/maxConns at or above this percentage counts as saturated.
+  # Only consulted when failOnPoolSaturation is true.
+  poolSaturationThresholdPercent: 100
+  # Grace period after SIGTERM during which /readyz reports 503 "draining"
+  # before the process actually stops accepting connections, giving the
+  # load balancer time to notice and stop routing here first. Default 0
+  # means zero behaviour change until an operator sets it; in Choreo, set
+  # this to roughly two readiness probe periods.
+  drainGracePeriodSeconds: 0

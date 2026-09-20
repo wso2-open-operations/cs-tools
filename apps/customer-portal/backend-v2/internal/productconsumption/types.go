@@ -39,7 +39,8 @@ type ConsumptionStatusRequest struct {
 
 // ConsumptionData carries the current provisioning state for a project.
 type ConsumptionData struct {
-	Status        int     `json:"status"`
+	// jsonInt, not int: the upstream sends this as 5.0 — see jsonint.go.
+	Status        jsonInt `json:"status"`
 	ApplicationID *string `json:"applicationId,omitempty"`
 	Name          *string `json:"name,omitempty"`
 	Description   *string `json:"description,omitempty"`

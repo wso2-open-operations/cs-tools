@@ -31,6 +31,7 @@ import (
 // this array.
 var changeRequestFilterFieldSet = map[string]bool{
 	"createdOn": true, "assignmentGroupId": true, "approval": true,
+	"assignedUserId": true,
 }
 
 // changeRequestFilterOpSet is the exact set of ChangeRequestFieldFilter.Op
@@ -104,6 +105,12 @@ type parsedChangeRequestFilters struct {
 	// request ("not requested" / "requested" / "approved" / "rejected"),
 	// passed straight through to SN as filters.approval.
 	Approval *string
+	// AssignedUserIDs are sys_user UUIDs (not yet converted to sysids -- that
+	// conversion happens where the outbound payload is built, same as
+	// AssignmentGroupIDs above). Wire field name is "assignedUserId" (singular,
+	// matching case search's own convention); it is sent to Ballerina/SN as the
+	// plural "assignedUserIds" JSON key.
+	AssignedUserIDs []string
 }
 
 // ParseChangeRequestFieldFilters translates the change-request-search wire
@@ -172,6 +179,18 @@ func ParseChangeRequestFieldFilters(filters []domain.ChangeRequestFieldFilter, n
 			}
 			v := f.Values[0]
 			p.Approval = &v
+
+		case "assignedUserId":
+			if f.Op != "in" {
+				return parsedChangeRequestFilters{}, badChangeRequestFilterCombo(f)
+			}
+			if err := requireChangeRequestFilterValues(f); err != nil {
+				return parsedChangeRequestFilters{}, err
+			}
+			if err := validateUUIDs("filters: assignedUserId", f.Values); err != nil {
+				return parsedChangeRequestFilters{}, err
+			}
+			p.AssignedUserIDs = append(p.AssignedUserIDs, f.Values...)
 		}
 	}
 

@@ -74,6 +74,12 @@ type AccountService interface {
 	GetAccountByID(ctx context.Context, id string) (domain.AccountDetail, error)
 }
 
+// SalesforceEventService handles POST /salesforce/events. Account fetch goes
+// through REST sales/sales-entity-service POST /customer-search, not GraphQL.
+type SalesforceEventService interface {
+	HandleEvent(ctx context.Context, req domain.SalesforceEventRequest) error
+}
+
 // EventPublishFailureService defines the operations available on the
 // event_publish_failures entity — see domain.EventPublishFailure's doc
 // comment for what it's for.
@@ -174,6 +180,22 @@ type ScheduledTaskRunService interface {
 	DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (domain.DeleteScheduledTaskRunsResponse, error)
 }
 
+// AlertIncidentMappingService defines the operations available on the
+// alert_incident_mapping entity — see domain.AlertIncidentMappingView's doc
+// comment for what it's for.
+type AlertIncidentMappingService interface {
+	// CreateAlertIncidentMapping inserts a new mapping row. A ValidationError
+	// is returned if alertNumber, source, alertStatus, or incidentId is
+	// missing; a ConflictError if alertNumber is already mapped.
+	CreateAlertIncidentMapping(ctx context.Context, req domain.CreateAlertIncidentMappingRequest) (domain.AlertIncidentMappingView, error)
+	// LookupAlertIncidentMappings returns every mapping for
+	// (req.Source, req.UniqueIdentifier), most-recent-first. A
+	// ValidationError is returned if source or uniqueIdentifier is missing.
+	// An empty (never nil) Mappings slice, not an error, is returned when
+	// nothing matches.
+	LookupAlertIncidentMappings(ctx context.Context, req domain.LookupAlertIncidentMappingsRequest) (domain.LookupAlertIncidentMappingsResponse, error)
+}
+
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
@@ -204,9 +226,22 @@ type ProjectUpdateService interface {
 	UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error)
 }
 
+// ProjectMetadataService is the GetProjectMetadata slice of ProjectStatsService,
+// split out because it's the one method of that interface with a Postgres-backed
+// implementation (projectMetadataService) as well as the ServiceNow one --
+// snProjectStatsService satisfies this interface structurally, so the same
+// concrete value backs both ProjectStatsService and ProjectMetadataService in
+// ServiceNow mode. See ProjectMetadataHandler.
+type ProjectMetadataService interface {
+	// GetProjectMetadata returns the reference data (choice lists, feature
+	// flags) needed to build the project's UI.
+	GetProjectMetadata(ctx context.Context, projectID string) (domain.ProjectMetadataResponse, error)
+}
+
 // ProjectStatsService defines the project-scoped metadata and statistics
-// operations. All methods require the ServiceNow data source; there is no
-// Postgres fallback.
+// operations. GetProjectMetadata also has a Postgres-backed implementation --
+// see ProjectMetadataService. The remaining stats methods require the
+// ServiceNow data source; there is no Postgres fallback for them yet.
 type ProjectStatsService interface {
 	// GetProjectMetadata returns the reference data (choice lists, feature
 	// flags) needed to build the project's UI.
@@ -229,7 +264,10 @@ type ProjectStatsService interface {
 }
 
 // ProjectContactService defines the operations available on project contacts.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// The Postgres-backed implementation (projectContactService) reads from
+// project_contact (migration 000022), joined through account_contact to
+// "user" and through project_contact_group/project_group_role/project_role
+// (migrations 000023-000025) for roles.
 type ProjectContactService interface {
 	// SearchProjectContacts returns a paginated list of contacts associated with
 	// the project identified by projectID.
@@ -241,11 +279,44 @@ type ProjectContactService interface {
 }
 
 // AccountContactService defines the operations available on account contacts.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// The Postgres-backed implementation (accountContactService) reads from the
+// account_contact table (migration 000020), joined against "user" to
+// resolve a display name/email where possible.
 type AccountContactService interface {
 	// SearchAccountContacts returns a paginated list of contacts associated with
 	// the account identified by accountID.
 	SearchAccountContacts(ctx context.Context, accountID string, req domain.SearchAccountContactsRequest) (domain.SearchAccountContactsResponse, error)
+}
+
+// OpportunityService defines the operations available on the opportunity entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type OpportunityService interface {
+	// SearchOpportunities returns a paginated list of opportunities matching the
+	// filters in req.
+	SearchOpportunities(ctx context.Context, req domain.SearchOpportunitiesRequest) (domain.SearchOpportunitiesResponse, error)
+	// GetOpportunityByID returns a single opportunity's detail. A NotFoundError is
+	// returned when no opportunity matches.
+	GetOpportunityByID(ctx context.Context, id string) (domain.Opportunity, error)
+}
+
+// InvoiceService defines the operations available on the invoice entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type InvoiceService interface {
+	// SearchInvoices returns a paginated list of invoices matching the filters in req.
+	SearchInvoices(ctx context.Context, req domain.SearchInvoicesRequest) (domain.SearchInvoicesResponse, error)
+	// GetInvoiceByID returns a single invoice's detail. A NotFoundError is returned
+	// when no invoice matches.
+	GetInvoiceByID(ctx context.Context, id string) (domain.Invoice, error)
+}
+
+// ProjectOpportunityLinkService defines the operations available on
+// project-opportunity links. ServiceNow data source only; there is no Postgres
+// fallback, and no by-id fetch -- the underlying ServiceNow data has no
+// single-record endpoint for this resource (search only).
+type ProjectOpportunityLinkService interface {
+	// SearchProjectOpportunityLinks returns a paginated list of project-opportunity
+	// links matching the filters in req.
+	SearchProjectOpportunityLinks(ctx context.Context, req domain.SearchProjectOpportunityLinksRequest) (domain.SearchProjectOpportunityLinksResponse, error)
 }
 
 // ProductService defines the operations available on the product entity.
@@ -345,7 +416,9 @@ type CaseService interface {
 	// UpdateCase updates the state, severity, watch list, assignee, or internal-only
 	// fix-ETA estimate (best-case/most-likely/worst-case) of a case.
 	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
-	// WatchList, AssigneeEmail, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta are
+	// WatchList is supported by both data sources (Postgres via work_item_watcher,
+	// migration 000040) and is mutually exclusive with State/Severity/WorkState.
+	// AssigneeEmail, BestCaseFixEta, MostLikelyFixEta, and WorstCaseFixEta are
 	// only supported for the ServiceNow data source.
 	// Transitioning State to closed is rejected with a ValidationError if the case has any
 	// open task that is visible to the customer (the authoritative case-close gate).
@@ -371,7 +444,9 @@ type CaseService interface {
 	// SearchCaseActivities returns a paginated activity feed (comments, attachments, and
 	// optionally field changes) for the case identified by req.CaseID. Field-change entries
 	// are included only when req.IncludeFieldChanges is set. A ValidationError is returned
-	// for invalid input. Supported by the ServiceNow data source only.
+	// for invalid input. The Postgres-backed implementation merges comments and complete
+	// attachments only -- there is no field-change audit table in this schema, so
+	// req.IncludeFieldChanges has no effect there.
 	SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) (domain.SearchCaseActivitiesResponse, error)
 	// GetCaseAttachmentContent returns the raw binary content and its Content-Type
 	// for the attachment identified by attachmentID.
@@ -438,8 +513,11 @@ type CaseEscalationService interface {
 	CreateCaseEscalation(ctx context.Context, caseID string, reason *string, action *domain.EscalationAction) (domain.CreatedEscalation, error)
 }
 
-// CatalogService defines the operations available on service catalogs.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// CatalogService defines the operations available on service catalogs. The
+// Postgres-backed implementation (catalogService) reads sr_category,
+// catalog_item, catalog_item_category, catalog_variable and
+// sr_category_routing_rule (migrations 000067-000071) -- see catalog_repo.go
+// for how a "catalog" and item availability are defined there.
 type CatalogService interface {
 	// SearchCatalogs returns catalogs available for the given deployed product.
 	// DeployedProductID is required. A ValidationError is returned for missing input.
@@ -463,8 +541,10 @@ type FeedbackService interface {
 	AggregateFeedback(ctx context.Context, req domain.AggregateFeedbackRequest) (domain.AggregateFeedbackResponse, error)
 }
 
-// CallRequestService defines the operations available on the call_requests entity.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// CallRequestService defines the operations available on call requests. The
+// Postgres-backed implementation (callRequestService) reads and writes
+// customer_call (migration 000072) -- see call_request_repo.go for the fields
+// with no backing column.
 type CallRequestService interface {
 	// CreateCallRequest creates a new call request for the given case.
 	// A ValidationError is returned for invalid input.
@@ -484,7 +564,16 @@ type CallRequestService interface {
 	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error)
 }
 
-// ChangeRequestService defines the operations available on the change_requests entity.
+// ChangeRequestService defines the operations available on the change_requests
+// entity. The Postgres-backed implementation (changeRequestService) reads
+// from change_request (migration 000047), a shared-PK extension of
+// work_item -- see that repository's own doc comment for the fields with no
+// real column at all (ServiceID/ServiceOfferingID/ConfigurationItemID/
+// GroupID/AssignedTeamID/Type/ApprovedBy/ApprovedOn/LegalNextStates).
+// CreateChangeRequest and both approval methods have no Postgres
+// implementation: the first needs a number-generation scheme this schema
+// doesn't have (same blocker as CaseService.CreateCase); the other two need
+// per-stage, per-approver approval records this schema doesn't have either.
 type ChangeRequestService interface {
 	// CreateChangeRequest creates a new change request in ServiceNow. Subject is required.
 	// Supported by the ServiceNow data source only.
@@ -507,7 +596,8 @@ type ChangeRequestService interface {
 	PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error)
 
 	// GetChangeRequestApprovals returns the approval stages and per-approver status
-	// for a single change request identified by UUID.
+	// for a single change request identified by UUID. Supported by the ServiceNow data
+	// source only.
 	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
 
 	// DecideChangeRequestApproval submits the caller's decision ("approved" or
@@ -517,6 +607,13 @@ type ChangeRequestService interface {
 }
 
 // TimeCardService defines the operations available on the time-cards entity.
+// The Postgres-backed implementation (timeCardService) resolves the caller's
+// identity from their x-user-id-token the same way caseService does for case
+// comments (see repository.TimeCardRepository), rather than forwarding a
+// token to a downstream service the way the ServiceNow-backed implementation
+// does -- so "SN enforces authorization" below applies to that implementation
+// only; the Postgres-backed one enforces submitter/state checks itself
+// (e.g. UpdateTimeCardFields' "AND state = 'submitted'" guard).
 type TimeCardService interface {
 	// SearchTimeCards returns a paginated list of time cards filtered by optional
 	// project IDs, case, user, approver, date range, and states.
@@ -526,9 +623,8 @@ type TimeCardService interface {
 	// UpdateTimeCard edits an editable (submitted) time card, or transitions its
 	// state (approve/reject) when req.State is set. SN enforces authorization.
 	UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error)
-	// SearchCaseTimeCards returns a paginated list of time cards grouped and rolled up by
-	// case, using the same filters as SearchTimeCards. Supported by the ServiceNow data
-	// source only.
+	// SearchCaseTimeCards returns a paginated list of time cards grouped and
+	// rolled up by case, using the same filters as SearchTimeCards.
 	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest) (domain.SearchCaseTimeCardsResponse, error)
 	// DeleteTimeCard permanently deletes a time card. Matches UpdateTimeCard's
 	// trust model exactly: this only validates the ID's shape and forwards the
@@ -547,15 +643,18 @@ type ConfigurationItemService interface {
 	SearchConfigurationItems(ctx context.Context, req domain.SearchConfigurationItemsRequest) (domain.SearchConfigurationItemsResponse, error)
 }
 
-// GroupService defines the operations available on the groups entity.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// GroupService defines the operations available on the groups entity. On
+// Postgres this is backed by the team table (migration 000028); Group.Active
+// is always true and Group.Parent always nil there -- see
+// GroupRepository's own doc comment.
 type GroupService interface {
 	// SearchGroups returns a paginated list of groups filtered by optional search query.
 	SearchGroups(ctx context.Context, req domain.SearchGroupsRequest) (domain.SearchGroupsResponse, error)
 }
 
-// ServiceOfferingService defines the operations available on the service offerings entity.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// ServiceOfferingService defines the operations available on the service
+// offerings entity. On Postgres this is backed by the service_offering
+// table (migration 000049).
 type ServiceOfferingService interface {
 	// SearchServiceOfferings returns a paginated list of service offerings filtered by
 	// optional service IDs.
@@ -563,15 +662,22 @@ type ServiceOfferingService interface {
 }
 
 // ITServiceService defines the operations available on the CMDB IT services entity.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// On Postgres this is backed by the standalone service table (migration
+// 000048); ServiceClassification always comes back nil there -- see
+// ITServiceRepository's own doc comment for why.
 type ITServiceService interface {
-	// SearchITServices returns a paginated list of CMDB services from ServiceNow.
+	// SearchITServices returns a paginated list of services.
 	SearchITServices(ctx context.Context, req domain.SearchITServicesRequest) (domain.SearchITServicesResponse, error)
 }
 
 // CommentService defines generic comment search operations across all reference types
 // (case, conversation, change_request, etc.).
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// The Postgres-backed implementation (commentService) supports referenceType
+// "case", "conversation", "change_request", and "incident" -- every work_item
+// subtype the comment table's work_item_id foreign key can point at (see
+// repository.ReferenceTypeToWorkItemType). "deployment" is ServiceNow-only:
+// deployment is its own standalone table (migration 000013), not a work_item
+// subtype, so a Postgres-backed comment can never reference one.
 type CommentService interface {
 	// SearchComments returns a paginated list of comments for the given reference entity.
 	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
@@ -580,7 +686,9 @@ type CommentService interface {
 }
 
 // TaskSlaService defines the operations available on the task-slas entity.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// On Postgres this is backed by sla/sla_policy (migrations 000051/000052) --
+// see TaskSlaRepository's own doc comment for the fields with no confirmed
+// rendering format that are left nil there.
 type TaskSlaService interface {
 	// SearchTaskSlas returns a paginated list of task SLA records filtered by optional task IDs.
 	SearchTaskSlas(ctx context.Context, req domain.SearchTaskSlasRequest) (domain.SearchTaskSlasResponse, error)
@@ -614,7 +722,11 @@ type TaskService interface {
 }
 
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// The Postgres-backed implementation (productVulnerabilityService) reads
+// from the product_vulnerability table (migration 000034), which mirrors
+// ServiceNow's own record 1:1 -- see that migration's own doc comment.
+// SyncProductVulnerabilities is the one method with no Postgres equivalent
+// (see its own doc comment for why).
 type ProductVulnerabilityService interface {
 	// SearchProductVulnerabilities returns a paginated list of vulnerabilities filtered by
 	// optional priority, product name, product version, and search query.
@@ -626,13 +738,16 @@ type ProductVulnerabilityService interface {
 	GetProductVulnerability(ctx context.Context, id string) (domain.ProductVulnerabilityView, error)
 
 	// GetVulnerabilityMeta returns the valid severity choices for product vulnerabilities.
-	// Supported by the ServiceNow data source only.
 	GetVulnerabilityMeta(ctx context.Context) (domain.VulnerabilityMetaResponse, error)
 	// SyncProductVulnerabilities replaces the full set of product vulnerabilities with the
 	// given items. This is a full-replace sync: ServiceNow deletes any existing record whose
 	// WSO2ID is not present in items and upserts everything that is. Callers MUST submit the
 	// complete current set, never a partial delta, or downstream records will be deleted.
-	// Supported by the ServiceNow data source only.
+	// Supported by the ServiceNow data source only: the full-replace semantics need a stable
+	// external join key with a database-enforced uniqueness guarantee to upsert against, and
+	// product_vulnerability has no UNIQUE constraint on any column other than its own
+	// generated id -- adding one is a schema change, out of scope here (see
+	// productVulnerabilityService.SyncProductVulnerabilities).
 	SyncProductVulnerabilities(ctx context.Context, items []domain.ProductVulnerabilitySyncItem) (domain.ProductVulnerabilitySyncResult, error)
 }
 
@@ -677,6 +792,18 @@ type IncidentService interface {
 	// SearchIncidentActivities returns a paginated activity feed for an incident.
 	// Confirmed as a real, distinct endpoint from SearchCaseActivities.
 	SearchIncidentActivities(ctx context.Context, req domain.SearchIncidentActivitiesRequest) (domain.SearchIncidentActivitiesResponse, error)
+
+	// HandOffIncidentToSpecialist hands an incident off to its specialist group in one
+	// call: moves the incident to the specialist group for its business service, clears
+	// the assignee, opens a runbook-gap task, and (by default) files an internal issue for
+	// the receiving team. The internal issue filing is best-effort, not atomic with the
+	// rest of the handoff: a 200 response means the handoff itself succeeded even if the
+	// issue could not be created, in which case the response's GithubIssueError is set and
+	// callers must check it rather than assume all-or-nothing. A ValidationError is
+	// returned for invalid input, a NotFoundError if the incident does not exist, and a
+	// ConflictError if the incident is not eligible (wrong business service, not in
+	// progress, or already with the specialist group for this service).
+	HandOffIncidentToSpecialist(ctx context.Context, req domain.HandOffIncidentToSpecialistRequest) (domain.HandOffIncidentToSpecialistResponse, error)
 }
 
 // ProblemService defines the operations available on the problems entity.
@@ -746,8 +873,10 @@ type ConversationService interface {
 }
 
 // GlobalService serves system-wide metadata and cross-entity search that
-// isn't scoped to any single project or case.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// isn't scoped to any single project or case. GetSystemMetadata has a
+// Postgres-backed implementation (globalService); GlobalSearch still
+// requires the ServiceNow data source -- there is no Postgres fallback for
+// it yet.
 type GlobalService interface {
 	// GetSystemMetadata returns system-wide reference data (time zones, project types,
 	// and feedback emoji choices) used across the frontend.
@@ -757,8 +886,11 @@ type GlobalService interface {
 	GlobalSearch(ctx context.Context, req domain.GlobalSearchRequest) (domain.GlobalSearchResponse, error)
 }
 
-// EscalationService defines the operations available on the escalations entity.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// EscalationService defines the operations available on the escalations
+// entity. On Postgres, SearchEscalations is backed by case_escalation/
+// case_escalation_notification_list (migration 000053); CreateEscalation
+// requires the ServiceNow data source -- see EscalationRepository's own doc
+// comment for why.
 type EscalationService interface {
 	// SearchEscalations returns a paginated list of escalations filtered by optional case
 	// IDs and current escalation levels. A ValidationError is returned for invalid input.
@@ -828,4 +960,42 @@ type KnowledgeBaseService interface {
 	CreateKnowledgeBase(ctx context.Context, req domain.CreateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 	UpdateKnowledgeBaseName(ctx context.Context, id string, req domain.UpdateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 	SetKnowledgeBaseActive(ctx context.Context, id string, req domain.UpdateKnowledgeBaseActiveRequest) (domain.KnowledgeBase, error)
+}
+
+// OutageService defines the operations available on the outages entity. All
+// methods require the ServiceNow data source; there is no Postgres fallback.
+type OutageService interface {
+	// CreateOutage creates a new outage. Type, Begin, and ShortDescription are
+	// required. AcknowledgePublicPublication is required when the resolved
+	// configuration item publishes to a status page; omitting it in that case
+	// returns a ConflictError.
+	CreateOutage(ctx context.Context, req domain.CreateOutageRequest) (domain.CreateOutageResponse, error)
+
+	// SearchOutages returns a paginated list of outages filtered by optional
+	// type, status, configuration item, incident, and date-range criteria.
+	// A ValidationError is returned for invalid input.
+	SearchOutages(ctx context.Context, req domain.SearchOutagesRequest) (domain.SearchOutagesResponse, error)
+
+	// GetOutageByID returns the full detail of a single outage by its UUID,
+	// including per-channel communication counts. A NotFoundError is returned
+	// if the outage does not exist.
+	GetOutageByID(ctx context.Context, id string) (domain.OutageDetail, error)
+
+	// UpdateOutage applies a partial update to an outage. Closing an outage is
+	// done by setting End; there is no separate state field or close verb.
+	// A ValidationError is returned if no field is provided.
+	UpdateOutage(ctx context.Context, req domain.PatchOutageRequest) (domain.PatchOutageResponse, error)
+
+	// AddOutageCommunication appends a communication journal entry to an
+	// outage. An external entry is a publishing action and is subject to the
+	// same publication-acknowledgement gate as CreateOutage.
+	AddOutageCommunication(ctx context.Context, req domain.AddOutageCommunicationRequest) (domain.AddOutageCommunicationResponse, error)
+
+	// SearchOutageCommunications returns a paginated list of an outage's
+	// communication journal entries, optionally filtered by channel.
+	SearchOutageCommunications(ctx context.Context, req domain.SearchOutageCommunicationsRequest) (domain.SearchOutageCommunicationsResponse, error)
+
+	// GetOutageMetadata returns the live choice lists (types, statuses,
+	// channels, monitored clouds) needed to render an outage create/edit form.
+	GetOutageMetadata(ctx context.Context) (domain.OutageMetadataResponse, error)
 }

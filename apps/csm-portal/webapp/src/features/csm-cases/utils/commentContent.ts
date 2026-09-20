@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { markdownToHtml } from "@utils/renderMarkdown";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
 /**
@@ -134,6 +135,30 @@ export function hasDisplayableContent(comment: CsmCaseComment): boolean {
 }
 
 /**
+ * Cleans a comment's raw `bodyHtml` the same way `CsmCaseCommentBubble`'s own
+ * `preprocessed` memo does before rendering it — unwraps `[code]` wrapper
+ * tags into real HTML (or renders bot/chatbot Markdown to HTML) and strips
+ * the backend's "Customer comment added" label. Exists so a consumer that
+ * needs the same cleaned-up content but isn't rendering the bubble itself
+ * (e.g. the PDF report generators, which turn the result into plain text via
+ * `stripHtmlTags`) doesn't have to reimplement this pipeline — reported live
+ * when the PDF export instead showed the raw, unstripped "Customer comment
+ * added" label as if it were the comment's actual content.
+ */
+export function preprocessCommentBodyHtml(comment: CsmCaseComment): string {
+  if (comment.authorRole === "chatbot") return markdownToHtml(comment.bodyHtml);
+  const raw = comment.bodyHtml ?? "";
+  const isFullCodeWrap = hasSingleCodeWrapper(raw);
+  const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
+  const afterCode = isFullCodeWrap
+    ? stripCodeWrapper(raw)
+    : codeBlockCount > 1
+      ? stripAllCodeBlocks(raw)
+      : convertCodeTagsToHtml(raw);
+  return stripCustomerCommentAddedLabel(afterCode);
+}
+
+/**
  * Replaces bare URLs in an HTML string (not already inside an href attribute)
  * with clickable anchor tags that open in a new tab.
  */
@@ -146,5 +171,24 @@ export function linkifyBareUrls(html: string): string {
   return html.replace(
     /(?<!href=["'])(?=(https?:\/\/[^\s<>"']+))\1(?!["']?\s*<\/a>)/g,
     '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">$1</a>',
+  );
+}
+
+/**
+ * Whether at least one **customer-visible** comment (`internal` falsy) with
+ * real displayable content exists on the case. Used to gate the "no public
+ * comment yet" confirmation before a WIP case moves to Awaiting info or
+ * Solution proposed — an internal-only work note, or a comment that strips
+ * down to nothing renderable (see {@link hasDisplayableContent}), doesn't
+ * count: the customer would still have no explanation for the transition.
+ * `undefined`/empty `comments` (still loading, or a case with none yet)
+ * correctly returns `false` rather than throwing.
+ */
+export function hasPublicComment(
+  comments: CsmCaseComment[] | undefined,
+): boolean {
+  if (!comments) return false;
+  return comments.some(
+    (comment) => !comment.internal && hasDisplayableContent(comment),
   );
 }

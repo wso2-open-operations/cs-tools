@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import { useSearchGroups } from "@api/useSearchGroups";
-import { useSearchUsersByName } from "@api/useSearchUsersByName";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import { formatDateTimeLocal, parseDateTimeLocal } from "@utils/dateTime";
@@ -122,7 +122,7 @@ export default function EditProblemDialog({
                 value={assignedToId}
                 onChange={setAssignedToId}
                 disabled={isSaving}
-                useSearch={useSearchUsersByName}
+                useSearch={useSearchInternalUsersByName}
                 getId={(u) => u.id!}
                 getLabel={userLabel}
                 knownLabel={problem.assignedTo?.name}

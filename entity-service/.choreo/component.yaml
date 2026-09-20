@@ -10,3 +10,30 @@ endpoints:
     networkVisibilities:
       - Organization
     schemaFilePath: openapi.yaml
+
+  # Published separately from the API above, and publicly, so external
+  # alerting can poll it without credentials. It is backed by its own
+  # listener on its own port (internal/server/health.go), not by another
+  # basePath on port 8080 — that listener's mux carries only the two health
+  # routes, so nothing else in this service is reachable at public
+  # visibility even if this file is later edited wrongly. Do not point this
+  # endpoint at port 8080.
+  #
+  # The port below must match HEALTH_PORT (internal/config), exactly as the
+  # endpoint above must match SERVER_PORT. Nothing reconciles the two at
+  # deploy time: this file is static, so overriding HEALTH_PORT in a Choreo
+  # deployment routes public health traffic to a port nothing is listening
+  # on, and the symptom is a health endpoint that is permanently unreachable
+  # — i.e. the alerting looks like an outage. Leave HEALTH_PORT unset in
+  # every Choreo deployment (the 8081 default is what this file assumes);
+  # override it only locally, where nothing reads this file. If it ever does
+  # need to change here, change both together in the same commit.
+  - name: entity-service-health
+    displayName: Entity Service Health
+    service:
+      basePath: /
+      port: 8081
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: health-openapi.yaml

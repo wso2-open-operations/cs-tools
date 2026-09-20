@@ -290,13 +290,18 @@ describe("CasesFilterBar — removed bar controls fall back to chips", () => {
     expect(screen.queryByText(/^CS team:/)).not.toBeInTheDocument();
   });
 
+  it("does not render a chip for sreTeams — it has its own 'SRE Team' bar control", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS, sreTeams: ["g1"] });
+    expect(screen.queryByText(/^SRE team:/)).not.toBeInTheDocument();
+  });
+
   // The State field's tri-state include/exclude toggle was removed — Simple
   // mode's "State" control is now a plain include-only multi-select, so
   // `excludeStates` has no bar control of its own any more. Any active
   // `excludeStates` value also forces Advanced mode on mount (see
   // `isSimpleRepresentable`), where the "State"/"is not one of" row is the
   // primary way to see/edit it while the panel is open — same reasoning as
-  // `sreTeams`/`workStates` above, a chip is still the only summary while the
+  // `workStates` above, a chip is still the only summary while the
   // panel is collapsed (`activeFilterChips`'s own `effectiveMode`/
   // `isFiltersOpen` gating), so it's asserted here with the panel collapsed.
   it("renders a removable chip for excludeStates now that the tri-state 'State' control is gone", () => {
@@ -350,6 +355,41 @@ describe("CasesFilterBar — 'CRE Team' control (replaces the removed 'Work stat
     fireEvent.click(await screen.findByRole("option", { name: "ABT One" }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ csTeams: ["g-1"] }));
+  });
+});
+
+describe("CasesFilterBar — 'SRE Team' control (mirrors 'CRE Team')", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+    postMock.mockResolvedValue({
+      teams: [
+        { id: "abt-1", name: "SRE One", family: "sre-abt", sreGroupId: "s-1" },
+        { id: "abt-2", name: "SRE Two", family: "sre-abt", sreGroupId: "s-2" },
+        // No sreGroupId configured -- must not appear as a selectable option.
+        { id: "abt-3", name: "SRE Three", family: "sre-abt" },
+        // Has a sreGroupId but a non-`sre-abt` family -- must not appear either.
+        { id: "abt-4", name: "SRE Four", family: "sre", sreGroupId: "s-4" },
+      ],
+    });
+  });
+
+  it("renders team display names as options, backed by sreGroupId (what the filter actually matches on)", async () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    expect(await screen.findByRole("option", { name: "SRE One" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SRE Two" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "SRE Three" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "SRE Four" })).not.toBeInTheDocument();
+  });
+
+  it("selecting a team sets sreTeams to its sreGroupId, not its registry id", async () => {
+    const { onChange } = renderBar({ ...DEFAULT_CASES_FILTERS });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    fireEvent.click(await screen.findByRole("option", { name: "SRE One" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ sreTeams: ["s-1"] }));
   });
 });
 
@@ -761,12 +801,13 @@ describe("CasesFilterBar — per-consumer hidden Simple-mode controls", () => {
     postMock.mockResolvedValue({ teams: [] });
   });
 
-  it("shows Onboarding status and CRE Team by default", () => {
+  it("shows Onboarding status, CRE Team, and SRE Team by default", () => {
     renderBar({ ...DEFAULT_CASES_FILTERS });
     expect(
       screen.getByRole("combobox", { name: "Onboarding status" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "CRE Team" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "SRE Team" })).toBeInTheDocument();
   });
 
   it("hides Onboarding status when hideOnboardingStatusFilter is set (e.g. a project-scoped view)", () => {
@@ -777,6 +818,7 @@ describe("CasesFilterBar — per-consumer hidden Simple-mode controls", () => {
       screen.queryByRole("combobox", { name: "Onboarding status" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "CRE Team" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "SRE Team" })).toBeInTheDocument();
   });
 
   it("hides CRE Team when hideCreTeamFilter is set (e.g. a project-scoped view)", () => {
@@ -789,12 +831,27 @@ describe("CasesFilterBar — per-consumer hidden Simple-mode controls", () => {
     expect(
       screen.getByRole("combobox", { name: "Onboarding status" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "SRE Team" })).toBeInTheDocument();
   });
 
-  it("hides both when both flags are set, without affecting the Severity control", () => {
+  it("hides SRE Team when hideSreTeamFilter is set (e.g. a project-scoped view)", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      hideSreTeamFilter: true,
+    });
+    expect(
+      screen.queryByRole("combobox", { name: "SRE Team" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Onboarding status" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "CRE Team" })).toBeInTheDocument();
+  });
+
+  it("hides all three when their flags are set, without affecting the Severity control", () => {
     renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
       hideOnboardingStatusFilter: true,
       hideCreTeamFilter: true,
+      hideSreTeamFilter: true,
       showSeverityFilter: true,
     });
     expect(
@@ -802,6 +859,9 @@ describe("CasesFilterBar — per-consumer hidden Simple-mode controls", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", { name: "CRE Team" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "SRE Team" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Severity" })).toBeInTheDocument();
   });

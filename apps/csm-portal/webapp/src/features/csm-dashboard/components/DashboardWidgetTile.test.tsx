@@ -1964,4 +1964,176 @@ describe("DashboardWidgetTile", () => {
       screen.queryByRole("button", { name: "Refresh My Patches" }),
     ).not.toBeInTheDocument();
   });
+
+  // The expanded-list rendering itself moved out of this component into
+  // `WidgetInlineDrilldownPanel` (rendered by `DashboardWidgetGrid` as a
+  // full-width sibling, not by this tile) — these tests cover only what
+  // stayed here: `inlineDrilldown` mode reports slice clicks up via
+  // `onExpandChange` instead of navigating away or tracking its own local
+  // expansion state, and never renders a list itself regardless of
+  // `expandedSlice`.
+  describe("inlineDrilldown", () => {
+    it("shape pie: clicking a slice reports it via onExpandChange instead of navigating away", async () => {
+      postMock.mockResolvedValue({ total: 2 });
+      const onExpandChange = vi.fn();
+
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="cases-by-severity"
+          displayName="Cases by severity"
+          resourceType="case"
+          shape="pie"
+          filters={{}}
+          slices={[
+            {
+              label: "Critical",
+              query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+            },
+          ]}
+          inlineDrilldown
+          expandedSlice={null}
+          onExpandChange={onExpandChange}
+        />,
+        "/cases",
+      );
+
+      await waitFor(() => expect(screen.getByText("slice:Critical:2")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("slice:Critical:2"));
+
+      expect(onExpandChange).toHaveBeenCalledWith(
+        expect.objectContaining({ label: "Critical", value: 2 }),
+      );
+      // No navigation — inline mode's whole point.
+      expect(screen.queryByTestId("location-probe")).not.toBeInTheDocument();
+    });
+
+    it("shape pie: clicking the already-expanded slice again reports null (collapse), not the slice itself", async () => {
+      postMock.mockResolvedValue({ total: 2 });
+      const onExpandChange = vi.fn();
+      const criticalSlice = {
+        label: "Critical",
+        value: 2,
+        query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+      };
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="cases-by-severity"
+          displayName="Cases by severity"
+          resourceType="case"
+          shape="pie"
+          filters={{}}
+          slices={[criticalSlice]}
+          inlineDrilldown
+          expandedSlice={criticalSlice}
+          onExpandChange={onExpandChange}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("slice:Critical:2")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("slice:Critical:2"));
+
+      expect(onExpandChange).toHaveBeenCalledWith(null);
+    });
+
+    it("shape pie: clicking a different slice reports that new slice (switches, not toggles off) when another slice is already expanded", async () => {
+      postMock.mockImplementation(
+        (_path: string, body: { filters: { filters: { field: string; values?: string[] }[] } }) => {
+          const severity = body.filters.filters.find((f) => f.field === "severity")?.values;
+          if (severity?.includes("critical")) return Promise.resolve({ total: 2 });
+          if (severity?.includes("high")) return Promise.resolve({ total: 5 });
+          return Promise.resolve({ total: 0 });
+        },
+      );
+      const onExpandChange = vi.fn();
+      const criticalSlice = {
+        label: "Critical",
+        value: 2,
+        query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+      };
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="cases-by-severity"
+          displayName="Cases by severity"
+          resourceType="case"
+          shape="pie"
+          filters={{}}
+          slices={[
+            criticalSlice,
+            {
+              label: "High",
+              query: { filters: [{ field: "severity", op: "in", values: ["high"] }] },
+            },
+          ]}
+          inlineDrilldown
+          expandedSlice={criticalSlice}
+          onExpandChange={onExpandChange}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("slice:High:5")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("slice:High:5"));
+
+      expect(onExpandChange).toHaveBeenCalledWith(
+        expect.objectContaining({ label: "High", value: 5 }),
+      );
+    });
+
+    it("shape pie: never renders a list itself even while expandedSlice is set — that's WidgetInlineDrilldownPanel's job now", async () => {
+      postMock.mockResolvedValue({ total: 2 });
+      const criticalSlice = {
+        label: "Critical",
+        value: 2,
+        query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+      };
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="cases-by-severity"
+          displayName="Cases by severity"
+          resourceType="case"
+          shape="pie"
+          filters={{}}
+          slices={[criticalSlice]}
+          listLimit={5}
+          inlineDrilldown
+          expandedSlice={criticalSlice}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("slice:Critical:2")).toBeInTheDocument());
+      // The hardcoded CasesList renderer's own "Case ID" header would only
+      // appear if this tile still rendered an inline list itself.
+      expect(screen.queryByText("Case ID")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /view more/i })).not.toBeInTheDocument();
+    });
+
+    it("suppresses the tile-level background click-through when inlineDrilldown is set", async () => {
+      postMock.mockResolvedValue({ total: 2 });
+
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="cases-by-severity"
+          displayName="Cases by severity"
+          resourceType="case"
+          shape="pie"
+          filters={{}}
+          slices={[
+            {
+              label: "Critical",
+              query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
+            },
+          ]}
+          inlineDrilldown
+        />,
+        "/cases",
+      );
+
+      await waitFor(() => expect(screen.getByText("slice:Critical:2")).toBeInTheDocument());
+      expect(
+        screen.queryByRole("button", { name: "View all cases for Cases by severity" }),
+      ).not.toBeInTheDocument();
+    });
+  });
 });

@@ -91,6 +91,7 @@ function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
     <Button
       variant="text"
       size="small"
+      className="csm-print-hide"
       startIcon={<ArrowLeft size={16} />}
       onClick={onClick}
       sx={{ alignSelf: "flex-start" }}

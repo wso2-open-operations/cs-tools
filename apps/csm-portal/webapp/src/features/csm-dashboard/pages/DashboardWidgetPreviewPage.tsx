@@ -73,6 +73,7 @@ import DateRangeFilter, {
 import MultiSelectField from "@components/MultiSelectField";
 import TriStateMultiSelectField from "@components/TriStateMultiSelectField";
 import AsyncUserIdMultiSelect from "@features/csm-cases/components/AsyncUserIdMultiSelect";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import { STATE_OPTIONS } from "@features/csm-cases/utils/caseFilterOptions";
 import {
   ALL_CALL_REQUEST_STATES,
@@ -573,6 +574,8 @@ function CallRequestWidgetPreview({
               setPage(0);
             }}
             currentUserId={currentUserId}
+            roleIds={INTERNAL_USER_ROLES}
+            active
           />
         </Box>
         <Box sx={{ minWidth: 220 }}>

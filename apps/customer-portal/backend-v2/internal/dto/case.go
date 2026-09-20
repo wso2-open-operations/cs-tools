@@ -76,7 +76,6 @@ type CaseSummary struct {
 	Severity         *IDLabelRef `json:"severity,omitempty"`
 	Status           *IDLabelRef `json:"status,omitempty"`
 	Type             *IDLabelRef `json:"type,omitempty"`
-	CaseTypes        *IDLabelRef `json:"caseTypes,omitempty"`
 	CreatedOn        string      `json:"createdOn,omitempty"`
 	UpdatedOn        string      `json:"updatedOn,omitempty"`
 	CreatedBy        string      `json:"createdBy,omitempty"`
@@ -126,7 +125,6 @@ func MapSearchCases(r entity.SearchCasesResponse) SearchCasesResponse {
 			Severity:         caseSeverityRef(c.Severity),
 			Status:           caseStatusRef(c.State),
 			Type:             caseTypeRef(c.Type),
-			CaseTypes:        caseTypeRef(c.Type),
 			CreatedOn:        c.CreatedOn,
 			UpdatedOn:        c.UpdatedOn,
 			CreatedBy:        userRefIdentity(c.CreatedBy),
@@ -258,28 +256,6 @@ func BuildEntitySearchCasesRequest(projectID string, req CaseSearchRequest) enti
 	}
 }
 
-// PersonRef is a compact reference to a person (name + email), used for
-// case creators and assigned engineers. Internal identifiers (entity-service's
-// UserRef.ID/UserID, AssignedEngineerRef.ID) are intentionally dropped.
-type PersonRef struct {
-	Name  string  `json:"name"`
-	Email *string `json:"email,omitempty"`
-}
-
-// LinkedServiceRequest is a compact reference to a service-request case
-// linked to another case as its parent.
-type LinkedServiceRequest struct {
-	ID     string `json:"id"`
-	Number string `json:"number"`
-	Name   string `json:"name"`
-}
-
-// CaseTag is a free-text label attached to a case.
-type CaseTag struct {
-	Label string  `json:"label"`
-	Color *string `json:"color,omitempty"`
-}
-
 // CaseDetailsAccount is the account reference embedded in CaseDetails,
 // matching the frontend's own CaseDetailsAccount type ({type, id, label}).
 type CaseDetailsAccount struct {
@@ -317,60 +293,50 @@ type CaseWatchListUser struct {
 //
 // Deliberately excludes entity-service's AutoclosureStep/AutoclosureStateTime
 // and BestCaseFixEta/MostLikelyFixEta/WorstCaseFixEta — genuinely
-// CSM-engineer-facing only. SlaResponseTime, CsManager, ClosedBy,
-// CloseNotes (on this read path — it does exist on the PATCH response),
-// HasAutoClosed, FindingsResolved/FindingsTotal, EscalationLevel/
-// IsEscalated, Duration, EngagementStartDate/EngagementEndDate, and
-// Variables are all present on the frontend's type but have no
-// entity-service equivalent at all on CaseView — not fixable in this dto
-// layer alone.
+// CSM-engineer-facing only. CsManager and FindingsResolved/FindingsTotal
+// have no entity-service equivalent on CaseView. CloseNotes and ResolutionNotes
+// are deliberately NOT exposed here even though entity-service's CaseView carries them:
+// they are internal CS-agent close/resolution notes, never meant for
+// the customer-facing view.
 type CaseDetails struct {
-	ID                    string                       `json:"id"`
-	InternalID            string                       `json:"internalId"`
-	Number                string                       `json:"number"`
-	Title                 string                       `json:"title"`
-	Description           string                       `json:"description"`
-	Product               *IDLabelRef                  `json:"product,omitempty"`
-	Account               *CaseDetailsAccount          `json:"account,omitempty"`
-	AssignedEngineer      *CaseDetailsAssignedEngineer `json:"assignedEngineer,omitempty"`
-	EngineerEmail         *string                      `json:"engineerEmail,omitempty"`
-	Project               *IDLabelRef                  `json:"project,omitempty"`
-	Type                  *IDLabelRef                  `json:"type,omitempty"`
-	DeployedProduct       *IDLabelRef                  `json:"deployedProduct,omitempty"`
-	RelatedCase           *IDLabelRef                  `json:"relatedCase,omitempty"`
-	Conversation          *IDLabelRef                  `json:"conversation,omitempty"`
-	IssueType             *IDLabelRef                  `json:"issueType,omitempty"`
-	EngagementType        *IDLabelRef                  `json:"engagementType,omitempty"`
-	Catalog               *IDLabelRef                  `json:"catalog,omitempty"`
-	CatalogItem           *IDLabelRef                  `json:"catalogItem,omitempty"`
-	ChangeRequests        []IDLabelRef                 `json:"changeRequests,omitempty"`
-	AssignedTeam          *IDLabelRef                  `json:"assignedTeam,omitempty"`
-	Deployment            *IDLabelRef                  `json:"deployment,omitempty"`
-	Severity              *IDLabelRef                  `json:"severity,omitempty"`
-	Status                *IDLabelRef                  `json:"status,omitempty"`
-	WorkState             *string                      `json:"workState,omitempty"`
-	CreatedOn             time.Time                    `json:"createdOn"`
-	UpdatedOn             time.Time                    `json:"updatedOn"`
-	ClosedOn              *time.Time                   `json:"closedOn,omitempty"`
-	CreatedBy             string                       `json:"createdBy"`
-	ParentCase            *NumberRef                   `json:"parentCase,omitempty"`
-	LinkedServiceRequests []LinkedServiceRequest       `json:"linkedServiceRequests,omitempty"`
-	ResolvedOn            *time.Time                   `json:"resolvedOn,omitempty"`
-	ResolutionCode        *string                      `json:"resolutionCode,omitempty"`
-	Cause                 *string                      `json:"cause,omitempty"`
-	ResolutionNotes       *string                      `json:"resolutionNotes,omitempty"`
-	WatchList             []CaseWatchListUser          `json:"watchList,omitempty"`
-	FixEta                *time.Time                   `json:"fixEta,omitempty"`
+	ID               string                       `json:"id"`
+	InternalID       string                       `json:"internalId"`
+	Number           string                       `json:"number"`
+	Title            string                       `json:"title"`
+	Description      string                       `json:"description"`
+	Product          *IDLabelRef                  `json:"product,omitempty"`
+	Account          *CaseDetailsAccount          `json:"account,omitempty"`
+	AssignedEngineer *CaseDetailsAssignedEngineer `json:"assignedEngineer,omitempty"`
+	Project          *IDLabelRef                  `json:"project,omitempty"`
+	Type             *IDLabelRef                  `json:"type,omitempty"`
+	DeployedProduct  *IDLabelRef                  `json:"deployedProduct,omitempty"`
+	RelatedCase      *IDLabelRef                  `json:"relatedCase,omitempty"`
+	Conversation     *IDLabelRef                  `json:"conversation,omitempty"`
+	IssueType        *IDLabelRef                  `json:"issueType,omitempty"`
+	EngagementType   *IDLabelRef                  `json:"engagementType,omitempty"`
+	Catalog          *IDLabelRef                  `json:"catalog,omitempty"`
+	CatalogItem      *IDLabelRef                  `json:"catalogItem,omitempty"`
+	ChangeRequests   []IDLabelRef                 `json:"changeRequests,omitempty"`
+	AssignedTeam     *IDLabelRef                  `json:"assignedTeam,omitempty"`
+	Deployment       *IDLabelRef                  `json:"deployment,omitempty"`
+	Severity         *IDLabelRef                  `json:"severity,omitempty"`
+	Status           *IDLabelRef                  `json:"status,omitempty"`
+	CreatedOn        time.Time                    `json:"createdOn"`
+	UpdatedOn        time.Time                    `json:"updatedOn"`
+	ClosedOn         *time.Time                   `json:"closedOn,omitempty"`
+	CreatedBy        string                       `json:"createdBy"`
+	ParentCase       *NumberRef                   `json:"parentCase,omitempty"`
+	ResolvedOn       *time.Time                   `json:"resolvedOn,omitempty"`
+	WatchList        []CaseWatchListUser          `json:"watchList,omitempty"`
 	// Exposed because the frontend's CaseDetails type declares them
 	// (features/support/types/cases.ts). AcknowledgedBy and
 	// EngagementPaymentType are decoded upstream but deliberately NOT exposed:
 	// no frontend consumer, so per CLAUDE.md they stay trimmed until one exists.
-	SLAResponseTime     *string   `json:"slaResponseTime,omitempty"`
-	ClosedBy            *Ref      `json:"closedBy,omitempty"`
-	HasAutoClosed       *bool     `json:"hasAutoClosed,omitempty"`
-	EngagementStartDate *string   `json:"engagementStartDate,omitempty"`
-	EngagementEndDate   *string   `json:"engagementEndDate,omitempty"`
-	Tags                []CaseTag `json:"tags,omitempty"`
+	SLAResponseTime     *string `json:"slaResponseTime,omitempty"`
+	ClosedBy            *Ref    `json:"closedBy,omitempty"`
+	HasAutoClosed       *bool   `json:"hasAutoClosed,omitempty"`
+	EngagementStartDate *string `json:"engagementStartDate,omitempty"`
+	EngagementEndDate   *string `json:"engagementEndDate,omitempty"`
 	// Duration is the upstream's humanised elapsed time, rendered as-is.
 	Duration *string `json:"duration,omitempty"`
 	// EscalationLevel is an {id, label} ref because that is what the frontend
@@ -389,10 +355,8 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 	}
 
 	var assignedEngineer *CaseDetailsAssignedEngineer
-	var engineerEmail *string
 	if c.AssignedEngineer != nil {
 		assignedEngineer = &CaseDetailsAssignedEngineer{ID: c.AssignedEngineer.ID, Label: c.AssignedEngineer.Name, Name: c.AssignedEngineer.Name}
-		engineerEmail = c.AssignedEngineer.Email
 	}
 
 	var relatedCase *IDLabelRef
@@ -409,11 +373,6 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 		changeRequests = append(changeRequests, IDLabelRef{ID: cr.ID, Label: label})
 	}
 
-	linked := make([]LinkedServiceRequest, 0, len(c.LinkedServiceRequests))
-	for _, lsr := range c.LinkedServiceRequests {
-		linked = append(linked, LinkedServiceRequest{ID: lsr.ID, Number: lsr.Number, Name: lsr.Name})
-	}
-
 	var watchList []CaseWatchListUser
 	if len(c.WatchList) > 0 {
 		watchList = make([]CaseWatchListUser, 0, len(c.WatchList))
@@ -422,60 +381,44 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 		}
 	}
 
-	var tags []CaseTag
-	if len(c.Tags) > 0 {
-		tags = make([]CaseTag, 0, len(c.Tags))
-		for _, t := range c.Tags {
-			tags = append(tags, CaseTag{Label: t.Label, Color: t.Color})
-		}
-	}
-
 	return CaseDetails{
-		ID:                    c.ID,
-		InternalID:            c.InternalID,
-		Number:                c.Number,
-		Title:                 c.Subject,
-		Description:           c.Description,
-		Product:               entityRefToIDLabel(c.ProductDetails),
-		Account:               account,
-		AssignedEngineer:      assignedEngineer,
-		EngineerEmail:         engineerEmail,
-		Project:               &IDLabelRef{ID: c.ProjectDetails.ID, Label: c.ProjectDetails.Name},
-		Type:                  caseTypeRefFromPointer(c.Type),
-		DeployedProduct:       deployedProductRefToIDLabel(c.DeployedProductDetails),
-		RelatedCase:           relatedCase,
-		Conversation:          entityRefToIDLabel(c.Conversation),
-		IssueType:             caseIssueTypeRef(&c.IssueType),
-		EngagementType:        caseEngagementTypeRef(c.EngagementType),
-		Catalog:               entityRefToIDLabel(c.Catalog),
-		CatalogItem:           entityRefToIDLabel(c.CatalogItem),
-		ChangeRequests:        changeRequests,
-		AssignedTeam:          entityRefToIDLabel(c.AssignedTeam),
-		Deployment:            entityRefToIDLabel(c.DeploymentDetails),
-		Severity:              caseSeverityRef(&c.Severity),
-		Status:                caseStatusRef(c.State),
-		WorkState:             c.WorkState,
-		CreatedOn:             c.CreatedOn,
-		UpdatedOn:             c.UpdatedOn,
-		ClosedOn:              c.ClosedOn,
-		CreatedBy:             c.CreatedByDetails.Name,
-		ParentCase:            mapNumberRef(c.ParentCase),
-		LinkedServiceRequests: linked,
-		ResolvedOn:            c.ResolvedOn,
-		ResolutionCode:        c.ResolutionCode,
-		Cause:                 c.Cause,
-		ResolutionNotes:       c.ResolutionNotes,
-		WatchList:             watchList,
-		FixEta:                c.FixEta,
-		SLAResponseTime:       c.SLAResponseTime,
-		ClosedBy:              mapRef(c.ClosedBy),
-		HasAutoClosed:         c.HasAutoClosed,
-		EngagementStartDate:   c.EngagementStartDate,
-		EngagementEndDate:     c.EngagementEndDate,
-		Tags:                  tags,
-		Duration:              c.Duration,
-		EscalationLevel:       caseEscalationLevelRef(c.EscalationLevel),
-		IsEscalated:           c.IsEscalated,
+		ID:                  c.ID,
+		InternalID:          c.InternalID,
+		Number:              c.Number,
+		Title:               c.Subject,
+		Description:         c.Description,
+		Product:             entityRefToIDLabel(c.ProductDetails),
+		Account:             account,
+		AssignedEngineer:    assignedEngineer,
+		Project:             &IDLabelRef{ID: c.ProjectDetails.ID, Label: c.ProjectDetails.Name},
+		Type:                caseTypeRefFromPointer(c.Type),
+		DeployedProduct:     deployedProductRefToIDLabel(c.DeployedProductDetails),
+		RelatedCase:         relatedCase,
+		Conversation:        entityRefToIDLabel(c.Conversation),
+		IssueType:           caseIssueTypeRef(&c.IssueType),
+		EngagementType:      caseEngagementTypeRef(c.EngagementType),
+		Catalog:             entityRefToIDLabel(c.Catalog),
+		CatalogItem:         entityRefToIDLabel(c.CatalogItem),
+		ChangeRequests:      changeRequests,
+		AssignedTeam:        entityRefToIDLabel(c.AssignedTeam),
+		Deployment:          entityRefToIDLabel(c.DeploymentDetails),
+		Severity:            caseSeverityRef(&c.Severity),
+		Status:              caseStatusRef(c.State),
+		CreatedOn:           c.CreatedOn,
+		UpdatedOn:           c.UpdatedOn,
+		ClosedOn:            c.ClosedOn,
+		CreatedBy:           c.CreatedByDetails.Name,
+		ParentCase:          mapNumberRef(c.ParentCase),
+		ResolvedOn:          c.ResolvedOn,
+		WatchList:           watchList,
+		SLAResponseTime:     c.SLAResponseTime,
+		ClosedBy:            mapRef(c.ClosedBy),
+		HasAutoClosed:       c.HasAutoClosed,
+		EngagementStartDate: c.EngagementStartDate,
+		EngagementEndDate:   c.EngagementEndDate,
+		Duration:            c.Duration,
+		EscalationLevel:     caseEscalationLevelRef(c.EscalationLevel),
+		IsEscalated:         c.IsEscalated,
 	}
 }
 
@@ -650,26 +593,13 @@ func BuildEntityUpdateCaseRequest(id string, req UpdateCaseRequest) entity.Updat
 }
 
 // CaseUpdateResponse is the portal's response for PATCH /cases/{id}.
-// Deliberately excludes entity-service's UpdatedBy (internal actor identity)
-// and the Best/MostLikely/WorstCaseFixEta trio, for the same reasons as
-// CaseDetails above. WatchList IS included (unlike CaseView/CaseDetails,
-// which omit it) — a customer who just updated the watch list needs
-// confirmation of who's on it now, so this is a deliberate exception to the
-// read-path exclusion rather than an oversight.
+// Matches Ballerina v1 and the webapp's PatchCaseResponse contract.
 type CaseUpdateResponse struct {
-	ID             string     `json:"id"`
-	UpdatedOn      time.Time  `json:"updatedOn"`
-	State          string     `json:"state,omitempty"`
-	Severity       string     `json:"severity,omitempty"`
-	WorkState      *string    `json:"workState,omitempty"`
-	WatchList      []string   `json:"watchList,omitempty"`
-	AssignedTo     *PersonRef `json:"assignedTo,omitempty"`
-	ResolutionCode *string    `json:"resolutionCode,omitempty"`
-	Cause          *string    `json:"cause,omitempty"`
-	CloseNotes     *string    `json:"closeNotes,omitempty"`
-	ResolvedOn     *time.Time `json:"resolvedOn,omitempty"`
-	ParentCase     *NumberRef `json:"parentCase,omitempty"`
-	FixEta         *time.Time `json:"fixEta,omitempty"`
+	ID        string    `json:"id"`
+	UpdatedOn time.Time `json:"updatedOn"`
+	State     string    `json:"state,omitempty"`
+	UpdatedBy string    `json:"updatedBy,omitempty"`
+	WatchList []string  `json:"watchList,omitempty"`
 }
 
 // MapCaseUpdate builds the portal response from entity-service's UpdateCaseResponse.
@@ -688,25 +618,12 @@ func MapCaseUpdate(r entity.UpdateCaseResponse) CaseUpdateResponse {
 		}
 	}
 
-	var assignedTo *PersonRef
-	if c.AssignedTo != nil {
-		assignedTo = &PersonRef{Name: c.AssignedTo.Name, Email: c.AssignedTo.Email}
-	}
-
 	return CaseUpdateResponse{
-		ID:             c.ID,
-		UpdatedOn:      c.UpdatedOn,
-		State:          c.State,
-		Severity:       c.Severity,
-		WorkState:      c.WorkState,
-		WatchList:      watchList,
-		AssignedTo:     assignedTo,
-		ResolutionCode: c.ResolutionCode,
-		Cause:          c.Cause,
-		CloseNotes:     c.CloseNotes,
-		ResolvedOn:     c.ResolvedOn,
-		ParentCase:     mapNumberRef(c.ParentCase),
-		FixEta:         c.FixEta,
+		ID:        c.ID,
+		UpdatedOn: c.UpdatedOn,
+		State:     c.State,
+		UpdatedBy: c.UpdatedBy,
+		WatchList: watchList,
 	}
 }
 
@@ -794,6 +711,17 @@ type SearchCaseActivitiesResponse struct {
 func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseActivitiesResponse {
 	items := make([]CaseActivity, 0, len(r.Activity))
 	for _, a := range r.Activity {
+		// Work notes (internal WSO2 support annotations) must never reach the customer portal.
+		if a.Type == "work_note" || a.Type == "work_notes" {
+			continue
+		}
+		if a.CommentType != nil {
+			ct := string(*a.CommentType)
+			if ct == string(entity.CommentTypeWorkNote) || ct == "work_note" || ct == "work_notes" {
+				continue
+			}
+		}
+
 		var commentType *string
 		if a.CommentType != nil {
 			s := string(*a.CommentType)

@@ -26,7 +26,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// ProductVersionRepository defines the persistence operations for the product_versions table.
+// ProductVersionRepository defines the persistence operations for the
+// product_version table (migration 000011).
 type ProductVersionRepository interface {
 	// SearchProductVersions returns a filtered, paginated slice of product versions
 	// together with the total count of matching rows before pagination.
@@ -64,13 +65,13 @@ func (r *productVersionRepo) SearchProductVersions(ctx context.Context, req doma
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM product_versions " + where
+	countQuery := "SELECT COUNT(*) FROM product_version " + where
 
 	dataQuery := fmt.Sprintf(
 		`SELECT id, product_id, version, current_support_status,
 		        release_date, support_eol_date, earliest_possible_support_eol_date,
-		        created_at, updated_at
-		 FROM product_versions %s
+		        created_on, updated_on
+		 FROM product_version %s
 		 ORDER BY release_date DESC, id
 		 LIMIT $%d OFFSET $%d`,
 		where, argIdx, argIdx+1,
@@ -84,7 +85,7 @@ func (r *productVersionRepo) SearchProductVersions(ctx context.Context, req doma
 
 	eg.Go(func() error {
 		if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
-			return fmt.Errorf("count product_versions: %w", err)
+			return fmt.Errorf("count product_version: %w", err)
 		}
 		return nil
 	})
@@ -92,7 +93,7 @@ func (r *productVersionRepo) SearchProductVersions(ctx context.Context, req doma
 	eg.Go(func() error {
 		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
 		if err != nil {
-			return fmt.Errorf("query product_versions: %w", err)
+			return fmt.Errorf("query product_version: %w", err)
 		}
 		defer rows.Close()
 

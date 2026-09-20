@@ -77,6 +77,7 @@ import {
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
 import MultiSelectField from "@components/MultiSelectField";
 import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import ProductNameMultiSelect from "@features/csm-cases/components/ProductNameMultiSelect";
 import AdvancedFiltersBuilder from "@features/csm-cases/components/AdvancedFiltersBuilder";
 import AnyOfGroupsBuilder from "@features/csm-cases/components/AnyOfGroupsBuilder";
@@ -140,7 +141,8 @@ export interface CasesFilters {
   csTeams: string[];
   /** SRE team group ids (`sreTeam` op:in) the case's project is scoped to.
    * Independent of `csTeams` -- a case's account may carry both a CRE and
-   * an SRE team assignment. */
+   * an SRE team assignment. Has its own Simple-mode bar control (see
+   * `CasesFilterBar`'s "SRE Team" field, mirroring "CRE Team"). */
   sreTeams: string[];
   /** Tags the case must carry (`tag` op:in). Independent of `excludeTags` —
    * both may be set at once (the backend ANDs them). */
@@ -268,6 +270,13 @@ interface CasesFilterBarProps {
    * single-project-scoped view. Advanced mode still offers the field.
    */
   hideCreTeamFilter?: boolean;
+  /**
+   * Hide the "SRE Team" Simple-mode control. Same reasoning as
+   * {@link hideCreTeamFilter}: the SRE team a case's project is scoped to is
+   * a per-project attribute, a no-op filter on a single-project-scoped
+   * view. Advanced mode still offers the field.
+   */
+  hideSreTeamFilter?: boolean;
 }
 
 // Work state has no bar control of its own (see `buildActiveFilterChips`'s
@@ -305,26 +314,26 @@ interface ActiveFilterChip {
  * removable, though, or a user landing on a dashboard-filtered cases list
  * has no way to see (or undo) *why* it's filtered — hence one chip per
  * active value here, shown regardless of whether the filter grid itself is
- * expanded. `sreTeams`/`excludeTags`/`workStates` are included here too:
- * their bar controls were removed as clutter (they are advanced, rarely
- * hand-picked, and a better home for advanced filters is still to be
- * designed), so a chip is now the ONLY way a user can see or clear them
- * after arriving from a dashboard click-through. `excludeStates` joins this
- * group too: the State field's tri-state include/exclude toggle was removed
- * (Simple mode's "State" control is now a plain include-only multi-select),
- * so a chip is the only way to see/clear an exclusion that arrived via a
+ * expanded. `excludeTags`/`workStates` are included here too: their bar
+ * controls were removed as clutter (they are advanced, rarely hand-picked,
+ * and a better home for advanced filters is still to be designed), so a
+ * chip is now the ONLY way a user can see or clear them after arriving from
+ * a dashboard click-through. `excludeStates` joins this group too: the
+ * State field's tri-state include/exclude toggle was removed (Simple
+ * mode's "State" control is now a plain include-only multi-select), so a
+ * chip is the only way to see/clear an exclusion that arrived via a
  * saved view, a shared URL, or a dashboard click-through. `csTeams`/
- * `onboardingStatuses` has its own bar control (see the filter grid below)
- * and is deliberately NOT chipped here — every other bar-controlled field
- * (`states`, `severities`, ...) shows its selection inside its own control,
- * not as a second, redundant chip. `tags`/`excludeTags` moved out of Simple
- * mode entirely (Tags is Advanced-only now — see the mode toggle below): any
- * value in either one forces `isSimpleRepresentable` to false, so the Tag
- * row itself is what a user sees (in Advanced mode), never a chip alongside
- * an invisible control.
+ * `sreTeams`/`onboardingStatuses` each has its own bar control (see the
+ * filter grid below) and is deliberately NOT chipped here — every other
+ * bar-controlled field (`states`, `severities`, ...) shows its selection
+ * inside its own control, not as a second, redundant chip. `tags`/
+ * `excludeTags` moved out of Simple mode entirely (Tags is Advanced-only now
+ * — see the mode toggle below): any value in either one forces
+ * `isSimpleRepresentable` to false, so the Tag row itself is what a user
+ * sees (in Advanced mode), never a chip alongside an invisible control.
  */
 // All of the reasoning above is Simple-mode only. In Advanced mode every
-// field this function chips (`sreTeams`, `workStates`, the SLA/escalation/
+// field this function chips (`workStates`, the SLA/escalation/
 // project-type/date-range fields, plus `advancedFilters` and
 // `anyOfBranches`) already has its own always-visible, always-editable,
 // always-clearable row: `filtersToAdvancedRows` (`filterFieldAdapters.ts`)
@@ -340,24 +349,8 @@ interface ActiveFilterChip {
 // click-through while looking at the Simple grid -- that part is unchanged.
 function buildActiveFilterChips(
   filters: CasesFilters,
-  /** groupId -> team display name, so a team chip never shows a raw UUID.
-   * Falls back to the id when the lookup has not resolved (or the team is
-   * unknown) rather than hiding the chip — an unlabelled filter the user can
-   * still see and remove beats an invisible one. Only feeds the `sreTeams`
-   * chip now (`csTeams` has its own bar control), but still covers both
-   * `creGroupId` and `sreGroupId` keys since the caller passes one merged
-   * map either way. */
-  teamLabels: Record<string, string> = {},
 ): ActiveFilterChip[] {
   const chips: ActiveFilterChip[] = [];
-
-  filters.sreTeams.forEach((groupId) => {
-    chips.push({
-      key: `sreTeam-${groupId}`,
-      label: `SRE team: ${teamLabels[groupId] ?? groupId}`,
-      onRemove: (f) => ({ ...f, sreTeams: f.sreTeams.filter((t) => t !== groupId) }),
-    });
-  });
 
   // `states` still has its own bar control (a plain include-only
   // multi-select on the State field -- see the filter grid below), so it is
@@ -523,6 +516,7 @@ export default function CasesFilterBar({
   hideTypeFilter = false,
   hideOnboardingStatusFilter = false,
   hideCreTeamFilter = false,
+  hideSreTeamFilter = false,
   typeFilterLabel = "Case type",
   hideProjectFilter = false,
   showEngagementTypeFilter = false,
@@ -605,18 +599,9 @@ export default function CasesFilterBar({
 
   // Team is a fixed, small enough list to fetch in full (same endpoint/hook
   // the team-based dashboards use -- see AbtDashboardHeader) rather than a
-  // type-to-search async picker, and doubles as the source for the "CS
-  // team" bar control below and the SRE-team chip label (SRE team has no
-  // bar control of its own -- see `buildActiveFilterChips`).
+  // type-to-search async picker, and doubles as the source for both the
+  // "CRE Team" and "SRE Team" bar controls below.
   const { data: teams } = useTeams(true);
-  const teamLabels = useMemo(() => {
-    const labels: Record<string, string> = {};
-    for (const t of teams ?? []) {
-      if (t.creGroupId) labels[t.creGroupId] = t.name;
-      if (t.sreGroupId) labels[t.sreGroupId] = t.name;
-    }
-    return labels;
-  }, [teams]);
   // `creGroupId` (not the registry `id`) is what a `creTeam`/`csTeams` filter
   // entry actually matches on; only teams with one configured are
   // selectable here (an id-less team has nothing such a filter could hold).
@@ -633,17 +618,16 @@ export default function CasesFilterBar({
         .map((t) => ({ value: t.creGroupId, label: t.name })),
     [teams],
   );
-  // Same shape, keyed off `sreGroupId` instead — feeds the "Advanced
-  // filters" builder's `sreTeam` row (a real multi-select now, not
-  // hand-typed team ids/UUIDs). Scoped to `cre-abt` family per explicit
-  // product instruction, not `sre-abt` -- see the "SRE Team" filter's
-  // family-scoping note in `advancedFilters.ts` for the caveat.
+  // Same shape, keyed off `sreGroupId` instead — feeds both the "SRE Team"
+  // Simple-mode control below and the "Advanced filters" builder's
+  // `sreTeam` row. Scoped to the `sre-abt` family, matching
+  // `abtFamilyForDashboardType`, mirroring `teamOptions` above.
   const sreTeamOptions = useMemo(
     () =>
       (teams ?? [])
         .filter(
           (t): t is typeof t & { sreGroupId: string } =>
-            Boolean(t.sreGroupId) && t.family === "cre-abt",
+            Boolean(t.sreGroupId) && t.family === "sre-abt",
         )
         .map((t) => ({ value: t.sreGroupId, label: t.name })),
     [teams],
@@ -665,9 +649,9 @@ export default function CasesFilterBar({
   const activeFilterChips = useMemo(
     () =>
       effectiveMode === "simple" || !isFiltersOpen
-        ? buildActiveFilterChips(filters, teamLabels)
+        ? buildActiveFilterChips(filters)
         : [],
-    [filters, teamLabels, effectiveMode, isFiltersOpen],
+    [filters, effectiveMode, isFiltersOpen],
   );
 
   // ── Saved views ──────────────────────────────────────────────────────────
@@ -1051,6 +1035,24 @@ export default function CasesFilterBar({
                 />
               </Grid>
             )}
+            {!hideSreTeamFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                {/* SRE team the case's project is scoped to (`sreTeam`).
+                    Options are `sreGroupId`s (what the filter actually
+                    matches on); labels are team display names, never the
+                    raw group-id UUID. Mirrors the "CRE Team" control above,
+                    and matches the CR/Incident pages' own "SRE Team"
+                    Simple-mode control (`ChangeRequestsFilterBar.tsx`/
+                    `IncidentsFilterBar.tsx`). */}
+                <MultiSelectField
+                  id="cases-filter-sre-team"
+                  label="SRE Team"
+                  values={filters.sreTeams}
+                  options={sreTeamOptions}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, sreTeams: next })}
+                />
+              </Grid>
+            )}
             {showEngagementTypeFilter && (
               <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
                 <MultiSelectField
@@ -1082,6 +1084,8 @@ export default function CasesFilterBar({
                 values={filters.assignees}
                 onChange={(next) => handleSimpleFieldChange({ ...filters, assignees: next })}
                 nameSeed={assigneeNameSeed}
+                roleIds={INTERNAL_USER_ROLES}
+                active
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>

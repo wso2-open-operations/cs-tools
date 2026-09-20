@@ -211,6 +211,32 @@ func caseStateLookupKey(label string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(label)), "_", " ")
 }
 
+// caseStateClosed is entity-service's domain enum for a closed case — the key
+// caseStateIDs, caseStateLabelWords, and caseStateDisplayLabels all agree on.
+const caseStateClosed = "closed"
+
+// IsCaseStateClosed reports whether a case state means "closed", accepting
+// every representation this one field travels as: entity-service's domain enum
+// ("closed"), ServiceNow's display text ("Closed"), and the numeric SN
+// choice-list id the frontend still speaks ("3"). Handlers pass
+// entity.CaseView.State, which carries one of the first two depending on the
+// active data source (see SearchCaseView's doc comment); the id form is
+// accepted so a caller holding a portal-facing status id resolves the same way.
+//
+// Exported because the case write guards live in internal/handler but
+// the state vocabulary they need lives here, alongside the tables it is keyed
+// on — a handler must never re-hardcode "closed"/"3" itself.
+func IsCaseStateClosed(state string) bool {
+	trimmed := strings.TrimSpace(state)
+	if trimmed == "" {
+		return false
+	}
+	if caseStateLabelWords[caseStateLookupKey(trimmed)] == caseStateClosed {
+		return true
+	}
+	return caseStateIDToEnum[trimmed] == caseStateClosed
+}
+
 func caseStatusRef(label string) *IDLabelRef {
 	if label == "" {
 		return nil

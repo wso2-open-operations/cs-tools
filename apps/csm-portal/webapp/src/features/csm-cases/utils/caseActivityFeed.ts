@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import type {
   CaseAttachment,
   CaseAuditEntry,
@@ -52,4 +53,42 @@ export function compareFeedEntries(a: FeedEntry, b: FeedEntry): number {
   const bBot = b.kind === "comment" && b.comment.authorRole === "chatbot";
   if (aBot !== bBot) return aBot ? 1 : -1;
   return feedEntryId(a).localeCompare(feedEntryId(b));
+}
+
+// Matches the handful of backend timestamp shapes `parseBackendTimestamp`
+// understands (space-separated, "M/D/YYYY h:m:s", ISO "T"-separated). Plain
+// text values ("High", "3", "2026") must NOT match — `new Date(...)` parses
+// bare years/numbers as valid dates, which would misclassify them. Mirrors
+// `CaseActivitiesFeed.tsx`'s own (unexported) `TIMESTAMP_VALUE_PATTERN` —
+// duplicated rather than imported from a component module.
+const AUDIT_TIMESTAMP_VALUE_PATTERN =
+  /^(\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:\d{1,2}(:\d{1,2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?|\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{1,2}(:\d{1,2})?)$/;
+
+function formatAuditChangeValue(value: string): string {
+  if (!AUDIT_TIMESTAMP_VALUE_PATTERN.test(value.trim())) return value;
+  return (
+    formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "short" }) ?? value
+  );
+}
+
+/**
+ * Single-line plain-text description of an audit/field-change entry — e.g.
+ * "State: New → Work in Progress; Assignee: cleared → Jane Doe" — mirroring
+ * `CaseActivitiesFeed.tsx`'s own `FieldChangeLine` JSX but as one plain
+ * string, for a consumer that can't render JSX (the PDF report export).
+ * Falls back to the entry's own `description` for an older/synthetic entry
+ * with no structured `changes`.
+ */
+export function describeAuditEntry(entry: CaseAuditEntry): string {
+  if (entry.changes && entry.changes.length > 0) {
+    return entry.changes
+      .map((c) => {
+        const previous = c.previousValue?.trim();
+        const next = c.newValue?.trim();
+        const to = next ? formatAuditChangeValue(next) : "cleared";
+        return previous ? `${c.fieldLabel}: ${formatAuditChangeValue(previous)} → ${to}` : `${c.fieldLabel}: ${to}`;
+      })
+      .join("; ");
+  }
+  return entry.description ?? "";
 }

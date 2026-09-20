@@ -48,12 +48,14 @@ const wsMaxMessageBytes = 64 << 10 // 64 KiB
 // an idle peer before closing the connection.
 const wsIdleTimeout = 5 * time.Minute
 
-// entityCommentCreator is the subset of the entity client needed to persist
-// conversation messages as comments and auto-resolve a conversation.
+// entityCommentCreator is the subset of the entity client needed to create
+// conversations, persist conversation messages as comments, and auto-resolve a
+// conversation.
 // GetProject resolves the project's owning account (and doubles as the
 // caller's access-control gate for that project) — see HandleWebSocket.
 type entityCommentCreator interface {
 	CreateComment(ctx context.Context, req entity.CreateCommentRequest) (entity.CreateCommentResponse, error)
+	CreateConversation(ctx context.Context, req entity.CreateConversationRequest) (entity.CreateConversationResponse, error)
 	UpdateConversation(ctx context.Context, id string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error)
 	GetConversation(ctx context.Context, id string) (entity.ConversationDetails, error)
 	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
@@ -100,13 +102,10 @@ type wsTokenValidator interface {
 }
 
 // WebSocketHandler proxies real-time chat messages between the browser and
-// the upstream AI chat agent for an existing conversation.
-//
-// NOTE: entity-service has no createConversation exposed over this
-// connection, so a WebSocket message that doesn't carry an existing
-// conversationId cannot start a brand-new conversation here — the caller
-// must first create one via
-// POST /projects/{id}/conversations (see handler.AIChatHandler.CreateConversation).
+// the upstream AI chat agent. When an incoming message does not carry an
+// existing conversationId, a new conversation is dynamically created via
+// entity-service and its ID is returned to the client in a conversation_created
+// event before streaming begins.
 // The AI agent's own reply IS persisted as a comment here (see
 // handleMessage), attributed to the assistant rather than to the customer
 // whose token relayed it, via entity.CreatedByAgent — the same as
@@ -322,6 +321,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	conn.SetReadLimit(wsMaxMessageBytes)
 
+	var activeConvID string
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(wsIdleTimeout)); err != nil {
 			slog.WarnContext(r.Context(), "websocket set read deadline failed", "userID", user.UserID, "err", summarizeErr(err))
@@ -334,11 +334,11 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 			}
 			return
 		}
-		h.handleMessage(r.Context(), conn, user, projectID, accountID, data)
+		h.handleMessage(r.Context(), conn, user, projectID, accountID, &activeConvID, data)
 	}
 }
 
-func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Conn, user *middleware.UserInfo, projectID, accountID string, data []byte) {
+func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Conn, user *middleware.UserInfo, projectID, accountID string, activeConvID *string, data []byte) {
 	trimmed := strings.TrimSpace(strings.ToLower(string(data)))
 	var parsed map[string]any
 	_ = json.Unmarshal(data, &parsed)
@@ -378,21 +378,59 @@ func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Co
 	// a write-after-close race, and it would diverge from the Ballerina backend,
 	// whose onMessage also forwards these inline.
 	if msgType, _ := parsed["type"].(string); msgType == msgTypeFeedback || msgType == msgTypeTokenIncreaseRequest {
-		h.handleSideChannel(ctx, conn, user, projectID, msgType, parsed)
+		h.handleSideChannel(ctx, conn, user, projectID, activeConvID, msgType, parsed)
 		return
 	}
 
 	conversationID, _ := parsed["conversationId"].(string)
-	if conversationID == "" || !uuidRe.MatchString(conversationID) {
-		_ = writeWSJSON(conn, wsEvent{
-			Type: "error",
-			Message: "Starting a new conversation over this connection isn't supported yet — " +
-				"include the conversationId of an existing conversation to resume it.",
-		})
-		return
-	}
-
 	userMessage, _ := parsed["message"].(string)
+
+	if conversationID != "" {
+		if !uuidRe.MatchString(conversationID) {
+			_ = writeWSJSON(conn, wsEvent{
+				Type:    "error",
+				Message: "Invalid conversation ID.",
+			})
+			return
+		}
+		if activeConvID != nil {
+			*activeConvID = conversationID
+		}
+	} else if activeConvID != nil && *activeConvID != "" {
+		conversationID = *activeConvID
+	} else {
+		// New conversation: create conversation dynamically in entity-service
+		if strings.TrimSpace(userMessage) == "" {
+			_ = writeWSJSON(conn, wsEvent{
+				Type:    "error",
+				Message: "Message is required to start a new conversation.",
+			})
+			return
+		}
+		convResp, err := h.entity.CreateConversation(ctx, entity.CreateConversationRequest{
+			ProjectID:      projectID,
+			InitialMessage: userMessage,
+		})
+		if err != nil {
+			slog.ErrorContext(ctx, "entity CreateConversation failed", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
+			_ = writeWSJSON(conn, wsEvent{
+				Type:    "error",
+				Message: "Failed to create a new conversation.",
+			})
+			return
+		}
+		conversationID = convResp.Conversation.ID
+		if activeConvID != nil {
+			*activeConvID = conversationID
+		}
+		if err := writeWSJSON(conn, wsEvent{
+			Type:           "conversation_created",
+			ConversationID: conversationID,
+		}); err != nil {
+			slog.WarnContext(ctx, "failed to send conversation_created event", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+			return
+		}
+	}
 	enriched, err := buildUpstreamPayload(parsed, conversationID, accountID)
 	if err != nil {
 		_ = writeWSJSON(conn, wsEvent{Type: "error", Message: "Failed to process message."})
@@ -486,8 +524,11 @@ func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Co
 // name into a durable audit row. So the field is either this session's user or
 // absent, never client-supplied — the upstream falls back to the account when it
 // is absent. Mirrors the Ballerina backend's onMessage side-channel branch.
-func (h *WebSocketHandler) handleSideChannel(ctx context.Context, conn *websocket.Conn, user *middleware.UserInfo, projectID, msgType string, parsed map[string]any) {
+func (h *WebSocketHandler) handleSideChannel(ctx context.Context, conn *websocket.Conn, user *middleware.UserInfo, projectID string, activeConvID *string, msgType string, parsed map[string]any) {
 	conversationID, _ := parsed["conversationId"].(string)
+	if conversationID == "" && activeConvID != nil && *activeConvID != "" {
+		conversationID = *activeConvID
+	}
 	if conversationID == "" || !uuidRe.MatchString(conversationID) {
 		// The client knows which answer it is rating even when this connection
 		// has not carried a turn yet, so a missing id is a client bug, not a

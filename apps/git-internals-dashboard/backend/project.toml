@@ -1,0 +1,7 @@
+# Google Cloud Buildpacks project descriptor, read by `pack build` from the
+# build context. Required because this module has two main packages
+# (cmd/server, cmd/seed) and no main package at the root, so the buildpack's
+# default of "." finds no Go files.
+[[build.env]]
+name = "GOOGLE_BUILDABLE"
+value = "./cmd/server"

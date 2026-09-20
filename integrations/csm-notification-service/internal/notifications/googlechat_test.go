@@ -358,6 +358,93 @@ func TestSendCaseCreatedAlert_RejectsEmptyCaseNumber(t *testing.T) {
 	}
 }
 
+// TestSendSecurityReportAnalysisAlert_SendsExpectedCard verifies the
+// security_report_analysis card's shape: same header convention as
+// SendCaseCreatedAlert (case reference + "🆕" marker as the title, case
+// title as the subtitle, unstyled), but a fixed "Security Report Analysis"
+// label in place of a severity line, since severity is never set for this
+// case type.
+func TestSendSecurityReportAnalysisAlert_SendsExpectedCard(t *testing.T) {
+	var capturedBody chatCardMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewGoogleChatClient(GoogleChatConfig{Spaces: []GoogleChatSpace{{Product: "api-manager", WebhookURL: srv.URL}}})
+
+	err := c.SendSecurityReportAnalysisAlert(context.Background(), "api-manager",
+		"CS0001001", "WSO2-1000", "WSO2 API Manager",
+		`Tom & Jerry <script>`, "Team Nova", "https://csm.example.com/cases/CASE-1")
+	if err != nil {
+		t.Fatalf("SendSecurityReportAnalysisAlert returned error: %v", err)
+	}
+
+	if len(capturedBody.CardsV2) != 1 {
+		t.Fatalf("CardsV2 length = %d, want 1", len(capturedBody.CardsV2))
+	}
+	card := capturedBody.CardsV2[0].Card
+	if card.Header == nil {
+		t.Fatal("Header = nil, want a header leading with the case reference")
+	}
+	if card.Header.Title != "🆕 CS0001001 · WSO2-1000" {
+		t.Errorf("Header.Title = %q, want %q", card.Header.Title, "🆕 CS0001001 · WSO2-1000")
+	}
+	if card.Header.Subtitle != `Tom & Jerry <script>` {
+		t.Errorf("Header.Subtitle = %q, want the case title verbatim", card.Header.Subtitle)
+	}
+	if len(card.Sections) != 1 || len(card.Sections[0].Widgets) != 1 {
+		t.Fatalf("unexpected sections/widgets shape: %+v — want a single text widget, no button", card.Sections)
+	}
+	want := `<font color="#5F6368">Team Nova</font><br><b>Security Report Analysis</b><br><b>WSO2 API Manager</b><br><a href="https://csm.example.com/cases/CASE-1">View case</a>`
+	if got := card.Sections[0].Widgets[0].TextParagraph.Text; got != want {
+		t.Errorf("card text = %q, want %q", got, want)
+	}
+}
+
+// TestSendSecurityReportAnalysisAlert_OmitsEmptyOptionalParts verifies
+// team/product are each dropped entirely when the caller doesn't supply
+// one — the fixed "Security Report Analysis" label and the "View case"
+// link are never omitted.
+func TestSendSecurityReportAnalysisAlert_OmitsEmptyOptionalParts(t *testing.T) {
+	var capturedBody chatCardMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewGoogleChatClient(GoogleChatConfig{Spaces: []GoogleChatSpace{{Product: "api-manager", WebhookURL: srv.URL}}})
+
+	err := c.SendSecurityReportAnalysisAlert(context.Background(), "api-manager",
+		"CS0001001", "", "", "", "", "https://csm.example.com/cases/CASE-1")
+	if err != nil {
+		t.Fatalf("SendSecurityReportAnalysisAlert returned error: %v", err)
+	}
+
+	card := capturedBody.CardsV2[0].Card
+	if card.Header.Title != "🆕 CS0001001" {
+		t.Errorf("Header.Title = %q, want just the 🆕 marker and case number with no WSO2CaseID separator", card.Header.Title)
+	}
+	if card.Header.Subtitle != "" {
+		t.Errorf("Header.Subtitle = %q, want empty when title is empty", card.Header.Subtitle)
+	}
+	want := `<b>Security Report Analysis</b><br><a href="https://csm.example.com/cases/CASE-1">View case</a>`
+	if got := card.Sections[0].Widgets[0].TextParagraph.Text; got != want {
+		t.Errorf("card text = %q, want %q", got, want)
+	}
+}
+
+func TestSendSecurityReportAnalysisAlert_RejectsEmptyCaseNumber(t *testing.T) {
+	c := NewGoogleChatClient(GoogleChatConfig{Spaces: []GoogleChatSpace{{Product: "api-manager", WebhookURL: "https://example.com"}}})
+	if err := c.SendSecurityReportAnalysisAlert(context.Background(), "api-manager", "", "WSO2-1000", "WSO2 API Manager", "title", "Team Nova", "https://example.com/cases/1"); err == nil {
+		t.Fatal("expected error for empty caseNumber, got nil")
+	}
+}
+
 // TestSendCaseAcknowledgedAlert_SendsExpectedCard verifies the
 // case.acknowledged card's three lines — no header, no button, no leading
 // icon on any of them (dropped for width on mobile — see

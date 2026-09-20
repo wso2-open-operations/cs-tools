@@ -28,6 +28,13 @@ vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: (...args: unknown[]) => useSearchGroupsMock(...(args as [])),
 }));
 
+// The "Requested by" picker (added for CR field parity) goes through the
+// same kind of backend-client-backed hook — stub it out identically.
+const useSearchUsersByNameMock = vi.fn(() => ({ data: [], isFetching: false, isError: false }));
+vi.mock("@api/useSearchUsersByName", () => ({
+  useSearchInternalUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
+}));
+
 /**
  * Stand-in for the rich-text editor: a textarea whose value is the HTML.
  *
@@ -287,6 +294,24 @@ describe("EditChangeRequestDialog — rollback and test plans", () => {
     });
     fireEvent.click(saveButton());
     expect(onSave).toHaveBeenCalledWith({ rollbackPlan: "<p>Roll back.</p>" });
+  });
+});
+
+describe("EditChangeRequestDialog — assigned engineer", () => {
+  it("renders an Assigned to picker alongside Assignment group", () => {
+    renderDialog();
+    expect(screen.getByLabelText(/^assigned to$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^assignment group$/i)).toBeInTheDocument();
+  });
+
+  it("seeds the known assignee's name when the CR already has one", () => {
+    renderDialog({ assignedEngineer: { id: "user-1", name: "Jane Doe" } });
+    expect(screen.getByLabelText(/^assigned to$/i)).toHaveValue("Jane Doe");
+  });
+
+  it("leaves Save disabled when nothing changed, even with an existing assignee", () => {
+    renderDialog({ assignedEngineer: { id: "user-1", name: "Jane Doe" } });
+    expect(saveButton()).toBeDisabled();
   });
 });
 

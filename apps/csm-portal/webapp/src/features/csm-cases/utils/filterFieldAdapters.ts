@@ -366,9 +366,9 @@ export function normalizeCasesFilters(filters: CasesFilters): CasesFilters {
  * Tags — it's Advanced-only now, see `CasesFilterBar.tsx`). Filters
  * expressible entirely within the Simple grid's fields (`severities`,
  * `states`, `caseTypes`, `assignees`, `workStates`, `projects`,
- * `engagementTypes`, `productNames`, `csTeams`, `onboardingStatuses`) can
- * still be represented in Simple mode regardless of this check — those
- * fields simply aren't in this list.
+ * `engagementTypes`, `productNames`, `csTeams`, `sreTeams`,
+ * `onboardingStatuses`) can still be represented in Simple mode regardless
+ * of this check — those fields simply aren't in this list.
  *
  * `excludeStates` DOES gate Simple mode now, same reasoning as `tags`/
  * `excludeTags`: the Simple grid's "State" control used to be a tri-state
@@ -383,7 +383,6 @@ export function isSimpleRepresentable(filters: CasesFilters): boolean {
     filters.tags.length === 0 &&
     filters.excludeTags.length === 0 &&
     filters.excludeStates.length === 0 &&
-    filters.sreTeams.length === 0 &&
     filters.projectTypes.length === 0 &&
     filters.escalationLevels.length === 0 &&
     filters.hasEscalation === null &&

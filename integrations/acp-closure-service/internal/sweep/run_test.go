@@ -300,8 +300,8 @@ func TestRun_SkipsExcludedProjectsInBroadSweep(t *testing.T) {
 			// failure. Its endDate being null instead would make
 			// processProject a silent no-op either way, so the
 			// zero-failures assertion below couldn't distinguish
-			// "never evaluated" from "evaluated but harmless" (PR #1482
-			// review, CodeRabbit).
+			// "never evaluated" from "evaluated but harmless" (per
+			// CodeRabbit).
 			return []byte(`{
 				"projects": [
 					{"id": "p1", "endDate": null},

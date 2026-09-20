@@ -60,18 +60,16 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// NewPoolFromConfig creates a Postgres connection pool from cfg's DSN, with a
-// 10s connect timeout.
-//
-// Only call this when cfg.HasDatabase() is true. When DATA_SOURCE=postgres a
-// pool is mandatory and Config.Validate already guarantees the DB variables
-// are present. When DATA_SOURCE=servicenow it is optional: entity reads and
-// writes go through the SN integration service instead, and the two
-// Postgres-only features — event_publish_failures (see
-// domain.EventPublishFailure) and sla_clocks — have no ServiceNow equivalent,
-// so their endpoints are simply not registered when no database is
-// configured. See internal/server/routes.go.
-func NewPoolFromConfig(cfg *config.Config) (*pgxpool.Pool, error) {
+// NewPoolIfNeeded creates a Postgres connection pool when one is needed.
+// When DATA_SOURCE=servicenow, case/account/etc. reads go through the SN
+// integration service, so no pool is opened and (nil, nil) is returned.
+// Side tables (event_publish_failures, sla_clocks, scheduled_task_run) have
+// no ServiceNow equivalent and are registered in routes.go only when a pool
+// is available — they must not block SN-mode startup (local customer-portal).
+func NewPoolIfNeeded(cfg *config.Config) (*pgxpool.Pool, error) {
+	if cfg.DataSource == config.DataSourceServiceNow {
+		return nil, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return NewPool(ctx, cfg.DSN())

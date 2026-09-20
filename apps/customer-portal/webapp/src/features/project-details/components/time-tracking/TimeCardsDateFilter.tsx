@@ -53,66 +53,60 @@ export default function TimeCardsDateFilter({
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 1.5,
-          flexWrap: "wrap",
-        }}
-      >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
         <Calendar size={18} />
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          Time Range:
+          Case Created Date :
         </Typography>
-        <DatePicker
-          value={parsedStart}
-          disableFuture
-          maxDate={parsedEnd ?? undefined}
-          onChange={(date) => {
-            onStartDateChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
-          }}
-          slotProps={{
-            textField: {
-              id: "time-cards-start-date",
-              size: "small",
-              sx: { minWidth: 160 },
-              slotProps: { htmlInput: { "aria-label": "Start date" } },
-            },
-            field: { clearable: true },
-          }}
-        />
-        <Typography variant="body2" color="text.secondary">
-          to
-        </Typography>
-        <DatePicker
-          value={parsedEnd}
-          disableFuture
-          minDate={parsedStart ?? undefined}
-          onChange={(date) => {
-            onEndDateChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
-          }}
-          slotProps={{
-            textField: {
-              id: "time-cards-end-date",
-              size: "small",
-              sx: { minWidth: 160 },
-              slotProps: { htmlInput: { "aria-label": "End date" } },
-            },
-            field: { clearable: true },
-          }}
-        />
-        {hasFilters && onClear && (
-          <Button
-            variant="text"
-            size="small"
-            onClick={onClear}
-            startIcon={<X size={16} />}
-            sx={{ color: "text.secondary" }}
-          >
-            Clear
-          </Button>
-        )}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+          <DatePicker
+            label="From"
+            value={parsedStart}
+            disableFuture
+            maxDate={parsedEnd ?? undefined}
+            onChange={(date) => {
+              onStartDateChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
+            }}
+            slotProps={{
+              textField: {
+                id: "time-cards-start-date",
+                size: "small",
+                sx: { minWidth: 160 },
+                slotProps: { htmlInput: { "aria-label": "Start date" } },
+              },
+              field: { clearable: true },
+            }}
+          />
+          <DatePicker
+            label="To"
+            value={parsedEnd}
+            disableFuture
+            minDate={parsedStart ?? undefined}
+            onChange={(date) => {
+              onEndDateChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
+            }}
+            slotProps={{
+              textField: {
+                id: "time-cards-end-date",
+                size: "small",
+                sx: { minWidth: 160 },
+                slotProps: { htmlInput: { "aria-label": "End date" } },
+              },
+              field: { clearable: true },
+            }}
+          />
+          {hasFilters && onClear && (
+            <Button
+              variant="text"
+              size="small"
+              onClick={onClear}
+              startIcon={<X size={16} />}
+              sx={{ color: "text.secondary" }}
+            >
+              Clear
+            </Button>
+          )}
+        </Box>
       </Box>
     </LocalizationProvider>
   );

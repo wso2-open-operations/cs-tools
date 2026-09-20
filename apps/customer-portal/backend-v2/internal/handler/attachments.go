@@ -35,6 +35,9 @@ type entityAttachmentClient interface {
 	GetAttachmentContent(ctx context.Context, id string) (body []byte, contentType string, err error)
 	DeleteAttachment(ctx context.Context, id string) (entity.DeleteAttachmentResponse, error)
 	GetAttachment(ctx context.Context, id string) (entity.AttachmentDetails, error)
+	// GetCase backs DeleteAttachment's closed-case guard only — this handler
+	// serves no case route of its own (see caseIsClosed in cases.go).
+	GetCase(ctx context.Context, id string) (entity.CaseView, error)
 }
 
 // AttachmentHandler handles HTTP requests for attachment operations.
@@ -135,7 +138,8 @@ func (h *AttachmentHandler) GetAttachmentContent(w http.ResponseWriter, r *http.
 	_, _ = w.Write(content) // #nosec G705 -- Content-Type set from entity-service's own sanitized value; Content-Disposition forces download, never inline rendering
 }
 
-// DeleteAttachment handles DELETE /attachments/{id}.
+// DeleteAttachment handles DELETE /attachments/{id}. Rejected with 400 when the
+// attachment belongs to a closed case (see caseIsClosed).
 func (h *AttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -147,6 +151,18 @@ func (h *AttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Requ
 	if id == "" || !isAttachmentID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
+	}
+
+	// This route is not nested under a case, so the case has to be recovered
+	// from the attachment's own referenceId before the closed-case rule can be
+	// applied. referenceId may name a deployment or conversation instead, in
+	// which case caseIsClosed's fail-open lookup leaves the delete untouched.
+	if attachment, err := h.entity.GetAttachment(r.Context(), id); err == nil && attachment.ReferenceID != "" {
+		if caseIsClosed(r.Context(), h.entity, attachment.ReferenceID) {
+			slog.WarnContext(r.Context(), "rejected attachment delete on a closed case", "userID", user.UserID, "attachmentID", id, "caseID", attachment.ReferenceID)
+			writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentDelete)
+			return
+		}
 	}
 
 	result, err := h.entity.DeleteAttachment(r.Context(), id)

@@ -190,6 +190,34 @@ export const SETTINGS = {
       },
     },
   },
+  aiAssistant: {
+    /** The section the toggles sit under. */
+    capabilitiesSection: "Support Capabilities",
+    novera: {
+      label: "AI Chat Assistant (Novera)",
+      /** The chip beside the label, which reports the current state. */
+      activeChip: "Active",
+      inactiveChip: "Inactive",
+      /** The Switch is labelled through `aria-labelledby`, so its accessible name
+       * is the section's label text. */
+      toggleName: "AI Chat Assistant (Novera)",
+      successMessage: "AI Chat Assistant (Novera) was updated successfully.",
+      /**
+       * Where Get Help leads once the assistant is on.
+       *
+       * `handleIssue` in GetHelpDropdown branches on the project's `hasAgent`:
+       * with it on the header's Get Help opens the Novera chat, with it off the
+       * create-case form. So this toggle decides that route, which is why the
+       * settings test follows it through.
+       */
+      getHelpPathWhenEnabled: "support/chat/describe-issue",
+      getHelpPathWhenDisabled: "support/chat/create-case",
+      /** The chat page's own prompt (DescribeIssuePage), which is what a user
+       * sees when the assistant is on — the URL alone does not show the page
+       * rendered. */
+      getHelpChatHeading: "What can we help you with?",
+    },
+  },
   display: {
     heading: "Display Preferences",
     fontSizeTitle: "Font Size",
@@ -305,6 +333,295 @@ export const UPDATES = {
   },
 } as const;
 
+/** The Novera chat, reached from Get Help once the assistant is enabled.
+ *
+ * Describing an issue starts a conversation: the page collects the text, runs it
+ * past a PII check, then navigates to `/support/chat`. */
+export const NOVERA_CHAT = {
+  describeIssue: {
+    pathSegment: "support/chat/describe-issue",
+    heading: "What can we help you with?",
+    /** The textarea's placeholder — an example issue, so it is matched on a
+     * distinctive fragment rather than in full. */
+    inputPlaceholder: /I'm experiencing API Gateway timeout issues/,
+    submitButton: "Submit & Get Help",
+    /** `CHAT_MAX_CHARS` — the cap `isMessageTooLong` measures against. */
+    maxChars: 4000,
+    /** Shown once the text is over the cap, quoting both numbers. */
+    tooLongMessage: (length: number, max: number) =>
+      `Message is too long (${length} characters). The maximum allowed is ${max} characters.`,
+  },
+  /** Where a submitted issue lands. */
+  conversationPathSegment: "support/chat",
+  /**
+   * The conversation's own path, once the backend has created it.
+   *
+   * Submitting navigates to `/support/chat` straight away and the id lands ~1–3s
+   * later (verified live). So matching the bare segment passes *before* the
+   * conversation exists — and a test that then navigates away aborts its
+   * creation, leaving no chat entry behind. The id is the signal that it is
+   * real.
+   */
+  conversationIdPattern: /\/support\/chat\/[0-9a-f]{32}$/,
+  conversation: {
+    /** Offered in two places on the chat page — beside the input and in the
+     * escalation banner — both reading "Create Case", so a locator for it takes
+     * the first. It carries the conversation into the case form as router state
+     * rather than as a query parameter. */
+    createCaseButton: "Create Case",
+    /** Where it leads: the same form the case suite uses, on the chat route. */
+    createCasePathSegment: "support/chat/create-case",
+  },
+  /**
+   * The chat history list (`/support/conversations`), reached from the Support
+   * Center's Chat History card.
+   */
+  history: {
+    pathSegment: "support/conversations",
+    searchPlaceholder: "Search chats by message, ID, or category...",
+    /**
+     * The two views the Chat History card's footer opens, and the heading each
+     * renders. Only the "mine" one carries a query parameter — the unfiltered
+     * view is the bare route.
+     */
+    views: {
+      mine: {
+        query: "createdByMe=true",
+        title: "My Chat History",
+        description: "Browse and search your conversation history with Novera",
+      },
+      all: {
+        title: "All Chat History",
+        description:
+          "Browse and search your complete conversation history with Novera",
+      },
+    },
+    /** Per-row action: "Resume" on an open conversation, "View" on a closed one
+     * (ConversationListRowAction). */
+    resumeButton: "Resume",
+    viewButton: "View",
+    /** ListResultsBar's count, with `entityLabel: "chat sessions"`. */
+    resultsCountPattern: /Showing (\d+) of (\d+) chat sessions/,
+    filtersButton: "Filters",
+    clearFiltersButton: (activeCount: number) =>
+      `Clear Filters (${activeCount})`,
+    /** The one filter conversations offer
+     * (ALL_CONVERSATIONS_FILTER_DEFINITIONS). Single-select, unlike the
+     * announcements status filter — so choosing an option closes the menu. */
+    stateFilter: {
+      selectId: "state",
+      label: "State",
+      /**
+       * The list's first option, meaning "no filter".
+       *
+       * Choosing it on an unfiltered list is a no-op — no request is sent at all
+       * — so a spec must pick a real state instead. Verified live: the options
+       * are All States, Close, Abandoned, Converted, Open, Resolved, Active.
+       * Note "Close" among them, the same wording the closed chip uses.
+       */
+      allOption: "All States",
+    },
+    /** Sort controls, from the shared ListResultsBar. Both fields are
+     * chronological, so the order labels read Newest/Oldest first throughout —
+     * there is no ordinal field here. */
+    sort: {
+      fieldSelectId: "list-sort-field",
+      orderSelectId: "list-sort-order",
+      fields: {
+        updatedOn: { label: "Updated on", value: "updatedOn" },
+        createdOn: { label: "Created on", value: "createdOn" },
+      },
+      orders: {
+        newestFirst: { label: "Newest first", value: "desc" },
+        oldestFirst: { label: "Oldest first", value: "asc" },
+      },
+    },
+    /** Also per row, and offered only while the conversation is resumable — the
+     * same rule that decides Resume vs View, so a closed one has neither. */
+    closeButton: "Close",
+    /** State chips the rows carry. A closed conversation loses both Close and
+     * Resume, and offers View instead.
+     *
+     * The closed chip reads "Close", not "Closed" — the same word as the button
+     * that closes it (verified live), so it is only unambiguous once that button
+     * is gone. */
+    activeState: "Active",
+    closedState: "Close",
+    /**
+     * The state a conversation reaches once a case has been raised from it.
+     *
+     * Terminal like Closed, so the row offers View rather than Resume
+     * (`isConversationResumable`). Verified live: creating a case flips the row
+     * straight from Active to Converted.
+     */
+    convertedState: "Converted",
+    /**
+     * Rows show the chat *number* — "CHAT000002814" — not the sysid the URL
+     * carries, and the sysid appears nowhere in the list (verified live). Nor
+     * does the conversation page show its number. So a conversation cannot be
+     * looked up by the id it was created with; the search has to go by its
+     * message, and the row is confirmed by where Resume lands.
+     */
+    numberPattern: /CHAT\d+/,
+  },
+  /**
+   * Where Resume lands: the conversation detail page, not the chat route.
+   *
+   * `/support/conversations/{id}` rather than `/support/chat/{id}` — the list
+   * hands the conversation to ConversationDetailsPage, which renders the same
+   * ChatInput when the conversation is resumable, so a follow-up can be posted
+   * from there.
+   *
+   * The message box only appears when the page is reached *through* the list:
+   * the row passes a `conversationSummary` in router state and the page derives
+   * the Resume action from it, so a direct visit to the same URL renders a
+   * read-only view with no input. Verified live.
+   */
+  resumedConversationPattern: /\/support\/conversations\/[0-9a-f]{32}$/,
+  /** The message box on an open conversation. */
+  message: {
+    inputPlaceholder: "Type your message...",
+    sendButton: "Send message",
+  },
+  /**
+   * The conversation detail page's summary panel.
+   *
+   * Rendered whether or not the conversation is resumable — a closed one reaches
+   * it through the row's View action, and shows the same fields without the
+   * message box. Verified live.
+   */
+  session: {
+    section: "Chat Session",
+    statusLabel: "Status",
+    chatNumberLabel: "Chat Number",
+    startedLabel: "Started",
+    messagesLabel: "Messages",
+    createdByLabel: "Created by",
+  },
+  /** The confirmation behind a row's Close control. */
+  closeDialog: {
+    title: "Close this chat?",
+    confirmButton: "Close chat",
+    cancelButton: "Cancel",
+  },
+  /**
+   * Shown on a resumed conversation that has no messages stored yet.
+   *
+   * A freshly created conversation is one of these: the question submitted on
+   * describe-issue is kept as the conversation's own `initialMessage` — which is
+   * what the history row displays — rather than as a message, so the detail page
+   * legitimately reports none. Verified live.
+   */
+  noMessagesText: "No messages found for this conversation.",
+  /**
+   * The case form as it arrives from a conversation.
+   *
+   * Unlike the Get Help route — which passes `skipChat` and leaves the form
+   * blank — this one arrives pre-populated from the chat: Deployment and Product
+   * Version are auto-detected, the title and description are generated, and the
+   * conversation is summarised alongside. Verified live.
+   *
+   * So the flow here is review-and-submit rather than fill-and-submit, and a spec
+   * that selects the deployment finds no placeholder to match.
+   */
+  generatedCaseForm: {
+    aiBadge: "AI Generated",
+    autoDetectedHint: "Auto detected",
+    titleHint: "Generated from chat",
+    conversationSummarySection: "Conversation Summary",
+    reviewHint:
+      "Please review and edit the auto-populated information before submitting",
+  },
+} as const;
+
+/** Engagements page (`/projects/:projectId/engagements`), reached from the side
+ * nav. A detail page is the case detail page on the engagement route, so its
+ * tabs and controls are the case ones. */
+export const ENGAGEMENTS = {
+  navItem: "Engagements",
+  pathSegment: "engagements",
+  searchPlaceholder: "Search engagements",
+  /**
+   * The three stat cards, and the list heading each one filters to.
+   *
+   * Clicking a card narrows the list in place — the title and subtitle change,
+   * the URL does not — so the heading is the only evidence the filter applied.
+   */
+  statCards: [
+    {
+      label: "Outstanding Engagements",
+      title: "Outstanding Engagements",
+      subtitle: "Active engagements without closed state",
+    },
+    {
+      label: "Completed",
+      title: "Completed Engagements",
+      subtitle: "Engagements in closed state",
+    },
+    {
+      label: "On Hold",
+      title: "On Hold Engagements",
+      subtitle: "Engagements awaiting info or action",
+    },
+  ],
+  /**
+   * There is no list heading until a card is chosen.
+   *
+   * EngagementsPage renders either the stat cards *or* a title, never both:
+   * `showSimplifiedView` is false until a stat filter is applied, and the title
+   * comes from the active stat key — which starts undefined. So a freshly opened
+   * page shows three cards and no heading, and choosing a card replaces the cards
+   * with the heading.
+   */
+  noHeadingUntilFiltered: true,
+  /** Sort controls, from the shared ListResultsBar. Status is ordinal, so its
+   * order labels read Descending/Ascending rather than Newest/Oldest first. */
+  sort: {
+    fieldSelectId: "list-sort-field",
+    orderSelectId: "list-sort-order",
+    fields: {
+      updatedOn: { label: "Updated on", value: "updatedOn" },
+      createdOn: { label: "Created on", value: "createdOn" },
+      status: { label: "Status", value: "state" },
+    },
+    orders: {
+      newestFirst: { label: "Newest first", value: "desc" },
+      oldestFirst: { label: "Oldest first", value: "asc" },
+    },
+  },
+  /**
+   * The listing page's Back control, and the one on an engagement's detail page —
+   * both read "Back".
+   *
+   * On the listing it only renders once a stat card has been chosen (or the page
+   * was opened with a `returnTo`), and in the stat-filter case it does not
+   * navigate: `clearStatFilter()` drops the filter and the page returns to the
+   * cards. On a detail page it goes back to the list.
+   */
+  backButton: "Back",
+  filtersButton: "Filters",
+  clearFiltersButton: (activeCount: number) => `Clear Filters (${activeCount})`,
+  /** Row number, matched within the card's whole text — engagements are cases
+   * underneath, so rows carry a "CS" number. Unanchored, since `hasText` sees the
+   * card's concatenated text. */
+  numberPattern: /CS\d+/,
+  /** The Details tab's engagement-specific sections and fields. */
+  details: {
+    overviewSection: "Engagement Overview",
+    overviewLabels: [
+      "Engagement ID",
+      "WSO2 Case ID",
+      "Status",
+      "Engagement Type",
+      "Created by",
+      "Created Date",
+      "Last Updated",
+    ],
+    customerSection: "Customer Information",
+    customerLabels: ["Organization", "Project"],
+  },
+} as const;
+
 /** Announcements list (`/projects/:projectId/announcements`), reached from the
  * side nav. Announcements are cases underneath, so their rows carry a "CS"
  * number and the detail page reuses the case header. */
@@ -321,6 +638,16 @@ export const ANNOUNCEMENTS_LIST = {
    * same reason the change-request pattern is. */
   numberPattern: /CS\d+/,
   /** Opens the filter panel; becomes "Clear Filters (n)" once one is applied. */
+  /**
+   * The listing page's Back control, and the one on an engagement's detail page —
+   * both read "Back".
+   *
+   * On the listing it only renders once a stat card has been chosen (or the page
+   * was opened with a `returnTo`), and in the stat-filter case it does not
+   * navigate: `clearStatFilter()` drops the filter and the page returns to the
+   * cards. On a detail page it goes back to the list.
+   */
+  backButton: "Back",
   filtersButton: "Filters",
   clearFiltersButton: (activeCount: number) => `Clear Filters (${activeCount})`,
   /** The only filter announcements offer (ANNOUNCEMENT_FILTER_DEFINITIONS), and
@@ -625,6 +952,48 @@ export const SECURITY_CENTER = {
    * date-stamped generated title. */
   searchPlaceholder: /Search reports/,
   emptyMessage: "No reports found.",
+  navItem: "Security Center",
+  tabs: {
+    securityReportAnalysis: "Security Report Analysis",
+    componentAnalysis: "Component Analysis",
+  },
+  /** The Component Analysis tab (ProductVulnerabilitiesTable).
+   *
+   * ⚠️ Its search, filters and pagination are all CLIENT-side: the table fetches
+   * the whole dataset once via POST /product-vulnerabilities/search and narrows
+   * it in a `useMemo`. So unlike the case and conversation lists, there is no
+   * per-search request to wait on — assertions have to be made against rendered
+   * rows, and a test that waits for a response after typing will hang.
+   *
+   * The tab is permission-gated on `hasComponentAnalysis`, and is selected via
+   * a `?tab=` query param rather than local state. */
+  componentAnalysis: {
+    tabId: "components",
+    title: "Component Analysis",
+    /** Matches cveId, componentName OR vulnerabilityId, case-insensitively. */
+    searchPlaceholder: "Search CVE or component",
+    /** PRODUCT_VULNERABILITIES_SEARCH_DEBOUNCE_MS. A count read sooner than
+     * this after typing is a count of the PREVIOUS state — which looks exactly
+     * like a search that matched everything. */
+    searchDebounceMs: 350,
+    emptyMessage: "No vulnerabilities found.",
+    filtersButton: "Filters",
+    clearFiltersButton: "Clear Filters",
+    filters: {
+      severityLabel: "Severity",
+      /** The no-filter option in each select — excluded when picking a real
+       * value, the same trap as the chat history's "All States". */
+      severityAllOption: "All Severity",
+      productLabel: "Product",
+      productPlaceholder: "Select a Product",
+      productAllOption: "All Products",
+      productVersionLabel: "Product Version",
+      productVersionPlaceholder: "Select a Product Version",
+      productVersionAllOption: "All Versions",
+    },
+    /** Rows are keyed by CVE, e.g. "CVE-2024-1234". */
+    cvePattern: /CVE-\d{4}-\d+/,
+  },
 } as const;
 
 /** The comment box on a case's Activity tab (ActivityCommentInput). */
@@ -1042,6 +1411,13 @@ export const SUPPORT_CENTER = {
     myCasesButton: "View my cases",
     allCasesButton: "View all cases",
   },
+  /** The Chat History card, beside Outstanding Cases. Its footer buttons open
+   * the conversations list, filtered or not. */
+  chatHistory: {
+    title: "Chat History",
+    myChatHistoryButton: "View my chat history",
+    allChatHistoryButton: "View all chat history",
+  },
   /** Every list reached from Support Center offers this, because the card sets
    * `returnTo` on navigation. The cases list falls back to a plain "Back" when
    * it is opened any other way, so this label doubles as a check that the
@@ -1133,6 +1509,99 @@ export const CASES_LIST = {
  * case offers the "Closed" action, rendered in present tense as "Close" by
  * `toPresentTenseActionLabel`. Clicking it opens a confirmation dialog rather
  * than closing outright. */
+/** The Escalate Case action and its modal (CaseDetailsActionRow +
+ * EscalateCaseModal).
+ *
+ * Escalation walks a case up five levels, EL1..EL5. A freshly created case sits
+ * at level 0, so the first escalation is EL0 → EL1 and notifies the Team Lead.
+ *
+ * The action is not universally available, and the conditions are worth knowing
+ * before writing an assertion against it (`showEscalateButton`):
+ *   - the case carries an escalation level at all (null hides the button),
+ *   - its status is not "Closed",
+ *   - it is not already at EL5 (ESCALATION_MAX_LEVEL_ID), and
+ *   - levels 3 and 4 additionally require the current user to be a project Lead
+ *     (ESCALATION_LEAD_REQUIRED_FROM_LEVEL) — so a non-Lead can escalate a new
+ *     case to EL1 but cannot take one past EL3.
+ */
+export const CASE_ESCALATION = {
+  /** Opens the modal. Present only under the conditions above. */
+  button: "Escalate Case",
+  /** Appears once a case is escalated, and is how the detail page shows the
+   * escalation took effect. */
+  deescalateButton: "De-escalate Case",
+  modal: {
+    /** Title interpolates the notified role, e.g. "Escalate to Team Lead
+     * Escalation" for the EL0 → EL1 step. Matched as a pattern because the role
+     * changes with the level. */
+    titlePattern: /Escalate to .+ Escalation/,
+    currentLevelLabel: "Current Level:",
+    nextLevelLabel: "Next Level:",
+    notifiedLabel: "Who will be notified:",
+    /** The reason textarea. It carries an explicit aria-label, unlike most
+     * fields in this app. */
+    reasonField: "Reason for escalation",
+    /** Reads "Escalating..." while the POST is in flight. */
+    confirmButton: "Confirm Escalation",
+    cancelButton: "Cancel",
+  },
+  /** Role notified at each step, keyed by the level being escalated FROM.
+   * Mirrors ESCALATION_NEXT_LEVEL in supportConstants.ts. */
+  notifiedRole: {
+    "0": "Team Lead",
+    "1": "Technology Unit Head",
+    "2": "CRE Head",
+    "3": "CCO / CRO",
+    "4": "CEO",
+  } as Record<string, string>,
+  /** Toast shown by the action row on success. */
+  successMessage: "Case escalated successfully.",
+  /** Header chip shown once a case is escalated, e.g. "Escalated to EL1".
+   *
+   * The level here is the API's own `escalationLevel.label`, not a string the
+   * UI builds from the id — so asserting it is a check that the backend
+   * recorded the new level, not just that the modal closed. */
+  escalatedChip: (level: string): string => `Escalated to ${level}`,
+  /** The case detail tab holding the history. Like Attachments and Calls, the
+   * label carries a live count — "Escalation (0)" before the first escalation,
+   * "Escalation (1)" after — so it is matched by prefix, never exactly. */
+  tab: /^Escalation/,
+  /** The same label with its count captured, for asserting the tally moved. */
+  tabCountPattern: /^Escalation \((\d+)\)/,
+  history: {
+    /** Panel heading inside the Escalation tab. */
+    heading: "Escalation History",
+    /** Shown when a case has never been escalated. */
+    emptyMessage: "No escalations recorded for this case.",
+    /** Each record renders a previous-level and a current-level chip; the panel
+     * also pins the case's initial EL0 state at the bottom of the list. So
+     * after a first escalation "EL0" appears more than once and "EL1" exactly
+     * once — assert counts accordingly. */
+    levelLabel: (level: number): string => `EL${level}`,
+  },
+  /** Level ids 3 and 4 need a project Lead to go further. */
+  leadRequiredFromLevels: ["3", "4"],
+  /** The De-escalate modal.
+   *
+   * Unlike escalation, the reason here is OPTIONAL — Confirm De-escalation is
+   * gated only on the request being in flight — so a test must not assert the
+   * button is disabled while the field is empty. */
+  deescalateModal: {
+    title: "De-escalate Case",
+    subtitle: "This will remove the escalation from this case.",
+    reasonField: "Reason for de-escalation",
+    /** Reads "De-escalating..." while the POST is in flight. */
+    confirmButton: "Confirm De-escalation",
+    cancelButton: "Cancel",
+  },
+  /** Toast shown on a successful de-escalation. */
+  deescalateSuccessMessage: "Case de-escalated successfully.",
+  /** Who may de-escalate: a CS admin, a project Lead, or — at levels 1-3 only —
+   * whoever raised the escalation (ESCALATION_DEESCALATE_CREATOR_ELIGIBLE_LEVELS).
+   * The test account qualifies on the last of those, having just escalated. */
+  deescalateCreatorEligibleLevels: ["1", "2", "3"],
+} as const;
+
 export const CASE_DETAIL = {
   /** URL segment every case detail page carries. */
   pathSegment: "support/cases",

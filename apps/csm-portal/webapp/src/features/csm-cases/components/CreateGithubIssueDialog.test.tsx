@@ -15,9 +15,38 @@
 // under the License.
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
+import { useGetGithubIssueRepoOptions } from "@features/csm-cases/api/useGetGithubIssueRepoOptions";
+
+// CreateGithubIssueDialog consumes this hook directly; mock the hook module
+// itself (per this app's testing convention — mock the hook when testing a
+// component that just consumes an already-built hook) rather than the
+// backend client it wraps.
+vi.mock("@features/csm-cases/api/useGetGithubIssueRepoOptions", () => ({
+  useGetGithubIssueRepoOptions: vi.fn(),
+}));
+
+const mockUseGetGithubIssueRepoOptions = vi.mocked(useGetGithubIssueRepoOptions);
+
+const REPO_OPTIONS_FIXTURE = [
+  { value: "asgardeo", displayLabel: "Asgardeo", owner: "wso2-enterprise", repo: "wso2-iam-internal" },
+  {
+    value: "choreo",
+    displayLabel: "WSO2 Developer Platform (Choreo)",
+    owner: "wso2-enterprise",
+    repo: "choreo",
+  },
+];
+
+beforeEach(() => {
+  mockUseGetGithubIssueRepoOptions.mockReturnValue({
+    data: REPO_OPTIONS_FIXTURE,
+    isLoading: false,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+});
 
 function selectType(typeLabel: string): void {
   fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type/i }));
@@ -164,6 +193,121 @@ describe("CreateGithubIssueDialog — stale per-type fields don't leak into the 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.not.objectContaining({ hotFixRequired: true }),
     );
+  });
+});
+
+describe("CreateGithubIssueDialog — repo options (showRepoField)", () => {
+  it("resolves the selected option's real owner/repo into repoOverride, not a hardcoded owner", () => {
+    const onSubmit = vi.fn();
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        showRepoField
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /choose repository/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Asgardeo" }));
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /file issue/i }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoOverride: { owner: "wso2-enterprise", repo: "wso2-iam-internal" },
+      }),
+    );
+  });
+
+  it("shows the resolved owner/repo (not a hardcoded string) on the confirm step", () => {
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        showRepoField
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /choose repository/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Asgardeo" }));
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+    const confirmDialog = screen.getByRole("dialog", {
+      name: /file this github issue/i,
+    });
+    expect(
+      within(confirmDialog).getByText(/wso2-enterprise\/wso2-iam-internal \(Asgardeo\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the repo select while options are loading, instead of rendering broken values", () => {
+    mockUseGetGithubIssueRepoOptions.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        showRepoField
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: /choose repository/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("keeps Create issue disabled while repo options are still loading, even with every other field filled", () => {
+    mockUseGetGithubIssueRepoOptions.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        showRepoField
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    // No repo can be selected yet — the select itself is disabled — so
+    // submitting now would silently omit repoOverride for a cloud case.
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
+  });
+
+  it("keeps Create issue disabled when the repo options fetch has failed", () => {
+    mockUseGetGithubIssueRepoOptions.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    render(
+      <CreateGithubIssueDialog
+        open
+        submitting={false}
+        error={null}
+        showRepoField
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
   });
 });
 

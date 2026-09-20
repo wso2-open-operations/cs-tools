@@ -76,12 +76,12 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.slices).toEqual([
       {
         label: "Critical",
-        query: { filters: [{ field: "severity", op: "eq", values: ["critical"] }] },
+        query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
         value: 3,
       },
       {
         label: "High",
-        query: { filters: [{ field: "severity", op: "eq", values: ["high"] }] },
+        query: { filters: [{ field: "severity", op: "in", values: ["high"] }] },
         value: 5,
       },
       { label: "Others", query: {}, navigable: false, value: 2 },
@@ -89,7 +89,7 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.total).toBe(10);
   });
 
-  it("scopes a non-case resourceType's named bucket to a flat top-level key", async () => {
+  it("scopes a resourceType with no case-DSL/filter-array/named-array field (e.g. incident_task) to a flat top-level key", async () => {
     postMock.mockResolvedValue({
       groups: [{ key: "P1", label: "P1", count: 4 }],
       othersCount: 0,
@@ -97,13 +97,78 @@ describe("useWidgetGroupByData", () => {
     });
 
     const { result } = renderHook(
-      () => useWidgetGroupByData("widget-1", "incident", {}, { field: "priority" }),
+      () => useWidgetGroupByData("widget-1", "incident_task", {}, { field: "priority" }),
       { wrapper },
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.slices).toEqual([{ label: "P1", query: { priority: "P1" }, value: 4 }]);
+  });
+
+  it("scopes an incident's state bucket to the nested filter-array shape with op 'in', not a flat key", async () => {
+    postMock.mockResolvedValue({
+      groups: [{ key: "NEW", label: "New", count: 4 }],
+      othersCount: 0,
+      totalRecords: 4,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "incident", {}, { field: "state" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices).toEqual([
+      {
+        label: "New",
+        query: { filters: [{ field: "state", op: "in", values: ["NEW"] }] },
+        value: 4,
+      },
+    ]);
+  });
+
+  it("scopes a problem's state bucket to the nested filter-array shape with op 'in', not a flat key", async () => {
+    postMock.mockResolvedValue({
+      groups: [{ key: "NEW", label: "New", count: 2 }],
+      othersCount: 0,
+      totalRecords: 2,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "problem", {}, { field: "state" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices).toEqual([
+      {
+        label: "New",
+        query: { filters: [{ field: "state", op: "in", values: ["NEW"] }] },
+        value: 2,
+      },
+    ]);
+  });
+
+  it("scopes a change_request's state bucket to the bespoke plural 'states' top-level array field", async () => {
+    postMock.mockResolvedValue({
+      groups: [{ key: "-5", label: "New", count: 6 }],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "change_request", {}, { field: "state" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices).toEqual([
+      { label: "New", query: { states: ["-5"] }, value: 6 },
+    ]);
   });
 
   it("marks the synthetic Others bucket non-navigable rather than giving it an unscoped query", async () => {
@@ -145,7 +210,7 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.slices).toEqual([
       {
         label: "Critical",
-        query: { filters: [{ field: "severity", op: "eq", values: ["critical"] }] },
+        query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
         value: 3,
       },
       { label: "Everything else", query: {}, navigable: false, value: 4 },
@@ -170,7 +235,7 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.slices).toEqual([
       {
         label: "Critical",
-        query: { filters: [{ field: "severity", op: "eq", values: ["critical"] }] },
+        query: { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
         value: 3,
       },
     ]);

@@ -176,9 +176,7 @@ func main() {
 	productHandler := handler.NewProductHandler(entityClient)
 	changeRequestHandler := handler.NewChangeRequestHandler(entityClient)
 	callRequestHandler := handler.NewCallRequestHandler(entityClient)
-	accountHandler := handler.NewAccountHandler(entityClient)
 	updatesHandler := handler.NewUpdatesHandler(updatesClient)
-	commentHandler := handler.NewCommentHandler(entityClient)
 	productVulnerabilityHandler := handler.NewProductVulnerabilityHandler(entityClient)
 	catalogHandler := handler.NewCatalogHandler(entityClient)
 	timeCardHandler := handler.NewTimeCardHandler(entityClient)
@@ -202,6 +200,7 @@ func main() {
 
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
+	mux.HandleFunc("PATCH /projects/{id}", projectHandler.PatchProject)
 	mux.HandleFunc("GET /projects/{id}/filters", projectStatsHandler.GetProjectFilters)
 	mux.HandleFunc("GET /projects/{id}/features", projectStatsHandler.GetProjectFeatures)
 	mux.HandleFunc("GET /projects/{id}/stats", projectStatsHandler.GetProjectDashboardStats)
@@ -279,14 +278,11 @@ func main() {
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/metrics/search", instanceHandler.SearchDeployedProductInstanceMetricsStats)
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/usages/search", instanceHandler.SearchDeployedProductInstanceUsageStats)
 
-	mux.HandleFunc("POST /attachments", attachmentHandler.CreateAttachment)
-	mux.HandleFunc("POST /attachments/search", attachmentHandler.SearchAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", attachmentHandler.GetAttachmentContent)
 	mux.HandleFunc("GET /attachments/{id}", attachmentHandler.GetAttachment)
 	mux.HandleFunc("DELETE /attachments/{id}", attachmentHandler.DeleteAttachment)
 
 	mux.HandleFunc("GET /products", productHandler.GetProducts)
-	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
 
 	// entity-service only supports change requests and call requests on its
@@ -302,12 +298,6 @@ func main() {
 	mux.HandleFunc("POST /cases/{caseId}/call-requests", callRequestHandler.CreateCallRequest)
 	mux.HandleFunc("POST /cases/{caseId}/call-requests/search", callRequestHandler.SearchCallRequests)
 	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{id}", callRequestHandler.PatchCallRequest)
-
-	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
-	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
-
-	mux.HandleFunc("POST /comments", commentHandler.CreateComment)
-	mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
 
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)

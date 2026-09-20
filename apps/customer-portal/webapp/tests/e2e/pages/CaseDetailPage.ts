@@ -24,6 +24,7 @@ import {
   CASE_COMMENT_INPUT,
   CASE_DETAIL,
   CASE_DETAILS_PANEL,
+  CASE_ESCALATION,
 } from "../utils/selectors";
 import { isSuccess } from "../utils/caseFlows";
 
@@ -166,13 +167,19 @@ export class CaseDetailPage {
   //
 
   /** Switches to the Details tab and waits for its first section. */
-  async openDetailsTab(): Promise<void> {
+  async openDetailsTab(
+    expectedSection: string = CASE_DETAILS_PANEL.sections.caseOverview,
+  ): Promise<void> {
     await this.page
       .getByRole("tab", { name: CASE_DETAILS_PANEL.tab, exact: true })
       .click();
-    await expect(
-      this.detailsText(CASE_DETAILS_PANEL.sections.caseOverview),
-    ).toHaveCount(1, { timeout: LOAD_TIMEOUT_MS });
+    // The first section's title names the record type: a case shows "Case
+    // Overview", an engagement "Engagement Overview" (CaseDetailsDetailsPanel).
+    // Waiting on the case wording for an engagement never resolves — it looks
+    // like the tab is stuck loading.
+    await expect(this.detailsText(expectedSection)).toHaveCount(1, {
+      timeout: LOAD_TIMEOUT_MS,
+    });
   }
 
   /**
@@ -280,6 +287,191 @@ export class CaseDetailPage {
           isSuccess(r.status()),
       ),
       this.confirmButton().click(),
+    ]);
+    return response;
+  }
+
+  /** The Escalate Case action in the header row.
+   *
+   * Scoped to <main> for the same reason the Close action is: the page chrome
+   * outside it carries its own controls. */
+  escalateButton(): Locator {
+    return this.main().getByRole("button", {
+      name: CASE_ESCALATION.button,
+      exact: true,
+    });
+  }
+
+  /** The De-escalate action, which exists only once a case is escalated —
+   * `showDeescalateButton` is driven by the case's own `isEscalated`, so its
+   * presence is the detail page's own account of the escalation, independent of
+   * the toast. */
+  deescalateButton(): Locator {
+    return this.main().getByRole("button", {
+      name: CASE_ESCALATION.deescalateButton,
+      exact: true,
+    });
+  }
+
+  /** The escalation modal. Addressed by its title rather than as the only
+   * dialog, so it cannot be confused with the state-change confirm dialog. */
+  escalateDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: CASE_ESCALATION.modal.titlePattern });
+  }
+
+  /** A level chip inside the modal, e.g. "EL0" for current or "EL1" for next.
+   *
+   * Both chips render the same shape of text, so this matches exactly to keep
+   * "EL1" from also matching a hypothetical "EL1x", and the caller scopes by
+   * which value it expects rather than by position. */
+  escalationLevelChip(level: string): Locator {
+    return this.escalateDialog().getByText(level, { exact: true });
+  }
+
+  /** The mandatory reason textarea. */
+  escalationReasonInput(): Locator {
+    return this.escalateDialog().getByLabel(
+      CASE_ESCALATION.modal.reasonField,
+    );
+  }
+
+  /** Confirms the escalation. Disabled until the reason is non-empty. */
+  confirmEscalationButton(): Locator {
+    return this.escalateDialog().getByRole("button", {
+      name: CASE_ESCALATION.modal.confirmButton,
+    });
+  }
+
+  /**
+   * Opens the escalation modal and waits for it to be ready to fill.
+   *
+   * Waits for the reason field rather than the dialog alone: the modal mounts
+   * with its level chips still resolving, and a caller that asserts on them the
+   * moment the dialog appears races that render.
+   */
+  async openEscalateModal(): Promise<void> {
+    await expect(this.escalateButton()).toBeEnabled();
+    await this.escalateButton().click();
+    await expect(this.escalateDialog()).toBeVisible();
+    await expect(this.escalationReasonInput()).toBeVisible();
+  }
+
+  /**
+   * Fills the reason and confirms, returning the escalation's POST response.
+   *
+   * Asserts on the wire rather than on the toast alone — the modal reports
+   * success from the mutation callback, so the response is the only direct
+   * evidence the backend recorded the escalation.
+   *
+   * @param reason - Reason text; the confirm button stays disabled while empty.
+   * @returns The successful POST response, for asserting on the request body.
+   */
+  async confirmEscalation(reason: string): Promise<Response> {
+    await this.escalationReasonInput().fill(reason);
+    await expect(this.confirmEscalationButton()).toBeEnabled();
+
+    const [response] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          /\/cases\/[^/]+\/escalations$/.test(r.url()) &&
+          r.request().method() === "POST" &&
+          isSuccess(r.status()),
+      ),
+      this.confirmEscalationButton().click(),
+    ]);
+    return response;
+  }
+
+  /** The header chip reporting the case's escalation level, e.g.
+   * "Escalated to EL1". */
+  escalatedChip(level: string): Locator {
+    return this.main()
+      .getByText(CASE_ESCALATION.escalatedChip(level), { exact: true })
+      .first();
+  }
+
+  /**
+   * Switches to the Escalation tab and waits for the history panel.
+   *
+   * Waits on the heading rather than the tab's selected state: the panel
+   * fetches its own records, so a caller asserting on a level the moment the
+   * tab activates races that request.
+   */
+  async openEscalationTab(): Promise<void> {
+    await this.page.getByRole("tab", { name: CASE_ESCALATION.tab }).click();
+    await expect(
+      this.detailsText(CASE_ESCALATION.history.heading),
+    ).toHaveCount(1, { timeout: LOAD_TIMEOUT_MS });
+  }
+
+  /** Level chips within the escalation history, e.g. "EL1".
+   *
+   * Returns every match: a single escalation renders EL0 as both the record's
+   * previous level and the pinned initial state, so the count is meaningful
+   * per level and the caller asserts on it. */
+  escalationHistoryLevel(level: number): Locator {
+    return this.main().getByText(CASE_ESCALATION.history.levelLabel(level), {
+      exact: true,
+    });
+  }
+
+  /** The de-escalation modal, matched by its title. */
+  deescalateDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: CASE_ESCALATION.deescalateModal.title });
+  }
+
+  /** The optional reason textarea in the de-escalation modal. */
+  deescalationReasonInput(): Locator {
+    return this.deescalateDialog().getByLabel(
+      CASE_ESCALATION.deescalateModal.reasonField,
+    );
+  }
+
+  confirmDeescalationButton(): Locator {
+    return this.deescalateDialog().getByRole("button", {
+      name: CASE_ESCALATION.deescalateModal.confirmButton,
+    });
+  }
+
+  /**
+   * Opens the de-escalation modal and waits for it to be ready.
+   *
+   * The button is permission-gated and rendered disabled inside a tooltip when
+   * the user may not de-escalate, so this waits for it to be enabled rather
+   * than clicking into a no-op.
+   */
+  async openDeescalateModal(): Promise<void> {
+    await expect(this.deescalateButton()).toBeEnabled({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await this.deescalateButton().click();
+    await expect(this.deescalateDialog()).toBeVisible();
+    await expect(this.deescalationReasonInput()).toBeVisible();
+  }
+
+  /**
+   * Confirms the de-escalation, optionally with a reason.
+   *
+   * @param reason - Optional reason; omitted entirely from the payload when
+   *   blank, which is what the modal itself does.
+   * @returns The successful POST response.
+   */
+  async confirmDeescalation(reason?: string): Promise<Response> {
+    if (reason) await this.deescalationReasonInput().fill(reason);
+    await expect(this.confirmDeescalationButton()).toBeEnabled();
+
+    const [response] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          /\/cases\/[^/]+\/escalations$/.test(r.url()) &&
+          r.request().method() === "POST" &&
+          isSuccess(r.status()),
+      ),
+      this.confirmDeescalationButton().click(),
     ]);
     return response;
   }

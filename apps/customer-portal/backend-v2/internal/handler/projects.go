@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -31,6 +32,7 @@ import (
 type entityProjectClient interface {
 	SearchProjects(ctx context.Context, req entity.SearchProjectsRequest) (entity.SearchProjectsResponse, error)
 	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
+	UpdateProject(ctx context.Context, id string, req entity.UpdateProjectRequest) (entity.UpdateProjectResponse, error)
 }
 
 // ProjectHandler handles HTTP requests for project operations.
@@ -94,4 +96,62 @@ func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONValue(w, http.StatusOK, dto.MapProjectDetails(result))
+}
+
+// PatchProject handles PATCH /projects/{id}: the AI chat assistant (Novera)
+// settings for a project.
+//
+// EXACTLY ONE FIELD PER REQUEST. entity-service rejects anything else, and the
+// Ballerina backend this replaces checked the same thing before calling it
+// ("Only one field can be updated at a time."). Checking here turns a round
+// trip that comes back 400 into an immediate, specific message.
+//
+// Both fields are pointers for that check to be possible at all: with plain
+// bools, a request setting hasAgent=false is indistinguishable from one that
+// omits it, so every request would look like it set both and none would pass.
+func (h *ProjectHandler) PatchProject(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+
+	// Strict decode. The Ballerina payload this replaces is a CLOSED record
+	// (record {| ... |}), so it rejects a property it does not declare, and
+	// openapi.yaml says additionalProperties: false. Silently dropping an
+	// unknown field would mean a caller misspelling hasKbReferences gets a 200
+	// and no change.
+	var req entity.UpdateProjectRequest
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if req.FieldCount() != 1 {
+		writeError(w, http.StatusBadRequest, "Only one field can be updated at a time.")
+		return
+	}
+
+	result, err := h.entity.UpdateProject(r.Context(), id, req)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateProject failed",
+			"userID", user.UserID, "projectID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update project settings.")
+		return
+	}
+
+	// The Ballerina resource returns response.project, not the whole envelope.
+	writeJSONValue(w, http.StatusOK, dto.MapUpdatedProject(result.Project))
 }

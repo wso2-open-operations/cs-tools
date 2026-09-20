@@ -328,6 +328,19 @@ export default function CaseDetailsDetailsPanel({
               </Typography>
             </Box>
           ) : null}
+          {data?.relatedCase?.id ? (
+            <Box>
+              <Typography {...labelSx}>Related Case</Typography>
+              <Link
+                to={`/projects/${projectId}/support/cases/${data.relatedCase.id}`}
+                state={{ returnTo: location.pathname + location.search }}
+              >
+                <Typography {...valueSx} color="primary.main">
+                  {formatValue(data.relatedCase.label)}
+                </Typography>
+              </Link>
+            </Box>
+          ) : null}
           <Box>
             <Typography {...labelSx}>Created Date</Typography>
             <Stack direction="row" alignItems="center" spacing={1}>
@@ -573,12 +586,6 @@ export default function CaseDetailsDetailsPanel({
                 {formatValue(
                   data?.closedBy?.label ?? data?.closedBy?.name ?? null,
                 )}
-              </Typography>
-            </Box>
-            <Box sx={{ gridColumn: { xs: "1", md: "1 / -1" } }}>
-              <Typography {...labelSx}>Close Notes</Typography>
-              <Typography {...valueSx}>
-                {formatValue(data?.closeNotes)}
               </Typography>
             </Box>
           </Box>

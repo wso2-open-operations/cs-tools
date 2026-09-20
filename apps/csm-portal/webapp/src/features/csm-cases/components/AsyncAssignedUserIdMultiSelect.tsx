@@ -31,6 +31,15 @@ interface AsyncAssignedUserIdMultiSelectProps {
    * request-build time). */
   values: string[];
   onChange: (next: string[]) => void;
+  /**
+   * Server-side role scoping passed straight through to
+   * {@link useInfiniteUserSearch}'s {@link UserSearchScope} — e.g. restrict
+   * this picker to internal staff only. Left unset, the search stays
+   * unscoped (this component's original behavior).
+   */
+  roleIds?: string[];
+  /** See {@link roleIds}; restrict to active accounts only. */
+  active?: boolean;
 }
 
 /**
@@ -46,6 +55,8 @@ interface AsyncAssignedUserIdMultiSelectProps {
 export default function AsyncAssignedUserIdMultiSelect({
   values,
   onChange,
+  roleIds,
+  active,
 }: AsyncAssignedUserIdMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -53,7 +64,7 @@ export default function AsyncAssignedUserIdMultiSelect({
   const query = debounced.trim();
 
   const { users: searchResults, isFetching, isFetchingNextPage, hasNextPage, isError, fetchNextPage } =
-    useInfiniteUserSearch(query, open);
+    useInfiniteUserSearch(query, open, { roleIds, active });
   // `id` is optional on `UserSearchOption` (`POST /users/search` doesn't
   // guarantee it) — this picker filters on the id, so a row without one is
   // unusable here and dropped, unlike the email-keyed pickers.

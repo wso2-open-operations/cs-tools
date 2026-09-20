@@ -294,7 +294,6 @@ export type CaseDetails = AuditMetadata & {
   status: IdLabelRef | null;
   closedOn: string | null;
   closedBy: CaseDetailsClosedBy | null;
-  closeNotes: string | null;
   hasAutoClosed: boolean | null;
   engineerEmail: string | null;
   findingsResolved: number | null;
@@ -457,6 +456,9 @@ export type CaseClassificationRequest = SharedEnvContext & {
 };
 
 // Request type for patching a case.
+// The backend requires exactly one of stateKey/watchList per request — there
+// is no comment field here at all; a comment goes through the separate
+// POST /cases/:id/comments endpoint (see usePostComment).
 export type PatchCaseRequest = {
   stateKey?: number;
   watchList?: string[];

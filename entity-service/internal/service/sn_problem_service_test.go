@@ -221,3 +221,47 @@ func TestSNProblemService_UpdateProblem_ConflictMapped(t *testing.T) {
 		t.Fatalf("expected *apierror.ConflictError, got %T: %v", err, err)
 	}
 }
+
+// --- AggregateProblems: state groupBy key remap ---
+//
+// SN's own groupBy implementation (ProblemUtils.groupProblemsBy) returns the
+// raw numeric problem_state value (as a string) as the bucket key, not this
+// platform's domain enum string. This test pins the remap through
+// snProblemStateKeyToState, the reverse of snProblemStateKeyMap.
+func TestSNProblemService_AggregateProblems_StateGroupByRemapsKeyToDomainEnum(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/problems/aggregate", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"groups": []map[string]any{
+				{"key": "101", "label": "New", "count": 5},
+				{"key": "104", "label": "Fix In Progress", "count": 2},
+				{"key": "9999", "label": "Unrecognized", "count": 1},
+			},
+			"othersCount":  0,
+			"totalRecords": 8,
+		})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowProblemService(client)
+
+	resp, err := svc.AggregateProblems(contextWithUserIDToken("token"), domain.AggregateProblemsRequest{
+		GroupBy: "state",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Groups) != 3 {
+		t.Fatalf("groups: got %d, want 3", len(resp.Groups))
+	}
+	if got, want := resp.Groups[0].Key, string(domain.ProblemStateNew); got != want {
+		t.Errorf("groups[0].Key: got %q, want %q (domain enum, not raw SN value %q)", got, want, "101")
+	}
+	if got, want := resp.Groups[1].Key, string(domain.ProblemStateFixInProgress); got != want {
+		t.Errorf("groups[1].Key: got %q, want %q", got, want)
+	}
+	// Unrecognized numeric state key: falls back to leaving the key as-is.
+	if got, want := resp.Groups[2].Key, "9999"; got != want {
+		t.Errorf("groups[2].Key: got %q, want %q (unrecognized state key falls back to raw key)", got, want)
+	}
+}

@@ -116,7 +116,7 @@ func (s *snCaseGithubIssueService) CreateCaseGithubIssue(ctx context.Context, re
 	if err != nil {
 		return domain.CreateCaseGithubIssueResponse{}, err
 	}
-	if _, ok := caseGithubIssueActionableStates[caseView.State]; !ok {
+	if _, ok := caseGithubIssueActionableStates[derefState(caseView.State)]; !ok {
 		return domain.CreateCaseGithubIssueResponse{}, &apierror.ConflictError{
 			Msg: "Case is not in a state that allows filing a GitHub issue",
 		}

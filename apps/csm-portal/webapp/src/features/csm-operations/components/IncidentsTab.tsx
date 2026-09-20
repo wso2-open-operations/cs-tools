@@ -42,6 +42,7 @@ import QueryErrorState from "@components/QueryErrorState";
 import FilteredCsvExportButton from "@components/FilteredCsvExportButton";
 import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useFilterBarCollapsed } from "@hooks/useFilterBarCollapsed";
 import { useBackendApi } from "@api/backend/client";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useSearchIncidents } from "@features/csm-operations/api/useSearchIncidents";
@@ -121,7 +122,6 @@ export default function IncidentsTab(): JSX.Element {
     () => readIncidentFiltersFromUrl(searchParams),
     [searchParams],
   );
-  const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
@@ -147,6 +147,11 @@ export default function IncidentsTab(): JSX.Element {
   // open the picker.
   const currentUserEmail = useIdTokenClaims()?.email;
   const currentUserId = useCurrentUser().user?.id;
+  const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
+    "incidents",
+    getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    true,
+  );
   const columnPrefs = useColumnPreferences({
     viewId: "incidents",
     userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
@@ -257,7 +262,7 @@ export default function IncidentsTab(): JSX.Element {
         onChange={handleFiltersChange}
         onReset={handleReset}
         isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen((prev) => !prev)}
+        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
       />
 
       <Box sx={{ display: "flex", justifyContent: "flex-end" }}>

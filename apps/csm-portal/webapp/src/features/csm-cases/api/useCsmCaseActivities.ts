@@ -25,8 +25,11 @@ import type {
 } from "@api/backend/types";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
 
-/** Page size used when loading the field-change lane. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
+/** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const ACTIVITIES_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on how many pages a single case's audit trail can page
+ * through — see `useCsmCaseComments.ts`'s identical constant/reasoning. */
+const MAX_ACTIVITY_PAGES = 200;
 
 /** Best display name off an activity entry's author fields. */
 function activityAuthorName(entry: BeCaseActivityEntry): string {
@@ -60,15 +63,16 @@ export function auditEntryFromBeActivity(
 }
 
 /**
- * Load the audited field/state-change lane for a case. In LIVE mode calls
- * `POST /cases/{id}/activities/search` with a single wide page (limit capped
- * at BE_MAX_PAGE_LIMIT) and `includeFieldChanges: true`, then filters the
- * response down to `type === "field_change"` entries — this endpoint also
- * returns `comment`/`attachment` entries, but those lanes keep reading from
- * their existing hooks (`useGetCsmCaseComments` / `useGetCsmCaseAttachments`),
- * so they are ignored here to avoid a second, divergent read path. Notably
- * this endpoint excludes work notes, so it must never replace the comments
- * hook.
+ * Load *every* audited field/state-change entry for a case. In LIVE mode
+ * calls `POST /cases/{id}/activities/search` with `includeFieldChanges: true`,
+ * paging through `BE_MAX_PAGE_LIMIT`-sized requests until the BE reports no
+ * more (`hasMore`) — a case with a long audit trail used to silently drop
+ * everything past the first page (same bug, same fix, as
+ * `useGetCsmCaseComments.ts`). This endpoint also returns `comment`/
+ * `attachment` entries, but those lanes keep reading from their existing
+ * hooks (`useGetCsmCaseComments` / `useGetCsmCaseAttachments`), so they're
+ * filtered out here to avoid a second, divergent read path. Notably this
+ * endpoint excludes work notes, so it must never replace the comments hook.
  */
 export function useGetCsmCaseActivities(
   caseId: string | undefined,
@@ -80,15 +84,21 @@ export function useGetCsmCaseActivities(
     queryFn: async (): Promise<CaseAuditEntry[]> => {
       if (!caseId) return [];
 
-      const payload: BeCaseActivitiesSearchPayload = {
-        pagination: { offset: 0, limit: ACTIVITIES_PAGE_LIMIT },
-        includeFieldChanges: true,
-      };
-      const response = await api.post<
-        BeCaseActivitiesSearchPayload,
-        BeCaseActivitiesSearchResponse
-      >(`/cases/${encodeURIComponent(caseId)}/activities/search`, payload);
-      return (response.activity ?? [])
+      const allEntries: BeCaseActivityEntry[] = [];
+      for (let page = 0; page < MAX_ACTIVITY_PAGES; page += 1) {
+        const payload: BeCaseActivitiesSearchPayload = {
+          pagination: { offset: page * ACTIVITIES_PAGE_LIMIT, limit: ACTIVITIES_PAGE_LIMIT },
+          includeFieldChanges: true,
+        };
+        const response = await api.post<
+          BeCaseActivitiesSearchPayload,
+          BeCaseActivitiesSearchResponse
+        >(`/cases/${encodeURIComponent(caseId)}/activities/search`, payload);
+        const rows = response.activity ?? [];
+        allEntries.push(...rows);
+        if (rows.length < ACTIVITIES_PAGE_LIMIT || !response.hasMore) break;
+      }
+      return allEntries
         .filter((a) => a.type === "field_change")
         .map(auditEntryFromBeActivity);
     },

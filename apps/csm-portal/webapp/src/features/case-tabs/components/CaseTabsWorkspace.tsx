@@ -118,22 +118,35 @@ export function CaseTabStripBar(): JSX.Element | null {
  * route.
  *
  * Also owns closing a tab whose current route is the one just closed:
- * navigates to whatever tab became active, or that case type's list view if
- * none are left open. Deliberately does NOT do this for a case that was
- * simply never opened as a tab at all (the open-tab-cap fallback in
- * `CaseDetailRouteSync`, rendered un-tabbed via the real `<Outlet/>`) — an
- * earlier version of this effect couldn't tell those two situations apart
- * (both look like "no tab backs the current route") and silently redirected
- * a just-clicked, cap-blocked case's URL back to whatever tab happened to be
- * active, which looked like the click had done nothing. Distinguishing them
- * needs the PREVIOUS render's open caseIds, not just tab ids: a genuinely
- * closed tab's caseId was in that set; a never-opened (blocked) one never
- * was.
+ * navigates to whatever tab became active, or — when that was the last open
+ * tab — back to wherever the user was before any case tab was opened (the
+ * dashboard, a listing page, admin, ...), via the SAME `useCurrentLocationTab`
+ * that backs the pinned tab in `CaseTabStripBar`. Falls back to that case
+ * type's list view (`basePathForKind`) only in the (practically unreachable)
+ * case `useCurrentLocationTab` never recorded a prior non-case location at
+ * all — see that hook's own doc comment for why it always has SOME value
+ * (defaulting to `/dashboard`) once mounted. Deliberately does NOT do this
+ * for a case that was simply never opened as a tab at all (the open-tab-cap
+ * fallback in `CaseDetailRouteSync`, rendered un-tabbed via the real
+ * `<Outlet/>`) — an earlier version of this effect couldn't tell those two
+ * situations apart (both look like "no tab backs the current route") and
+ * silently redirected a just-clicked, cap-blocked case's URL back to
+ * whatever tab happened to be active, which looked like the click had done
+ * nothing. Distinguishing them needs the PREVIOUS render's open caseIds, not
+ * just tab ids: a genuinely closed tab's caseId was in that set; a
+ * never-opened (blocked) one never was.
+ *
+ * Reads `useCurrentLocationTab` itself (rather than only `CaseTabStripBar`
+ * doing so) specifically so this effect has access to "the last non-case
+ * location" independent of the tab strip's own render — both components are
+ * mounted for the same lifetime (see `AppLayout`), so the two hook instances
+ * always observe the identical sequence of navigations and stay in lockstep.
  */
 export function CaseTabsContentHost(): JSX.Element | null {
   const location = useLocation();
   const navigate = useNavTransition();
   const { tabs, activeTabId } = useCaseTabsController();
+  const currentLocationTab = useCurrentLocationTab();
 
   const currentMatch = matchCaseLocation(location.pathname);
   // Whether a tab actually backs the CURRENT route's specific case — not
@@ -158,10 +171,17 @@ export function CaseTabsContentHost(): JSX.Element | null {
     const wasOpenForThisCase = prevCaseIds.has(currentMatch.caseId);
     if (!wasOpenForThisCase) return;
     const nextActive = tabs.find((t) => t.id === activeTabId);
-    navigate(nextActive ? nextActive.path : basePathForKind(currentMatch.kind), {
-      replace: true,
-    });
-    // Only re-run when the open tab set or the route changes.
+    navigate(
+      nextActive
+        ? nextActive.path
+        : currentLocationTab.path || basePathForKind(currentMatch.kind),
+      { replace: true },
+    );
+    // Only re-run when the open tab set or the route changes — deliberately
+    // NOT on every `currentLocationTab` change (it updates on every non-case
+    // navigation): this effect only needs its LATEST value at the moment a
+    // tab actually closes, not to re-fire whenever the user is simply
+    // browsing non-case pages with tabs open in the background.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabs, currentMatch?.caseId, activeRouteHasTab]);
 
@@ -175,6 +195,12 @@ export function CaseTabsContentHost(): JSX.Element | null {
   // un-tabbed real content.
   return (
     <div
+      // Only applied while this host is actually the visible content (see
+      // `CaseTabIsolatedRouter`'s own note on the same pattern, and
+      // `print.css`) — otherwise this print-only rule would force an
+      // otherwise `display: none` host visible on a printed page that isn't
+      // showing any case tab at all.
+      className={activeRouteHasTab ? "csm-print-expand" : undefined}
       style={{
         display: activeRouteHasTab ? "flex" : "none",
         flexDirection: "column",

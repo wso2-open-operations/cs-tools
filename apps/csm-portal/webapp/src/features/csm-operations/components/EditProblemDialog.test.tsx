@@ -26,7 +26,7 @@ const useSearchUsersByNameMock = vi.fn(() => ({ data: [], isFetching: false, isE
 const useSearchGroupsMock = vi.fn(() => ({ data: [], isFetching: false, isError: false }));
 
 vi.mock("@api/useSearchUsersByName", () => ({
-  useSearchUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
+  useSearchInternalUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
 }));
 vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: (...args: unknown[]) => useSearchGroupsMock(...(args as [])),

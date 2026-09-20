@@ -611,7 +611,7 @@ describe("CaseActionBar — Request update (enabled only in Awaiting info / Solu
     },
   );
 
-  it("disables request_update in an eligible state when the caller isn't the assigned engineer", () => {
+  it("still enables request_update in an eligible state when the caller isn't the assigned engineer", () => {
     const onAction = vi.fn();
     render(
       <CaseActionBar
@@ -624,9 +624,9 @@ describe("CaseActionBar — Request update (enabled only in Awaiting info / Solu
     );
     fireEvent.click(screen.getByRole("button", { name: /more/i }));
     const item = screen.getByRole("menuitem", { name: /request update/i });
-    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
     fireEvent.click(item);
-    expect(onAction).not.toHaveBeenCalled();
+    expect(onAction).toHaveBeenCalledWith({ secondary: "request_update" });
   });
 });
 

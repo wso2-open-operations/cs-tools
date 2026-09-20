@@ -31,6 +31,7 @@ export const CR_FILTER_PARAM_KEYS = [
   "crClosedFrom",
   "crClosedTo",
   "crSreTeams",
+  "crProjects",
 ] as const;
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -81,6 +82,15 @@ function parseTeamIdsCsv(raw: string | null): string[] {
 }
 
 /**
+ * Comma-separated project ids — same free-form (non-enum) shape as
+ * `parseTeamIdsCsv` above; kept as its own function so the two filters read
+ * independently even though the parsing logic is identical.
+ */
+function parseProjectIdsCsv(raw: string | null): string[] {
+  return parseTeamIdsCsv(raw);
+}
+
+/**
  * Read change-request filters from the URL. Unknown/malformed values (a
  * hand-edited or stale query string) are dropped rather than passed through,
  * so they fall back to the default (unfiltered) behaviour instead of being
@@ -96,6 +106,7 @@ export function readChangeRequestFiltersFromUrl(
     closedStartDate: parseDateOnly(params.get("crClosedFrom")),
     closedEndDate: parseDateOnly(params.get("crClosedTo")),
     sreTeamIds: parseTeamIdsCsv(params.get("crSreTeams")),
+    projectIds: parseProjectIdsCsv(params.get("crProjects")),
   };
 }
 
@@ -113,5 +124,6 @@ export function writeChangeRequestFiltersToUrl(
   if (f.closedStartDate) out.set("crClosedFrom", f.closedStartDate);
   if (f.closedEndDate) out.set("crClosedTo", f.closedEndDate);
   if (f.sreTeamIds.length) out.set("crSreTeams", f.sreTeamIds.join(","));
+  if (f.projectIds.length) out.set("crProjects", f.projectIds.join(","));
   return out;
 }

@@ -30,7 +30,7 @@ describe("readChangeRequestFiltersFromUrl", () => {
 
   it("parses a fully-populated query string", () => {
     const params = new URLSearchParams(
-      "crQ=rollback&crStates=implement,review&crImpacts=high,low&crClosedFrom=2026-01-01&crClosedTo=2026-01-31&crSreTeams=team-apollo,team-atlas",
+      "crQ=rollback&crStates=implement,review&crImpacts=high,low&crClosedFrom=2026-01-01&crClosedTo=2026-01-31&crSreTeams=team-apollo,team-atlas&crProjects=proj-1,proj-2",
     );
     expect(readChangeRequestFiltersFromUrl(params)).toEqual({
       search: "rollback",
@@ -39,6 +39,7 @@ describe("readChangeRequestFiltersFromUrl", () => {
       closedStartDate: "2026-01-01",
       closedEndDate: "2026-01-31",
       sreTeamIds: ["team-apollo", "team-atlas"],
+      projectIds: ["proj-1", "proj-2"],
     });
   });
 
@@ -47,6 +48,14 @@ describe("readChangeRequestFiltersFromUrl", () => {
     expect(readChangeRequestFiltersFromUrl(params).sreTeamIds).toEqual([
       "team-apollo",
       "team-atlas",
+    ]);
+  });
+
+  it("drops blank/whitespace project entries", () => {
+    const params = new URLSearchParams("crProjects=proj-1,%20%20,,proj-2");
+    expect(readChangeRequestFiltersFromUrl(params).projectIds).toEqual([
+      "proj-1",
+      "proj-2",
     ]);
   });
 
@@ -89,6 +98,7 @@ describe("writeChangeRequestFiltersToUrl", () => {
       closedStartDate: "2026-01-01",
       closedEndDate: "2026-01-31",
       sreTeamIds: ["team-apollo"],
+      projectIds: ["proj-1"],
     };
     const round = readChangeRequestFiltersFromUrl(
       writeChangeRequestFiltersToUrl(filters),
@@ -102,5 +112,13 @@ describe("writeChangeRequestFiltersToUrl", () => {
       sreTeamIds: [],
     });
     expect(params.has("crSreTeams")).toBe(false);
+  });
+
+  it("omits crProjects when no project is selected", () => {
+    const params = writeChangeRequestFiltersToUrl({
+      ...DEFAULT_CR_FILTERS,
+      projectIds: [],
+    });
+    expect(params.has("crProjects")).toBe(false);
   });
 });

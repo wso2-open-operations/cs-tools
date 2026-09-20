@@ -30,6 +30,7 @@ import {
 import { CaseCreatePage } from "../pages/CaseCreatePage";
 import type { CaseInput, ProjectFixture } from "../config/testData";
 import { CREATE_CASE } from "./selectors";
+import { idPattern, projectPathPattern } from "./ids";
 
 /** A case as identified by the API response that created it. */
 export interface CreatedCase {
@@ -154,7 +155,7 @@ export async function createCaseViaGetHelp(
   // detail page (`/projects/:projectId/support/cases/:caseId`).
   await expect(page.getByText(CREATE_CASE.successMessage)).toBeVisible();
   await expect(page).toHaveURL(
-    new RegExp(`/projects/${project.id}/support/cases/${created.id}`),
+    projectPathPattern(project.id, `support/cases/${idPattern(created.id!)}`),
   );
 
   // The detail page must render the case we just submitted.

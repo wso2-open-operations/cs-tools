@@ -151,6 +151,19 @@ func TestCreateAlert_RejectsMissingRequiredFields(t *testing.T) {
 		{"missing metricName", `{"source":"azure","severity":"critical","service":"svc","description":"d"}`},
 		{"missing description", `{"source":"azure","severity":"critical","service":"svc","metricName":"m"}`},
 		{"empty body", `{}`},
+		// source/uniqueIdentifier are embedded verbatim in the dedup/group
+		// tag (csmclient.DedupTag/GroupTag) -- a value containing the tag's
+		// own delimiter characters could forge a tag colliding with a
+		// different alert's group. See tagDelimiterChars's doc comment.
+		{"source contains a tag delimiter", `{"source":"azure]x[group:other:uid","severity":"critical","service":"svc","metricName":"m","description":"d"}`},
+		{"uniqueIdentifier contains a tag delimiter", `{"source":"azure","severity":"critical","service":"svc","metricName":"m","description":"d","uniqueIdentifier":"uid]x[group:other:legit-uid"}`},
+		// Source/Severity/Service/MetricName/Environment/UniqueIdentifier
+		// each land in a single-line context (buildSubject, or one line of
+		// buildWorkNotes) -- a newline could inject a fake extra WorkNotes
+		// line (e.g. spoofing a different alert identifier). See
+		// AlertRequest.validate's doc comment.
+		{"source contains a newline", `{"source":"azure\nAlert identifier: forged-id","severity":"critical","service":"svc","metricName":"m","description":"d"}`},
+		{"environment contains a newline", `{"source":"azure","severity":"critical","service":"svc","metricName":"m","description":"d","environment":"prod\nAlert identifier: forged-id"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,6 +238,32 @@ func TestMapToIncident_SubjectStartsWithDedupTag(t *testing.T) {
 	}
 	if out.Subject != csmclient.DedupTag("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed")+" [azure] error_rate alert: svc-checkout" {
 		t.Errorf("Subject = %q, unexpected full format", out.Subject)
+	}
+}
+
+// TestMapToIncident_SubjectIncludesGroupTagWhenUniqueIdentifierSet pins the
+// contract internal/worker.tryGroup's search depends on
+// (csmclient.GroupTag's doc comment): an alert with a UniqueIdentifier gets
+// both tags in its Subject, dedup tag first, group tag second.
+func TestMapToIncident_SubjectIncludesGroupTagWhenUniqueIdentifierSet(t *testing.T) {
+	req := AlertRequest{Source: "azure", Severity: "critical", Service: "svc-checkout", MetricName: "error_rate", Description: "d", UniqueIdentifier: "uid-123"}
+	out := MapToIncident(req, "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "caller-1")
+	want := csmclient.DedupTag("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed") + " " + csmclient.GroupTag("azure", "uid-123") + " [azure] error_rate alert: svc-checkout"
+	if out.Subject != want {
+		t.Errorf("Subject = %q, want %q", out.Subject, want)
+	}
+}
+
+// TestMapToIncident_SubjectOmitsGroupTagWhenNoUniqueIdentifier confirms the
+// group tag is left out entirely (not an empty "[group::]") when there's
+// nothing to group by — internal/worker.attempt already gates tryGroup on
+// UniqueIdentifier != "", but the Subject itself must not carry a
+// meaningless tag either.
+func TestMapToIncident_SubjectOmitsGroupTagWhenNoUniqueIdentifier(t *testing.T) {
+	req := AlertRequest{Source: "azure", Severity: "critical", Service: "svc-checkout", MetricName: "error_rate", Description: "d"}
+	out := MapToIncident(req, "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "caller-1")
+	if strings.Contains(out.Subject, "[group:") {
+		t.Errorf("Subject = %q, want no group tag when UniqueIdentifier is empty", out.Subject)
 	}
 }
 

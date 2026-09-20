@@ -157,6 +157,7 @@ export default function AppLayout({
     <IdleTimeoutProvider>
       <CaseTabsProvider>
         <Box
+          className="csm-print-expand"
           sx={{
             display: "flex",
             flexDirection: "column",
@@ -164,10 +165,12 @@ export default function AppLayout({
             overflow: "hidden",
           }}
         >
-          <TopBanner />
-          <MobileAppBanner />
-          <GlobalNotificationBanner visible={notificationBannerConfig.visible} />
-          <HtmlAnnouncementBanner />
+          <Box className="csm-print-hide">
+            <TopBanner />
+            <MobileAppBanner />
+            <GlobalNotificationBanner visible={notificationBannerConfig.visible} />
+            <HtmlAnnouncementBanner />
+          </Box>
           <AppShellLayout
             header={
               <Header
@@ -188,6 +191,7 @@ export default function AppLayout({
             }
           >
             <Box
+              className="csm-print-expand"
               sx={{
                 display: "flex",
                 flexDirection: "column",
@@ -202,6 +206,7 @@ export default function AppLayout({
               {isVisible && (
                 <LinearProgress
                   color="inherit"
+                  className="csm-print-hide"
                   sx={{
                     color: "primary.main",
                     position: "absolute",
@@ -219,9 +224,14 @@ export default function AppLayout({
                   strip. Renders nothing when no tabs are open. Held off
                   until hasInitialized for the same reason the sidebar is:
                   nothing meaningful to show before auth settles. */}
-              {hasInitialized && <CaseTabStripBar />}
+              {hasInitialized && (
+                <Box className="csm-print-hide">
+                  <CaseTabStripBar />
+                </Box>
+              )}
               <Box
                 ref={mainContentRef}
+                className="csm-print-expand"
                 sx={{
                   flex: 1,
                   minHeight: 0,

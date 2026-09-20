@@ -424,6 +424,58 @@ func TestSNCaseService_GetCaseByID_BallerinaBlockedFieldsAbsent(t *testing.T) {
 	if len(cv.WatchList) != 0 {
 		t.Fatalf("expected no watchers, got %+v", cv.WatchList)
 	}
+	if cv.ClosedOn != nil {
+		t.Fatalf("expected closedOn nil when the key is absent, got %+v", cv.ClosedOn)
+	}
+	if cv.CloseNotes != nil {
+		t.Fatalf("expected closeNotes nil when the key is absent, got %+v", cv.CloseNotes)
+	}
+}
+
+// TestSNCaseService_GetCaseByID_MapsClosedOn pins that Ballerina/SN closedOn
+// (space-separated UTC) is decoded onto CaseView so the portal can render
+// Closed On. The field used to be undeclared on snCase, so encoding/json
+// discarded it and GetCaseByID left CaseView.ClosedOn nil.
+func TestSNCaseService_GetCaseByID_MapsClosedOn(t *testing.T) {
+	body := `{
+		"id": "` + testWLCaseSysid + `",
+		"internalId": "WSO2-001",
+		"number": "CS0001001",
+		"title": "Case subject",
+		"description": "Case description",
+		"createdOn": "2026-01-01 10:00:00",
+		"updatedOn": "2026-02-20 01:34:44",
+		"closedOn": "2026-02-20 01:34:44",
+		"closeNotes": "Resolved successfully",
+		"createdBy": "reporter@example.com",
+		"project": {"id": "` + testProjectSysid + `", "name": "Project A"},
+		"deployment": {"id": "", "name": ""},
+		"deployedProduct": {"id": "", "name": "", "version": ""},
+		"state": {"id": 3, "label": "Closed"}
+	}`
+
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+
+	cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), sysidToUUID(testWLCaseSysid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantClosedOn, err := time.Parse(snCreatedOnLayout, "2026-02-20 01:34:44")
+	if err != nil {
+		t.Fatalf("parse want closedOn: %v", err)
+	}
+	if cv.ClosedOn == nil || !cv.ClosedOn.Equal(wantClosedOn) {
+		t.Fatalf("expected closedOn=%v, got %+v", wantClosedOn, cv.ClosedOn)
+	}
+	if cv.CloseNotes == nil || *cv.CloseNotes != "Resolved successfully" {
+		t.Fatalf("expected closeNotes=%q, got %+v", "Resolved successfully", cv.CloseNotes)
+	}
 }
 
 // TestSNCaseService_UpdateCase_ExactlyOneFieldValidation exercises the exactly-one-field
@@ -2501,22 +2553,29 @@ func TestSNCaseService_SearchTags_QueryTooLong(t *testing.T) {
 	}
 }
 
-func TestCaseService_SearchTags_ServiceUnavailable(t *testing.T) {
+// TestCaseService_SearchTags_RequiresValidToken covers caseService.SearchTags
+// now that it's backed by real Postgres storage (tag/work_item_tag, migration
+// 000021) instead of being an unconditional ServiceUnavailableError stub --
+// it still resolves the caller's identity first (see resolveActor), so an
+// unparseable x-user-id-token ("token" here has no "." separators, not a
+// real JWT) is rejected before ever reaching the (nil in this test) repo.
+func TestCaseService_SearchTags_RequiresValidToken(t *testing.T) {
 	svc := &caseService{}
 
 	if _, err := svc.SearchTags(contextWithUserIDToken("token"), domain.SearchTagsRequest{
 		Filters: domain.SearchTagsFilters{SearchQuery: "micro"},
 	}); err == nil {
 		t.Fatalf("expected error")
-	} else if _, ok := err.(*apierror.ServiceUnavailableError); !ok {
-		t.Fatalf("expected *apierror.ServiceUnavailableError, got %T: %v", err, err)
+	} else if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 	}
 }
 
 // TestSNCaseService_GetCaseByID_MapsLinkedChangeRequests covers the reverse side of the
-// service-request <-> change-request link. Upstream sends the list under `changeRequestsAll`
-// (unfiltered by change-request state, unlike the older `changeRequests` field) with 32-hex
-// ids; the domain exposes it as `linkedChangeRequests` with canonical UUIDs.
+// service-request <-> change-request link. Upstream sends customer-visible change requests
+// under `changeRequests` (filtered by change-request state, excluding New/Assess/Authorize)
+// and unfiltered change requests under `changeRequestsAll`. The domain exposes the customer-
+// visible list as `linkedChangeRequests` with canonical UUIDs.
 //
 // The cardinality cases matter: a service request can have several change requests (one per
 // environment the change is promoted to), so a single-value mapping would look correct
@@ -2525,7 +2584,7 @@ func TestSNCaseService_GetCaseByID_MapsLinkedChangeRequests(t *testing.T) {
 	crSysidA := sysid32('1')
 	crSysidB := sysid32('2')
 
-	newBody := func(changeRequests string) string {
+	newBody := func(changeRequests string, changeRequestsAll string) string {
 		return `{
 			"id": "` + testWLCaseSysid + `",
 			"internalId": "WSO2-001",
@@ -2539,15 +2598,16 @@ func TestSNCaseService_GetCaseByID_MapsLinkedChangeRequests(t *testing.T) {
 			"deployment": {"id": "", "name": ""},
 			"deployedProduct": {"id": "", "name": "", "version": ""},
 			"state": {"id": 1, "label": "Open"},
-			"changeRequestsAll": ` + changeRequests + `
+			"changeRequests": ` + changeRequests + `,
+			"changeRequestsAll": ` + changeRequestsAll + `
 		}`
 	}
 
-	get := func(t *testing.T, changeRequests string) domain.CaseView {
+	get := func(t *testing.T, changeRequests string, changeRequestsAll string) domain.CaseView {
 		t.Helper()
 		client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(newBody(changeRequests)))
+			_, _ = w.Write([]byte(newBody(changeRequests, changeRequestsAll)))
 		})
 		svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
 
@@ -2559,14 +2619,21 @@ func TestSNCaseService_GetCaseByID_MapsLinkedChangeRequests(t *testing.T) {
 	}
 
 	t.Run("null stays empty", func(t *testing.T) {
-		cv := get(t, "null")
+		cv := get(t, "null", "null")
 		if len(cv.LinkedChangeRequests) != 0 {
 			t.Fatalf("expected no linked change requests, got %+v", cv.LinkedChangeRequests)
 		}
 	})
 
+	t.Run("null changeRequests filters out draft changes present in changeRequestsAll", func(t *testing.T) {
+		cv := get(t, "null", `[{"id": "`+crSysidA+`", "number": "CHG0000001", "name": "Draft change"}]`)
+		if len(cv.LinkedChangeRequests) != 0 {
+			t.Fatalf("expected draft change requests in changeRequestsAll to be filtered out, got %+v", cv.LinkedChangeRequests)
+		}
+	})
+
 	t.Run("single entry maps with a canonical UUID", func(t *testing.T) {
-		cv := get(t, `[{"id": "`+crSysidA+`", "number": "CHG0000001", "name": "Promote to dev"}]`)
+		cv := get(t, `[{"id": "`+crSysidA+`", "number": "CHG0000001", "name": "Promote to dev"}]`, `[{"id": "`+crSysidA+`", "number": "CHG0000001", "name": "Promote to dev"}]`)
 		if len(cv.LinkedChangeRequests) != 1 {
 			t.Fatalf("expected 1 linked change request, got %d", len(cv.LinkedChangeRequests))
 		}
@@ -2581,6 +2648,9 @@ func TestSNCaseService_GetCaseByID_MapsLinkedChangeRequests(t *testing.T) {
 
 	t.Run("several entries all map, order preserved", func(t *testing.T) {
 		cv := get(t, `[
+			{"id": "`+crSysidA+`", "number": "CHG0000001", "name": "Promote to dev"},
+			{"id": "`+crSysidB+`", "number": "CHG0000002", "name": ""}
+		]`, `[
 			{"id": "`+crSysidA+`", "number": "CHG0000001", "name": "Promote to dev"},
 			{"id": "`+crSysidB+`", "number": "CHG0000002", "name": ""}
 		]`)
@@ -2686,5 +2756,51 @@ func TestSNCaseService_GetCaseByID_TagsFetchFailureDoesNotFailRead(t *testing.T)
 	}
 	if cv.Number != "CS0001001" {
 		t.Fatalf("expected the rest of the case detail to still be populated, got %+v", cv)
+	}
+}
+
+// --- AggregateCases: state groupBy key remap ---
+//
+// SN's own groupBy implementation returns the raw internal case state value
+// (e.g. "1003" for "Waiting On WSO2") as the bucket key, not this platform's
+// domain enum string. This test pins the remap through snCaseStateMap
+// (SN state label, lowercased -> domain CaseState), mirroring the equivalent
+// fix already applied to change_request/incident/problem.
+func TestSNCaseService_AggregateCases_StateGroupByRemapsKeyToDomainEnum(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cases/aggregate", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"groups": []map[string]any{
+				{"key": "1", "label": "Open", "count": 4},
+				{"key": "1003", "label": "Waiting On WSO2", "count": 3},
+				{"key": "9999", "label": "Unrecognized Label", "count": 1},
+			},
+			"othersCount":  0,
+			"totalRecords": 8,
+		})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+
+	resp, err := svc.AggregateCases(contextWithUserIDToken("token"), domain.AggregateCasesRequest{
+		GroupBy: "state",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Groups) != 3 {
+		t.Fatalf("groups: got %d, want 3", len(resp.Groups))
+	}
+	if got, want := resp.Groups[0].Key, string(domain.CaseStateOpen); got != want {
+		t.Errorf("groups[0].Key: got %q, want %q (domain enum, not raw SN value %q)", got, want, "1")
+	}
+	if got, want := resp.Groups[1].Key, string(domain.CaseStateWaitingOnWSO2); got != want {
+		t.Errorf("groups[1].Key: got %q, want %q (domain enum, not raw SN value %q)", got, want, "1003")
+	}
+	// Unrecognized label: falls back to leaving the key as-is rather than
+	// crashing or dropping the bucket.
+	if got, want := resp.Groups[2].Key, "9999"; got != want {
+		t.Errorf("groups[2].Key: got %q, want %q (unrecognized label falls back to raw key)", got, want)
 	}
 }

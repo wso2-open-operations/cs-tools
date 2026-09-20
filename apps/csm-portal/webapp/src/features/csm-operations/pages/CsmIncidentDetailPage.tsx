@@ -20,10 +20,13 @@ import {
   ArrowLeft,
   Eye,
   FileText,
+  GitPullRequest,
   Link as LinkIcon,
   MessageSquarePlus,
   Paperclip,
+  Megaphone,
   Pencil,
+  UserCog,
 } from "@wso2/oxygen-ui-icons-react";
 import {
   type JSX,
@@ -36,6 +39,7 @@ import {
 import { useLocation } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { BackendApiError } from "@api/backend/client";
+import ExportPdfButton from "@components/ExportPdfButton";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
@@ -52,6 +56,9 @@ import EditIncidentDialog from "@features/csm-operations/components/EditIncident
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import IncidentActionBar from "@features/csm-operations/components/IncidentActionBar";
 import IncidentResolutionDialog from "@features/csm-operations/components/IncidentResolutionDialog";
+import HandoffToSpecialistDialog from "@features/csm-operations/components/HandoffToSpecialistDialog";
+import SpecialistHandoffBadge from "@features/csm-operations/components/SpecialistHandoffBadge";
+import { useHandOffIncident } from "@features/csm-operations/api/useHandOffIncident";
 import {
   incidentCommentGateReason,
   incidentPriorityColor,
@@ -74,7 +81,11 @@ import {
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import type {
   BeEntityRef,
+  BeHandoffEscalationTeam,
+  BeHandoffReasonCode,
   BeIncidentDetail,
+  BeIncidentHandoffResult,
+  BeIncidentResolutionCode,
   BeIncidentState,
   BeUpdateIncidentPayload,
 } from "@api/backend/types";
@@ -84,6 +95,7 @@ import { useQueryParamTabs } from "@hooks/useSectionTabs";
 import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
 import { useReportCaseTabMeta } from "@features/case-tabs/hooks/useReportCaseTabMeta";
 import { useReportCaseTabDraft } from "@features/case-tabs/hooks/useReportCaseTabDraft";
+import type { CreateChangeRequestFromIncidentNavState } from "@features/csm-operations/utils/changeRequests";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations/incidents";
 
@@ -200,7 +212,12 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   });
   const { showError } = useErrorBanner();
   const patchIncident = usePatchIncident();
+  const handOffIncident = useHandOffIncident();
   const [editOpen, setEditOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  // Kept for the dialog's inline success/warning result, cleared whenever the
+  // dialog is reopened for a fresh attempt.
+  const [handoffResult, setHandoffResult] = useState<BeIncidentHandoffResult | null>(null);
   // Kept in the URL (`?tab=`), not local state, so a shared/bookmarked link
   // to a specific tab (e.g. Watchers) survives a refresh.
   const { activeTab, setActiveTab } = useQueryParamTabs<IncidentTabId>(
@@ -217,10 +234,22 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const { user: currentUser } = useCurrentUser();
   const currentUserEmail = useIdTokenClaims()?.email;
 
-  const { data: comments } = useGetCsmIncidentComments(id);
-  const { data: activityAudit } = useGetCsmIncidentActivities(id);
+  const {
+    data: comments,
+    isLoading: isCommentsLoading,
+    isError: isCommentsError,
+  } = useGetCsmIncidentComments(id);
+  const {
+    data: activityAudit,
+    isLoading: isActivityLoading,
+    isError: isActivityError,
+  } = useGetCsmIncidentActivities(id);
   const postComment = usePostCsmIncidentComment();
-  const { data: attachments } = useGetCsmCaseAttachments(id, "incident");
+  const {
+    data: attachments,
+    isLoading: isAttachmentsLoading,
+    isError: isAttachmentsError,
+  } = useGetCsmCaseAttachments(id, "incident");
   const postAttachment = usePostCsmCaseAttachment();
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const getAttachmentPreviewContent = useGetCsmCaseAttachmentPreviewSource();
@@ -333,8 +362,20 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         setResolutionTarget(target);
         return;
       }
+      // Starting work on an unassigned incident implicitly claims it, same
+      // as the case detail page's "assign to me" flow — otherwise moving an
+      // alert-generated incident to IN_PROGRESS leaves it with no assignee
+      // at all, since nothing else in this flow ever sets one. Combined into
+      // the single state PATCH (unlike cases, the entity service doesn't
+      // treat `state` and `assignedEngineerId` as mutually exclusive here),
+      // and only when nobody's already assigned, so a plain state change on
+      // an already-assigned incident never reassigns it to whoever clicked.
+      const claim =
+        target === "IN_PROGRESS" && !data?.assignedTo && currentUser?.id
+          ? { assignedEngineerId: currentUser.id }
+          : {};
       patchIncident.mutate(
-        { id, patch: { state: target } },
+        { id, patch: { state: target, ...claim } },
         {
           onError: (err) => {
             const msg =
@@ -346,11 +387,11 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         },
       );
     },
-    [id, patchIncident, showError],
+    [id, data?.assignedTo, currentUser?.id, patchIncident, showError],
   );
 
   const onResolutionSubmit = useCallback(
-    (fields: { resolutionCode: string; resolutionNotes: string }) => {
+    (fields: { resolutionCode: BeIncidentResolutionCode; resolutionNotes: string }) => {
       if (!id || !resolutionTarget) return;
       patchIncident.mutate(
         { id, patch: { state: resolutionTarget, ...fields } },
@@ -369,6 +410,33 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     [id, patchIncident, resolutionTarget, showError],
   );
 
+  /**
+   * Submit the handoff. Deliberately not gated on the incident's service or
+   * state here — the action is shown unconditionally (see the doc comment on
+   * `useHandOffIncident`) and any ineligibility comes back as a real `409`
+   * from the backend, surfaced through the page's error banner same as any
+   * other rejected write.
+   */
+  const onHandoffSubmit = useCallback(
+    (fields: { reasonCode: BeHandoffReasonCode; escalationTeam?: BeHandoffEscalationTeam }) => {
+      if (!id) return;
+      handOffIncident.mutate(
+        { incidentId: id, payload: fields },
+        {
+          onSuccess: (response) => setHandoffResult(response.handoff),
+          onError: (err) => {
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not hand off the incident. Please try again.";
+            showError(msg, err);
+          },
+        },
+      );
+    },
+    [id, handOffIncident, showError],
+  );
+
   const back = (): void => {
     navigate(backTarget);
   };
@@ -377,6 +445,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     <Button
       variant="text"
       size="small"
+      className="csm-print-hide"
       startIcon={<ArrowLeft size={16} />}
       onClick={back}
       sx={{ alignSelf: "flex-start" }}
@@ -418,80 +487,192 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   }
 
   const incident = data;
+  // The escalation-team select only ever has an effect for a Choreo-family
+  // incident (see `CHANGES-incident-handoff.md` §1.1: `escalationTeam` is
+  // read by the backend only when routing to the Choreo branch). There is no
+  // structured "business service family" field on the incident read model,
+  // so this goes off the service name the same way the rest of this page's
+  // Choreo/Asgardeo-specific copy would have to — a heuristic, not a gate:
+  // the select is purely a convenience, and submitting it for a non-Choreo
+  // incident is harmless (the backend just ignores it).
+  const isChoreoService = /choreo/i.test(incident.service?.name ?? "");
   const hasLinks = !!(incident.parent || incident.changeRequest || incident.problem || incident.causedBy);
   const hasLinkedServiceRequests =
     !!incident.linkedServiceRequests && incident.linkedServiceRequests.length > 0;
 
+  const handleExportIncidentPdf = async (): Promise<void> => {
+    try {
+      const { generateIncidentReportPdf } = await import(
+        "@features/csm-operations/utils/incidentReportPdf"
+      );
+      generateIncidentReportPdf(incident, comments ?? [], activityAudit ?? [], attachmentList);
+    } catch (err) {
+      showError("Could not export this incident as a PDF. Please try again.", err);
+    }
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-      {BackButton}
-
       <Box
         sx={{
           display: "flex",
-          gap: 2,
-          alignItems: "flex-start",
-          flexWrap: { xs: "wrap", md: "nowrap" },
+          alignItems: "center",
           justifyContent: "space-between",
         }}
       >
+        {BackButton}
+        <ExportPdfButton
+          onExport={handleExportIncidentPdf}
+          disabled={
+            isCommentsLoading ||
+            isActivityLoading ||
+            isAttachmentsLoading ||
+            isCommentsError ||
+            isActivityError ||
+            isAttachmentsError
+          }
+        />
+      </Box>
+
+      {/* The action bar to the right is five controls wide and deliberately
+          never shrinks, so anything sharing a flex row with it only gets
+          whatever narrow remainder is left over. Only the short, naturally
+          compact identity block (number + state/priority chips) shares that
+          row; the free-text subject sits on its own full-width row underneath,
+          where it can use the entire header width instead of wrapping over
+          several lines against a mostly-empty header — which is exactly how it
+          rendered, and was reported, while it was still inside that column. */}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
         <Box
           sx={{
             display: "flex",
-            flexDirection: "column",
-            gap: 1,
-            flex: 1,
-            minWidth: 0,
+            gap: 2,
+            alignItems: "flex-start",
+            flexWrap: { xs: "wrap", md: "nowrap" },
+            justifyContent: "space-between",
           }}
         >
-          <Typography
-            variant="h6"
+          <Box
             sx={{
-              fontFamily: "monospace",
-              fontWeight: 700,
-              letterSpacing: 0.2,
-              lineHeight: 1.2,
+              display: "flex",
+              flexDirection: "column",
+              gap: 1,
+              minWidth: 0,
             }}
           >
-            {incident.number || incident.id}
-          </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-            {incident.state && (
-              <Chip
-                size="small"
-                color={incidentStateColor(incident.state)}
-                label={incidentStateLabel(incident.state)}
-              />
-            )}
-            {incident.priority && (
-              <Chip
-                size="small"
-                variant="outlined"
-                color={incidentPriorityColor(incident.priority)}
-                label={incidentPriorityLabel(incident.priority)}
-              />
-            )}
-          </Box>
-          <Typography variant="h5">{incident.subject || "Incident"}</Typography>
-        </Box>
-        <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <IncidentActionBar
-              incident={incident}
-              isPending={patchIncident.isPending}
-              onAction={onIncidentAction}
-            />
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<Pencil size={14} />}
-              onClick={() => setEditOpen(true)}
+            <Typography
+              variant="h6"
+              sx={{
+                fontFamily: "monospace",
+                fontWeight: 700,
+                letterSpacing: 0.2,
+                lineHeight: 1.2,
+              }}
             >
-              Edit
-            </Button>
+              {incident.number || incident.id}
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              {incident.state && (
+                <Chip
+                  size="small"
+                  color={incidentStateColor(incident.state)}
+                  label={incidentStateLabel(incident.state)}
+                />
+              )}
+              {incident.priority && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={incidentPriorityColor(incident.priority)}
+                  label={incidentPriorityLabel(incident.priority)}
+                />
+              )}
+            </Box>
+          </Box>
+          <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+            <Box className="csm-print-hide" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <IncidentActionBar
+                incident={incident}
+                isPending={patchIncident.isPending}
+                onAction={onIncidentAction}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<UserCog size={14} />}
+                onClick={() => {
+                  setHandoffResult(null);
+                  setHandoffOpen(true);
+                }}
+              >
+                Escalate to specialist team
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<Megaphone size={14} />}
+                onClick={() =>
+                  navigate("/operations/outages/new", {
+                    state: {
+                      from: `/operations/incidents/${incident.id}`,
+                      incidentId: incident.id,
+                      configurationItemId: incident.configurationItem?.id,
+                    },
+                  })
+                }
+              >
+                Create outage
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<GitPullRequest size={14} />}
+                // Pre-selects this incident as the intended parent on the
+                // change-request create form — mirrors the service request's
+                // own "Create change request…" action (`CsmCaseDetailPage`'s
+                // `create_change_request` handler). Unlike that entry point,
+                // submitting with this pre-fill in place is gated on the
+                // create form itself (`isIncidentParentSelected`) until the
+                // backend accepts a change request linked directly to an
+                // incident — see `CreateChangeRequestFromIncidentNavState`'s
+                // doc comment. Offered unconditionally (no state gate) so the
+                // form is reachable regardless of the incident's own state;
+                // the gate lives entirely on the submit side.
+                onClick={() =>
+                  navigate("/operations/change-requests/new", {
+                    // `incident.id` is only nullable in the shared BeIncident
+                    // type for a bare search-result row; this is a loaded
+                    // detail record, always carrying a real id.
+                    state: {
+                      incidentId: incident.id as string,
+                      incidentNumber: incident.number ?? undefined,
+                      incidentSubject: incident.subject ?? undefined,
+                    } satisfies CreateChangeRequestFromIncidentNavState,
+                  })
+                }
+              >
+                Create change request
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<Pencil size={14} />}
+                onClick={() => setEditOpen(true)}
+              >
+                Edit
+              </Button>
+            </Box>
           </Box>
         </Box>
+        <Typography variant="h5">{incident.subject || "Incident"}</Typography>
       </Box>
+
+      {incident.specialistHandoff && (
+        <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+          <Typography variant="subtitle2">Specialist handoff</Typography>
+          <SpecialistHandoffBadge handoff={incident.specialistHandoff} />
+        </Card>
+      )}
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Overview</Typography>
@@ -523,7 +704,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         </Box>
       </Card>
 
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
           value={activeTab}
           onChange={(_, v) => setActiveTab(v as IncidentTabId)}
@@ -554,7 +735,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       {activeTab === "activities" && (
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           {composerOpen ? (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box className="csm-print-hide" sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <Typography variant="subtitle2">Reply</Typography>
                 <Button
@@ -599,6 +780,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               fullWidth
               variant="outlined"
               color="inherit"
+              className="csm-print-hide"
               startIcon={<MessageSquarePlus size={18} />}
               onClick={() => setComposerOpen(true)}
               sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5, px: 2 }}
@@ -812,6 +994,18 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             if (!patchIncident.isPending) setResolutionTarget(null);
           }}
           onSubmit={onResolutionSubmit}
+        />
+      )}
+
+      {handoffOpen && (
+        <HandoffToSpecialistDialog
+          showTeamSelect={isChoreoService}
+          isSubmitting={handOffIncident.isPending}
+          result={handoffResult}
+          onClose={() => {
+            if (!handOffIncident.isPending) setHandoffOpen(false);
+          }}
+          onSubmit={onHandoffSubmit}
         />
       )}
     </Box>

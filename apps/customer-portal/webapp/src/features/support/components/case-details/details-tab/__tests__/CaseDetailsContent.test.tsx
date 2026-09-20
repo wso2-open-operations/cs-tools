@@ -44,7 +44,6 @@ const mockCaseDetails = {
   status: { id: "1", label: "Open" },
   closedOn: null,
   closedBy: null,
-  closeNotes: null,
   hasAutoClosed: null,
   engineerEmail: null,
   findingsResolved: null,

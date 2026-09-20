@@ -175,6 +175,57 @@ func TestSNIncidentService_UpdateIncident_WatchList_InvalidUUID(t *testing.T) {
 	}
 }
 
+// TestSNIncidentService_UpdateIncident_ResolutionCodePassedThrough verifies a valid closed
+// enum resolution code is mapped to the SN close_code string value in the payload's
+// resolutionCodeKey field, same convention as category/impact/urgency.
+func TestSNIncidentService_UpdateIncident_ResolutionCodePassedThrough(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/"+testIncidentSysid, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Incident updated successfully.",
+			"incident": {"id": "` + testIncidentSysid + `", "number": "INC0001", "createdOn": "2026-01-01 00:00:00", "createdBy": "engineer@example.com"}
+		}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client, nil)
+
+	code := domain.IncidentResolutionCodeSolvedWorkaround
+	_, err := svc.UpdateIncident(contextWithUserIDToken("token"), domain.UpdateIncidentRequest{
+		ID:             testIncidentUUID,
+		ResolutionCode: &code,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, _ := gotBody["resolutionCodeKey"].(string)
+	if got != "Solved (Work Around)" {
+		t.Fatalf("resolutionCodeKey: got %q, want %q", got, "Solved (Work Around)")
+	}
+}
+
+// TestSNIncidentService_UpdateIncident_ResolutionCode_Invalid verifies a resolution code
+// outside the closed enum is rejected with a clean validation error before any SN call.
+func TestSNIncidentService_UpdateIncident_ResolutionCode_Invalid(t *testing.T) {
+	// client is intentionally nil: validation must fail before touching it.
+	svc := NewServiceNowIncidentService(nil, nil)
+
+	code := domain.IncidentResolutionCode("Not A Real Code")
+	_, err := svc.UpdateIncident(contextWithUserIDToken("token"), domain.UpdateIncidentRequest{
+		ID:             testIncidentUUID,
+		ResolutionCode: &code,
+	})
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
 // TestSNIncidentService_SearchIncidents_NumberFilterPassedThrough verifies the
 // exact-match Number filter reaches the outgoing payload under the "number" key
 // unchanged, alongside the untouched free-text searchQuery.
@@ -481,5 +532,273 @@ func TestSNIncidentService_SearchIncidents_BusinessServiceIdInvalidUUID(t *testi
 	_, err := svc.SearchIncidents(contextWithUserIDToken("token"), req)
 	if _, ok := err.(*apierror.ValidationError); !ok {
 		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
+// TestSNIncidentService_HandOffIncidentToSpecialist_PayloadAndResponseMapping
+// verifies the outgoing payload carries reasonCode/escalationTeam/createGithubIssue
+// under their exact wire names, and that every part of the response -- including
+// the nested incident detail -- is mapped back to the domain representation, with
+// previousAssignmentGroup/githubIssue/githubIssueError staying nil when the backing
+// data source omits them rather than becoming a zero value.
+func TestSNIncidentService_HandOffIncidentToSpecialist_PayloadAndResponseMapping(t *testing.T) {
+	var gotBody map[string]any
+	specialistGroupSysid := sysid32('7')
+	taskSysid := sysid32('8')
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/"+testIncidentSysid+"/specialist-handoffs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Incident handed off to specialist group",
+			"handoff": {
+				"assignmentGroup": {"id": "` + specialistGroupSysid + `", "name": "Choreo APIM Special Ops"},
+				"previousAssignmentGroup": null,
+				"reasonCode": "no-runbook",
+				"reasonDescription": "Runbook is not available",
+				"escalationTeam": "choreo-apim-team",
+				"task": {"id": "` + taskSysid + `", "number": "TASK0082504", "subject": "[Runbook Task] No entry available for INC0091926"},
+				"githubIssue": null,
+				"githubIssueError": null,
+				"incident": {"id": "` + testIncidentSysid + `", "number": "INC0091926"}
+			}
+		}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client, nil)
+
+	createGithubIssue := false
+	team := domain.IncidentSpecialistHandoffTeamChoreoAPIM
+	req := domain.HandOffIncidentToSpecialistRequest{
+		IncidentID:        testIncidentUUID,
+		ReasonCode:        domain.IncidentSpecialistHandoffReasonNoRunbook,
+		EscalationTeam:    &team,
+		CreateGithubIssue: &createGithubIssue,
+	}
+	resp, err := svc.HandOffIncidentToSpecialist(contextWithUserIDToken("token"), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody["reasonCode"] != "no-runbook" {
+		t.Fatalf("reasonCode: got %v, want no-runbook", gotBody["reasonCode"])
+	}
+	if gotBody["escalationTeam"] != "choreo-apim-team" {
+		t.Fatalf("escalationTeam: got %v, want choreo-apim-team", gotBody["escalationTeam"])
+	}
+	if gotBody["createGithubIssue"] != false {
+		t.Fatalf("createGithubIssue: got %v, want false", gotBody["createGithubIssue"])
+	}
+
+	if resp.Message != "Incident handed off to specialist group" {
+		t.Fatalf("Message = %q", resp.Message)
+	}
+	h := resp.Handoff
+	if h.AssignmentGroup.ID != sysidToUUID(specialistGroupSysid) || h.AssignmentGroup.Name != "Choreo APIM Special Ops" {
+		t.Fatalf("AssignmentGroup = %+v", h.AssignmentGroup)
+	}
+	if h.PreviousAssignmentGroup != nil {
+		t.Fatalf("PreviousAssignmentGroup = %+v, want nil", h.PreviousAssignmentGroup)
+	}
+	if h.ReasonCode != domain.IncidentSpecialistHandoffReasonNoRunbook || h.ReasonDescription != "Runbook is not available" {
+		t.Fatalf("ReasonCode/ReasonDescription = %v/%v", h.ReasonCode, h.ReasonDescription)
+	}
+	if h.EscalationTeam == nil || *h.EscalationTeam != domain.IncidentSpecialistHandoffTeamChoreoAPIM {
+		t.Fatalf("EscalationTeam = %v", h.EscalationTeam)
+	}
+	if h.Task.ID != sysidToUUID(taskSysid) || h.Task.Number != "TASK0082504" ||
+		h.Task.Subject != "[Runbook Task] No entry available for INC0091926" {
+		t.Fatalf("Task = %+v", h.Task)
+	}
+	if h.GithubIssue != nil {
+		t.Fatalf("GithubIssue = %+v, want nil", h.GithubIssue)
+	}
+	if h.GithubIssueError != nil {
+		t.Fatalf("GithubIssueError = %v, want nil", *h.GithubIssueError)
+	}
+	if h.Incident.ID == nil || *h.Incident.ID != sysidToUUID(testIncidentSysid) || h.Incident.Number == nil || *h.Incident.Number != "INC0091926" {
+		t.Fatalf("Incident = %+v", h.Incident)
+	}
+}
+
+// TestSNIncidentService_HandOffIncidentToSpecialist_ValidatesInput verifies that
+// a missing/invalid reasonCode or an invalid escalationTeam is rejected before any
+// call reaches the backing data source.
+func TestSNIncidentService_HandOffIncidentToSpecialist_ValidatesInput(t *testing.T) {
+	invalidTeam := domain.IncidentSpecialistHandoffEscalationTeam("not-a-team")
+
+	tests := []struct {
+		name string
+		req  domain.HandOffIncidentToSpecialistRequest
+	}{
+		{
+			name: "missing reasonCode",
+			req:  domain.HandOffIncidentToSpecialistRequest{IncidentID: testIncidentUUID},
+		},
+		{
+			name: "invalid reasonCode",
+			req: domain.HandOffIncidentToSpecialistRequest{
+				IncidentID: testIncidentUUID,
+				ReasonCode: domain.IncidentSpecialistHandoffReasonCode("bogus"),
+			},
+		},
+		{
+			name: "invalid escalationTeam",
+			req: domain.HandOffIncidentToSpecialistRequest{
+				IncidentID:     testIncidentUUID,
+				ReasonCode:     domain.IncidentSpecialistHandoffReasonNoRunbook,
+				EscalationTeam: &invalidTeam,
+			},
+		},
+		{
+			name: "invalid incident id",
+			req: domain.HandOffIncidentToSpecialistRequest{
+				IncidentID: "not-a-uuid",
+				ReasonCode: domain.IncidentSpecialistHandoffReasonNoRunbook,
+			},
+		},
+	}
+
+	// client is intentionally nil: validation must fail before touching it.
+	svc := NewServiceNowIncidentService(nil, nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.HandOffIncidentToSpecialist(contextWithUserIDToken("token"), tt.req)
+			if _, ok := err.(*apierror.ValidationError); !ok {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestSNIncidentService_GetIncidentByID_MapsSpecialistHandoff verifies the
+// specialistHandoff block on incident detail is mapped through, and stays nil
+// when the backing data source omits it (an incident never handed off).
+func TestSNIncidentService_GetIncidentByID_MapsSpecialistHandoff(t *testing.T) {
+	groupSysid := sysid32('9')
+
+	tests := []struct {
+		name           string
+		responseJSON   string
+		wantHandoffNil bool
+	}{
+		{
+			name: "handed-off incident carries a summary",
+			responseJSON: `{"id": "` + testIncidentSysid + `", "number": "INC0091926",
+				"specialistHandoff": {
+					"reasonCode": "no-runbook",
+					"reasonDescription": "Runbook is not available",
+					"escalationTeam": null,
+					"handedOffAt": "2026-08-21 04:02:48",
+					"handedOffBy": "sajithe@wso2.com",
+					"assignmentGroup": {"id": "` + groupSysid + `", "name": "Choreo Special Ops"},
+					"task": {"number": "TASK0082502", "subject": "[Runbook Task] No entry available for INC0091926", "state": "0", "stateLabel": "Open"},
+					"githubIssueUrl": "https://github.com/wso2-enterprise/asgardeo-product/issues/36771"
+				}}`,
+		},
+		{
+			name:           "never handed off incident carries no summary",
+			responseJSON:   `{"id": "` + testIncidentSysid + `", "number": "INC0091927", "specialistHandoff": null}`,
+			wantHandoffNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/incidents/"+testIncidentSysid, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
+			client := newTestSNClient(t, mux)
+			svc := NewServiceNowIncidentService(client, nil)
+
+			view, err := svc.GetIncidentByID(contextWithUserIDToken("token"), testIncidentUUID)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantHandoffNil {
+				if view.SpecialistHandoff != nil {
+					t.Fatalf("SpecialistHandoff = %+v, want nil", view.SpecialistHandoff)
+				}
+				return
+			}
+			if view.SpecialistHandoff == nil {
+				t.Fatalf("SpecialistHandoff = nil, want non-nil")
+			}
+			sh := view.SpecialistHandoff
+			if sh.ReasonCode != domain.IncidentSpecialistHandoffReasonNoRunbook || sh.ReasonDescription != "Runbook is not available" {
+				t.Fatalf("ReasonCode/ReasonDescription = %v/%v", sh.ReasonCode, sh.ReasonDescription)
+			}
+			if sh.EscalationTeam != nil {
+				t.Fatalf("EscalationTeam = %v, want nil", sh.EscalationTeam)
+			}
+			if sh.HandedOffAt != "2026-08-21 04:02:48" || sh.HandedOffBy == nil || *sh.HandedOffBy != "sajithe@wso2.com" {
+				t.Fatalf("HandedOffAt/HandedOffBy = %v/%v", sh.HandedOffAt, sh.HandedOffBy)
+			}
+			if sh.AssignmentGroup.ID != sysidToUUID(groupSysid) || sh.AssignmentGroup.Name != "Choreo Special Ops" {
+				t.Fatalf("AssignmentGroup = %+v", sh.AssignmentGroup)
+			}
+			if sh.Task.Number != "TASK0082502" || sh.Task.State == nil || *sh.Task.State != "0" ||
+				sh.Task.StateLabel == nil || *sh.Task.StateLabel != "Open" {
+				t.Fatalf("Task = %+v", sh.Task)
+			}
+			if sh.GithubIssueURL == nil || *sh.GithubIssueURL != "https://github.com/wso2-enterprise/asgardeo-product/issues/36771" {
+				t.Fatalf("GithubIssueURL = %v", sh.GithubIssueURL)
+			}
+		})
+	}
+}
+
+// --- AggregateIncidents: state groupBy key remap ---
+//
+// SN's own groupBy implementation (IncidentUtils.groupIncidentsBy) returns
+// the raw numeric incident state value (as a string) as the bucket key, not
+// this platform's domain enum string. This test pins the remap through
+// snIncidentStateLabelMap (SN numeric state ID -> domain label).
+func TestSNIncidentService_AggregateIncidents_StateGroupByRemapsKeyToDomainEnum(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/aggregate", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"groups": []map[string]any{
+				{"key": "1", "label": "New", "count": 4},
+				{"key": "2", "label": "In Progress", "count": 2},
+				{"key": "42", "label": "Unrecognized", "count": 1},
+			},
+			"othersCount":  0,
+			"totalRecords": 7,
+		})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client, nil)
+
+	resp, err := svc.AggregateIncidents(contextWithUserIDToken("token"), domain.AggregateIncidentsRequest{
+		GroupBy: "state",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Groups) != 3 {
+		t.Fatalf("groups: got %d, want 3", len(resp.Groups))
+	}
+	if got, want := resp.Groups[0].Key, "NEW"; got != want {
+		t.Errorf("groups[0].Key: got %q, want %q (domain label, not raw SN state id %q)", got, want, "1")
+	}
+	if got, want := resp.Groups[1].Key, "IN_PROGRESS"; got != want {
+		t.Errorf("groups[1].Key: got %q, want %q", got, want)
+	}
+	// Unrecognized numeric state id: falls back to leaving the key as-is.
+	if got, want := resp.Groups[2].Key, "42"; got != want {
+		t.Errorf("groups[2].Key: got %q, want %q (unrecognized state id falls back to raw key)", got, want)
 	}
 }

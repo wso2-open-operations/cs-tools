@@ -499,3 +499,100 @@ func TestParseDashboardsConfig_WidgetColumnsAndSortBy(t *testing.T) {
 		t.Errorf("no-columns-widget.SortBy = %+v, want nil", noColumns.SortBy)
 	}
 }
+
+func TestParseDashboardsConfig_WidgetInlineDrilldown(t *testing.T) {
+	const raw = `[
+		{
+			"id": "sample-dashboard",
+			"displayName": "Sample Dashboard",
+			"widgets": [
+				{
+					"id": "case-severity-breakdown",
+					"displayName": "Case Severity Breakdown",
+					"resourceType": "case",
+					"shape": "pie",
+					"gridWidth": 6,
+					"query": {},
+					"groupBy": {"field": "severity"},
+					"inlineDrilldown": true
+				},
+				{
+					"id": "no-inline-drilldown-widget",
+					"displayName": "No Inline Drilldown Widget",
+					"resourceType": "case",
+					"shape": "pie",
+					"gridWidth": 6,
+					"query": {},
+					"groupBy": {"field": "severity"}
+				}
+			]
+		}
+	]`
+
+	got, err := ParseDashboardsConfig(raw)
+	if err != nil {
+		t.Fatalf("ParseDashboardsConfig returned error: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Widgets) != 2 {
+		t.Fatalf("ParseDashboardsConfig(raw) = %+v, want 1 dashboard with 2 widgets", got)
+	}
+
+	if !got[0].Widgets[0].InlineDrilldown {
+		t.Errorf("case-severity-breakdown.InlineDrilldown = false, want true")
+	}
+
+	// Absent "inlineDrilldown" round-trips to false — the frontend's
+	// existing navigate-away behavior, unchanged from before this field
+	// existed.
+	if got[0].Widgets[1].InlineDrilldown {
+		t.Errorf("no-inline-drilldown-widget.InlineDrilldown = true, want false")
+	}
+}
+
+func TestParseDashboardsConfig_WidgetInlineLabels(t *testing.T) {
+	const raw = `[
+		{
+			"id": "sample-dashboard",
+			"displayName": "Sample Dashboard",
+			"widgets": [
+				{
+					"id": "case-severity-breakdown",
+					"displayName": "Case Severity Breakdown",
+					"resourceType": "case",
+					"shape": "pie",
+					"gridWidth": 6,
+					"query": {},
+					"groupBy": {"field": "severity"},
+					"inlineLabels": true
+				},
+				{
+					"id": "no-inline-labels-widget",
+					"displayName": "No Inline Labels Widget",
+					"resourceType": "case",
+					"shape": "pie",
+					"gridWidth": 6,
+					"query": {},
+					"groupBy": {"field": "severity"}
+				}
+			]
+		}
+	]`
+
+	got, err := ParseDashboardsConfig(raw)
+	if err != nil {
+		t.Fatalf("ParseDashboardsConfig returned error: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Widgets) != 2 {
+		t.Fatalf("ParseDashboardsConfig(raw) = %+v, want 1 dashboard with 2 widgets", got)
+	}
+
+	if !got[0].Widgets[0].InlineLabels {
+		t.Errorf("case-severity-breakdown.InlineLabels = false, want true")
+	}
+
+	// Absent "inlineLabels" round-trips to false — the frontend's existing
+	// donut+legend rendering, unchanged from before this field existed.
+	if got[0].Widgets[1].InlineLabels {
+		t.Errorf("no-inline-labels-widget.InlineLabels = true, want false")
+	}
+}

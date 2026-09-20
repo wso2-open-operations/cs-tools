@@ -15,34 +15,25 @@
 // under the License.
 
 //
-// Ensures one case exists per project type per severity — S1 to S4 across
+// Creates one case per project type per severity — S1 to S4 across
 // Subscription, Managed Cloud Subscription and Cloud Support.
 //
-// ⚠️ IDEMPOTENT BY DESIGN, which matters because cases cannot be deleted. Each
-// test searches the project's case list for its deterministic subject
-// (`<prefix> <severity code>`, from CASE_MATRIX) and creates a case only when
-// none is found. A second run therefore creates nothing.
+// ⚠️ NOT idempotent, and this is the most expensive suite in the repo to run.
+// Every execution raises a case for each offered combination — up to twelve —
+// and cases have no delete endpoint, so nothing here or elsewhere can remove
+// them. Retries add more. Treat a full run as a permanent write to the target
+// environment.
 //
-// Two consequences worth understanding before changing anything here:
+// It previously searched each project's case list for the deterministic subject
+// (`<prefix> <severity code>`, from CASE_MATRIX) and created only when nothing
+// matched. That made repeat runs free, but it also meant the create path stopped
+// being exercised as soon as the row existed: on a populated environment every
+// test passed without submitting anything. Creating unconditionally is the
+// deliberate trade — coverage of the write path in exchange for records per run.
 //
-// - The subject IS the key. Renaming a prefix in CASE_MATRIX orphans the
-//   existing cases, and the next run recreates that whole row — permanently.
-// - A false negative on the existence check creates a duplicate that cannot be
-//   removed, so `hasCaseWithSubject` waits for the search response produced by
-//   its own query rather than sampling the list mid-flight.
-//
-// ⚠️ DO NOT RUN THIS SUITE CONCURRENTLY AGAINST ONE ENVIRONMENT. The lookup and
-// the create are separate steps, so two overlapping runs can both find nothing
-// and both create — leaving a duplicate that cannot be deleted. Within a single
-// run this cannot happen (playwright.config.ts pins `workers: 1` and
-// `fullyParallel: false`), but nothing stops a second run, on another machine or
-// in CI, from racing this one.
-//
-// This is deliberately a documented constraint rather than a coded guard:
-// `POST /cases` offers no idempotency key and no uniqueness on subject, so the
-// server cannot dedupe; and a lock file would only serialize runs on the same
-// machine, giving false assurance against exactly the cross-machine case that
-// matters. Fixing it properly needs a server-side unique-create.
+// The subjects are still deterministic, so the cases this leaves behind remain
+// identifiable and grouped in the target environment. They are no longer a key,
+// though: repeated runs now produce many cases sharing one subject.
 //
 // Severity availability is per project: it comes from `acceptedSeverityValues`,
 // so a project that does not offer a severity skips that combination rather than
@@ -50,7 +41,6 @@
 //
 
 import { test, expect, withSession } from "../../fixtures/test";
-import { CasesListPage } from "../../pages/CasesListPage";
 import { CaseCreatePage } from "../../pages/CaseCreatePage";
 import {
   CASE_MATRIX,
@@ -62,6 +52,10 @@ import {
 } from "../../config/testData";
 import { expectSuccess, skipWhenUnconfigured } from "../../utils/caseFlows";
 import { CREATE_CASE } from "../../utils/selectors";
+import {
+  permanentWriteSkipReason,
+  permanentWritesAllowed,
+} from "../../utils/permanentWrites";
 
 withSession(test);
 
@@ -79,19 +73,16 @@ test.describe("Case Matrix", () => {
         const code = SEVERITY_CODES[severity];
         const subject = `${naming.titlePrefix} ${code}`;
 
-        test(`has a ${code} case`, async ({ page }) => {
+        test(`create ${code} case`, async ({ page }) => {
           skipWhenUnconfigured(project);
+          test.skip(
+            !permanentWritesAllowed(),
+            permanentWriteSkipReason(
+              "a support case (up to 12 across the full matrix)",
+            ),
+          );
 
-          const list = new CasesListPage(page);
-          await list.open(project.id);
-
-          if (await list.hasCaseWithSubject(subject)) {
-            // Nothing to do — this is the steady state after the first run.
-            console.log(`${projectType} ${code}: exists ("${subject}")`);
-            return;
-          }
-
-          console.log(`${projectType} ${code}: missing, creating "${subject}"`);
+          console.log(`${projectType} ${code}: creating "${subject}"`);
 
           const form = new CaseCreatePage(page);
           await form.openViaGetHelp(project.id);

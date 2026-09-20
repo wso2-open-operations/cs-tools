@@ -129,10 +129,11 @@ export function incidentPriorityColor(priority?: string | null): ChipColor {
 
 /**
  * Filters for the incidents list. The backend's `IncidentSearchPayload.filters`
- * supports `searchQuery`, `priorities`, `parentIds`, `slaViolated`,
- * `startCreatedDate`/`endCreatedDate`, and `productNames` (see openapi.yaml),
- * plus the generic `filters` array this feeds `sreTeamIds` through as an
- * `assignmentGroupId`/`"in"` entry; there's no server-side state/category
+ * only has flat named keys for `searchQuery`, `priorities`, `parentIds`, and
+ * `number` (see openapi.yaml); `slaViolated`, `createdOn` (date range), and
+ * `productName` all route through the generic `filters` array (see
+ * {@link buildIncidentSearchFilters}), same as `sreTeamIds`' own
+ * `assignmentGroupId`/`"in"` entry — there's no server-side state/category
  * filter to build a control for.
  */
 export interface IncidentFilters {
@@ -193,29 +194,55 @@ export function incidentDateOnlyToUTCEnd(dateOnly: string): string {
 
 /**
  * Build `IncidentSearchPayload.filters` from the UI's {@link IncidentFilters}
- * plus the (separately debounced) search text. `slaViolated` is included only
- * when the toggle is on — the backend treats `false` and "absent" as the same
- * thing, so sending `false` would be meaningless and misleading to read back.
+ * plus the (separately debounced) search text. `searchQuery`/`priorities`
+ * remain flat named keys — the backend's `SearchIncidentsRequest.filters` has
+ * no flat key for `slaViolated`, `createdOn`, `productName`, or
+ * `assignmentGroupId`; each of those is only accepted through the generic
+ * `filters` array (`IncidentFieldFilter`), so they're all merged into one
+ * array here rather than sent as top-level scalars — the entity-service
+ * rejects unknown top-level fields outright (400) rather than ignoring them.
+ * `slaViolated` is included only when the toggle is on — the backend treats
+ * `false` and "absent" as the same thing, so sending `false` would be
+ * meaningless and misleading to read back. `createdOn` becomes up to two
+ * separate `gte`/`lte` entries (one value each), not a single ranged entry.
  */
 export function buildIncidentSearchFilters(
   filters: IncidentFilters,
   debouncedSearch: string,
 ): NonNullable<BeIncidentSearchPayload["filters"]> {
+  const fieldFilters: NonNullable<BeIncidentSearchPayload["filters"]>["filters"] = [
+    ...(filters.slaViolated
+      ? [{ field: "slaViolated" as const, op: "eq" as const, values: ["true"] }]
+      : []),
+    ...(filters.createdStartDate
+      ? [
+          {
+            field: "createdOn" as const,
+            op: "gte" as const,
+            values: [incidentDateOnlyToUTCStart(filters.createdStartDate)],
+          },
+        ]
+      : []),
+    ...(filters.createdEndDate
+      ? [
+          {
+            field: "createdOn" as const,
+            op: "lte" as const,
+            values: [incidentDateOnlyToUTCEnd(filters.createdEndDate)],
+          },
+        ]
+      : []),
+    ...(filters.products.length > 0
+      ? [{ field: "productName" as const, op: "in" as const, values: filters.products }]
+      : []),
+    ...(filters.sreTeamIds.length > 0
+      ? [{ field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds }]
+      : []),
+  ];
+
   return {
     ...(debouncedSearch.length > 0 && { searchQuery: debouncedSearch }),
     ...(filters.priorities.length > 0 && { priorities: filters.priorities }),
-    ...(filters.slaViolated && { slaViolated: true }),
-    ...(filters.createdStartDate && {
-      startCreatedDate: incidentDateOnlyToUTCStart(filters.createdStartDate),
-    }),
-    ...(filters.createdEndDate && {
-      endCreatedDate: incidentDateOnlyToUTCEnd(filters.createdEndDate),
-    }),
-    ...(filters.products.length > 0 && { productNames: filters.products }),
-    ...(filters.sreTeamIds.length > 0 && {
-      filters: [
-        { field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds },
-      ],
-    }),
+    ...(fieldFilters.length > 0 && { filters: fieldFilters }),
   };
 }

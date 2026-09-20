@@ -36,7 +36,7 @@ func capturedSearch(t *testing.T, body string) (string, *httptest.ResponseRecord
 			captured = string(b)
 			return []byte(`{"users":[],"total":0,"limit":10,"offset":0}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 	w := httptest.NewRecorder()
 	h.SearchUsers(w, withUser(httptest.NewRequest(http.MethodPost, "/users/search", strings.NewReader(body))))
 	return captured, w
@@ -127,7 +127,7 @@ func TestSearchUsers_UnknownTeamUUIDIsRejectedWithoutCallingUpstream(t *testing.
 			called = true
 			return []byte(`{}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 	w := httptest.NewRecorder()
 	h.SearchUsers(w, withUser(httptest.NewRequest(http.MethodPost, "/users/search",
 		strings.NewReader(`{"filters":{"teamIds":["ffffffff-ffff-ffff-ffff-ffffffffffff"]}}`))))
@@ -148,7 +148,7 @@ func TestSearchUsers_UnknownTeamKeyIsRejectedWithoutCallingUpstream(t *testing.T
 			called = true
 			return []byte(`{}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 	w := httptest.NewRecorder()
 	h.SearchUsers(w, withUser(httptest.NewRequest(http.MethodPost, "/users/search",
 		strings.NewReader(`{"filters":{"teamIds":["no-such-team"]}}`))))
@@ -168,7 +168,7 @@ func TestSearchUsers_RejectsARoleOutsideTheAllowList(t *testing.T) {
 			called = true
 			return []byte(`{"users":[],"total":0}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 
 	w := httptest.NewRecorder()
 	h.SearchUsers(w, withUser(httptest.NewRequest(http.MethodPost, "/users/search",
@@ -209,7 +209,7 @@ func TestSearchUsers_TeamResolutionMakesNoEntityCalls(t *testing.T) {
 			calls++
 			return []byte(`{"users":[],"total":0}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 
 	const iterations = 20
 	for i := 0; i < iterations; i++ {
@@ -232,7 +232,7 @@ func TestGetUser_DerivesTeamsFromGroups(t *testing.T) {
 			return []byte(`{"id":"` + id + `","email":"staff@example.com","lockedOut":true,"groups":[` +
 				`{"id":"g-1","name":"ABT One"},{"id":"g-2","name":"Some Other Group"}]}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 
 	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)
@@ -280,7 +280,7 @@ func TestGetUser_EmptyTeamsWhenNoneMatch(t *testing.T) {
 		getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 			return []byte(`{"id":"` + id + `","groups":[{"id":"g-2","name":"Some Other Group"}]}`), nil
 		},
-	}, testDirectory(t), false)
+	}, testDirectory(t), false, nil)
 
 	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)

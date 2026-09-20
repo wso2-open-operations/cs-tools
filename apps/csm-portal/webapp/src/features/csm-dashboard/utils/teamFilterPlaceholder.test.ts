@@ -137,6 +137,114 @@ describe("resolveTeamPlaceholder", () => {
     });
   });
 
+  it("substitutes the placeholder with the selected team's sreGroupId for an assignmentGroupId entry (change_request/incident/problem)", () => {
+    const filters = {
+      filters: [
+        { field: "state", op: "in", values: ["open"] },
+        { field: "assignmentGroupId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] },
+      ],
+    };
+
+    const resolved = resolveTeamPlaceholder(
+      filters,
+      undefined,
+      "33333333-3333-3333-3333-333333333333",
+    );
+
+    expect(resolved).toEqual({
+      filters: [
+        { field: "state", op: "in", values: ["open"] },
+        {
+          field: "assignmentGroupId",
+          op: "in",
+          values: ["33333333-3333-3333-3333-333333333333"],
+        },
+      ],
+    });
+  });
+
+  it("never resolves an assignmentGroupId entry from selectedTeamCreGroupId, only from the sre group id", () => {
+    const filters = {
+      filters: [{ field: "assignmentGroupId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] }],
+    };
+
+    const resolved = resolveTeamPlaceholder(filters, "cre-group-id", undefined);
+
+    expect(resolved).toEqual({ filters: [] });
+  });
+
+  it("drops the assignmentGroupId entry entirely when no sreGroupId is available", () => {
+    const filters = {
+      filters: [
+        { field: "state", op: "in", values: ["open"] },
+        { field: "assignmentGroupId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] },
+      ],
+    };
+
+    const resolved = resolveTeamPlaceholder(filters, undefined, undefined);
+
+    expect(resolved).toEqual({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+  });
+
+  it("drops the assignmentGroupId entry entirely when given an array with many ids ('All ABTs')", () => {
+    const filters = {
+      filters: [
+        { field: "state", op: "in", values: ["open"] },
+        { field: "assignmentGroupId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] },
+      ],
+    };
+
+    const resolved = resolveTeamPlaceholder(filters, undefined, ["group-a", "group-b", "group-c"]);
+
+    expect(resolved).toEqual({
+      filters: [{ field: "state", op: "in", values: ["open"] }],
+    });
+  });
+
+  it("only substitutes the placeholder entry within an assignmentGroupId values array, leaving other literal values alone", () => {
+    const filters = {
+      filters: [
+        {
+          field: "assignmentGroupId",
+          op: "in",
+          values: ["some-literal-group-id", CURRENT_TEAM_PLACEHOLDER],
+        },
+      ],
+    };
+
+    const resolved = resolveTeamPlaceholder(filters, undefined, "team-group-id");
+
+    expect(resolved).toEqual({
+      filters: [
+        {
+          field: "assignmentGroupId",
+          op: "in",
+          values: ["some-literal-group-id", "team-group-id"],
+        },
+      ],
+    });
+  });
+
+  it("resolves creTeam and assignmentGroupId entries independently on the same filters object", () => {
+    const filters = {
+      filters: [
+        { field: "creTeam", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] },
+        { field: "assignmentGroupId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] },
+      ],
+    };
+
+    const resolved = resolveTeamPlaceholder(filters, "cre-group-id", "sre-group-id");
+
+    expect(resolved).toEqual({
+      filters: [
+        { field: "creTeam", op: "in", values: ["cre-group-id"] },
+        { field: "assignmentGroupId", op: "in", values: ["sre-group-id"] },
+      ],
+    });
+  });
+
   it("only substitutes the placeholder entry within a values array, leaving other literal values alone", () => {
     const filters = {
       filters: [
@@ -367,6 +475,14 @@ describe("hasTeamPlaceholder", () => {
   it("returns true when an sreTeam entry's values carry the placeholder", () => {
     const filters = {
       filters: [{ field: "sreTeam", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] }],
+    };
+
+    expect(hasTeamPlaceholder(filters)).toBe(true);
+  });
+
+  it("returns true when an assignmentGroupId entry's values carry the placeholder", () => {
+    const filters = {
+      filters: [{ field: "assignmentGroupId", op: "in", values: [CURRENT_TEAM_PLACEHOLDER] }],
     };
 
     expect(hasTeamPlaceholder(filters)).toBe(true);

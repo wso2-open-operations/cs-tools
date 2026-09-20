@@ -24,15 +24,20 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   FormHelperText,
+  Switch,
+  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { useCallback, useMemo, useState, type JSX } from "react";
 import { useSearchGroups } from "@api/useSearchGroups";
+import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import type {
   BeChangeRequestDetail,
   BeGroup,
   BePatchChangeRequestPayload,
+  BeUser,
 } from "@api/backend/types";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import Editor from "@components/rich-text-editor/Editor";
@@ -75,6 +80,10 @@ function toDateTimeLocal(raw?: string | null): string {
 /** Convert a `datetime-local` value back to the BE's `YYYY-MM-DD HH:MM:SS`. */
 function toBackendDateTime(local: string): string {
   return `${local.replace("T", " ")}:00`;
+}
+
+function userLabel(u: BeUser): string {
+  return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || u.id || "";
 }
 
 /** One long-form plan field, edited as rich text. */
@@ -147,9 +156,23 @@ function useRichTextPlanField(storedHtml?: string | null): RichTextPlanField {
 
 /**
  * Edit the change-request fields the BE allows updating: the planned window,
- * the assignment group, and the rollback and test plans. Only changed fields
- * are sent, and the BE requires at least one, so Save is disabled until
- * something differs.
+ * the assignment group, the individual assignee, requester, customer group,
+ * rollback duration, the implementation/rollback/test/affected-services/
+ * affected-components plans (the last five added 2026-08-20, see
+ * `CHANGES-cr-field-parity.md`), and whether the Implementation Plan is
+ * visible to customers.
+ * Only changed fields are sent, and the BE requires at least one, so Save is
+ * disabled until something differs.
+ *
+ * Deliberately NOT here, even though the backend's write contract accepts
+ * them: `categoryKey` (never gets an editable control — see
+ * `BeChangeRequestDetail.category`'s doc comment), `priorityKey` (no
+ * metadata endpoint yet for the picker), `environmentIds`/
+ * `deploymentProductIds` (no search endpoint exists at this BFF to build a
+ * picker against), `comment`/`workNote` (the existing CR comments feature
+ * already covers that surface), and `durationInput` (only succeeds against
+ * an exact-match validation rule not worth half-implementing here — see
+ * `BePatchChangeRequestPayload`'s doc comment for the full reasoning on each).
  *
  * `isCustomerApproved`/`isCustomerReviewed` are deliberately NOT exposed here
  * even though the BE patch contract still accepts them (see
@@ -184,11 +207,26 @@ export default function EditChangeRequestDialog({
     [cr.plannedEndOn],
   );
   const initialAssignedTeamId = cr.assignedTeam?.id ?? "";
+  const initialAssignedEngineerId = cr.assignedEngineer?.id ?? "";
+  const initialCustomerGroupId = cr.customerGroup?.id ?? "";
+  const initialRequestedById = cr.requestedBy?.id ?? "";
+  const initialRollbackDurationText = cr.rollbackDurationText ?? "";
+  const initialIsPlanningVisibleToCustomers = cr.isPlanningVisibleToCustomers ?? false;
   const [plannedStart, setPlannedStart] = useState(initialPlannedStart);
   const [plannedEnd, setPlannedEnd] = useState(initialPlannedEnd);
   const [assignedTeamId, setAssignedTeamId] = useState(initialAssignedTeamId);
+  const [assignedEngineerId, setAssignedEngineerId] = useState(initialAssignedEngineerId);
+  const [customerGroupId, setCustomerGroupId] = useState(initialCustomerGroupId);
+  const [requestedById, setRequestedById] = useState(initialRequestedById);
+  const [rollbackDurationText, setRollbackDurationText] = useState(initialRollbackDurationText);
+  const [isPlanningVisibleToCustomers, setIsPlanningVisibleToCustomers] = useState(
+    initialIsPlanningVisibleToCustomers,
+  );
   const rollbackPlan = useRichTextPlanField(cr.rollbackPlan);
   const testPlan = useRichTextPlanField(cr.testPlan);
+  const implementationPlan = useRichTextPlanField(cr.implementationPlan);
+  const affectedServicesText = useRichTextPlanField(cr.affectedServicesText);
+  const affectedComponentsText = useRichTextPlanField(cr.affectedComponentsText);
 
   // Client-side only, and only when both ends are set: the backing system
   // does its own validation and this must not become the thing that blocks a
@@ -210,12 +248,30 @@ export default function EditChangeRequestDialog({
     if (assignedTeamId !== initialAssignedTeamId && assignedTeamId) {
       next.assignedTeamId = assignedTeamId;
     }
+    if (assignedEngineerId !== initialAssignedEngineerId && assignedEngineerId) {
+      next.assignedEngineerId = assignedEngineerId;
+    }
     // Unlike the pickers above, an emptied plan field is a real edit the BE
     // can accept, so "" is sent rather than skipped. Both plans are rich text
     // on both sides now — see `useRichTextPlanField` for why "changed" is not
     // a comparison against the stored string.
     if (rollbackPlan.isDirty) next.rollbackPlan = rollbackPlan.outgoing;
     if (testPlan.isDirty) next.testPlan = testPlan.outgoing;
+    if (implementationPlan.isDirty) next.implementationPlan = implementationPlan.outgoing;
+    if (affectedServicesText.isDirty) next.affectedServicesText = affectedServicesText.outgoing;
+    if (affectedComponentsText.isDirty) next.affectedComponentsText = affectedComponentsText.outgoing;
+    if (rollbackDurationText !== initialRollbackDurationText) {
+      next.rollbackDurationText = rollbackDurationText;
+    }
+    if (customerGroupId !== initialCustomerGroupId && customerGroupId) {
+      next.customerGroupId = customerGroupId;
+    }
+    if (requestedById !== initialRequestedById && requestedById) {
+      next.requestedById = requestedById;
+    }
+    if (isPlanningVisibleToCustomers !== initialIsPlanningVisibleToCustomers) {
+      next.isPlanningVisibleToCustomers = isPlanningVisibleToCustomers;
+    }
     return next;
   }, [
     plannedStart,
@@ -224,10 +280,26 @@ export default function EditChangeRequestDialog({
     initialPlannedEnd,
     assignedTeamId,
     initialAssignedTeamId,
+    assignedEngineerId,
+    initialAssignedEngineerId,
     rollbackPlan.isDirty,
     rollbackPlan.outgoing,
     testPlan.isDirty,
     testPlan.outgoing,
+    implementationPlan.isDirty,
+    implementationPlan.outgoing,
+    affectedServicesText.isDirty,
+    affectedServicesText.outgoing,
+    affectedComponentsText.isDirty,
+    affectedComponentsText.outgoing,
+    rollbackDurationText,
+    initialRollbackDurationText,
+    customerGroupId,
+    initialCustomerGroupId,
+    requestedById,
+    initialRequestedById,
+    isPlanningVisibleToCustomers,
+    initialIsPlanningVisibleToCustomers,
   ]);
 
   const hasChanges = Object.keys(patch).length > 0;
@@ -343,6 +415,76 @@ export default function EditChangeRequestDialog({
             knownLabel={cr.assignedTeam?.name}
             helperText="Required before approval can be requested."
           />
+          <AsyncEntitySelect<BeUser>
+            id="cr-edit-assigned-engineer"
+            label="Assigned to"
+            placeholder="Search people…"
+            value={assignedEngineerId}
+            onChange={setAssignedEngineerId}
+            disabled={isSaving}
+            useSearch={useSearchInternalUsersByName}
+            getId={(u) => u.id!}
+            getLabel={userLabel}
+            knownLabel={cr.assignedEngineer?.name}
+          />
+          <AsyncEntitySelect<BeUser>
+            id="cr-edit-requested-by"
+            label="Requested by"
+            placeholder="Search people…"
+            value={requestedById}
+            onChange={setRequestedById}
+            disabled={isSaving}
+            useSearch={useSearchInternalUsersByName}
+            getId={(u) => u.id!}
+            getLabel={userLabel}
+            knownLabel={cr.requestedBy?.name}
+          />
+          <AsyncEntitySelect<BeGroup>
+            id="cr-edit-customer-group"
+            label="Customer group"
+            placeholder="Search groups…"
+            value={customerGroupId}
+            onChange={setCustomerGroupId}
+            disabled={isSaving}
+            useSearch={useSearchGroups}
+            getId={(g) => g.id}
+            getLabel={(g) => g.name}
+            knownLabel={cr.customerGroup?.name}
+          />
+          <TextField
+            label="Rollback duration"
+            value={rollbackDurationText}
+            onChange={(e) => setRollbackDurationText(e.target.value)}
+            fullWidth
+            size="small"
+            disabled={isSaving}
+            placeholder="e.g. 30 mins"
+            helperText="Free text — ServiceNow does not parse this into a structured duration."
+          />
+          <FormControlLabel
+            sx={{ ml: 0, justifyContent: "space-between", width: "100%" }}
+            labelPlacement="start"
+            control={
+              <Switch
+                size="small"
+                checked={isPlanningVisibleToCustomers}
+                onChange={(e) => setIsPlanningVisibleToCustomers(e.target.checked)}
+                disabled={isSaving}
+                inputProps={{ "aria-label": "Implementation Plan visible to customers" }}
+              />
+            }
+            label={
+              <Typography variant="body2" color="text.secondary">
+                Implementation Plan visible to customers
+              </Typography>
+            }
+          />
+          {renderPlanField(
+            "cr-edit-implementation-plan",
+            "Implementation plan",
+            implementationPlan,
+            "How this change is carried out.",
+          )}
           {renderPlanField(
             "cr-edit-rollback-plan",
             "Rollback plan",
@@ -354,6 +496,18 @@ export default function EditChangeRequestDialog({
             "Test plan",
             testPlan,
             "How the change is verified once implemented.",
+          )}
+          {renderPlanField(
+            "cr-edit-affected-services",
+            "Affected services",
+            affectedServicesText,
+            "Services impacted by this change.",
+          )}
+          {renderPlanField(
+            "cr-edit-affected-components",
+            "Affected components",
+            affectedComponentsText,
+            "Components impacted by this change.",
           )}
         </Box>
       </DialogContent>

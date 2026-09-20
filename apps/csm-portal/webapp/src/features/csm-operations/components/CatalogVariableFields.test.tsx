@@ -220,3 +220,82 @@ describe("CatalogVariableFields — choice lists", () => {
     expect(select).not.toHaveAttribute("aria-required", "true");
   });
 });
+
+describe("CatalogVariableFields — SR variable metadata (mandatory/readOnly/maxLength/validation)", () => {
+  it("marks a plain text field required only when the real mandatory flag says so", () => {
+    renderFields([
+      { ...NOTES, id: "req", questionText: "Required text", mandatory: true },
+      { ...NOTES, id: "opt", questionText: "Optional text", mandatory: false },
+    ]);
+
+    expect(screen.getByLabelText(/required text/i)).toHaveAttribute("required");
+    expect(screen.getByLabelText(/optional text/i)).not.toHaveAttribute("required");
+  });
+
+  it("disables a readOnly field's input, still showing its value", () => {
+    renderFields(
+      [{ ...NOTES, id: "ro", questionText: "Read-only field", readOnly: true }],
+      { ro: "fixed value" },
+    );
+
+    const field = screen.getByLabelText(/read-only field/i);
+    expect(field).toBeDisabled();
+    expect(field).toHaveValue("fixed value");
+  });
+
+  it("constrains a text input's maxLength attribute from the declared metadata", () => {
+    renderFields([
+      {
+        id: "33333333-3333-3333-3333-333333333333",
+        questionText: "Short field",
+        order: 100,
+        type: "single_line_text",
+        maxLength: 10,
+      },
+    ]);
+
+    expect(screen.getByLabelText(/short field/i)).toHaveAttribute("maxlength", "10");
+  });
+
+  it("shows the declared validation message as an error when the current value fails the regex", () => {
+    renderFields(
+      [
+        {
+          id: "44444444-4444-4444-4444-444444444444",
+          questionText: "Email Address",
+          order: 100,
+          type: "single_line_text",
+          validation: {
+            name: "Email",
+            regex: "^[^@]+@[^@]+\\.[^@]+$",
+            message: "Not a valid email",
+          },
+        },
+      ],
+      { "44444444-4444-4444-4444-444444444444": "not-an-email" },
+    );
+
+    expect(screen.getByText("Not a valid email")).toBeInTheDocument();
+  });
+
+  it("shows no validation error once the value matches the pattern", () => {
+    renderFields(
+      [
+        {
+          id: "44444444-4444-4444-4444-444444444444",
+          questionText: "Email Address",
+          order: 100,
+          type: "single_line_text",
+          validation: {
+            name: "Email",
+            regex: "^[^@]+@[^@]+\\.[^@]+$",
+            message: "Not a valid email",
+          },
+        },
+      ],
+      { "44444444-4444-4444-4444-444444444444": "jane.doe@example.com" },
+    );
+
+    expect(screen.queryByText("Not a valid email")).not.toBeInTheDocument();
+  });
+});

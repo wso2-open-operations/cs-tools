@@ -1022,7 +1022,7 @@ public type ProductVulnerabilitySearchResponse record {|
     ProductVulnerability[] productVulnerabilities;
     # Total records count
     int totalRecords;
-    *entity:Pagination;
+    *entity:ProductVulnerabilityPagination;
 |};
 
 # Recommended update level.

@@ -69,7 +69,7 @@ func TestLoggingNotifier_Send_LogsProjectAndSubjectFields(t *testing.T) {
 	startDate := time.Date(2025, 7, 29, 0, 0, 0, 0, time.UTC)
 	endDate := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
 
-	err := n.Send(context.Background(), Notice{
+	_, err := n.Send(context.Background(), Notice{
 		ProjectID:   "p1",
 		ProjectName: "TICKETNETWORK - Subscription",
 		ProjectKey:  "TICKETNET",
@@ -113,7 +113,7 @@ func TestLoggingNotifier_Send_LogsRecipientsIncludingCustomerWhenPresent(t *test
 	h := &capturingHandler{}
 	n := &LoggingNotifier{Logger: slog.New(h)}
 
-	err := n.Send(context.Background(), Notice{
+	_, err := n.Send(context.Background(), Notice{
 		ProjectID: "p1",
 		Window:    7,
 		Recipients: Recipients{
@@ -162,7 +162,7 @@ func TestLoggingNotifier_Send_OmitsCustomerAttributeWhenNil(t *testing.T) {
 	h := &capturingHandler{}
 	n := &LoggingNotifier{Logger: slog.New(h)}
 
-	err := n.Send(context.Background(), Notice{
+	_, err := n.Send(context.Background(), Notice{
 		ProjectID: "p1",
 		Window:    90,
 		Recipients: Recipients{
@@ -192,7 +192,7 @@ func TestLoggingNotifier_Send_LogsBodyWhenPresent(t *testing.T) {
 
 	const body = "Internal - Customer Project without Business Contacts\n\nUrgent reminder..."
 
-	err := n.Send(context.Background(), Notice{
+	_, err := n.Send(context.Background(), Notice{
 		ProjectID: "p1",
 		Subject:   "[Urgent] [ACP] No Business Contacts Specified for Project HFC Subscription - Subscription",
 		Body:      body,

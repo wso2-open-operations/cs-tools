@@ -206,6 +206,31 @@ func TestWithSubscriptionEndDateState_RejectsUnmappedWindow(t *testing.T) {
 	}
 }
 
+// TestWithSubscriptionEndDateState_PreservesHTMLSensitiveCharactersLiterally
+// covers a real gap normalizeJSON-based equivalence checks can't see
+// (CodeRabbit, PR #1657 review): encoding/json's default marshaling
+// HTML-escapes '<', '>', and '&' in *any* output it produces — including
+// bytes coming from an untouched json.RawMessage value that was never
+// semantically changed. A byte-for-byte preservation claim has to survive
+// this literally, not just survive a semantic-equivalence check.
+func TestWithSubscriptionEndDateState_PreservesHTMLSensitiveCharactersLiterally(t *testing.T) {
+	input := json.RawMessage(`{
+		"based_on_subscription_end_date": {"event_type": "open"},
+		"based_on_due_invoices": {"event_type": "open", "note": "R&D <Team> \"Alpha\""}
+	}`)
+
+	got, err := WithSubscriptionEndDateState(input, closure.NoticeWindow90, map[string]string{
+		"actionSendEmailNotification": "SUCCESSFUL",
+	})
+	if err != nil {
+		t.Fatalf("WithSubscriptionEndDateState() error = %v, want nil", err)
+	}
+
+	if !bytes.Contains(got, []byte(`R&D <Team> \"Alpha\"`)) {
+		t.Errorf("untouched section's literal characters were escaped instead of preserved:\ngot: %s", got)
+	}
+}
+
 // normalizeJSON re-marshals a JSON value through Go's canonical encoding so
 // two semantically-identical values that differ only in whitespace compare
 // equal. The values under test here are never re-serialized by

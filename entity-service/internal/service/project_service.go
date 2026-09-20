@@ -49,14 +49,19 @@ func (s *projectService) SearchProjects(ctx context.Context, req domain.SearchPr
 
 	views := make([]domain.ProjectView, len(projects))
 	for i, p := range projects {
-		endDate := p.EndDate
 		views[i] = domain.ProjectView{
 			ID:               p.ID,
 			Name:             p.Name,
 			Key:              p.Key,
 			SubscriptionType: p.SubscriptionType,
-			EndDate:          &endDate,
-			CreatedOn:        p.CreatedOn,
+			// StartDate/EndDate are already *time.Time on domain.Project
+			// (nil when the column is NULL), so they pass straight through
+			// instead of being re-boxed through a local copy. StartDate was
+			// previously dropped entirely here despite ProjectView having a
+			// real field for it.
+			StartDate: p.StartDate,
+			EndDate:   p.EndDate,
+			CreatedOn: p.CreatedOn,
 		}
 	}
 

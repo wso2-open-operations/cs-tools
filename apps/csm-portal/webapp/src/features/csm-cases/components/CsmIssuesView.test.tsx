@@ -374,6 +374,33 @@ describe("CsmIssuesView defaultCaseTypes (Support page's case-type default, digi
   });
 });
 
+describe("CsmIssuesView filter section collapsed state (remembered between visits)", () => {
+  it("defaults the filter section open on a fresh visit", () => {
+    renderAt(null);
+    expect(casesFilterBarPropsSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isFiltersOpen: true }),
+    );
+  });
+
+  it("persists a collapsed filter section across a remount for the same user", () => {
+    const { unmount } = renderAt(null);
+    const { onFiltersToggle } = casesFilterBarPropsSpy.mock.calls[
+      casesFilterBarPropsSpy.mock.calls.length - 1
+    ][0] as { onFiltersToggle: () => void };
+
+    act(() => onFiltersToggle());
+    expect(casesFilterBarPropsSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isFiltersOpen: false }),
+    );
+    unmount();
+
+    renderAt(null);
+    expect(casesFilterBarPropsSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isFiltersOpen: false }),
+    );
+  });
+});
+
 describe("CsmIssuesView showSeverityFilter override (project Work items tab)", () => {
   it("defaults to hidden when the type filter is unlocked (multi-type view, no lockedFilters.caseTypes)", () => {
     render(

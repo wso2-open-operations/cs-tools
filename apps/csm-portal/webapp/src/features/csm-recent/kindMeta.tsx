@@ -20,6 +20,7 @@ import {
   FolderOpen,
   GitPullRequest,
   Headset,
+  Megaphone,
   Search,
   Siren,
   Wrench,
@@ -37,6 +38,7 @@ export const KIND_LABEL: Record<RecentViewKind, string> = {
   incident: "Incidents",
   change_request: "Change requests",
   problem: "Problems",
+  outage: "Outages",
 };
 
 /** Stable display order for kind groups. */
@@ -48,6 +50,7 @@ export const KIND_ORDER: RecentViewKind[] = [
   "incident",
   "change_request",
   "problem",
+  "outage",
   "page",
 ];
 
@@ -69,5 +72,7 @@ export function kindIcon(kind: RecentViewKind, size = 16): JSX.Element {
       return <GitPullRequest size={size} />;
     case "problem":
       return <Wrench size={size} />;
+    case "outage":
+      return <Megaphone size={size} />;
   }
 }

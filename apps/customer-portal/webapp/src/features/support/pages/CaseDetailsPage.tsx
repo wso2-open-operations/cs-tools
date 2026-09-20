@@ -15,7 +15,8 @@
 // under the License.
 
 import { useEffect, useRef, type JSX } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@features/support/api/useGetCaseDetails";
@@ -37,10 +38,8 @@ import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationC
 export default function CaseDetailsPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const { projectId, caseId } = useParams<{
-    projectId: string;
-    caseId: string;
-  }>();
+  const projectId = useNormalizedIdParam("projectId");
+  const caseId = useNormalizedIdParam("caseId");
   const { showLoader, hideLoader } = useLoader();
   const { showError } = useErrorBanner();
 

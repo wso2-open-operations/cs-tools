@@ -80,6 +80,7 @@ export default function ListStatGrid<T extends string>({
       sx={{
         display: "grid",
         width: "100%",
+        alignItems: "stretch",
         gap: spacing,
         gridTemplateColumns: {
           xs: columnsFromSegment(xs),
@@ -115,19 +116,28 @@ export default function ListStatGrid<T extends string>({
             sx={{
               position: "relative",
               minWidth: 0,
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
               cursor: isClickable ? "pointer" : undefined,
-              borderRadius: 1,
-              transition: isClickable
-                ? "box-shadow 0.2s ease, transform 0.15s ease"
-                : undefined,
+              // Hover/focus rings live on the StatCard paper (not this cell)
+              // so they track the card when the grid row grows with wrapped labels.
               "&:hover": isClickable
                 ? {
-                    boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
-                    transform: "translateY(-2px)",
+                    "& > .MuiPaper-root": {
+                      boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
+                      transform: "translateY(-2px)",
+                    },
                   }
                 : undefined,
               "&:focus-visible": isClickable
-                ? { outline: "2px solid", outlineOffset: 2 }
+                ? {
+                    outline: "none",
+                    "& > .MuiPaper-root": {
+                      outline: `2px solid ${theme.palette.primary.main}`,
+                      outlineOffset: 2,
+                    },
+                  }
                 : undefined,
             }}
           >
@@ -188,6 +198,16 @@ export default function ListStatGrid<T extends string>({
               }
               icon={<Icon />}
               iconColor={stat.iconColor}
+              sx={{
+                height: "100%",
+                width: "100%",
+                flex: 1,
+                minHeight: 0,
+                boxSizing: "border-box",
+                transition: isClickable
+                  ? "box-shadow 0.2s ease, transform 0.15s ease"
+                  : undefined,
+              }}
             />
           </Box>
         );

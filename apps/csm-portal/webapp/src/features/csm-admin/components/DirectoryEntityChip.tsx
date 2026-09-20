@@ -16,6 +16,7 @@
 
 import { Chip } from "@wso2/oxygen-ui";
 import type { JSX, KeyboardEvent, MouseEvent } from "react";
+import { useLocation } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 interface DirectoryEntityChipProps {
@@ -37,6 +38,13 @@ interface DirectoryEntityChipProps {
  * can show the name immediately without a second lookup, falling back to the
  * raw id when the state is unavailable (a direct/shared link).
  *
+ * Also carries `from` (this chip's own current location), so `DirectoryMemberPage`'s
+ * Back button returns here — a case, an account, a user profile — instead of
+ * always dropping the caller on the plain directory list. Reported live as a
+ * bug ("Back to Teams" from a case always went to the Teams directory) before
+ * this was added; the identical fix already exists for `CsmAdminLayout.tsx`/
+ * `CsmUsersPage.tsx`, just hadn't been propagated to this sibling.
+ *
  * Stops the click (and Enter/Space activation the underlying `Chip` already
  * wires up) from bubbling, so this can be nested inside a clickable table row
  * (e.g. the users list) without also triggering the row's own navigation.
@@ -49,9 +57,11 @@ export default function DirectoryEntityChip({
   variant = "outlined",
 }: DirectoryEntityChipProps): JSX.Element {
   const navigate = useNavTransition();
+  const location = useLocation();
 
   const go = (): void => {
-    navigate(`${routeBase}/${encodeURIComponent(id)}`, { state: { name } });
+    const from = `${location.pathname}${location.search}${location.hash}`;
+    navigate(`${routeBase}/${encodeURIComponent(id)}`, { state: { name, from } });
   };
 
   return (

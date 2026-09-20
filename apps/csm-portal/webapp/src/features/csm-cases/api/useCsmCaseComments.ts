@@ -35,14 +35,24 @@ import {
 } from "@api/backend/mappers";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
-/** Page size used by the comments list. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
+/** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const COMMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on how many pages a single case's comment trail can page
+ * through — 200 pages * BE_MAX_PAGE_LIMIT is far beyond any real case, this
+ * only guards against an unbounded loop if the BE's `hasMore` were ever
+ * wrong. */
+const MAX_COMMENT_PAGES = 200;
 
 /**
- * Load all comments on a case. In LIVE mode calls
- * `POST /cases/{id}/comments/search` with a single wide page (limit capped at
- * BE_MAX_PAGE_LIMIT). If a case exceeds that, switch consumers to an explicit
- * pagination wrapper rather than chasing pages here.
+ * Load *every* comment on a case. In LIVE mode calls
+ * `POST /cases/{id}/comments/search`, paging through `BE_MAX_PAGE_LIMIT`-sized
+ * requests until the BE reports no more (`hasMore`) — a case with more
+ * comments than one page used to silently drop everything past the first
+ * BE_MAX_PAGE_LIMIT (reported live: printing/exporting a heavily-commented
+ * case was missing most of its comment trail, independent of and in addition
+ * to the print-CSS pagination fix in `print.css`). This is the comments
+ * *lane* specifically (work notes/public comments) — the audit/field-change
+ * lane (`useGetCsmCaseActivities`) needed and got the identical fix.
  */
 export function useGetCsmCaseComments(
   caseId: string | undefined,
@@ -54,14 +64,20 @@ export function useGetCsmCaseComments(
     queryFn: async (): Promise<CsmCaseComment[]> => {
       if (!caseId) return [];
 
-      const payload: BeCaseCommentSearchPayload = {
-        pagination: { offset: 0, limit: COMMENTS_PAGE_LIMIT },
-      };
-      const response = await api.post<
-        BeCaseCommentSearchPayload,
-        BeCommentSearchResponse
-      >(`/cases/${encodeURIComponent(caseId)}/comments/search`, payload);
-      return (response.comments ?? []).map((comment) =>
+      const allComments: BeComment[] = [];
+      for (let page = 0; page < MAX_COMMENT_PAGES; page += 1) {
+        const payload: BeCaseCommentSearchPayload = {
+          pagination: { offset: page * COMMENTS_PAGE_LIMIT, limit: COMMENTS_PAGE_LIMIT },
+        };
+        const response = await api.post<
+          BeCaseCommentSearchPayload,
+          BeCommentSearchResponse
+        >(`/cases/${encodeURIComponent(caseId)}/comments/search`, payload);
+        const rows = response.comments ?? [];
+        allComments.push(...rows);
+        if (rows.length < COMMENTS_PAGE_LIMIT || !response.hasMore) break;
+      }
+      return allComments.map((comment) =>
         uiCommentFromBe(comment, { context: "case" }),
       );
     },

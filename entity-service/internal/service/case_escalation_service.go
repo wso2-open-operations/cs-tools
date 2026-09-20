@@ -31,7 +31,11 @@ import (
 // escalate/de-escalate actions can in principle produce more than one page's
 // worth of records, so SearchCaseEscalations below pages through every result
 // rather than returning just the first page.
-const caseEscalationSearchPageSize = 100
+// Must not exceed maxLimit (user_service.go): normalizePagination rejects any
+// Limit > maxLimit with a ValidationError, which previously made every single
+// GET /cases/{id}/escalations call fail with 400 "limit cannot exceed 50"
+// (this constant was 100).
+const caseEscalationSearchPageSize = 50
 
 type caseEscalationService struct {
 	escalations EscalationService

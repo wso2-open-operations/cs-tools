@@ -106,18 +106,13 @@ type mockIncidentCreator struct {
 	searchCalls int
 	searchTags  []string
 
-	// searchOpenFn is optional; when nil, SearchOpenIncidentByNumber reports
-	// "no match, no error" — the common case for tests that never reach the
-	// incident-grouping open-state confirmation step at all.
-	searchOpenFn    func(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error)
-	searchOpenCalls int
-	searchOpenNums  []string
-
-	// lookupMappingsFn is optional; when nil, LookupAlertIncidentMappings
-	// reports "no mappings, no error" — the common case for tests where a
-	// row has no UniqueIdentifier at all, so this is never called.
-	lookupMappingsFn    func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error)
-	lookupMappingsCalls int
+	// searchGroupFn is optional; when nil, SearchOpenIncidentByGroupTag
+	// reports "no match, no error" — the common case for tests that never
+	// reach the incident-grouping search at all (no UniqueIdentifier).
+	searchGroupFn    func(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error)
+	searchGroupCalls int
+	searchGroupTags  []string
+	searchGroupSince []time.Time
 
 	// createMappingFn is optional; when nil, CreateAlertIncidentMapping
 	// reports success with no error.
@@ -140,21 +135,14 @@ func (m *mockIncidentCreator) SearchIncidentByTag(ctx context.Context, tag strin
 	return nil, false, nil
 }
 
-func (m *mockIncidentCreator) SearchOpenIncidentByNumber(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error) {
-	m.searchOpenCalls++
-	m.searchOpenNums = append(m.searchOpenNums, number)
-	if m.searchOpenFn != nil {
-		return m.searchOpenFn(ctx, number)
+func (m *mockIncidentCreator) SearchOpenIncidentByGroupTag(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error) {
+	m.searchGroupCalls++
+	m.searchGroupTags = append(m.searchGroupTags, tag)
+	m.searchGroupSince = append(m.searchGroupSince, since)
+	if m.searchGroupFn != nil {
+		return m.searchGroupFn(ctx, tag, since)
 	}
 	return nil, false, nil
-}
-
-func (m *mockIncidentCreator) LookupAlertIncidentMappings(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error) {
-	m.lookupMappingsCalls++
-	if m.lookupMappingsFn != nil {
-		return m.lookupMappingsFn(ctx, source, uniqueIdentifier)
-	}
-	return nil, nil
 }
 
 func (m *mockIncidentCreator) CreateAlertIncidentMapping(ctx context.Context, req csmclient.CreateAlertIncidentMappingRequest) (*csmclient.AlertIncidentMappingView, error) {
@@ -623,6 +611,9 @@ func TestConfig_Defaults(t *testing.T) {
 	if cfg.PollInterval != 15*time.Second {
 		t.Errorf("default PollInterval = %v, want 15s", cfg.PollInterval)
 	}
+	if cfg.GroupWindow != 15*time.Minute {
+		t.Errorf("default GroupWindow = %v, want 15m", cfg.GroupWindow)
+	}
 }
 
 // strPtr is a small test-local pointer helper, matching the *string fields
@@ -640,22 +631,15 @@ func TestRunOnce_GroupsOntoEarlierOpenIncident_SkipsCreate(t *testing.T) {
 	s := &mockStore{pendingBatchFn: func(ctx context.Context, limit int) ([]store.AlertRecord, error) {
 		return []store.AlertRecord{row}, nil
 	}}
+	wantTag := csmclient.GroupTag("azure", "uid-123")
 	csm := &mockIncidentCreator{
 		createFn: func(ctx context.Context, req csmclient.CreateIncidentRequest) (*csmclient.CreateIncidentResult, error) {
 			t.Fatal("CreateIncident should not be called once grouping finds an earlier, still-open incident")
 			return nil, nil
 		},
-		lookupMappingsFn: func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error) {
-			if source != "azure" || uniqueIdentifier != "uid-123" {
-				t.Errorf("lookup called with source=%q uniqueIdentifier=%q, want azure/uid-123", source, uniqueIdentifier)
-			}
-			return []csmclient.AlertIncidentMappingView{
-				{ID: "map-1", IncidentID: "inc-old", IncidentNumber: strPtr("INC0009999")},
-			}, nil
-		},
-		searchOpenFn: func(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error) {
-			if number != "INC0009999" {
-				t.Errorf("SearchOpenIncidentByNumber called with %q, want INC0009999", number)
+		searchGroupFn: func(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error) {
+			if tag != wantTag {
+				t.Errorf("SearchOpenIncidentByGroupTag called with tag=%q, want %q", tag, wantTag)
 			}
 			return &csmclient.CreateIncidentResult{IncidentID: "inc-old", IncidentNumber: "INC0009999"}, true, nil
 		},
@@ -665,11 +649,8 @@ func TestRunOnce_GroupsOntoEarlierOpenIncident_SkipsCreate(t *testing.T) {
 	w := New(s, csm, tw, Config{MaxRetries: 3})
 	w.RunOnce(context.Background())
 
-	if csm.lookupMappingsCalls != 1 {
-		t.Fatalf("LookupAlertIncidentMappings called %d times, want 1", csm.lookupMappingsCalls)
-	}
-	if csm.searchOpenCalls != 1 {
-		t.Fatalf("SearchOpenIncidentByNumber called %d times, want 1", csm.searchOpenCalls)
+	if csm.searchGroupCalls != 1 {
+		t.Fatalf("SearchOpenIncidentByGroupTag called %d times, want 1", csm.searchGroupCalls)
 	}
 	if csm.calls != 0 {
 		t.Errorf("CreateIncident called %d times, want 0", csm.calls)
@@ -685,48 +666,58 @@ func TestRunOnce_GroupsOntoEarlierOpenIncident_SkipsCreate(t *testing.T) {
 	}
 }
 
-// TestRunOnce_GroupingFallsThroughOnNoMatchOrClosedOrLookupOrStateCheckFailure
-// covers all of the "not groupable" branches at once: no earlier mapping,
-// a mapping whose incident is confirmed no longer open, the lookup call
-// itself erroring, and the open-state confirmation call itself erroring
-// (the fail-open case this feature will actually hit in production today —
-// see tryGroup's doc comment). Every one of these must fall through
-// unchanged to the existing create-or-dedup-search flow: CreateIncident is
-// still called exactly once, and the row is still delivered against the
-// newly-created incident.
-func TestRunOnce_GroupingFallsThroughOnNoMatchOrClosedOrLookupOrStateCheckFailure(t *testing.T) {
+// TestRunOnce_GroupSearchUsesConfiguredWindow confirms the "since" argument
+// passed to SearchOpenIncidentByGroupTag is now-GroupWindow, using the
+// worker's own injected clock (w.now) rather than a bare time.Now() at call
+// time — this is what makes the search actually bounded, not just tagged.
+func TestRunOnce_GroupSearchUsesConfiguredWindow(t *testing.T) {
+	row := rowWithGroupablePayload(t, "alert-2", "azure", "uid-123")
+	s := &mockStore{pendingBatchFn: func(ctx context.Context, limit int) ([]store.AlertRecord, error) {
+		return []store.AlertRecord{row}, nil
+	}}
+	csm := &mockIncidentCreator{
+		createFn: func(ctx context.Context, req csmclient.CreateIncidentRequest) (*csmclient.CreateIncidentResult, error) {
+			return &csmclient.CreateIncidentResult{IncidentID: "inc-new"}, nil
+		},
+	}
+	tw := &mockEscalator{}
+
+	fixedNow := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	w := New(s, csm, tw, Config{MaxRetries: 3, GroupWindow: 20 * time.Minute})
+	w.now = func() time.Time { return fixedNow }
+	w.RunOnce(context.Background())
+
+	if csm.searchGroupCalls != 1 {
+		t.Fatalf("SearchOpenIncidentByGroupTag called %d times, want 1", csm.searchGroupCalls)
+	}
+	wantSince := fixedNow.Add(-20 * time.Minute)
+	if !csm.searchGroupSince[0].Equal(wantSince) {
+		t.Errorf("since = %v, want %v (fixedNow - 20m configured GroupWindow)", csm.searchGroupSince[0], wantSince)
+	}
+}
+
+// TestRunOnce_GroupingFallsThroughOnNoMatchOrSearchFailure covers both
+// "not groupable" branches: no matching incident found (already excludes
+// closed/resolved/out-of-window incidents server-side, per the search's own
+// state+createdOn filters), and the search call itself erroring (the
+// fail-open case this feature will actually hit in production today — see
+// tryGroup's doc comment). Both must fall through unchanged to the existing
+// create-or-dedup-search flow: CreateIncident is still called exactly once,
+// and the row is still delivered against the newly-created incident.
+func TestRunOnce_GroupingFallsThroughOnNoMatchOrSearchFailure(t *testing.T) {
 	cases := []struct {
-		name             string
-		lookupMappingsFn func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error)
-		searchOpenFn     func(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error)
+		name          string
+		searchGroupFn func(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error)
 	}{
 		{
-			name: "no earlier mapping found",
-			lookupMappingsFn: func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error) {
-				return nil, nil
+			name: "no matching incident found",
+			searchGroupFn: func(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error) {
+				return nil, false, nil
 			},
 		},
 		{
-			name: "mapping found but its incident is no longer open",
-			lookupMappingsFn: func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error) {
-				return []csmclient.AlertIncidentMappingView{{ID: "map-1", IncidentID: "inc-old", IncidentNumber: strPtr("INC0009999")}}, nil
-			},
-			searchOpenFn: func(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error) {
-				return nil, false, nil // resolved/closed/cancelled -> no longer open
-			},
-		},
-		{
-			name: "lookup call itself errors",
-			lookupMappingsFn: func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error) {
-				return nil, errors.New("connection refused")
-			},
-		},
-		{
-			name: "open-state confirmation call itself errors (e.g. the same 401 CreateIncident gets today)",
-			lookupMappingsFn: func(ctx context.Context, source, uniqueIdentifier string) ([]csmclient.AlertIncidentMappingView, error) {
-				return []csmclient.AlertIncidentMappingView{{ID: "map-1", IncidentID: "inc-old", IncidentNumber: strPtr("INC0009999")}}, nil
-			},
-			searchOpenFn: func(ctx context.Context, number string) (*csmclient.CreateIncidentResult, bool, error) {
+			name: "search call itself errors (e.g. the same 401 CreateIncident gets today)",
+			searchGroupFn: func(ctx context.Context, tag string, since time.Time) (*csmclient.CreateIncidentResult, bool, error) {
 				return nil, false, &apierror.Error{StatusCode: 401, Body: "Missing or invalid user ID token header."}
 			},
 		},
@@ -742,8 +733,7 @@ func TestRunOnce_GroupingFallsThroughOnNoMatchOrClosedOrLookupOrStateCheckFailur
 				createFn: func(ctx context.Context, req csmclient.CreateIncidentRequest) (*csmclient.CreateIncidentResult, error) {
 					return &csmclient.CreateIncidentResult{IncidentID: "inc-new", IncidentNumber: "INC0000001"}, nil
 				},
-				lookupMappingsFn: tc.lookupMappingsFn,
-				searchOpenFn:     tc.searchOpenFn,
+				searchGroupFn: tc.searchGroupFn,
 			}
 			tw := &mockEscalator{}
 
@@ -776,14 +766,52 @@ func TestRunOnce_NoUniqueIdentifierSkipsGroupingEntirely(t *testing.T) {
 	w := New(s, csm, tw, Config{MaxRetries: 3})
 	w.RunOnce(context.Background())
 
-	if csm.lookupMappingsCalls != 0 {
-		t.Errorf("LookupAlertIncidentMappings called %d times, want 0 for a row with no UniqueIdentifier", csm.lookupMappingsCalls)
-	}
-	if csm.searchOpenCalls != 0 {
-		t.Errorf("SearchOpenIncidentByNumber called %d times, want 0 for a row with no UniqueIdentifier", csm.searchOpenCalls)
+	if csm.searchGroupCalls != 0 {
+		t.Errorf("SearchOpenIncidentByGroupTag called %d times, want 0 for a row with no UniqueIdentifier", csm.searchGroupCalls)
 	}
 	if csm.calls != 1 {
 		t.Errorf("CreateIncident called %d times, want 1", csm.calls)
+	}
+}
+
+// TestRunOnce_GroupingSkippedWhenPersistedFieldsContainTagDelimiter covers a
+// legacy row buffered before the ingress delimiter check existed: its
+// persisted Source or UniqueIdentifier can still contain
+// csmclient.TagDelimiterChars. Building a GroupTag from either unvalidated
+// would let distinct (source, uniqueIdentifier) pairs collide on the same
+// tag, so tryGroup must bypass the search entirely and fall through to the
+// normal create/dedup path.
+func TestRunOnce_GroupingSkippedWhenPersistedFieldsContainTagDelimiter(t *testing.T) {
+	cases := []struct {
+		name             string
+		source           string
+		uniqueIdentifier string
+	}{
+		{name: "delimiter in source", source: "a:b", uniqueIdentifier: "c"},
+		{name: "delimiter in uniqueIdentifier", source: "a", uniqueIdentifier: "b:c"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := rowWithGroupablePayload(t, "alert-2", tc.source, tc.uniqueIdentifier)
+			s := &mockStore{pendingBatchFn: func(ctx context.Context, limit int) ([]store.AlertRecord, error) {
+				return []store.AlertRecord{row}, nil
+			}}
+			csm := &mockIncidentCreator{createFn: func(ctx context.Context, req csmclient.CreateIncidentRequest) (*csmclient.CreateIncidentResult, error) {
+				return &csmclient.CreateIncidentResult{IncidentID: "inc-new", IncidentNumber: "INC0000001"}, nil
+			}}
+			tw := &mockEscalator{}
+
+			w := New(s, csm, tw, Config{MaxRetries: 3})
+			w.RunOnce(context.Background())
+
+			if csm.searchGroupCalls != 0 {
+				t.Errorf("SearchOpenIncidentByGroupTag called %d times, want 0 when persisted fields contain a tag delimiter", csm.searchGroupCalls)
+			}
+			if csm.calls != 1 {
+				t.Errorf("CreateIncident called %d times, want 1", csm.calls)
+			}
+		})
 	}
 }
 

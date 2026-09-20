@@ -17,6 +17,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -60,8 +61,8 @@ func TestBuildEntitySearchCallRequestsRequest_CaseIDFromPathAndStateKeysTranslat
 
 	got := BuildEntitySearchCallRequestsRequest("case-1", req)
 
-	if got.CaseID != "case-1" {
-		t.Fatalf("CaseID = %q, want %q", got.CaseID, "case-1")
+	if got.CaseID != toDashedID("case-1") {
+		t.Fatalf("CaseID = %q, want %q", got.CaseID, toDashedID("case-1"))
 	}
 	if got.Filters == nil {
 		t.Fatal("expected non-nil Filters")
@@ -75,6 +76,16 @@ func TestBuildEntitySearchCallRequestsRequest_CaseIDFromPathAndStateKeysTranslat
 	}
 }
 
+func TestBuildEntitySearchCallRequestsRequest_CaseIDNormalizedToDashedUUID(t *testing.T) {
+	req := CallRequestSearchRequest{
+		Pagination: entity.Pagination{Limit: 10, Offset: 0},
+	}
+	got := BuildEntitySearchCallRequestsRequest("26051dbc3baa8f5091404c6aa5e45a1c", req)
+	if got.CaseID != "26051dbc-3baa-8f50-9140-4c6aa5e45a1c" {
+		t.Fatalf("CaseID = %q, want %q", got.CaseID, "26051dbc-3baa-8f50-9140-4c6aa5e45a1c")
+	}
+}
+
 // TestBuildEntitySearchCallRequestsRequest_NoStateKeysLeavesFiltersNil
 // verifies an empty/absent stateKeys filter produces a nil Filters, matching
 // entity.SearchCallRequestsRequest.Filters's omitempty/optional contract,
@@ -84,5 +95,79 @@ func TestBuildEntitySearchCallRequestsRequest_NoStateKeysLeavesFiltersNil(t *tes
 
 	if got.Filters != nil {
 		t.Fatalf("Filters = %+v, want nil", got.Filters)
+	}
+}
+
+func TestCreateCallRequestResponse_UnmarshalChoiceListState(t *testing.T) {
+	// Sample response with choice-list state structure
+	raw := []byte(`{
+		"message": "Call request created successfully.",
+		"callRequest": {
+			"id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+			"createdOn": "2026-01-01 10:00:00",
+			"createdBy": "user@example.com",
+			"state": {
+				"id": 2,
+				"label": "Pending on WSO2"
+			},
+			"scheduleTime": "2026-01-02 10:00:00"
+		}
+	}`)
+
+	var resp entity.CreateCallRequestResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if resp.CallRequest.ID != "a1b2c3d4e5f60718293a4b5c6d7e8f90" {
+		t.Errorf("ID = %q, want a1b2c3d4e5f60718293a4b5c6d7e8f90", resp.CallRequest.ID)
+	}
+	if resp.CallRequest.State.ID != "2" || resp.CallRequest.State.Label != "Pending on WSO2" {
+		t.Errorf("State = %+v, want ID=\"2\", Label=\"Pending on WSO2\"", resp.CallRequest.State)
+	}
+
+	mapped := MapCallRequestCreate(resp)
+	if mapped.ID != "a1b2c3d4e5f60718293a4b5c6d7e8f90" {
+		t.Errorf("mapped.ID = %q, want a1b2c3d4e5f60718293a4b5c6d7e8f90", mapped.ID)
+	}
+	if mapped.State != "Pending on WSO2" {
+		t.Errorf("mapped.State = %q, want \"Pending on WSO2\"", mapped.State)
+	}
+}
+
+func TestSearchCallRequestsResponse_UnmarshalNumericStateID(t *testing.T) {
+	raw := []byte(`{
+		"callRequests": [
+			{
+				"id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+				"number": "CALL0000001",
+				"case": {"id": "22222222222222222222222222222222", "name": "CS0000001"},
+				"createdOn": "2026-01-01 10:00:00",
+				"updatedOn": "2026-01-01 10:00:00",
+				"state": {"id": 2, "label": "Pending on WSO2"},
+				"preferredTimes": ["2026-01-02T10:00:00Z"],
+				"durationMin": 30
+			}
+		],
+		"total": 1,
+		"offset": 0,
+		"limit": 10
+	}`)
+
+	var resp entity.SearchCallRequestsResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if len(resp.CallRequests) != 1 {
+		t.Fatalf("expected 1 call request, got %d", len(resp.CallRequests))
+	}
+	if resp.CallRequests[0].State.ID != "2" {
+		t.Errorf("State.ID = %q, want \"2\"", resp.CallRequests[0].State.ID)
+	}
+
+	mapped := MapSearchCallRequests(resp)
+	if mapped.CallRequests[0].State.ID != "2" || mapped.CallRequests[0].State.Label != "Pending on WSO2" {
+		t.Errorf("mapped State = %+v, want ID=\"2\", Label=\"Pending on WSO2\"", mapped.CallRequests[0].State)
 	}
 }

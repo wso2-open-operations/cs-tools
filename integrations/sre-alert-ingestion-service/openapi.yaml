@@ -8,11 +8,11 @@ info:
     buffered before any delivery attempt is made, retried with backoff on
     failure, and escalated via an independent voice-call channel if delivery
     keeps failing — so this service is never a single point of failure on
-    the platform's own availability. Fronted by Choreo's API Manager gateway
-    (subscription + client credentials) — this service performs no inbound
-    auth of its own.
+    the platform's own availability. Deployed with no gateway/ingress auth
+    layer in front of it, so it authenticates every inbound request itself
+    via HTTP Basic Auth, one username/password pair per alert source.
 security:
-  - oauth2ClientCredentials: []
+  - basicAuth: []
 servers:
   - url: "{server}:{port}/"
     variables:
@@ -80,16 +80,193 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /alerts/adapters/azure:
+    post:
+      summary: Submit an Azure Monitor common-alert-schema webhook payload.
+      description: >
+        Translates Azure Monitor's own native webhook body into this
+        service's generic AlertRequest, then reuses the exact same
+        validation/buffering/worker/grouping/dedup/escalation path as
+        POST /alerts. Additive to that generic endpoint, not a replacement
+        for it.
+      operationId: createAlertFromAzure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AzureAlertPayload'
+      responses:
+        "202":
+          description: Alert accepted and durably buffered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertAcceptedResponse'
+        "400":
+          description: BadRequest — missing a required field, or malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alerts/adapters/site24x7:
+    post:
+      summary: Submit a Site24x7 native alert-webhook payload.
+      description: >
+        Translates Site24x7's own native webhook body into this service's
+        generic AlertRequest. Only STATUS values TROUBLE/DOWN/CRITICAL
+        create a buffered alert; any other STATUS returns 200 with a small
+        acknowledgment body (the payload is valid, it is simply not a
+        status this integration acts on).
+      operationId: createAlertFromSite24x7
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Site24x7AlertPayload'
+      responses:
+        "202":
+          description: Alert accepted and durably buffered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertAcceptedResponse'
+        "200":
+          description: Recognized but ignored — STATUS is not TROUBLE/DOWN/CRITICAL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoredResponse'
+        "400":
+          description: BadRequest — malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alerts/adapters/opensearch:
+    post:
+      summary: Submit an OpenSearch (Choreo path) native alert payload.
+      description: >
+        Translates this source's own native alert body into this service's
+        generic AlertRequest, then reuses the exact same
+        validation/buffering/worker/grouping/dedup/escalation path as
+        POST /alerts.
+      operationId: createAlertFromOpenSearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenSearchAlertPayload'
+      responses:
+        "202":
+          description: Alert accepted and durably buffered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertAcceptedResponse'
+        "400":
+          description: BadRequest — malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alerts/adapters/grafana:
+    post:
+      summary: Submit a Grafana native alert-webhook payload.
+      description: >
+        Translates Grafana's own native webhook body into this service's
+        generic AlertRequest. Only state == "alerting" creates a buffered
+        alert; any other state returns 200 with a small acknowledgment body
+        (a non-alerting webhook is not an incident-creation trigger).
+      operationId: createAlertFromGrafana
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrafanaAlertPayload'
+      responses:
+        "202":
+          description: Alert accepted and durably buffered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertAcceptedResponse'
+        "200":
+          description: Recognized but ignored — state is not "alerting".
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoredResponse'
+        "400":
+          description: BadRequest — malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
-    oauth2ClientCredentials:
-      type: oauth2
-      flows:
-        clientCredentials:
-          # Placeholder — fill in with the actual token endpoint for this
-          # service's Choreo-managed API once it's provisioned.
-          tokenUrl: "<token_url>"
-          scopes: {}
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        One username/password pair per alert source, configured via the
+        SRE_ALERT_AUTH_USERS environment variable (bcrypt-hashed at rest).
+        See README.md's Authentication section.
 
   schemas:
     ErrorResponse:
@@ -146,3 +323,110 @@ components:
           type: string
           format: uuid
           description: The buffered alert's internal id (not a platform incident id).
+        alertNumber:
+          type: string
+          description: >
+            This service's own human-readable alert number (e.g. "ALT0000123"),
+            distinct from id — see internal/store.Store.Enqueue's doc comment.
+
+    IgnoredResponse:
+      type: object
+      description: >
+        Returned when a vendor-adapter route recognized the payload as
+        well-formed but not one this integration acts on (e.g. a Site24x7
+        STATUS other than TROUBLE/DOWN/CRITICAL, or a Grafana state other
+        than "alerting") — the alert is neither buffered nor an error.
+      required: [status, reason]
+      properties:
+        status:
+          type: string
+          enum: [ignored]
+        reason:
+          type: string
+
+    AzureAlertPayload:
+      type: object
+      description: >
+        Azure Monitor's own common-alert-schema webhook body, modeled to
+        only the fields this adapter reads — not an exhaustive schema of
+        everything Azure Monitor can send.
+      properties:
+        data:
+          type: object
+          properties:
+            essentials:
+              type: object
+              properties:
+                alertId:
+                  type: string
+                alertRule:
+                  type: string
+                severity:
+                  type: string
+                  description: One of "Sev0".."Sev4".
+                monitorCondition:
+                  type: string
+                  description: '"Fired" or "Resolved".'
+                monitoringService:
+                  type: string
+            alertContext:
+              type: object
+              description: Vendor-specific nested object, rendered into Description as-is.
+
+    Site24x7AlertPayload:
+      type: object
+      description: Site24x7's own native alert-webhook body.
+      properties:
+        STATUS:
+          type: string
+          description: >
+            One of "TROUBLE", "DOWN", "CRITICAL" (actionable, case
+            sensitive) or any other value (recognized but ignored).
+        MONITORNAME:
+          type: string
+        MONITOR_ID:
+          type: string
+        INCIDENT_REASON:
+          type: string
+        INCIDENT_DETAILS:
+          type: string
+
+    OpenSearchAlertPayload:
+      type: object
+      description: >
+        This source's own native alert body. Note: its "source" field is a
+        human-readable title, not the originating system's identity — it is
+        mapped to AlertRequest.metricName, not AlertRequest.source (which is
+        always the fixed literal "opensearch").
+      properties:
+        source:
+          type: string
+          description: Human-readable title of what fired.
+        description:
+          type: string
+        timestamp:
+          type: string
+        severity:
+          type: string
+          description: >
+            One of "critical", "urgent", "warning", "low", "informational",
+            or any other/missing value (maps to this service's "ok").
+
+    GrafanaAlertPayload:
+      type: object
+      description: Grafana's own native alert-webhook body.
+      properties:
+        state:
+          type: string
+          description: Only "alerting" is actionable; any other value is ignored.
+        title:
+          type: string
+        tags:
+          type: object
+          properties:
+            service:
+              type: string
+              description: Free text, passed through as-is to AlertRequest.service.
+            severity:
+              type: string
+              description: One of "1".."4", or any other/missing value (maps to "ok").

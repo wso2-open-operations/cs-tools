@@ -36,6 +36,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/githubissue"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/notifications"
@@ -49,6 +50,7 @@ func main() {
 	middleware.ConfigureLogger()
 
 	dashboard.SetActive(loadDashboards())
+	githubissue.SetActive(loadGithubIssueRepoOptions())
 
 	// Reference data is resolved once, here, and then only ever read from
 	// memory: the team registry (key <-> display name <-> backing group id <->
@@ -77,6 +79,7 @@ func main() {
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
 	dashboardHandler := handler.NewDashboardHandler()
+	metadataHandler := handler.NewMetadataHandler()
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	productHandler := handler.NewProductHandler(customerEntityClient)
@@ -99,6 +102,7 @@ func main() {
 	problemHandler := handler.NewProblemHandler(customerEntityClient)
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
+	outageHandler := handler.NewOutageHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
 	// are read with os.Getenv (never mustEnv) — a missing or malformed value
@@ -144,7 +148,7 @@ func main() {
 		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
 	}
 	scimClient := scim.NewClient(scimCfg)
-	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, sftpgoAttachmentStorageEnabled)
+	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, sftpgoAttachmentStorageEnabled, loadDashboardDesignerEmails())
 
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
@@ -188,6 +192,7 @@ func main() {
 	mux.HandleFunc("POST /call-requests/search", caseHandler.SearchAllCallRequests)
 	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{callRequestId}", caseHandler.PatchCallRequest)
 	mux.HandleFunc("POST /cases/{id}/github-issues", caseHandler.CreateCaseGithubIssue)
+	mux.HandleFunc("GET /metadata", metadataHandler.GetMetadata)
 	mux.HandleFunc("POST /cases/{id}/tags", caseHandler.AddCaseTag)
 	mux.HandleFunc("DELETE /cases/{id}/tags/{tagId}", caseHandler.RemoveCaseTag)
 	mux.HandleFunc("POST /tags/search", caseHandler.SearchTags)
@@ -220,6 +225,7 @@ func main() {
 	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("POST /accounts/{id}/contacts/search", accountHandler.SearchAccountContacts)
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
+	mux.HandleFunc("GET /projects/{id}/metadata", projectHandler.GetProjectMetadata)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
 	mux.HandleFunc("GET /projects/{id}/contacts/{contactId}", projectHandler.GetProjectContact)
@@ -283,6 +289,7 @@ func main() {
 	mux.HandleFunc("POST /incidents/{id}/comments", incidentHandler.CreateIncidentComment)
 	mux.HandleFunc("POST /incidents/{id}/comments/search", incidentHandler.SearchIncidentComments)
 	mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
+	mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", incidentHandler.HandOffIncidentToSpecialist)
 	mux.HandleFunc("GET /alerts/{id}", alertHandler.GetAlert)
 	mux.HandleFunc("GET /smart-alerts/{id}", alertHandler.GetSmartAlert)
 	mux.HandleFunc("POST /change-requests/{id}/comments", changeRequestHandler.CreateChangeRequestComment)
@@ -295,6 +302,16 @@ func main() {
 	mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
 	mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
 	mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
+	mux.HandleFunc("POST /outages", outageHandler.CreateOutage)
+	mux.HandleFunc("POST /outages/search", outageHandler.SearchOutages)
+	// Registered before the {id} wildcard purely for readability — net/http's
+	// ServeMux resolves by specificity, not registration order, so this
+	// literal path wins over the wildcard regardless.
+	mux.HandleFunc("GET /outages/metadata", outageHandler.GetOutageMetadata)
+	mux.HandleFunc("GET /outages/{id}", outageHandler.GetOutage)
+	mux.HandleFunc("PATCH /outages/{id}", outageHandler.PatchOutage)
+	mux.HandleFunc("POST /outages/{id}/communications", outageHandler.AddOutageCommunication)
+	mux.HandleFunc("POST /outages/{id}/communications/search", outageHandler.SearchOutageCommunications)
 	// Called manually today; not yet wired into real incident/case creation.
 	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
 
@@ -451,6 +468,28 @@ func loadDashboards() *dashboard.Registry {
 	return registry
 }
 
+// loadGithubIssueRepoOptions resolves the "Open Git issue" dialog's
+// repository catalogue from GITHUB_ISSUE_REPO_OPTIONS (a JSON array — see
+// githubissue.ParseRepoOptions for the shape and validation) and exits the
+// process on any failure to parse it.
+//
+// This used to be a hardcoded array in the frontend, which is how a real case
+// filed with "Asgardeo" selected landed in the wrong GitHub repository: the
+// owner/repo mapping lived in code no config reviewer would think to check.
+// Fatal on malformed content, same rationale as loadDashboards: an operator
+// error here should stop the deploy, not silently ship an empty or
+// half-populated dropdown. Unset is legal and yields no options — a
+// deployment that has not configured this yet must still start.
+func loadGithubIssueRepoOptions() []githubissue.RepoOption {
+	options, err := githubissue.ParseRepoOptions(os.Getenv("GITHUB_ISSUE_REPO_OPTIONS"))
+	if err != nil {
+		slog.Error("invalid GITHUB_ISSUE_REPO_OPTIONS", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("loaded github issue repo options", "count", len(options))
+	return options
+}
+
 // loadDirectory resolves the reference catalogues from environment
 // configuration, once, at startup:
 //
@@ -494,6 +533,40 @@ func loadDirectory() *directory.Directory {
 	}
 	slog.Info("resolved reference catalogues", "teams", dir.TeamCount(), "roles", dir.RoleCount())
 	return dir
+}
+
+// loadDashboardDesignerEmails resolves the synthetic "dashboard_designer" role
+// grant list from its configuration form:
+//
+//	DASHBOARD_DESIGNER_EMAILS  A comma-separated list of email addresses,
+//	                        whitespace around each entry trimmed. GET
+//	                        /users/me grants the caller an extra
+//	                        "dashboard_designer" role (on top of whatever the
+//	                        entity service reports) when their email
+//	                        matches, case-insensitively.
+//
+// Unlike directory.DefaultRoles, this deliberately has no committed default:
+// email addresses are organisation-specific data, not generic platform
+// vocabulary, so there is nothing safe to commit -- the same reasoning
+// CSM_TEAM_REGISTRY's own lack of a default follows. An unset or empty value
+// yields an empty set, so behavior is unchanged from before this flag
+// existed: nobody gets the extra role.
+//
+// A duplicate entry is silently deduplicated rather than treated as a
+// startup error, unlike ParseRoles' handling of a duplicate role name: a
+// human-maintained email list is far more likely to pick up an accidental
+// duplicate than a typo'd role name is, and failing the whole deploy over
+// that would be disproportionate.
+func loadDashboardDesignerEmails() map[string]struct{} {
+	emails := splitComma(os.Getenv("DASHBOARD_DESIGNER_EMAILS"))
+	if len(emails) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(emails))
+	for _, e := range emails {
+		set[strings.ToLower(e)] = struct{}{}
+	}
+	return set
 }
 
 // loadSftpgoConfig resolves the SFTPGo-backed attachment-storage feature

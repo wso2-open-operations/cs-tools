@@ -43,9 +43,13 @@ vi.mock("@api/useGetProjectFeatures", () => ({
   default: () => ({ data: {}, isLoading: false }),
 }));
 
+const mockIsProjectRestricted = vi.fn(() => false);
+const mockIsProjectSuspended = vi.fn(() => false);
+
 vi.mock("@utils/permission", () => ({
   getProjectPermissions: () => ({ hasSR: true, hasSraWriteAccess: true }),
-  isProjectRestricted: () => false,
+  isProjectRestricted: () => mockIsProjectRestricted(),
+  isProjectSuspended: () => mockIsProjectSuspended(),
 }));
 
 vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
@@ -56,6 +60,9 @@ vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
 
 describe("GetHelpDropdown", () => {
   it("should render an accessible Get Help control with responsive label", () => {
+    mockIsProjectRestricted.mockReturnValue(false);
+    mockIsProjectSuspended.mockReturnValue(false);
+
     render(<GetHelpDropdown />);
 
     expect(screen.getByRole("button", { name: "Get Help" })).toBeInTheDocument();
@@ -63,5 +70,21 @@ describe("GetHelpDropdown", () => {
     expect(
       screen.getByRole("button", { name: "More help options" }),
     ).toBeInTheDocument();
+  });
+
+  it("should not render when the project is restricted", () => {
+    mockIsProjectRestricted.mockReturnValue(true);
+    mockIsProjectSuspended.mockReturnValue(false);
+
+    const { container } = render(<GetHelpDropdown />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("should not render when the project is suspended or expired", () => {
+    mockIsProjectRestricted.mockReturnValue(false);
+    mockIsProjectSuspended.mockReturnValue(true);
+
+    const { container } = render(<GetHelpDropdown />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

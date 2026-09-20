@@ -24,7 +24,8 @@ import {
   type JSX,
 } from "react";
 import { flushSync } from "react-dom";
-import { useNavigate, useParams, useLocation } from "react-router";
+import { useNavigate, useLocation } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
@@ -93,10 +94,9 @@ const CONVERSATION_ID_WAIT_MS = 3000;
  */
 export default function NoveraChatPage(): JSX.Element {
   const navigate = useNavigate();
-  const { projectId, conversationId: urlConversationId } = useParams<{
-    projectId: string;
-    conversationId?: string;
-  }>();
+  const projectId = useNormalizedIdParam("projectId");
+  // Absent on the index route (/support/chat), which starts a new conversation.
+  const urlConversationId = useNormalizedIdParam("conversationId");
   const location = useLocation();
   const navState = location.state as ChatNavState | null;
   const initialUserMessage = navState?.initialUserMessage;

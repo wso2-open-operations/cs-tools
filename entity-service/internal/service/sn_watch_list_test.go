@@ -17,7 +17,9 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -127,6 +129,109 @@ func TestSNCaseService_CreateCase_WatchListResolvedToEmails(t *testing.T) {
 	assertWatchListPayload(t, gotBody, []string{testWatcherEmail1, testWatcherEmail2})
 }
 
+// TestWatchListEmails_ForwardsEmailsWithoutLookup is the Customer Portal /
+// Ballerina contract: watchList is EmailString[], forwarded as-is. A user
+// lookup would 400 those values as invalid UUIDs (issues 3001 / 3002).
+func TestWatchListEmails_ForwardsEmailsWithoutLookup(t *testing.T) {
+	in := []string{testWatcherEmail1, testWatcherEmail2}
+	got, err := watchListEmails(context.Background(), nil, "token", "watchList", in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != len(in) {
+		t.Fatalf("got %d emails, want %d", len(got), len(in))
+	}
+	for i, w := range in {
+		if got[i] != w {
+			t.Fatalf("got[%d] = %q, want %q", i, got[i], w)
+		}
+	}
+}
+
+// TestWatchListEmails_ForwardsMoreThan50Emails pins that the /users/search
+// page cap must not reject a portal email list. Existing SN cases routinely
+// carry more than 50 watchers; PATCH replaces the whole list, so a 50 cap
+// made every save of those cases fail.
+func TestWatchListEmails_ForwardsMoreThan50Emails(t *testing.T) {
+	in := make([]string, maxUserLimit+1)
+	for i := range in {
+		in[i] = fmt.Sprintf("watcher%03d@example.com", i)
+	}
+	got, err := watchListEmails(context.Background(), nil, "token", "watchList", in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != len(in) {
+		t.Fatalf("got %d emails, want %d", len(got), len(in))
+	}
+}
+
+// TestWatchListEmails_RejectsNeitherEmailNorUUID covers the 400 the portal
+// used to hit with emails, now reserved for values that are neither.
+func TestWatchListEmails_RejectsNeitherEmailNorUUID(t *testing.T) {
+	_, err := watchListEmails(context.Background(), nil, "token", "watchList", []string{"not-an-email"})
+	verr, ok := err.(*apierror.ValidationError)
+	if !ok {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+	if !strings.Contains(verr.Msg, "invalid email") {
+		t.Fatalf("error %q does not name an invalid email", verr.Msg)
+	}
+}
+
+// TestWatchListEmails_RejectsMixedEmailAndUUID keeps a single list in one
+// identity shape so CSM ids and portal emails cannot be interleaved.
+func TestWatchListEmails_RejectsMixedEmailAndUUID(t *testing.T) {
+	_, err := watchListEmails(context.Background(), nil, "token", "watchList", []string{
+		testWatcherEmail1, testIncidentWatcherUUID1,
+	})
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
+// TestSNCaseService_CreateCase_WatchListEmailsForwarded verifies POST /cases
+// accepts watcher emails and sends them to the backing service without a
+// user-id lookup.
+func TestSNCaseService_CreateCase_WatchListEmailsForwarded(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/users/search", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("email watch lists must not trigger a user lookup")
+	})
+	mux.HandleFunc("/cases", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{
+			"message": "Case created successfully",
+			"case": {"id": "` + testWLCaseSysid + `", "number": "CS0000010", "createdBy": "engineer@example.com", "createdOn": "2026-01-02 10:00:00", "state": {"id": 1, "label": "Open"}}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+
+	req := domain.CreateCaseRequest{
+		Type:                  "engagement",
+		ProjectID:             testProjectUUID,
+		DeploymentID:          testDeploymentUUID,
+		DeployedProductID:     testDeployedProdID,
+		Subject:               "Migration planning",
+		Description:           "Plan the migration",
+		EngagementType:        domain.EngagementTypeMigration,
+		EngagementPaymentType: domain.EngagementPaymentTypePaid,
+		WatchList:             []string{testWatcherEmail1, testWatcherEmail2},
+	}
+
+	if _, err := svc.CreateCase(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertWatchListPayload(t, gotBody, []string{testWatcherEmail1, testWatcherEmail2})
+}
+
 // TestSNCaseService_UpdateCase_WatchListResolvedToEmails mirrors the create-path
 // coverage for PATCH /cases/{id}, whose payload declares emails as well.
 func TestSNCaseService_UpdateCase_WatchListResolvedToEmails(t *testing.T) {
@@ -150,6 +255,43 @@ func TestSNCaseService_UpdateCase_WatchListResolvedToEmails(t *testing.T) {
 	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
 
 	watchList := []string{testIncidentWatcherUUID1, testIncidentWatcherUUID2}
+	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID:        sysidToUUID(testWLCaseSysid),
+		WatchList: &watchList,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertWatchListPayload(t, gotBody, []string{testWatcherEmail1, testWatcherEmail2})
+}
+
+// TestSNCaseService_UpdateCase_WatchListEmailsForwarded verifies PATCH /cases
+// accepts watcher emails (service-request / case edit) without treating them
+// as user UUIDs.
+func TestSNCaseService_UpdateCase_WatchListEmailsForwarded(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/users/search", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("email watch lists must not trigger a user lookup")
+	})
+	mux.HandleFunc("/cases/"+testWLCaseSysid, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-03 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+
+	watchList := []string{testWatcherEmail1, testWatcherEmail2}
 	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
 		ID:        sysidToUUID(testWLCaseSysid),
 		WatchList: &watchList,

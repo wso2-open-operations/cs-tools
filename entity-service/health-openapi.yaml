@@ -1,0 +1,114 @@
+openapi: 3.0.1
+info:
+  title: Entity Service Health
+  version: 1.0.0
+  description: >-
+    Health probes for the entity service, published as their own public
+    Choreo endpoint so external alerting can poll them without credentials.
+    Served by a separate listener from the main API (see
+    internal/server/health.go) whose mux carries only the two operations
+    below — no business route is reachable here.
+
+    Two probes rather than one combined check, so alerting can tell "the
+    component is down" apart from "the component is up but its database is
+    not".
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8081"
+paths:
+  /health:
+    get:
+      summary: >-
+        Component probe. Answers 200 whenever the process is up and serving.
+        Makes no dependency calls of its own, so a database outage never
+        shows up here — that is what /health/database is for.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: The component is up and serving.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentHealthResponse"
+              example:
+                status: ok
+  /health/database:
+    get:
+      summary: >-
+        Database probe. Answers 503 when a round trip to PostgreSQL fails,
+        so a database outage is a usable alert condition on its own.
+      operationId: getHealthDatabase
+      security: []
+      responses:
+        "200":
+          description: >-
+            Nothing to alert on. `database: up` when the round trip
+            succeeded, or `database: not_configured` for a deployment that
+            runs without a connection pool at all — this probe alerts on a
+            PostgreSQL outage, and such a deployment has no PostgreSQL to be
+            out.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseHealthResponse"
+              examples:
+                databaseUp:
+                  summary: The round trip to PostgreSQL succeeded
+                  value:
+                    status: ok
+                    database: up
+                databaseNotConfigured:
+                  summary: This deployment runs without a connection pool
+                  value:
+                    status: ok
+                    database: not_configured
+        "503":
+          description: >-
+            The round trip to PostgreSQL failed. The body carries no error
+            detail by design — this endpoint is public, so it reports only
+            whether the dependency is up, never anything about the
+            infrastructure behind it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseHealthResponse"
+              example:
+                status: unavailable
+                database: down
+components:
+  schemas:
+    ComponentHealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+    DatabaseHealthResponse:
+      type: object
+      required:
+        - status
+        - database
+      properties:
+        status:
+          type: string
+          description: Overall result of this probe.
+          enum:
+            - ok
+            - unavailable
+        database:
+          type: string
+          description: >-
+            Why the probe resolved the way it did. Always present, so an
+            alerting rule can read it unconditionally.
+          enum:
+            - up
+            - down
+            - not_configured

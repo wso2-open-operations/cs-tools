@@ -73,6 +73,13 @@ type snAccount struct {
 	CreatedOn       string           `json:"createdOn"`
 	CreatedBy       *string          `json:"createdBy"`
 	UpdatedOn       string           `json:"updatedOn"`
+	// Partner and PrimaryPartnerAccountID are the raw ServiceNow
+	// customer_account.partner/u_primary_partner_account_id fields, merged in by the
+	// Ballerina entity-service from a separate Table API read (not part of the scoped
+	// app's own /accounts response). Naming/derivation into IsPartner/HasPrimaryPartner
+	// happens in this layer -- see snAccountCommonFields.
+	Partner                 *bool            `json:"partner"`
+	PrimaryPartnerAccountID *snCaseEntityRef `json:"primaryPartnerAccountId"`
 }
 
 // snAccountSearchPayload is the Choreo POST /accounts/search request body.
@@ -168,6 +175,22 @@ func nilIfEmpty(s *string) *string {
 	return s
 }
 
+// snHasPrimaryPartner derives AccountView/AccountDetail.HasPrimaryPartner from the raw
+// primaryPartnerAccountId reference: nil when the key is entirely absent (Ballerina never
+// had a value for this account -- e.g. Postgres data source, or ServiceNow's own Table API
+// row omitted the column), true when present with a real id, false when present but the
+// reference is empty. In practice the Ballerina layer's own displayValuePairToReference
+// already collapses "present but empty" into "entirely absent" before this ever reaches the
+// wire, so false is not currently observable from live ServiceNow data -- but this function
+// still handles it correctly in case that upstream behavior ever changes.
+func snHasPrimaryPartner(ref *snCaseEntityRef) *bool {
+	if ref == nil {
+		return nil
+	}
+	has := ref.ID != ""
+	return &has
+}
+
 func snAccountCommonFields(a snAccount) (deactivationDate *string, technicalOwner, accountManager, renewalAccountManager *domain.PersonRef, creTeam, sreTeam *domain.EntityRef) {
 	deactivationDate = nilIfEmpty(a.DeactivationDate)
 	if a.TechnicalOwner != nil && a.TechnicalOwner.ID != "" {
@@ -223,6 +246,8 @@ func snAccountToDomain(a snAccount) domain.AccountView {
 		CreatedOn:             a.CreatedOn,
 		CreatedBy:             nilIfEmpty(a.CreatedBy),
 		UpdatedOn:             a.UpdatedOn,
+		IsPartner:             a.Partner,
+		HasPrimaryPartner:     snHasPrimaryPartner(a.PrimaryPartnerAccountID),
 	}
 }
 
@@ -258,6 +283,8 @@ func snAccountToDetail(a snAccount) domain.AccountDetail {
 		CreatedOn:             a.CreatedOn,
 		CreatedBy:             nilIfEmpty(a.CreatedBy),
 		UpdatedOn:             a.UpdatedOn,
+		IsPartner:             a.Partner,
+		HasPrimaryPartner:     snHasPrimaryPartner(a.PrimaryPartnerAccountID),
 	}
 }
 

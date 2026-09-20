@@ -38,6 +38,7 @@ import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomiz
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { getColumnPreferencesUserKey, useColumnPreferences } from "@hooks/useColumnPreferences";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useFilterBarCollapsed } from "@hooks/useFilterBarCollapsed";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useBackendApi } from "@api/backend/client";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -137,7 +138,6 @@ export default function ChangeRequestsTab(): JSX.Element {
     () => readChangeRequestFiltersFromUrl(searchParams),
     [searchParams],
   );
-  const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
@@ -161,6 +161,11 @@ export default function ChangeRequestsTab(): JSX.Element {
   // set so a returning user sees no change until they open the picker.
   const currentUserEmail = useIdTokenClaims()?.email;
   const currentUserId = useCurrentUser().user?.id;
+  const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
+    "change-requests",
+    getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    true,
+  );
   const columnPrefs = useColumnPreferences({
     viewId: "change-requests",
     userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
@@ -268,7 +273,7 @@ export default function ChangeRequestsTab(): JSX.Element {
         onChange={handleFiltersChange}
         onReset={handleReset}
         isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen((prev: boolean) => !prev)}
+        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
       />
 
       <Box sx={{ display: "flex", justifyContent: "flex-end" }}>

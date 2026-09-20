@@ -22,6 +22,7 @@ import {
 } from "../fixtures/test";
 import { CASE_DETAIL, SETTINGS } from "../utils/selectors";
 import { SideNavPage } from "./SideNavPage";
+import { idPattern, projectPathPattern } from "../utils/ids";
 
 /** How long to allow for the page and its queries to resolve. */
 const LOAD_TIMEOUT_MS = 60_000;
@@ -46,8 +47,24 @@ export class SettingsPage {
     await sideNav.open(projectId);
     await sideNav.clickItem(
       SETTINGS.navItem,
-      new RegExp(`/projects/${projectId}/${SETTINGS.pathSegment}`),
+      projectPathPattern(projectId, SETTINGS.pathSegment),
     );
+    await expect(this.tab(SETTINGS.tabs.userManagement)).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+  }
+
+  /**
+   * Opens settings directly by URL.
+   *
+   * For getting *back* to the page mid-test — a restore step should not depend on
+   * a dashboard load and a side-nav click, which is a long way round and one more
+   * thing that can fail while state is left changed.
+   *
+   * @param projectId - Project whose settings to open.
+   */
+  async open(projectId: string): Promise<void> {
+    await this.page.goto(`/projects/${projectId}/${SETTINGS.pathSegment}`);
     await expect(this.tab(SETTINGS.tabs.userManagement)).toBeVisible({
       timeout: LOAD_TIMEOUT_MS,
     });
@@ -195,12 +212,112 @@ export class SettingsPage {
     const [response] = await Promise.all([
       this.page.waitForResponse(
         (r) =>
-          new RegExp(`/projects/${projectId}/contacts/`).test(
+          new RegExp(`/projects/${idPattern(projectId)}/contacts/`).test(
             new URL(r.url()).pathname,
           ) && r.request().method() === "PATCH",
         { timeout: LOAD_TIMEOUT_MS },
       ),
       this.saveRolesButton().click(),
+    ]);
+    return response;
+  }
+
+  //
+  // AI Assistant tab.
+  //
+
+  /** The Support Capabilities section heading. */
+  capabilitiesSection(): Locator {
+    return this.main().getByText(SETTINGS.aiAssistant.capabilitiesSection, {
+      exact: true,
+    });
+  }
+
+  /** The AI Chat Assistant (Novera) row's label. */
+  noveraLabel(): Locator {
+    return this.main().getByText(SETTINGS.aiAssistant.novera.label, {
+      exact: true,
+    });
+  }
+
+  /**
+   * The Novera toggle.
+   *
+   * A `switch`, not a `checkbox` — MUI's Switch carries `role="switch"`, and the
+   * tab has no checkbox at all, so a checkbox locator finds nothing and hangs.
+   * Verified live.
+   *
+   * Located without a name: it is labelled through `aria-labelledby`, and the
+   * tab renders exactly one switch, so narrowing further only adds a way to
+   * mismatch.
+   */
+  noveraToggle(): Locator {
+    return this.main().getByRole("switch");
+  }
+
+  /**
+   * The state chip beside the Novera label.
+   *
+   * @param label - "Active" or "Inactive".
+   */
+  noveraChip(label: string): Locator {
+    return this.main().getByText(label, { exact: true });
+  }
+
+  /**
+   * Flips the Novera toggle and waits for the project patch to land.
+   *
+   * The toggle writes `hasAgent` on the project, so the request body is what
+   * distinguishes enabling from disabling.
+   *
+   * @param projectId - Project being updated.
+   * @param enable - True to switch on, false to switch off.
+   * @returns The update response.
+   */
+  async setNovera(projectId: string, enable: boolean): Promise<Response> {
+    // A request that never gets a response — the backend rejecting it without
+    // CORS headers, so the browser aborts it — would otherwise sit in
+    // waitForResponse for the full timeout and report nothing but "timed out".
+    // Racing the failure surfaces the actual reason at the point it happens.
+    const matchesPatch = (url: string): boolean =>
+      new RegExp(`/projects/${idPattern(projectId)}$`).test(
+        new URL(url).pathname,
+      );
+
+    const failure = new Promise<never>((_, reject) => {
+      this.page.on("requestfailed", (request) => {
+        if (request.method() === "PATCH" && matchesPatch(request.url())) {
+          reject(
+            new Error(
+              `PATCH ${request.url()} failed at the network layer ` +
+                `(${request.failure()?.errorText}). The Novera toggle could ` +
+                `not be saved, so the switch reverts and the assistant stays ` +
+                `inactive. This is a backend/deployment fault, not a test one.`,
+            ),
+          );
+        }
+      });
+    });
+
+    const [response] = await Promise.all([
+      Promise.race([
+        this.page.waitForResponse(
+        (r) =>
+          // The portal calls the backend with whichever spelling of the id
+          // is in the address bar, so this must accept both — matching only
+          // the plain form means the wait never resolves and the toggle looks
+          // like it failed to take.
+          new RegExp(`/projects/${idPattern(projectId)}$`).test(
+            new URL(r.url()).pathname,
+          ) &&
+          r.request().method() === "PATCH",
+          { timeout: LOAD_TIMEOUT_MS },
+        ),
+        failure,
+      ]),
+      enable
+        ? this.noveraToggle().check()
+        : this.noveraToggle().uncheck(),
     ]);
     return response;
   }

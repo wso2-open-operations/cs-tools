@@ -1,0 +1,16 @@
+window.config = {
+  // OIDC IdP base URL for the configured Asgardeo organization.
+  GID_AUTH_BASE_URL: "<asgardeo-org-base-url>",
+  GID_AUTH_CLIENT_ID: "<client-id>",
+  GID_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:5173",
+  GID_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:5173",
+  GID_AUTH_SCOPES: "openid profile email",
+
+  // Choreo gateway URL of the backend, e.g.
+  // https://<org>.choreoapis.dev/<proj>/backend/v1.0
+  // Must be https: — http: is only accepted for localhost/127.0.0.1/::1,
+  // since the bearer token is sent to this URL on every request.
+  GID_BACKEND_BASE_URL: "http://localhost:8080",
+
+  GID_LOG_LEVEL: "ERROR",
+};

@@ -26,7 +26,7 @@ import (
 // problemFilterFieldSet is the exact set of ProblemFieldFilter.Field values
 // accepted by problem search. Anything else is rejected outright.
 var problemFilterFieldSet = map[string]bool{
-	"state": true, "assignmentGroupId": true,
+	"state": true, "assignmentGroupId": true, "assignedUserId": true,
 }
 
 // problemFilterOpSet is the exact set of ProblemFieldFilter.Op values
@@ -64,6 +64,12 @@ type parsedProblemFilters struct {
 	// AssignmentGroupIDs are sys_user_group UUIDs (not yet converted to
 	// sysids -- that conversion happens where the outbound payload is built).
 	AssignmentGroupIDs []string
+	// AssignedUserIDs are sys_user UUIDs (not yet converted to sysids -- that
+	// conversion happens where the outbound payload is built, same as
+	// AssignmentGroupIDs above). Wire field name is "assignedUserId" (singular,
+	// matching case search's own convention); it is sent to Ballerina/SN as the
+	// plural "assignedUserIds" JSON key.
+	AssignedUserIDs []string
 }
 
 // ParseProblemFieldFilters translates the problem-search wire contract's
@@ -107,6 +113,18 @@ func ParseProblemFieldFilters(filters []domain.ProblemFieldFilter) (parsedProble
 				return parsedProblemFilters{}, err
 			}
 			p.AssignmentGroupIDs = append(p.AssignmentGroupIDs, f.Values...)
+
+		case "assignedUserId":
+			if f.Op != "in" {
+				return parsedProblemFilters{}, badProblemFilterCombo(f)
+			}
+			if err := requireProblemFilterValues(f); err != nil {
+				return parsedProblemFilters{}, err
+			}
+			if err := validateUUIDs("filters: assignedUserId", f.Values); err != nil {
+				return parsedProblemFilters{}, err
+			}
+			p.AssignedUserIDs = append(p.AssignedUserIDs, f.Values...)
 		}
 	}
 

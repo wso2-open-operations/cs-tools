@@ -48,7 +48,8 @@ type eventPublisherService struct {
 // apps/csm-portal/backend's own internal/eventpublisher.Publisher — which
 // has to record a failed publish via an HTTP call to this service's
 // POST /event-publish-failures — failures is called in-process here, since
-// this service is the one that already owns that table.
+// this service is the one that already owns that table. failures may be
+// nil when no Postgres pool is available; Publish then skips recording.
 func NewEventPublisherService(kafka kafkaProducer, failures EventPublishFailureService) EventPublisherService {
 	return &eventPublisherService{kafka: kafka, failures: failures}
 }

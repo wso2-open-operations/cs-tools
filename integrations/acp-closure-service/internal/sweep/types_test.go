@@ -136,8 +136,8 @@ func TestProject_ParsesNameProjectKeyStartDateAndAccountName(t *testing.T) {
 }
 
 // TestProject_ParsesNameKeyAndStartDateFromRealSearchProjectsResponse is a
-// regression test addressing a real review concern (PR #1440, Sajith
-// Ekanayake): Name/ProjectKey/StartDate were only regression-tested against
+// regression test addressing a real review concern (Sajith Ekanayake):
+// Name/ProjectKey/StartDate were only regression-tested against
 // a GetProject-shaped fixture, but the unattended production sweep
 // (TEST_PROJECT_ID unset) reads projects from /projects/search instead — a
 // different, historically leaner response shape (CLAUDE.md documents

@@ -143,12 +143,9 @@ func (h *CaseHandler) RequestCaseUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var currentCase struct {
-		State            string `json:"state"`
-		Type             string `json:"type"`
-		EngagementType   string `json:"engagementType"`
-		AssignedEngineer *struct {
-			ID *string `json:"id"`
-		} `json:"assignedEngineer"`
+		State          string `json:"state"`
+		Type           string `json:"type"`
+		EngagementType string `json:"engagementType"`
 	}
 	if err := json.Unmarshal(current, &currentCase); err != nil {
 		slog.ErrorContext(r.Context(), "failed to parse case state for request-update guard", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -158,24 +155,6 @@ func (h *CaseHandler) RequestCaseUpdate(w http.ResponseWriter, r *http.Request) 
 
 	if currentCase.State != caseStateAwaitingInfo && currentCase.State != caseStateSolutionProposed {
 		writeError(w, http.StatusConflict, ErrMsgRequestUpdateNotAllowed)
-		return
-	}
-
-	// Ownership check, mirroring CreateCaseComment's guard for a public
-	// (non-work_note) comment: this endpoint always posts a customer-visible
-	// comment, so only the case's assigned engineer may trigger it. Resolved
-	// here, after the state gate, so the extra lookup is only paid on a
-	// request that would otherwise be accepted.
-	currentUserID := h.resolveCurrentUserID(r, user)
-	if currentUserID == "" {
-		// The caller's identity could not be established, so ownership cannot
-		// be decided either way: fail closed, but as a server-side failure
-		// rather than a misleading "you are not the assignee".
-		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
-		return
-	}
-	if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != currentUserID {
-		writeError(w, http.StatusForbidden, ErrMsgCommentNotOwnCase)
 		return
 	}
 

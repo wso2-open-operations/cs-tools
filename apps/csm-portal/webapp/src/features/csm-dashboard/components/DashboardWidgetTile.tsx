@@ -16,7 +16,7 @@
 
 import { Box, Button, Card, Chip, IconButton, Skeleton, Tooltip, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { ArrowRight, Info, RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useRef, useState, type JSX, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { memo, useRef, useState, type JSX, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useElementVisibleOnce } from "@hooks/useElementVisibleOnce";
@@ -147,6 +147,43 @@ interface DashboardWidgetTileProps {
    * in that context. `undefined`/falsy is a no-op: a normal dashboard page
    * (no `renderWidgetAction`) keeps its refresh button exactly as before. */
   hideRefreshButton?: boolean;
+  /** Only meaningful for shape "pie"/"bar". When `true`, clicking a slice
+   * renders that slice's own filtered list inline, below the chart, on this
+   * same tile — rather than navigating away to that resourceType's own list
+   * page (the existing, still-default behavior for every widget that omits
+   * this or passes `false`; see `BeDashboardWidget.inlineDrilldown`).
+   * Clicking the already-expanded slice again collapses it; clicking a
+   * different slice switches the expansion to it. A slice with
+   * `navigable: false` (a groupBy widget's synthetic "Others" bucket, which
+   * has no safe selector) never expands, same as it never navigates away
+   * today. The tile-level background click-through (clicking the chart's
+   * padding/empty space, which otherwise lands on the widget's own base
+   * filters) is suppressed entirely when this is set — inline mode's whole
+   * point is "don't navigate away", and there is no single "base filters"
+   * destination to send a background click to once one exists per slice
+   * instead. Absent/`false` renders and behaves exactly as before this prop
+   * existed. */
+  inlineDrilldown?: boolean;
+  /** Only meaningful for shape "pie" (see `DashboardPieChart`'s own prop of
+   * the same name, and `BeDashboardWidget.inlineLabels`). Not applicable to
+   * shape "bar", so never forwarded to `DashboardBarChart`. Absent/`false`
+   * is a no-op. */
+  inlineLabels?: boolean;
+  /** Only meaningful when `inlineDrilldown` is set (shape "pie"/"bar"):
+   * this tile's own currently-expanded slice, LIFTED into the parent
+   * `DashboardWidgetGrid` (see that component's own `expanded` state) so it
+   * can render the resulting list as a full-width sibling grid item below
+   * this (narrow) tile, rather than nested inside this tile's own `Card`.
+   * `null`/`undefined` means no slice of THIS widget is currently expanded
+   * — which is also true while a DIFFERENT widget's slice is expanded, both
+   * of which render identically here (just the chart, no expansion). */
+  expandedSlice?: PieSliceResult | null;
+  /** Only meaningful when `inlineDrilldown` is set: reports a slice click
+   * up to `DashboardWidgetGrid` instead of tracking it locally. Called with
+   * the clicked slice to expand it (replacing whichever slice — on this
+   * widget or another — was previously expanded), or `null` to collapse
+   * (clicking the already-expanded slice again). */
+  onExpandChange?: (slice: PieSliceResult | null) => void;
 }
 
 /**
@@ -164,8 +201,25 @@ interface DashboardWidgetTileProps {
  * resource's own tab; `shape: "list"` tiles can't be (their rows and "View
  * more" need their own nested links), so only they get a plain, non-link
  * `Card`.
+ *
+ * Wrapped in `React.memo` so that expanding/collapsing an inline-drilldown
+ * slice on ONE widget (`DashboardWidgetGrid`'s own lifted `expanded` state)
+ * doesn't re-render every OTHER widget on the same dashboard — confirmed via
+ * a temporary render-count probe (removed before landing this) that,
+ * without this memo, clicking a slice on one pie/bar tile re-rendered every
+ * sibling tile on the page, even though their own props were unchanged.
+ * That re-render was harmless on its own (React's reconciliation produces
+ * no DOM writes for a tile whose rendered output is byte-identical), but
+ * it's needless work at dashboard scale and this memo is free as long as
+ * `DashboardWidgetGrid` also keeps this component's own `filters` and
+ * `onExpandChange` props referentially stable per widget id across an
+ * unrelated expand/collapse (see that component's own
+ * `getResolvedFilters`/`getOnExpandChange` caches) — without THAT half of
+ * the fix, this memo alone would do nothing, since a fresh object/closure
+ * identity on every render defeats `React.memo`'s default shallow prop
+ * comparison regardless.
  */
-export default function DashboardWidgetTile({
+function DashboardWidgetTile({
   widgetId,
   displayName,
   description,
@@ -181,6 +235,10 @@ export default function DashboardWidgetTile({
   selectedTeamSreGroupId,
   selectedTeamLabel,
   hideRefreshButton,
+  inlineDrilldown,
+  inlineLabels,
+  expandedSlice = null,
+  onExpandChange,
 }: DashboardWidgetTileProps): JSX.Element {
   const theme = useTheme();
   const navigate = useNavigate();
@@ -446,6 +504,13 @@ export default function DashboardWidgetTile({
   });
   const Icon = config.icon;
   const isListShape = shape === "list";
+  // Shared by the shape-"list" branch and, when `inlineDrilldown` is set, an
+  // expanded slice's own inline list on the pie/bar branch below — both
+  // render through the same per-resourceType (or generic, `columns`-
+  // configured) list renderer, so this is computed once rather than
+  // duplicated.
+  const hasColumns = Boolean(columns && columns.length > 0);
+  const ListRenderer = WIDGET_LIST_RENDERERS[resourceType];
 
   // Shared hover idiom for every clickable tile (the count-shape anchor and
   // the pie/bar tile-level click-through target below) — matches the
@@ -537,8 +602,6 @@ export default function DashboardWidgetTile({
     // (the common case, and every dashboard as of this field's addition) is
     // a no-op: ListRenderer below is untouched, so existing widgets render
     // byte-for-byte as before.
-    const hasColumns = Boolean(columns && columns.length > 0);
-    const ListRenderer = WIDGET_LIST_RENDERERS[resourceType];
     const total = data?.total ?? 0;
     return (
       <Card
@@ -661,6 +724,33 @@ export default function DashboardWidgetTile({
         handleTileClick();
       }
     };
+    const handleSliceClick = (slice: PieSliceResult): void => {
+      // See `PieSliceResult.navigable`'s own doc comment: a groupBy widget's
+      // synthetic "Others" bucket has no safe selector to navigate to (or,
+      // in `inlineDrilldown` mode, to expand into a list), so it opts out
+      // of click-through entirely rather than falling through to the
+      // widget's own unscoped base result set.
+      if (slice.navigable === false) return;
+      if (inlineDrilldown) {
+        // Toggle: clicking the already-expanded slice again collapses it;
+        // clicking a different slice switches the expansion to it. Slices
+        // are compared by `label` — the same identity the chart itself
+        // already keys each slice/bar on (see DashboardPieChart/
+        // DashboardBarChart's own `data` mapping). The actual expand/collapse
+        // state is lifted into `DashboardWidgetGrid` (see `expandedSlice`/
+        // `onExpandChange`'s own doc comments) — this tile only reports the
+        // click, it no longer tracks the expansion itself.
+        onExpandChange?.(expandedSlice && expandedSlice.label === slice.label ? null : slice);
+        return;
+      }
+      navigate(
+        config.buildHref(resolvePlaceholders(mergeWidgetFilters(filters, slice.query)), {
+          widgetId,
+          displayName: resolvedDisplayName,
+        }),
+        { state: dashboardReturnState },
+      );
+    };
     return (
       <Card
         ref={tileRef}
@@ -672,26 +762,33 @@ export default function DashboardWidgetTile({
           ...cardRefreshRevealSx,
         }}
       >
-        <Box
-          role="button"
-          tabIndex={0}
-          aria-label={`View all cases for ${resolvedDisplayName}`}
-          onClick={handleTileClick}
-          onKeyDown={handleTileKeyDown}
-          sx={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 0,
-            borderRadius: "inherit",
-            cursor: "pointer",
-            ...widgetHoverSx,
-            "&:focus-visible": {
-              outline: "2px solid",
-              outlineColor: "primary.main",
-              outlineOffset: -2,
-            },
-          }}
-        />
+        {/* Suppressed entirely for `inlineDrilldown`: there is no single
+            "base filters" destination for a background click to land on
+            once each slice expands its own inline list in place, and inline
+            mode's whole point is "don't navigate away" — see this prop's
+            own doc comment on `DashboardWidgetTileProps`. */}
+        {!inlineDrilldown && (
+          <Box
+            role="button"
+            tabIndex={0}
+            aria-label={`View all cases for ${resolvedDisplayName}`}
+            onClick={handleTileClick}
+            onKeyDown={handleTileKeyDown}
+            sx={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 0,
+              borderRadius: "inherit",
+              cursor: "pointer",
+              ...widgetHoverSx,
+              "&:focus-visible": {
+                outline: "2px solid",
+                outlineColor: "primary.main",
+                outlineOffset: -2,
+              },
+            }}
+          />
+        )}
         <Box sx={{ position: "relative", zIndex: 1, height: "100%", pointerEvents: "none" }}>
           <Box sx={{ position: "absolute", top: -4, right: -4, pointerEvents: "auto" }}>
             {refreshButton}
@@ -716,21 +813,11 @@ export default function DashboardWidgetTile({
               total={pieData.total}
               isLoading={pieData.isLoading}
               isError={pieData.isError}
-              onSliceClick={(slice: PieSliceResult) => {
-                // See `PieSliceResult.navigable`'s own doc comment: a
-                // groupBy widget's synthetic "Others" bucket has no safe
-                // selector to navigate to, so it opts out of click-through
-                // entirely rather than falling through to the widget's own
-                // unscoped base result set.
-                if (slice.navigable === false) return;
-                navigate(
-                  config.buildHref(resolvePlaceholders(mergeWidgetFilters(filters, slice.query)), {
-                    widgetId,
-                    displayName: resolvedDisplayName,
-                  }),
-                  { state: dashboardReturnState },
-                );
-              }}
+              onSliceClick={handleSliceClick}
+              // Only DashboardPieChart accepts this prop — shape "bar" never
+              // sets `inlineLabels` on its own widget config, but guard it
+              // here too rather than relying on that alone.
+              {...(shape === "pie" ? { inlineLabels } : {})}
             />
           </Box>
         </Box>
@@ -847,3 +934,5 @@ export default function DashboardWidgetTile({
     </Card>
   );
 }
+
+export default memo(DashboardWidgetTile);

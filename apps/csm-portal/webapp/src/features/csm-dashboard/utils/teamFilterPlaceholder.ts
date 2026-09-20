@@ -17,10 +17,10 @@
 import { isCaseFieldFilterArray, type WidgetCaseFieldFilterLike } from "./widgetPreviewUrl";
 
 /**
- * Placeholder value a `creTeam` or `sreTeam` filter entry's `values` array
- * may carry — mirrors how `assignedUserId` widgets carry the signed-in user's
- * own placeholder and how the entity-service resolves its own
- * `__current_user_email__` for `createdBy` server-side. Unlike both of
+ * Placeholder value a `creTeam`/`sreTeam`/`assignmentGroupId` filter entry's
+ * `values` array may carry — mirrors how `assignedUserId` widgets carry the
+ * signed-in user's own placeholder and how the entity-service resolves its
+ * own `__current_user_email__` for `createdBy` server-side. Unlike both of
  * those, this one is resolved entirely CLIENT-SIDE: it stands for "the
  * currently selected team in this dashboard's own UI state", not anything
  * about the signed-in user's identity, so only this frontend (never the
@@ -45,6 +45,17 @@ export const ALL_TEAMS_SENTINEL = "__all__";
 
 export const CRE_TEAM_FILTER_FIELD = "creTeam";
 export const SRE_TEAM_FILTER_FIELD = "sreTeam";
+/**
+ * The `change_request`/`incident`/`problem` resourceTypes' own team-scoping
+ * field, in the same case-search generic field/op/values DSL as `creTeam`/
+ * `sreTeam` (e.g. `{"field": "assignmentGroupId", "op": "in", "values":
+ * ["__current_team__"]}`) but a different field name and, critically, a
+ * different resolution source: unlike `creTeam`/`sreTeam` (whose entry's own
+ * field name picks the discipline, CRE vs SRE), `assignmentGroupId` is
+ * always resolved from `selectedTeamSreGroupId` only — these three
+ * resourceTypes are SRE-specific, there is no CRE equivalent of this field.
+ */
+export const ASSIGNMENT_GROUP_ID_FILTER_FIELD = "assignmentGroupId";
 
 /**
  * Substitutes {@link CURRENT_TEAM_PLACEHOLDER} wherever it appears in a
@@ -62,6 +73,14 @@ export const SRE_TEAM_FILTER_FIELD = "sreTeam";
  * from its own discipline's group id. This only applies when the
  * corresponding group id argument is a single selected team (a plain
  * string).
+ *
+ * As of 2026-09-12 this also resolves the placeholder on a third case-DSL
+ * field, {@link ASSIGNMENT_GROUP_ID_FILTER_FIELD} (`assignmentGroupId`) — the
+ * team-scoping field the `change_request`/`incident`/`problem` resourceTypes
+ * actually use, same field/op/values shape as `creTeam`/`sreTeam` but always
+ * resolved from `selectedTeamSreGroupId` regardless of field name (these
+ * three resourceTypes are SRE-only; there is no `creTeam`-style "pick the
+ * discipline by field name" here, since there's only one discipline to pick).
  *
  * Either group id argument may also be an array of group ids — the "All
  * ABTs" case (see {@link ALL_TEAMS_SENTINEL}). As of 2026-08-05 this is an
@@ -152,7 +171,12 @@ function resolveCaseFieldFilterPlaceholder(
   for (const entry of fieldFilters) {
     const values = entry.values;
     const isCreEntry = entry.field === CRE_TEAM_FILTER_FIELD;
-    const isSreEntry = entry.field === SRE_TEAM_FILTER_FIELD;
+    // `sreTeam` and `assignmentGroupId` both resolve from
+    // `selectedTeamSreGroupId` — the latter is the case/change_request/
+    // incident/problem-search DSL's own SRE-only team-scoping field, see
+    // `ASSIGNMENT_GROUP_ID_FILTER_FIELD`'s doc comment.
+    const isSreEntry =
+      entry.field === SRE_TEAM_FILTER_FIELD || entry.field === ASSIGNMENT_GROUP_ID_FILTER_FIELD;
     if ((!isCreEntry && !isSreEntry) || !values?.includes(CURRENT_TEAM_PLACEHOLDER)) {
       resolved.push(entry);
       continue;
@@ -205,9 +229,9 @@ function resolveAssignmentTeamIdsPlaceholder(
 
 /**
  * Whether `filters` carries {@link CURRENT_TEAM_PLACEHOLDER} anywhere
- * {@link resolveTeamPlaceholder} would actually resolve it — a `creTeam` or
- * `sreTeam` case-field-filter entry's `values`, or a flat
- * `assignmentTeamIds` array. Deliberately mirrors that function's own two
+ * {@link resolveTeamPlaceholder} would actually resolve it — a `creTeam`,
+ * `sreTeam`, or `assignmentGroupId` case-field-filter entry's `values`, or a
+ * flat `assignmentTeamIds` array. Deliberately mirrors that function's own
  * detection checks (`values?.includes(CURRENT_TEAM_PLACEHOLDER)` for the
  * case DSL, `assignmentTeamIds.includes(CURRENT_TEAM_PLACEHOLDER)` for the
  * flat shape) rather than re-deriving its own notion of "team-scoped" —
@@ -226,7 +250,8 @@ export function hasTeamPlaceholder(filters: Record<string, unknown>): boolean {
   if (isCaseFieldFilterArray(fieldFilters)) {
     const hasCaseFieldPlaceholder = fieldFilters.some((entry) => {
       const isCreEntry = entry.field === CRE_TEAM_FILTER_FIELD;
-      const isSreEntry = entry.field === SRE_TEAM_FILTER_FIELD;
+      const isSreEntry =
+        entry.field === SRE_TEAM_FILTER_FIELD || entry.field === ASSIGNMENT_GROUP_ID_FILTER_FIELD;
       return (isCreEntry || isSreEntry) && (entry.values?.includes(CURRENT_TEAM_PLACEHOLDER) ?? false);
     });
     if (hasCaseFieldPlaceholder) return true;

@@ -147,6 +147,161 @@ describe("CsmDashboardBuilderListPage", () => {
     expect(await screen.findByText("Local draft")).toBeInTheDocument();
   });
 
+  it("shows a 'clear local edits' action only for a deployed dashboard that has a local draft", async () => {
+    getMock.mockImplementation((path: string) => {
+      if (path === "/dashboards") {
+        return Promise.resolve([
+          { id: "agents_pilot", displayName: "Engineer overview", isDefault: true, isTeamBased: false },
+          { id: "team_perf", displayName: "Team performance", isDefault: false, isTeamBased: true },
+        ]);
+      }
+      if (path === "/dashboards/agents_pilot") {
+        return Promise.resolve({
+          id: "agents_pilot",
+          displayName: "Engineer overview",
+          isDefault: true,
+          isTeamBased: false,
+          widgets: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+    saveDashboardDraft({
+      id: "agents_pilot",
+      sourceDashboardId: "agents_pilot",
+      displayName: "Engineer overview (renamed locally)",
+      isDefault: true,
+      isTeamBased: false,
+      widgets: [],
+      emptySections: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Engineer overview")).toBeInTheDocument();
+    expect(screen.getByText("Team performance")).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("button", { name: /clear local edits for engineer overview/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /clear local edits for team performance/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears local edits for the clicked dashboard only, after confirming, and leaves other dashboards untouched", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    getMock.mockImplementation((path: string) => {
+      if (path === "/dashboards") {
+        return Promise.resolve([
+          { id: "agents_pilot", displayName: "Engineer overview", isDefault: true, isTeamBased: false },
+          { id: "team_perf", displayName: "Team performance", isDefault: false, isTeamBased: true },
+        ]);
+      }
+      if (path === "/dashboards/agents_pilot") {
+        return Promise.resolve({
+          id: "agents_pilot",
+          displayName: "Engineer overview",
+          isDefault: true,
+          isTeamBased: false,
+          widgets: [],
+        });
+      }
+      if (path === "/dashboards/team_perf") {
+        return Promise.resolve({
+          id: "team_perf",
+          displayName: "Team performance",
+          isDefault: false,
+          isTeamBased: true,
+          widgets: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+    saveDashboardDraft({
+      id: "agents_pilot",
+      sourceDashboardId: "agents_pilot",
+      displayName: "Engineer overview (renamed locally)",
+      isDefault: true,
+      isTeamBased: false,
+      widgets: [],
+      emptySections: [],
+    });
+    saveDashboardDraft({
+      id: "team_perf",
+      sourceDashboardId: "team_perf",
+      displayName: "Team performance (renamed locally)",
+      isDefault: false,
+      isTeamBased: true,
+      widgets: [],
+      emptySections: [],
+    });
+
+    renderPage();
+
+    const clearButton = await screen.findByRole("button", {
+      name: /clear local edits for engineer overview/i,
+    });
+    fireEvent.click(clearButton);
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /clear local edits for engineer overview/i }),
+      ).not.toBeInTheDocument(),
+    );
+    // The other dashboard's draft, and its own clear action, must be untouched.
+    expect(
+      screen.getByRole("button", { name: /clear local edits for team performance/i }),
+    ).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  it("does not clear local edits when the confirmation is declined", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    getMock.mockImplementation((path: string) => {
+      if (path === "/dashboards") {
+        return Promise.resolve([
+          { id: "agents_pilot", displayName: "Engineer overview", isDefault: true, isTeamBased: false },
+        ]);
+      }
+      if (path === "/dashboards/agents_pilot") {
+        return Promise.resolve({
+          id: "agents_pilot",
+          displayName: "Engineer overview",
+          isDefault: true,
+          isTeamBased: false,
+          widgets: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+    saveDashboardDraft({
+      id: "agents_pilot",
+      sourceDashboardId: "agents_pilot",
+      displayName: "Engineer overview (renamed locally)",
+      isDefault: true,
+      isTeamBased: false,
+      widgets: [],
+      emptySections: [],
+    });
+
+    renderPage();
+
+    const clearButton = await screen.findByRole("button", {
+      name: /clear local edits for engineer overview/i,
+    });
+    fireEvent.click(clearButton);
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("button", { name: /clear local edits for engineer overview/i }),
+    ).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
   it("does NOT flag a deployed dashboard whose local draft is byte-identical to what's deployed", async () => {
     getMock.mockImplementation((path: string) => {
       if (path === "/dashboards") {

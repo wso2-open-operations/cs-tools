@@ -72,8 +72,15 @@ type Decision struct {
 // daysRemaining <= 0, regardless of lastNoticeWindow. The caller is
 // responsible for checking closureStatus before actually invoking suspend.
 func Decide(now, endDate time.Time, lastNoticeWindow *NoticeWindow) Decision {
-	daysRemaining := daysBetween(now, endDate)
+	return decideFromDaysRemaining(daysBetween(now, endDate), lastNoticeWindow)
+}
 
+// decideFromDaysRemaining is the 90/60/30/15/7/0 cascade shared by every
+// closure reason (subscription end date, invoice due date, ...) — each
+// reason only differs in which date it counts down to, so this is the one
+// place that cascade is implemented. See Decide's own doc comment for the
+// ShouldSuspend idempotency note, which applies here identically.
+func decideFromDaysRemaining(daysRemaining int, lastNoticeWindow *NoticeWindow) Decision {
 	if daysRemaining <= 0 {
 		alreadyNotified := lastNoticeWindow != nil && *lastNoticeWindow <= NoticeWindow0
 		return Decision{

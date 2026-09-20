@@ -20,19 +20,30 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import { incidentStateLabel } from "@features/csm-operations/utils/incidents";
-import type { BeIncidentState } from "@api/backend/types";
+import {
+  INCIDENT_RESOLUTION_CODES,
+  INCIDENT_RESOLUTION_CODE_LABELS,
+} from "@features/csm-operations/utils/incidentResolution";
+import type { BeIncidentResolutionCode, BeIncidentState } from "@api/backend/types";
 
 interface IncidentResolutionDialogProps {
   /** The transition this dialog is confirming — always RESOLVED or CLOSED. */
   target: Extract<BeIncidentState, "RESOLVED" | "CLOSED">;
   isSubmitting: boolean;
   onClose: () => void;
-  onSubmit: (fields: { resolutionCode: string; resolutionNotes: string }) => void;
+  onSubmit: (fields: {
+    resolutionCode: BeIncidentResolutionCode;
+    resolutionNotes: string;
+  }) => void;
 }
 
 /**
@@ -49,11 +60,11 @@ export default function IncidentResolutionDialog({
   onClose,
   onSubmit,
 }: IncidentResolutionDialogProps): JSX.Element {
-  const [resolutionCode, setResolutionCode] = useState("");
+  const [resolutionCode, setResolutionCode] = useState<BeIncidentResolutionCode | "">("");
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [touched, setTouched] = useState(false);
 
-  const hasCode = resolutionCode.trim().length > 0;
+  const hasCode = resolutionCode !== "";
   const hasNotes = resolutionNotes.trim().length > 0;
   const canSubmit = hasCode && hasNotes && !isSubmitting;
 
@@ -65,18 +76,32 @@ export default function IncidentResolutionDialog({
           ServiceNow requires a resolution to move this incident to{" "}
           {incidentStateLabel(target)}.
         </Typography>
-        <TextField
-          label="Resolution code"
-          required
-          size="small"
-          fullWidth
-          value={resolutionCode}
-          onChange={(e) => setResolutionCode(e.target.value)}
-          onBlur={() => setTouched(true)}
-          error={touched && !hasCode}
-          helperText={touched && !hasCode ? "Resolution code is required." : undefined}
-          disabled={isSubmitting}
-        />
+        <FormControl fullWidth size="small" required error={touched && !hasCode}>
+          <InputLabel
+            id="incident-resolution-code-label"
+            shrink={resolutionCode !== ""}
+            sx={{ top: "0px !important" }}
+          >
+            Resolution code
+          </InputLabel>
+          <Select
+            labelId="incident-resolution-code-label"
+            label="Resolution code"
+            value={resolutionCode}
+            notched={resolutionCode !== ""}
+            disabled={isSubmitting}
+            onChange={(e) =>
+              setResolutionCode(e.target.value as BeIncidentResolutionCode)
+            }
+            onBlur={() => setTouched(true)}
+          >
+            {INCIDENT_RESOLUTION_CODES.map((code) => (
+              <MenuItem key={code} value={code}>
+                {INCIDENT_RESOLUTION_CODE_LABELS[code]}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <TextField
           label="Resolution notes"
           required
@@ -104,12 +129,12 @@ export default function IncidentResolutionDialog({
           color="success"
           disabled={!canSubmit}
           onClick={() => {
-            if (!hasCode || !hasNotes) {
+            if (resolutionCode === "" || !hasNotes) {
               setTouched(true);
               return;
             }
             onSubmit({
-              resolutionCode: resolutionCode.trim(),
+              resolutionCode,
               resolutionNotes: resolutionNotes.trim(),
             });
           }}

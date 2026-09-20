@@ -37,19 +37,24 @@
 // takes, so the expectation is declared in config rather than discovered at
 // runtime.
 //
-// ⚠️ IDEMPOTENT, because reports are cases and cases cannot be deleted. Each test
-// searches the project's report list for its configured description and raises a
-// report only when none is found — so retries and repeated runs add nothing. The
-// descriptions are the idempotency key: they are stable per project, whereas the
-// generated title carries the creation date and would only dedupe within a day.
+// ⚠️ NOT idempotent. This test raises a report unconditionally, so every run —
+// including every retry and every scheduled execution — leaves one more
+// permanent, customer-visible record. Reports are cases, and cases have no
+// delete endpoint, so nothing here or elsewhere can clean them up.
 //
-// Changing a description in SECURITY_REPORT_INPUT therefore orphans the existing
-// report and causes the next run to create a replacement, permanently.
+// It previously looked for an existing report by description and returned early
+// when it found one. That guard made repeat runs free, but it also meant the
+// creation path stopped being exercised the moment the first report existed: on
+// a project that already had one the test passed without submitting anything.
+// Creating unconditionally is the deliberate trade — coverage of the write path
+// in exchange for a record per run.
+//
+// The descriptions in SECURITY_REPORT_INPUT are still stable per project, so the
+// reports this leaves behind remain identifiable in the target environment.
 //
 
 import { test, expect, withSession } from "../../fixtures/test";
 import { SecurityReportCreatePage } from "../../pages/SecurityReportCreatePage";
-import { SecurityCenterPage } from "../../pages/SecurityCenterPage";
 import {
   PROJECTS,
   ProjectType,
@@ -57,6 +62,11 @@ import {
   SECURITY_REPORT_INPUT,
 } from "../../config/testData";
 import { expectSuccess, skipWhenUnconfigured } from "../../utils/caseFlows";
+import { idPattern, projectPathPattern } from "../../utils/ids";
+import {
+  permanentWriteSkipReason,
+  permanentWritesAllowed,
+} from "../../utils/permanentWrites";
 
 withSession(test);
 
@@ -90,22 +100,12 @@ test.describe("Security Report", () => {
         return;
       }
 
-      test("has a security report", async ({ page }) => {
+      test("create security report", async ({ page }) => {
         skipWhenUnconfigured(project);
-
-        // Reports are cases, and cases have no delete endpoint — so raising one
-        // unconditionally would leave a permanent, customer-visible record on
-        // every run, retry and scheduled execution. Look first: the description
-        // is stable per project (unlike the generated title, which carries the
-        // creation date), and the list search covers descriptions.
-        const securityCenter = new SecurityCenterPage(page);
-        await securityCenter.open(project.id);
-        if (await securityCenter.hasReportMatching(input.description)) {
-          console.log(`${projectType}: security report already exists`);
-          return;
-        }
-
-        console.log(`${projectType}: no security report found, creating one`);
+        test.skip(
+          !permanentWritesAllowed(),
+          permanentWriteSkipReason("a security report (a case)"),
+        );
 
         const form = new SecurityReportCreatePage(page);
         await form.openViaGetHelpMenu(project.id);
@@ -162,8 +162,12 @@ test.describe("Security Report", () => {
         };
         expect(created.id, "backend returned no case id").toBeTruthy();
 
+        // Both ids go through idPattern: the portal renders them in their
+        // UUID-hyphenated spelling while the fixture and the API use the plain
+        // 32-hex form. This assertion never ran while the existence guard
+        // short-circuited the test, so it had not yet hit that mismatch.
         await expect(page).toHaveURL(
-          new RegExp(`/projects/${project.id}/.*/${created.id}`),
+          projectPathPattern(project.id, `.*/${idPattern(created.id!)}`),
         );
 
         console.log(

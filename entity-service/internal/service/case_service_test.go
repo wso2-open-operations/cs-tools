@@ -61,7 +61,7 @@ func (s *stubCaseRepo) SearchCaseComments(ctx context.Context, req domain.Search
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) UpdateCase(context.Context, domain.UpdateCaseRequest) (domain.Case, domain.CaseSeverity, error) {
+func (s *stubCaseRepo) UpdateCase(context.Context, domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
 	panic("not implemented")
 }
 func (s *stubCaseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error) {
@@ -100,6 +100,21 @@ func (s *stubCaseRepo) ConfirmCaseAttachment(ctx context.Context, id string) (do
 	}
 	panic("not implemented")
 }
+func (s *stubCaseRepo) AddCaseTag(context.Context, string, string, string) (domain.Tag, error) {
+	panic("not implemented")
+}
+func (s *stubCaseRepo) RemoveCaseTag(context.Context, string, string, string) error {
+	panic("not implemented")
+}
+func (s *stubCaseRepo) SearchTags(context.Context, string, string, int) ([]domain.Tag, error) {
+	panic("not implemented")
+}
+func (s *stubCaseRepo) SetCaseWatchList(context.Context, string, []string, string) ([]domain.WatchListUser, time.Time, error) {
+	panic("not implemented")
+}
+func (s *stubCaseRepo) SearchCaseActivities(context.Context, domain.SearchCaseActivitiesRequest) ([]domain.CaseActivity, int, error) {
+	panic("not implemented")
+}
 
 // stubUserRepo is a minimal repository.UserRepository; SearchCases doesn't
 // exercise it beyond the createdBy-current-user path, which these tests don't
@@ -116,6 +131,23 @@ func (s stubUserRepo) GetUserByEmail(ctx context.Context, email string) (domain.
 		return s.getUserByEmail(ctx, email)
 	}
 	panic("not implemented")
+}
+
+// GetUserRoles/GetUserGroups return empty rather than panicking: GetMe calls
+// both unconditionally after GetUserByEmail succeeds, and none of this
+// stub's existing test cases care about their contents.
+func (stubUserRepo) GetUserRoles(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (stubUserRepo) GetUserGroups(context.Context, string) ([]domain.UserGroupRef, error) {
+	return nil, nil
+}
+
+// GetUsersByIDs returns empty rather than panicking, matching
+// GetUserRoles/GetUserGroups above -- no existing test case in this
+// file exercises it.
+func (stubUserRepo) GetUsersByIDs(context.Context, []string) ([]domain.User, error) {
+	return nil, nil
 }
 
 // TestCaseService_SearchCases_RejectsUnsupportedPostgresFields proves the

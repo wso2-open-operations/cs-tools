@@ -25,13 +25,15 @@ import (
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
-// Watch lists arrive at this service as platform user UUIDs, but the backing
-// service's write payloads are not keyed by id at all: the case create, case
-// update and incident create payloads declare the watch list as email
-// addresses, and the incident update payload declares it as usernames.
-// Forwarding the ids verbatim is silently accepted upstream and drops every
-// watcher, so each id is resolved to the identity value its target payload
-// actually declares before the write goes out.
+// Watch lists on case create/update (and incident create) arrive either as
+// watcher emails — the Customer Portal / Ballerina contract — or as platform
+// user UUIDs from CSM. The backing service's write payloads are not keyed by
+// id at all: those three payloads declare the watch list as email addresses,
+// and the incident update payload declares it as usernames. Forwarding UUIDs
+// verbatim is silently accepted upstream and drops every watcher, so each id
+// is resolved to the identity value its target payload actually declares
+// before the write goes out. Emails are already the declared shape and are
+// forwarded as-is.
 //
 // snWatchListIdentity holds both values from the one lookup, so a caller can
 // pick the one its payload needs without a second round trip.
@@ -113,13 +115,66 @@ func resolveWatchListIdentities(
 	return out, nil
 }
 
-// watchListEmails resolves watch-list user UUIDs to email addresses, for the
-// payloads that declare the watch list that way. The returned slice is non-nil
-// and in the caller's order.
+// watchListEmails returns the email addresses the backing service's case
+// create, case update, and incident create payloads declare. Incoming emails
+// (Customer Portal) are forwarded in the caller's order with no lookup and
+// no length cap (Ballerina; existing SN cases often exceed 50 watchers).
+// Incoming platform UUIDs (CSM) are resolved to emails first — forwarding
+// ids verbatim is silently accepted upstream and drops every watcher — and
+// are capped at maxUserLimit because resolution is one /users/search page.
+// A mixed list, or a value that is neither an email nor a UUID, is a
+// validation error. The returned slice is non-nil and in the caller's order.
 func watchListEmails(
-	ctx context.Context, client *integrationservice.Client, token, field string, ids []string,
+	ctx context.Context, client *integrationservice.Client, token, field string, values []string,
 ) ([]string, error) {
-	identities, err := resolveWatchListIdentities(ctx, client, token, field, ids)
+	if len(values) == 0 {
+		return []string{}, nil
+	}
+
+	allEmail := true
+	allUUID := true
+	var firstInvalid string
+	for _, v := range values {
+		isEmail := emailRE.MatchString(v)
+		isUUID := uuidRE.MatchString(v)
+		if !isEmail {
+			allEmail = false
+		}
+		if !isUUID {
+			allUUID = false
+		}
+		if !isEmail && !isUUID && firstInvalid == "" {
+			firstInvalid = v
+		}
+	}
+
+	if allEmail {
+		// Emails are forwarded as-is (Ballerina / Customer Portal). The 50-item
+		// cap below exists only because UUID resolution is a single
+		// /users/search page; it must not reject an existing SN watch list that
+		// is already larger than that page size.
+		out := make([]string, len(values))
+		copy(out, values)
+		return out, nil
+	}
+	if !allUUID {
+		if firstInvalid != "" {
+			return nil, &apierror.ValidationError{
+				Msg: fmt.Sprintf("%s contains invalid email: %q", field, firstInvalid),
+			}
+		}
+		return nil, &apierror.ValidationError{
+			Msg: fmt.Sprintf("%s items must all be email addresses or all be user identifiers", field),
+		}
+	}
+
+	if len(values) > maxUserLimit {
+		return nil, &apierror.ValidationError{
+			Msg: fmt.Sprintf("%s cannot contain more than %d values", field, maxUserLimit),
+		}
+	}
+
+	identities, err := resolveWatchListIdentities(ctx, client, token, field, values)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +183,7 @@ func watchListEmails(
 	for i, identity := range identities {
 		if identity.Email == "" {
 			return nil, &apierror.ValidationError{
-				Msg: fmt.Sprintf("%s contains a user with no email address: %q", field, ids[i]),
+				Msg: fmt.Sprintf("%s contains a user with no email address: %q", field, values[i]),
 			}
 		}
 		emails = append(emails, identity.Email)

@@ -49,7 +49,6 @@ export interface CaseDto {
   csManager: (EntityReference & { email: string | null }) | null;
   closedOn: string | null;
   closedBy: (EntityReference & { count: number | null }) | null;
-  closeNotes: string | null;
   hasAutoClosed: boolean | null;
   id: string;
   internalId: string;

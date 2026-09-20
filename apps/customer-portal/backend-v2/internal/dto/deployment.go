@@ -33,7 +33,6 @@ type DeploymentSummary struct {
 	Name        string      `json:"name"`
 	Type        *IDLabelRef `json:"type,omitempty"`
 	Description *string     `json:"description,omitempty"`
-	CreatedBy   *Ref        `json:"createdBy,omitempty"`
 	Project     *IDLabelRef `json:"project,omitempty"`
 	CreatedOn   time.Time   `json:"createdOn"`
 	UpdatedOn   time.Time   `json:"updatedOn"`
@@ -68,7 +67,6 @@ func MapSearchDeployments(r entity.SearchDeploymentsResponse) SearchDeploymentsR
 			Name:        d.Name,
 			Type:        deploymentTypeRef(d.Type),
 			Description: d.Description,
-			CreatedBy:   mapRef(d.CreatedBy),
 			Project:     entityRefToIDLabel(&d.Project),
 			CreatedOn:   d.CreatedOn,
 			UpdatedOn:   d.UpdatedOn,

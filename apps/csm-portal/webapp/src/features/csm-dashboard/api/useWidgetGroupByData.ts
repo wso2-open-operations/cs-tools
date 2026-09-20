@@ -40,23 +40,63 @@ import { usesCaseFieldFilterDsl } from "@features/csm-admin/dashboards/utils/wid
 import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/useWidgetPieData";
 
 /**
+ * Resource types whose entity-service search contract accepts the generic
+ * `{field, op, values}` filter-array shape for a groupBy-able field, in
+ * addition to whatever `usesCaseFieldFilterDsl`/`CASE_FIELD_DSL_RESOURCE_TYPES`
+ * already covers. Deliberately a *separate*, narrower set kept local to
+ * `bucketQuery` rather than folded into `usesCaseFieldFilterDsl` itself:
+ * that shared set also drives which of the admin dashboard builder's filter
+ * operators get offered per resourceType, and incident/problem's own
+ * entity-service field allowlists (`incidentFilterFieldSet`/
+ * `problemFilterFieldSet` in cs-tools/entity-service) are much narrower than
+ * case's — folding them into the shared set would let the builder offer
+ * filter combinations neither backend actually accepts. `case`/
+ * `service_request`/`security_report_analysis`/`announcement`/`engagement`
+ * (the `usesCaseFieldFilterDsl` set) don't need to be repeated here.
+ */
+const GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES = new Set<BeWidgetResourceType>(["incident", "problem"]);
+
+/**
  * Builds a named bucket's own click-through `query` — the same shape
  * `DashboardWidgetTile`'s slice navigation merges under the widget's base
- * `query` via `mergeWidgetFilters` (see that function's own doc comment for
- * why the two resourceType families below are handled differently). A
- * `case`-DSL resourceType's search contract has no flat top-level key for
- * an arbitrary aggregated field, so it goes through the generic
- * `field`/`op`/`values` predicate array; every other resourceType's own
- * bespoke search contract keys straight off the field name.
+ * `query` via `mergeWidgetFilters`. The entity-service's search contract for
+ * a groupBy-able field genuinely differs by resourceType (confirmed live
+ * against real 400s, not just by reading the Go source), so this has three
+ * branches:
+ *
+ * 1. `usesCaseFieldFilterDsl(resourceType)` (`case`/`service_request`/
+ *    `security_report_analysis`/`announcement`/`engagement`) plus
+ *    `incident`/`problem` (see `GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES` above):
+ *    all of these validate a field like "state" through the same generic
+ *    `{field, op, values}` predicate array, and every one of them only
+ *    accepts `op: "in"` for "state" — never "eq" (`case_filters.go`'s,
+ *    `incident_filters.go`'s, and `problem_filters.go`'s own
+ *    `badXxxFilterCombo` checks all reject "state"/"eq"). A single-element
+ *    `values` array with `op: "in"` is the correct, always-safe way to
+ *    express "equals this one value" against any of these contracts.
+ * 2. `change_request`: has no generic filter-array entry for "state" at
+ *    all — `ChangeRequestFieldFilter`'s own allowed field set
+ *    (`createdOn`/`assignmentGroupId`/`approval`) excludes it. Change
+ *    request state filtering is instead a bespoke, plural, array-valued
+ *    top-level field: `states: [key]` (see
+ *    `SearchChangeRequestsFilters.States`, a sibling of `Filters`, not an
+ *    entry inside it).
+ * 3. Everything else (e.g. `call_request`'s own flat scalar fields, if any
+ *    groupBy widget ever uses them): falls back to a flat `{ [field]: key }`,
+ *    unchanged from before.
  */
 function bucketQuery(
   resourceType: BeWidgetResourceType,
   field: string,
   key: string,
 ): Record<string, unknown> {
-  return usesCaseFieldFilterDsl(resourceType)
-    ? { filters: [{ field, op: "eq", values: [key] }] }
-    : { [field]: key };
+  if (usesCaseFieldFilterDsl(resourceType) || GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES.has(resourceType)) {
+    return { filters: [{ field, op: "in", values: [key] }] };
+  }
+  if (resourceType === "change_request" && field === "state") {
+    return { states: [key] };
+  }
+  return { [field]: key };
 }
 
 /**

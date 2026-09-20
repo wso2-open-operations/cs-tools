@@ -53,8 +53,8 @@ const pageSize = 50
 // counted in Result.ProjectsExcluded. This applies uniformly to both the
 // broad sweep and the TEST_PROJECT_ID-scoped path: if projectID itself is
 // excluded, GetProject is never called at all. Per explicit design
-// direction (PR #1440 discussion, Sajith Ekanayake): this exists for
-// deliberate business-driven exclusions, not as a workaround for data
+// direction (Sajith Ekanayake): this exists for deliberate business-driven
+// exclusions, not as a workaround for data
 // bugs — a project excluded here produces zero log signal about whatever
 // might be wrong with it, which is the opposite of what you want for an
 // actual bug. nil is equivalent to an empty set (nothing excluded).

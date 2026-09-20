@@ -40,7 +40,7 @@ func (f *fakeCaseServiceForGithubIssue) GetCaseByID(_ context.Context, _ string)
 	if f.err != nil {
 		return domain.CaseView{}, f.err
 	}
-	return domain.CaseView{State: f.state}, nil
+	return domain.CaseView{State: &f.state}, nil
 }
 
 // contextWithUserIDToken builds a context carrying the given x-user-id-token,

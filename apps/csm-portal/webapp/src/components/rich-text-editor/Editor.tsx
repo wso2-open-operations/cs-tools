@@ -38,8 +38,11 @@ import {
   tokenizePlainTextPaste,
   unwrapNestedPreCodeElements,
   collapseEmptyParagraphElements,
+  stripWhitespaceStyleFromHtml,
+  htmlToPlainText,
 } from "@components/rich-text-editor/richTextEditor";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
+import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Toolbar, {
@@ -124,7 +127,7 @@ const OnChangeHTMLPlugin = ({
       onChange={(editorState) => {
         editorState.read(() => {
           const html = $generateHtmlFromNodes(editor);
-          onChange?.(html);
+          onChange?.(stripWhitespaceStyleFromHtml(html));
         });
       }}
     />
@@ -312,9 +315,20 @@ const ClipboardImagePlugin = ({
  *   path gets from `tokenizePlainTextPaste`, generalized to any source that
  *   puts `text/html` on the clipboard. See `collapseEmptyParagraphElements`
  *   in richTextEditor.tsx.
+ * - Any HTML paste (clipboard carries a non-empty `text/html`): instead of
+ *   inserting immediately, holds the clipboard payload and shows
+ *   `PasteFormatDialog`, which lets the user choose between "Keep Formatting"
+ *   (the normalized-HTML path above) and "Remove Formatting" (the plain-text
+ *   path below, applied to the pasted content). A plain-text-only paste
+ *   (clipboard has `text/plain` but no `text/html`) is unaffected and always
+ *   goes straight to the plain-text path with no prompt.
  */
-const PasteNormalizationPlugin = (): null => {
+const PasteNormalizationPlugin = (): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
+  const [pendingPaste, setPendingPaste] = useState<{
+    html: string;
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
     return editor.registerCommand(
@@ -328,21 +342,8 @@ const PasteNormalizationPlugin = (): null => {
         const text = clipboardData.getData("text/plain");
 
         if (html.trim()) {
-          const dom = new DOMParser().parseFromString(html, "text/html");
-          const unwrappedPreCode = unwrapNestedPreCodeElements(dom);
-          const collapsedEmptyParagraphs = collapseEmptyParagraphElements(dom);
-          if (!unwrappedPreCode && !collapsedEmptyParagraphs) return false;
-
           event.preventDefault();
-          editor.update(
-            () => {
-              const selection = $getSelection();
-              if (!$isRangeSelection(selection)) return;
-              const nodes = $generateNodesFromDOM(editor, dom);
-              selection.insertNodes(nodes);
-            },
-            { tag: PASTE_TAG },
-          );
+          setPendingPaste({ html, text });
           return true;
         }
 
@@ -377,7 +378,68 @@ const PasteNormalizationPlugin = (): null => {
     );
   }, [editor]);
 
-  return null;
+  /** "Keep Formatting" -- exactly the normalized-HTML insertion path above. */
+  const applyKeepFormatting = useCallback(() => {
+    if (!pendingPaste) return;
+    const dom = new DOMParser().parseFromString(pendingPaste.html, "text/html");
+    unwrapNestedPreCodeElements(dom);
+    collapseEmptyParagraphElements(dom);
+
+    editor.update(
+      () => {
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection)) return;
+        const nodes = $generateNodesFromDOM(editor, dom);
+        selection.insertNodes(nodes);
+      },
+      { tag: PASTE_TAG },
+    );
+    setPendingPaste(null);
+  }, [editor, pendingPaste]);
+
+  /**
+   * "Remove Formatting" -- discards all structure and treats the paste
+   * exactly like today's plain-text paste path, tokenizing the clipboard's
+   * own `text/plain` payload when present (what a plain-text paste of the
+   * same content would have used) and otherwise falling back to a plain-text
+   * rendering of the HTML.
+   */
+  const applyRemoveFormatting = useCallback(() => {
+    if (!pendingPaste) return;
+    const plainText = pendingPaste.text || htmlToPlainText(pendingPaste.html);
+    const tokens = tokenizePlainTextPaste(plainText);
+
+    editor.update(
+      () => {
+        for (const token of tokens) {
+          const currentSelection = $getSelection();
+          if (!$isRangeSelection(currentSelection)) continue;
+
+          if (token.type === "paragraph") {
+            currentSelection.insertParagraph();
+          } else if (token.type === "tab") {
+            currentSelection.insertNodes([$createTabNode()]);
+          } else {
+            currentSelection.insertText(token.value);
+          }
+        }
+      },
+      { tag: PASTE_TAG },
+    );
+    setPendingPaste(null);
+  }, [editor, pendingPaste]);
+
+  const cancelPendingPaste = useCallback(() => setPendingPaste(null), []);
+
+  if (!pendingPaste) return null;
+
+  return (
+    <PasteFormatDialog
+      onKeepFormatting={applyKeepFormatting}
+      onRemoveFormatting={applyRemoveFormatting}
+      onClose={cancelPendingPaste}
+    />
+  );
 };
 
 /** Static editor config (namespace, nodes, theme). */

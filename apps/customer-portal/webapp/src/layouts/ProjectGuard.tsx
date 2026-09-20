@@ -16,43 +16,44 @@
 
 import { type JSX, useEffect } from "react";
 import { Box, LinearProgress } from "@wso2/oxygen-ui";
-import { Outlet, useParams } from "react-router";
+import { Outlet } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import ApiErrorState from "@components/error/ApiErrorState";
 import ProjectSuspendedNoticePage from "@/components/access-control/ProjectSuspendedNoticePage";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
-import { ProjectClosureState } from "@/types/permission";
+import { isProjectSuspended } from "@utils/permission";
 
 /**
  * ProjectGuard wraps all routes under `projects/:projectId`.
  *
  * It fetches project details once at the layout boundary. If the API
  * returns an error (400, 401, 403, 404, 5xx, etc.) the guard renders
- * {@link ApiErrorState} instead of the child route. If the project has
- * closureState "Suspended" it renders the Project Suspension Notice.
+ * {@link ApiErrorState} instead of the child route. If the project is
+ * suspended or its contract has ended, it renders the Project Suspension Notice.
  *
  * @returns {JSX.Element} The child outlet or an error/suspension page.
  */
 function ProjectGuardContent(): JSX.Element {
-  const { projectId } = useParams<{ projectId: string }>();
+  const projectId = useNormalizedIdParam("projectId");
   const { setIsErrorPageDisplayed, setIsProjectSuspended } =
     useErrorPageContext();
 
   const { data, error, isLoading } = useGetProjectDetails(projectId ?? "");
 
   const hasError = !isLoading && Boolean(error);
-  const isProjectSuspended =
-    !isLoading && data?.closureState === ProjectClosureState.SUSPENDED;
+  const isSuspended =
+    !isLoading && isProjectSuspended(data?.closureState, data?.endDate);
 
-  const isErrorPageDisplayed = hasError || isProjectSuspended;
+  const isErrorPageDisplayed = hasError || isSuspended;
 
   useEffect(() => {
     setIsErrorPageDisplayed(isErrorPageDisplayed);
   }, [isErrorPageDisplayed, setIsErrorPageDisplayed]);
 
   useEffect(() => {
-    setIsProjectSuspended(isProjectSuspended);
-  }, [isProjectSuspended, setIsProjectSuspended]);
+    setIsProjectSuspended(isSuspended);
+  }, [isSuspended, setIsProjectSuspended]);
 
   if (isLoading) {
     return (
@@ -80,7 +81,7 @@ function ProjectGuardContent(): JSX.Element {
     );
   }
 
-  if (isProjectSuspended) {
+  if (isSuspended) {
     return <ProjectSuspendedNoticePage project={data!} />;
   }
 

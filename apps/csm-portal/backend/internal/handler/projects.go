@@ -29,6 +29,7 @@ import (
 // entityProjectClient abstracts the entity service project operations used by ProjectHandler.
 type entityProjectClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
+	GetProjectMetadata(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
 	GetProjectContact(ctx context.Context, projectID, contactID string) ([]byte, error)
@@ -64,6 +65,30 @@ func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProject failed", "userID", user.UserID, "projectID", id, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve project.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetProjectMetadata handles GET /projects/{id}/metadata.
+func (h *ProjectHandler) GetProjectMetadata(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.GetProjectMetadata(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProjectMetadata failed", "userID", user.UserID, "projectID", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to retrieve project metadata.")
 		return
 	}
 

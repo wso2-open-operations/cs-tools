@@ -42,7 +42,24 @@ public type Pagination record {|
     int offset = DEFAULT_OFFSET;
     # Limit for pagination
     @constraint:Int {
-        minValue: 1
+        minValue: MIN_LIMIT,
+        maxValue: MAX_LIMIT
+    }
+    int 'limit = DEFAULT_LIMIT;
+    json...;
+|};
+
+# Pagination information for product vulnerability searches (supports bulk fetches).
+public type ProductVulnerabilityPagination record {|
+    # Offset for pagination
+    @constraint:Int {
+        minValue: 0
+    }
+    int offset = DEFAULT_OFFSET;
+    # Limit for pagination
+    @constraint:Int {
+        minValue: MIN_LIMIT,
+        maxValue: PRODUCT_VULNERABILITY_MAX_LIMIT
     }
     int 'limit = DEFAULT_LIMIT;
     json...;
@@ -1589,7 +1606,7 @@ public type ProductVulnerabilitySearchPayload record {|
     # Sort configuration
     SortBy sortBy?; // TODO: Check the correct sort by fields for vulnerabilities
     # Pagination details
-    Pagination pagination?;
+    ProductVulnerabilityPagination pagination?;
 |};
 
 # Product vulnerability.
@@ -1637,7 +1654,7 @@ public type ProductVulnerabilitySearchResponse record {|
     ProductVulnerability[] productVulnerabilities;
     # Total records count
     int totalRecords;
-    *Pagination;
+    *ProductVulnerabilityPagination;
     json...;
 |};
 

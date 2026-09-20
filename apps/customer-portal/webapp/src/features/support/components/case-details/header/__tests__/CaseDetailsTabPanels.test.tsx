@@ -51,7 +51,6 @@ const mockCaseDetails = {
   severity: { id: "60", label: "S0" },
   closedOn: null,
   closedBy: null,
-  closeNotes: null,
   hasAutoClosed: null,
 };
 

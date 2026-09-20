@@ -33,8 +33,10 @@ import MultiSelectField from "@components/MultiSelectField";
 import AsyncCreatedByMultiSelect from "@features/csm-cases/components/AsyncCreatedByMultiSelect";
 import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
+import AsyncAccountMultiSelect from "@features/csm-cases/components/AsyncAccountMultiSelect";
 import ProductNameMultiSelect from "@features/csm-cases/components/ProductNameMultiSelect";
 import AsyncTagMultiSelect from "@features/csm-cases/components/AsyncTagMultiSelect";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import {
   ADVANCED_FILTER_FIELDS,
   RELATIVE_DATE_PRESETS,
@@ -69,6 +71,11 @@ interface AdvancedFiltersBuilderProps {
    * (`AsyncProjectMultiSelect`) — same seed the Simple grid's own "Project"
    * control uses. */
   projectNameSeed?: Map<string, string>;
+  /** Known id → name pairs for the `accountId` row's value input
+   * (`AsyncAccountMultiSelect`) — same shape as `projectNameSeed`, but
+   * `accountId` has no Simple-grid control of its own to seed it from, so
+   * this is currently always empty in practice; kept for parity/future use. */
+  accountNameSeed?: Map<string, string>;
 }
 
 /** "YYYY-MM-DD" to a local-midnight Date (avoids the UTC-parse day-shift
@@ -232,6 +239,7 @@ export default function AdvancedFiltersBuilder({
   sreTeamOptions,
   assigneeNameSeed,
   projectNameSeed,
+  accountNameSeed,
 }: AdvancedFiltersBuilderProps): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -332,6 +340,8 @@ export default function AdvancedFiltersBuilder({
                 <AsyncCreatedByMultiSelect
                   values={row.values}
                   onChange={(next) => onUpdateRow(row, { ...asRow(row), values: next })}
+                  roleIds={INTERNAL_USER_ROLES}
+                  active
                 />
               )}
               {opMeta?.valueKind === "asyncAssigneeMultiSelect" && (
@@ -341,6 +351,8 @@ export default function AdvancedFiltersBuilder({
                   values={row.values}
                   onChange={(next) => onUpdateRow(row, { ...asRow(row), values: next })}
                   nameSeed={assigneeNameSeed}
+                  roleIds={INTERNAL_USER_ROLES}
+                  active
                 />
               )}
               {opMeta?.valueKind === "asyncProjectMultiSelect" && (
@@ -350,6 +362,15 @@ export default function AdvancedFiltersBuilder({
                   values={row.values}
                   onChange={(next) => onUpdateRow(row, { ...asRow(row), values: next })}
                   nameSeed={projectNameSeed}
+                />
+              )}
+              {opMeta?.valueKind === "asyncAccountMultiSelect" && (
+                <AsyncAccountMultiSelect
+                  id={`advanced-filter-value-${index}`}
+                  label="Value(s)"
+                  values={row.values}
+                  onChange={(next) => onUpdateRow(row, { ...asRow(row), values: next })}
+                  nameSeed={accountNameSeed}
                 />
               )}
               {opMeta?.valueKind === "asyncProductMultiSelect" && (

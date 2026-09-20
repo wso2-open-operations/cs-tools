@@ -207,3 +207,24 @@ func MapProjectDetails(p entity.ProjectDetailsView) ProjectDetails {
 		OnboardingStatus:         p.OnboardingStatus,
 	}
 }
+
+// UpdatedProject is the portal's response to PATCH /projects/{id}: the project
+// as it stands after its AI chat assistant settings were changed.
+type UpdatedProject struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	HasAgent        *bool  `json:"hasAgent,omitempty"`
+	HasKbReferences *bool  `json:"hasKbReferences,omitempty"`
+}
+
+// MapUpdatedProject converts entity-service's project to the portal's shape,
+// so the frontend contract is this package's to change rather than being
+// whatever entity-service happens to return.
+func MapUpdatedProject(p entity.UpdatedProjectRef) UpdatedProject {
+	return UpdatedProject{
+		ID:              p.ID,
+		Name:            p.Name,
+		HasAgent:        p.HasAgent,
+		HasKbReferences: p.HasKbReferences,
+	}
+}

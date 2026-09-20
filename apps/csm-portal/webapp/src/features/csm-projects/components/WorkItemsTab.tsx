@@ -53,11 +53,12 @@ interface WorkItemsTabProps {
  * closed `<Select multiple>` dropdown already, not an inline checkbox list)
  * rather than introducing a new control.
  *
- * `hideOnboardingStatusFilter`/`hideCreTeamFilter` are also passed: both are
- * per-project attributes (a project's onboarding status, the CS team its
- * account is scoped to), so every work item on this already project-scoped
- * tab shares the same value for each — filtering by them here is a no-op
- * that only adds clutter. `showSeverityFilter` is passed `true` (overriding
+ * `hideOnboardingStatusFilter`/`hideCreTeamFilter`/`hideSreTeamFilter` are
+ * also passed: all three are per-project attributes (a project's onboarding
+ * status, the CS/SRE teams its account is scoped to), so every work item on
+ * this already project-scoped tab shares the same value for each —
+ * filtering by them here is a no-op that only adds clutter.
+ * `showSeverityFilter` is passed `true` (overriding
  * `CsmIssuesView`'s own "only when type is locked to Case" default, which
  * would never fire here since this tab's type filter is unlocked): Severity
  * is still a genuinely useful control on this mixed list, since narrowing by
@@ -94,6 +95,7 @@ export default function WorkItemsTab({ projectId }: WorkItemsTabProps): JSX.Elem
           hideProjectFilter
           hideOnboardingStatusFilter
           hideCreTeamFilter
+          hideSreTeamFilter
           showSeverityFilter
           typeFilterLabel="Work item type"
           hideBackButton

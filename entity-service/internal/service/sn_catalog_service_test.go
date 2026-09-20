@@ -143,3 +143,86 @@ func deref(s *string) string {
 	}
 	return *s
 }
+
+// TestSNCatalogService_GetCatalogItemVariables_MapsMetadata verifies the nine
+// additive metadata keys (name, mandatory, active, readOnly, hidden, defaultValue,
+// maxLength, referenceTable, validation) reach the response, and that a variable
+// with no validation rule or reference table carries nil rather than a zero value.
+func TestSNCatalogService_GetCatalogItemVariables_MapsMetadata(t *testing.T) {
+	catalogUUID := sysidToUUID(sysid32('1'))
+	catalogItemUUID := sysidToUUID(sysid32('2'))
+	variableSysid := sysid32('3')
+
+	body := `{"variables": [
+		{
+			"id": "` + variableSysid + `", "questionText": "Email Address", "order": 100, "type": "Single Line Text",
+			"name": "email",
+			"mandatory": true,
+			"active": true,
+			"readOnly": false,
+			"hidden": false,
+			"defaultValue": "jane.doe@example.com",
+			"maxLength": 80,
+			"referenceTable": null,
+			"validation": {"name": "Email", "regex": "^.+@.+$", "message": "Not a valid email"}
+		},
+		{
+			"id": "` + sysid32('4') + `", "questionText": "Impact", "order": 200, "type": "Select Box",
+			"name": "impact",
+			"mandatory": false,
+			"active": false,
+			"readOnly": true,
+			"hidden": true,
+			"defaultValue": null,
+			"maxLength": null,
+			"referenceTable": "cmdb_ci",
+			"validation": null
+		}
+	]}`
+
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
+
+	svc := NewServiceNowCatalogService(client)
+
+	resp, err := svc.GetCatalogItemVariables(contextWithUserIDToken("token"), catalogUUID, catalogItemUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Variables) != 2 {
+		t.Fatalf("expected 2 variables, got %d", len(resp.Variables))
+	}
+
+	email := resp.Variables[0]
+	if deref(email.Name) != "email" || !email.Mandatory || !email.Active || email.ReadOnly || email.Hidden {
+		t.Fatalf("unexpected email variable flags: %+v", email)
+	}
+	if deref(email.DefaultValue) != "jane.doe@example.com" {
+		t.Fatalf("DefaultValue = %v, want jane.doe@example.com", deref(email.DefaultValue))
+	}
+	if email.MaxLength == nil || *email.MaxLength != 80 {
+		t.Fatalf("MaxLength = %v, want 80", email.MaxLength)
+	}
+	if email.ReferenceTable != nil {
+		t.Fatalf("ReferenceTable = %v, want nil", *email.ReferenceTable)
+	}
+	if email.Validation == nil || email.Validation.Name != "Email" || email.Validation.Regex != "^.+@.+$" || email.Validation.Message != "Not a valid email" {
+		t.Fatalf("unexpected Validation: %+v", email.Validation)
+	}
+
+	impact := resp.Variables[1]
+	if deref(impact.Name) != "impact" || impact.Mandatory || impact.Active || !impact.ReadOnly || !impact.Hidden {
+		t.Fatalf("unexpected impact variable flags: %+v", impact)
+	}
+	if impact.DefaultValue != nil || impact.MaxLength != nil || impact.Validation != nil {
+		t.Fatalf("expected nil DefaultValue/MaxLength/Validation on impact, got %+v", impact)
+	}
+	if deref(impact.ReferenceTable) != "cmdb_ci" {
+		t.Fatalf("ReferenceTable = %v, want cmdb_ci", deref(impact.ReferenceTable))
+	}
+}

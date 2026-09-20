@@ -37,6 +37,7 @@ type entityIncidentClient interface {
 	CreateComment(ctx context.Context, body []byte) ([]byte, error)
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	SearchIncidentActivities(ctx context.Context, id string, body []byte) ([]byte, error)
+	HandOffIncidentToSpecialist(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // searchIncidentsRequest mirrors the enum/format-constrained fields of the documented
@@ -87,6 +88,9 @@ var (
 	validIncidentStates = map[string]bool{
 		"NEW": true, "IN_PROGRESS": true, "ON_HOLD": true, "RESOLVED": true, "CLOSED": true, "CANCELLED": true,
 	}
+
+	validHandoffReasonCodes     = map[string]bool{"no-runbook": true, "runbook-not-working": true}
+	validHandoffEscalationTeams = map[string]bool{"choreo-runtime-team": true, "choreo-apim-team": true}
 )
 
 // createIncidentRequest mirrors the enum/format-constrained fields of the documented
@@ -310,6 +314,33 @@ func validateSearchIncidentsBody(body []byte) bool {
 		return false
 	}
 	if req.SortBy.Order != "" && !validIncidentSortOrders[req.SortBy.Order] {
+		return false
+	}
+	return true
+}
+
+// handOffIncidentRequest mirrors the enum-constrained fields of the documented
+// HandOffIncidentToSpecialistRequest schema. It is decoded only to validate those
+// fields at the boundary; the original raw body is still forwarded to the entity
+// service unchanged.
+type handOffIncidentRequest struct {
+	ReasonCode     string  `json:"reasonCode"`
+	EscalationTeam *string `json:"escalationTeam"`
+}
+
+// validateHandOffIncidentBody checks the required reasonCode enum and, when present,
+// the escalationTeam enum, so obviously invalid requests are rejected before reaching
+// the entity service. createGithubIssue is a plain boolean with no enum to check; an
+// invalid type there is caught by json.Unmarshal.
+func validateHandOffIncidentBody(body []byte) bool {
+	var req handOffIncidentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	if !validHandoffReasonCodes[req.ReasonCode] {
+		return false
+	}
+	if req.EscalationTeam != nil && *req.EscalationTeam != "" && !validHandoffEscalationTeams[*req.EscalationTeam] {
 		return false
 	}
 	return true
@@ -660,6 +691,77 @@ func (h *IncidentHandler) SearchIncidentComments(w http.ResponseWriter, r *http.
 		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "incidentID", id, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search incident comments.")
 		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handOffIncidentResponseEnvelope is the subset of HandOffIncidentToSpecialistResponse
+// this handler decodes for observability only. It is never re-marshalled or used to
+// build the caller's response -- the raw upstream body is forwarded verbatim so
+// githubIssueError (and every other field) reaches the caller unchanged.
+type handOffIncidentResponseEnvelope struct {
+	Handoff struct {
+		GithubIssueError *string `json:"githubIssueError"`
+	} `json:"handoff"`
+}
+
+// HandOffIncidentToSpecialist handles POST /incidents/{id}/specialist-handoffs.
+// The handoff itself can succeed (ServiceNow state committed) while the internal
+// GitHub issue creation fails -- the entity service reports that as a non-nil
+// handoff.githubIssueError on an otherwise-200 response rather than an error status.
+// This is surfaced explicitly in the server log rather than left to a caller who
+// might not inspect the nested field, so a silent partial failure is still visible
+// operator-side even if a webapp caller ever missed it. The response body itself is
+// forwarded unchanged, so the caller always has the field to check too.
+func (h *IncidentHandler) HandOffIncidentToSpecialist(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if !validateHandOffIncidentBody(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.HandOffIncidentToSpecialist(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity HandOffIncidentToSpecialist failed", "userID", user.UserID, "incidentID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to hand off incident to specialist group.")
+		return
+	}
+
+	var envelope handOffIncidentResponseEnvelope
+	if err := json.Unmarshal(result, &envelope); err != nil {
+		slog.WarnContext(r.Context(), "entity HandOffIncidentToSpecialist: decode response for githubIssueError check failed", "userID", user.UserID, "incidentID", id, "err", err)
+	} else if envelope.Handoff.GithubIssueError != nil {
+		slog.WarnContext(r.Context(), "incident handed off to specialist group but internal issue creation failed",
+			"userID", user.UserID, "incidentID", id, "githubIssueError", *envelope.Handoff.GithubIssueError)
 	}
 
 	writeJSON(w, http.StatusOK, result)

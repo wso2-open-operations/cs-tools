@@ -211,17 +211,14 @@ type snCase struct {
 	// this must tolerate absence.
 	Variables []snCaseVariableAnswer `json:"variables"`
 	// ChangeRequests carries the change requests raised from this case, keyed as
-	// `changeRequests` upstream. Only populated for service-request cases.
-	//
-	// Deprecated: the upstream `changeRequests` field is filtered to a subset of change
-	// request states by the backing service. Case mapping below reads ChangeRequestsAll
-	// instead, which is unfiltered. This field is kept only because it is still present
-	// on the upstream response; nothing in this service reads it.
+	// ChangeRequests carries the change requests raised from this case, keyed as
+	// `changeRequests` upstream. Populated for service-request cases only; filtered
+	// to customer-visible states by the backing service (excluding New, Assess, and
+	// Authorize). Case mapping reads this field so draft/internal change requests are
+	// filtered out for customer-facing consumers.
 	ChangeRequests []snLinkedChangeRequestRef `json:"changeRequests"`
 	// ChangeRequestsAll carries the same change requests as ChangeRequests but unfiltered by
-	// state, keyed as `changeRequestsAll` upstream. Same item shape as `changeRequests`. Case
-	// mapping reads this field so linked change requests in New/Assess/Authorize states are
-	// no longer silently dropped before they reach the outward `linkedChangeRequests` field.
+	// state, keyed as `changeRequestsAll` upstream. Same item shape as `changeRequests`.
 	ChangeRequestsAll []snLinkedChangeRequestRef `json:"changeRequestsAll"`
 	ResolutionCode    *struct {
 		ID    json.Number `json:"id"`
@@ -270,7 +267,9 @@ type snCase struct {
 	// not declared here, so encoding/json discarded them. All nullable: an
 	// absent key stays nil rather than becoming a zero value.
 	SLAResponseTime       *string          `json:"slaResponseTime"`
+	ClosedOn              *string          `json:"closedOn"`
 	ClosedBy              *snCaseEntityRef `json:"closedBy"`
+	CloseNotes            *string          `json:"closeNotes"`
 	HasAutoClosed         *bool            `json:"hasAutoClosed"`
 	EngagementStartDate   *string          `json:"engagementStartDate"`
 	EngagementEndDate     *string          `json:"engagementEndDate"`
@@ -511,6 +510,7 @@ var snSortFieldMap = map[domain.CaseSortField]string{
 	domain.CaseSortFieldUpdatedOn: "updatedOn",
 	domain.CaseSortFieldSeverity:  "severity",
 	domain.CaseSortFieldState:     "state",
+	domain.CaseSortFieldAssignee:  "assignee",
 }
 
 // caseGroupByFieldValues enumerates the case-search fields SearchCases can
@@ -539,9 +539,12 @@ var caseGroupByFieldValues = map[string][]string{
 }
 
 type snCaseFilters struct {
-	CaseTypes          []string `json:"caseTypes"`
-	SearchQuery        string   `json:"searchQuery,omitempty"`
-	ProjectIDs         []string `json:"projectIds,omitempty"`
+	CaseTypes   []string `json:"caseTypes"`
+	SearchQuery string   `json:"searchQuery,omitempty"`
+	ProjectIDs  []string `json:"projectIds,omitempty"`
+	// ExcludeProjectIDs is the inverse of ProjectIDs: cases whose project is
+	// none of these. See domain.ParsedCaseFilters.ExcludeProjectIDs.
+	ExcludeProjectIDs  []string `json:"excludeProjectIds,omitempty"`
 	DeploymentIDs      []string `json:"deploymentIds,omitempty"`
 	DeployedProductIDs []string `json:"deployedProductIds,omitempty"`
 	StateKeys          []int    `json:"stateKeys,omitempty"`
@@ -612,7 +615,10 @@ type snCaseFilters struct {
 	CreTeamIDs []string `json:"integrationCsTeamIds,omitempty"`
 	SreTeamIDs []string `json:"sreTeamIds,omitempty"`
 	// AccountIDs: see domain.ParsedCaseFilters.AccountIDs doc comment.
-	AccountIDs           []string `json:"accountIds,omitempty"`
+	AccountIDs []string `json:"accountIds,omitempty"`
+	// ExcludeAccountIDs is the inverse of AccountIDs: cases whose parent
+	// account is none of these. See domain.ParsedCaseFilters.ExcludeAccountIDs.
+	ExcludeAccountIDs    []string `json:"excludeAccountIds,omitempty"`
 	Unassigned           bool     `json:"unassigned,omitempty"`
 	ResolutionNotesEmpty bool     `json:"resolutionNotesEmpty,omitempty"`
 	// TaskSLAFilter: SN-side join on Task SLA table, filtering by businessElapsedPercent
@@ -997,8 +1003,8 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 
 	if len(req.WatchList) > 0 {
 		// The backing service's case-create payload declares the watch list as
-		// email addresses, not user ids, so the incoming platform UUIDs are
-		// resolved to emails first.
+		// email addresses. Incoming emails are forwarded as-is; platform UUIDs
+		// are resolved to emails first.
 		emails, err := watchListEmails(ctx, s.client, token, "watchList", req.WatchList)
 		if err != nil {
 			return domain.CreateCaseResponse{}, err
@@ -1121,7 +1127,7 @@ func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.Creat
 		WSO2CaseID:   cv.InternalID,
 		CaseTitle:    cv.Subject,
 		CaseType:     strings.ToUpper(req.Type),
-		Priority:     strings.ToUpper(string(cv.Severity)),
+		Priority:     strings.ToUpper(string(derefSeverity(cv.Severity))),
 		Product:      product,
 		Team:         caseTeamName(cv),
 		CreatedAt:    cv.CreatedOn.Format(time.RFC3339),
@@ -1173,9 +1179,9 @@ func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.Creat
 // existing, accepted limitation shared by every case.*/incident.* event
 // this service publishes, not something specific to SLA registration.
 func (s *snCaseService) publishSLAClockRegister(ctx context.Context, cv domain.CaseView, req domain.CreateCaseRequest, caseID string) {
-	durations, ok := slaDurations[cv.Severity]
+	durations, ok := slaDurations[derefSeverity(cv.Severity)]
 	if !ok || len(durations) == 0 {
-		slog.WarnContext(ctx, "sn create case: sla.clock.register not published, no SLA duration policy for severity", "caseId", caseID, "severity", cv.Severity)
+		slog.WarnContext(ctx, "sn create case: sla.clock.register not published, no SLA duration policy for severity", "caseId", caseID, "severity", derefSeverity(cv.Severity))
 		return
 	}
 	durationStrings := make(map[string]string, len(durations))
@@ -1187,15 +1193,15 @@ func (s *snCaseService) publishSLAClockRegister(ctx context.Context, cv domain.C
 		CaseID:              caseID,
 		Durations:           durationStrings,
 		CaseCreatedAt:       cv.CreatedOn.Format(time.RFC3339),
-		AvoidWeekendDueDate: slaAvoidWeekendClockTypes[cv.Severity],
+		AvoidWeekendDueDate: slaAvoidWeekendClockTypes[derefSeverity(cv.Severity)],
 		CaseNumber:          cv.Number,
 		WSO2CaseID:          cv.InternalID,
 		CaseTitle:           cv.Subject,
 		CaseType:            strings.ToUpper(req.Type),
 		Product:             caseProductName(cv),
 		Team:                caseTeamName(cv),
-		Priority:            strings.ToUpper(string(cv.Severity)),
-		State:               strings.ToUpper(string(cv.State)),
+		Priority:            strings.ToUpper(string(derefSeverity(cv.Severity))),
+		State:               strings.ToUpper(string(derefState(cv.State))),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "sn create case: encode sla.clock.register payload failed", "caseId", caseID, "error", err)
@@ -1448,7 +1454,7 @@ func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, r
 		slog.ErrorContext(ctx, "sn create comment: customer reply state transition not evaluated, get case failed", "caseId", req.CaseID)
 		return
 	}
-	if cv.State != domain.CaseStateAwaitingInfo && cv.State != domain.CaseStateSolutionProposed {
+	if derefState(cv.State) != domain.CaseStateAwaitingInfo && derefState(cv.State) != domain.CaseStateSolutionProposed {
 		return
 	}
 
@@ -1780,7 +1786,7 @@ func (s *snCaseService) publishCaseAcknowledged(ctx context.Context, caseID, ack
 		CaseID:           caseID,
 		CaseNumber:       cv.Number,
 		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(cv.Severity)),
+		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
 		Product:          product,
 		Team:             caseTeamName(cv),
 		AcknowledgerName: acknowledgerName,
@@ -1825,6 +1831,25 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("sn get case %q: %w", c.ID, err)
 	}
+	// snCaseStateLabelToEnum(nil) falls back to CaseStateOpen (a fallback
+	// for the required-field contract this used to be) rather than
+	// erroring, so that alone can't distinguish "genuinely open" from "no
+	// state reported at all" -- check c.State itself instead. Severity/
+	// IssueType have no equivalent error path (an unrecognized label
+	// silently maps to ""), so a mapped-empty result is treated the same
+	// as absent input: nil, not a pointer to "".
+	var statePtr *domain.CaseState
+	if c.State != nil {
+		statePtr = &state
+	}
+	var severityPtr *domain.CaseSeverity
+	if sev := snSeverityToSeverity(c.Severity); sev != "" {
+		severityPtr = &sev
+	}
+	var issueTypePtr *domain.CaseIssueType
+	if it := snIssueTypeToEnum(c.IssueType); it != "" {
+		issueTypePtr = &it
+	}
 
 	cv := domain.CaseView{
 		ID:              sysidToUUID(c.ID),
@@ -1835,9 +1860,9 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		EscalationLevel: snEscalationLevelToDomain(c.EscalationLevel),
 		IsEscalated:     c.IsEscalated,
 		Description:     c.Description,
-		Severity:        snSeverityToSeverity(c.Severity),
-		IssueType:       snIssueTypeToEnum(c.IssueType),
-		State:           state,
+		Severity:        severityPtr,
+		IssueType:       issueTypePtr,
+		State:           statePtr,
 		WorkState:       snWorkStateLabelToEnum(c.WorkState),
 		Type:            snCaseTypeToDomain(c.CaseType),
 		EngagementType:  snLabelStr(c.EngagementType),
@@ -1846,7 +1871,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		// The case read carries no id for the creator, only the email and full
 		// name, so the canonical reference is emitted with a null id.
 		CreatedBy:      domain.NewUserReference("", c.CreatedBy, c.CreatedByFullName),
-		ProjectDetails: domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+		ProjectDetails: &domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
 	}
 
 	if depID := sysidToUUID(c.Deployment.ID); depID != "" {
@@ -1934,9 +1959,9 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		}
 		cv.LinkedServiceRequests = lsr
 	}
-	if len(c.ChangeRequestsAll) > 0 {
-		lcr := make([]domain.LinkedChangeRequestRef, 0, len(c.ChangeRequestsAll))
-		for _, r := range c.ChangeRequestsAll {
+	if len(c.ChangeRequests) > 0 {
+		lcr := make([]domain.LinkedChangeRequestRef, 0, len(c.ChangeRequests))
+		for _, r := range c.ChangeRequests {
 			// An absent upstream subject becomes null, not "" — see the note on
 			// LinkedChangeRequestRef.Name.
 			var name *string
@@ -1973,6 +1998,13 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 			return domain.CaseView{}, fmt.Errorf("sn get case: parse resolvedOn %q: %w", *c.ResolvedOn, err)
 		}
 		cv.ResolvedOn = &resolvedOn
+	}
+	if c.ClosedOn != nil && *c.ClosedOn != "" {
+		closedOn, err := parseSNDateTime(ctx, "sn get case", "closedOn", *c.ClosedOn)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse closedOn %q: %w", *c.ClosedOn, err)
+		}
+		cv.ClosedOn = &closedOn
 	}
 	if len(c.WatchList) > 0 {
 		wl := make([]domain.WatchListUser, 0, len(c.WatchList))
@@ -2028,6 +2060,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if c.ClosedBy != nil {
 		cv.ClosedBy = &domain.EntityRef{ID: sysidToUUID(c.ClosedBy.ID), Name: c.ClosedBy.Name}
 	}
+	cv.CloseNotes = c.CloseNotes
 	if c.EngagementPaymentType != nil && c.EngagementPaymentType.Label != "" {
 		cv.EngagementPaymentType = &c.EngagementPaymentType.Label
 	}
@@ -2752,7 +2785,8 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 	if req.WatchList != nil {
 		// As on create, the backing service's case-update payload declares the
-		// watch list as email addresses, and it replaces the whole list, so an
+		// watch list as email addresses (incoming emails forwarded as-is;
+		// platform UUIDs resolved first), and it replaces the whole list, so an
 		// explicitly empty list must still be sent to clear it rather than be
 		// skipped.
 		emails, err := watchListEmails(ctx, s.client, token, "watchList", *req.WatchList)
@@ -2879,7 +2913,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		switch {
 		case err != nil:
 			slog.ErrorContext(ctx, "sn update case: enrich case for case.status_changed publish failed", "caseId", req.ID)
-		case cv.State == *req.State:
+		case derefState(cv.State) == *req.State:
 			slog.InfoContext(ctx, "sn update case: case.status_changed not published, state is unchanged", "caseId", req.ID)
 		default:
 			caseBeforeUpdate = cv
@@ -2902,7 +2936,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		switch {
 		case err != nil:
 			slog.ErrorContext(ctx, "sn update case: enrich case for case.severity_changed publish failed", "caseId", req.ID)
-		case cv.Severity == *req.Severity:
+		case derefSeverity(cv.Severity) == *req.Severity:
 			slog.InfoContext(ctx, "sn update case: case.severity_changed not published, severity is unchanged", "caseId", req.ID)
 		default:
 			caseBeforeSeverity = cv
@@ -2961,11 +2995,12 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if snResp.Case.State != nil {
 		state, err := snCaseStateLabelToEnum(snResp.Case.State)
 		if err == nil {
-			resp.Case.State = state
+			resp.Case.State = &state
 		}
 	}
 	if snResp.Case.Severity != nil {
-		resp.Case.Severity = snSeverityToSeverity(snResp.Case.Severity)
+		severity := snSeverityToSeverity(snResp.Case.Severity)
+		resp.Case.Severity = &severity
 	}
 	if snResp.Case.Type != nil {
 		if t := snCaseTypeToDomain(snResp.Case.Type); t != nil {
@@ -3055,7 +3090,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// the case's own current state just redundantly re-applies the same
 	// effect harmlessly.
 	if req.State != nil && snResp.Case.State != nil {
-		s.applyCaseStateSLAEffects(ctx, req.ID, resp.Case.State)
+		s.applyCaseStateSLAEffects(ctx, req.ID, derefState(resp.Case.State))
 	}
 	if publishCaseAssign {
 		assigneeName := *req.AssigneeEmail
@@ -3079,8 +3114,8 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// pre-update severity (e.g. a stale echo), publishing anyway would
 	// send a false case.severity_changed event with identical old/new
 	// values.
-	if publishSeverityChange && resp.Case.Severity != "" && resp.Case.Severity != caseBeforeSeverity.Severity {
-		s.publishSeverityChanged(ctx, req.ID, string(caseBeforeSeverity.Severity), string(resp.Case.Severity), caseBeforeSeverity)
+	if publishSeverityChange && resp.Case.Severity != nil && derefSeverity(resp.Case.Severity) != derefSeverity(caseBeforeSeverity.Severity) {
+		s.publishSeverityChanged(ctx, req.ID, string(derefSeverity(caseBeforeSeverity.Severity)), string(derefSeverity(resp.Case.Severity)), caseBeforeSeverity)
 	}
 
 	return resp, nil
@@ -3869,6 +3904,7 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		CaseTypes:                        snCaseTypes,
 		SearchQuery:                      searchQuery,
 		ProjectIDs:                       uuidsToSysids(parsed.ProjectIDs),
+		ExcludeProjectIDs:                uuidsToSysids(parsed.ExcludeProjectIDs),
 		DeploymentIDs:                    uuidsToSysids(parsed.DeploymentIDs),
 		StateKeys:                        domainStatesToSNIDs(parsed.States),
 		ExcludeStates:                    domainStatesToSNIDs(parsed.ExcludeStates),
@@ -3899,6 +3935,7 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		CreTeamIDs:                       uuidsToSysids(parsed.CreTeamIDs),
 		SreTeamIDs:                       uuidsToSysids(parsed.SreTeamIDs),
 		AccountIDs:                       uuidsToSysids(parsed.AccountIDs),
+		ExcludeAccountIDs:                uuidsToSysids(parsed.ExcludeAccountIDs),
 		Unassigned:                       parsed.Unassigned,
 		ResolutionNotesEmpty:             parsed.ResolutionNotesEmpty,
 		TaskSLAFilter:                    buildSNTaskSLAFilter(parsed.TaskSLAFilter),
@@ -3972,6 +4009,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, err
 	}
 	if err := validateUUIDs("accountId", req.Parsed.AccountIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := validateUUIDs("accountId", req.Parsed.ExcludeAccountIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
 
@@ -4121,9 +4161,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		workStateLabel := snWorkStateLabelStr(c.WorkState)
 		engagementTypeLabel := snLabelStr(c.EngagementType)
 
-		stateLabel := ""
+		var stateLabel *string
 		if c.State != nil {
-			stateLabel = c.State.Label
+			stateLabel = &c.State.Label
 		}
 		caseTypeDomain := ""
 		if t := snCaseTypeToDomain(c.CaseType); t != nil {
@@ -4152,7 +4192,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			EngagementType: engagementTypeLabel,
 			WorkState:      workStateLabel,
 			Type:           caseTypeDomain,
-			Project:        domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+			Project:        &domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
 			ProjectKey:     c.Project.Key,
 			// BestCaseFixEta/MostLikelyFixEta/WorstCaseFixEta are already date-only
 			// "YYYY-MM-DD" strings on both sides, so no parsing/reformatting is
@@ -4295,6 +4335,9 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if err := validateUUIDs("accountId", parsed.AccountIDs); err != nil {
 		return domain.AggregateResponse{}, err
 	}
+	if err := validateUUIDs("accountId", parsed.ExcludeAccountIDs); err != nil {
+		return domain.AggregateResponse{}, err
+	}
 	for _, t := range parsed.Types {
 		if _, ok := snCaseTypeMap[t]; !ok {
 			return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + t}
@@ -4353,13 +4396,29 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return domain.AggregateResponse{}, fmt.Errorf("sn cases: parse aggregate response: %w", err)
 	}
-	// "account" is the only ID-valued field in validCaseAggregateField; SN
+	// "account" is an ID-valued field in validCaseAggregateField; SN
 	// returns its bucket keys as raw sys_ids, so convert them to this
-	// platform's UUIDs before returning. Every other allowed field (state,
-	// severity, type) is a plain enum and is left as-is.
+	// platform's UUIDs before returning.
 	if req.GroupBy == "account" {
 		for i := range resp.Groups {
 			resp.Groups[i].Key = sysidToUUID(resp.Groups[i].Key)
+		}
+	}
+	// "state" is a plain enum, but SN's own groupBy implementation returns
+	// its raw internal state value as the bucket key (e.g. "1003" for
+	// "Waiting On WSO2"), not this platform's domain enum string. SN's
+	// response already carries the correct human-readable label for each
+	// bucket, so remap the key through the existing label lookup
+	// (snCaseStateMap), the same map used elsewhere in this file to build
+	// Case.State from the SN state label.
+	if req.GroupBy == "state" {
+		for i := range resp.Groups {
+			if v, ok := snCaseStateMap[strings.ToLower(resp.Groups[i].Label)]; ok {
+				resp.Groups[i].Key = string(v)
+			}
+			// else: leave the key as-is, mirroring the change-request,
+			// incident, and problem equivalents' own defensive fallback
+			// for an unrecognized label.
 		}
 	}
 	return resp, nil

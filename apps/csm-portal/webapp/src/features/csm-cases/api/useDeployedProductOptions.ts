@@ -29,6 +29,13 @@ export interface DeployedProductOption {
   id: string;
   /** Human label: "{product name} {version}". */
   label: string;
+  /**
+   * Opaque category code carried straight through from `BeDeployedProduct.category`
+   * (e.g. "ms", "pc"), or `null`/`undefined` when the record has none. Used by
+   * callers (e.g. the service-request create page) that need to narrow the
+   * option list to a project's `srProductCategories`.
+   */
+  category?: string | null;
 }
 
 /**
@@ -37,20 +44,38 @@ export interface DeployedProductOption {
  * `version` objects, so the readable label is built straight from those — no
  * secondary product/version lookups needed. Disabled until a deployment id is
  * provided.
+ *
+ * `productCategories`, when given a non-empty list, is forwarded to the
+ * search so the entity service itself narrows results to those categories
+ * (e.g. a cloud/PDP project's service-request picker) — omit it for
+ * unfiltered results, identical to today's behaviour.
  */
 export function useDeployedProductOptions(
   deploymentId: string | undefined,
+  productCategories?: string[],
 ): UseQueryResult<DeployedProductOption[], Error> {
   const api = useBackendApi();
+  // Normalized to a stable, comparable key: an empty/undefined list must
+  // produce the same query key as "no filter" so callers that pass `[]`
+  // before metadata has loaded don't churn the cache once the real list
+  // arrives, and so the key stays a plain string join rather than an
+  // array identity that changes every render.
+  const categoriesKey =
+    productCategories && productCategories.length > 0
+      ? [...productCategories].sort().join(",")
+      : "";
 
   return useQuery<DeployedProductOption[], Error>({
-    queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId ?? ""],
+    queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId ?? "", categoriesKey],
     queryFn: async (): Promise<DeployedProductOption[]> => {
       const dpRes = await api.post<
         BeDeployedProductSearchPayload,
         BeDeployedProductSearchResponse
       >(`/deployments/${encodeURIComponent(deploymentId as string)}/products/search`, {
         pagination: { offset: 0, limit: PAGE_LIMIT },
+        ...(productCategories && productCategories.length > 0
+          ? { productCategories }
+          : {}),
       });
       const deployed = dpRes.deployedProducts ?? [];
 
@@ -59,7 +84,11 @@ export function useDeployedProductOptions(
         // products with missing names stay distinguishable in the selector.
         const name = d.product?.name || d.product?.id || "Product";
         const ver = d.version?.name ?? "";
-        return { id: d.id, label: ver ? `${name} ${ver}` : name };
+        return {
+          id: d.id,
+          label: ver ? `${name} ${ver}` : name,
+          category: d.category,
+        };
       });
     },
     enabled: !!deploymentId,

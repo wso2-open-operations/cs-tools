@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { JSX } from "react";
@@ -134,6 +134,7 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
 }));
 vi.mock("@api/useSearchUsersByName", () => ({
   useSearchUsersByName: () => ({ data: [], isFetching: false, isError: false }),
+  useSearchInternalUsersByName: () => ({ data: [], isFetching: false, isError: false }),
 }));
 
 // Imported after the mocks above so the module picks them up.
@@ -507,9 +508,12 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
     openChangeState();
     fireEvent.click(screen.getByRole("menuitem", { name: /resolved/i }));
 
-    fireEvent.change(screen.getByLabelText(/resolution code/i), {
-      target: { value: "Solved" },
-    });
+    fireEvent.mouseDown(
+      document
+        .getElementById("incident-resolution-code-label")!
+        .parentElement!.querySelector('[role="combobox"]')!,
+    );
+    fireEvent.click(within(screen.getByRole("listbox")).getByText(/^solved \(permanently\)$/i));
     fireEvent.change(screen.getByLabelText(/resolution notes/i), {
       target: { value: "Restarted the service." },
     });
@@ -520,7 +524,7 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
         id: "inc-1",
         patch: {
           state: "RESOLVED",
-          resolutionCode: "Solved",
+          resolutionCode: "SOLVED_PERMANENTLY",
           resolutionNotes: "Restarted the service.",
         },
       },
@@ -528,6 +532,40 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
       }),
+    );
+  });
+
+  it("claims an unassigned incident for the signed-in engineer when starting work (-> IN_PROGRESS)", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW", assignedTo: null } });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      {
+        id: "inc-1",
+        patch: {
+          state: "IN_PROGRESS",
+          assignedEngineerId: "00000000-0000-0000-0000-00000000000c",
+        },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("does not reassign an already-assigned incident when starting work (-> IN_PROGRESS)", () => {
+    mockQueryResult({
+      data: {
+        ...BASE_INCIDENT,
+        state: "NEW",
+        assignedTo: { id: "someone-else", name: "Someone Else" },
+      },
+    });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "inc-1", patch: { state: "IN_PROGRESS" } },
+      expect.objectContaining({ onError: expect.any(Function) }),
     );
   });
 
@@ -544,6 +582,28 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
     renderPage();
     expect(screen.queryByRole("button", { name: /in progress/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("CsmIncidentDetailPage — Create change request entry point", () => {
+  // Regression/new-feature test: this action used to not exist at all on the
+  // incident detail page (unlike the service request's own "Create change
+  // request…" action) — see CreateChangeRequestFromIncidentNavState's doc
+  // comment for why the create form still gates submitting on this pre-fill
+  // until the backend accepts an incident-linked change request.
+  it("navigates to the change-request create form with this incident pre-selected as the intended parent", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/new", {
+      state: {
+        incidentId: "inc-1",
+        incidentNumber: "INC0012345",
+        incidentSubject: "Gateway 502s",
+      },
+    });
   });
 });
 

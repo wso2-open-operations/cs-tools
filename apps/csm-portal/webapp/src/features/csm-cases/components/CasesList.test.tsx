@@ -459,7 +459,9 @@ describe("CasesList optional columns", () => {
 });
 
 describe("CasesList sortable headers", () => {
-  function renderSortable(initialField: "createdOn" | "updatedOn" | "severity" | "state") {
+  function renderSortable(
+    initialField: "createdOn" | "updatedOn" | "severity" | "state" | "assignee",
+  ) {
     const onSortFieldChange = vi.fn();
     const onSortOrderChange = vi.fn();
     renderWithProviders(
@@ -470,7 +472,7 @@ describe("CasesList sortable headers", () => {
             <CasesList
               cases={[CASE]}
               isLoading={false}
-              optionalColumns={["severity", "createdAt"]}
+              optionalColumns={["severity", "createdAt", "assignee"]}
               sortField={initialField}
               sortOrder="desc"
               onSortFieldChange={onSortFieldChange}
@@ -501,6 +503,15 @@ describe("CasesList sortable headers", () => {
 
     expect(onSortFieldChange).not.toHaveBeenCalled();
     expect(onSortOrderChange).toHaveBeenCalledWith("asc");
+  });
+
+  it("activates the Assignee header at desc order when clicked", () => {
+    const { onSortFieldChange, onSortOrderChange } = renderSortable("updatedOn");
+
+    fireEvent.click(screen.getByText("Assignee"));
+
+    expect(onSortFieldChange).toHaveBeenCalledWith("assignee");
+    expect(onSortOrderChange).toHaveBeenCalledWith("desc");
   });
 
   it("marks only the currently active column as sorted", () => {

@@ -15,7 +15,7 @@
 // under the License.
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
 import {
   MemoryRouter,
@@ -285,6 +285,9 @@ vi.mock("@features/csm-cases/api/useCsmCaseCallRequests", () => ({
 vi.mock("@features/csm-cases/api/useSearchCaseTasks", () => ({
   useSearchCaseTasks: () => ({ data: undefined }),
 }));
+vi.mock("@features/csm-cases/api/useSearchLinkedIncidents", () => ({
+  useSearchLinkedIncidents: () => ({ data: undefined }),
+}));
 vi.mock("@features/csm-cases/api/useSearchDeployments", () => ({
   useSearchDeployments: () => ({
     data: undefined,
@@ -293,13 +296,19 @@ vi.mock("@features/csm-cases/api/useSearchDeployments", () => ({
     isFetching: false,
   }),
 }));
+// Controllable per-test so the onboarding chip's gate (`onboardingStatus` /
+// `onboardingOwner`, both on the same project fetch already used elsewhere
+// on this page) can be exercised without adding a new fetch mock per case.
+const useGetProjectMock = vi.fn();
+function defaultGetProjectImpl(): unknown {
+  return { data: undefined, isLoading: false, refetch: vi.fn(), isFetching: false };
+}
+useGetProjectMock.mockImplementation(defaultGetProjectImpl);
+afterEach(() => {
+  useGetProjectMock.mockImplementation(defaultGetProjectImpl);
+});
 vi.mock("@features/csm-projects/api/useGetProject", () => ({
-  useGetProject: () => ({
-    data: undefined,
-    isLoading: false,
-    refetch: vi.fn(),
-    isFetching: false,
-  }),
+  useGetProject: (...args: unknown[]) => useGetProjectMock(...args),
 }));
 vi.mock("@features/csm-cases/api/useGetCsmCaseSlas", () => ({
   useGetCsmCaseSlas: () => ({ data: undefined }),
@@ -361,16 +370,35 @@ vi.mock("@features/csm-cases/components/CsmCaseCommentInput", () => ({
 }));
 // Probe, not `null`: the change_case_type and request_update tests below
 // need a way to open their dialogs the same way a real user would (via the
-// action bar's menu). CaseActionBar's own rendering/gating is covered in
+// action bar's menu). The two lifecycle buttons (request info / propose
+// solution) exist for the no-public-comment confirm-gate tests further down
+// — they carry a target state, same as a real "Change state" primary button
+// would. CaseActionBar's own rendering/gating is covered in
 // CaseActionBar.test.tsx.
 vi.mock("@features/csm-cases/components/CaseActionBar", () => ({
-  default: ({ onAction }: { onAction: (action: { secondary: string }) => void }) => (
+  default: ({
+    onAction,
+  }: {
+    onAction: (
+      action: { secondary: string } | string,
+      targetState?: string,
+    ) => void;
+  }) => (
     <>
       <button type="button" onClick={() => onAction({ secondary: "change_case_type" })}>
         stub open change case type
       </button>
       <button type="button" onClick={() => onAction({ secondary: "request_update" })}>
         stub open request update
+      </button>
+      <button type="button" onClick={() => onAction("request_info", "awaiting_info")}>
+        stub request info
+      </button>
+      <button
+        type="button"
+        onClick={() => onAction("propose_solution", "solution_proposed")}
+      >
+        stub propose solution
       </button>
     </>
   ),
@@ -455,6 +483,9 @@ vi.mock("@features/csm-cases/components/RequestUpdateDialog", () => ({
 }));
 vi.mock("@features/csm-cases/components/ChildCasesWidget", () => ({
   ChildCasesWidget: () => null,
+}));
+vi.mock("@features/csm-cases/components/LinkedIncidentsListWidget", () => ({
+  LinkedIncidentsListWidget: () => null,
 }));
 vi.mock("@features/csm-cases/components/LinkedServiceRequestsWidget", () => ({
   LinkedServiceRequestsWidget: () => null,
@@ -972,6 +1003,76 @@ describe("CsmCaseDetailPage — tab label counts", () => {
 
     expect(
       screen.getByRole("tab", { name: /time tracking \(9\)/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("CsmCaseDetailPage — onboarding chip", () => {
+  it("does not render when the project has no onboarding engagement", () => {
+    useGetProjectMock.mockImplementation(() => ({
+      data: { onboardingStatus: undefined, onboardingOwner: null },
+      isLoading: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderPage();
+
+    expect(screen.queryByText("Onboarding")).not.toBeInTheDocument();
+  });
+
+  it("does not render for a non-'In-Progress' onboarding status", () => {
+    useGetProjectMock.mockImplementation(() => ({
+      data: {
+        onboardingStatus: "Not-Started",
+        onboardingOwner: { id: "user-1", name: "Jane Doe", email: "jane.doe@example.com" },
+      },
+      isLoading: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderPage();
+
+    expect(screen.queryByText("Onboarding")).not.toBeInTheDocument();
+  });
+
+  it("renders with the owner's name in the tooltip when onboarding is in progress", async () => {
+    useGetProjectMock.mockImplementation(() => ({
+      data: {
+        onboardingStatus: "In-Progress",
+        onboardingOwner: { id: "user-1", name: "Jane Doe", email: "jane.doe@example.com" },
+      },
+      isLoading: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderPage();
+
+    const chip = screen.getByText("Onboarding");
+    expect(chip).toBeInTheDocument();
+    fireEvent.mouseOver(chip);
+    expect(
+      await screen.findByText("Onboarding owner: Jane Doe"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders with an 'Unassigned' tooltip when onboarding is in progress but no owner is set", async () => {
+    useGetProjectMock.mockImplementation(() => ({
+      data: { onboardingStatus: "In-Progress", onboardingOwner: null },
+      isLoading: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderPage();
+
+    const chip = screen.getByText("Onboarding");
+    expect(chip).toBeInTheDocument();
+    fireEvent.mouseOver(chip);
+    expect(
+      await screen.findByText("Onboarding owner: Unassigned"),
     ).toBeInTheDocument();
   });
 });
@@ -1583,6 +1684,136 @@ describe("CsmCaseDetailPage — Linked change requests widget only shows on serv
 
     expect(
       screen.getByTestId("linked-change-requests-widget-probe"),
+    ).toBeInTheDocument();
+  });
+});
+
+// Regression coverage for the "no public comment yet" confirm gate on the
+// WIP -> Awaiting info / Solution proposed transitions (see
+// `hasPublicComment` and `onAction` in the page). `comments` defaults to `[]`
+// via `defaultCommentsImpl` above, so these tests don't need to override the
+// comments mock unless they want a case that already has a public comment.
+describe("CsmCaseDetailPage — no-public-comment confirm gate", () => {
+  // `patchCaseMutateMock` is a module-level vi.fn() with no global reset, so
+  // calls accumulate across every test in this file (other describe blocks
+  // rely on that, asserting only that a call happened somewhere). This
+  // block's "not PATCHed" assertions need a clean slate instead, or a
+  // `{ state: "awaiting_info" }` call from an earlier test in this same
+  // block would make a later "not called" check pass for the wrong reason.
+  beforeEach(() => {
+    patchCaseMutateMock.mockClear();
+  });
+
+  it("confirms before moving to Awaiting info when the case has no public comment yet", () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /stub request info/i }));
+
+    expect(
+      screen.getByText(/no public comment on this case yet/i),
+    ).toBeInTheDocument();
+    expect(patchCaseMutateMock).not.toHaveBeenCalledWith(
+      { state: "awaiting_info" },
+      expect.anything(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /proceed anyway/i }));
+
+    expect(patchCaseMutateMock).toHaveBeenCalledWith(
+      { state: "awaiting_info" },
+      expect.anything(),
+    );
+  });
+
+  it("does not PATCH and closes the dialog when the engineer chooses to add a comment first", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /stub request info/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /add a comment first/i }),
+    );
+
+    // MUI's Dialog unmounts its content only once its close transition
+    // finishes, so the title isn't gone from the DOM synchronously after the
+    // click the way a plain conditional render's would be.
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/no public comment on this case yet/i),
+      ).not.toBeInTheDocument(),
+    );
+    expect(patchCaseMutateMock).not.toHaveBeenCalledWith(
+      { state: "awaiting_info" },
+      expect.anything(),
+    );
+  });
+
+  it("shows the propose-solution-specific copy for the Solution proposed transition", () => {
+    renderPage();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /stub propose solution/i }),
+    );
+
+    expect(
+      screen.getByText(/won't be told what the proposed solution is/i),
+    ).toBeInTheDocument();
+  });
+
+  it("skips the confirm gate and PATCHes straight away when the case already has a public comment", () => {
+    useGetCsmCaseCommentsMock.mockImplementation(() => ({
+      data: [
+        {
+          id: "c-1",
+          caseId: "case-1",
+          authorName: "Jane Doe",
+          authorRole: "customer",
+          bodyHtml: "<p>Any update?</p>",
+          createdAt: "2026-01-01T00:00:00Z",
+          internal: false,
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /stub request info/i }));
+
+    expect(
+      screen.queryByText(/no public comment on this case yet/i),
+    ).not.toBeInTheDocument();
+    expect(patchCaseMutateMock).toHaveBeenCalledWith(
+      { state: "awaiting_info" },
+      expect.anything(),
+    );
+  });
+
+  it("still gates the transition when the case only has an internal work note, not a public comment", () => {
+    useGetCsmCaseCommentsMock.mockImplementation(() => ({
+      data: [
+        {
+          id: "c-1",
+          caseId: "case-1",
+          authorName: "Jane Doe",
+          authorRole: "wso2_engineer",
+          bodyHtml: "<p>Internal-only note for the team.</p>",
+          createdAt: "2026-01-01T00:00:00Z",
+          internal: true,
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      isFetching: false,
+    }));
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /stub request info/i }));
+
+    expect(
+      screen.getByText(/no public comment on this case yet/i),
     ).toBeInTheDocument();
   });
 });

@@ -232,8 +232,13 @@ export function isCloudSupportProject(
 export function shouldHideOnboardingData(
   onboardingStatus: string | null | undefined,
 ): boolean {
-  const normalized = (onboardingStatus ?? "").trim().toLowerCase();
-  return normalized === NOT_APPLICABLE_ONBOARDING_STATUS;
+  if (!onboardingStatus) return false;
+  const normalized = onboardingStatus.trim().toLowerCase();
+  return (
+    normalized === NOT_APPLICABLE_ONBOARDING_STATUS ||
+    normalized.replace(/[\s_]+/g, "-") === NOT_APPLICABLE_ONBOARDING_STATUS ||
+    normalized === "n/a"
+  );
 }
 
 /**
@@ -275,6 +280,44 @@ export function getProductCategoriesForServiceRequest(
 }
 
 /**
+ * Checks whether a project's contract has ended (i.e. endDate has passed).
+ * End date is considered inclusive of the full day (until 23:59:59.999 UTC).
+ *
+ * @param endDate - Project end date string (e.g. YYYY-MM-DD or ISO format).
+ * @param now - Reference date for comparison, defaults to current time.
+ * @returns True when endDate is in the past (after end-of-day).
+ */
+export function isProjectContractEnded(
+  endDate: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  const trimmed = endDate?.trim();
+  if (!trimmed) return false;
+
+  // Handle YYYY-MM-DD format
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (match) {
+    const endOfYear = Number(match[1]);
+    const endOfMonth = Number(match[2]) - 1;
+    const endOfDay = Number(match[3]);
+    const endDateTime = new Date(Date.UTC(endOfYear, endOfMonth, endOfDay, 23, 59, 59, 999));
+    if (Number.isNaN(endDateTime.getTime())) return false;
+    if (
+      endDateTime.getUTCFullYear() !== endOfYear ||
+      endDateTime.getUTCMonth() !== endOfMonth ||
+      endDateTime.getUTCDate() !== endOfDay
+    ) {
+      return false;
+    }
+    return now.getTime() > endDateTime.getTime();
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return now.getTime() > parsed.getTime();
+}
+
+/**
  * Whether the project is in a Restricted closure state.
  * When restricted, action buttons (create SR, add deployment, add user, etc.) must be hidden.
  *
@@ -285,6 +328,26 @@ export function isProjectRestricted(
   closureState: string | null | undefined,
 ): boolean {
   return closureState === ProjectClosureState.RESTRICTED;
+}
+
+/**
+ * Whether the project is suspended or its contract has ended.
+ * When suspended or contract has ended, project access is blocked and the suspension notice is shown.
+ *
+ * @param closureState - Value from project.closureState.
+ * @param endDate - Project end date string.
+ * @param now - Reference date for comparison.
+ * @returns True when the project is suspended or contract has ended.
+ */
+export function isProjectSuspended(
+  closureState: string | null | undefined,
+  endDate?: string | null | undefined,
+  now?: Date,
+): boolean {
+  if (closureState?.trim().toLowerCase() === ProjectClosureState.SUSPENDED.toLowerCase()) {
+    return true;
+  }
+  return isProjectContractEnded(endDate, now);
 }
 
 /**

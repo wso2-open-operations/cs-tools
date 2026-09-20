@@ -39,7 +39,13 @@ import {
   INCIDENT_PRIORITIES,
   type IncidentFilters,
 } from "@features/csm-operations/utils/incidents";
+import {
+  readIncidentFiltersFromUrl,
+  writeIncidentFiltersToUrl,
+} from "@features/csm-operations/utils/incidentsFiltersUrl";
+import { incidentsSavedViews } from "@features/csm-operations/utils/incidentsSavedViews";
 import IncidentProductMultiSelect from "@features/csm-operations/components/IncidentProductMultiSelect";
+import SavedViewsMenu from "@features/csm-operations/components/SavedViewsMenu";
 import MultiSelectField from "@components/MultiSelectField";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
@@ -201,6 +207,17 @@ export default function IncidentsFilterBar({
             }}
           />
         </Box>
+
+        <SavedViewsMenu
+          currentQs={writeIncidentFiltersToUrl(filters).toString()}
+          canonicalizeQs={(qs) =>
+            writeIncidentFiltersToUrl(readIncidentFiltersFromUrl(new URLSearchParams(qs))).toString()
+          }
+          activeCount={activeCount}
+          hasSearch={filters.search.trim().length > 0}
+          onApply={(qs) => onChange(readIncidentFiltersFromUrl(new URLSearchParams(qs)))}
+          store={incidentsSavedViews}
+        />
 
         <Button
           variant="outlined"

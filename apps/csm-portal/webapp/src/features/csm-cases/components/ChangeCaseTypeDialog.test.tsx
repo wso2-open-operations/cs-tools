@@ -99,7 +99,6 @@ describe("ChangeCaseTypeDialog — step 1: pick target", () => {
         currentType="case"
         currentSeverity="S2"
         hasAttachments
-        currentProjectSubscriptionType="managed_cloud_subscription"
         isSubmitting={false}
         onClose={() => {}}
         onSubmit={() => {}}
@@ -119,7 +118,6 @@ describe("ChangeCaseTypeDialog — step 1: pick target", () => {
         currentType="case"
         currentSeverity="S2"
         hasAttachments
-        currentProjectSubscriptionType="managed_cloud_subscription"
         isSubmitting={false}
         onClose={() => {}}
         onSubmit={() => {}}
@@ -164,125 +162,6 @@ describe("ChangeCaseTypeDialog — step 1: pick target", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
-  });
-});
-
-describe("ChangeCaseTypeDialog — Service Request gated by project subscription type", () => {
-  it("disables Service Request when the project's subscription type doesn't qualify", () => {
-    render(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        currentProjectSubscriptionType="subscription"
-        isSubmitting={false}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    const sr = screen.getByRole("radio", { name: /^service request/i });
-    expect(sr).toBeDisabled();
-    expect(screen.getByText(/managed cloud \/ cloud support only/i)).toBeInTheDocument();
-  });
-
-  it("disables Service Request when no subscription type is known at all", () => {
-    render(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        isSubmitting={false}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    expect(screen.getByRole("radio", { name: /^service request/i })).toBeDisabled();
-  });
-
-  it("enables Service Request for a Managed Cloud project", () => {
-    render(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        currentProjectSubscriptionType="managed_cloud_subscription"
-        isSubmitting={false}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    expect(screen.getByRole("radio", { name: /^service request$/i })).toBeEnabled();
-  });
-
-  it("enables Service Request for a Cloud Support project", () => {
-    render(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        currentProjectSubscriptionType="cloud_support"
-        isSubmitting={false}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    expect(screen.getByRole("radio", { name: /^service request$/i })).toBeEnabled();
-  });
-
-  it("blocks the fields-step Next if the subscription type resolves to ineligible after Service Request was already selected", () => {
-    // Regression for a gap where fieldsStepValid/canSubmit didn't reference
-    // serviceRequestAllowed at all — only the step-1 radio's `disabled` did.
-    // If targetType is already "service_request" and the subscription type
-    // then resolves (or changes) to something ineligible, the fields step
-    // must not stay valid just because catalog/item/answers are filled in.
-    const { rerender } = render(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        currentProjectSubscriptionType="managed_cloud_subscription"
-        isSubmitting={false}
-        deployedProductId="dp-1"
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    pickTargetAndAdvanceToFields(/service request/i);
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Catalog" }));
-    fireEvent.click(screen.getByRole("option", { name: /api manager support/i }));
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Catalog item" }));
-    fireEvent.click(screen.getByRole("option", { name: /request environment scaling/i }));
-    expect(screen.getByRole("button", { name: /^next$/i })).toBeEnabled();
-
-    rerender(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        currentProjectSubscriptionType="subscription"
-        isSubmitting={false}
-        deployedProductId="dp-1"
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /^next$/i })).toBeDisabled();
-  });
-
-  it("does not gate the other transfer targets", () => {
-    render(
-      <ChangeCaseTypeDialog
-        currentType="case"
-        currentSeverity="S2"
-        hasAttachments
-        currentProjectSubscriptionType="subscription"
-        isSubmitting={false}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    expect(screen.getByRole("radio", { name: /^security report$/i })).toBeEnabled();
-    expect(screen.getByRole("radio", { name: /^engagement$/i })).toBeEnabled();
   });
 });
 
@@ -635,7 +514,6 @@ describe("ChangeCaseTypeDialog — transfer into service_request", () => {
         currentType="case"
         currentSeverity="S2"
         hasAttachments
-        currentProjectSubscriptionType="managed_cloud_subscription"
         isSubmitting={false}
         deployedProductId="dp-1"
         onClose={() => {}}
@@ -676,7 +554,6 @@ describe("ChangeCaseTypeDialog — transfer into service_request", () => {
         currentType="case"
         currentSeverity="S2"
         hasAttachments
-        currentProjectSubscriptionType="managed_cloud_subscription"
         isSubmitting={false}
         deployedProductId="dp-1"
         onClose={() => {}}

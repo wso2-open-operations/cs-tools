@@ -179,7 +179,7 @@ func (h *ChangeRequestHandler) PatchChangeRequest(w http.ResponseWriter, r *http
 		return
 	}
 
-	writeJSONValue(w, http.StatusOK, dto.MapChangeRequestDetails(result.ChangeRequest))
+	writeJSONValue(w, http.StatusOK, dto.MapChangeRequestUpdate(result))
 }
 
 // GetChangeRequestApprovals handles GET /change-requests/{id}/approvals.

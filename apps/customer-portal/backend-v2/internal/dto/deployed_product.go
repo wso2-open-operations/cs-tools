@@ -49,13 +49,72 @@ type DeployedProductVersion struct {
 type DeployedProductSummary struct {
 	ID         string                  `json:"id"`
 	Deployment *IDLabelRef             `json:"deployment,omitempty"`
-	Product    *IDLabelRef             `json:"product,omitempty"`
+	Product    *ProductRef             `json:"product,omitempty"`
 	Version    *DeployedProductVersion `json:"version,omitempty"`
 	Cores      *int                    `json:"cores,omitempty"`
 	TPS        *float64                `json:"tps,omitempty"`
 	Category   *string                 `json:"category,omitempty"`
-	CreatedOn  time.Time               `json:"createdOn"`
-	UpdatedOn  time.Time               `json:"updatedOn"`
+	// Description is the customer's own note about this deployed product. The
+	// Manage Products dialog prefills its editor from this value and diffs
+	// against it to decide whether to send a change, so omitting it made an
+	// existing description invisible.
+	Description *string `json:"description,omitempty"`
+	// Updates is the update-level history recorded against this deployed
+	// product, which the Updates page needs alongside the product's
+	// abbreviation to work out which levels are still pending. Customer-facing
+	// by nature — it describes the customer's own deployment.
+	Updates   []ProductUpdate `json:"updates,omitempty"`
+	CreatedOn time.Time       `json:"createdOn"`
+	UpdatedOn time.Time       `json:"updatedOn"`
+}
+
+// ProductRef is the product reference on a deployed product: the usual
+// {id, label} plus the short product key.
+//
+// It is not IDLabelRef because Abbreviation is meaningless for every other
+// reference the portal returns, and because it is load-bearing here: the
+// product-updates service keys its catalogue as "wso2am"/"wso2is"/"wso2mi"
+// while Label is the display name ("WSO2 API Manager"). Matching a deployed
+// product to its update levels is impossible without it — the two vocabularies
+// have nothing in common.
+type ProductRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Abbreviation is absent when entity-service runs against Postgres, whose
+	// products table has no equivalent column.
+	Abbreviation *string `json:"abbreviation,omitempty"`
+}
+
+// ProductUpdate is one entry of a deployed product's update-level history.
+type ProductUpdate struct {
+	UpdateLevel int `json:"updateLevel"`
+	// Date is a date-only "YYYY-MM-DD" string, passed through as the upstream
+	// records it rather than reformatted as a timestamp.
+	Date    string  `json:"date"`
+	Details *string `json:"details,omitempty"`
+}
+
+// deployedProductRef maps entity-service's product reference, preserving the
+// abbreviation. Returns nil for an empty reference so an absent product stays
+// omitted rather than serialising as an empty object.
+func deployedProductRef(p entity.ProductEntityRef) *ProductRef {
+	if p.ID == "" && p.Name == "" {
+		return nil
+	}
+	return &ProductRef{ID: p.ID, Label: p.Name, Abbreviation: p.Abbreviation}
+}
+
+// mapProductUpdates maps the update-level history, leaving nil as nil so an
+// absent history is omitted rather than reported as an empty list.
+func mapProductUpdates(updates []entity.ProductUpdateEntry) []ProductUpdate {
+	if len(updates) == 0 {
+		return nil
+	}
+	out := make([]ProductUpdate, 0, len(updates))
+	for _, u := range updates {
+		out = append(out, ProductUpdate{UpdateLevel: u.UpdateLevel, Date: u.Date, Details: u.Details})
+	}
+	return out
 }
 
 // SearchDeployedProductsResponse is the portal's response for
@@ -113,15 +172,17 @@ func MapSearchDeployedProducts(r entity.SearchDeployedProductsResponse) SearchDe
 	items := make([]DeployedProductSummary, 0, len(r.DeployedProducts))
 	for _, d := range r.DeployedProducts {
 		items = append(items, DeployedProductSummary{
-			ID:         d.ID,
-			Deployment: entityRefToIDLabel(&d.Deployment),
-			Product:    entityRefToIDLabel(&d.Product),
-			Version:    mapDeployedProductVersion(d.Version),
-			Cores:      parseCores(d.Cores),
-			TPS:        parseTPS(d.TPS),
-			Category:   d.Category,
-			CreatedOn:  d.CreatedOn,
-			UpdatedOn:  d.UpdatedOn,
+			ID:          d.ID,
+			Deployment:  entityRefToIDLabel(&d.Deployment),
+			Product:     deployedProductRef(d.Product),
+			Version:     mapDeployedProductVersion(d.Version),
+			Cores:       parseCores(d.Cores),
+			TPS:         parseTPS(d.TPS),
+			Category:    d.Category,
+			Description: d.Description,
+			Updates:     mapProductUpdates(d.Updates),
+			CreatedOn:   d.CreatedOn,
+			UpdatedOn:   d.UpdatedOn,
 		})
 	}
 	return SearchDeployedProductsResponse{
@@ -133,20 +194,26 @@ func MapSearchDeployedProducts(r entity.SearchDeployedProductsResponse) SearchDe
 	}
 }
 
+// DeployedProductSearchFilters contains optional filters for searching deployed products.
+type DeployedProductSearchFilters struct {
+	ProductCategories []string `json:"productCategories,omitempty"`
+}
+
 // DeployedProductSearchRequest is the portal's request body for
 // POST /deployments/{deploymentId}/products/search.
 type DeployedProductSearchRequest struct {
-	Pagination entity.Pagination `json:"pagination"`
+	Pagination entity.Pagination             `json:"pagination"`
+	Filters    *DeployedProductSearchFilters `json:"filters,omitempty"`
 }
 
 // BuildEntitySearchDeployedProductsRequest translates the portal's search
 // request into entity-service's request shape, always scoping to the
-// deployment in the URL — never a client-settable body field (same
-// reasoning as BuildEntitySearchCasesRequest's projectID parameter).
+// deployment in the URL (normalized to a canonical dashed UUID) — never a client-settable
+// body field (same reasoning as BuildEntitySearchCasesRequest's projectID parameter).
 func BuildEntitySearchDeployedProductsRequest(deploymentID string, req DeployedProductSearchRequest) entity.SearchDeployedProductsRequest {
 	return entity.SearchDeployedProductsRequest{
 		Pagination:    req.Pagination,
-		DeploymentIDs: []string{deploymentID},
+		DeploymentIDs: []string{toDashedID(deploymentID)},
 	}
 }
 
@@ -164,13 +231,20 @@ type DeployedProductCreateRequest struct {
 
 // BuildEntityCreateDeployedProductRequest translates the portal's create
 // request into entity-service's request shape, forcing DeploymentID from
-// the path.
+// the path and normalizing every identifier to a canonical dashed UUID.
+//
+// Dashed, not sysid: entity-service validates projectId/deploymentId/
+// productId/versionId with validateUUIDs and performs the sysid conversion
+// itself (see snDeployedProductService.CreateDeployedProduct). Sending a
+// hyphen-stripped sysid failed that validation outright —
+// "projectId contains invalid UUID" — so creating a deployed product could
+// never succeed. Same direction as the call-request builders.
 func BuildEntityCreateDeployedProductRequest(deploymentID string, req DeployedProductCreateRequest) entity.CreateDeployedProductRequest {
 	return entity.CreateDeployedProductRequest{
-		ProjectID:    req.ProjectID,
-		DeploymentID: deploymentID,
-		ProductID:    req.ProductID,
-		VersionID:    req.VersionID,
+		ProjectID:    toDashedID(req.ProjectID),
+		DeploymentID: toDashedID(deploymentID),
+		ProductID:    toDashedID(req.ProductID),
+		VersionID:    toDashedID(req.VersionID),
 		Cores:        req.Cores,
 		TPS:          req.TPS,
 		Description:  req.Description,
@@ -201,7 +275,15 @@ type DeployedProductUpdateRequest struct {
 	Cores       *int     `json:"cores,omitempty"`
 	TPS         *float64 `json:"tps,omitempty"`
 	Description *string  `json:"description,omitempty"`
-	Active      *bool    `json:"active,omitempty"`
+	// Updates replaces the deployed product's update-level history wholesale —
+	// this is how the Manage Products dialog's Update History tab saves, and it
+	// sends updates on its own with no other field set.
+	//
+	// A pointer to a slice so that an explicit empty array (the user deleted
+	// every entry) is not confused with an absent field; see
+	// entity.UpdateDeployedProductRequest.Updates.
+	Updates *[]ProductUpdate `json:"updates,omitempty"`
+	Active  *bool            `json:"active,omitempty"`
 }
 
 // BuildEntityUpdateDeployedProductRequest translates the portal's update
@@ -212,9 +294,10 @@ type DeployedProductUpdateRequest struct {
 // reliable source (see PatchDeployment's doc comment on entityDeployment
 // Client for the same reasoning).
 func BuildEntityUpdateDeployedProductRequest(id, deploymentID string, req DeployedProductUpdateRequest) entity.UpdateDeployedProductRequest {
+	dashedDeploymentID := toDashedID(deploymentID)
 	out := entity.UpdateDeployedProductRequest{
-		ID:           id,
-		DeploymentID: &deploymentID,
+		ID:           toDashedID(id),
+		DeploymentID: &dashedDeploymentID,
 		Cores:        req.Cores,
 		TPS:          req.TPS,
 		Active:       req.Active,
@@ -223,6 +306,17 @@ func BuildEntityUpdateDeployedProductRequest(id, deploymentID string, req Deploy
 		if raw, err := json.Marshal(*req.Description); err == nil {
 			out.Description = raw
 		}
+	}
+	if req.Updates != nil {
+		entries := make([]entity.ProductUpdateEntry, 0, len(*req.Updates))
+		for _, u := range *req.Updates {
+			entries = append(entries, entity.ProductUpdateEntry{
+				UpdateLevel: u.UpdateLevel,
+				Date:        u.Date,
+				Details:     u.Details,
+			})
+		}
+		out.Updates = &entries
 	}
 	return out
 }

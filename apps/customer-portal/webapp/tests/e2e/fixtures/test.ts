@@ -30,6 +30,7 @@ import {
   type BrowserContext,
 } from "@playwright/test";
 import fs from "node:fs";
+import { loginIdentity } from "../auth/credentials";
 import path from "node:path";
 
 /** The default captured session, used for login unless a spec asks for another.
@@ -42,6 +43,10 @@ export const DEFAULT_SESSION = "session";
  * token refresh can succeed mid-run when the short-lived access token expires;
  * bundles without it still replay fine for the access token's TTL. */
 interface SessionBundle {
+  /** Which account the session belongs to (see auth/credentials.ts). Absent in
+   * bundles captured before identities existed; such a bundle is replayed with a
+   * warning rather than refused, so an older capture still works. */
+  identity?: string;
   /** Origin the bundle was captured from. Required in practice — it scopes the
    * storage replay so tokens are never restored into a cross-origin frame.
    * Optional here only because the on-disk JSON is untrusted input. */
@@ -67,6 +72,14 @@ function readBundle(name: string): SessionBundle {
 /** Origin a captured bundle belongs to, or undefined if it has none/is absent. */
 export function sessionOrigin(name: string = DEFAULT_SESSION): string | undefined {
   return hasSession(name) ? readBundle(name).origin : undefined;
+}
+
+/** Identity a captured bundle belongs to, or undefined for a pre-identity
+ * bundle. */
+export function sessionIdentity(
+  name: string = DEFAULT_SESSION,
+): string | undefined {
+  return hasSession(name) ? readBundle(name).identity : undefined;
 }
 
 async function applySession(
@@ -165,6 +178,21 @@ export function withSession(t: typeof base, name: string = DEFAULT_SESSION): voi
         `${target}. Re-run with E2E_BASE_URL=${captured} E2E_NO_WEBSERVER=1, or ` +
         `recapture against ${target}.`,
     );
+    // Same shape of check as the origin above, and for the same class of bug:
+    // replaying a bundle captured as another account runs the suite as the wrong
+    // user. Only enforced when the bundle records an identity — an older capture
+    // has none, and refusing those would break the documented fallback to a
+    // hand-captured session.
+    const capturedIdentity = sessionIdentity(name);
+    const wantedIdentity = loginIdentity();
+    t.skip(
+      !!capturedIdentity && capturedIdentity !== wantedIdentity,
+      `Session '${name}' was captured as "${capturedIdentity}" but this run ` +
+        `wants "${wantedIdentity}". Delete ` +
+        `tests/e2e/storageState/${name}.json to have the auth setup mint a new ` +
+        `one, or set E2E_LOGIN_IDENTITY=${capturedIdentity}.`,
+    );
+
     await applySession(context, name);
   });
 }

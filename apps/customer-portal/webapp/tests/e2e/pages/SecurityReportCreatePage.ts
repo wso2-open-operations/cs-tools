@@ -23,6 +23,7 @@ import {
   GET_HELP_BUTTON,
   GET_HELP_MENU,
 } from "../utils/selectors";
+import { projectPathPattern } from "../utils/ids";
 
 /** How long to allow for the dashboard header and the form to finish loading —
  * both are skeletonised while their queries resolve, well beyond the 5s default
@@ -73,7 +74,7 @@ export class SecurityReportCreatePage {
     await this.securityReportMenuItem().click();
 
     await expect(this.page).toHaveURL(
-      new RegExp(`/projects/${projectId}/support/security-report/create`),
+      projectPathPattern(projectId, "support/security-report/create"),
     );
     // The Product select is the readiness signal: verified present on all three
     // project types, whereas Deployment is absent on Cloud Support, whose

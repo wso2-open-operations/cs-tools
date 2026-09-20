@@ -144,25 +144,15 @@ func TestRequestCaseUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects when the caller is not the case's assigned engineer", func(t *testing.T) {
+	t.Run("succeeds for a caller who is not the case's assigned engineer", func(t *testing.T) {
+		var posted map[string]string
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
 				return []byte(`{"state":"awaiting_info","type":"case","assignedEngineer":{"id":"someone-else"}}`), nil
 			},
-		}
-		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testUpdateRequestCaseID+"/request-update", strings.NewReader(`{"stage":"first"}`)))
-		r.SetPathValue("id", testUpdateRequestCaseID)
-		w := httptest.NewRecorder()
-		h.RequestCaseUpdate(w, r)
-		assertStatus(t, w, http.StatusForbidden)
-		assertErrorMessage(t, w, ErrMsgCommentNotOwnCase)
-	})
-
-	t.Run("rejects when the case has no assigned engineer", func(t *testing.T) {
-		client := &mockEntityCaseClient{
-			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
-				return []byte(`{"state":"awaiting_info","type":"case"}`), nil
+			createCaseCommentFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+				_ = json.Unmarshal(body, &posted)
+				return []byte(`{"id":"comment-1"}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -170,18 +160,18 @@ func TestRequestCaseUpdate(t *testing.T) {
 		r.SetPathValue("id", testUpdateRequestCaseID)
 		w := httptest.NewRecorder()
 		h.RequestCaseUpdate(w, r)
-		assertStatus(t, w, http.StatusForbidden)
-		assertErrorMessage(t, w, ErrMsgCommentNotOwnCase)
+		assertStatus(t, w, http.StatusCreated)
+		want := requestUpdateTemplates[requestUpdateCategoryGeneric][requestUpdateStageFirst]
+		if posted["content"] != want {
+			t.Errorf("posted content = %q, want the generic template %q", posted["content"], want)
+		}
 	})
 
-	t.Run("fails closed when the caller's own id cannot be resolved", func(t *testing.T) {
+	t.Run("succeeds when the case has no assigned engineer at all", func(t *testing.T) {
 		var commentCreated bool
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
-				return []byte(`{"state":"awaiting_info","type":"case","assignedEngineer":{"id":"` + testPlatformUserID + `"}}`), nil
-			},
-			getUserMeFn: func(context.Context) ([]byte, error) {
-				return []byte(`{"id":""}`), nil
+				return []byte(`{"state":"awaiting_info","type":"case"}`), nil
 			},
 			createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
 				commentCreated = true
@@ -193,30 +183,10 @@ func TestRequestCaseUpdate(t *testing.T) {
 		r.SetPathValue("id", testUpdateRequestCaseID)
 		w := httptest.NewRecorder()
 		h.RequestCaseUpdate(w, r)
-		assertStatus(t, w, http.StatusInternalServerError)
-		assertErrorMessage(t, w, ErrMsgInternal)
-		if commentCreated {
-			t.Error("comment was created despite the caller's identity being unresolvable")
+		assertStatus(t, w, http.StatusCreated)
+		if !commentCreated {
+			t.Error("comment was not created for an unassigned case")
 		}
-	})
-
-	t.Run("does not resolve the caller's id when the state gate already rejects", func(t *testing.T) {
-		client := &mockEntityCaseClient{
-			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
-				return []byte(`{"state":"open","type":"case","assignedEngineer":{"id":"` + testPlatformUserID + `"}}`), nil
-			},
-			getUserMeFn: func(context.Context) ([]byte, error) {
-				t.Error("GetUserMe must not be called once the state gate has rejected the request")
-				return nil, nil
-			},
-		}
-		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testUpdateRequestCaseID+"/request-update", strings.NewReader(`{"stage":"first"}`)))
-		r.SetPathValue("id", testUpdateRequestCaseID)
-		w := httptest.NewRecorder()
-		h.RequestCaseUpdate(w, r)
-		assertStatus(t, w, http.StatusConflict)
-		assertErrorMessage(t, w, ErrMsgRequestUpdateNotAllowed)
 	})
 
 	t.Run("posts the generic template for a non-migration case in each allowed state", func(t *testing.T) {

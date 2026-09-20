@@ -21,11 +21,15 @@ import { auditEntryFromBeActivity } from "@features/csm-cases/api/useCsmCaseActi
 import type {
   BeCaseActivitiesSearchPayload,
   BeCaseActivitiesSearchResponse,
+  BeCaseActivityEntry,
 } from "@api/backend/types";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
 
-/** Page size used when loading the field-change lane. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
+/** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const ACTIVITIES_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on how many pages a single incident's audit trail can page
+ * through — see `useCsmCaseComments.ts`'s identical constant/reasoning. */
+const MAX_ACTIVITY_PAGES = 200;
 
 /**
  * Load the audited field/state-change lane for an incident, calling
@@ -41,6 +45,10 @@ const ACTIVITIES_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
  * credentials available here) — the request/response shape mirrors the
  * case endpoint exactly on the assumption it matches, per the team's
  * confirmation that both endpoints share the same underlying mechanism.
+ *
+ * Pages through `BE_MAX_PAGE_LIMIT`-sized requests until the BE reports no
+ * more (`hasMore`) — see `useCsmCaseActivities.ts`'s identical fix/reasoning
+ * (a long audit trail used to silently drop everything past the first page).
  */
 export function useGetCsmIncidentActivities(
   incidentId: string | undefined,
@@ -52,15 +60,21 @@ export function useGetCsmIncidentActivities(
     queryFn: async (): Promise<CaseAuditEntry[]> => {
       if (!incidentId) return [];
 
-      const payload: BeCaseActivitiesSearchPayload = {
-        pagination: { offset: 0, limit: ACTIVITIES_PAGE_LIMIT },
-        includeFieldChanges: true,
-      };
-      const response = await api.post<
-        BeCaseActivitiesSearchPayload,
-        BeCaseActivitiesSearchResponse
-      >(`/incidents/${encodeURIComponent(incidentId)}/activities/search`, payload);
-      return (response.activity ?? [])
+      const allEntries: BeCaseActivityEntry[] = [];
+      for (let page = 0; page < MAX_ACTIVITY_PAGES; page += 1) {
+        const payload: BeCaseActivitiesSearchPayload = {
+          pagination: { offset: page * ACTIVITIES_PAGE_LIMIT, limit: ACTIVITIES_PAGE_LIMIT },
+          includeFieldChanges: true,
+        };
+        const response = await api.post<
+          BeCaseActivitiesSearchPayload,
+          BeCaseActivitiesSearchResponse
+        >(`/incidents/${encodeURIComponent(incidentId)}/activities/search`, payload);
+        const rows = response.activity ?? [];
+        allEntries.push(...rows);
+        if (rows.length < ACTIVITIES_PAGE_LIMIT || !response.hasMore) break;
+      }
+      return allEntries
         .filter((a) => a.type === "field_change")
         .map(auditEntryFromBeActivity);
     },

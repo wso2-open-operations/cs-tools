@@ -1,0 +1,15 @@
+# Auth (Asgardeo, via the webapp's @asgardeo/react wiring), rate limiting,
+# and CORS are all enforced by the Choreo API gateway in front of this
+# component — the service itself is deliberately authless.
+schemaVersion: 1.2
+
+endpoints:
+  - name: git-internals-dashboard-api
+    displayName: Git Internals Dashboard API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: openapi.yaml

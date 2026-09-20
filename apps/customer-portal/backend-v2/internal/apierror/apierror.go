@@ -57,3 +57,29 @@ func NewUpstreamError(statusCode int, rawBody []byte) *Error {
 	}
 	return &Error{StatusCode: statusCode}
 }
+
+// DataError is a failure where the upstream call SUCCEEDED but returned
+// something this backend cannot act on — a record missing a field the next
+// step needs, a status outside the known set.
+//
+// Distinct from Error, which carries an upstream HTTP status. These have no
+// status to carry: nothing failed at the transport or protocol level. Without
+// a type of their own they are plain errors, and summarizeErr logs every plain
+// error as "upstream request failed" — which is precisely wrong here and sends
+// whoever is debugging to look for an outage that never happened.
+//
+// It deliberately does NOT satisfy the *Error mapping, so the client still
+// receives the handler's generic message rather than upstream internals. The
+// gain is in the log, which is where diagnosis actually happens.
+type DataError struct {
+	Reason string
+}
+
+func (e *DataError) Error() string {
+	return "upstream data unusable: " + e.Reason
+}
+
+// NewDataError builds a DataError with a formatted reason.
+func NewDataError(format string, args ...any) *DataError {
+	return &DataError{Reason: fmt.Sprintf(format, args...)}
+}

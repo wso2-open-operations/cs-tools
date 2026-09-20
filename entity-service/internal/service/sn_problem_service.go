@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -61,6 +62,10 @@ type snProblemFilters struct {
 	StateKeys []int `json:"stateKeys,omitempty"`
 	// AssignmentGroupIDs: sys_user_group sys_ids (converted from UUIDs).
 	AssignmentGroupIDs []string `json:"assignmentGroupIds,omitempty"`
+	// AssignedUserIDs: sys_user sys_ids (converted from UUIDs). Wire key is
+	// plural "assignedUserIds" to match Ballerina/SN's contract, even though
+	// the domain-facing filter field is singular "assignedUserId".
+	AssignedUserIDs []string `json:"assignedUserIds,omitempty"`
 }
 
 // snProblemStateKeyMap maps domain ProblemState enums to ServiceNow's raw
@@ -75,6 +80,20 @@ var snProblemStateKeyMap = map[domain.ProblemState]int{
 	domain.ProblemStateResolved:          106,
 	domain.ProblemStateClosed:            107,
 }
+
+// snProblemStateKeyToState is the reverse of snProblemStateKeyMap (SN raw
+// problem_state numeric key -> domain ProblemState), derived at init from
+// the same source of truth so the two can never drift. Used to translate
+// the aggregate endpoint's raw numeric state key back to this platform's
+// domain enum, since SN's groupBy returns the raw ServiceNow value rather
+// than the domain string.
+var snProblemStateKeyToState = func() map[int]domain.ProblemState {
+	m := make(map[int]domain.ProblemState, len(snProblemStateKeyMap))
+	for state, key := range snProblemStateKeyMap {
+		m[key] = state
+	}
+	return m
+}()
 
 var validProblemState = map[domain.ProblemState]bool{
 	domain.ProblemStateNew:               true,
@@ -117,6 +136,7 @@ func (s *snProblemService) SearchProblems(ctx context.Context, req domain.Search
 			Number:             stringPtrValue(req.Filters.Number),
 			StateKeys:          parsedFilters.StateKeys,
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
@@ -205,6 +225,7 @@ func (s *snProblemService) AggregateProblems(ctx context.Context, req domain.Agg
 			Number:             stringPtrValue(req.Filters.Number),
 			StateKeys:          parsedFilters.StateKeys,
 			AssignmentGroupIDs: uuidsToSysids(parsedFilters.AssignmentGroupIDs),
+			AssignedUserIDs:    uuidsToSysids(parsedFilters.AssignedUserIDs),
 		},
 		GroupBy:   req.GroupBy,
 		MaxGroups: req.MaxGroups,
@@ -219,13 +240,31 @@ func (s *snProblemService) AggregateProblems(ctx context.Context, req domain.Agg
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return domain.AggregateResponse{}, fmt.Errorf("sn problems: parse aggregate response: %w", err)
 	}
-	// "assignmentGroup" is the only ID-valued field in
+	// "assignmentGroup" is an ID-valued field in
 	// validProblemAggregateField; SN returns its bucket keys as raw
 	// sys_ids, so convert them to this platform's UUIDs before returning.
-	// "state" is a plain enum and is left as-is.
 	if req.GroupBy == "assignmentGroup" {
 		for i := range resp.Groups {
 			resp.Groups[i].Key = sysidToUUID(resp.Groups[i].Key)
+		}
+	}
+	// "state" is a plain enum, but SN's own groupBy implementation returns
+	// its raw numeric problem_state value (as a string) as the bucket key,
+	// not this platform's domain enum string. Parse it back to the numeric
+	// SN key and look it up in snProblemStateKeyToState (the reverse of
+	// snProblemStateKeyMap) to recover the domain enum.
+	if req.GroupBy == "state" {
+		for i := range resp.Groups {
+			key, err := strconv.Atoi(resp.Groups[i].Key)
+			if err != nil {
+				// Leave the key as-is if it isn't the numeric string we expect.
+				continue
+			}
+			if state, ok := snProblemStateKeyToState[key]; ok {
+				resp.Groups[i].Key = string(state)
+			}
+			// else: leave the key as-is, mirroring the defensive fallback
+			// used for the change-request and incident equivalents.
 		}
 	}
 	return resp, nil

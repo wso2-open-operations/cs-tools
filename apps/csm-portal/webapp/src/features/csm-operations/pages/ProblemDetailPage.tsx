@@ -200,6 +200,7 @@ export default function ProblemDetailPage(): JSX.Element {
     <Button
       variant="text"
       size="small"
+      className="csm-print-hide"
       startIcon={<ArrowLeft size={16} />}
       onClick={back}
       sx={{ alignSelf: "flex-start" }}
@@ -302,7 +303,7 @@ export default function ProblemDetailPage(): JSX.Element {
           <Typography variant="h5">{problem.subject || "Problem"}</Typography>
         </Box>
         <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Box className="csm-print-hide" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <ProblemActionBar
               problem={problem}
               isPending={patchProblem.isPending}

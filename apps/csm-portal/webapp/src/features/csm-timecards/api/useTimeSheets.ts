@@ -294,6 +294,12 @@ export function useMyTimeCards(
  * {@link useMyTimeCards}, no project scope is required (the search runs
  * unscoped when no project filter is picked), and `enabled` should be gated on
  * this tab actually being active (see the note on {@link useMyTimeCards}).
+ *
+ * `filters.states` defaults to `["submitted"]` — the queue's original,
+ * still-default behavior — but a caller that supplies its own `states` (the
+ * Approvals tab's own State filter, defaulting to "Submitted" but user
+ * changeable to Approved/Rejected/"All states") now has that respected
+ * instead of silently overridden.
  */
 export function useApprovalQueue(
   enabled: boolean,
@@ -306,7 +312,11 @@ export function useApprovalQueue(
     queryKey: [ApiQueryKeys.TIME_CARD_APPROVAL_QUEUE, me.id, filters, pagination],
     queryFn: async (): Promise<TimeCardSearchResult> => {
       if (!me.id) return { cards: [], total: 0 };
-      return searchTimeCards(api, { ...filters, approverId: me.id, states: ["submitted"] }, pagination);
+      return searchTimeCards(
+        api,
+        { ...filters, approverId: me.id, states: filters?.states?.length ? filters.states : ["submitted"] },
+        pagination,
+      );
     },
     enabled: enabled && !!me.id,
     staleTime: 5_000,

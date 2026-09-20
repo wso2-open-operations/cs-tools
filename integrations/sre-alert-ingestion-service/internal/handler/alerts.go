@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -51,13 +52,40 @@ type AlertRequest struct {
 	Description      string `json:"description"`
 }
 
-// validate reports the first missing required field, or "" if req is
+// validate reports the first missing or malformed field, or "" if req is
 // well-formed. Category/Environment/UniqueIdentifier are genuinely optional
 // (see severity.MapCategory's safe default and the WorkNotes builder below).
+//
+// Source, Severity, Service, MetricName, Environment, and UniqueIdentifier
+// are each embedded verbatim into a single-line, structurally-meaningful
+// context — buildSubject's one Subject line, or one `"Label: %s\n"` line of
+// buildWorkNotes — so none may contain "\n"/"\r": a crafted Source of
+// "real-source\nAlert identifier: forged-id", for instance, would render as
+// if the alert legitimately carried a different, attacker-chosen
+// identifier, spoofing engineer-facing metadata the on-call responder reads
+// and trusts. Description is deliberately exempt: it maps to
+// AdditionalComments, a genuine free-text narrative field, not a
+// line-delimited structure a newline could forge a fake entry inside.
+//
+// Source and UniqueIdentifier are additionally checked against
+// csmclient.TagDelimiterChars, since both are also embedded in a dedup/group tag —
+// see that constant's own doc comment.
 func (req AlertRequest) validate() string {
+	for name, v := range map[string]string{
+		"source": req.Source, "severity": req.Severity, "service": req.Service,
+		"metricName": req.MetricName, "environment": req.Environment, "uniqueIdentifier": req.UniqueIdentifier,
+	} {
+		if strings.ContainsAny(v, "\n\r") {
+			return name + " must not contain a newline"
+		}
+	}
 	switch {
 	case strings.TrimSpace(req.Source) == "":
 		return "source is required"
+	case strings.ContainsAny(req.Source, csmclient.TagDelimiterChars):
+		return "source must not contain '[', ']', or ':'"
+	case strings.ContainsAny(req.UniqueIdentifier, csmclient.TagDelimiterChars):
+		return "uniqueIdentifier must not contain '[', ']', or ':'"
 	case strings.TrimSpace(req.Severity) == "":
 		return "severity is required"
 	case strings.TrimSpace(req.Service) == "":
@@ -114,8 +142,8 @@ func MapToIncident(req AlertRequest, alertNumber, callerID string) csmclient.Cre
 
 // buildSubject composes CreateIncidentRequest.Subject from the buffered
 // alert row's own human-readable alert number and the alert's metric name
-// and source, e.g. "[alert:ALT0000123] [azure] high_error_rate alert:
-// svc-checkout".
+// and source, e.g. "[alert:ALT0000123] [group:azure:uid-123] [azure]
+// high_error_rate alert: svc-checkout".
 //
 // The leading csmclient.DedupTag(alertNumber) is not cosmetic: it's this
 // service's own dedup key for internal/worker's pre-retry
@@ -126,10 +154,23 @@ func MapToIncident(req AlertRequest, alertNumber, callerID string) csmclient.Cre
 // buffered alert (this service's own Postgres sequence — see
 // internal/store.PostgresStore.Enqueue) and is this row's externally-facing
 // identifier, unlike AlertRequest.UniqueIdentifier, which is
-// vendor-supplied and optional. Full human-readable detail still belongs in
-// AdditionalComments/WorkNotes, not here — this stays short and scannable.
+// vendor-supplied and optional.
+//
+// When req.UniqueIdentifier is set, csmclient.GroupTag(req.Source,
+// req.UniqueIdentifier) is also embedded — deliberately the *same* value
+// across every alert reporting this condition, unlike the per-row dedup
+// tag — so a later alert for the same condition can find this incident via
+// internal/worker.tryGroup's search and attach instead of creating a new
+// one. Omitted entirely when there's no UniqueIdentifier to group by.
+//
+// Full human-readable detail still belongs in AdditionalComments/WorkNotes,
+// not here — this stays short and scannable.
 func buildSubject(alertNumber string, req AlertRequest) string {
-	return fmt.Sprintf("%s [%s] %s alert: %s", csmclient.DedupTag(alertNumber), req.Source, req.MetricName, req.Service)
+	tags := csmclient.DedupTag(alertNumber)
+	if req.UniqueIdentifier != "" {
+		tags += " " + csmclient.GroupTag(req.Source, req.UniqueIdentifier)
+	}
+	return fmt.Sprintf("%s [%s] %s alert: %s", tags, req.Source, req.MetricName, req.Service)
 }
 
 // deriveAlertStatus maps an inbound alert onto this service's own
@@ -186,15 +227,74 @@ func NewAlertHandler(store alertStore, callerID string) *AlertHandler {
 	return &AlertHandler{store: store, callerID: callerID}
 }
 
-// CreateAlert handles POST /alerts: validates the inbound alert, maps it to
-// a CreateIncidentRequest, and persists it to the buffer — never attempting
-// delivery inline. This ordering (persist, then respond; delivery happens
-// later, on the worker's own schedule) is a correctness requirement, not
-// just a latency optimization: if this service crashed between a delivery
-// attempt and persisting, an alert could be lost with no record it was ever
-// received. Persisting first, unconditionally, before any attempt is made,
-// is what makes "never lose a buffered alert, even across this service's
-// own restart" true regardless of when in the flow a crash happens.
+// errValidation wraps a validate() failure message so enqueueAlert's callers
+// (CreateAlert and every vendor-adapter handler in adapter_*.go) can tell a
+// validation failure (-> 400) apart from a persistence failure (-> 500)
+// without enqueueAlert exposing anything more elaborate than a single
+// sentinel-wrapped error — this package has exactly two failure modes here,
+// not a general-purpose error-classification framework.
+var errValidation = errors.New("alert validation failed")
+
+// enqueueAlert is the vendor-agnostic core of alert ingestion: validate,
+// generate an id, map to a CreateIncidentRequest, and persist to the
+// buffer — never attempting delivery inline. This ordering (persist, then
+// return; delivery happens later, on the worker's own schedule) is a
+// correctness requirement, not just a latency optimization: if this service
+// crashed between a delivery attempt and persisting, an alert could be lost
+// with no record it was ever received. Persisting first, unconditionally,
+// before any attempt is made, is what makes "never lose a buffered alert,
+// even across this service's own restart" true regardless of when in the
+// flow a crash happens.
+//
+// Both CreateAlert (the generic POST /alerts entrypoint) and every
+// vendor-adapter handler (adapter_azure.go, adapter_site24x7.go,
+// adapter_opensearch.go, adapter_grafana.go) call this same method after
+// building their own AlertRequest — from the wire-format JSON directly for
+// CreateAlert, from a vendor-native payload for an adapter — so none of
+// validation/id-generation/mapping/persistence is ever duplicated.
+//
+// On failure, err wraps errValidation (via errors.Is) for a validate()
+// failure, or is a bare error from h.store.Enqueue for a persistence
+// failure — callers map the former to 400 and the latter to 500, matching
+// CreateAlert's original behavior.
+func (h *AlertHandler) enqueueAlert(ctx context.Context, req AlertRequest) (id, alertNumber string, err error) {
+	if msg := req.validate(); msg != "" {
+		return "", "", fmt.Errorf("%w: %s", errValidation, msg)
+	}
+
+	// id is still generated here (internal/idgen), before persistence: it is
+	// alert_buffer's DB primary key, needed up front as internal/store.Store's
+	// Enqueue parameter. The row's externally-facing identifier, by contrast,
+	// is generated by the store itself (this service's own Postgres sequence)
+	// during Enqueue — see buildPayload below and internal/store.Store.Enqueue's
+	// doc comment for why that has to be a callback rather than a plain value.
+	id = idgen.New()
+
+	alertNumber, err = h.store.Enqueue(ctx, id, func(alertNumber string) ([]byte, error) {
+		incidentReq := MapToIncident(req, alertNumber, h.callerID)
+		payload := alertpayload.Payload{
+			CreateIncidentRequest: incidentReq,
+			Source:                req.Source,
+			UniqueIdentifier:      req.UniqueIdentifier,
+			Service:               req.Service,
+			MetricName:            req.MetricName,
+			AlertStatus:           deriveAlertStatus(req),
+		}
+		return json.Marshal(payload)
+	})
+	if err != nil {
+		return "", "", err
+	}
+
+	slog.InfoContext(ctx, "alert buffered", "id", id, "alertNumber", alertNumber, "source", req.Source, "severity", req.Severity, "service", req.Service)
+	return id, alertNumber, nil
+}
+
+// CreateAlert handles POST /alerts: the generic, pre-normalized entrypoint
+// for any source that can speak AlertRequest's own JSON shape directly. It
+// reads the body, unmarshals it into an AlertRequest, and delegates to
+// enqueueAlert for everything else. See enqueueAlert's doc comment for the
+// persist-then-respond correctness argument.
 func (h *AlertHandler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
@@ -212,37 +312,28 @@ func (h *AlertHandler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
-	if msg := req.validate(); msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
-		return
-	}
 
-	// id is still generated here (internal/idgen), before persistence: it is
-	// alert_buffer's DB primary key, needed up front as internal/store.Store's
-	// Enqueue parameter. The row's externally-facing identifier, by contrast,
-	// is generated by the store itself (this service's own Postgres sequence)
-	// during Enqueue — see buildPayload below and internal/store.Store.Enqueue's
-	// doc comment for why that has to be a callback rather than a plain value.
-	id := idgen.New()
+	id, alertNumber, err := h.enqueueAlert(r.Context(), req)
+	h.writeEnqueueResult(w, r, id, alertNumber, err)
+}
 
-	alertNumber, err := h.store.Enqueue(r.Context(), id, func(alertNumber string) ([]byte, error) {
-		incidentReq := MapToIncident(req, alertNumber, h.callerID)
-		payload := alertpayload.Payload{
-			CreateIncidentRequest: incidentReq,
-			Source:                req.Source,
-			UniqueIdentifier:      req.UniqueIdentifier,
-			Service:               req.Service,
-			MetricName:            req.MetricName,
-			AlertStatus:           deriveAlertStatus(req),
-		}
-		return json.Marshal(payload)
-	})
+// writeEnqueueResult writes the HTTP response for an enqueueAlert result,
+// shared by CreateAlert and every vendor-adapter handler in adapter_*.go so
+// the 400-vs-500 classification and the 202 success body are written
+// identically everywhere: a validation failure (errors.Is(err,
+// errValidation)) maps to 400 with the validation message, any other error
+// maps to 500 with the generic internal-error message (logged, since it's
+// this service's own store failing, not a caller mistake), and success
+// writes the same {"id":..., "alertNumber":...} body CreateAlert always has.
+func (h *AlertHandler) writeEnqueueResult(w http.ResponseWriter, r *http.Request, id, alertNumber string, err error) {
 	if err != nil {
+		if errors.Is(err, errValidation) {
+			writeError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), errValidation.Error()+": "))
+			return
+		}
 		slog.ErrorContext(r.Context(), "handler: failed to persist buffered alert", "err", err)
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
 	}
-
-	slog.InfoContext(r.Context(), "alert buffered", "id", id, "alertNumber", alertNumber, "source", req.Source, "severity", req.Severity, "service", req.Service)
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "alertNumber": alertNumber})
 }

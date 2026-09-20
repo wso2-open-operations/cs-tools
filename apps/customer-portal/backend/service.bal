@@ -1277,6 +1277,53 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken, payload.projectId);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(payload.projectId, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to create a case for the selected project. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${payload.projectId} not found for user: ${userInfo.userId}`);
+                return <http:BadRequest>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve project details.";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        if isProjectSuspendedOrExpired(projectResponse.closureState, projectResponse.endDate) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to create a case for suspended/expired project: ${
+                    payload.projectId}!`);
+            return <http:Forbidden>{
+                body: {
+                    message: "Cannot create cases for a suspended or contract-expired project."
+                }
+            };
+        }
+
         entity:CaseCreateResponse|error createdCaseResponse = entity:createCase(userInfo.idToken, payload);
         if createdCaseResponse is error {
             if getStatusCode(createdCaseResponse) == http:STATUS_UNAUTHORIZED {
@@ -2456,6 +2503,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # Submit feedback for a specific case.
     #
     # + id - ID of the case
+    # + payload - Submitted feedback payload
     # + return - Submitted feedback response or error response
     resource function post cases/[entity:IdString id]/feedback(http:RequestContext ctx,
             types:CaseFeedbackPayload payload)
@@ -2466,6 +2514,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             return <http:InternalServerError>{
                 body: {
                     message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, id);
+        if caseResponse is entity:CaseResponse && !isCaseClosed(caseResponse) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to submit feedback for non-closed case: ${id}`);
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_NOT_CLOSED_FOR_FEEDBACK
                 }
             };
         }
@@ -2545,6 +2603,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, id);
+        if caseResponse is entity:CaseResponse && isCaseClosed(caseResponse) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to add attachment to closed case: ${id}`);
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_CREATE
+                }
+            };
+        }
+
         entity:AttachmentCreateResponse|error createdAttachmentResponse = entity:createAttachment(userInfo.idToken,
                 {
                     referenceId: id,
@@ -2620,6 +2688,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             return <http:BadRequest>{
                 body: {
                     message: validateAttachmentUpdatePayload
+                }
+            };
+        }
+
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, caseId);
+        if caseResponse is entity:CaseResponse && isCaseClosed(caseResponse) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to update attachment on closed case: ${caseId}`);
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_UPDATE
                 }
             };
         }
@@ -2786,7 +2864,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the attachment
     # + return - Success message or error response
     resource function delete attachments/[entity:IdString id](http:RequestContext ctx)
-        returns http:Ok|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -2795,6 +2873,22 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
                 }
             };
+        }
+
+        entity:AttachmentResponse|error attachment = entity:getAttachment(userInfo.idToken, id);
+        if attachment is entity:AttachmentResponse {
+            string referenceId = attachment.referenceId;
+            if referenceId != "" {
+                entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, referenceId);
+                if caseResponse is entity:CaseResponse && isCaseClosed(caseResponse) {
+                    log:printWarn(string `User: ${userInfo.userId} attempted to delete attachment: ${id} from closed case: ${referenceId}`);
+                    return <http:BadRequest>{
+                        body: {
+                            message: ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_DELETE
+                        }
+                    };
+                }
+            }
         }
 
         entity:AttachmentDeleteResponse|error response = entity:deleteAttachment(userInfo.idToken, id);

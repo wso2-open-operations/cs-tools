@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -31,6 +33,7 @@ import (
 type entityCaseClient interface {
 	SearchCases(ctx context.Context, req entity.SearchCasesRequest) (entity.SearchCasesResponse, error)
 	GetCase(ctx context.Context, id string) (entity.CaseView, error)
+	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
 	CreateCase(ctx context.Context, req entity.CreateCaseRequest) (entity.CreateCaseResponse, error)
 	UpdateConversation(ctx context.Context, id string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error)
 	UpdateCase(ctx context.Context, id string, req entity.UpdateCaseRequest) (entity.UpdateCaseResponse, error)
@@ -123,7 +126,38 @@ func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Reque
 	writeJSONValue(w, http.StatusOK, dto.MapCaseAttachments(result))
 }
 
-// CreateCaseAttachment handles POST /cases/{id}/attachments.
+// caseStateReader is the single entity-service call the closed-case guard
+// needs. It is declared separately from entityCaseClient/entityAttachmentClient
+// so both handlers can share one guard implementation.
+type caseStateReader interface {
+	GetCase(ctx context.Context, id string) (entity.CaseView, error)
+}
+
+// caseIsClosed reports whether caseID names a case in the closed state.
+//
+// A closed case's attachments are read-only, and this backend is where that
+// rule lives: entity-service still accepts the write, and the webapp only
+// disables the upload/delete controls, so the direct-API path needs closing
+// too. Used by CreateCaseAttachment, PatchCaseAttachment, and — via the
+// attachment's own referenceId — AttachmentHandler.DeleteAttachment.
+//
+// The extra lookup deliberately fails open: an entity-service error leaves the
+// operation to proceed rather than blocking a legitimate write on a failed
+// guard read. That also covers DeleteAttachment's case, where referenceId may
+// name a deployment or conversation instead of a case and GetCase 404s. This
+// mirrors the Ballerina backend's
+// `caseResponse is entity:CaseResponse && isCaseClosed(caseResponse)` guard,
+// which ignores the error branch the same way.
+func caseIsClosed(ctx context.Context, client caseStateReader, caseID string) bool {
+	caseView, err := client.GetCase(ctx, caseID)
+	if err != nil {
+		return false
+	}
+	return dto.IsCaseStateClosed(caseView.State)
+}
+
+// CreateCaseAttachment handles POST /cases/{id}/attachments. Rejected with 400
+// when the case is closed (see caseIsClosed).
 func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -145,6 +179,12 @@ func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Reques
 	var req dto.CreateCaseAttachmentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if caseIsClosed(r.Context(), h.entity, id) {
+		slog.WarnContext(r.Context(), "rejected attachment create on a closed case", "userID", user.UserID, "caseID", id)
+		writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentCreate)
 		return
 	}
 
@@ -200,6 +240,25 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+
+	if req.ProjectID == "" || !uuidRe.MatchString(req.ProjectID) {
+		writeError(w, http.StatusBadRequest, "Project ID is required and must be a valid UUID.")
+		return
+	}
+
+	project, err := h.entity.GetProject(r.Context(), req.ProjectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProject failed during CreateCase", "userID", user.UserID, "projectID", req.ProjectID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve project details.")
+		return
+	}
+
+	if isProjectSuspendedOrExpired(project) {
+		slog.WarnContext(r.Context(), "attempted to create case for suspended or expired project", "userID", user.UserID, "projectID", req.ProjectID)
+		writeError(w, http.StatusForbidden, "Cannot create cases for a suspended or contract-expired project.")
+		return
+	}
+
 	entityReq := dto.BuildEntityCreateCaseRequest(req)
 	// CreatedBy is server-set from the authenticated caller, never from the
 	// request body (the struct's json:"-" tag means a client-supplied value
@@ -374,7 +433,8 @@ func (h *CaseHandler) GetCaseFeedback(w http.ResponseWriter, r *http.Request) {
 	writeJSONValue(w, http.StatusOK, dto.MapCaseFeedback(result))
 }
 
-// SubmitCaseFeedback handles POST /cases/{id}/feedback.
+// SubmitCaseFeedback handles POST /cases/{id}/feedback. Rejected with 400
+// when the case is not in the closed state.
 func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -399,6 +459,12 @@ func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if caseView, err := h.entity.GetCase(r.Context(), id); err == nil && !dto.IsCaseStateClosed(caseView.State) {
+		slog.WarnContext(r.Context(), "rejected feedback submission on a non-closed case", "userID", user.UserID, "caseID", id, "state", caseView.State)
+		writeError(w, http.StatusBadRequest, ErrMsgCaseNotClosedForFeedback)
+		return
+	}
+
 	result, err := h.entity.SubmitCaseFeedback(r.Context(), id, dto.BuildEntitySubmitCaseFeedbackRequest(req))
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SubmitCaseFeedback failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
@@ -413,7 +479,8 @@ func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request)
 // referenceId/referenceType are injected server-side (caseId path param,
 // ReferenceTypeCase). Only Name is read from the request body — Description
 // is never wired through here, by design for this route (case attachments
-// don't carry a description).
+// don't carry a description). Rejected with 400 when the case is closed (see
+// caseIsClosed).
 func (h *CaseHandler) PatchCaseAttachment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -439,6 +506,12 @@ func (h *CaseHandler) PatchCaseAttachment(w http.ResponseWriter, r *http.Request
 		return
 	}
 	req.Description = nil // this route never forwards description (case attachments don't carry one)
+
+	if caseIsClosed(r.Context(), h.entity, caseID) {
+		slog.WarnContext(r.Context(), "rejected attachment update on a closed case", "userID", user.UserID, "caseID", caseID, "attachmentID", attachmentID)
+		writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentUpdate)
+		return
+	}
 
 	entityReq := dto.BuildEntityUpdateAttachmentRequest(req, caseID, entity.ReferenceTypeCase)
 	result, err := h.entity.UpdateAttachment(r.Context(), attachmentID, entityReq)
@@ -527,3 +600,17 @@ func (h *CaseHandler) SearchCaseEscalations(w http.ResponseWriter, r *http.Reque
 
 	writeJSONValue(w, http.StatusOK, dto.MapEscalationSearchResponse(result))
 }
+
+// isProjectSuspendedOrExpired checks if a project is suspended or its contract has ended.
+func isProjectSuspendedOrExpired(project entity.ProjectDetailsView) bool {
+	if project.ClosureState != nil && strings.EqualFold(strings.TrimSpace(*project.ClosureState), "suspended") {
+		return true
+	}
+	if !project.EndDate.IsZero() {
+		todayUTC := time.Now().UTC().Format("2006-01-02")
+		endDateUTC := project.EndDate.UTC().Format("2006-01-02")
+		return todayUTC > endDateUTC
+	}
+	return false
+}
+

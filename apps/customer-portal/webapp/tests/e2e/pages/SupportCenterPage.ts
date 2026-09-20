@@ -17,6 +17,7 @@
 import { type Locator, type Page, expect } from "../fixtures/test";
 import { CASE_DETAIL, SUPPORT_CENTER } from "../utils/selectors";
 import { SideNavPage } from "./SideNavPage";
+import { projectPathPattern } from "../utils/ids";
 
 /** How long to allow for the shell and the card's own queries to resolve. */
 const LOAD_TIMEOUT_MS = 60_000;
@@ -49,7 +50,7 @@ export class SupportCenterPage {
     await sideNav.open(projectId);
     await sideNav.clickItem(
       SUPPORT_CENTER.navItem,
-      new RegExp(`/projects/${projectId}/${SUPPORT_CENTER.pathSegment}$`),
+      projectPathPattern(projectId, `${SUPPORT_CENTER.pathSegment}$`),
     );
     await expect(this.outstandingCasesCard()).toBeVisible({
       timeout: LOAD_TIMEOUT_MS,
@@ -123,7 +124,7 @@ export class SupportCenterPage {
   async returnFromList(projectId: string): Promise<void> {
     await this.backButton().click();
     await expect(this.page).toHaveURL(
-      new RegExp(`/projects/${projectId}/${SUPPORT_CENTER.pathSegment}$`),
+      projectPathPattern(projectId, `${SUPPORT_CENTER.pathSegment}$`),
       { timeout: LOAD_TIMEOUT_MS },
     );
   }
@@ -150,6 +151,41 @@ export class SupportCenterPage {
         }),
       })
       .last();
+  }
+
+  /**
+   * The Chat History card.
+   *
+   * Located the same way as the Outstanding Cases card — by its title *and* one
+   * of its own buttons, so nested containers resolve to the card itself.
+   */
+  chatHistoryCard(): Locator {
+    return this.main()
+      .locator("div")
+      .filter({
+        has: this.page.getByText(SUPPORT_CENTER.chatHistory.title, {
+          exact: true,
+        }),
+      })
+      .filter({
+        has: this.page.getByRole("button", {
+          name: SUPPORT_CENTER.chatHistory.allChatHistoryButton,
+          exact: true,
+        }),
+      })
+      .last();
+  }
+
+  /**
+   * A footer button of the Chat History card.
+   *
+   * @param name - Exact button label.
+   */
+  chatHistoryFooterButton(name: string): Locator {
+    return this.chatHistoryCard().getByRole("button", {
+      name,
+      exact: true,
+    });
   }
 
   /**

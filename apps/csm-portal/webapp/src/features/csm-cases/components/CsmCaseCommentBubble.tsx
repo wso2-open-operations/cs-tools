@@ -15,7 +15,7 @@
 // under the License.
 
 import { Avatar, Box, Chip, Paper, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
-import { Bot } from "@wso2/oxygen-ui-icons-react";
+import { Bot, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
@@ -344,11 +344,19 @@ export default function CsmCaseCommentBubble({
           // stronger border keeps entries visually distinct in both themes.
           bgcolor: "background.paper",
           borderColor: "action.disabled",
+          // Internal work notes get a distinct amber tint + left accent bar,
+          // never the brand/primary colour used pervasively elsewhere (WSO2
+          // engineer avatars, buttons) — that would read as "just another
+          // WSO2-authored entry" rather than "this never reaches the
+          // customer". `warning.50`/`warning.main` are the same tokens
+          // FEEDBACK_PALETTE already uses for its warning banner in both
+          // light and dark theme, so this reads correctly in both without a
+          // new colour token.
           ...(isInternal && {
-            bgcolor: "action.hover",
-            borderColor: "divider",
-            borderLeftWidth: "3px",
-            borderLeftColor: "primary.main",
+            bgcolor: "warning.50",
+            borderColor: "warning.main",
+            borderLeftWidth: "4px",
+            borderLeftColor: "warning.main",
           }),
         }}
       >
@@ -369,9 +377,21 @@ export default function CsmCaseCommentBubble({
               variant="outlined"
             />
           )}
-          {/* A filled chip "bubble" marks the work note; paired with the tinted
-              background it reads as internal without a heavy banner. */}
-          {isInternal && <SemanticChip role="default" variant="outlined" label="Internal note" />}
+          {/* Filled + amber (not the neutral "default" role) so the marker
+              still reads as "internal only" on its own, independent of the
+              tinted background — e.g. if the bubble is copied out of
+              context, or scanned quickly in a long trail. Paired with the
+              left accent bar and background tint above for a persistent,
+              always-visible signal rather than a hover-only affordance. */}
+          {isInternal && (
+            <Chip
+              size="small"
+              color="warning"
+              variant="filled"
+              icon={<Lock size={12} />}
+              label="Internal note"
+            />
+          )}
           <Typography variant="caption" color="text.secondary">
             <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
           </Typography>
@@ -380,6 +400,13 @@ export default function CsmCaseCommentBubble({
           sx={{
             minWidth: 0,
             maxWidth: "100%",
+            // Newly generated comments no longer carry a per-run
+            // `white-space: pre-wrap` inline style (digiops-cs#2933) — this
+            // container declares it once instead, so multi-space runs and
+            // leading/trailing spaces the user typed still aren't collapsed.
+            // Older comments still carry their own inline style and are
+            // unaffected either way.
+            whiteSpace: "pre-wrap",
             // Backend HTML can put an explicit pixel width on *any* element — a
             // Word/Excel paste arrives as `<div style="width:2400px">`, and a
             // `<pre>`/`<p>` can carry one just as easily — so the per-tag rules

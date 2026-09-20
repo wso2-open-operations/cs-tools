@@ -2,8 +2,9 @@
 
 Go HTTP server (`net/http`, Go 1.26+) that ingests normalized alerts from
 external monitoring tools and turns each into a platform incident via
-`csm-integration-service`, buffering durably and escalating via Twilio when
-CSM can't be reached. Read `README.md` first for the architecture diagram,
+`csm-integration-service`, buffering durably and escalating (Twilio call +
+Google Chat + email, independently) when CSM can't be reached. Read
+`README.md` first for the architecture diagram,
 config table, and severity-mapping table — this file is the "why", not a
 restatement of the "what".
 
@@ -17,8 +18,12 @@ Every design choice here traces back to that:
   succeeding. See `internal/handler.AlertHandler.CreateAlert`'s doc comment.
 - The buffer is a **dedicated** Postgres database, never CSM's own. Sharing
   one would reintroduce the exact coupling this service removes.
-- The escalation channel (Twilio voice call) is **independent of CSM** —
-  reachable even when CSM itself is fully down.
+- The escalation channels (Twilio voice call, Google Chat, email — all
+  three, independently) are **independent of CSM** — reachable even when
+  CSM itself is fully down. `MultiChannelEscalator` fans out to all
+  configured channels rather than picking one; see its own doc comment for
+  why (more independent ways for SRE to notice beats picking a "best"
+  channel).
 - Retry state (`retry_count`, `last_attempt_at`) lives in Postgres, not
   in-process memory, so it survives this service's own restart or a
   regional failover — an in-process retry loop would not.
@@ -46,9 +51,9 @@ through. The only status this service treats as a **terminal**,
 non-retryable failure is **400** (`apierror.Error.StatusCode ==
 http.StatusBadRequest`): the payload itself is invalid, and retrying the
 same payload can never succeed. Do not add a special case for 401 that
-skips retry — every buffered alert currently ends up escalated via Twilio
-specifically because this classification is correct; changing it silently
-drops every alert this service ever ingests instead.
+skips retry — every buffered alert currently ends up escalated (Twilio +
+Google Chat + email) specifically because this classification is correct;
+changing it silently drops every alert this service ever ingests instead.
 
 When the missing end-user-identity infrastructure lands upstream and
 `POST /incidents` starts succeeding, this service's behavior should need
@@ -200,16 +205,32 @@ trimmed to `MakeCall`/`Escalate` only (no SMS need in this service) — credited
 not wired as a dependency. Diverge from it freely if this service's needs change; there is no
 coupling to keep in sync.
 
+`internal/notifications/googlechat.go` and `email.go` are the same kind of self-contained
+copy, adapted from `csm-notification-service`'s own Google Chat and email clients but trimmed
+hard: this service has exactly one message to send (an escalation notice) to exactly one
+space/recipient-list, not `csm-notification-service`'s many per-product Chat spaces or its
+full CC/BCC/attachments email contract. `internal/notifications/multi.go`'s
+`MultiChannelEscalator` is this service's own — nothing to adapt from, since no existing
+client fans one message out to three independent channels — and is deliberately not a
+first-success-wins race: see its doc comment for why every configured channel is always
+attempted, and why partial failure (one channel down, others up) still counts as escalation
+succeeding.
+
 ## Deployment isolation
 
 This service is deployed and scaled independently of every other CSM component, by design —
-its entire purpose is to keep working when the rest of the CSM platform doesn't. Its only
-runtime dependency on anything CSM-owned is an HTTP call to `csm-integration-service`'s
-`POST /incidents` / `POST /incidents/search` (see "Why `csm-integration-service`, not
-`entity-service`, directly" above). It does not import any other service's Go module, is not
-deployed alongside any other component, and its buffer database is its own dedicated Postgres
-instance, never shared with the CSM platform's database. Do not add an import of, or a
-deploy-time dependency on, any other `cs-tools` component without revisiting this decision.
+its entire purpose is to keep working when the rest of the CSM platform doesn't. Its runtime
+dependencies are: `csm-integration-service`'s `POST /incidents` / `POST /incidents/search`
+(see "Why `csm-integration-service`, not `entity-service`, directly" above, the only
+CSM-owned one), and — for escalation only, exercised solely when the first dependency is
+failing — Twilio, a Google Chat incoming webhook, and the internal email-notification service.
+None of the three escalation channels is CSM-owned in the sense `csm-integration-service` is;
+losing all three at the same moment as a CSM outage is the one scenario this service still has
+no further fallback for (see README's "Known limitations"). It does not import any other
+service's Go module, is not deployed alongside any other component, and its buffer database is
+its own dedicated Postgres instance, never shared with the CSM platform's database. Do not add
+an import of, or a deploy-time dependency on, any other `cs-tools` component without
+revisiting this decision.
 
 **Run exactly one instance of this worker today.** `PendingBatch` (`internal/store`) reads
 pending rows without a lease or row lock, and `Worker.attempt` skips its dedup search whenever
@@ -246,6 +267,45 @@ deliberately does not run migrations itself — see its doc comment.
 your local `go` binary is older, `GOTOOLCHAIN=auto` (Go's own built-in
 toolchain-management feature) transparently downloads and uses 1.26 — no
 need to lower the `go.mod` version to match an older local install.
+
+## Vendor adapters: translate, then reuse `enqueueAlert` unchanged
+
+`POST /alerts` only ever accepted this service's own pre-normalized
+`AlertRequest` JSON — nothing translated a real monitoring tool's actual
+webhook payload into it. `internal/handler/adapter_azure.go`,
+`adapter_site24x7.go`, `adapter_opensearch.go`, and `adapter_grafana.go`
+close that gap: each is a dedicated `POST /alerts/adapters/<vendor>` route
+that parses one vendor's own native payload into an `AlertRequest`, then
+calls the same unexported `AlertHandler.enqueueAlert` that `CreateAlert`
+itself calls (see `internal/handler/alerts.go`) — every adapter reuses
+100% of validation/buffering/worker/grouping/dedup/escalation, none of it
+duplicated. Each adapter's own file has a pure `mapXPayload` function
+(parse+map, independently unit-tested) separate from the thin HTTP handler
+wrapping it, mirroring the `CreateAlert`/`enqueueAlert` split.
+
+One route per vendor shape, not one shared endpoint branching on payload
+shape internally, is a deliberate choice (the prior ServiceNow-based
+pipeline this replaces did the latter, ambiguously, for Azure vs. Site24x7)
+— simpler to route, reason about, and test. All four adapter routes sit
+behind the exact same `basicAuth` middleware as `POST /alerts` (wired in
+`cmd/server/main.go`) — there is no route on this service that skips
+inbound authentication, adapters included.
+
+Site24x7 and Grafana each filter on their vendor's own "is this actually
+firing" signal (`STATUS` TROUBLE/DOWN/CRITICAL; `state == "alerting"`) and
+respond `200` with a small acknowledgment body for anything else, rather
+than treating a non-matching-but-valid payload as an error — visibility the
+prior pipeline didn't have (it silently dropped non-matching statuses).
+
+`AlertRequest.Source` is always a fixed, lowercase, vendor-identifying
+literal (`"azure"`, `"site24x7"`, `"opensearch"`, `"grafana"`) chosen by the
+adapter itself, never derived from a field inside the vendor's own payload —
+OpenSearch's payload has its own `source` field that is a human-readable
+title, not the originating system's identity, and mapping it directly would
+have been wrong. `"azure"` and `"site24x7"` are the literals
+`internal/severity.MapContactType` already has entries for; keep using
+those exact strings if a new adapter's vendor gets a `ContactType` entry
+added there in the future.
 
 ## Vendor neutrality
 

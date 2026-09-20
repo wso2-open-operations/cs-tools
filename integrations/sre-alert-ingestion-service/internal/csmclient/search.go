@@ -21,7 +21,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
+
+// TagDelimiterChars are the characters DedupTag/GroupTag use to structure a
+// tag: "[", "]", ":". A field embedded unescaped inside one of those tags
+// must not contain them — otherwise a crafted Source/UniqueIdentifier could
+// forge a tag string that collides with a different alert's group
+// (attacker-controlled grouping/dedup conflation) or inject unexpected
+// structure into the free-text search query sent to csm-integration-service.
+// internal/handler.AlertRequest.validate rejects these on ingress; anything
+// consuming Source/UniqueIdentifier out of a persisted row (e.g.
+// internal/worker.Worker.tryGroup) must re-check them too, since a legacy
+// row buffered before that ingress check existed could still carry one.
+const TagDelimiterChars = "[]:"
 
 // DedupTag returns the exact, stable tag internal/handler.MapToIncident
 // embeds in every CreateIncidentRequest.Subject it builds, keyed off the
@@ -43,22 +56,43 @@ func DedupTag(alertNumber string) string {
 	return "[alert:" + alertNumber + "]"
 }
 
+// GroupTag returns the tag internal/handler.buildSubject embeds in a new
+// incident's Subject whenever the triggering alert carries a vendor-supplied
+// UniqueIdentifier — the cross-alert grouping key a later, different alert
+// reporting the same underlying condition (e.g. that condition's "resolved"
+// event) searches for via SearchOpenIncidentByGroupTag, so it attaches to
+// the same incident instead of creating a new one.
+//
+// Format: "[group:<source>:<uniqueIdentifier>]". Unlike DedupTag (unique per
+// buffered alert, for this service's own retry-safety), this value is
+// deliberately the *same* across every alert reporting the same condition —
+// that's what makes it a grouping key rather than a per-row identifier.
+//
+// This mirrors, in spirit, an alert_hash + time-window dedup design found
+// (2026-09) in a ServiceNow prod flow ("Create Incident from Alert") built
+// for a different, not-yet-live alert pipeline — but is not a port of it:
+// that flow's referenced alert_hash column does not actually exist on any
+// SN table today (confirmed by direct schema read), so there was no live
+// field-level mechanism to copy. The 15-minute window
+// (Worker.Config.GroupWindow's default) is the one concrete, prod-confirmed
+// parameter carried over from that design; the tag itself is this service's
+// own.
+func GroupTag(source, uniqueIdentifier string) string {
+	return "[group:" + source + ":" + uniqueIdentifier + "]"
+}
+
 // SearchIncidentsFilters is the filter subset of entity-service's own
 // SearchIncidentsFilters (internal/domain/entity.go) this service actually
 // sends. The real upstream type carries more optional fields (Priorities,
-// ParentIDs, a fuller Filters array) — this service only ever needs
-// free-text SearchQuery for the pre-retry dedup check, plus Number and a
-// state Filters entry for the incident-grouping open-state confirmation
-// (see SearchOpenIncidentByNumber), so the rest are left zero-valued/omitted
-// rather than modeled here.
+// ParentIDs, Number) — this service only ever needs free-text SearchQuery
+// (the dedup/group tag) plus a generic Filters array (state, createdOn), so
+// the rest are left zero-valued/omitted rather than modeled here.
 type SearchIncidentsFilters struct {
 	SearchQuery string `json:"searchQuery"`
-	// Number filters to the incident whose human-readable number (e.g.
-	// "INC0010001") exactly matches. Only set by SearchOpenIncidentByNumber.
-	Number *string `json:"number,omitempty"`
 	// Filters is entity-service's generic field/op/values filter array. This
-	// service only ever sends a single "state" (op "in") entry — see
-	// openIncidentStates and SearchOpenIncidentByNumber.
+	// service sends "state" (op "in", see openIncidentStates) and,  for the
+	// incident-grouping search only, "createdOn" (op "gte") to bound the
+	// match to Worker.Config.GroupWindow — see SearchOpenIncidentByGroupTag.
 	Filters []IncidentFieldFilter `json:"filters,omitempty"`
 }
 
@@ -151,31 +185,38 @@ func (c *Client) SearchIncidentByTag(ctx context.Context, tag string) (*CreateIn
 	return c.searchFirstIncident(ctx, req)
 }
 
-// SearchOpenIncidentByNumber calls POST /incidents/search filtered to the
-// incident whose human-readable number exactly matches number, AND a state
-// filter restricted to openIncidentStates (i.e. not Resolved/Closed/
-// Cancelled), and reports whether such a still-open incident exists.
+// SearchOpenIncidentByGroupTag calls POST /incidents/search filtered to
+// GroupTag(source, uniqueIdentifier) AND a state filter restricted to
+// openIncidentStates (i.e. not Resolved/Closed/Cancelled) AND createdOn >=
+// since, and reports whether such a still-open, still-within-window
+// incident exists.
 //
-// This backs internal/worker's incident-grouping check: before attaching a
-// new alert to an earlier alert's already-known incident (found via a
-// recorded alert-incident-mapping row), this confirms that incident hasn't
-// since been resolved or closed — grouping a new, currently-firing alert
-// onto a closed incident would silently bury it instead of surfacing it.
+// This backs internal/worker's incident-grouping check: before creating a
+// new incident for an alert that carries a UniqueIdentifier, this looks for
+// an earlier alert reporting the same (source, uniqueIdentifier) condition
+// whose incident is both still open and was created within the configured
+// GroupWindow — see GroupTag's doc comment for why this is not a strict
+// port of any single existing mechanism. since is the caller's
+// responsibility to compute (Worker.now().Add(-GroupWindow)), not this
+// method's — keeps this package free of a "what time is it" dependency.
 //
 // Known limitation: like SearchIncidentByTag and CreateIncident, this
 // endpoint is ServiceNow-backed and requires a forwarded end-user identity
 // token this stack cannot currently supply, so it also 401s on every call
 // today (see this package's doc comment and this service's README/CLAUDE.md).
-// internal/worker fails open on any error here — "we couldn't confirm the
-// incident is still open" is treated the same as "not groupable, proceed as
-// before," never as "assume it's open." This method is structurally correct
-// and ready for when that infrastructure gap is closed; it does not itself
-// work around it.
-func (c *Client) SearchOpenIncidentByNumber(ctx context.Context, number string) (*CreateIncidentResult, bool, error) {
+// internal/worker fails open on any error here — "we couldn't confirm a
+// groupable incident exists" is treated the same as "not groupable, proceed
+// as before," never as "assume one exists." This method is structurally
+// correct and ready for when that infrastructure gap is closed; it does not
+// itself work around it.
+func (c *Client) SearchOpenIncidentByGroupTag(ctx context.Context, tag string, since time.Time) (*CreateIncidentResult, bool, error) {
 	req := SearchIncidentsRequest{
 		Filters: SearchIncidentsFilters{
-			Number:  &number,
-			Filters: []IncidentFieldFilter{{Field: "state", Op: "in", Values: openIncidentStates}},
+			SearchQuery: tag,
+			Filters: []IncidentFieldFilter{
+				{Field: "state", Op: "in", Values: openIncidentStates},
+				{Field: "createdOn", Op: "gte", Values: []string{since.UTC().Format(time.RFC3339)}},
+			},
 		},
 		Pagination: Pagination{Limit: 1, Offset: 0},
 	}
@@ -183,7 +224,7 @@ func (c *Client) SearchOpenIncidentByNumber(ctx context.Context, number string) 
 }
 
 // searchFirstIncident is the shared POST /incidents/search call + decode
-// path behind SearchIncidentByTag and SearchOpenIncidentByNumber — both only
+// path behind SearchIncidentByTag and SearchOpenIncidentByGroupTag — both only
 // ever care about "does at least one incident match, and if so what's its
 // id/number," differing only in which filters they send.
 func (c *Client) searchFirstIncident(ctx context.Context, req SearchIncidentsRequest) (*CreateIncidentResult, bool, error) {

@@ -51,7 +51,7 @@ const testDashboardsConfigJSON = `[
   {"id":"sample-team-dashboard","displayName":"Sample Team Dashboard","targetTeam":"sample-team","isTeamBased":true,"widgets":[
     {"id":"team-open-cases","displayName":"Team Open Cases","section":"Overview","resourceType":"case","shape":"count","gridWidth":4,"query":{"filters":[{"field":"severity","op":"in","values":["critical","high"]},{"field":"state","op":"in","values":["open","work_in_progress"]}]}},
     {"id":"unassigned-cases","displayName":"Unassigned Cases","section":"Overview","resourceType":"case","shape":"count","gridWidth":4,"query":{"filters":[{"field":"assignedUserId","op":"isEmpty"},{"field":"state","op":"in","values":["open"]}]}},
-    {"id":"cases-by-severity","displayName":"Cases by Severity","description":"Share of active cases at each severity level.","resourceType":"case","shape":"pie","gridWidth":4,"query":{"filters":[{"field":"state","op":"in","values":["open","work_in_progress"]}]},"slices":[
+    {"id":"cases-by-severity","displayName":"Cases by Severity","description":"Share of active cases at each severity level.","resourceType":"case","shape":"pie","gridWidth":4,"query":{"filters":[{"field":"state","op":"in","values":["open","work_in_progress"]}]},"inlineDrilldown":true,"inlineLabels":true,"slices":[
       {"label":"Critical","color":"error","query":{"filters":[{"field":"severity","op":"in","values":["critical"]}]}},
       {"label":"Mine","query":{"filters":[{"field":"assignedUserId","op":"in","values":["__current_user__"]}]}}
     ]},
@@ -575,6 +575,18 @@ func TestGetDashboardDetail(t *testing.T) {
 		}
 		if len(pie.Slices) != 2 {
 			t.Fatalf("len(cases-by-severity.Slices) = %d, want 2", len(pie.Slices))
+		}
+		if !pie.InlineDrilldown {
+			t.Errorf("cases-by-severity.InlineDrilldown = false, want true (configured true, must round-trip through widgetViews unmodified)")
+		}
+		if pendingCR, ok := byID["pending-change-requests"]; ok && pendingCR.InlineDrilldown {
+			t.Errorf("pending-change-requests.InlineDrilldown = true, want false (shape count never configures it, must not default to true)")
+		}
+		if !pie.InlineLabels {
+			t.Errorf("cases-by-severity.InlineLabels = false, want true (configured true, must round-trip through widgetViews unmodified)")
+		}
+		if pendingCR, ok := byID["pending-change-requests"]; ok && pendingCR.InlineLabels {
+			t.Errorf("pending-change-requests.InlineLabels = true, want false (shape count never configures it, must not default to true)")
 		}
 
 		var critical, mine *dashboardPieSliceView

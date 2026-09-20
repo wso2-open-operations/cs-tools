@@ -115,8 +115,47 @@ HTTP Request
 | DB_PASSWORD | Yes      | —         | Database password |
 | DB_NAME     | Yes      | postgres  | Database name     |
 | DB_SSLMODE  | No       | require   | SSL mode          |
+| SERVER_PORT | No       | 8080      | Main API listener port |
+| HEALTH_PORT | No       | 8081      | Health probe listener port; must differ from `SERVER_PORT`, and must be left at its default in Choreo deployments (see below) |
 
 > `.env` file is loaded automatically if present. Absent `.env` is silently ignored; a malformed one causes a fatal startup error.
+
+## Health probes
+
+The service listens on **two** ports. `SERVER_PORT` (8080) carries the API and is published at
+**Organization** visibility. `HEALTH_PORT` (8081) carries nothing but the health probes and is
+published at **Public** visibility, so external alerting can poll it without credentials — see
+`.choreo/component.yaml`, which declares one Choreo endpoint per port.
+
+`.choreo/component.yaml` declares both ports statically and nothing reconciles them with the
+environment at deploy time, so **overriding `SERVER_PORT` or `HEALTH_PORT` in a Choreo deployment
+routes traffic to a port with no listener.** For the health endpoint that is particularly
+unhelpful: a probe that never answers looks exactly like the outage it exists to report. Override
+these locally only.
+
+The split is deliberate and is the security boundary itself: what is publicly reachable is decided
+by which mux a handler is registered on (`internal/server/health.go`), not by a gateway path rule
+in another system that fails open if it is ever wrong. Nothing but the two probes below is
+reachable on the public port, whatever happens to that config. **Do not point the public Choreo
+endpoint at port 8080, and do not register business routes on the health mux.**
+
+| Probe | Port | Answers |
+| ----- | ---- | ------- |
+| `GET /health` | 8080 and 8081 | Always `200 {"status":"ok"}`. Pure liveness — makes no dependency calls, so a database outage never gets the instance restarted or pulled from rotation. |
+| `GET /health/database` | 8081 only | `200 {"status":"ok","database":"up"}` when a round trip to PostgreSQL succeeds, `503 {"status":"unavailable","database":"down"}` when it fails. |
+
+Two probes rather than one combined check, so alerting can tell "the component is down" apart from
+"the component is up but its database is not".
+
+The database probe alerts on a **PostgreSQL** outage specifically. A deployment running without a
+connection pool (`DATA_SOURCE=servicenow`, where reads go through the ServiceNow integration
+service) has no PostgreSQL to be out, so it answers `200` with `database: "not_configured"` rather
+than a 503 that would fire continuously against a database that is not supposed to exist.
+
+Failure bodies deliberately carry no error detail — no driver message, host, or port. The
+endpoint is public, so it reports only whether the dependency is up, never anything about the
+infrastructure behind it. Both probes send `Cache-Control: no-store`, since a cached 200 would
+keep reporting healthy straight through an outage.
 
 ### Directory vocabularies — moved
 
@@ -155,7 +194,7 @@ rather than async.
 
 ### SLA clocks
 
-`sla_clocks` (migration `000011`, display columns added in `000014`) durably tracks per-case SLA
+`sla_clocks` (migration `000042`, display columns added in `000046`) durably tracks per-case SLA
 timers — `caseId`/`clockType`, `startedAt`/`dueAt`, up to three tier-crossing timestamps
 (`reached50At`/`reached75At`/`reached100At`), `pausedAt`, and eight display-only fields (case
 number/WSO2 case id/title/type/product/team/priority/state, a point-in-time snapshot from
@@ -204,8 +243,7 @@ publishing and the SLA pause/resume side effects above for free, with no duplica
 
 ### Scheduled task runs
 
-`scheduled_task_run` (migration `000013` — the one intentionally singular table name in this
-schema) is durable claim/retry state for `operations/csm-scheduled-tasks`, a single Choreo
+`scheduled_task_run` (migration `000045`) is durable claim/retry state for `operations/csm-scheduled-tasks`, a single Choreo
 Scheduled Task that fans out to many independently-scheduled sub-crons on one shared driver
 cadence. Has no ServiceNow equivalent — always backed by Postgres. No stored status column: a row's
 state is always derivable from which timestamp is set (`succeededOn`, `supersededOn`,
