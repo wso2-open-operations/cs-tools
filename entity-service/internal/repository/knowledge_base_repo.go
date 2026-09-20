@@ -63,7 +63,14 @@ func NewKnowledgeBaseRepository(db *pgxpool.Pool) KnowledgeBaseRepository {
 
 // ListKnowledgeBases implements KnowledgeBaseRepository.
 func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.KnowledgeBase, error) {
-	rows, err := r.db.Query(ctx, "SELECT "+knowledgeBaseColumns+" FROM knowledge_bases ORDER BY name")
+	// TEMPORARY, SCOPED FIX for kbdraftengine: the real shared DB's table
+	// is "knowledge_base" (singular), with "title"/"active" instead of
+	// "name"/"is_active", and no product_id column at all -- kb.ProductID
+	// is left unset (zero value) below since there's nothing to map it
+	// from; kbdraftengine only reads ID/IsActive, so this doesn't block it,
+	// but any other consumer of this method relying on ProductID would
+	// need a real design decision first (out of scope here).
+	rows, err := r.db.Query(ctx, "SELECT id, title, active, created_on, updated_on FROM knowledge_base ORDER BY title")
 	if err != nil {
 		return nil, fmt.Errorf("list knowledge bases: %w", err)
 	}
@@ -72,7 +79,7 @@ func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.Kn
 	kbs := make([]domain.KnowledgeBase, 0)
 	for rows.Next() {
 		var kb domain.KnowledgeBase
-		if err := rows.Scan(&kb.ID, &kb.ProductID, &kb.Name, &kb.IsActive, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
+		if err := rows.Scan(&kb.ID, &kb.Name, &kb.IsActive, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("scan knowledge base: %w", err)
 		}
 		kbs = append(kbs, kb)

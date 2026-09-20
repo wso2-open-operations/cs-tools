@@ -74,18 +74,30 @@ func NewKBArticleRepository(db *pgxpool.Pool) KBArticleRepository {
 
 // CreateKBArticle implements KBArticleRepository.
 func (r *kbArticleRepo) CreateKBArticle(ctx context.Context, req domain.CreateKBArticleRequest) (domain.KBArticle, error) {
+	// TEMPORARY, SCOPED FIX for kbdraftengine (KB auto-generation feature):
+	// the real shared DB's table is "knowledge_article" (singular), not
+	// "kb_articles" -- team_key and submitted_at don't exist there at all
+	// (dropped below); reviewer_id/created_at/updated_at/published_at/
+	// retired_at are named revised_by_id/created_on/updated_on/
+	// published_on/retired_on there instead. Neither id nor created_on/
+	// updated_on has a DB-level default on the real table (confirmed via
+	// \d+ -- no "Default" shown), so both are generated explicitly here
+	// rather than relying on the database. created_by is NOT NULL and not
+	// FK-validated (free text, like case/comment's created_by) -- reusing
+	// req.AuthorID as a placeholder value here; revisit once the real
+	// authorID/identity question is settled with Sajith.
 	const query = `
-		INSERT INTO kb_articles (knowledge_base_id, title, body, author_id, updated_by, team_key)
-		VALUES ($1, $2, $3, $4, $4, $5)
+		INSERT INTO knowledge_article (id, knowledge_base_id, title, body, state, author_id, created_by, updated_by, created_on, updated_on)
+		VALUES (gen_random_uuid(), $1, $2, $3, 'draft', $4::uuid, $4::text, $4::text, NOW(), NOW())
 		RETURNING id, knowledge_base_id, title, body, state, author_id,
-		          reviewer_id, source_case_id, rejection_comment, updated_by, team_key, created_at, updated_at, submitted_at, published_at, retired_at`
+		          revised_by_id, source_case_id, rejection_comment, updated_by, created_on, updated_on, published_on, retired_on`
 
 	var a domain.KBArticle
 	err := r.db.QueryRow(ctx, query,
-		req.KnowledgeBaseID, req.Title, req.Body, req.AuthorID, req.TeamKey,
+		req.KnowledgeBaseID, req.Title, req.Body, req.AuthorID,
 	).Scan(
 		&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
-		&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.TeamKey, &a.CreatedOn, &a.UpdatedOn, &a.SubmittedOn, &a.PublishedOn, &a.RetiredOn,
+		&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.CreatedOn, &a.UpdatedOn, &a.PublishedOn, &a.RetiredOn,
 	)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {

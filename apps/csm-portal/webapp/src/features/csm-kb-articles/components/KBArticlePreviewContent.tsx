@@ -19,6 +19,7 @@ import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useNavTransition } from "@hooks/useNavTransition";
 import type { KBArticle, KBArticleState } from "@features/csm-kb-articles/types/csmKbArticles";
+import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 
 const STATE_LABELS: Record<KBArticleState, string> = {
   draft: "Draft",
@@ -107,8 +108,10 @@ export default function KBArticlePreviewContent({
             pr: 1,
           }}
           // eslint-disable-next-line react/no-danger -- article.body is
-          // author-authored rich text HTML from our own Lexical editor.
-          dangerouslySetInnerHTML={{ __html: article.body }}
+          // author-authored rich text HTML from our own Lexical editor,
+          // sanitized below since the Lexical editor is not a security
+          // boundary on its own (CodeRabbit XSS finding).
+          dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(article.body) }}
         />
       </Box>
 
