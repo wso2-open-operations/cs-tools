@@ -40,7 +40,7 @@ func TestCreateCommentReferenceTypes(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"message":"created","comment":{"id":"abc","createdOn":"2026-08-01 10:00:00","createdBy":"jane.doe@example.com"}}`))
 		}))
-		return NewServiceNowCommentService(client)
+		return NewServiceNowCommentService(client, nil)
 	}
 
 	req := func(refType domain.ReferenceType) domain.CreateCommentRequest {

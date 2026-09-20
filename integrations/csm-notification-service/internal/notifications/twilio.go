@@ -18,11 +18,13 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +64,14 @@ type TwilioConfig struct {
 	// https://www.twilio.com/docs/voice/twiml/say/text-speech#available-voices-and-languages.
 	// Empty uses Twilio's own account default voice.
 	Voice string
+	// RingTimeoutSeconds is how long a call rings before Twilio gives up on
+	// it (TWILIO_RING_TIMEOUT_SECONDS). Zero leaves Twilio's own default of
+	// 60 seconds. Worth setting for an escalation ladder: a rung's next
+	// attempt can come due while the previous one is still ringing, and a
+	// call nobody is going to answer holds a line and a concurrency slot for
+	// a minute to learn nothing. It is also what makes a test run bearable —
+	// five seconds is enough to confirm a phone rang.
+	RingTimeoutSeconds int
 	// Language sets <Say>'s language/locale (e.g. "en-IN", "en-GB"), which
 	// affects pronunciation — worth setting explicitly for names/terms the
 	// default voice's default locale might mispronounce. Empty uses
@@ -117,7 +127,8 @@ func (c *TwilioClient) SendSMS(ctx context.Context, to, body string) error {
 		form.Set("From", c.cfg.FromNumber)
 	}
 
-	return c.do(ctx, "Messages.json", form)
+	_, err := c.do(ctx, "Messages.json", form)
+	return err
 }
 
 // MakeCall places a single voice call to `to` (E.164, e.g. "+14155552671")
@@ -126,29 +137,56 @@ func (c *TwilioClient) SendSMS(ctx context.Context, to, body string) error {
 // client's configured Voice/Language, from the account's configured
 // FromNumber. Unlike SendSMS, this always requires FromNumber: Twilio Voice
 // has no MessagingServiceSid equivalent.
-func (c *TwilioClient) MakeCall(ctx context.Context, to, message string) error {
+func (c *TwilioClient) MakeCall(ctx context.Context, to, message string) (Call, error) {
 	if strings.TrimSpace(to) == "" {
-		return fmt.Errorf("notifications: to is required")
+		return Call{}, fmt.Errorf("notifications: to is required")
 	}
 	if strings.TrimSpace(message) == "" {
-		return fmt.Errorf("notifications: message is required")
+		return Call{}, fmt.Errorf("notifications: message is required")
 	}
 	if c.cfg.AccountSID == "" || c.cfg.AuthToken == "" || c.cfg.FromNumber == "" {
-		return fmt.Errorf("notifications: twilio is not configured")
+		return Call{}, fmt.Errorf("notifications: twilio is not configured")
 	}
 
 	twiml, err := sayTwiML(message, c.cfg.Voice, c.cfg.Language)
 	if err != nil {
-		return err
+		return Call{}, err
 	}
 	form := url.Values{
 		"To":    {to},
 		"From":  {c.cfg.FromNumber},
 		"Twiml": {twiml},
 	}
+	c.applyRingTimeout(form)
 
 	return c.do(ctx, "Calls.json", form)
 }
+
+// applyRingTimeout sets how long the call may ring, when configured.
+func (c *TwilioClient) applyRingTimeout(form url.Values) {
+	if c.cfg.RingTimeoutSeconds > 0 {
+		form.Set("Timeout", strconv.Itoa(c.cfg.RingTimeoutSeconds))
+	}
+}
+
+// Call is the voice call Twilio created: its sid — the only durable handle on
+// a call once the request returns, and what an operator searches the console
+// by — and the status it was accepted in ("queued", occasionally "ringing" if
+// Twilio has already begun dialling).
+//
+// It is deliberately not the whole resource. The fields below are what a log
+// line and a status poll need; everything else Twilio returns would be carried
+// around unused, and some of it (the "to" number) is exactly what this
+// service's own logging convention keeps out of logs.
+type Call struct {
+	SID    string `json:"sid"`
+	Status string `json:"status"`
+}
+
+// maxCallBody bounds the success-path read, same reasoning as maxErrBody on
+// the failure path: a call is already placed by then, so an unexpectedly large
+// body must degrade to "no details" rather than to a failure.
+const maxCallBody = 4096
 
 // twimlResponse is the <Response><Say voice="..." language="...">message</Say></Response>
 // document MakeCall sends as Twilio's Twiml param. Built via encoding/xml's
@@ -185,27 +223,39 @@ func sayTwiML(message, voice, language string) (string, error) {
 // do POSTs a form-encoded request to the given Twilio resource path (e.g.
 // "Messages.json", "Calls.json") under this account, authenticated with
 // Basic Auth, and maps a non-201 response to *apierror.Error.
-func (c *TwilioClient) do(ctx context.Context, resourcePath string, form url.Values) error {
+func (c *TwilioClient) do(ctx context.Context, resourcePath string, form url.Values) (Call, error) {
 	endpoint := c.cfg.APIBaseURL + "/Accounts/" + url.PathEscape(c.cfg.AccountSID) + "/" + resourcePath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return fmt.Errorf("notifications: build twilio request: %w", err)
+		return Call{}, fmt.Errorf("notifications: build twilio request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(c.cfg.AccountSID, c.cfg.AuthToken)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("notifications: call twilio: %w", err)
+		return Call{}, fmt.Errorf("notifications: call twilio: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Twilio returns 201 Created for both a successfully queued message and
-	// a successfully initiated call — the body is only needed on failure, so
-	// skip reading it here rather than reading a response we're about to
-	// discard.
+	// a successfully initiated call. The body carries the created resource's
+	// sid and status, which is the only durable handle on a call once it
+	// leaves this process — worth reading so a caller can log what it placed,
+	// and so an operator can find that exact call in the Twilio console or
+	// poll it for ringing/answered. Bounded like the error path below: a
+	// malformed or oversized body degrades to an empty Call, never to a
+	// failed send, because the call itself has already been accepted.
 	if resp.StatusCode == http.StatusCreated {
-		return nil
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxCallBody))
+		if err != nil {
+			return Call{}, nil
+		}
+		var created Call
+		if err := json.Unmarshal(body, &created); err != nil {
+			return Call{}, nil
+		}
+		return created, nil
 	}
 
 	// Bounded even on read failure: io.LimitReader caps how much of a
@@ -214,7 +264,7 @@ func (c *TwilioClient) do(ctx context.Context, resourcePath string, form url.Val
 	const maxErrBody = 256
 	excerpt, err := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
 	if err != nil {
-		return fmt.Errorf("notifications: read twilio response: %w", err)
+		return Call{}, fmt.Errorf("notifications: read twilio response: %w", err)
 	}
-	return &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
+	return Call{}, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 }

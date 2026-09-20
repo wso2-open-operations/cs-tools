@@ -49,6 +49,30 @@ func (m *mockEventPublisher) Publish(_ context.Context, eventType events.Type, e
 
 func (m *mockEventPublisher) Close() {}
 
+// findPublishCall returns the first recorded call of the given event type.
+// Tests assert on the call they care about rather than on the total publish
+// count: one mutation legitimately publishes several unrelated events (a
+// created case emits both case.created and sla.clock.register), and counting
+// them couples every such test to every future publisher.
+func findPublishCall(calls []mockPublishCall, t events.Type) (mockPublishCall, bool) {
+	for _, c := range calls {
+		if c.eventType == t {
+			return c, true
+		}
+	}
+	return mockPublishCall{}, false
+}
+
+// publishedTypes lists what was actually published, for a failure message
+// that says what turned up instead of what was expected.
+func publishedTypes(calls []mockPublishCall) []events.Type {
+	types := make([]events.Type, 0, len(calls))
+	for _, c := range calls {
+		types = append(types, c.eventType)
+	}
+	return types
+}
+
 // newTestCreateCaseClient stubs both requests publishCaseCreated triggers
 // after a successful create: the POST /cases create call itself, then the
 // GetCaseByID enrichment (a GET /cases/{id}, plus a GET /cases/{id}/tags
@@ -125,12 +149,13 @@ func TestSNCaseService_CreateCase_PublishesCaseCreated(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(publisher.calls) != 1 {
-		t.Fatalf("expected 1 publish call, got %d", len(publisher.calls))
-	}
-	call := publisher.calls[0]
-	if call.eventType != events.TypeCaseCreated {
-		t.Errorf("eventType = %q, want %q", call.eventType, events.TypeCaseCreated)
+	// CreateCase publishes more than one event now — case.created for the
+	// notification, and sla.clock.register to start the SLA clocks — so this
+	// asserts on the case.created call rather than on the publish count,
+	// which would otherwise have to be updated by every future publisher.
+	call, ok := findPublishCall(publisher.calls, events.TypeCaseCreated)
+	if !ok {
+		t.Fatalf("no %s publish call; got %v", events.TypeCaseCreated, publishedTypes(publisher.calls))
 	}
 	if call.entityID != resp.Case.ID {
 		t.Errorf("entityID = %q, want the new case's id %q", call.entityID, resp.Case.ID)

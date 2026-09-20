@@ -30,6 +30,15 @@ import "encoding/json"
 type Type string
 
 const (
+	// CASE OR INCIDENT? Two different entities. A case is POST /cases and
+	// domain.CaseView; an incident is POST /incidents and
+	// domain.IncidentView. Their event families are separate for that
+	// reason, and a comment on one is not a comment on the other.
+	//
+	// "SRE incident" is not a third thing: sre-alert-ingestion-service turns
+	// a vendor alert into a platform incident through the same
+	// POST /incidents, so it produces exactly what the incident.* events
+	// describe.
 	TypeCaseCreated      Type = "case.created"
 	TypeCommentAdded     Type = "case.comment_added"
 	TypeStatusChanged    Type = "case.status_changed"
@@ -37,6 +46,26 @@ const (
 	TypeCaseAcknowledged Type = "case.acknowledged"
 	TypeSeverityChanged  Type = "case.severity_changed"
 	TypeIncidentCreated  Type = "incident.created"
+	// TypeIncidentAcknowledged / TypeIncidentPriorityElevated drive the
+	// incident call-escalation ladder in csm-notification-service. The ladder
+	// starts on incident.created (or a priority elevation) and keeps calling
+	// until one of two things happens, per the escalation specification:
+	// the incident moves out of NEW ("update the ticket status to Work In
+	// Progress to stop further notifications"), or — for an elevation — a
+	// public comment is added. incident.acknowledged is the stop signal for
+	// the first of those.
+	TypeIncidentAcknowledged     Type = "incident.acknowledged"
+	TypeIncidentPriorityElevated Type = "incident.priority_elevated"
+	// TypeIncidentCommentAdded is the second way a call escalation stops.
+	// Section 3.0 gives two acknowledgement gestures, one per trigger: a newly
+	// reported incident is acknowledged by moving it to Work In Progress
+	// (TypeIncidentAcknowledged), while a PRIORITY ELEVATION is acknowledged
+	// by adding a public comment — which is what section 10.0's own voice
+	// message instructs an elevation's recipient to do. Without this event an
+	// elevation's ladder had no stop signal at all: the incident has normally
+	// already left NEW by the time its priority is raised, so
+	// TypeIncidentAcknowledged can never fire again for it.
+	TypeIncidentCommentAdded Type = "incident.comment_added"
 	// TypeCaseBillableStatusChanged is Postgres-data-source-only (unlike
 	// every other type here, which is ServiceNow-only) — see
 	// CaseBillableStatusChangedPayload's own doc comment for what it's for
@@ -282,6 +311,66 @@ type CaseCreatedPayload struct {
 type IncidentCreatedPayload struct {
 	Title            string `json:"title"`
 	ShortDescription string `json:"shortDescription"`
+
+	// The remaining fields feed csm-notification-service's call-escalation
+	// ladder (its internal/escalation), which needs the priority that keys
+	// the timing table plus the routing attributes that select recipients.
+	// Every one is optional on the wire: publishIncidentCreated resolves them
+	// from a post-create read of the incident, and that read is best-effort —
+	// when it fails, this event is published with Title/ShortDescription
+	// alone, exactly as it was before these fields existed, and the ladder
+	// simply does not start. Keep in sync with csm-notification-service's own
+	// IncidentCreatedPayload by hand, same as every payload above.
+	//
+	// Note this struct has no Product or CallTo, unlike the consumer's
+	// version: this service has no product-to-Chat-space mapping and no
+	// on-call paging system of its own, so it has never supplied either and
+	// the consumer substitutes its own configured defaults.
+	Number   string `json:"number,omitempty"`
+	Priority string `json:"priority,omitempty"`
+	Account  string `json:"account,omitempty"`
+	Team     string `json:"team,omitempty"`
+	// ABTEligible is a POINTER so an absent value stays absent on the wire.
+	// It splits the consumer's rule table in half — the ABT rows against the
+	// sub-team ones — so "not told" is a different situation from "told no",
+	// and it is the situation today: this service has no product-to-BU
+	// mapping and never sets it. Sending false would claim an answer nobody
+	// gave. Keep in sync with csm-notification-service's own payload.
+	ABTEligible *bool `json:"abtEligible,omitempty"`
+	// ReportedAt is when the incident was opened, RFC3339. Every call in the
+	// ladder is an offset from this rather than from consume time, so a
+	// backlogged consumer cannot shift the whole ladder later than the
+	// escalation specification intends — the same reasoning
+	// SLAClockRegisterPayload.CaseCreatedAt applies to an SLA clock.
+	ReportedAt string `json:"reportedAt,omitempty"`
+}
+
+// IncidentCommentAddedPayload is the Payload shape for
+// TypeIncidentCommentAdded — published by CreateComment when a comment lands
+// on an incident.
+//
+// IsPublic is the whole point of the event. Section 3.0's acknowledgement
+// gesture for a priority elevation is a PUBLIC comment; a work note is an
+// internal jotting and must not stop anyone's pager. The consumer decides what
+// to do with each, rather than this service publishing only the public ones —
+// keeping the event a statement of fact, the same way every payload here does.
+//
+// KNOWN GAP: this carries no author. Incidents have no customer-portal surface
+// in this platform (csm-notification-service's recipientlinks builds only a
+// CSM /operations/incidents link for them), so a public comment on one is
+// written by internal staff in practice and the distinction does not yet
+// matter. If incidents ever become customer-visible, an author must be added
+// and checked before a comment is allowed to cancel an escalation — otherwise
+// a customer's own comment would silence the page meant to get their incident
+// attended to. Resolving one needs a follow-up comment search (see
+// snCaseService.resolveCommentAuthor), so it is flagged here rather than
+// built speculatively.
+type IncidentCommentAddedPayload struct {
+	// CommentID is the created comment, for traceability in the escalation
+	// execution summary.
+	CommentID string `json:"commentId"`
+	// IsPublic is false for a work note.
+	IsPublic bool `json:"isPublic"`
 }
 
 // SLAClockRegisterPayload is the Payload shape for TypeSLAClockRegister —
@@ -318,4 +407,62 @@ type SLAClockRegisterPayload struct {
 	Team                string            `json:"team,omitempty"`
 	Priority            string            `json:"priority,omitempty"`
 	State               string            `json:"state,omitempty"`
+}
+
+// IncidentAcknowledgedPayload is the Payload shape for
+// TypeIncidentAcknowledged — the signal that cancels a running call
+// escalation. Published by UpdateIncident when an incident genuinely leaves
+// the NEW state, never on a no-op re-PATCH (same guard reasoning as
+// publishSeverityChanged).
+//
+// Carries no Recipients: nothing is sent to anyone on acknowledgement, it
+// only stops what is already running. NewState is included so the consumer
+// can distinguish "picked up" (IN_PROGRESS) from a terminal state
+// (RESOLVED/CLOSED/CANCELLED), both of which cancel the ladder but mean
+// different things in the execution summary.
+type IncidentAcknowledgedPayload struct {
+	// PreviousState is the state the incident left, e.g. "NEW".
+	PreviousState string `json:"previousState"`
+	// NewState is the state it moved to, e.g. "IN_PROGRESS".
+	NewState string `json:"newState"`
+}
+
+// Deliberately no acknowledger identity: UpdateIncidentRequest carries no
+// actor, and this service has no way to resolve who performed an update —
+// the same reason CaseAssignedPayload stopped claiming to carry an assigner.
+// A consumer that needs it must get it from the incident's own activity feed.
+
+// IncidentPriorityElevatedPayload is the Payload shape for
+// TypeIncidentPriorityElevated — the second trigger that starts a call
+// escalation, alongside incident.created.
+//
+// Published only when the priority genuinely increases in urgency; a
+// downgrade or a no-op re-PATCH publishes nothing. The escalation ladder's
+// timings are keyed by the NEW priority, so that is what a consumer schedules
+// against.
+type IncidentPriorityElevatedPayload struct {
+	// OldPriority is the priority before the change, e.g. "MODERATE".
+	OldPriority string `json:"oldPriority"`
+	// NewPriority is the priority after the change, e.g. "HIGH" — this is
+	// what the escalation timings are keyed by, after the consumer maps a
+	// domain priority onto the specification's own P0-P4 scale.
+	NewPriority string `json:"newPriority"`
+	// Title is the incident subject, carried for display only — the escalation
+	// voice message is built from priority, account, case id and team, not
+	// from this. Optional on purpose: it comes from a nilable ServiceNow
+	// field, and an elevation must never be lost because the subject was
+	// empty. Consumers treat an empty title the way they treat an absent
+	// product, not as a malformed event.
+	Title string `json:"title,omitempty"`
+
+	// The remaining fields mirror IncidentCreatedPayload's own escalation
+	// inputs and are optional for the same reason. Unlike the created event,
+	// these come from the post-PATCH incident this service already holds, so
+	// no extra read is needed to populate them.
+	Number      string `json:"number,omitempty"`
+	Account     string `json:"account,omitempty"`
+	Team        string `json:"team,omitempty"`
+	ABTEligible *bool  `json:"abtEligible,omitempty"`
+	// ElevatedAt is when the priority actually changed, RFC3339.
+	ElevatedAt string `json:"elevatedAt,omitempty"`
 }

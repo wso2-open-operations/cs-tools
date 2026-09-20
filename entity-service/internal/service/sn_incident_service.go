@@ -36,6 +36,12 @@ import (
 // than detached.
 const publishIncidentCreatedTimeout = 5 * time.Second
 
+// publishIncidentEscalationSignalTimeout bounds the publish calls that start
+// and stop the incident call-escalation ladder. Same reasoning and value as
+// publishIncidentCreatedTimeout: the incident is already updated in
+// ServiceNow by the time either runs, so neither may fail the update.
+const publishIncidentEscalationSignalTimeout = 5 * time.Second
+
 // snIncidentsResponse mirrors the Choreo POST /incidents/search response.
 type snIncidentsResponse struct {
 	Incidents    []snIncident `json:"incidents"`
@@ -815,15 +821,26 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	resp.Incident.Number = snResp.Incident.Number
 	resp.Incident.CreatedOn = snResp.Incident.CreatedOn
 	resp.Incident.CreatedBy = snResp.Incident.CreatedBy
-	s.publishIncidentCreated(ctx, req, resp.Incident.ID)
+	s.publishIncidentCreated(ctx, req, resp.Incident.ID, resp.Incident.Number, resp.Incident.CreatedOn)
 	return resp, nil
 }
 
 // publishIncidentCreated best-effort publishes an incident.created event for
-// a newly created incident. Unlike publishCaseCreated, no enrichment round
-// trip is needed: Title/ShortDescription come directly from req, which
-// already carries everything the notification needs (Subject, and
-// optionally AdditionalComments) without a follow-up GetIncidentByID call.
+// a newly created incident. Title/ShortDescription come directly from req,
+// and Number/ReportedAt from the create response, so neither needs a read.
+//
+// The escalation fields do need one. The call-escalation ladder is keyed on
+// the incident's PRIORITY, which ServiceNow derives from impact and urgency
+// and which neither req nor the create response carries — and on the assigned
+// team's display name, where req has only a sys_id. So this makes one
+// best-effort GetIncidentByID call to resolve them.
+//
+// That read is deliberately not fatal and not even required: if it fails, the
+// event is published with exactly the fields it carried before the ladder
+// existed, and the consumer's ladder simply does not start (see
+// events.IncidentCreatedPayload). Losing the Chat alert and the direct call —
+// which is what returning early would do — would be a strictly worse outcome
+// than losing the ladder.
 //
 // ShortDescription falls back to req.Subject when req.AdditionalComments is
 // absent — a freshly created incident often has no additional comments yet,
@@ -844,7 +861,7 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 // publishCaseCreated's doc comment for why (same reasoning applies here).
 // Any failure is logged and does not fail CreateIncident itself: the
 // incident already exists in ServiceNow by this point.
-func (s *snIncidentService) publishIncidentCreated(ctx context.Context, req domain.CreateIncidentRequest, incidentID string) {
+func (s *snIncidentService) publishIncidentCreated(ctx context.Context, req domain.CreateIncidentRequest, incidentID, number, createdOn string) {
 	if s.publisher == nil {
 		return
 	}
@@ -856,10 +873,33 @@ func (s *snIncidentService) publishIncidentCreated(ctx context.Context, req doma
 		shortDescription = *req.AdditionalComments
 	}
 
-	payload, err := json.Marshal(events.IncidentCreatedPayload{
+	event := events.IncidentCreatedPayload{
 		Title:            req.Subject,
 		ShortDescription: shortDescription,
-	})
+		Number:           number,
+		ReportedAt:       snTimeToRFC3339(ctx, "sn create incident", "createdOn", createdOn),
+	}
+	if view, verr := s.GetIncidentByID(ctx, incidentID); verr == nil {
+		if view.Priority != nil {
+			event.Priority = *view.Priority
+		}
+		if view.AssignmentGroup != nil {
+			event.Team = view.AssignmentGroup.Name
+		}
+		// openedOn is the incident's own "when the customer reported this",
+		// which is what the ladder should measure from; createdOn above is
+		// only the fallback for when the read fails.
+		if view.OpenedOn != nil {
+			if opened := snTimeToRFC3339(ctx, "sn create incident", "openedOn", *view.OpenedOn); opened != "" {
+				event.ReportedAt = opened
+			}
+		}
+	} else {
+		slog.WarnContext(ctx, "sn create incident: escalation enrichment fetch failed; publishing without escalation fields",
+			"incidentId", incidentID)
+	}
+
+	payload, err := json.Marshal(event)
 	if err != nil {
 		slog.ErrorContext(ctx, "sn create incident: encode incident.created payload failed", "incidentId", incidentID, "error", err)
 		return
@@ -874,6 +914,22 @@ func (s *snIncidentService) publishIncidentCreated(ctx context.Context, req doma
 		// needs to debug this specific failure.
 		slog.ErrorContext(ctx, "sn create incident: publish incident.created failed", "incidentId", incidentID)
 	}
+}
+
+// snTimeToRFC3339 converts a ServiceNow datetime string to RFC3339, returning
+// "" when it is absent or unparsable. Uses parseSNDateTime so it tolerates
+// both formats ServiceNow is known to return (see that function's own doc
+// comment); an empty result makes the consumer fall back to consume time
+// rather than to a zero timestamp, which would place the whole ladder in 1970.
+func snTimeToRFC3339(ctx context.Context, callSite, field, value string) string {
+	if value == "" {
+		return ""
+	}
+	t, err := parseSNDateTime(ctx, callSite, field, value)
+	if err != nil {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 // snIncidentSubcategoryLabelMap maps SN subcategory string values to domain enum strings.
@@ -1380,6 +1436,28 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 		payload.ResolvedByID = &v
 	}
 
+	// Baseline for the escalation signals below. Fetched only when this update
+	// could actually start or stop a call escalation, so every other PATCH
+	// pays no extra round trip. A failed fetch is not fatal: it leaves
+	// `before` zero-valued, which publishEscalationSignals treats as "no
+	// baseline, publish nothing" rather than guessing.
+	//
+	// Impact and urgency count as priority changes here, because in
+	// ServiceNow they ARE the priority: CreateIncident requires both and
+	// accepts no priority at all — the platform derives it. A PATCH raising
+	// urgency therefore raises the priority just as surely as one naming it,
+	// and gating on req.Priority alone meant that update published nothing
+	// and no ladder ever started.
+	var before domain.IncidentView
+	if s.publisher != nil && incidentUpdateTouchesEscalation(req) {
+		if fetched, ferr := s.GetIncidentByID(ctx, req.ID); ferr == nil {
+			before = fetched
+		} else {
+			slog.WarnContext(ctx, "sn update incident: escalation baseline fetch failed; skipping escalation signals",
+				"incidentId", req.ID)
+		}
+	}
+
 	raw, err := s.client.Patch(ctx, "/incidents/"+uuidToSysid(req.ID), token, payload)
 	if err != nil {
 		return domain.UpdateIncidentResponse{}, err
@@ -1390,10 +1468,166 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 		return domain.UpdateIncidentResponse{}, fmt.Errorf("sn update incident: parse response: %w", err)
 	}
 
+	view := mapSNIncidentToView(snResp.Incident)
+	s.publishEscalationSignals(ctx, req, before, view)
+
 	return domain.UpdateIncidentResponse{
 		Message:  snResp.Message,
-		Incident: mapSNIncidentToView(snResp.Incident),
+		Incident: view,
 	}, nil
+}
+
+// publishEscalationSignals emits the two events that drive the incident call
+// escalation ladder, comparing the incident as it was before the PATCH
+// against the PATCH response.
+//
+// Both are best-effort and never fail UpdateIncident: the incident is already
+// updated in ServiceNow by the time this runs, exactly as publishIncidentCreated
+// reasons about creation. Both are guarded against a no-op re-PATCH the same
+// way publishSeverityChanged is — a caller re-sending the state it already has
+// must not cancel a live escalation, and re-sending the same priority must not
+// start a second one.
+//
+// before is zero-valued when the pre-PATCH fetch was skipped or failed; with
+// no baseline to compare against, nothing is published rather than guessing at
+// a transition that may not have happened.
+func (s *snIncidentService) publishEscalationSignals(
+	ctx context.Context, req domain.UpdateIncidentRequest, before, after domain.IncidentView,
+) {
+	if s.publisher == nil || before.ID == nil {
+		return
+	}
+
+	if req.State != nil {
+		if prev, next, ok := incidentStateTransition(before, after); ok {
+			s.publishIncidentAcknowledged(ctx, req.ID, prev, next)
+		}
+	}
+	if incidentUpdateTouchesPriority(req) {
+		if oldP, newP, ok := incidentPriorityElevation(before, after); ok {
+			s.publishIncidentPriorityElevated(ctx, req.ID, oldP, newP, after)
+		}
+	}
+}
+
+// incidentUpdateTouchesPriority reports whether an update could change the
+// incident's priority — directly, or through the impact and urgency
+// ServiceNow derives it from.
+//
+// The comparison itself is still made against the real before/after
+// priorities (see incidentPriorityElevation), so a change to impact or
+// urgency that leaves the derived priority alone publishes nothing. This only
+// decides whether it is worth looking.
+func incidentUpdateTouchesPriority(req domain.UpdateIncidentRequest) bool {
+	return req.Priority != nil || req.Impact != nil || req.Urgency != nil
+}
+
+// incidentUpdateTouchesEscalation reports whether an update could start or
+// stop a call escalation, and so whether the pre-PATCH baseline is worth
+// fetching.
+func incidentUpdateTouchesEscalation(req domain.UpdateIncidentRequest) bool {
+	return req.State != nil || incidentUpdateTouchesPriority(req)
+}
+
+// incidentStateTransition reports a genuine move out of NEW. Leaving NEW is
+// what the escalation specification means by acknowledgement ("update the
+// ticket status to Work In Progress to stop further notifications"); every
+// other transition, including NEW -> NEW, leaves a running ladder alone.
+func incidentStateTransition(before, after domain.IncidentView) (prev, next string, ok bool) {
+	if before.State == nil || after.State == nil {
+		return "", "", false
+	}
+	prev, next = *before.State, *after.State
+	if prev == next || prev != string(domain.IncidentStateNew) {
+		return "", "", false
+	}
+	return prev, next, true
+}
+
+// incidentPriorityElevation reports a genuine increase in urgency. A downgrade
+// or an unchanged priority starts nothing: the ladder exists to react to an
+// incident becoming more urgent, not less.
+//
+// Urgency ordering comes from snIncidentPriorityKeyMap, the map this service
+// already uses to talk to ServiceNow (CRITICAL=1 … PLANNING=5), rather than a
+// second hand-maintained table that could drift from it. An elevation is
+// therefore a strictly decreasing key. A value outside that map is not treated
+// as an elevation at all: an unrecognised priority is not evidence of anything.
+func incidentPriorityElevation(before, after domain.IncidentView) (oldP, newP string, ok bool) {
+	if before.Priority == nil || after.Priority == nil {
+		return "", "", false
+	}
+	oldP, newP = *before.Priority, *after.Priority
+	if oldP == newP {
+		return "", "", false
+	}
+	oldKey, oldOK := snIncidentPriorityKeyMap[domain.IncidentPriority(oldP)]
+	newKey, newOK := snIncidentPriorityKeyMap[domain.IncidentPriority(newP)]
+	if !oldOK || !newOK || newKey >= oldKey {
+		return "", "", false
+	}
+	return oldP, newP, true
+}
+
+// publishIncidentAcknowledged emits the signal that cancels a running call
+// escalation for this incident.
+func (s *snIncidentService) publishIncidentAcknowledged(ctx context.Context, incidentID, prev, next string) {
+	ctx, cancel := context.WithTimeout(ctx, publishIncidentEscalationSignalTimeout)
+	defer cancel()
+
+	payload, err := json.Marshal(events.IncidentAcknowledgedPayload{
+		PreviousState: prev,
+		NewState:      next,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "sn update incident: encode incident.acknowledged payload failed", "incidentId", incidentID, "error", err)
+		return
+	}
+	if err := s.publisher.Publish(ctx, events.TypeIncidentAcknowledged, incidentID, payload); err != nil {
+		// Not logging err itself, same reasoning as publishIncidentCreated:
+		// it can carry raw Event Hub client detail.
+		slog.ErrorContext(ctx, "sn update incident: publish incident.acknowledged failed", "incidentId", incidentID)
+	}
+}
+
+// publishIncidentPriorityElevated emits the second trigger that starts a call
+// escalation, keyed by the NEW priority — the escalation timings are defined
+// per priority, so the consumer schedules against what the incident is now.
+func (s *snIncidentService) publishIncidentPriorityElevated(
+	ctx context.Context, incidentID, oldP, newP string, after domain.IncidentView,
+) {
+	ctx, cancel := context.WithTimeout(ctx, publishIncidentEscalationSignalTimeout)
+	defer cancel()
+
+	title := ""
+	if after.Subject != nil {
+		title = *after.Subject
+	}
+	event := events.IncidentPriorityElevatedPayload{
+		OldPriority: oldP,
+		NewPriority: newP,
+		Title:       title,
+		// ElevatedAt is "now" rather than a field off the incident: the PATCH
+		// that caused this elevation has just been applied, and this is the
+		// instant the ladder's own offsets should run from. updatedOn would
+		// be the same moment but rendered in ServiceNow's own format, and
+		// depends on the response carrying it.
+		ElevatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if after.Number != nil {
+		event.Number = *after.Number
+	}
+	if after.AssignmentGroup != nil {
+		event.Team = after.AssignmentGroup.Name
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		slog.ErrorContext(ctx, "sn update incident: encode incident.priority_elevated payload failed", "incidentId", incidentID, "error", err)
+		return
+	}
+	if err := s.publisher.Publish(ctx, events.TypeIncidentPriorityElevated, incidentID, payload); err != nil {
+		slog.ErrorContext(ctx, "sn update incident: publish incident.priority_elevated failed", "incidentId", incidentID)
+	}
 }
 
 // SearchIncidentActivities returns the activity feed for an incident. Confirmed by the

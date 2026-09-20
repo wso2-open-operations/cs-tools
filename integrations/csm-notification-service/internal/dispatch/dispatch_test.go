@@ -140,11 +140,11 @@ type mockCallSender struct {
 	calls []sentCall
 }
 
-func (m *mockCallSender) MakeCall(ctx context.Context, to, message string) error {
+func (m *mockCallSender) MakeCall(ctx context.Context, to, message string) (notifications.Call, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, sentCall{to, message})
-	return m.err
+	return notifications.Call{}, m.err
 }
 
 // mockLinkResolver defaults to resolving every recipient to the same fixed
@@ -1314,7 +1314,7 @@ func TestDispatcher_Handle_CaseCreated_EmailSendingDisabled(t *testing.T) {
 // internal/slaengine's own consumer group, which shares this topic — are a
 // silent no-op here, not an error. Erroring would burn this consumer's
 // retries and dead-letter an event that was never broken.
-func TestDispatcher_Handle_IgnoresSLAEventTypes(t *testing.T) {
+func TestDispatcher_Handle_IgnoresEventTypesOwnedByOtherConsumers(t *testing.T) {
 	mock := &mockEmailSender{}
 	chat := &mockGoogleChatSender{}
 	call := &mockCallSender{}
@@ -1324,6 +1324,15 @@ func TestDispatcher_Handle_IgnoresSLAEventTypes(t *testing.T) {
 		`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}}`,
 		`{"type":"sla.tier_reached","entityId":"CASE-1","payload":{"caseId":"CASE-1","clockType":"response","tier":"50"}}`,
 	}
+	// The two incident-escalation types are ignored here for the same reason:
+	// internal/escalation owns them, and erroring would dead-letter a valid
+	// event. Kept in this test rather than a new one so the "not this
+	// consumer's concern" set stays in one place.
+	records = append(records,
+		`{"type":"incident.acknowledged","entityId":"INC-1","payload":{"previousState":"NEW","newState":"IN_PROGRESS"}}`,
+		`{"type":"incident.priority_elevated","entityId":"INC-1","payload":{"oldPriority":"MODERATE","newPriority":"HIGH","title":"t"}}`,
+		`{"type":"incident.comment_added","entityId":"INC-1","payload":{"commentId":"c-1","isPublic":true}}`,
+	)
 	for _, r := range records {
 		if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(r)}); err != nil {
 			t.Errorf("Handle(%s) error = %v, want nil", r, err)

@@ -479,7 +479,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	commentRepo := repository.NewCommentRepository(db)
 	var activeCommentSvc service.CommentService
 	if cfg.DataSource == config.DataSourceServiceNow {
-		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient)
+		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
 	} else {
 		activeCommentSvc = service.NewCommentService(commentRepo, userRepo)
 	}

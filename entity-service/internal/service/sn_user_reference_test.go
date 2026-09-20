@@ -68,7 +68,7 @@ func TestCommentUserReferenceFromUpstreamID(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	resp, err := NewServiceNowCommentService(client).SearchComments(contextWithUserIDToken("token"), domain.SearchCommentsRequest{
+	resp, err := NewServiceNowCommentService(client, nil).SearchComments(contextWithUserIDToken("token"), domain.SearchCommentsRequest{
 		ReferenceID:   sysidToUUID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
 		ReferenceType: domain.ReferenceTypeConversation,
 		Pagination:    domain.Pagination{Limit: 10},

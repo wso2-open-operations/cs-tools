@@ -60,7 +60,7 @@ type googleChatSender interface {
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
 type callSender interface {
-	MakeCall(ctx context.Context, to, message string) error
+	MakeCall(ctx context.Context, to, message string) (notifications.Call, error)
 }
 
 // linkResolver abstracts recipientlinks.Resolver for testability.
@@ -326,6 +326,13 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleSeverityChanged(ctx, record, env.Payload)
 	case events.TypeIncidentCreated:
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
+	case events.TypeIncidentAcknowledged, events.TypeIncidentPriorityElevated, events.TypeIncidentCommentAdded:
+		// The incident call-escalation ladder (internal/escalation) owns
+		// these three; the notification dispatcher reacts to none of them. Same
+		// reasoning as the sla.* case below — erroring here would burn this
+		// consumer's retries and dead-letter a perfectly valid event that
+		// simply is not this consumer's concern.
+		return nil
 	case events.TypeCRApprovalRequested:
 		return d.handleCRApprovalRequested(ctx, record, env.Payload)
 	case events.TypeCRPlanDateNotice:
@@ -1177,7 +1184,13 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 			slog.WarnContext(ctx, "dispatch: no callTo for incident.created (payload and INCIDENT_DEFAULT_CALL_TO both empty); skipping call")
 		default:
 			message := fmt.Sprintf("New incident: %s. %s", p.Title, p.ShortDescription)
-			callErr = d.call.MakeCall(ctx, callTo, message)
+			var placed notifications.Call
+			placed, callErr = d.call.MakeCall(ctx, callTo, message)
+			if callErr == nil {
+				slog.InfoContext(ctx, "dispatch: incident call placed",
+					"incidentId", entityID, "to", maskPhone(callTo),
+					"callSid", placed.SID, "callStatus", placed.Status)
+			}
 			if callErr != nil {
 				d.forget(callKey)
 				callOwned = false
