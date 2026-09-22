@@ -1019,3 +1019,21 @@ type OutageService interface {
 	// channels, monitored clouds) needed to render an outage create/edit form.
 	GetOutageMetadata(ctx context.Context) (domain.OutageMetadataResponse, error)
 }
+
+// EngagementAllocationService defines the operations available on the
+// customer-engagement allocation tables — see
+// domain.StatusUpdateReminderRecipient's doc comment for what they are.
+type EngagementAllocationService interface {
+	// StatusUpdateReminderRecipients returns everyone who has a live
+	// allocation covering cycleStartDate (YYYY-MM-DD) and has not published
+	// their own status update for that cycle. A ValidationError is returned
+	// if cycleStartDate is missing or not a valid date.
+	StatusUpdateReminderRecipients(ctx context.Context, cycleStartDate string) (domain.StatusUpdateReminderResponse, error)
+	// CreateStatusUpdate files one weekly engagement status update and
+	// publishes events.TypeEngagementStatusUpdateCreated for
+	// csm-notification-service to email out. A ValidationError is returned
+	// for a malformed request or any non-WSO2 recipient; a NotFoundError if
+	// the engagement does not exist. A publish failure does NOT fail the
+	// call — the update is recorded either way.
+	CreateStatusUpdate(ctx context.Context, req domain.CreateEngagementStatusUpdateRequest) (domain.EngagementStatusUpdate, error)
+}

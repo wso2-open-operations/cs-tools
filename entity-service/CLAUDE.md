@@ -2294,6 +2294,28 @@ profile's team block) and, for customers only (`user_type` EXTERNAL, emitted as
 - Enrichment failures are errors, not silently partial profiles (the ServiceNow adapter
   degrades to empty blocks; a database error here is a real fault).
 - Like the other user routes this does no per-caller scoping; the BFF gates it.
+## Engagement status-update reminders
+
+`GET /engagement-allocations/status-update-reminders?cycleStartDate=YYYY-MM-DD` returns
+everyone who owes a weekly engagement status update for that cycle. Backs the
+`allocation_status_update_reminder` sub-cron in `operations/csm-scheduled-tasks`, which holds
+no database of its own and reads every business fact over HTTP.
+
+**This is the one endpoint that reads tables this service does not own.** The
+`customer_engagement`, `customer_engagement_allocation_resource` and
+`customer_engagement_status_update` tables are mirrored from ServiceNow by
+`csm-sync-service` (its migration 0079), which is why they are singular-named and carry no
+`gen_random_uuid()` defaults — they are sync output, not entity-service schema. Do not add
+migrations for them here; provenance decides ownership, not which service reads them.
+
+The whole rule is one statement, `statusUpdateReminderQuery` in
+`internal/repository/engagement_allocation_repo.go`: a live allocation covering the cycle
+date, on an `IN_PROGRESS` engagement, whose resource has no `PUBLISHED` status update of
+their own for that week. That query's doc comment records exactly where it diverges from the
+ServiceNow flow it ports and why; read it before changing any predicate.
+
+`cycleStartDate` is a bare date, not a timestamp — the underlying columns are `DATE`, and
+accepting an instant would let a timezone creep into a boundary that has none.
 
 ## Adding a new entity
 

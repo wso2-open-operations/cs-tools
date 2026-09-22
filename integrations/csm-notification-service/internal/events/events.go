@@ -47,6 +47,12 @@ const (
 	TypeCaseAcknowledged Type = "case.acknowledged"
 	TypeSeverityChanged  Type = "case.severity_changed"
 	TypeIncidentCreated  Type = "incident.created"
+	// TypeEngagementStatusUpdateCreated fires when somebody publishes a
+	// weekly engagement status update via entity-service. The port of
+	// ServiceNow's SendEmailsOnEngagementStatusUpdateFlow, which triggered on
+	// a record insert on u_customer_engagement_status_update and mailed the
+	// update out. Postgres-data-source-only.
+	TypeEngagementStatusUpdateCreated Type = "engagement.status_update_created"
 
 	// TypeSLAClockRegister and TypeSLATierReached belong to internal/slaengine,
 	// not internal/dispatch — see SLAClockRegisterPayload/SLATierReachedPayload
@@ -98,6 +104,8 @@ var KnownTypes = []Type{
 	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
 	TypeSLAClockRegister, TypeSLATierReached, TypeCaseBillableStatusChanged,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
+	TypeSLAClockRegister, TypeSLATierReached,
+	TypeEngagementStatusUpdateCreated,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -435,4 +443,28 @@ type CRApprovalRequestedPayload struct {
 	// Recipients are already resolved and de-duplicated. Never empty — a notice
 	// with nobody to send to is not published.
 	Recipients []string `json:"recipients"`
+}
+
+// EngagementStatusUpdateCreatedPayload is TypeEngagementStatusUpdateCreated's
+// payload. Mirrors entity-service's struct of the same name exactly; keep the
+// two in sync by hand, same reasoning as every payload above.
+//
+// Recipients/CcRecipients arrive already resolved AND already filtered to
+// @wso2.com by the publisher — that filtering is a business rule about who may
+// read an internal engagement update, not a delivery concern, so this service
+// does not re-derive it. (The ServiceNow original tried to enforce it in the
+// action's own script step, but the check threw inside its own try/catch and
+// was swallowed, so the send went ahead regardless.)
+//
+// Content is the update's HTML body as the author wrote it. This service wraps
+// it in the WSO2 email shell rather than re-rendering it.
+type EngagementStatusUpdateCreatedPayload struct {
+	EngagementID   string   `json:"engagementId"`
+	EngagementName string   `json:"engagementName,omitempty"`
+	AuthorName     string   `json:"authorName,omitempty"`
+	Subject        string   `json:"subject"`
+	Content        string   `json:"content"`
+	CycleStartDate string   `json:"cycleStartDate,omitempty"`
+	Recipients     []string `json:"recipients"`
+	CcRecipients   []string `json:"ccRecipients,omitempty"`
 }

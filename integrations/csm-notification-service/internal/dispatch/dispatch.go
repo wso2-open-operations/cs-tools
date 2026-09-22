@@ -330,6 +330,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleCRApprovalRequested(ctx, record, env.Payload)
 	case events.TypeCRPlanDateNotice:
 		return d.handleCRPlanDateNotice(ctx, record, env.Payload)
+	case events.TypeEngagementStatusUpdateCreated:
+		return d.handleEngagementStatusUpdateCreated(ctx, record, env.Payload)
 	case events.TypeSLAClockRegister, events.TypeSLATierReached:
 		// internal/slaengine's own consumer group (a different group ID, so
 		// it gets its own full copy of this same topic) is what reacts to
@@ -1134,6 +1136,63 @@ func (d *Dispatcher) forgetEmailGroups(baseKey string, caseLinks []string) {
 // tier of retries coming for the identical content (same recordBaseKey),
 // so forgetting there would let an already-succeeded channel be reclaimed
 // and resent once the dead-lettered record's first DLQ attempt arrives.
+// handleEngagementStatusUpdateCreated emails one weekly engagement status
+// update to the audience its author chose.
+//
+// Port of ServiceNow's SendEmailsOnEngagementStatusUpdateFlow. Two things that
+// flow did are deliberately NOT done here:
+//
+//   - It re-checked the cc list for non-WSO2 addresses in its action's own
+//     script step. That check threw inside its own try/catch and was
+//     swallowed, so it never actually blocked anything. The real filter now
+//     lives in entity-service, before the event is published, so a rejected
+//     address fails the author's request visibly instead of silently mailing
+//     an outsider.
+//   - It put the author's content through a rich-text Email step with no
+//     wrapper. Here it goes into the standard WSO2 shell like every other
+//     notification this service sends.
+func (d *Dispatcher) handleEngagementStatusUpdateCreated(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
+	var p events.EngagementStatusUpdateCreatedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode engagement.status_update_created payload: %w", err)
+	}
+
+	recipients := p.Recipients
+	cc := p.CcRecipients
+	if !d.emailSendingEnabled {
+		slog.InfoContext(ctx, "dispatch: email sending disabled, skipping engagement status update",
+			"engagementId", p.EngagementID, "recipients", len(recipients))
+		return nil
+	}
+	if d.emailDebugMode {
+		if len(d.emailDebugRecipients) == 0 {
+			slog.WarnContext(ctx, "dispatch: email debug mode on with no debug recipients, skipping engagement status update",
+				"engagementId", p.EngagementID)
+			return nil
+		}
+		// Cc is dropped rather than redirected: copying the debug list twice
+		// tells nobody anything, and leaving the real Cc would defeat the
+		// point of debug mode.
+		recipients = d.emailDebugRecipients
+		cc = nil
+	}
+
+	body := notifications.RenderEngagementStatusUpdateEmail(notifications.EngagementStatusUpdateEmailData{
+		Subject:        p.Subject,
+		Content:        p.Content,
+		EngagementName: p.EngagementName,
+		AuthorName:     p.AuthorName,
+		CycleStartDate: p.CycleStartDate,
+	})
+
+	if err := d.email.SendEmail(ctx, recipients, cc, nil, nil, p.Subject, body, nil); err != nil {
+		return fmt.Errorf("dispatch: send engagement status update: %w", err)
+	}
+	slog.InfoContext(ctx, "dispatch: engagement status update sent",
+		"engagementId", p.EngagementID, "recipients", len(recipients), "cc", len(cc))
+	return nil
+}
+
 func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.Record, entityID string, raw json.RawMessage) error {
 	var p events.IncidentCreatedPayload
 	if err := json.Unmarshal(raw, &p); err != nil {

@@ -378,6 +378,19 @@ paths:
         Create a new announcement request in state draft. Has no ServiceNow
         equivalent — always backed by Postgres.
       operationId: createAnnouncementRequest
+  /engagement-status-updates:
+    post:
+      summary: >-
+        File one weekly engagement status update. Publishes
+        engagement.status_update_created, which csm-notification-service emails
+        to the update's mailing list — the port of ServiceNow's
+        SendEmailsOnEngagementStatusUpdateFlow. Always backed by Postgres; has
+        no ServiceNow equivalent. Every recipient must be an @wso2.com address;
+        one that is not fails the whole request rather than being dropped
+        silently. Filing an update through this endpoint publishes it — there
+        is no draft state here, because a draft that counted as "updated" is
+        one of the defects the weekly reminder fixes.
+      operationId: createEngagementStatusUpdate
       requestBody:
         required: true
         content:
@@ -391,6 +404,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnnouncementRequest'
+              $ref: '#/components/schemas/CreateEngagementStatusUpdateRequest'
+      responses:
+        "201":
+          description: The stored status update.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementStatusUpdate'
         "400":
           description: Bad request.
           content:
@@ -454,6 +475,8 @@ paths:
                 $ref: '#/components/schemas/AnnouncementRequest'
         "404":
           description: No such request.
+        "404":
+          description: Not found.
           content:
             application/json:
               schema:
@@ -548,6 +571,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnnouncementRequest'
+  /engagement-allocations/status-update-reminders:
+    get:
+      summary: >-
+        Everyone who owes a weekly engagement status update for the cycle
+        starting cycleStartDate: a live allocation covering that date, on an
+        IN_PROGRESS engagement, with no PUBLISHED status update of their own
+        for the cycle. Backs the weekly reminder sub-cron in
+        operations/csm-scheduled-tasks. Reads the customer-engagement tables
+        synced from ServiceNow by csm-sync-service (migration 0079), so it is
+        always backed by Postgres and has no ServiceNow equivalent.
+      operationId: getStatusUpdateReminderRecipients
+      parameters:
+        - name: cycleStartDate
+          in: query
+          required: true
+          description: >-
+            Start of the weekly cycle being reminded about, YYYY-MM-DD.
+            Normally the Monday of the previous week.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The reminder audience for that cycle. Empty when nobody owes one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusUpdateReminderResponse'
         "400":
           description: Bad request.
           content:
@@ -562,6 +613,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: The request is not in state draft.
+          description: Not found.
           content:
             application/json:
               schema:
@@ -6890,6 +6942,104 @@ components:
           type: string
           description: Why nothing was done, empty when the delivery was applied.
 
+    CreateEngagementStatusUpdateRequest:
+      type: object
+      required: [engagementId, authorId, subject, content, mailingList]
+      properties:
+        engagementId:
+          type: string
+          format: uuid
+        allocationId:
+          type: string
+          format: uuid
+          description: Optional; the reminder matches on author and engagement, not allocation.
+        authorId:
+          type: string
+          format: uuid
+          description: Who wrote it. This is the field the weekly reminder checks.
+        subject:
+          type: string
+        content:
+          type: string
+          description: The update body, HTML, as authored.
+        cycleStartDate:
+          type: string
+          format: date
+          description: Monday of the week covered. Defaults to the current week's Monday.
+        mailingList:
+          type: array
+          description: >-
+            Who the update is circulated to. Becomes the email's Cc, not its
+            To — the mail is addressed to the author. At least one address,
+            all @wso2.com; one that is not fails the request.
+          items:
+            type: string
+    EngagementStatusUpdate:
+      type: object
+      required: [id, engagementId, authorId, subject, content, state, cycleStartDate, createdOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        engagementId:
+          type: string
+          format: uuid
+        allocationId:
+          type: string
+          format: uuid
+          nullable: true
+        authorId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        content:
+          type: string
+        state:
+          type: string
+          description: Always PUBLISHED for updates filed through this endpoint.
+        cycleStartDate:
+          type: string
+          format: date
+        mailingList:
+          type: array
+          items:
+            type: string
+        createdOn:
+          type: string
+          format: date-time
+    StatusUpdateReminderRecipient:
+      type: object
+      required: [userId, email]
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: The person's user id.
+        email:
+          type: string
+          description: >-
+            Where the reminder goes. Never empty — anyone without an address is
+            excluded, since they could not be reminded anyway.
+        name:
+          type: string
+          nullable: true
+          description: Omitted when the synced user row has no name.
+    StatusUpdateReminderResponse:
+      type: object
+      required: [cycleStartDate, count, recipients]
+      properties:
+        cycleStartDate:
+          type: string
+          format: date
+          description: Echoes the requested cycle, so a caller logs which week it asked about.
+        count:
+          type: integer
+          description: Number of recipients.
+        recipients:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusUpdateReminderRecipient'
     Pagination:
       type: object
       properties:

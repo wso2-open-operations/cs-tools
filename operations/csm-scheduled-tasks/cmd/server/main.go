@@ -38,6 +38,8 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/allocationreminder"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engagementallocations"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
@@ -102,6 +104,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Third entity-service client, same deployment and credentials again —
+	// see internal/engagementallocations' own doc comment for why "who owes a
+	// weekly status update" isn't another method on either of the other two.
+	engagementAllocationsClient, err := engagementallocations.NewClient(engagementallocations.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service engagement-allocations client", "err", err)
+		os.Exit(1)
+	}
+
 	// Global kill switch for every failure alert email — see
 	// engine.Engine.AlertsEnabled's own doc comment. Defaults to true (the
 	// current always-alert behavior); set to false to go quiet without
@@ -153,6 +170,18 @@ func main() {
 
 	const openCasesTaskName = "open_cases_report"
 	openCasesTo, openCasesCc := recipientsFor(recipientOverrides, openCasesTaskName)
+	// NOTE: this task's SUB_CRON_RECIPIENTS entry is FAILURE-ALERT ONLY. Unlike
+	// the two report tasks above, its real audience is the people who owe an update,
+	// resolved from the data — leaving it unset does not stop it mailing them.
+	// See internal/allocationreminder's own doc comment.
+	// The CSM Portal the reminder's navigation steps link to. Optional: unset
+	// just means the mail names "Engagements" without linking it. Deliberately
+	// this component's own variable rather than a shared one — point it at the
+	// portal these recipients actually use.
+	csmPortalWebBaseURL := os.Getenv("CSM_PORTAL_WEB_BASE_URL")
+
+	const allocationReminderTaskName = "allocation_status_update_reminder"
+	allocationReminderTo, allocationReminderCc := recipientsFor(recipientOverrides, allocationReminderTaskName)
 
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
@@ -197,6 +226,26 @@ func main() {
 			Handler:  opencases.SendReport(entityCasesClient, emailClient, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
+		},
+		// Emails every person who has a live engagement allocation but has not
+		// published their own status update for last week — the Go port of
+		// ServiceNow's WeeklyAllocationStatusUpdateReminderEmailFlow. Unlike
+		// the two report tasks above, the recipients come from the data, not from
+		// SUB_CRON_RECIPIENTS; that entry only sets who is alerted when this
+		// FAILS. See internal/allocationreminder's own doc comment.
+		//
+		// Default schedule is Monday at 00:00, matching the ServiceNow
+		// trigger's own "Weekly on Monday at 00:00:00" — subject to the same
+		// TZ=UTC caveat as every other schedule here (see "Housekeeping" in
+		// this component's CLAUDE.md). The cycle it asks about is derived from
+		// the ISO calendar rather than from when it happens to run, so a retry
+		// later in the week still reminds about the same week.
+		{
+			Name:     allocationReminderTaskName,
+			Schedule: scheduleFor(scheduleOverrides, allocationReminderTaskName, "0 0 * * 1"),
+			Handler:  allocationreminder.SendReminders(engagementAllocationsClient, emailClient, csmPortalWebBaseURL, alertsEnabled),
+			To:       allocationReminderTo,
+			Cc:       allocationReminderCc,
 		},
 	}
 

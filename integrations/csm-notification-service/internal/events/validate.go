@@ -77,6 +77,17 @@ func validRecipients(recipients []string) bool {
 // wrong case's partition, breaking that other case's ordering guarantee.
 func Validate(entityID string, t Type, raw json.RawMessage) error {
 	switch t {
+	case TypeEngagementStatusUpdateCreated:
+		var p EngagementStatusUpdateCreatedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		// EntityID is the status update's own id, so unlike the case.* types
+		// there is no in-payload id to cross-check it against. EngagementID
+		// identifies what the update is ABOUT, not the event's own subject.
+		if p.EngagementID == "" || p.Subject == "" || p.Content == "" || !validRecipients(p.Recipients) {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
 	case TypeCaseCreated:
 		var p CaseCreatedPayload
 		if err := decodeStrict(raw, &p); err != nil {

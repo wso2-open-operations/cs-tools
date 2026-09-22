@@ -48,6 +48,9 @@ var crApprovalRequestedTemplateRaw string
 //go:embed templates/cr_plan_date_notice.html
 var crPlanDateNoticeTemplateRaw string
 
+//go:embed templates/engagement_status_update.html
+var engagementStatusUpdateTemplateRaw string
+
 // wso2LogoURL is WSO2's own official logo asset, served from wso2.cachefly.net
 // (WSO2's public CDN for site assets — not third-party hosting). An earlier
 // version embedded the logo as an inline base64 data: URI instead, avoiding
@@ -71,14 +74,15 @@ func bakeLogo(raw string) string {
 }
 
 var (
-	commentAddedTemplate        = bakeLogo(commentAddedTemplateRaw)
-	statusChangedTemplate       = bakeLogo(statusChangedTemplateRaw)
-	crApprovalRequestedTemplate = bakeLogo(crApprovalRequestedTemplateRaw)
-	crPlanDateNoticeTemplate    = bakeLogo(crPlanDateNoticeTemplateRaw)
-	caseAssignedTemplate        = bakeLogo(caseAssignedTemplateRaw)
-	caseCreatedTemplate         = bakeLogo(caseCreatedTemplateRaw)
-	internalNoteTemplate        = bakeLogo(internalNoteTemplateRaw)
-	severityChangedTemplate     = bakeLogo(severityChangedTemplateRaw)
+	commentAddedTemplate           = bakeLogo(commentAddedTemplateRaw)
+	statusChangedTemplate          = bakeLogo(statusChangedTemplateRaw)
+	crApprovalRequestedTemplate    = bakeLogo(crApprovalRequestedTemplateRaw)
+	crPlanDateNoticeTemplate       = bakeLogo(crPlanDateNoticeTemplateRaw)
+	caseAssignedTemplate           = bakeLogo(caseAssignedTemplateRaw)
+	caseCreatedTemplate            = bakeLogo(caseCreatedTemplateRaw)
+	internalNoteTemplate           = bakeLogo(internalNoteTemplateRaw)
+	severityChangedTemplate        = bakeLogo(severityChangedTemplateRaw)
+	engagementStatusUpdateTemplate = bakeLogo(engagementStatusUpdateTemplateRaw)
 )
 
 // htmlBlockBoundary matches the tags plainTextFromHTML treats as line
@@ -432,4 +436,49 @@ func RenderCRPlanDateNoticeEmail(d CRPlanDateEmailData) string {
 		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
 	)
 	return replacer.Replace(crPlanDateNoticeTemplate)
+}
+
+// EngagementStatusUpdateEmailData is what RenderEngagementStatusUpdateEmail
+// needs. Content is the author's own HTML body.
+type EngagementStatusUpdateEmailData struct {
+	Subject        string
+	Content        string
+	EngagementName string
+	AuthorName     string
+	CycleStartDate string
+}
+
+// RenderEngagementStatusUpdateEmail wraps one weekly engagement status update
+// in the standard WSO2 shell.
+//
+// Content is interpolated WITHOUT escaping, unlike every other field here.
+// That is deliberate and is what the ServiceNow original did too — the body is
+// HTML the author composed in a rich-text editor, and escaping it would mail
+// people their own markup as literal text. The trade is that an author can put
+// arbitrary HTML into an internal email; the recipients are all @wso2.com
+// (enforced by the publisher), so the blast radius is the same people who
+// could already email each other directly.
+func RenderEngagementStatusUpdateEmail(d EngagementStatusUpdateEmailData) string {
+	headline := "New engagement status update"
+	if d.AuthorName != "" {
+		headline = escapeHTML(d.AuthorName) + " published a status update"
+	}
+
+	// Engagement name and cycle are both optional; render whichever are
+	// present rather than leaving a stray separator behind.
+	var context []string
+	if d.EngagementName != "" {
+		context = append(context, escapeHTML(d.EngagementName))
+	}
+	if d.CycleStartDate != "" {
+		context = append(context, "week of "+escapeHTML(d.CycleStartDate))
+	}
+
+	replacer := strings.NewReplacer(
+		"<!-- [HEADLINE] -->", headline,
+		"<!-- [SUBJECT] -->", escapeHTML(d.Subject),
+		"<!-- [ENGAGEMENT_AND_CYCLE] -->", strings.Join(context, " &middot; "),
+		"<!-- [CONTENT] -->", d.Content,
+	)
+	return replacer.Replace(engagementStatusUpdateTemplate)
 }

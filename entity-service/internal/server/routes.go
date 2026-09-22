@@ -187,6 +187,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		announcementRequestHandler = handler.NewAnnouncementRequestHandler(service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db)))
 	}
 
+	// The customer-engagement allocation tables are synced from ServiceNow by
+	// csm-sync-service, not owned here — this service reads them because
+	// operations/csm-scheduled-tasks has no database of its own. Same db != nil
+	// gating as the three above: without Postgres there is nothing to read.
+	var engagementAllocationHandler *handler.EngagementAllocationHandler
+	if db != nil {
+		engagementAllocationHandler = handler.NewEngagementAllocationHandler(
+			service.NewEngagementAllocationService(repository.NewEngagementAllocationRepository(db), eventPublisher))
+	}
+
 	accountRepo := repository.NewAccountRepository(db)
 	accountHandler := handler.NewAccountHandler(service.NewAccountService(accountRepo))
 
@@ -696,6 +706,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
 		mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
 		mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	}
+
+	if engagementAllocationHandler != nil {
+		mux.HandleFunc("GET /engagement-allocations/status-update-reminders", engagementAllocationHandler.StatusUpdateReminderRecipients)
+		mux.HandleFunc("POST /engagement-status-updates", engagementAllocationHandler.CreateStatusUpdate)
 	}
 	if alertIncidentMappingHandler != nil {
 		mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
