@@ -40,12 +40,14 @@ import (
 	"github.com/adhocore/gronx"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityrotations"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/weekendrotation"
 )
 
 func main() {
@@ -102,6 +104,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Roster lookups for the weekend-rotation notice. Its own narrow client
+	// rather than another method set on entityCasesClient — see
+	// internal/entityrotations' own doc comment.
+	entityRotationsClient, err := entityrotations.NewClient(entityrotations.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service rotation-roster client", "err", err)
+		os.Exit(1)
+	}
+
 	// Global kill switch for every failure alert email — see
 	// engine.Engine.AlertsEnabled's own doc comment. Defaults to true (the
 	// current always-alert behavior); set to false to go quiet without
@@ -154,6 +171,9 @@ func main() {
 	const openCasesTaskName = "open_cases_report"
 	openCasesTo, openCasesCc := recipientsFor(recipientOverrides, openCasesTaskName)
 
+	const weekendRotationTaskName = "weekend_rotation_notice"
+	weekendRotationTo, weekendRotationCc := recipientsFor(recipientOverrides, weekendRotationTaskName)
+
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
 		// entity-service's scheduled_task_run table that succeeded or were
@@ -197,6 +217,24 @@ func main() {
 			Handler:  opencases.SendReport(entityCasesClient, emailClient, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
+		},
+		// Tells the coming weekend's rostered team that they are on duty —
+		// see internal/weekendrotation's own doc comment, which records the
+		// ServiceNow action this follows and the one behaviour it changes.
+		// Unlike the two report tasks above, its recipients are the ROSTERED
+		// PEOPLE; weekendRotationTo/Cc are an addition to that audience, not
+		// the audience itself, so an empty SUB_CRON_RECIPIENTS entry still
+		// sends. Monday and Thursday at 08:00, matching the days the
+		// ServiceNow action gated dispatch to (its flow triggered daily and
+		// then did nothing on the other five) — again TZ=UTC-dependent,
+		// override via SUB_CRON_SCHEDULES.
+		{
+			Name:     weekendRotationTaskName,
+			Schedule: scheduleFor(scheduleOverrides, weekendRotationTaskName, "0 8 * * 1,4"),
+			Handler: weekendrotation.SendNotice(entityRotationsClient, emailClient,
+				time.Now, weekendRotationTo, weekendRotationCc, alertsEnabled),
+			To: weekendRotationTo,
+			Cc: weekendRotationCc,
 		},
 	}
 

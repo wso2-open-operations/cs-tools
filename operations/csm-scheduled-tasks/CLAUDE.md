@@ -82,6 +82,33 @@ registry, rather than a dedicated env var per task that would need inventing aga
 sub-cron added here. `scheduleFor`/`recipientsFor` look up each task's override by its exact
 `Name`; anything not mentioned just keeps its own hardcoded default (schedule) or gets nil (To/Cc).
 
+## The weekend rotation notice
+
+`weekend_rotation_notice` (`internal/weekendrotation`) is the odd one out among the registered
+tasks and worth reading before copying either pattern:
+
+- **Its recipients are the rostered people, not its config.** `SUB_CRON_RECIPIENTS` `to`/`cc` for
+  this task are *added* to the roster's own addresses, rather than being the whole audience as
+  they are for `stale_cases_report` / `open_cases_report`. An empty entry still sends.
+- **An empty roster is a success.** A weekend with nobody on it returns nil without emailing.
+- **It runs twice a week** — default `0 8 * * 1,4` (Monday and Thursday 08:00).
+
+It replaces the ServiceNow flow "Dispatch Email Notification for Weekend Team" and follows that
+flow's `GetWeekendTeam` action closely: same two dispatch days, both weekend dates looked up
+separately, each member shown with their roster note. The flow itself triggers daily at 08:30 and
+the action gates dispatch to Monday/Thursday; registering it on those two days directly is the
+same behaviour without the five no-op runs.
+
+The one deliberate difference is the empty-roster case. The action joins recipients into a string,
+so an empty roster produces `""` and the Send Email step fails with *"Email validation failed:
+Email has no recipients."* With no weekend roster on the instance dated later than 2025-08-05,
+that is every dispatch, not an edge case. `internal/weekendrotation`'s own doc comment records
+this, and `weekendrotation_test.go` pins it.
+
+It reads the roster from entity-service's `POST /team-rotations/search` via
+`internal/entityrotations`, a third narrow client alongside `internal/ledger` and
+`internal/entitycases`.
+
 ## Retry backoff
 
 `registry.Task.RetryBackoff` defaults to the driver's own interval (`DRIVER_INTERVAL`, see below)
