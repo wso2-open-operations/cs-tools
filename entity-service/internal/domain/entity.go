@@ -7096,3 +7096,33 @@ type LookupAlertIncidentMappingsRequest struct {
 type LookupAlertIncidentMappingsResponse struct {
 	Mappings []AlertIncidentMappingView `json:"mappings"`
 }
+
+// StatusUpdateReminderRecipient is one person who owes a weekly engagement
+// status update.
+//
+// The customer-engagement tables these come from are synced from ServiceNow by
+// csm-sync-service (u_customer_engagement and friends, migration 0079), not
+// owned by this service. They are read here because
+// operations/csm-scheduled-tasks holds no database of its own and reads every
+// business fact over HTTP — see that component's own CLAUDE.md.
+type StatusUpdateReminderRecipient struct {
+	// UserID is the person's "user".id.
+	UserID string `json:"userId"`
+	// Email is where the reminder goes. Never empty: the query excludes
+	// anyone without an address, since they could not be reminded anyway.
+	Email string `json:"email"`
+	// Name is nil when the synced user row has none.
+	Name *string `json:"name,omitempty"`
+}
+
+// StatusUpdateReminderResponse is the reminder audience for one weekly cycle.
+type StatusUpdateReminderResponse struct {
+	// CycleStartDate echoes the requested cycle, YYYY-MM-DD, so a caller
+	// logging the result records which week it asked about.
+	CycleStartDate string `json:"cycleStartDate"`
+	// Count is len(Recipients), so a caller can log the size without
+	// walking the list.
+	Count int `json:"count"`
+	// Recipients is empty, never null, when nobody owes an update.
+	Recipients []StatusUpdateReminderRecipient `json:"recipients"`
+}

@@ -167,6 +167,73 @@ query run) if empty. Shares `internal/entitycases.Client` and the row-rendering 
 `internal/notify` with "Stale cases report", but has its own template
 (`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
 emails" below.
+## Weekly allocation status update reminder
+
+`internal/allocationreminder.SendReminders`, registered as
+`"allocation_status_update_reminder"`, is the Go port of ServiceNow's
+`WeeklyAllocationStatusUpdateReminderEmailFlow`. Default schedule `0 0 * * 1` — Monday
+00:00, matching the ServiceNow trigger's own "Weekly on Monday at 00:00:00", with the same
+`TZ=UTC` caveat as "Housekeeping" above.
+
+**It is the first sub-cron whose audience comes from the data rather than from config**, and
+that inverts two rules the two report tasks above establish:
+
+- `SUB_CRON_RECIPIENTS` for this task is **failure-alert only**. Leaving it unset does not
+  stop the task mailing people — it only means nobody extra is told when it fails. Contrast
+  `stale_cases_report`/`open_cases_report`, where an empty `to` means the task skips its
+  query entirely.
+- It emails **one message per recipient**, not one message to a combined `To` line. The
+  ServiceNow original joined every address together, which disclosed the full list of people
+  behind on their updates to everyone on it. The body is identical for every recipient
+  (`notify.RenderAllocationStatusUpdateReminder` takes no arguments), so nothing is lost.
+
+The mail's navigation steps point at the **CSM Portal**, not ServiceNow: the original told people to log
+into Agent Workspace and use "Customer Engagements" > "My Allocations", which they can no longer do. The
+portal's engagements page is linked via `CSM_PORTAL_WEB_BASE_URL` (see the env table below) rather than
+hardcoded, since the ServiceNow-backed portal host would not resolve these records.
+
+`ALERTS_ENABLED=false` silences it like every other email here, without failing the task or
+even running the query.
+
+A send that fails for one person does not abandon the rest: every recipient is attempted and
+the failures are joined into one error. Giving up on the first bad address would leave most
+of the audience unreminded *and* retry the whole batch next tick, re-mailing everyone who had
+already received it.
+
+**The cycle is derived from the ISO calendar, not from "today minus seven days"** like the
+original. Those agree only when the job actually runs on a Monday; a Tuesday retry under the
+original's rule silently shifts the whole window by a day. Anchoring to the week makes every
+attempt within a week — first try or fourth retry — ask about the same cycle, which is what
+makes the handler idempotent per period.
+
+Recipients come from entity-service's
+`GET /engagement-allocations/status-update-reminders?cycleStartDate=YYYY-MM-DD` via
+`internal/engagementallocations.Client` — a third entity-service client alongside
+`internal/ledger` and `internal/entitycases`, for the reason that package's own doc comment
+gives. That endpoint reads the `customer_engagement*` tables csm-sync-service mirrors from
+ServiceNow (its migration 0079).
+
+**The port deliberately fixes three defects in the original**, each confirmed against the
+ServiceNow `sys_dictionary` dump of 2026-09-21 and each reproducible offline against
+csm-sync-service's `testdata/0079_customer_engagement_seed.sql`:
+
+1. **Author, not engagement.** The original's per-author filter is applied to the wrong
+   `GlideRecord`, and after that record's `query()` has already run — so it does nothing.
+   The live flow asks "has *anyone* on this engagement posted?", meaning one person's update
+   silences the reminder for every colleague on it.
+2. **Published updates only.** The original counts any status-update row regardless of state,
+   so an abandoned draft suppresses the reminder as effectively as a published update.
+3. **Live allocations only.** The original never checks the allocation's own state. Three of
+   its nine values are cancellations or rejections, so a consultant who *rejected* an
+   allocation still gets chased for updates on it.
+
+What is **not** changed: the engagement filter stays `IN_PROGRESS` only, matching the
+original's raw `u_state == "1"`. `NEW`, `REQUESTED` and `ON_HOLD` engagements are still
+skipped — widening that is a product decision, not a defect fix.
+
+Registering this task is a paired change with **deactivating the ServiceNow flow**, per the
+double-fire rule in the root `CLAUDE.md`. Two systems sending the same reminder is worse than
+neither.
 
 ## Alerting
 
@@ -232,6 +299,7 @@ report emails" below for why that's not a generic engine feature.
 | `DRIVER_INTERVAL` | No (default `1h`) | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself |
 | `SUB_CRON_SCHEDULES` | No | JSON object `{"<task.Name>": "<cron expression>"}` overriding any registered task's schedule by name — see "Adding a sub-cron" above. A task not mentioned keeps its own hardcoded default |
 | `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — or, for a report-style task, its report's actual recipients (see "Alerting" above for which tasks work which way). A task not mentioned gets no per-task recipients |
+| `CSM_PORTAL_WEB_BASE_URL` | No | CSM Portal base URL linked from the weekly allocation reminder's navigation steps (`<base>/engagements`). Unset just means the mail names "Engagements" without linking it; a non-http(s) value is treated as unset rather than pasted into an href. Point it at the portal the recipients actually use |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time

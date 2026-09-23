@@ -603,6 +603,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnnouncementRequest'
+  /engagement-allocations/status-update-reminders:
+    get:
+      summary: >-
+        Everyone who owes a weekly engagement status update for the cycle
+        starting cycleStartDate: a live allocation covering that date, on an
+        IN_PROGRESS engagement, with no PUBLISHED status update of their own
+        for the cycle. Backs the weekly reminder sub-cron in
+        operations/csm-scheduled-tasks. Reads the customer-engagement tables
+        synced from ServiceNow by csm-sync-service (migration 0079), so it is
+        always backed by Postgres and has no ServiceNow equivalent.
+      operationId: getStatusUpdateReminderRecipients
+      parameters:
+        - name: cycleStartDate
+          in: query
+          required: true
+          description: >-
+            Start of the weekly cycle being reminded about, YYYY-MM-DD.
+            Normally the Monday of the previous week.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The reminder audience for that cycle. Empty when nobody owes one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusUpdateReminderResponse'
         "400":
           description: Bad request.
           content:
@@ -617,6 +645,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: The request is not in state draft.
+          description: Not found.
           content:
             application/json:
               schema:
@@ -7218,6 +7247,38 @@ components:
           type: string
           description: Why nothing was done, empty when the delivery was applied.
 
+    StatusUpdateReminderRecipient:
+      type: object
+      required: [userId, email]
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: The person's user id.
+        email:
+          type: string
+          description: >-
+            Where the reminder goes. Never empty — anyone without an address is
+            excluded, since they could not be reminded anyway.
+        name:
+          type: string
+          nullable: true
+          description: Omitted when the synced user row has no name.
+    StatusUpdateReminderResponse:
+      type: object
+      required: [cycleStartDate, count, recipients]
+      properties:
+        cycleStartDate:
+          type: string
+          format: date
+          description: Echoes the requested cycle, so a caller logs which week it asked about.
+        count:
+          type: integer
+          description: Number of recipients.
+        recipients:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusUpdateReminderRecipient'
     Pagination:
       type: object
       properties:
