@@ -30,23 +30,35 @@ import (
 // unconfigured methods panic if called -- same convention as
 // stubProblemRepo (problem_service_test.go).
 type stubCallRequestRepo struct {
-	createCallRequest func(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error)
+	createCallRequest     func(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string, authProjectIDs []string) (domain.CreateCallRequestResponse, error)
+	searchCallRequests    func(ctx context.Context, caseID string, states []domain.CallRequestStateType, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error)
+	searchAllCallRequests func(ctx context.Context, f domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error)
+	updateCallRequest     func(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string, authProjectIDs []string) (domain.UpdateCallRequestResponse, error)
 }
 
-func (s *stubCallRequestRepo) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error) {
+func (s *stubCallRequestRepo) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string, authProjectIDs []string) (domain.CreateCallRequestResponse, error) {
 	if s.createCallRequest != nil {
-		return s.createCallRequest(ctx, req, callerID, callerEmail)
+		return s.createCallRequest(ctx, req, callerID, callerEmail, authProjectIDs)
 	}
 	panic("not implemented")
 }
-func (s *stubCallRequestRepo) SearchCallRequests(context.Context, string, []domain.CallRequestStateType, domain.Pagination) ([]domain.CallRequestView, int, error) {
-	panic("not implemented")
+func (s *stubCallRequestRepo) SearchCallRequests(ctx context.Context, caseID string, states []domain.CallRequestStateType, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error) {
+	if s.searchCallRequests != nil {
+		return s.searchCallRequests(ctx, caseID, states, authProjectIDs, pagination)
+	}
+	panic("SearchCallRequests called unexpectedly")
 }
-func (s *stubCallRequestRepo) SearchAllCallRequests(context.Context, domain.SearchAllCallRequestsFilters, domain.CallRequestSort, domain.Pagination) ([]domain.CallRequestView, int, error) {
-	panic("not implemented")
+func (s *stubCallRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error) {
+	if s.searchAllCallRequests != nil {
+		return s.searchAllCallRequests(ctx, f, sortBy, authProjectIDs, pagination)
+	}
+	panic("SearchAllCallRequests called unexpectedly")
 }
-func (s *stubCallRequestRepo) UpdateCallRequest(context.Context, domain.UpdateCallRequestRequest, *string, string) (domain.UpdateCallRequestResponse, error) {
-	panic("not implemented")
+func (s *stubCallRequestRepo) UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string, authProjectIDs []string) (domain.UpdateCallRequestResponse, error) {
+	if s.updateCallRequest != nil {
+		return s.updateCallRequest(ctx, req, assigneeID, callerEmail, authProjectIDs)
+	}
+	panic("UpdateCallRequest called unexpectedly")
 }
 
 // stubMirrorCallRequestService embeds CallRequestService (nil) and overrides
@@ -77,7 +89,7 @@ func TestCallRequestService_CreateCallRequest_MirrorsToServiceNow(t *testing.T) 
 		},
 	}
 	repo := &stubCallRequestRepo{
-		createCallRequest: func(_ context.Context, req domain.CreateCallRequestRequest, _, _ string) (domain.CreateCallRequestResponse, error) {
+		createCallRequest: func(_ context.Context, req domain.CreateCallRequestRequest, _, _ string, _ []string) (domain.CreateCallRequestResponse, error) {
 			var resp domain.CreateCallRequestResponse
 			resp.CallRequest.ID = testUUID
 			return resp, nil
@@ -86,8 +98,10 @@ func TestCallRequestService_CreateCallRequest_MirrorsToServiceNow(t *testing.T) 
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
 	svc := NewCallRequestServiceWithSNWriteback(repo, stubUserRepo{
-		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
-	}, dispatcher, mirror)
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}, stubAccess{scope: AccessScope{Unrestricted: true}}, dispatcher, mirror)
 
 	if _, err := svc.CreateCallRequest(ctx, req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -120,7 +134,7 @@ func TestCallRequestService_CreateCallRequest_MirrorFailureRecordsWritebackFailu
 		},
 	}
 	repo := &stubCallRequestRepo{
-		createCallRequest: func(context.Context, domain.CreateCallRequestRequest, string, string) (domain.CreateCallRequestResponse, error) {
+		createCallRequest: func(context.Context, domain.CreateCallRequestRequest, string, string, []string) (domain.CreateCallRequestResponse, error) {
 			var resp domain.CreateCallRequestResponse
 			resp.CallRequest.ID = testUUID
 			return resp, nil
@@ -129,14 +143,272 @@ func TestCallRequestService_CreateCallRequest_MirrorFailureRecordsWritebackFailu
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
 	svc := NewCallRequestServiceWithSNWriteback(repo, stubUserRepo{
-		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
-	}, dispatcher, mirror)
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}, stubAccess{scope: AccessScope{Unrestricted: true}}, dispatcher, mirror)
 
 	if _, err := svc.CreateCallRequest(ctx, req); err != nil {
 		t.Fatalf("expected the Postgres-side success to be reported despite the mirror failure, got %v", err)
 	}
 
 	waitFor(t, func() bool { return failures.count() == 1 })
+}
+
+// TestCallRequestService_SearchCallRequests_ScopesToCallerProjects is the
+// core regression guard for the call_request authorization gap:
+// SearchCallRequests applied no authorization at all before this fix -- any
+// authenticated caller could pass any existing caseID and read that case's
+// call requests regardless of project.
+func TestCallRequestService_SearchCallRequests_ScopesToCallerProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	t.Run("external caller's own resolved projects are passed to the repo", func(t *testing.T) {
+		called := false
+		var gotAuthProjectIDs []string
+		repo := &stubCallRequestRepo{
+			searchCallRequests: func(_ context.Context, _ string, _ []domain.CallRequestStateType, authProjectIDs []string, _ domain.Pagination) ([]domain.CallRequestView, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.CallRequestView{}, 0, nil
+			},
+		}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+		_, err := svc.SearchCallRequests(ctx, domain.SearchCallRequestsRequest{CaseID: testUUID, Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchCallRequests: %v", err)
+		}
+		if !called {
+			t.Fatal("expected repo.SearchCallRequests to be called")
+		}
+		if len(gotAuthProjectIDs) != 1 || gotAuthProjectIDs[0] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+			t.Fatalf("repo received authProjectIDs = %v, want [aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]", gotAuthProjectIDs)
+		}
+	})
+
+	t.Run("external caller with no registered projects at all gets zero results, repo never called", func(t *testing.T) {
+		repo := &stubCallRequestRepo{}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: nil}})
+
+		resp, err := svc.SearchCallRequests(ctx, domain.SearchCallRequestsRequest{CaseID: testUUID, Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchCallRequests: %v", err)
+		}
+		if len(resp.CallRequests) != 0 {
+			t.Errorf("resp.CallRequests = %v, want empty", resp.CallRequests)
+		}
+	})
+
+	t.Run("internal (unrestricted) caller passes no project filter", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		called := false
+		repo := &stubCallRequestRepo{
+			searchCallRequests: func(_ context.Context, _ string, _ []domain.CallRequestStateType, authProjectIDs []string, _ domain.Pagination) ([]domain.CallRequestView, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.CallRequestView{}, 0, nil
+			},
+		}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{Unrestricted: true}})
+
+		_, err := svc.SearchCallRequests(ctx, domain.SearchCallRequestsRequest{CaseID: testUUID, Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchCallRequests: %v", err)
+		}
+		if !called || gotAuthProjectIDs != nil {
+			t.Errorf("called=%v gotAuthProjectIDs=%v, want called=true and nil", called, gotAuthProjectIDs)
+		}
+	})
+}
+
+// TestCallRequestService_SearchAllCallRequests_ScopesToCallerProjects is
+// SearchCallRequests' identical guard for the cross-case search endpoint.
+func TestCallRequestService_SearchAllCallRequests_ScopesToCallerProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	t.Run("external caller's own resolved projects are passed to the repo", func(t *testing.T) {
+		called := false
+		var gotAuthProjectIDs []string
+		repo := &stubCallRequestRepo{
+			searchAllCallRequests: func(_ context.Context, _ domain.SearchAllCallRequestsFilters, _ domain.CallRequestSort, authProjectIDs []string, _ domain.Pagination) ([]domain.CallRequestView, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.CallRequestView{}, 0, nil
+			},
+		}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+		_, err := svc.SearchAllCallRequests(ctx, domain.SearchAllCallRequestsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchAllCallRequests: %v", err)
+		}
+		if !called {
+			t.Fatal("expected repo.SearchAllCallRequests to be called")
+		}
+		if len(gotAuthProjectIDs) != 1 || gotAuthProjectIDs[0] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+			t.Fatalf("repo received authProjectIDs = %v, want [aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]", gotAuthProjectIDs)
+		}
+	})
+
+	t.Run("external caller with no registered projects at all gets zero results, repo never called", func(t *testing.T) {
+		repo := &stubCallRequestRepo{}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: nil}})
+
+		resp, err := svc.SearchAllCallRequests(ctx, domain.SearchAllCallRequestsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchAllCallRequests: %v", err)
+		}
+		if len(resp.CallRequests) != 0 {
+			t.Errorf("resp.CallRequests = %v, want empty", resp.CallRequests)
+		}
+	})
+
+	t.Run("internal (unrestricted) caller passes no project filter", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		called := false
+		repo := &stubCallRequestRepo{
+			searchAllCallRequests: func(_ context.Context, _ domain.SearchAllCallRequestsFilters, _ domain.CallRequestSort, authProjectIDs []string, _ domain.Pagination) ([]domain.CallRequestView, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.CallRequestView{}, 0, nil
+			},
+		}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{Unrestricted: true}})
+
+		_, err := svc.SearchAllCallRequests(ctx, domain.SearchAllCallRequestsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchAllCallRequests: %v", err)
+		}
+		if !called || gotAuthProjectIDs != nil {
+			t.Errorf("called=%v gotAuthProjectIDs=%v, want called=true and nil", called, gotAuthProjectIDs)
+		}
+	})
+}
+
+// TestCallRequestService_CreateCallRequest_ScopesToCallerProjects covers the
+// write path: CreateCallRequest applied no authorization at all before this
+// fix -- a caller could open a call request against any case regardless of
+// project.
+func TestCallRequestService_CreateCallRequest_ScopesToCallerProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	req := domain.CreateCallRequestRequest{CaseID: testUUID, Reason: "r", UTCTimes: []string{"2026-10-01T10:00:00Z"}, DurationMinutes: 30}
+	userRepo := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+
+	t.Run("external caller's own resolved projects are passed to the repo", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		repo := &stubCallRequestRepo{
+			createCallRequest: func(_ context.Context, _ domain.CreateCallRequestRequest, _, _ string, authProjectIDs []string) (domain.CreateCallRequestResponse, error) {
+				gotAuthProjectIDs = authProjectIDs
+				var resp domain.CreateCallRequestResponse
+				resp.CallRequest.ID = testUUID
+				return resp, nil
+			},
+		}
+		svc := NewCallRequestService(repo, userRepo, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+		if _, err := svc.CreateCallRequest(ctx, req); err != nil {
+			t.Fatalf("CreateCallRequest: %v", err)
+		}
+		if len(gotAuthProjectIDs) != 1 || gotAuthProjectIDs[0] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+			t.Fatalf("repo received authProjectIDs = %v, want [aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]", gotAuthProjectIDs)
+		}
+	})
+
+	t.Run("external caller with no registered projects at all gets NotFound, repo never called", func(t *testing.T) {
+		repo := &stubCallRequestRepo{}
+		svc := NewCallRequestService(repo, userRepo, stubAccess{scope: AccessScope{ProjectIDs: nil}})
+
+		_, err := svc.CreateCallRequest(ctx, req)
+		var nf *apierror.NotFoundError
+		if !asNotFoundError(err, &nf) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("internal caller passes no project filter", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		called := false
+		repo := &stubCallRequestRepo{
+			createCallRequest: func(_ context.Context, _ domain.CreateCallRequestRequest, _, _ string, authProjectIDs []string) (domain.CreateCallRequestResponse, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				var resp domain.CreateCallRequestResponse
+				resp.CallRequest.ID = testUUID
+				return resp, nil
+			},
+		}
+		svc := NewCallRequestService(repo, userRepo, stubAccess{scope: AccessScope{Unrestricted: true}})
+
+		if _, err := svc.CreateCallRequest(ctx, req); err != nil {
+			t.Fatalf("CreateCallRequest: %v", err)
+		}
+		if !called || gotAuthProjectIDs != nil {
+			t.Errorf("called=%v gotAuthProjectIDs=%v, want called=true and nil", called, gotAuthProjectIDs)
+		}
+	})
+}
+
+// TestCallRequestService_UpdateCallRequest_ScopesToCallerProjects covers the
+// by-id write path: UpdateCallRequest applied no authorization at all before
+// this fix -- a caller could update any call request by id regardless of
+// project.
+func TestCallRequestService_UpdateCallRequest_ScopesToCallerProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	req := domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateCanceled}
+
+	t.Run("external caller's own resolved projects are passed to the repo", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		repo := &stubCallRequestRepo{
+			updateCallRequest: func(_ context.Context, _ domain.UpdateCallRequestRequest, _ *string, _ string, authProjectIDs []string) (domain.UpdateCallRequestResponse, error) {
+				gotAuthProjectIDs = authProjectIDs
+				return domain.UpdateCallRequestResponse{}, nil
+			},
+		}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+		if _, err := svc.UpdateCallRequest(ctx, req); err != nil {
+			t.Fatalf("UpdateCallRequest: %v", err)
+		}
+		if len(gotAuthProjectIDs) != 1 || gotAuthProjectIDs[0] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+			t.Fatalf("repo received authProjectIDs = %v, want [aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]", gotAuthProjectIDs)
+		}
+	})
+
+	t.Run("external caller with no registered projects at all gets NotFound, repo never called", func(t *testing.T) {
+		repo := &stubCallRequestRepo{}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: nil}})
+
+		_, err := svc.UpdateCallRequest(ctx, req)
+		var nf *apierror.NotFoundError
+		if !asNotFoundError(err, &nf) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("internal caller passes no project filter", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		called := false
+		repo := &stubCallRequestRepo{
+			updateCallRequest: func(_ context.Context, _ domain.UpdateCallRequestRequest, _ *string, _ string, authProjectIDs []string) (domain.UpdateCallRequestResponse, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return domain.UpdateCallRequestResponse{}, nil
+			},
+		}
+		svc := NewCallRequestService(repo, nil, stubAccess{scope: AccessScope{Unrestricted: true}})
+
+		if _, err := svc.UpdateCallRequest(ctx, req); err != nil {
+			t.Fatalf("UpdateCallRequest: %v", err)
+		}
+		if !called || gotAuthProjectIDs != nil {
+			t.Errorf("called=%v gotAuthProjectIDs=%v, want called=true and nil", called, gotAuthProjectIDs)
+		}
+	})
 }
 
 const testUUID = "99999999-0000-4000-8000-000000000001"

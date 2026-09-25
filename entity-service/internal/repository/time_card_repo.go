@@ -37,10 +37,20 @@ type TimeCardRepository interface {
 	// SearchTimeCards returns a filtered, sorted, paginated slice of time
 	// cards together with the total count of matching rows before
 	// pagination. callerEmail is the caller's own resolved identity,
-	// threaded down to this layer for a future authorization decision --
-	// not enforced yet, same posture as AccountContactRepository's own
-	// callerEmail parameter.
-	SearchTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string) ([]domain.TimeCardView, int, error)
+	// threaded down for filters.approverId/approvedById resolution.
+	// authProjectIDs is a SEPARATE thing from filters.ProjectIDs -- it
+	// restricts by the case's real project (wi.project_id, via the
+	// mandatory tc.case_id join), resolved purely from the caller's own
+	// AccessScope, never from request input; filters.ProjectIDs stays a
+	// caller-supplied business filter on the row's own, optional,
+	// independently-set tc.customer_project_id column, which this
+	// authorization check deliberately does NOT reuse -- that column can be
+	// NULL even when the underlying case has a real project (an empty
+	// req.ProjectID on CreateTimeCard leaves it NULL), so filtering
+	// authorization on it would incorrectly exclude a caller's own
+	// legitimate time cards. nil authProjectIDs means unrestricted
+	// (internal caller).
+	SearchTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string, authProjectIDs []string) ([]domain.TimeCardView, int, error)
 	// SearchCaseTimeCards returns the same filtered set as SearchTimeCards,
 	// grouped and rolled up by case, together with the total count of
 	// distinct matching cases before pagination. The returned project comes
@@ -49,9 +59,9 @@ type TimeCardRepository interface {
 	// CreateTimeCard validates it against the case's project when supplied)
 	// and grouping by it would fragment one case into multiple summary rows
 	// while COUNT(DISTINCT tc.case_id) still counted it once. callerEmail is
-	// threaded down for the same future-authorization reason as
-	// SearchTimeCards.
-	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string) ([]domain.CaseTimeCardSummary, int, error)
+	// threaded down for the same reason as SearchTimeCards; authProjectIDs
+	// is the same authorization-only filter, identical reasoning.
+	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string, authProjectIDs []string) ([]domain.CaseTimeCardSummary, int, error)
 	// CreateTimeCard inserts a new time card in the "submitted" state,
 	// submitted by userID, plus one time_card_approver row per
 	// req.ApproverIDs, all in one transaction. When req.ProjectID is
@@ -253,15 +263,24 @@ func (r *timeCardRepo) getApprovers(ctx context.Context, timeCardIDs []string) (
 
 // timeCardWhereClause builds the shared WHERE clause + args used by both
 // SearchTimeCards and SearchCaseTimeCards, so the two can never drift out of
-// sync on which cards a given filter set matches.
-func timeCardWhereClause(f *domain.SearchTimeCardsFilters) (string, []any) {
+// sync on which cards a given filter set matches. authProjectIDs is kept
+// separate from f.ProjectIDs -- see SearchTimeCards's own doc comment for
+// why: it restricts by the case's real project (wi.project_id) rather than
+// the row's own optional, independently-set tc.customer_project_id column,
+// and is resolved purely from the caller's AccessScope, never from f. nil
+// means unrestricted (internal caller) -- no filter added.
+func timeCardWhereClause(f *domain.SearchTimeCardsFilters, authProjectIDs []string) (string, []any) {
 	where := "WHERE 1=1"
 	args := []any{}
+	if len(authProjectIDs) > 0 {
+		args = append(args, authProjectIDs)
+		where += fmt.Sprintf(" AND wi.project_id = ANY($%d::uuid[])", len(args))
+	}
 	if f == nil {
 		return where, args
 	}
 
-	argIdx := 1
+	argIdx := len(args) + 1
 	add := func(clause string, val any) {
 		where += fmt.Sprintf(" AND "+clause, argIdx)
 		args = append(args, val)
@@ -322,8 +341,8 @@ func timeCardWhereClause(f *domain.SearchTimeCardsFilters) (string, []any) {
 }
 
 // SearchTimeCards implements TimeCardRepository.
-func (r *timeCardRepo) SearchTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, _ string) ([]domain.TimeCardView, int, error) {
-	where, args := timeCardWhereClause(req.Filters)
+func (r *timeCardRepo) SearchTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, _ string, authProjectIDs []string) ([]domain.TimeCardView, int, error) {
+	where, args := timeCardWhereClause(req.Filters, authProjectIDs)
 
 	sortCol := "tc.updated_on"
 	if req.SortBy.Field == domain.TimeCardSortFieldWorkDate {
@@ -393,10 +412,10 @@ func (r *timeCardRepo) SearchTimeCards(ctx context.Context, req domain.SearchTim
 }
 
 // SearchCaseTimeCards implements TimeCardRepository.
-func (r *timeCardRepo) SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, _ string) ([]domain.CaseTimeCardSummary, int, error) {
-	where, args := timeCardWhereClause(req.Filters)
+func (r *timeCardRepo) SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, _ string, authProjectIDs []string) ([]domain.CaseTimeCardSummary, int, error) {
+	where, args := timeCardWhereClause(req.Filters, authProjectIDs)
 
-	countQuery := fmt.Sprintf(`SELECT COUNT(DISTINCT tc.case_id) FROM time_card tc %s`, where)
+	countQuery := fmt.Sprintf(`SELECT COUNT(DISTINCT tc.case_id) FROM time_card tc JOIN work_item wi ON wi.id = tc.case_id %s`, where)
 
 	dataQuery := fmt.Sprintf(`
 		SELECT wi.id, wi.number, wi.subject, wi.created_on, wi.updated_on, wi.created_by, wi.updated_by,

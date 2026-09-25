@@ -83,16 +83,36 @@ func parseIncidentTaskFieldFiltersPostgres(filters []domain.IncidentTaskFieldFil
 }
 
 type incidentTaskService struct {
-	repo repository.IncidentTaskRepository
+	repo   repository.IncidentTaskRepository
+	access AccessService
 }
 
 // NewIncidentTaskService constructs an IncidentTaskService backed by Postgres.
-func NewIncidentTaskService(repo repository.IncidentTaskRepository) IncidentTaskService {
-	return &incidentTaskService{repo: repo}
+func NewIncidentTaskService(repo repository.IncidentTaskRepository, access AccessService) IncidentTaskService {
+	return &incidentTaskService{repo: repo, access: access}
+}
+
+// requireInternalCaller rejects anyone whose AccessScope is not Unrestricted
+// -- same reasoning as incidentService's own copy: incident_task rows have
+// no project association at all (work_item.project_id is NULL for every
+// real incident_task, confirmed live against a real database copy), and in
+// practice only csm-portal-backend (WSO2-internal) calls these endpoints.
+func (s *incidentTaskService) requireInternalCaller(ctx context.Context) error {
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	if !scope.Unrestricted {
+		return &apierror.ForbiddenError{Msg: "incident tasks are only available to internal services"}
+	}
+	return nil
 }
 
 // SearchIncidentTasks implements IncidentTaskService.
 func (s *incidentTaskService) SearchIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest) (domain.SearchIncidentTasksResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.SearchIncidentTasksResponse{}, err
+	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchIncidentTasksResponse{}, err
 	}
@@ -122,6 +142,9 @@ func (s *incidentTaskService) SearchIncidentTasks(ctx context.Context, req domai
 // repository rejects "assignmentGroup" specifically with its own,
 // data-source-specific message (no assignment-group column exists here).
 func (s *incidentTaskService) AggregateIncidentTasks(ctx context.Context, req domain.AggregateIncidentTasksRequest) (domain.AggregateResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.AggregateResponse{}, err
+	}
 	if !validIncidentTaskAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
@@ -136,6 +159,9 @@ func (s *incidentTaskService) AggregateIncidentTasks(ctx context.Context, req do
 
 // GetIncidentTask implements IncidentTaskService.
 func (s *incidentTaskService) GetIncidentTask(ctx context.Context, id string) (domain.IncidentTaskDetail, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.IncidentTaskDetail{}, err
+	}
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.IncidentTaskDetail{}, err
 	}

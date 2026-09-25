@@ -68,6 +68,7 @@ type stubCaseRepo struct {
 	updateCaseParent              func(ctx context.Context, caseID, parentID, callerEmail string) (time.Time, error)
 	updateCaseFields              func(ctx context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error)
 	recordCaseFieldChangeActivity func(ctx context.Context, caseID, fieldName, oldValue, newValue, actorEmail string) error
+	searchCaseActivities          func(ctx context.Context, req domain.SearchCaseActivitiesRequest) ([]domain.CaseActivity, int, error)
 }
 
 func (s *stubCaseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
@@ -82,11 +83,21 @@ func (s *stubCaseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.
 	}
 	panic("not implemented")
 }
+
+// GetCaseByID defaults to a permissive success (an empty CaseView, err=nil)
+// when getCaseByID isn't configured -- unlike this stub's other methods, it
+// is now called as an authorization precondition by many case-adjacent
+// operations (comments/attachments/tags/watch-list/UpdateCase, via
+// caseService.authorizeCaseAccess), not only by tests that care about its
+// own return value, so most existing tests exercising those operations
+// never configured it and don't need to just to prove authorization passes.
+// Tests that specifically want to exercise the authorization gate (success
+// or rejection) still set getCaseByID explicitly to override this.
 func (s *stubCaseRepo) GetCaseByID(ctx context.Context, id string, scope repository.SearchScope) (domain.CaseView, error) {
 	if s.getCaseByID != nil {
 		return s.getCaseByID(ctx, id, scope)
 	}
-	panic("not implemented")
+	return domain.CaseView{}, nil
 }
 func (s *stubCaseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope repository.SearchScope) ([]domain.SearchCaseView, int, error) {
 	if s.searchCases != nil {
@@ -124,11 +135,20 @@ func (s *stubCaseRepo) SearchCaseAttachments(ctx context.Context, caseID string,
 	}
 	panic("not implemented")
 }
+
+// GetCaseAttachmentByID defaults to a permissive success (a minimal
+// Attachment referencing testCaseID, err=nil) when getCaseAttachmentByID
+// isn't configured -- same reasoning as GetCaseByID's own doc comment above:
+// it is now also called as an authorization precondition
+// (caseService.authorizeAttachmentAccess), by operations (delete/rename)
+// whose existing tests never needed an attachment fixture before. Tests that
+// care about the attachment's own fields still set getCaseAttachmentByID
+// explicitly to override this.
 func (s *stubCaseRepo) GetCaseAttachmentByID(ctx context.Context, id string) (domain.Attachment, error) {
 	if s.getCaseAttachmentByID != nil {
 		return s.getCaseAttachmentByID(ctx, id)
 	}
-	panic("not implemented")
+	return domain.Attachment{ID: id, ReferenceID: testCaseID}, nil
 }
 func (s *stubCaseRepo) DeleteCaseAttachment(ctx context.Context, id string) error {
 	if s.deleteCaseAttachment != nil {
@@ -202,7 +222,10 @@ func (s *stubCaseRepo) UpdateCaseFields(ctx context.Context, req domain.UpdateCa
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) SearchCaseActivities(context.Context, domain.SearchCaseActivitiesRequest) ([]domain.CaseActivity, int, error) {
+func (s *stubCaseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) ([]domain.CaseActivity, int, error) {
+	if s.searchCaseActivities != nil {
+		return s.searchCaseActivities(ctx, req)
+	}
 	panic("not implemented")
 }
 

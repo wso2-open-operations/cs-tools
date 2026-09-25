@@ -48,11 +48,21 @@ import (
 type TaskSlaRepository interface {
 	// SearchTaskSlas returns a filtered, paginated slice of task SLA
 	// records together with the total count of matching rows before
-	// pagination.
-	SearchTaskSlas(ctx context.Context, taskIDs []string, limit, offset int) ([]domain.TaskSlaView, int, error)
+	// pagination. projectIDs restricts to SLAs on a work item in one of
+	// these projects -- nil means unrestricted (internal caller); the
+	// caller is responsible for resolving this from its own AccessScope,
+	// never from caller-supplied input, since SearchTaskSlasFilters carries
+	// no projectIds field of its own for a customer to narrow with. This
+	// filter also naturally excludes SLAs on project-less work items
+	// (incident/incident_task, work_item.project_id NULL for 100% of real
+	// rows) for any non-nil (external-caller) projectIDs, since NULL never
+	// matches ANY(...) -- exactly the fail-closed behavior wanted here,
+	// with no separate work_item-type branch needed.
+	SearchTaskSlas(ctx context.Context, taskIDs []string, projectIDs []string, limit, offset int) ([]domain.TaskSlaView, int, error)
 	// GetTaskSla returns the full detail of a single task SLA record by its
-	// UUID, or a NotFoundError if no matching row exists.
-	GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error)
+	// UUID, or a NotFoundError if no matching row exists OR it exists but
+	// its work item's project isn't in projectIDs (nil means unrestricted).
+	GetTaskSla(ctx context.Context, id string, projectIDs []string) (domain.TaskSlaDetail, error)
 }
 
 type taskSlaRepo struct {
@@ -192,12 +202,16 @@ func taskSlaStageDisplay(raw string) *string {
 }
 
 // SearchTaskSlas implements TaskSlaRepository.
-func (r *taskSlaRepo) SearchTaskSlas(ctx context.Context, taskIDs []string, limit, offset int) ([]domain.TaskSlaView, int, error) {
+func (r *taskSlaRepo) SearchTaskSlas(ctx context.Context, taskIDs []string, projectIDs []string, limit, offset int) ([]domain.TaskSlaView, int, error) {
 	where := "WHERE 1=1"
 	args := []any{}
 	if len(taskIDs) > 0 {
 		args = append(args, taskIDs)
 		where += fmt.Sprintf(" AND sla.work_item_id = ANY($%d::uuid[])", len(args))
+	}
+	if len(projectIDs) > 0 {
+		args = append(args, projectIDs)
+		where += fmt.Sprintf(" AND wi.project_id = ANY($%d::uuid[])", len(args))
 	}
 
 	countQuery := "SELECT COUNT(*) " + taskSlaViewJoins + " " + where
@@ -249,7 +263,13 @@ func (r *taskSlaRepo) SearchTaskSlas(ctx context.Context, taskIDs []string, limi
 }
 
 // GetTaskSla implements TaskSlaRepository.
-func (r *taskSlaRepo) GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error) {
+func (r *taskSlaRepo) GetTaskSla(ctx context.Context, id string, projectIDs []string) (domain.TaskSlaDetail, error) {
+	where := "WHERE sla.id = $1"
+	args := []any{id}
+	if len(projectIDs) > 0 {
+		args = append(args, projectIDs)
+		where += fmt.Sprintf(" AND wi.project_id = ANY($%d::uuid[])", len(args))
+	}
 	row := r.db.QueryRow(ctx, `
 		SELECT sla.id, sla.stage::TEXT, sla.is_active,
 		       sla.work_item_id, wi.number, wi.type::TEXT,
@@ -267,7 +287,7 @@ func (r *taskSlaRepo) GetTaskSla(ctx context.Context, id string) (domain.TaskSla
 		FROM sla
 		LEFT JOIN work_item wi ON wi.id = sla.work_item_id
 		LEFT JOIN sla_policy pol ON pol.id = sla.sla_policy_id
-		WHERE sla.id = $1`, id,
+		`+where, args...,
 	)
 
 	var (

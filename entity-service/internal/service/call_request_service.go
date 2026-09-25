@@ -31,6 +31,7 @@ import (
 type callRequestService struct {
 	repo     repository.CallRequestRepository
 	userRepo repository.UserRepository
+	access   AccessService
 	// snWriteback/snMirror back CreateCallRequest's best-effort, asynchronous
 	// ServiceNow mirror write under DATA_SOURCE=postgres-servicenow-dual-write
 	// -- both nil in every other mode. Set only via
@@ -56,8 +57,29 @@ type callRequestService struct {
 
 // NewCallRequestService constructs a CallRequestService backed by Postgres
 // (customer_call, migration 000072).
-func NewCallRequestService(repo repository.CallRequestRepository, userRepo repository.UserRepository) CallRequestService {
-	return &callRequestService{repo: repo, userRepo: userRepo}
+func NewCallRequestService(repo repository.CallRequestRepository, userRepo repository.UserRepository, access AccessService) CallRequestService {
+	return &callRequestService{repo: repo, userRepo: userRepo, access: access}
+}
+
+// resolveCallRequestAuthProjectIDs resolves the caller's AccessScope into
+// the authProjectIDs parameter CallRequestRepository's methods take: nil for
+// an unrestricted (internal) caller, or scope.ProjectIDs otherwise. ok is
+// false when a non-unrestricted caller has zero registered projects --
+// callers must short-circuit on that rather than pass an empty slice to the
+// repo (same class of bug already caught and fixed for
+// change_request/conversation/escalation/task_sla/time_card).
+func (s *callRequestService) resolveCallRequestAuthProjectIDs(ctx context.Context) (authProjectIDs []string, ok bool, err error) {
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if scope.Unrestricted {
+		return nil, true, nil
+	}
+	if len(scope.ProjectIDs) == 0 {
+		return nil, false, nil
+	}
+	return scope.ProjectIDs, true, nil
 }
 
 // NewCallRequestServiceWithSNWriteback is NewCallRequestService plus the
@@ -68,8 +90,8 @@ func NewCallRequestService(repo repository.CallRequestRepository, userRepo repos
 // is not mirrored. A separate constructor rather than extending
 // NewCallRequestService's own signature, same reasoning as
 // NewCaseServiceWithSNWriteback's own doc comment.
-func NewCallRequestServiceWithSNWriteback(repo repository.CallRequestRepository, userRepo repository.UserRepository, dispatcher *SNWritebackDispatcher, mirror CallRequestService) CallRequestService {
-	return &callRequestService{repo: repo, userRepo: userRepo, snWriteback: dispatcher, snMirror: mirror}
+func NewCallRequestServiceWithSNWriteback(repo repository.CallRequestRepository, userRepo repository.UserRepository, access AccessService, dispatcher *SNWritebackDispatcher, mirror CallRequestService) CallRequestService {
+	return &callRequestService{repo: repo, userRepo: userRepo, access: access, snWriteback: dispatcher, snMirror: mirror}
 }
 
 // callerEmail resolves the caller's email from their x-user-id-token -- the
@@ -115,7 +137,20 @@ func (s *callRequestService) CreateCallRequest(ctx context.Context, req domain.C
 	if err != nil {
 		return domain.CreateCallRequestResponse{}, err
 	}
-	resp, err := s.repo.CreateCallRequest(ctx, req, user.ID, email)
+
+	// Scoped to the caller's own registered projects: a call request can
+	// only be opened against a case belonging to a project the caller
+	// actually has. Call requests were found with no authorization at all
+	// before this fix.
+	authProjectIDs, ok, err := s.resolveCallRequestAuthProjectIDs(ctx)
+	if err != nil {
+		return domain.CreateCallRequestResponse{}, err
+	}
+	if !ok {
+		return domain.CreateCallRequestResponse{}, &apierror.NotFoundError{Msg: "case not found"}
+	}
+
+	resp, err := s.repo.CreateCallRequest(ctx, req, user.ID, email, authProjectIDs)
 	if err != nil {
 		return domain.CreateCallRequestResponse{}, err
 	}
@@ -162,7 +197,23 @@ func (s *callRequestService) SearchCallRequests(ctx context.Context, req domain.
 		states = req.Filters.States
 	}
 
-	views, total, err := s.repo.SearchCallRequests(ctx, req.CaseID, states, req.Pagination)
+	// Scoped to the caller's own registered projects: SearchCallRequests
+	// applied no authorization at all before this fix -- any authenticated
+	// caller could pass any existing caseID and read that case's call
+	// requests regardless of project.
+	authProjectIDs, ok, err := s.resolveCallRequestAuthProjectIDs(ctx)
+	if err != nil {
+		return domain.SearchCallRequestsResponse{}, err
+	}
+	if !ok {
+		return domain.SearchCallRequestsResponse{
+			CallRequests: []domain.CallRequestView{},
+			Limit:        req.Pagination.Limit,
+			Offset:       req.Pagination.Offset,
+		}, nil
+	}
+
+	views, total, err := s.repo.SearchCallRequests(ctx, req.CaseID, states, authProjectIDs, req.Pagination)
 	if err != nil {
 		return domain.SearchCallRequestsResponse{}, err
 	}
@@ -217,7 +268,21 @@ func (s *callRequestService) SearchAllCallRequests(ctx context.Context, req doma
 		return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "sortBy.order must be one of: asc, desc"}
 	}
 
-	views, total, err := s.repo.SearchAllCallRequests(ctx, req.Filters, req.SortBy, req.Pagination)
+	// Scoped to the caller's own registered projects. SearchAllCallRequests
+	// applied no authorization at all before this fix.
+	authProjectIDs, ok, err := s.resolveCallRequestAuthProjectIDs(ctx)
+	if err != nil {
+		return domain.SearchCallRequestsResponse{}, err
+	}
+	if !ok {
+		return domain.SearchCallRequestsResponse{
+			CallRequests: []domain.CallRequestView{},
+			Offset:       req.Pagination.Offset,
+			Limit:        req.Pagination.Limit,
+		}, nil
+	}
+
+	views, total, err := s.repo.SearchAllCallRequests(ctx, req.Filters, req.SortBy, authProjectIDs, req.Pagination)
 	if err != nil {
 		return domain.SearchCallRequestsResponse{}, err
 	}
@@ -291,5 +356,16 @@ func (s *callRequestService) UpdateCallRequest(ctx context.Context, req domain.U
 		assigneeID = &user.ID
 	}
 
-	return s.repo.UpdateCallRequest(ctx, req, assigneeID, email)
+	// Scoped to the caller's own registered projects. UpdateCallRequest
+	// applied no authorization at all before this fix -- any authenticated
+	// caller could update any call request by id regardless of project.
+	authProjectIDs, ok, err := s.resolveCallRequestAuthProjectIDs(ctx)
+	if err != nil {
+		return domain.UpdateCallRequestResponse{}, err
+	}
+	if !ok {
+		return domain.UpdateCallRequestResponse{}, &apierror.NotFoundError{Msg: "call request not found"}
+	}
+
+	return s.repo.UpdateCallRequest(ctx, req, assigneeID, email, authProjectIDs)
 }

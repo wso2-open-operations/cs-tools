@@ -139,7 +139,7 @@ func TestIncidentService_CreateIncident_SNFailureLeavesPostgresUntouched(t *test
 	// it's ever called, which is exactly the assertion: Postgres must stay
 	// untouched.
 	repo := &stubIncidentRepo{}
-	svc := NewIncidentServiceWithSNMirror(repo, mirror, nil)
+	svc := NewIncidentServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, nil)
 
 	_, err := svc.CreateIncident(context.Background(), validCreateIncidentRequest())
 	if err == nil {
@@ -192,7 +192,7 @@ func TestIncidentService_CreateIncident_SNSuccessCreatesPostgresRowWithMatchingI
 			return resp, nil
 		},
 	}
-	svc := NewIncidentServiceWithSNMirror(repo, mirror, nil)
+	svc := NewIncidentServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, nil)
 
 	resp, err := svc.CreateIncident(context.Background(), validCreateIncidentRequest())
 	if err != nil {
@@ -227,7 +227,7 @@ func TestIncidentService_CreateIncident_DoesNotRetryValidationError(t *testing.T
 		},
 	}
 	repo := &stubIncidentRepo{}
-	svc := NewIncidentServiceWithSNMirror(repo, mirror, nil)
+	svc := NewIncidentServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, nil)
 
 	_, err := svc.CreateIncident(context.Background(), validCreateIncidentRequest())
 	var ve *apierror.ValidationError
@@ -256,7 +256,7 @@ func TestIncidentService_CreateIncident_RejectsUnsupportedFields(t *testing.T) {
 		},
 	}
 	repo := &stubIncidentRepo{}
-	svc := NewIncidentServiceWithSNMirror(repo, mirror, nil)
+	svc := NewIncidentServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, nil)
 
 	configItemID := "77777777-7777-7777-7777-777777777777"
 	req := validCreateIncidentRequest()
@@ -301,7 +301,7 @@ func TestIncidentService_CreateIncident_PublishesOnlyAfterPostgresSucceeds(t *te
 		},
 	}
 	publisher := &mockEventPublisher{}
-	svc := NewIncidentServiceWithSNMirror(repo, mirror, publisher)
+	svc := NewIncidentServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, publisher)
 
 	if _, err := svc.CreateIncident(context.Background(), validCreateIncidentRequest()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -336,7 +336,7 @@ func TestIncidentService_CreateIncident_DoesNotPublishWhenPostgresFails(t *testi
 		},
 	}
 	publisher := &mockEventPublisher{}
-	svc := NewIncidentServiceWithSNMirror(repo, mirror, publisher)
+	svc := NewIncidentServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, publisher)
 
 	if _, err := svc.CreateIncident(context.Background(), validCreateIncidentRequest()); err == nil {
 		t.Fatal("expected an error when the Postgres insert fails")
@@ -345,4 +345,75 @@ func TestIncidentService_CreateIncident_DoesNotPublishWhenPostgresFails(t *testi
 	if len(publisher.calls) != 0 {
 		t.Errorf("expected 0 publish calls when Postgres fails after a ServiceNow success, got %d: %+v", len(publisher.calls), publisher.calls)
 	}
+}
+
+// TestIncidentService_RequiresInternalCaller is the core regression guard
+// for the incident authorization gap: SearchIncidents, AggregateIncidents,
+// GetIncidentByID, SearchIncidentActivities, and CreateIncident applied no
+// authorization at all before this fix. Confirmed live against a real
+// database copy: 100% of 83,198 real incidents have project_id = NULL --
+// incidents are internal ITIL/ops records, not customer-project-scoped
+// data, so "internal caller only" (not project scoping) is the correct
+// fix, mirroring slaStatusService's identical requireInternalCaller
+// pattern. The stub repo panics on any call, which is itself the
+// assertion for the "external caller" cases: if the gate didn't block
+// first, the panic would fail the test.
+func TestIncidentService_RequiresInternalCaller(t *testing.T) {
+	external := stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}
+	internal := stubAccess{scope: AccessScope{Unrestricted: true}}
+
+	assertForbidden := func(t *testing.T, err error) {
+		t.Helper()
+		var fe *apierror.ForbiddenError
+		if !errors.As(err, &fe) {
+			t.Fatalf("expected *apierror.ForbiddenError, got %T: %v", err, err)
+		}
+	}
+
+	t.Run("SearchIncidents", func(t *testing.T) {
+		svc := NewIncidentService(&stubIncidentRepo{}, external)
+		_, err := svc.SearchIncidents(context.Background(), domain.SearchIncidentsRequest{Pagination: domain.Pagination{Limit: 10}})
+		assertForbidden(t, err)
+	})
+
+	t.Run("AggregateIncidents", func(t *testing.T) {
+		svc := NewIncidentService(&stubIncidentRepo{}, external)
+		_, err := svc.AggregateIncidents(context.Background(), domain.AggregateIncidentsRequest{GroupBy: "state"})
+		assertForbidden(t, err)
+	})
+
+	t.Run("GetIncidentByID", func(t *testing.T) {
+		svc := NewIncidentService(&stubIncidentRepo{}, external)
+		_, err := svc.GetIncidentByID(context.Background(), "11111111-1111-1111-1111-111111111111")
+		assertForbidden(t, err)
+	})
+
+	t.Run("SearchIncidentActivities", func(t *testing.T) {
+		svc := NewIncidentService(&stubIncidentRepo{}, external)
+		_, err := svc.SearchIncidentActivities(context.Background(), domain.SearchIncidentActivitiesRequest{
+			IncidentID: "11111111-1111-1111-1111-111111111111",
+			Pagination: domain.Pagination{Limit: 10},
+		})
+		assertForbidden(t, err)
+	})
+
+	t.Run("CreateIncident", func(t *testing.T) {
+		svc := NewIncidentService(&stubIncidentRepo{}, external)
+		_, err := svc.CreateIncident(context.Background(), validCreateIncidentRequest())
+		assertForbidden(t, err)
+	})
+
+	t.Run("an internal caller is not blocked by the gate itself", func(t *testing.T) {
+		// GetIncidentByID with an internal scope reaches the repo (which
+		// panics, since it's unconfigured) -- proving the gate let it
+		// through, distinct from the external-caller cases above where the
+		// gate itself is what stops execution before the repo is reached.
+		svc := NewIncidentService(&stubIncidentRepo{}, internal)
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected the unconfigured stub repo to be reached (and panic) for an internal caller")
+			}
+		}()
+		_, _ = svc.GetIncidentByID(context.Background(), "11111111-1111-1111-1111-111111111111")
+	})
 }

@@ -38,6 +38,7 @@ var validTimeCardState = map[domain.TimeCardState]bool{
 type timeCardService struct {
 	repo     repository.TimeCardRepository
 	userRepo repository.UserRepository
+	access   AccessService
 	// snWriteback/snMirror back CreateTimeCard's best-effort, asynchronous
 	// ServiceNow mirror write under DATA_SOURCE=postgres-servicenow-dual-write
 	// -- both nil in every other mode. Set only via
@@ -58,8 +59,29 @@ type timeCardService struct {
 }
 
 // NewTimeCardService constructs a TimeCardService backed by Postgres.
-func NewTimeCardService(repo repository.TimeCardRepository, userRepo repository.UserRepository) TimeCardService {
-	return &timeCardService{repo: repo, userRepo: userRepo}
+func NewTimeCardService(repo repository.TimeCardRepository, userRepo repository.UserRepository, access AccessService) TimeCardService {
+	return &timeCardService{repo: repo, userRepo: userRepo, access: access}
+}
+
+// resolveTimeCardAuthProjectIDs resolves the caller's AccessScope into the
+// authProjectIDs parameter TimeCardRepository.SearchTimeCards/
+// SearchCaseTimeCards take: nil for an unrestricted (internal) caller, or
+// scope.ProjectIDs otherwise. ok is false when a non-unrestricted caller
+// has zero registered projects -- callers must short-circuit on that
+// rather than pass an empty slice to the repo (same class of bug already
+// caught and fixed for change_request/conversation/escalation/task_sla).
+func (s *timeCardService) resolveTimeCardAuthProjectIDs(ctx context.Context) (authProjectIDs []string, ok bool, err error) {
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if scope.Unrestricted {
+		return nil, true, nil
+	}
+	if len(scope.ProjectIDs) == 0 {
+		return nil, false, nil
+	}
+	return scope.ProjectIDs, true, nil
 }
 
 // NewTimeCardServiceWithSNWriteback is NewTimeCardService plus the wiring
@@ -70,8 +92,8 @@ func NewTimeCardService(repo repository.TimeCardRepository, userRepo repository.
 // mirrored. A separate constructor rather than extending NewTimeCardService's
 // own signature, same reasoning as NewCaseServiceWithSNWriteback's own doc
 // comment.
-func NewTimeCardServiceWithSNWriteback(repo repository.TimeCardRepository, userRepo repository.UserRepository, dispatcher *SNWritebackDispatcher, mirror TimeCardService) TimeCardService {
-	return &timeCardService{repo: repo, userRepo: userRepo, snWriteback: dispatcher, snMirror: mirror}
+func NewTimeCardServiceWithSNWriteback(repo repository.TimeCardRepository, userRepo repository.UserRepository, access AccessService, dispatcher *SNWritebackDispatcher, mirror TimeCardService) TimeCardService {
+	return &timeCardService{repo: repo, userRepo: userRepo, access: access, snWriteback: dispatcher, snMirror: mirror}
 }
 
 // currentUserID resolves the caller's user id from their x-user-id-token --
@@ -180,20 +202,28 @@ func (s *timeCardService) SearchTimeCards(ctx context.Context, req domain.Search
 		return domain.SearchTimeCardsResponse{}, err
 	}
 
-	// Requires a valid, authenticated caller (same minimum bar as every
-	// write on this service) but does not yet scope results to what that
-	// caller specifically owns/approves/manages -- entity-service has no
-	// authorization model to build that against today. callerEmail is
-	// threaded to the repository layer for that future decision, the same
-	// deliberate, deferred-not-missing posture as
-	// AccountContactRepository/ProjectContactRepository's own callerEmail
-	// parameter.
 	callerEmail, err := resolveCallerEmail(ctx)
 	if err != nil {
 		return domain.SearchTimeCardsResponse{}, err
 	}
 
-	views, total, err := s.repo.SearchTimeCards(ctx, req, callerEmail)
+	// Scoped to the caller's own registered projects (via the case's real
+	// project, not filters.ProjectIDs' separate tc.customer_project_id
+	// column -- see TimeCardRepository.SearchTimeCards' own doc comment).
+	// Time cards were found with no authorization at all before this fix.
+	authProjectIDs, ok, err := s.resolveTimeCardAuthProjectIDs(ctx)
+	if err != nil {
+		return domain.SearchTimeCardsResponse{}, err
+	}
+	if !ok {
+		return domain.SearchTimeCardsResponse{
+			TimeCards: []domain.TimeCardView{},
+			Limit:     req.Pagination.Limit,
+			Offset:    req.Pagination.Offset,
+		}, nil
+	}
+
+	views, total, err := s.repo.SearchTimeCards(ctx, req, callerEmail, authProjectIDs)
 	if err != nil {
 		return domain.SearchTimeCardsResponse{}, err
 	}
@@ -215,14 +245,25 @@ func (s *timeCardService) SearchCaseTimeCards(ctx context.Context, req domain.Se
 		return domain.SearchCaseTimeCardsResponse{}, err
 	}
 
-	// See SearchTimeCards' identical comment: requires authentication, does
-	// not yet scope results to it.
 	callerEmail, err := resolveCallerEmail(ctx)
 	if err != nil {
 		return domain.SearchCaseTimeCardsResponse{}, err
 	}
 
-	summaries, total, err := s.repo.SearchCaseTimeCards(ctx, req, callerEmail)
+	// See SearchTimeCards' identical comment.
+	authProjectIDs, ok, err := s.resolveTimeCardAuthProjectIDs(ctx)
+	if err != nil {
+		return domain.SearchCaseTimeCardsResponse{}, err
+	}
+	if !ok {
+		return domain.SearchCaseTimeCardsResponse{
+			Cases:  []domain.CaseTimeCardSummary{},
+			Limit:  req.Pagination.Limit,
+			Offset: req.Pagination.Offset,
+		}, nil
+	}
+
+	summaries, total, err := s.repo.SearchCaseTimeCards(ctx, req, callerEmail, authProjectIDs)
 	if err != nil {
 		return domain.SearchCaseTimeCardsResponse{}, err
 	}

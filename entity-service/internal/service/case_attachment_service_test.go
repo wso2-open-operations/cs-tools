@@ -263,10 +263,11 @@ func TestCaseService_ConfirmCaseAttachment_TransitionsToComplete(t *testing.T) {
 	repo := &stubCaseRepo{
 		getCaseAttachmentByID: func(_ context.Context, id string) (domain.Attachment, error) {
 			return domain.Attachment{
-				ID:         id,
-				Status:     domain.AttachmentStatusPending,
-				StorageKey: &key,
-				CreatedBy:  domain.NewUserReference("user-jane", "jane.doe@example.com", "Jane Doe"),
+				ID:          id,
+				ReferenceID: testCaseID,
+				Status:      domain.AttachmentStatusPending,
+				StorageKey:  &key,
+				CreatedBy:   domain.NewUserReference("user-jane", "jane.doe@example.com", "Jane Doe"),
 			}, nil
 		},
 		confirmCaseAttachment: func(_ context.Context, id string) (domain.Attachment, error) {
@@ -302,10 +303,11 @@ func TestCaseService_ConfirmCaseAttachment_RejectsAlreadyComplete(t *testing.T) 
 	repo := &stubCaseRepo{
 		getCaseAttachmentByID: func(_ context.Context, id string) (domain.Attachment, error) {
 			return domain.Attachment{
-				ID:         id,
-				Status:     domain.AttachmentStatusComplete,
-				StorageKey: &key,
-				CreatedBy:  domain.NewUserReference("user-jane", "jane.doe@example.com", "Jane Doe"),
+				ID:          id,
+				ReferenceID: testCaseID,
+				Status:      domain.AttachmentStatusComplete,
+				StorageKey:  &key,
+				CreatedBy:   domain.NewUserReference("user-jane", "jane.doe@example.com", "Jane Doe"),
 			}, nil
 		},
 		confirmCaseAttachment: func(context.Context, string) (domain.Attachment, error) {
@@ -330,10 +332,11 @@ func TestCaseService_ConfirmCaseAttachment_RejectsDifferentActor(t *testing.T) {
 	repo := &stubCaseRepo{
 		getCaseAttachmentByID: func(_ context.Context, id string) (domain.Attachment, error) {
 			return domain.Attachment{
-				ID:         id,
-				Status:     domain.AttachmentStatusPending,
-				StorageKey: &key,
-				CreatedBy:  domain.NewUserReference("someone-else", "someone.else@example.com", "Someone Else"),
+				ID:          id,
+				ReferenceID: testCaseID,
+				Status:      domain.AttachmentStatusPending,
+				StorageKey:  &key,
+				CreatedBy:   domain.NewUserReference("someone-else", "someone.else@example.com", "Someone Else"),
 			}, nil
 		},
 		confirmCaseAttachment: func(context.Context, string) (domain.Attachment, error) {

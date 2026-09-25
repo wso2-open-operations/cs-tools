@@ -186,7 +186,8 @@ func parseIncidentFieldFiltersPostgres(f domain.SearchIncidentsFilters, now time
 }
 
 type incidentService struct {
-	repo repository.IncidentRepository
+	repo   repository.IncidentRepository
+	access AccessService
 	// snMirror is nil in every mode except DATA_SOURCE=postgres-servicenow-dual-write
 	// (config.DataSourcePostgresServiceNowDualWrite) -- see
 	// NewIncidentServiceWithSNMirror's own doc comment. When set, CreateIncident
@@ -206,8 +207,29 @@ type incidentService struct {
 }
 
 // NewIncidentService constructs an IncidentService backed by Postgres.
-func NewIncidentService(repo repository.IncidentRepository) IncidentService {
-	return &incidentService{repo: repo}
+func NewIncidentService(repo repository.IncidentRepository, access AccessService) IncidentService {
+	return &incidentService{repo: repo, access: access}
+}
+
+// requireInternalCaller rejects anyone whose AccessScope is not Unrestricted
+// -- mirrors slaStatusService/onboardingStepService's own helper of the same
+// name and same reasoning. Incidents (unlike case/change_request/
+// conversation) have no project association at all: work_item.project_id is
+// NULL for every real incident/incident_task/problem row (confirmed live
+// against a real database copy, 100% NULL across 83,198 real incidents) --
+// these are internal ITIL/ops records, not customer-project-scoped data, and
+// in practice only csm-portal-backend (WSO2-internal) calls these endpoints
+// today. There is no scope short of "internal caller" that would be safe to
+// hand this out under.
+func (s *incidentService) requireInternalCaller(ctx context.Context) error {
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	if !scope.Unrestricted {
+		return &apierror.ForbiddenError{Msg: "incidents are only available to internal services"}
+	}
+	return nil
 }
 
 // NewIncidentServiceWithSNMirror is NewIncidentService plus the wiring
@@ -225,12 +247,15 @@ func NewIncidentService(repo repository.IncidentRepository) IncidentService {
 // ServiceNow POST, including its own side effects (publishIncidentCreated).
 // It is never made the active IncidentService here -- reads always stay on
 // Postgres in this mode.
-func NewIncidentServiceWithSNMirror(repo repository.IncidentRepository, mirror IncidentService, eventPublisher EventPublisherService) IncidentService {
-	return &incidentService{repo: repo, snMirror: mirror, eventPublisher: eventPublisher}
+func NewIncidentServiceWithSNMirror(repo repository.IncidentRepository, access AccessService, mirror IncidentService, eventPublisher EventPublisherService) IncidentService {
+	return &incidentService{repo: repo, access: access, snMirror: mirror, eventPublisher: eventPublisher}
 }
 
 // SearchIncidents implements IncidentService.
 func (s *incidentService) SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.SearchIncidentsResponse{}, err
+	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchIncidentsResponse{}, err
 	}
@@ -258,6 +283,9 @@ func (s *incidentService) SearchIncidents(ctx context.Context, req domain.Search
 
 // AggregateIncidents implements IncidentService.
 func (s *incidentService) AggregateIncidents(ctx context.Context, req domain.AggregateIncidentsRequest) (domain.AggregateResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.AggregateResponse{}, err
+	}
 	if !validIncidentAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
@@ -273,6 +301,9 @@ func (s *incidentService) AggregateIncidents(ctx context.Context, req domain.Agg
 
 // GetIncidentByID implements IncidentService.
 func (s *incidentService) GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.IncidentView{}, err
+	}
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.IncidentView{}, err
 	}
@@ -281,6 +312,9 @@ func (s *incidentService) GetIncidentByID(ctx context.Context, id string) (domai
 
 // SearchIncidentActivities implements IncidentService.
 func (s *incidentService) SearchIncidentActivities(ctx context.Context, req domain.SearchIncidentActivitiesRequest) (domain.SearchIncidentActivitiesResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.SearchIncidentActivitiesResponse{}, err
+	}
 	if err := validateUUIDs("incidentId", []string{req.IncidentID}); err != nil {
 		return domain.SearchIncidentActivitiesResponse{}, err
 	}
@@ -307,6 +341,9 @@ func (s *incidentService) SearchIncidentActivities(ctx context.Context, req doma
 // delegates to createIncidentSNFirst instead of the plain Postgres path's
 // ServiceUnavailableError below -- see that method's own doc comment.
 func (s *incidentService) CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.CreateIncidentResponse{}, err
+	}
 	if s.snMirror != nil {
 		// ConfigurationItemID/AssignmentGroupID have no backing column on
 		// this data source at all (unlike Subcategory/AssignedEngineerID/

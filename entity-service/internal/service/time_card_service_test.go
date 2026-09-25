@@ -29,14 +29,22 @@ import (
 // unconfigured methods panic if called -- same convention as
 // stubCallRequestRepo (call_request_service_test.go).
 type stubTimeCardRepo struct {
-	createTimeCard func(ctx context.Context, req domain.CreateTimeCardRequest, userID string) (domain.TimeCardView, error)
+	createTimeCard      func(ctx context.Context, req domain.CreateTimeCardRequest, userID string) (domain.TimeCardView, error)
+	searchTimeCards     func(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string, authProjectIDs []string) ([]domain.TimeCardView, int, error)
+	searchCaseTimeCards func(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string, authProjectIDs []string) ([]domain.CaseTimeCardSummary, int, error)
 }
 
-func (s *stubTimeCardRepo) SearchTimeCards(context.Context, domain.SearchTimeCardsRequest, string) ([]domain.TimeCardView, int, error) {
-	panic("not implemented")
+func (s *stubTimeCardRepo) SearchTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string, authProjectIDs []string) ([]domain.TimeCardView, int, error) {
+	if s.searchTimeCards != nil {
+		return s.searchTimeCards(ctx, req, callerEmail, authProjectIDs)
+	}
+	panic("SearchTimeCards called unexpectedly")
 }
-func (s *stubTimeCardRepo) SearchCaseTimeCards(context.Context, domain.SearchTimeCardsRequest, string) ([]domain.CaseTimeCardSummary, int, error) {
-	panic("not implemented")
+func (s *stubTimeCardRepo) SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string, authProjectIDs []string) ([]domain.CaseTimeCardSummary, int, error) {
+	if s.searchCaseTimeCards != nil {
+		return s.searchCaseTimeCards(ctx, req, callerEmail, authProjectIDs)
+	}
+	panic("SearchCaseTimeCards called unexpectedly")
 }
 func (s *stubTimeCardRepo) CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest, userID string) (domain.TimeCardView, error) {
 	if s.createTimeCard != nil {
@@ -63,6 +71,139 @@ type stubMirrorTimeCardService struct {
 
 func (s *stubMirrorTimeCardService) CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
 	return s.createTimeCard(ctx, req)
+}
+
+// TestTimeCardService_SearchTimeCards_ScopesToCallerProjects is the core
+// regression guard for the time_card authorization gap: SearchTimeCards
+// applied no authorization at all before this fix. authProjectIDs is
+// resolved purely from AccessScope and is deliberately separate from
+// filters.ProjectIDs (which filters the row's own optional,
+// independently-settable customer_project_id column -- see
+// TimeCardRepository.SearchTimeCards' own doc comment).
+func TestTimeCardService_SearchTimeCards_ScopesToCallerProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	t.Run("external caller's own resolved projects are passed to the repo", func(t *testing.T) {
+		called := false
+		var gotAuthProjectIDs []string
+		repo := &stubTimeCardRepo{
+			searchTimeCards: func(_ context.Context, _ domain.SearchTimeCardsRequest, _ string, authProjectIDs []string) ([]domain.TimeCardView, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.TimeCardView{}, 0, nil
+			},
+		}
+		svc := NewTimeCardService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+		_, err := svc.SearchTimeCards(ctx, domain.SearchTimeCardsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchTimeCards: %v", err)
+		}
+		if !called {
+			t.Fatal("expected repo.SearchTimeCards to be called")
+		}
+		if len(gotAuthProjectIDs) != 1 || gotAuthProjectIDs[0] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+			t.Fatalf("repo received authProjectIDs = %v, want [aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]", gotAuthProjectIDs)
+		}
+	})
+
+	t.Run("external caller with no registered projects at all gets zero results, repo never called", func(t *testing.T) {
+		repo := &stubTimeCardRepo{}
+		svc := NewTimeCardService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: nil}})
+
+		resp, err := svc.SearchTimeCards(ctx, domain.SearchTimeCardsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchTimeCards: %v", err)
+		}
+		if len(resp.TimeCards) != 0 {
+			t.Errorf("resp.TimeCards = %v, want empty", resp.TimeCards)
+		}
+	})
+
+	t.Run("internal (unrestricted) caller passes no project filter", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		called := false
+		repo := &stubTimeCardRepo{
+			searchTimeCards: func(_ context.Context, _ domain.SearchTimeCardsRequest, _ string, authProjectIDs []string) ([]domain.TimeCardView, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.TimeCardView{}, 0, nil
+			},
+		}
+		svc := NewTimeCardService(repo, nil, stubAccess{scope: AccessScope{Unrestricted: true}})
+
+		_, err := svc.SearchTimeCards(ctx, domain.SearchTimeCardsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchTimeCards: %v", err)
+		}
+		if !called || gotAuthProjectIDs != nil {
+			t.Errorf("called=%v gotAuthProjectIDs=%v, want called=true and nil", called, gotAuthProjectIDs)
+		}
+	})
+}
+
+// TestTimeCardService_SearchCaseTimeCards_ScopesToCallerProjects is
+// SearchTimeCards' identical guard for the case-grouped summary endpoint.
+func TestTimeCardService_SearchCaseTimeCards_ScopesToCallerProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	t.Run("external caller's own resolved projects are passed to the repo", func(t *testing.T) {
+		called := false
+		var gotAuthProjectIDs []string
+		repo := &stubTimeCardRepo{
+			searchCaseTimeCards: func(_ context.Context, _ domain.SearchTimeCardsRequest, _ string, authProjectIDs []string) ([]domain.CaseTimeCardSummary, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.CaseTimeCardSummary{}, 0, nil
+			},
+		}
+		svc := NewTimeCardService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+		_, err := svc.SearchCaseTimeCards(ctx, domain.SearchTimeCardsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchCaseTimeCards: %v", err)
+		}
+		if !called {
+			t.Fatal("expected repo.SearchCaseTimeCards to be called")
+		}
+		if len(gotAuthProjectIDs) != 1 || gotAuthProjectIDs[0] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+			t.Fatalf("repo received authProjectIDs = %v, want [aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]", gotAuthProjectIDs)
+		}
+	})
+
+	t.Run("external caller with no registered projects at all gets zero results, repo never called", func(t *testing.T) {
+		repo := &stubTimeCardRepo{}
+		svc := NewTimeCardService(repo, nil, stubAccess{scope: AccessScope{ProjectIDs: nil}})
+
+		resp, err := svc.SearchCaseTimeCards(ctx, domain.SearchTimeCardsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchCaseTimeCards: %v", err)
+		}
+		if len(resp.Cases) != 0 {
+			t.Errorf("resp.Cases = %v, want empty", resp.Cases)
+		}
+	})
+
+	t.Run("internal (unrestricted) caller passes no project filter", func(t *testing.T) {
+		var gotAuthProjectIDs []string
+		called := false
+		repo := &stubTimeCardRepo{
+			searchCaseTimeCards: func(_ context.Context, _ domain.SearchTimeCardsRequest, _ string, authProjectIDs []string) ([]domain.CaseTimeCardSummary, int, error) {
+				called = true
+				gotAuthProjectIDs = authProjectIDs
+				return []domain.CaseTimeCardSummary{}, 0, nil
+			},
+		}
+		svc := NewTimeCardService(repo, nil, stubAccess{scope: AccessScope{Unrestricted: true}})
+
+		_, err := svc.SearchCaseTimeCards(ctx, domain.SearchTimeCardsRequest{Pagination: domain.Pagination{Limit: 10}})
+		if err != nil {
+			t.Fatalf("SearchCaseTimeCards: %v", err)
+		}
+		if !called || gotAuthProjectIDs != nil {
+			t.Errorf("called=%v gotAuthProjectIDs=%v, want called=true and nil", called, gotAuthProjectIDs)
+		}
+	})
 }
 
 func validCreateTimeCardRequest() domain.CreateTimeCardRequest {
@@ -95,8 +236,10 @@ func TestTimeCardService_CreateTimeCard_MirrorsToServiceNow(t *testing.T) {
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
 	svc := NewTimeCardServiceWithSNWriteback(repo, stubUserRepo{
-		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
-	}, dispatcher, mirror)
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}, stubAccess{scope: AccessScope{Unrestricted: true}}, dispatcher, mirror)
 
 	if _, err := svc.CreateTimeCard(ctx, req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -136,8 +279,10 @@ func TestTimeCardService_CreateTimeCard_MirrorFailureRecordsWritebackFailure(t *
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
 	svc := NewTimeCardServiceWithSNWriteback(repo, stubUserRepo{
-		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
-	}, dispatcher, mirror)
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}, stubAccess{scope: AccessScope{Unrestricted: true}}, dispatcher, mirror)
 
 	if _, err := svc.CreateTimeCard(ctx, req); err != nil {
 		t.Fatalf("expected the Postgres-side success to be reported despite the mirror failure, got %v", err)

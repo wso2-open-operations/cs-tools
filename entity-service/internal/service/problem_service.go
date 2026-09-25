@@ -72,7 +72,8 @@ func parseProblemFieldFiltersPostgres(filters []domain.ProblemFieldFilter) (stat
 }
 
 type problemService struct {
-	repo repository.ProblemRepository
+	repo   repository.ProblemRepository
+	access AccessService
 	// snMirror is nil in every mode except DATA_SOURCE=postgres-servicenow-dual-write
 	// (config.DataSourcePostgresServiceNowDualWrite) -- see
 	// NewProblemServiceWithSNMirror's own doc comment. When set,
@@ -83,8 +84,24 @@ type problemService struct {
 }
 
 // NewProblemService constructs a ProblemService backed by Postgres.
-func NewProblemService(repo repository.ProblemRepository) ProblemService {
-	return &problemService{repo: repo}
+func NewProblemService(repo repository.ProblemRepository, access AccessService) ProblemService {
+	return &problemService{repo: repo, access: access}
+}
+
+// requireInternalCaller rejects anyone whose AccessScope is not Unrestricted
+// -- same reasoning as incidentService's own copy: problem rows have no
+// project association at all (work_item.project_id is NULL for every real
+// problem, confirmed live against a real database copy), and in practice
+// only csm-portal-backend (WSO2-internal) calls these endpoints.
+func (s *problemService) requireInternalCaller(ctx context.Context) error {
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	if !scope.Unrestricted {
+		return &apierror.ForbiddenError{Msg: "problems are only available to internal services"}
+	}
+	return nil
 }
 
 // NewProblemServiceWithSNMirror is NewProblemService plus the wiring
@@ -100,12 +117,15 @@ func NewProblemService(repo repository.ProblemRepository) ProblemService {
 // NewServiceNowProblemService) whose CreateProblem performs the real
 // ServiceNow POST. It is never made the active ProblemService here -- reads
 // always stay on Postgres in this mode.
-func NewProblemServiceWithSNMirror(repo repository.ProblemRepository, mirror ProblemService) ProblemService {
-	return &problemService{repo: repo, snMirror: mirror}
+func NewProblemServiceWithSNMirror(repo repository.ProblemRepository, access AccessService, mirror ProblemService) ProblemService {
+	return &problemService{repo: repo, access: access, snMirror: mirror}
 }
 
 // SearchProblems implements ProblemService.
 func (s *problemService) SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.SearchProblemsResponse{}, err
+	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchProblemsResponse{}, err
 	}
@@ -129,6 +149,9 @@ func (s *problemService) SearchProblems(ctx context.Context, req domain.SearchPr
 
 // AggregateProblems implements ProblemService.
 func (s *problemService) AggregateProblems(ctx context.Context, req domain.AggregateProblemsRequest) (domain.AggregateResponse, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.AggregateResponse{}, err
+	}
 	if !validProblemAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
@@ -143,6 +166,9 @@ func (s *problemService) AggregateProblems(ctx context.Context, req domain.Aggre
 
 // GetProblem implements ProblemService.
 func (s *problemService) GetProblem(ctx context.Context, id string) (domain.ProblemDetail, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.ProblemDetail{}, err
+	}
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ProblemDetail{}, err
 	}
@@ -155,6 +181,9 @@ func (s *problemService) GetProblem(ctx context.Context, id string) (domain.Prob
 // delegates to createProblemSNFirst instead of the plain Postgres path's
 // ServiceUnavailableError below -- see that method's own doc comment.
 func (s *problemService) CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.ProblemDetail{}, err
+	}
 	if s.snMirror != nil {
 		return s.createProblemSNFirst(ctx, req)
 	}

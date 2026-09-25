@@ -669,9 +669,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// UpdateCallRequest does not (Postgres-first CREATE means
 		// customer_call.id has no ServiceNow counterpart to target).
 		snCallRequestMirrorSvc := service.NewServiceNowCallRequestService(serviceNowIntegrationServiceClient)
-		activeCallRequestSvc = service.NewCallRequestServiceWithSNWriteback(callRequestRepo, userRepo, snWritebackDispatcher, snCallRequestMirrorSvc)
+		activeCallRequestSvc = service.NewCallRequestServiceWithSNWriteback(callRequestRepo, userRepo, accessSvc, snWritebackDispatcher, snCallRequestMirrorSvc)
 	default:
-		activeCallRequestSvc = service.NewCallRequestService(callRequestRepo, userRepo)
+		activeCallRequestSvc = service.NewCallRequestService(callRequestRepo, userRepo, accessSvc)
 	}
 	callRequestHandler := handler.NewCallRequestHandler(activeCallRequestSvc)
 
@@ -699,7 +699,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.DataSource == config.DataSourceServiceNow {
 		activeEscalationSvc = service.NewServiceNowEscalationService(serviceNowIntegrationServiceClient)
 	} else {
-		activeEscalationSvc = service.NewEscalationService(escalationRepo)
+		activeEscalationSvc = service.NewEscalationService(escalationRepo, accessSvc)
 	}
 	escalationHandler := handler.NewEscalationHandler(activeEscalationSvc)
 	caseEscalationHandler := handler.NewCaseEscalationHandler(service.NewCaseEscalationService(activeEscalationSvc, activeCaseSvc))
@@ -735,9 +735,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Update/DeleteTimeCard do not (Postgres-first CREATE means
 		// time_card.id has no ServiceNow counterpart to target).
 		snTimeCardMirrorSvc := service.NewServiceNowTimeCardService(serviceNowIntegrationServiceClient)
-		activeTimeCardSvc = service.NewTimeCardServiceWithSNWriteback(timeCardRepo, userRepo, snWritebackDispatcher, snTimeCardMirrorSvc)
+		activeTimeCardSvc = service.NewTimeCardServiceWithSNWriteback(timeCardRepo, userRepo, accessSvc, snWritebackDispatcher, snTimeCardMirrorSvc)
 	default:
-		activeTimeCardSvc = service.NewTimeCardService(timeCardRepo, userRepo)
+		activeTimeCardSvc = service.NewTimeCardService(timeCardRepo, userRepo, accessSvc)
 	}
 	timeCardHandler := handler.NewTimeCardHandler(activeTimeCardSvc)
 
@@ -806,9 +806,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// succeeds -- see NewIncidentServiceWithSNMirror's own doc comment
 		// and publishIncidentCreatedEvent's.
 		snIncidentMirrorSvc := service.NewServiceNowIncidentService(serviceNowIntegrationServiceClient, nil)
-		activeIncidentSvc = service.NewIncidentServiceWithSNMirror(incidentRepo, snIncidentMirrorSvc, eventPublisher)
+		activeIncidentSvc = service.NewIncidentServiceWithSNMirror(incidentRepo, accessSvc, snIncidentMirrorSvc, eventPublisher)
 	default:
-		activeIncidentSvc = service.NewIncidentService(incidentRepo)
+		activeIncidentSvc = service.NewIncidentService(incidentRepo, accessSvc)
 	}
 	incidentHandler := handler.NewIncidentHandler(activeIncidentSvc)
 
@@ -825,9 +825,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// snProblemMirrorSvc's CreateProblem is the only method of it this
 		// mode ever calls.
 		snProblemMirrorSvc := service.NewServiceNowProblemService(serviceNowIntegrationServiceClient)
-		activeProblemSvc = service.NewProblemServiceWithSNMirror(problemRepo, snProblemMirrorSvc)
+		activeProblemSvc = service.NewProblemServiceWithSNMirror(problemRepo, accessSvc, snProblemMirrorSvc)
 	default:
-		activeProblemSvc = service.NewProblemService(problemRepo)
+		activeProblemSvc = service.NewProblemService(problemRepo, accessSvc)
 	}
 	problemHandler := handler.NewProblemHandler(activeProblemSvc)
 
@@ -846,7 +846,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.DataSource == config.DataSourceServiceNow {
 		activeIncidentTaskSvc = service.NewServiceNowIncidentTaskService(serviceNowIntegrationServiceClient)
 	} else {
-		activeIncidentTaskSvc = service.NewIncidentTaskService(incidentTaskRepo)
+		activeIncidentTaskSvc = service.NewIncidentTaskService(incidentTaskRepo, accessSvc)
 	}
 	incidentTaskHandler := handler.NewIncidentTaskHandler(activeIncidentTaskSvc)
 
@@ -946,7 +946,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.DataSource == config.DataSourceServiceNow {
 		activeTaskSlaSvc = service.NewServiceNowTaskSlaService(serviceNowIntegrationServiceClient)
 	} else {
-		activeTaskSlaSvc = service.NewTaskSlaService(taskSlaRepo)
+		activeTaskSlaSvc = service.NewTaskSlaService(taskSlaRepo, accessSvc)
 	}
 	taskSlaHandler := handler.NewTaskSlaHandler(activeTaskSlaSvc)
 

@@ -177,18 +177,26 @@ type CallRequestRepository interface {
 	// CreateCallRequest inserts a call request for req.CaseID in state
 	// pending_on_wso2, opened by callerID/callerEmail. Returns a NotFoundError
 	// if req.CaseID is not an existing case-like work item.
-	CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error)
+	// authProjectIDs restricts to the caller's own registered projects
+	// (resolved purely from AccessScope, never from request input), the
+	// same authorization-only parameter every other Track A fix threads
+	// through -- nil means unrestricted (internal caller). Call requests had
+	// no caller-scoped authorization at all before this fix: any
+	// authenticated caller could pass any existing caseID/call-request id,
+	// belonging to any project, and read or mutate it.
+	CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string, authProjectIDs []string) (domain.CreateCallRequestResponse, error)
 	// SearchCallRequests returns the call requests of one case, newest first,
 	// optionally narrowed to states, with the total before pagination.
-	SearchCallRequests(ctx context.Context, caseID string, states []domain.CallRequestStateType, pagination domain.Pagination) ([]domain.CallRequestView, int, error)
+	SearchCallRequests(ctx context.Context, caseID string, states []domain.CallRequestStateType, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error)
 	// SearchAllCallRequests returns call requests across all cases matching
 	// the filters, with the total before pagination.
-	SearchAllCallRequests(ctx context.Context, filters domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, pagination domain.Pagination) ([]domain.CallRequestView, int, error)
+	SearchAllCallRequests(ctx context.Context, filters domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error)
 	// UpdateCallRequest applies req to the call request req.ID. assigneeID is
 	// the already-resolved user id for req.Assignee (nil to leave it
 	// unchanged). Returns a NotFoundError if no call request matches (or, when
-	// req.CaseID is set, none belongs to that case).
-	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string) (domain.UpdateCallRequestResponse, error)
+	// req.CaseID is set, none belongs to that case, or the call request's
+	// case is outside authProjectIDs).
+	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string, authProjectIDs []string) (domain.UpdateCallRequestResponse, error)
 }
 
 type callRequestRepo struct {
@@ -328,12 +336,16 @@ func caseStatesToEnums(states []domain.CaseState) []string {
 }
 
 // SearchCallRequests implements CallRequestRepository.
-func (r *callRequestRepo) SearchCallRequests(ctx context.Context, caseID string, states []domain.CallRequestStateType, pagination domain.Pagination) ([]domain.CallRequestView, int, error) {
+func (r *callRequestRepo) SearchCallRequests(ctx context.Context, caseID string, states []domain.CallRequestStateType, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error) {
 	args := []any{caseID}
 	where := `WHERE cc.work_item_id = $1::text::uuid`
 	if len(states) > 0 {
 		args = append(args, callRequestStatesToEnums(states))
 		where += fmt.Sprintf(` AND cc.state = ANY($%d::text[]::customer_call_state_enum[])`, len(args))
+	}
+	if len(authProjectIDs) > 0 {
+		args = append(args, authProjectIDs)
+		where += fmt.Sprintf(` AND wi.project_id = ANY($%d::uuid[])`, len(args))
 	}
 	return r.runCallRequestSearch(ctx, where, `ORDER BY cc.created_on DESC, cc.id`, args, pagination)
 }
@@ -347,7 +359,7 @@ var callRequestSortColumns = map[domain.CallRequestSortField]string{
 }
 
 // SearchAllCallRequests implements CallRequestRepository.
-func (r *callRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, pagination domain.Pagination) ([]domain.CallRequestView, int, error) {
+func (r *callRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, authProjectIDs []string, pagination domain.Pagination) ([]domain.CallRequestView, int, error) {
 	var args []any
 	where := `WHERE 1=1`
 	add := func(clause string, val any) {
@@ -355,6 +367,9 @@ func (r *callRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.Se
 		where += fmt.Sprintf(" AND "+clause, len(args))
 	}
 
+	if len(authProjectIDs) > 0 {
+		add(`wi.project_id = ANY($%d::uuid[])`, authProjectIDs)
+	}
 	if len(f.AssignedUserIDs) > 0 {
 		add(`cc.assigned_to_id = ANY($%d::text[]::uuid[])`, f.AssignedUserIDs)
 	}
@@ -382,7 +397,7 @@ func (r *callRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.Se
 }
 
 // CreateCallRequest implements CallRequestRepository.
-func (r *callRequestRepo) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error) {
+func (r *callRequestRepo) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string, authProjectIDs []string) (domain.CreateCallRequestResponse, error) {
 	// A new request is raised by the customer, so it starts pending on WSO2
 	// (who must schedule or counter-propose). preferred times land in
 	// final_times as a JSON array, the shape decodeFinalTimes reads back.
@@ -392,8 +407,14 @@ func (r *callRequestRepo) CreateCallRequest(ctx context.Context, req domain.Crea
 	}
 
 	// INSERT ... SELECT ... FROM work_item so a nonexistent (or non-case)
-	// work item yields zero rows -> NotFoundError, instead of a bare
-	// foreign-key violation.
+	// work item, or one outside authProjectIDs, yields zero rows ->
+	// NotFoundError, instead of a bare foreign-key violation.
+	args := []any{callerEmail, callerID, req.DurationMinutes, req.Reason, string(times), req.CaseID}
+	authClause := ""
+	if len(authProjectIDs) > 0 {
+		args = append(args, authProjectIDs)
+		authClause = fmt.Sprintf(" AND wi.project_id = ANY($%d::uuid[])", len(args))
+	}
 	query := `
 		INSERT INTO customer_call (
 			id, created_on, updated_on, created_by, updated_by,
@@ -404,14 +425,12 @@ func (r *callRequestRepo) CreateCallRequest(ctx context.Context, req domain.Crea
 		       wi.id, $2::text::uuid, NOW(), TRUE, 'PENDING_ON_WSO2'::customer_call_state_enum,
 		       make_interval(mins => $3::int), $4::text, $5::text::jsonb
 		FROM work_item wi
-		WHERE wi.id = $6::text::uuid AND wi.type = ANY(` + caseLikeWorkItemTypes + `)
+		WHERE wi.id = $6::text::uuid AND wi.type = ANY(` + caseLikeWorkItemTypes + `)` + authClause + `
 		RETURNING id, created_on`
 
 	var id string
 	var createdOn time.Time
-	err = r.db.QueryRow(ctx, query,
-		callerEmail, callerID, req.DurationMinutes, req.Reason, string(times), req.CaseID,
-	).Scan(&id, &createdOn)
+	err = r.db.QueryRow(ctx, query, args...).Scan(&id, &createdOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.CreateCallRequestResponse{}, &apierror.NotFoundError{Msg: "case not found"}
 	}
@@ -432,7 +451,7 @@ func (r *callRequestRepo) CreateCallRequest(ctx context.Context, req domain.Crea
 //
 // Every optional field is applied with COALESCE, so an absent field leaves the
 // stored value untouched. The state is always written.
-func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string) (domain.UpdateCallRequestResponse, error) {
+func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string, authProjectIDs []string) (domain.UpdateCallRequestResponse, error) {
 	var finalTimes *string
 	if req.UTCTimes != nil {
 		b, err := json.Marshal(req.UTCTimes)
@@ -463,7 +482,24 @@ func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.Upda
 		caseID = &req.CaseID
 	}
 
-	const query = `
+	args := []any{
+		req.ID, callRequestStateToEnum(req.State), callerEmail,
+		finalTimes, req.DurationMinutes, scheduledOn, assigneeID,
+		req.Notes, req.Plan, req.Attendees, req.ActionItems, actual, caseID,
+	}
+	// authProjectIDs restricts to the caller's own registered projects,
+	// checked via an EXISTS against the call request's own work item --
+	// resolved purely from AccessScope, never from req. Empty/nil means
+	// unrestricted (internal caller), matching every other Track A repo
+	// method's convention of omitting the clause entirely rather than
+	// binding a NULL/empty array.
+	authClause := ""
+	if len(authProjectIDs) > 0 {
+		args = append(args, authProjectIDs)
+		authClause = fmt.Sprintf(" AND EXISTS (SELECT 1 FROM work_item wi WHERE wi.id = customer_call.work_item_id AND wi.project_id = ANY($%d::uuid[]))", len(args))
+	}
+
+	query := `
 		UPDATE customer_call SET
 			state = $2::text::customer_call_state_enum,
 			updated_on = NOW(),
@@ -478,16 +514,12 @@ func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.Upda
 			action_items = COALESCE($11::text, action_items),
 			actual_call_duration = COALESCE($12::text, actual_call_duration)
 		WHERE id = $1::text::uuid
-		  AND ($13::text::uuid IS NULL OR work_item_id = $13::text::uuid)
+		  AND ($13::text::uuid IS NULL OR work_item_id = $13::text::uuid)` + authClause + `
 		RETURNING id, updated_on`
 
 	var id string
 	var updatedOn time.Time
-	err := r.db.QueryRow(ctx, query,
-		req.ID, callRequestStateToEnum(req.State), callerEmail,
-		finalTimes, req.DurationMinutes, scheduledOn, assigneeID,
-		req.Notes, req.Plan, req.Attendees, req.ActionItems, actual, caseID,
-	).Scan(&id, &updatedOn)
+	err := r.db.QueryRow(ctx, query, args...).Scan(&id, &updatedOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if caseID != nil {
 			return domain.UpdateCallRequestResponse{}, &apierror.NotFoundError{Msg: "call request not found for this case"}

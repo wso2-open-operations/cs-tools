@@ -639,6 +639,33 @@ func (s *caseService) GetCaseByID(ctx context.Context, id string) (domain.CaseVi
 	return s.repo.GetCaseByID(ctx, id, scope)
 }
 
+// authorizeCaseAccess confirms the caller may see caseID before an operation
+// acts on its comments/attachments/tags/watch-list/fields. Reuses
+// GetCaseByID's own scoping (the same NotFoundError it already returns for a
+// case outside the caller's scope) rather than reimplementing the check, so
+// the two can never drift. Every caller of this method previously had no
+// per-resource authorization at all -- see e.g. ConfirmCaseAttachment's own
+// doc comment ("any authenticated user may perform on any case attachment").
+func (s *caseService) authorizeCaseAccess(ctx context.Context, caseID string) error {
+	_, err := s.GetCaseByID(ctx, caseID)
+	return err
+}
+
+// authorizeAttachmentAccess fetches the attachment by id and confirms the
+// caller may see its owning case, returning the fetched attachment for
+// callers that need it (avoiding a second fetch). See authorizeCaseAccess's
+// own doc comment for why this check exists.
+func (s *caseService) authorizeAttachmentAccess(ctx context.Context, attachmentID string) (domain.Attachment, error) {
+	a, err := s.repo.GetCaseAttachmentByID(ctx, attachmentID)
+	if err != nil {
+		return domain.Attachment{}, err
+	}
+	if err := s.authorizeCaseAccess(ctx, a.ReferenceID); err != nil {
+		return domain.Attachment{}, err
+	}
+	return a, nil
+}
+
 var validCommentType = map[domain.CommentType]bool{
 	domain.CommentTypeWorkNote: true,
 	domain.CommentTypeComment:  true,
@@ -655,6 +682,9 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 	}
 	if req.Content == "" {
 		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "content is required"}
+	}
+	if err := s.authorizeCaseAccess(ctx, req.CaseID); err != nil {
+		return domain.CreateCaseCommentResponse{}, err
 	}
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
@@ -749,6 +779,9 @@ func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchC
 	if req.Filters != nil && req.Filters.Type != nil && !validCommentType[*req.Filters.Type] {
 		return domain.SearchCaseCommentsResponse{}, &apierror.ValidationError{Msg: "filters.type contains invalid value: " + string(*req.Filters.Type)}
 	}
+	if err := s.authorizeCaseAccess(ctx, req.CaseID); err != nil {
+		return domain.SearchCaseCommentsResponse{}, err
+	}
 	comments, total, err := s.repo.SearchCaseComments(ctx, req)
 	if err != nil {
 		return domain.SearchCaseCommentsResponse{}, err
@@ -765,6 +798,14 @@ func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchC
 // UpdateCase implements CaseService.
 func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error) {
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	// Gates every branch below (watchList/assignee/parent/acknowledge/fields/
+	// plain state-severity-workState) in one place: none of those sub-methods
+	// had any per-resource authorization at all before this fix (see e.g.
+	// updateCaseAssignee's own lack of one) -- any authenticated caller could
+	// mutate any case by id, regardless of project.
+	if err := s.authorizeCaseAccess(ctx, req.ID); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
 	// Fields with no Postgres implementation at all: a full type transfer,
@@ -1837,6 +1878,9 @@ func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.Creat
 	default:
 		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid status %q: must be 'pending' or 'complete'", req.Status)}
 	}
+	if err := s.authorizeCaseAccess(ctx, req.ReferenceID); err != nil {
+		return domain.CreateAttachmentResponse{}, err
+	}
 
 	user, err := s.resolveActor(ctx)
 	if err != nil {
@@ -1889,7 +1933,7 @@ func (s *caseService) ConfirmCaseAttachment(ctx context.Context, id string) (dom
 		return domain.ConfirmAttachmentResponse{}, err
 	}
 
-	existing, err := s.repo.GetCaseAttachmentByID(ctx, id)
+	existing, err := s.authorizeAttachmentAccess(ctx, id)
 	if err != nil {
 		return domain.ConfirmAttachmentResponse{}, err
 	}
@@ -1942,6 +1986,9 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
 	}
+	if err := s.authorizeCaseAccess(ctx, req.ReferenceID); err != nil {
+		return domain.SearchAttachmentsResponse{}, err
+	}
 
 	attachments, total, err := s.repo.SearchCaseAttachments(ctx, req.ReferenceID, req.Pagination)
 	if err != nil {
@@ -1968,6 +2015,9 @@ func (s *caseService) SearchCaseActivities(ctx context.Context, req domain.Searc
 		return domain.SearchCaseActivitiesResponse{}, err
 	}
 	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchCaseActivitiesResponse{}, err
+	}
+	if err := s.authorizeCaseAccess(ctx, req.CaseID); err != nil {
 		return domain.SearchCaseActivitiesResponse{}, err
 	}
 
@@ -2004,6 +2054,9 @@ func (s *caseService) DeleteCaseAttachment(ctx context.Context, req domain.Delet
 		return domain.DeleteAttachmentResponse{}, err
 	}
 	if _, err := s.resolveActor(ctx); err != nil {
+		return domain.DeleteAttachmentResponse{}, err
+	}
+	if _, err := s.authorizeAttachmentAccess(ctx, req.AttachmentID); err != nil {
 		return domain.DeleteAttachmentResponse{}, err
 	}
 	if err := s.repo.DeleteCaseAttachment(ctx, req.AttachmentID); err != nil {
@@ -2056,6 +2109,9 @@ func (s *caseService) addCaseTagAs(ctx context.Context, caseID, label, actorEmai
 	}
 	if len(label) > 255 {
 		return domain.Tag{}, &apierror.ValidationError{Msg: "label must not exceed 255 characters"}
+	}
+	if err := s.authorizeCaseAccess(ctx, caseID); err != nil {
+		return domain.Tag{}, err
 	}
 
 	s.detectPatchTagBillableOverride(ctx, caseID, label)
@@ -2175,6 +2231,9 @@ func (s *caseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) e
 	if err := validateUUIDs("tagId", []string{tagID}); err != nil {
 		return err
 	}
+	if err := s.authorizeCaseAccess(ctx, caseID); err != nil {
+		return err
+	}
 	actor, err := s.resolveActor(ctx)
 	if err != nil {
 		return err
@@ -2221,7 +2280,7 @@ func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.
 		return domain.AttachmentDetails{}, err
 	}
 
-	a, err := s.repo.GetCaseAttachmentByID(ctx, id)
+	a, err := s.authorizeAttachmentAccess(ctx, id)
 	if err != nil {
 		return domain.AttachmentDetails{}, err
 	}
@@ -2279,6 +2338,9 @@ func (s *caseService) UpdateAttachment(ctx context.Context, req domain.UpdateAtt
 		return domain.UpdateAttachmentResponse{}, err
 	}
 	if err := validatePGAttachmentUpdate(req); err != nil {
+		return domain.UpdateAttachmentResponse{}, err
+	}
+	if _, err := s.authorizeAttachmentAccess(ctx, req.AttachmentID); err != nil {
 		return domain.UpdateAttachmentResponse{}, err
 	}
 

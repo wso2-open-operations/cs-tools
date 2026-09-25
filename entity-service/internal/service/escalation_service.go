@@ -25,7 +25,8 @@ import (
 )
 
 type escalationService struct {
-	repo repository.EscalationRepository
+	repo   repository.EscalationRepository
+	access AccessService
 }
 
 // NewEscalationService constructs an EscalationService backed by Postgres.
@@ -33,8 +34,8 @@ type escalationService struct {
 // EscalationRepository's own doc comment for why (no defined level-
 // transition or notification-recipient rule to derive from the schema
 // alone).
-func NewEscalationService(repo repository.EscalationRepository) EscalationService {
-	return &escalationService{repo: repo}
+func NewEscalationService(repo repository.EscalationRepository, access AccessService) EscalationService {
+	return &escalationService{repo: repo, access: access}
 }
 
 // SearchEscalations implements EscalationService.
@@ -66,7 +67,34 @@ func (s *escalationService) SearchEscalations(ctx context.Context, req domain.Se
 		sortOrder = string(req.SortBy.Order)
 	}
 
-	escalations, total, err := s.repo.SearchEscalations(ctx, caseIDs, currentLevels, sortField, sortOrder, req.Pagination.Limit, req.Pagination.Offset)
+	// SearchEscalationsFilters has no projectIds field for a caller to
+	// (mis)supply -- escalations are scoped purely from the caller's own
+	// resolved AccessScope, never from request input. Escalations were
+	// found with no authorization at all before this fix: escalationFromJoins
+	// already joins work_item (for wi.number/subject), which HAS a real
+	// project_id (case_escalation is 100% CASE-type in real data, unlike
+	// incident/problem/incident_task), but nothing filtered on it.
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.SearchEscalationsResponse{}, err
+	}
+	var projectIDs []string
+	if !scope.Unrestricted {
+		if len(scope.ProjectIDs) == 0 {
+			// Fail-closed short-circuit: an empty projectIDs slice reaching
+			// the repo would be indistinguishable from "no filter" there
+			// (same class of bug already caught and fixed for
+			// change_request/conversation) -- stop here instead.
+			return domain.SearchEscalationsResponse{
+				Escalations: []domain.Escalation{},
+				Limit:       req.Pagination.Limit,
+				Offset:      req.Pagination.Offset,
+			}, nil
+		}
+		projectIDs = scope.ProjectIDs
+	}
+
+	escalations, total, err := s.repo.SearchEscalations(ctx, caseIDs, currentLevels, projectIDs, sortField, sortOrder, req.Pagination.Limit, req.Pagination.Offset)
 	if err != nil {
 		return domain.SearchEscalationsResponse{}, err
 	}

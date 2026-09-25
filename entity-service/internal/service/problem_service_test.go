@@ -90,7 +90,7 @@ func TestProblemService_CreateProblem_SNFailureLeavesPostgresUntouched(t *testin
 	// it's ever called, which is exactly the assertion: Postgres must stay
 	// untouched.
 	repo := &stubProblemRepo{}
-	svc := NewProblemServiceWithSNMirror(repo, mirror)
+	svc := NewProblemServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	_, err := svc.CreateProblem(ctx, validCreateProblemRequest())
 	if err == nil {
@@ -141,7 +141,7 @@ func TestProblemService_CreateProblem_SNSuccessCreatesPostgresRowWithMatchingIde
 			return domain.ProblemDetail{ID: &id, Number: &number, State: state}, nil
 		},
 	}
-	svc := NewProblemServiceWithSNMirror(repo, mirror)
+	svc := NewProblemServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	resp, err := svc.CreateProblem(ctx, validCreateProblemRequest())
 	if err != nil {
@@ -181,7 +181,7 @@ func TestProblemService_CreateProblem_DoesNotRetryValidationError(t *testing.T) 
 		},
 	}
 	repo := &stubProblemRepo{}
-	svc := NewProblemServiceWithSNMirror(repo, mirror)
+	svc := NewProblemServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	_, err := svc.CreateProblem(ctx, validCreateProblemRequest())
 	var ve *apierror.ValidationError
@@ -212,7 +212,7 @@ func TestProblemService_CreateProblem_MissingUserIDTokenRejected(t *testing.T) {
 		},
 	}
 	repo := &stubProblemRepo{}
-	svc := NewProblemServiceWithSNMirror(repo, mirror)
+	svc := NewProblemServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	_, err := svc.CreateProblem(ctx, validCreateProblemRequest())
 	if _, ok := err.(*apierror.UnauthorizedError); !ok {
@@ -221,4 +221,58 @@ func TestProblemService_CreateProblem_MissingUserIDTokenRejected(t *testing.T) {
 	if mirrorCalled {
 		t.Error("ServiceNow must not be called when the caller's identity cannot be resolved")
 	}
+}
+
+// TestProblemService_RequiresInternalCaller is the core regression guard
+// for the problem authorization gap: SearchProblems, AggregateProblems,
+// GetProblem, and CreateProblem applied no authorization at all before
+// this fix. Confirmed live against a real database copy: 100% of real
+// problem rows have project_id = NULL -- problems are internal ITIL/ops
+// records, not customer-project-scoped data, so "internal caller only"
+// (not project scoping) is the correct fix, mirroring incidentService's
+// identical requireInternalCaller pattern.
+func TestProblemService_RequiresInternalCaller(t *testing.T) {
+	external := stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}
+
+	assertForbidden := func(t *testing.T, err error) {
+		t.Helper()
+		var fe *apierror.ForbiddenError
+		if !errors.As(err, &fe) {
+			t.Fatalf("expected *apierror.ForbiddenError, got %T: %v", err, err)
+		}
+	}
+
+	t.Run("SearchProblems", func(t *testing.T) {
+		svc := NewProblemService(&stubProblemRepo{}, external)
+		_, err := svc.SearchProblems(context.Background(), domain.SearchProblemsRequest{Pagination: domain.Pagination{Limit: 10}})
+		assertForbidden(t, err)
+	})
+
+	t.Run("AggregateProblems", func(t *testing.T) {
+		svc := NewProblemService(&stubProblemRepo{}, external)
+		_, err := svc.AggregateProblems(context.Background(), domain.AggregateProblemsRequest{GroupBy: "state"})
+		assertForbidden(t, err)
+	})
+
+	t.Run("GetProblem", func(t *testing.T) {
+		svc := NewProblemService(&stubProblemRepo{}, external)
+		_, err := svc.GetProblem(context.Background(), "11111111-1111-1111-1111-111111111111")
+		assertForbidden(t, err)
+	})
+
+	t.Run("CreateProblem", func(t *testing.T) {
+		svc := NewProblemService(&stubProblemRepo{}, external)
+		_, err := svc.CreateProblem(context.Background(), domain.CreateProblemRequest{})
+		assertForbidden(t, err)
+	})
+
+	t.Run("an internal caller is not blocked by the gate itself", func(t *testing.T) {
+		svc := NewProblemService(&stubProblemRepo{}, stubAccess{scope: AccessScope{Unrestricted: true}})
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected the unconfigured stub repo to be reached (and panic) for an internal caller")
+			}
+		}()
+		_, _ = svc.GetProblem(context.Background(), "11111111-1111-1111-1111-111111111111")
+	})
 }

@@ -39,8 +39,12 @@ import (
 type EscalationRepository interface {
 	// SearchEscalations returns a filtered, sorted, paginated slice of
 	// escalations together with the total count of matching rows before
-	// pagination.
-	SearchEscalations(ctx context.Context, caseIDs []string, currentLevels []int, sortField, sortOrder string, limit, offset int) ([]domain.Escalation, int, error)
+	// pagination. projectIDs restricts to escalations on cases in these
+	// projects -- nil means unrestricted (internal caller); the caller is
+	// responsible for resolving this from its own AccessScope, never from
+	// caller-supplied input, since SearchEscalationsFilters carries no
+	// projectIds field of its own for a customer to narrow with.
+	SearchEscalations(ctx context.Context, caseIDs []string, currentLevels []int, projectIDs []string, sortField, sortOrder string, limit, offset int) ([]domain.Escalation, int, error)
 }
 
 type escalationRepo struct {
@@ -151,12 +155,16 @@ func (r *escalationRepo) getEscalationNotifiedUsers(ctx context.Context, escalat
 }
 
 // SearchEscalations implements EscalationRepository.
-func (r *escalationRepo) SearchEscalations(ctx context.Context, caseIDs []string, currentLevels []int, sortField, sortOrder string, limit, offset int) ([]domain.Escalation, int, error) {
+func (r *escalationRepo) SearchEscalations(ctx context.Context, caseIDs []string, currentLevels []int, projectIDs []string, sortField, sortOrder string, limit, offset int) ([]domain.Escalation, int, error) {
 	where := "WHERE 1=1"
 	args := []any{}
 	if len(caseIDs) > 0 {
 		args = append(args, caseIDs)
 		where += fmt.Sprintf(" AND ce.work_item_id = ANY($%d::uuid[])", len(args))
+	}
+	if len(projectIDs) > 0 {
+		args = append(args, projectIDs)
+		where += fmt.Sprintf(" AND wi.project_id = ANY($%d::uuid[])", len(args))
 	}
 	if len(currentLevels) > 0 {
 		levels := make([]string, len(currentLevels))
