@@ -19,6 +19,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Grid,
   IconButton,
   InputAdornment,
@@ -40,6 +41,7 @@ import {
 import {
   PencilLine,
   Plus,
+  RefreshCw,
   Search,
   Shield,
   Trash2,
@@ -53,13 +55,18 @@ import {
   NULL_PLACEHOLDER,
   ROLE_CONFIG,
   SETTINGS_USER_ADD_BUTTON_LABEL,
-  SETTINGS_USER_ADD_ERROR,
+  SETTINGS_USER_DISMISS_TOOLTIP,
   SETTINGS_USER_EDIT_TOOLTIP,
   SETTINGS_USER_EMPTY_MESSAGE,
+  SETTINGS_USER_INVITE_ALREADY_RUNNING,
   SETTINGS_USER_INVITE_SUCCESS,
+  SETTINGS_USER_INVITING_NOTICE,
+  SETTINGS_USER_PENDING_PROCESSING_TOOLTIP,
+  SETTINGS_USER_PENDING_STATUS,
   SETTINGS_USER_REMOVE_ERROR,
   SETTINGS_USER_REMOVE_SUCCESS,
   SETTINGS_USER_REMOVE_TOOLTIP,
+  SETTINGS_USER_RETRY_TOOLTIP,
   SETTINGS_USER_ROLE_PERMISSIONS_TITLE,
   SETTINGS_USER_SEARCH_PLACEHOLDER,
   SETTINGS_USER_SECURITY_UPDATE_SUCCESS,
@@ -72,6 +79,10 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import AddUserModal from "./AddUserModal";
 import EditUserModal from "./EditUserModal";
 import RemoveUserModal from "./RemoveUserModal";
+import {
+  usePendingInvites,
+  type PendingInvite,
+} from "@features/settings/hooks/usePendingInvites";
 import {
   getAvatarColor,
   getInitials,
@@ -103,6 +114,7 @@ export default function SettingsUserManagement({
     data: contacts = [],
     isLoading,
     error,
+    refetch: refetchContacts,
   } = useGetProjectContacts(projectId);
   const postContact = usePostProjectContact(projectId);
   const deleteContact = useDeleteProjectContact(projectId);
@@ -128,19 +140,37 @@ export default function SettingsUserManagement({
   }, [contacts, searchQuery]);
 
 
+  const pendingInvites = usePendingInvites({
+    // mutateAsync, not mutate: callbacks passed to mutate fire only for the
+    // latest call, and several invitations may be in flight at once.
+    send: postContact.mutateAsync,
+    refetchContacts: async () => (await refetchContacts()).data,
+    onInvited: (email) => showSuccess(`${SETTINGS_USER_INVITE_SUCCESS}: ${email}`),
+    onFailed: (email, message) => showError(`${email}: ${message}`),
+  });
+
+  // An invitation already in the list is shown as its real row only.
+  const visiblePending = useMemo(
+    () =>
+      pendingInvites.pending.filter(
+        (p) =>
+          !contacts.some(
+            (c) => c.email?.trim().toLowerCase() === p.email.trim().toLowerCase(),
+          ),
+      ),
+    [pendingInvites.pending, contacts],
+  );
+
   const handleAddUser = useCallback(
     (data: CreateProjectContactRequest) => {
-      postContact.mutate(data, {
-        onSuccess: () => {
-          showSuccess(SETTINGS_USER_INVITE_SUCCESS);
-          window.location.reload();
-        },
-        onError: (err) => {
-          showError(err?.message ?? SETTINGS_USER_ADD_ERROR);
-        },
-      });
+      if (!pendingInvites.invite(data)) {
+        showError(SETTINGS_USER_INVITE_ALREADY_RUNNING);
+        return;
+      }
+      setIsAddModalOpen(false);
+      showSuccess(`Inviting ${data.contactEmail}. ${SETTINGS_USER_INVITING_NOTICE}`);
     },
-    [postContact, showSuccess, showError],
+    [pendingInvites, showSuccess, showError],
   );
 
   const handleRemoveUser = useCallback(() => {
@@ -289,7 +319,7 @@ export default function SettingsUserManagement({
                   <ErrorIndicator entityName="users" size="medium" />
                 </TableCell>
               </TableRow>
-            ) : filteredContacts.length === 0 ? (
+            ) : filteredContacts.length === 0 && visiblePending.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={canAddOrRemoveUsers ? 4 : 3}
@@ -302,7 +332,17 @@ export default function SettingsUserManagement({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredContacts.map((contact) => (
+              [
+                ...visiblePending.map((invite) => (
+                  <PendingInviteRow
+                    key={`pending-${invite.email}`}
+                    invite={invite}
+                    showActions={canAddOrRemoveUsers}
+                    onRetry={pendingInvites.retry}
+                    onDismiss={pendingInvites.dismiss}
+                  />
+                )),
+                ...filteredContacts.map((contact) => (
                 <TableRow key={contact.id} hover>
                   <TableCell>
                     <Box
@@ -406,7 +446,8 @@ export default function SettingsUserManagement({
                     </TableCell>
                   )}
                 </TableRow>
-              ))
+                )),
+              ]
             )}
           </TableBody>
         </Table>
@@ -483,7 +524,6 @@ export default function SettingsUserManagement({
         projectId={projectId}
         onClose={() => setIsAddModalOpen(false)}
         onSubmit={handleAddUser}
-        isSubmitting={postContact.isPending}
       />
 
       <EditUserModal
@@ -502,5 +542,144 @@ export default function SettingsUserManagement({
         onConfirm={handleRemoveUser}
       />
     </Box>
+  );
+}
+
+interface PendingInviteRowProps {
+  invite: PendingInvite;
+  showActions: boolean;
+  onRetry: (email: string) => void;
+  onDismiss: (email: string) => void;
+}
+
+/**
+ * A table row for an invitation that is not yet a contact: shown straight
+ * away with the details the admin entered, so the page never waits on the
+ * several seconds an invitation takes.
+ *
+ * @param {PendingInviteRowProps} props - The invitation and its actions.
+ * @returns {JSX.Element} The row.
+ */
+function PendingInviteRow({
+  invite,
+  showActions,
+  onRetry,
+  onDismiss,
+}: PendingInviteRowProps): JSX.Element {
+  const { request, status, error, email } = invite;
+  const name = [request.contactFirstName, request.contactLastName].filter(Boolean).join(" ");
+  const roleSource = {
+    email,
+    firstName: request.contactFirstName,
+    lastName: request.contactLastName,
+    isCsAdmin: !!request.isCsAdmin,
+    isLead: !!request.isLead,
+    isPortalUser: !!request.isPortalUser,
+    isSecurityContact: !!request.isSecurityContact,
+    isCsIntegrationUser: !!request.isCsIntegrationUser,
+  } as ProjectContact;
+
+  const statusChip =
+    status === "inviting" ? (
+      <Chip
+        size="small"
+        variant="outlined"
+        icon={<CircularProgress size={12} color="inherit" aria-hidden />}
+        label={SETTINGS_USER_PENDING_STATUS.inviting}
+        sx={{ typography: "caption" }}
+      />
+    ) : status === "failed" ? (
+      <Tooltip title={error ?? ""}>
+        <Chip
+          size="small"
+          variant="outlined"
+          color="error"
+          label={SETTINGS_USER_PENDING_STATUS.failed}
+          sx={{ typography: "caption" }}
+        />
+      </Tooltip>
+    ) : (
+      <Tooltip title={SETTINGS_USER_PENDING_PROCESSING_TOOLTIP}>
+        <Chip
+          size="small"
+          variant="outlined"
+          color="warning"
+          label={SETTINGS_USER_PENDING_STATUS.processing}
+          sx={{ typography: "caption" }}
+        />
+      </Tooltip>
+    );
+
+  return (
+    <TableRow data-testid={`pending-invite-${email}`} aria-busy={status === "inviting"}>
+      <TableCell>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <Box
+            sx={{
+              width: 40,
+              height: 40,
+              borderRadius: "50%",
+              bgcolor: getAvatarColor(email),
+              color: "white",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              typography: "body2",
+              fontWeight: 600,
+              opacity: status === "inviting" ? 0.6 : 1,
+            }}
+          >
+            {getInitials(request.contactFirstName, request.contactLastName, email)}
+          </Box>
+          <Box>
+            <Typography variant="body2">{name || NULL_PLACEHOLDER}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {email}
+            </Typography>
+            {status === "failed" && error && (
+              <Typography variant="caption" color="error" sx={{ display: "block" }}>
+                {error}
+              </Typography>
+            )}
+          </Box>
+        </Box>
+      </TableCell>
+      <TableCell>
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+          {getRoleBadges(roleSource).map((badge) => (
+            <Chip
+              key={badge.label}
+              size="small"
+              icon={<badge.Icon size={12} />}
+              label={badge.label}
+              variant="outlined"
+              color={badge.chipColor}
+              sx={getRoleChipSx(badge.chipColor)}
+            />
+          ))}
+        </Box>
+      </TableCell>
+      <TableCell>{statusChip}</TableCell>
+      {showActions && (
+        <TableCell align="right">
+          <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
+            {status === "failed" && (
+              <Tooltip title={SETTINGS_USER_RETRY_TOOLTIP}>
+                <IconButton size="small" aria-label="Retry invitation" onClick={() => onRetry(email)}>
+                  <RefreshCw size={16} />
+                </IconButton>
+              </Tooltip>
+            )}
+            {status !== "inviting" && (
+              <Tooltip title={SETTINGS_USER_DISMISS_TOOLTIP}>
+                <IconButton size="small" aria-label="Dismiss invitation" onClick={() => onDismiss(email)}>
+                  <X size={16} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+        </TableCell>
+      )}
+    </TableRow>
   );
 }

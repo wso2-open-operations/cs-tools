@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -32,6 +33,10 @@ import (
 type entityUserClient interface {
 	GetMe(ctx context.Context) (entity.GetUserMeResponse, error)
 	PatchMe(ctx context.Context, req entity.PatchUserMeRequest) (entity.PatchUserMeResponse, error)
+	// RegisterInvitedMemberships completes the caller's onboarding in
+	// Salesforce and the CSM database. Only called when firstAccessEnabled
+	// is set.
+	RegisterInvitedMemberships(ctx context.Context) error
 }
 
 // scimUserClient abstracts the SCIM operations used by UserHandler.
@@ -46,12 +51,24 @@ type scimUserClient interface {
 type UserHandler struct {
 	entity entityUserClient
 	scim   scimUserClient
+	// firstAccessEnabled is CSM_MIGRATION_FIRST_ACCESS_ENABLED. It belongs
+	// to the ServiceNow-to-CSM cutover and is off in every deployment until
+	// that day: off means GetMe behaves exactly as it always has, because
+	// the block guarded by it is never entered.
+	firstAccessEnabled bool
 }
 
-// NewUserHandler creates a UserHandler backed by the given entity and SCIM clients.
-func NewUserHandler(entity entityUserClient, scim scimUserClient) *UserHandler {
-	return &UserHandler{entity: entity, scim: scim}
+// NewUserHandler creates a UserHandler backed by the given entity and SCIM
+// clients. firstAccessEnabled turns on the post-sign-in onboarding call; see
+// UserHandler.firstAccessEnabled.
+func NewUserHandler(entity entityUserClient, scim scimUserClient, firstAccessEnabled bool) *UserHandler {
+	return &UserHandler{entity: entity, scim: scim, firstAccessEnabled: firstAccessEnabled}
 }
+
+// firstAccessTimeout bounds the background onboarding call. It runs after the
+// response has been written, on a context detached from the request, so the
+// request's own cancellation must not kill it and it must not run forever.
+const firstAccessTimeout = 20 * time.Second
 
 // userUpdateRequest is the PATCH /users/me request shape. At least one field
 // must be set.
@@ -91,6 +108,31 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONValue(w, http.StatusOK, resp)
+
+	// Cutover only. After the profile has already gone to the browser, ask
+	// entity-service to finish onboarding this user if they still have an
+	// invitation open: clear their Salesforce lockout flag, mark the
+	// membership REGISTERED, refresh the database. It is deliberately
+	// invisible — it runs after the response, on its own context, and a
+	// failure is logged and dropped. Nothing about this request's outcome
+	// depends on it, and entity-service answers immediately for the usual
+	// case of a user with nothing invited.
+	if h.firstAccessEnabled {
+		go h.completeFirstAccess(context.WithoutCancel(r.Context()), user.UserID)
+	}
+}
+
+// completeFirstAccess runs the onboarding call described in GetMe. It never
+// returns anything: its only possible outcome for the caller is a log line.
+func (h *UserHandler) completeFirstAccess(ctx context.Context, userID string) {
+	ctx, cancel := context.WithTimeout(ctx, firstAccessTimeout)
+	defer cancel()
+	if err := h.entity.RegisterInvitedMemberships(ctx); err != nil {
+		// Not an error the user can act on, and not one that should page
+		// anyone: the Salesforce event that follows an invitation reaches
+		// entity-service by its own path as well.
+		slog.WarnContext(ctx, "entity RegisterInvitedMemberships failed", "userID", userID, "err", summarizeErr(err))
+	}
 }
 
 // PatchMe handles PATCH /users/me. phoneNumber is updated via SCIM; timeZone

@@ -27,21 +27,31 @@ import type { CreateProjectContactRequest } from "@features/settings/types/users
 import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
+ * How an invitation request ended when it did not fail.
+ *
+ * - `created`: the contact exists now.
+ * - `processing`: the backend stopped waiting (HTTP 202) while the invitation
+ *   carries on and commits, so the caller should refresh the list until the
+ *   contact appears.
+ */
+export type PostProjectContactOutcome = "created" | "processing";
+
+/**
  * Hook to create a project contact (POST /projects/:projectId/contacts).
  *
  * @param {string} projectId - The ID of the project.
- * @returns {UseMutationResult<void, Error, CreateProjectContactRequest>} Mutation result.
+ * @returns {UseMutationResult<PostProjectContactOutcome, Error, CreateProjectContactRequest>} Mutation result.
  */
 export function usePostProjectContact(
   projectId: string,
-): UseMutationResult<void, Error, CreateProjectContactRequest> {
+): UseMutationResult<PostProjectContactOutcome, Error, CreateProjectContactRequest> {
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  return useMutation<void, Error, CreateProjectContactRequest>({
-    mutationFn: async (body): Promise<void> => {
+  return useMutation<PostProjectContactOutcome, Error, CreateProjectContactRequest>({
+    mutationFn: async (body): Promise<PostProjectContactOutcome> => {
       logger.debug("[usePostProjectContact] Request payload:", body);
 
       try {
@@ -69,6 +79,7 @@ export function usePostProjectContact(
           const text = await response.text();
           throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
+        return response.status === 202 ? "processing" : "created";
       } catch (error) {
         logger.error("[usePostProjectContact] Error:", error);
         throw error;

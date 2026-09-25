@@ -171,6 +171,24 @@ export const SETTINGS_USER_INVITE_SUCCESS = "Invitation sent successfully";
 
 export const SETTINGS_USER_ADD_ERROR = "Failed to add user. Please try again.";
 
+export const SETTINGS_USER_INVITING_NOTICE = "This takes a few seconds.";
+
+export const SETTINGS_USER_INVITE_ALREADY_RUNNING =
+  "An invitation to this address is already being sent.";
+
+export const SETTINGS_USER_PENDING_STATUS = {
+  inviting: "Inviting…",
+  failed: "Failed",
+  processing: "Processing",
+} as const;
+
+export const SETTINGS_USER_PENDING_PROCESSING_TOOLTIP =
+  "Still being processed. Refresh the page in a minute to see it.";
+
+export const SETTINGS_USER_RETRY_TOOLTIP = "Retry invitation";
+
+export const SETTINGS_USER_DISMISS_TOOLTIP = "Dismiss";
+
 export const SETTINGS_USER_REMOVE_SUCCESS = "User removed successfully";
 
 export const SETTINGS_USER_REMOVE_ERROR =

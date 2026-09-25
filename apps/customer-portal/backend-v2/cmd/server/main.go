@@ -166,7 +166,25 @@ func main() {
 	// listener, so the JWKS is fetched and refreshed once per process.
 	tokenValidator := middleware.NewTokenValidator(authCfg)
 
-	userHandler := handler.NewUserHandler(entityClient, scimClient)
+	// CSM_MIGRATION_* flags belong to the ServiceNow-to-CSM cutover: opt-in,
+	// off unless the value is exactly "true", and off means the portal
+	// behaves exactly as it does today.
+	csmMigrationFirstAccess := os.Getenv("CSM_MIGRATION_FIRST_ACCESS_ENABLED") == "true"
+	if csmMigrationFirstAccess {
+		slog.Info("CSM_MIGRATION_FIRST_ACCESS_ENABLED=true; an invited user's first profile load will complete their onboarding")
+	}
+
+	// Project contacts. On, the contact list and the admin check read the CSM
+	// database, and invite / role change / deactivate / resend go to
+	// entity-service, which updates Postgres and Salesforce in one
+	// transaction. Off, all of it goes to the pre-cutover onboarding service
+	// exactly as before, so this flag is the whole rollback.
+	csmMigrationPortalContacts := os.Getenv("CSM_MIGRATION_PORTAL_CONTACTS_ENABLED") == "true"
+	if csmMigrationPortalContacts {
+		slog.Info("CSM_MIGRATION_PORTAL_CONTACTS_ENABLED=true; project contacts are read from the CSM database and written through the entity service")
+	}
+
+	userHandler := handler.NewUserHandler(entityClient, scimClient, csmMigrationFirstAccess)
 	projectHandler := handler.NewProjectHandler(entityClient)
 	projectStatsHandler := handler.NewProjectStatsHandler(entityClient)
 	caseHandler := handler.NewCaseHandler(entityClient)
@@ -186,7 +204,7 @@ func main() {
 	globalHandler := handler.NewGlobalHandler(entityClient)
 	instanceHandler := handler.NewInstanceHandler(entityClient)
 	registryHandler := handler.NewRegistryHandler(entityClient, registryClient, adminRole)
-	contactHandler := handler.NewContactHandler(entityClient, userManagementClient)
+	contactHandler := handler.NewContactHandler(entityClient, userManagementClient, entityClient, csmMigrationPortalContacts)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +241,7 @@ func main() {
 	mux.HandleFunc("POST /projects/{id}/contacts", contactHandler.CreateProjectContact)
 	mux.HandleFunc("DELETE /projects/{id}/contacts/{email}", contactHandler.RemoveProjectContact)
 	mux.HandleFunc("PATCH /projects/{id}/contacts/{email}", contactHandler.UpdateProjectContactRole)
+	mux.HandleFunc("POST /projects/{id}/contacts/{email}/resend-invitation", contactHandler.ResendProjectContactInvitation)
 	mux.HandleFunc("POST /projects/{id}/contacts/validate", contactHandler.ValidateProjectContact)
 	mux.HandleFunc("DELETE /registry-tokens/{id}", registryHandler.DeleteRegistryToken)
 	mux.HandleFunc("POST /registry-tokens/{id}/regenerate", registryHandler.RegenerateRegistryToken)

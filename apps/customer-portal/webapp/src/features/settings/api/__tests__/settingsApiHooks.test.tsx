@@ -123,11 +123,23 @@ describe("settings API hooks", () => {
     const { result } = renderHook(() => usePostProjectContact("p-1"), {
       wrapper: createWrapper(),
     });
-    await result.current.mutateAsync({ contactEmail: "new@test.dev" } as never);
+    await expect(
+      result.current.mutateAsync({ contactEmail: "new@test.dev" } as never),
+    ).resolves.toBe("created");
     expect(authFetchMock).toHaveBeenCalledWith(
       "https://api.test/projects/p-1/contacts",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("reports a 202 invitation as still processing", async () => {
+    authFetchMock.mockResolvedValueOnce({ ok: true, status: 202 });
+    const { result } = renderHook(() => usePostProjectContact("p-1"), {
+      wrapper: createWrapper(),
+    });
+    await expect(
+      result.current.mutateAsync({ contactEmail: "new@test.dev" } as never),
+    ).resolves.toBe("processing");
   });
 
   it("patches an existing project contact", async () => {
