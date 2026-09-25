@@ -110,7 +110,7 @@ func NewAnnouncementRequestRepository(db *pgxpool.Pool) AnnouncementRequestRepos
 // returns a full row, kept in one place so it can't drift out of sync with
 // scanAnnouncementRequest's field order.
 const announcementRequestColumns = `
-	id, kind, state, subject, description, is_security_announcement,
+	id, kind, state, subject, description, announcement_type::TEXT,
 	audience_definition, resolved_project_ids, resolved_project_count,
 	dry_run_case_id, dry_run_on, dry_run_by,
 	created_by, created_by_email, created_on, updated_on,
@@ -122,8 +122,9 @@ const announcementRequestColumns = `
 func scanAnnouncementRequest(row pgx.Row) (domain.AnnouncementRequest, error) {
 	var r domain.AnnouncementRequest
 	var resolvedProjectIDsRaw, publishedCaseIDsRaw []byte
+	var announcementType string
 	if err := row.Scan(
-		&r.ID, &r.Kind, &r.State, &r.Subject, &r.Description, &r.IsSecurityAnnouncement,
+		&r.ID, &r.Kind, &r.State, &r.Subject, &r.Description, &announcementType,
 		&r.AudienceDefinition, &resolvedProjectIDsRaw, &r.ResolvedProjectCount,
 		&r.DryRunCaseID, &r.DryRunAt, &r.DryRunBy,
 		&r.CreatedBy, &r.CreatedByEmail, &r.CreatedAt, &r.UpdatedAt,
@@ -134,6 +135,11 @@ func scanAnnouncementRequest(row pgx.Row) (domain.AnnouncementRequest, error) {
 	); err != nil {
 		return domain.AnnouncementRequest{}, err
 	}
+	// The domain's IsSecurityAnnouncement stays a plain bool (no wire-contract
+	// change for existing callers) even though storage is now the same
+	// announcement_type_enum the "announcement" table uses -- see this
+	// migration's own comment (000085_announcement_requests_announcement_type).
+	r.IsSecurityAnnouncement = announcementType == "SECURITY"
 	// resolved_project_ids/published_case_ids are JSONB and nil until
 	// Submit/MarkPublished respectively — decoded explicitly (not left to
 	// pgx's default codec) so a NULL column reads back as a nil slice
@@ -158,12 +164,12 @@ func (r *announcementRequestRepo) Create(ctx context.Context, req domain.CreateA
 		audience = json.RawMessage(`{}`)
 	}
 	query := `
-		INSERT INTO announcement_requests (kind, subject, description, is_security_announcement, audience_definition, created_by, created_by_email)
-		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))
+		INSERT INTO announcement_requests (kind, subject, description, announcement_type, audience_definition, created_by, created_by_email)
+		VALUES ($1, $2, $3, $4::announcement_type_enum, $5, $6, NULLIF($7, ''))
 		RETURNING ` + announcementRequestColumns
 
 	ar, err := scanAnnouncementRequest(r.db.QueryRow(ctx, query,
-		req.Kind, req.Subject, req.Description, req.IsSecurityAnnouncement, audience, req.CreatedBy, req.CreatedByEmail,
+		req.Kind, req.Subject, req.Description, announcementTypeEnumValue(req.IsSecurityAnnouncement), audience, req.CreatedBy, req.CreatedByEmail,
 	))
 	if err != nil {
 		return domain.AnnouncementRequest{}, fmt.Errorf("create announcement_request: %w", err)
@@ -255,7 +261,7 @@ func (r *announcementRequestRepo) Update(ctx context.Context, id string, expecte
 		UPDATE announcement_requests SET
 			subject = COALESCE($2, subject),
 			description = COALESCE($3, description),
-			is_security_announcement = COALESCE($4, is_security_announcement),
+			announcement_type = COALESCE($4::announcement_type_enum, announcement_type),
 			audience_definition = CASE WHEN $5::boolean THEN $6 ELSE audience_definition END,
 			updated_on = NOW()
 		WHERE id = $1 AND state = $7
@@ -270,7 +276,7 @@ func (r *announcementRequestRepo) Update(ctx context.Context, id string, expecte
 	}
 
 	ar, err := scanAnnouncementRequest(r.db.QueryRow(ctx, query,
-		id, req.Subject, req.Description, req.IsSecurityAnnouncement, audienceSet, audience, expectedState,
+		id, req.Subject, req.Description, announcementTypeEnumValuePtr(req.IsSecurityAnnouncement), audienceSet, audience, expectedState,
 	))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -423,7 +429,7 @@ func (r *announcementRequestRepo) RevertToDraft(ctx context.Context, id string, 
 			state = 'draft',
 			subject = COALESCE($2, subject),
 			description = COALESCE($3, description),
-			is_security_announcement = COALESCE($4, is_security_announcement),
+			announcement_type = COALESCE($4::announcement_type_enum, announcement_type),
 			audience_definition = CASE WHEN $5::boolean THEN $6 ELSE audience_definition END,
 			resolved_project_ids = NULL, resolved_project_count = NULL,
 			dry_run_case_id = NULL, dry_run_on = NULL, dry_run_by = NULL,
@@ -441,7 +447,7 @@ func (r *announcementRequestRepo) RevertToDraft(ctx context.Context, id string, 
 	}
 
 	ar, err := scanAnnouncementRequest(r.db.QueryRow(ctx, query,
-		id, req.Subject, req.Description, req.IsSecurityAnnouncement, audienceSet, audience,
+		id, req.Subject, req.Description, announcementTypeEnumValuePtr(req.IsSecurityAnnouncement), audienceSet, audience,
 	))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

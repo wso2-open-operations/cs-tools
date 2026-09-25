@@ -613,6 +613,8 @@ export interface BeAnnouncementCreatePayload {
   projectId: string;
   subject: string;
   description: string;
+  /** Sets the created case's announcement_type to SECURITY instead of GENERAL. */
+  isSecurityAnnouncement?: boolean;
 }
 
 /**

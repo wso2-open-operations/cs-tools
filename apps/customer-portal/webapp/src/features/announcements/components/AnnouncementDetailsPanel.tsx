@@ -116,12 +116,18 @@ export default function AnnouncementDetailsPanel({
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
   const updatedOnLabel = formatAnnouncementDateDisplay(data.updatedOn);
-  // Matches the CSM portal's own SECURITY_ANNOUNCEMENT_TAG_LABEL constant --
-  // the two apps have no shared code to import it from, so it's duplicated
-  // here as a literal, same as every other cross-app label match in this file.
-  const isSecurityAnnouncement = (data.tags ?? []).some(
-    (t) => t.label.toLowerCase() === "security announcement",
-  );
+  // announcementType is the source of truth going forward, but a case
+  // created before that column existed always reads back "GENERAL" (its
+  // default -- see migration 000084_announcement_add_type, which added no
+  // backfill for pre-existing rows) even though it still carries the
+  // mandatory "Security Announcement" tag. Checking both keeps the chip
+  // showing for that historical data without giving the tag priority over
+  // the real column for anything created after this switch.
+  const isSecurityAnnouncement =
+    data.announcementType === "SECURITY" ||
+    (data.tags ?? []).some(
+      (t) => t.label.toLowerCase() === "security announcement",
+    );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>

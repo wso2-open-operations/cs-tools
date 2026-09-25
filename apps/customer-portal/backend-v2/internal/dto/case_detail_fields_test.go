@@ -134,6 +134,18 @@ func TestMapCaseDetails_ExposesTags(t *testing.T) {
 	}
 }
 
+// TestMapCaseDetails_ExposesAnnouncementType confirms a case's announcement_type
+// (the ServiceNow-sourced GENERAL/SECURITY classification, migrated into
+// entity-service's own announcement.announcement_type column) reaches the
+// customer-facing response, so the frontend can render a Security badge from
+// it directly instead of scanning case tags.
+func TestMapCaseDetails_ExposesAnnouncementType(t *testing.T) {
+	got := MapCaseDetails(entity.CaseView{AnnouncementType: strPtr("SECURITY")})
+	if got.AnnouncementType == nil || *got.AnnouncementType != "SECURITY" {
+		t.Fatalf("expected announcementType to be exposed as SECURITY, got %v", got.AnnouncementType)
+	}
+}
+
 // TestMapCaseDetails_OmitsAbsentFields checks a case response carrying none of
 // these values omits the keys rather than emitting nulls or zero values.
 func TestMapCaseDetails_OmitsAbsentFields(t *testing.T) {

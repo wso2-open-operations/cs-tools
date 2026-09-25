@@ -367,6 +367,9 @@ type CaseDetails struct {
 	EscalationLevel *IDLabelRef `json:"escalationLevel,omitempty"`
 	IsEscalated     *bool       `json:"isEscalated,omitempty"`
 	Tags            []Tag       `json:"tags,omitempty"`
+	// AnnouncementType is only meaningful when Type.ID is "announcement" --
+	// "GENERAL" or "SECURITY". Nil for every other case-like type.
+	AnnouncementType *string `json:"announcementType,omitempty"`
 }
 
 // MapCaseDetails builds the portal response from entity-service's CaseView.
@@ -442,6 +445,7 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 		EscalationLevel:     caseEscalationLevelRef(c.EscalationLevel),
 		IsEscalated:         c.IsEscalated,
 		Tags:                mapTags(c.Tags),
+		AnnouncementType:    c.AnnouncementType,
 	}
 }
 

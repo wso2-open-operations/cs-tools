@@ -303,6 +303,12 @@ export type CaseDetails = AuditMetadata & {
   isEscalated?: boolean | null;
   /** Free-text labels attached to the case, e.g. "Security Announcement". */
   tags?: Array<{ id: string; label: string; color?: string | null }>;
+  /**
+   * Only meaningful when type.id is "announcement" -- "GENERAL" or
+   * "SECURITY" (entity-service's announcement.announcement_type column).
+   * Absent for every other case-like type.
+   */
+  announcementType?: string | null;
 };
 
 // Item type for a single case comment.

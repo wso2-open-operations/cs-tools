@@ -2197,15 +2197,21 @@ type CaseView struct {
 	// Severity/IssueType/State are null in practice for a large share of
 	// real cases -- see domain.Case's own doc comment for the confirmed
 	// production null rates.
-	Severity       *CaseSeverity  `json:"severity"`
-	IssueType      *CaseIssueType `json:"issueType"`
-	State          *CaseState     `json:"state"`
-	WorkState      *CaseWorkState `json:"workState"`
-	Type           *string        `json:"type"`
-	EngagementType *string        `json:"engagementType"`
-	CreatedOn      time.Time      `json:"createdOn"`
-	UpdatedOn      time.Time      `json:"updatedOn"`
-	ClosedOn       *time.Time     `json:"closedOn"`
+	Severity  *CaseSeverity  `json:"severity"`
+	IssueType *CaseIssueType `json:"issueType"`
+	State     *CaseState     `json:"state"`
+	WorkState *CaseWorkState `json:"workState"`
+	Type      *string        `json:"type"`
+	// AnnouncementType is only meaningful when Type is "announcement" -- the
+	// real ServiceNow classification (u_announcement_type, migrated into
+	// Postgres' own announcement.announcement_type column) of "GENERAL" vs
+	// "SECURITY", set at creation time (see CreateCaseRequest.IsSecurityAnnouncement).
+	// Nil for every other case-like type.
+	AnnouncementType *string    `json:"announcementType,omitempty"`
+	EngagementType   *string    `json:"engagementType"`
+	CreatedOn        time.Time  `json:"createdOn"`
+	UpdatedOn        time.Time  `json:"updatedOn"`
+	ClosedOn         *time.Time `json:"closedOn"`
 	// CreatedBy is the canonical user reference for the case creator. Its id is
 	// populated only where the backing data source already supplies one, and
 	// null otherwise: see UserReference.
@@ -2945,6 +2951,10 @@ type CreateCaseRequest struct {
 	// For engagement type
 	EngagementType        EngagementType        `json:"engagementType"`
 	EngagementPaymentType EngagementPaymentType `json:"engagementPaymentType"`
+	// For announcement type only: sets announcement.announcement_type to
+	// "SECURITY" instead of the column's own default "GENERAL" -- see
+	// CaseView.AnnouncementType's own doc comment. Ignored for every other type.
+	IsSecurityAnnouncement bool `json:"isSecurityAnnouncement,omitempty"`
 }
 
 // CommentType classifies the type of a case comment.

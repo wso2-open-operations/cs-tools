@@ -88,7 +88,7 @@ describe("AnnouncementDetailsPanel", () => {
     expect(table).toHaveTextContent("4.2.0");
   });
 
-  it("shows a Security chip when the case carries the Security Announcement tag", () => {
+  it("shows a Security chip when the case's announcementType is SECURITY", () => {
     render(
       <AnnouncementDetailsPanel
         data={{
@@ -97,7 +97,7 @@ describe("AnnouncementDetailsPanel", () => {
           description: "<p>Details</p>",
           status: { id: "1", label: "Open" },
           createdOn: "2024-01-15T10:00:00Z",
-          tags: [{ id: "tag-1", label: "Security Announcement" }],
+          announcementType: "SECURITY",
         } as never}
         isLoading={false}
         isError={false}
@@ -109,7 +109,7 @@ describe("AnnouncementDetailsPanel", () => {
     expect(screen.getByText("Security")).toBeInTheDocument();
   });
 
-  it("shows no Security chip when the case has no tags", () => {
+  it("shows no Security chip when the case's announcementType is GENERAL or absent", () => {
     render(
       <AnnouncementDetailsPanel
         data={{
@@ -127,6 +127,27 @@ describe("AnnouncementDetailsPanel", () => {
       />,
     );
     expect(screen.queryByText("Security")).not.toBeInTheDocument();
+  });
+
+  it("shows a Security chip via the Security Announcement tag when announcementType predates the column (historical data)", () => {
+    render(
+      <AnnouncementDetailsPanel
+        data={{
+          title: "Critical vulnerability notice",
+          number: "ANN-090",
+          description: "<p>Details</p>",
+          status: { id: "1", label: "Open" },
+          createdOn: "2023-06-01T10:00:00Z",
+          tags: [{ id: "tag-1", label: "Security Announcement" }],
+        } as never}
+        isLoading={false}
+        isError={false}
+        caseId="case-1"
+        projectId="proj-1"
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByText("Security")).toBeInTheDocument();
   });
 
   it("renders back button while loading", () => {

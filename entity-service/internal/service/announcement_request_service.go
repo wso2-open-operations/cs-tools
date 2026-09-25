@@ -468,11 +468,12 @@ func (s *announcementRequestService) AutoPublish(ctx context.Context, id string)
 			continue
 		}
 		created, err := s.cases.CreateCase(ctx, domain.CreateCaseRequest{
-			CreatedBy:   current.CreatedBy,
-			Type:        "announcement",
-			ProjectID:   projectID,
-			Subject:     current.Subject,
-			Description: current.Description,
+			CreatedBy:              current.CreatedBy,
+			Type:                   "announcement",
+			ProjectID:              projectID,
+			Subject:                current.Subject,
+			Description:            current.Description,
+			IsSecurityAnnouncement: current.IsSecurityAnnouncement,
 		})
 		if err != nil {
 			stillFailingCases = append(stillFailingCases, projectID)

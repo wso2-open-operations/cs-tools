@@ -843,6 +843,10 @@ type CaseView struct {
 	Duration        *string `json:"duration"`
 	EscalationLevel *string `json:"escalationLevel"`
 	IsEscalated     *bool   `json:"isEscalated"`
+	// AnnouncementType is only meaningful when Type is "announcement" --
+	// "GENERAL" or "SECURITY" (entity-service's announcement.announcement_type
+	// column). Nil for every other case-like type.
+	AnnouncementType *string `json:"announcementType,omitempty"`
 }
 
 // --- deployments ---

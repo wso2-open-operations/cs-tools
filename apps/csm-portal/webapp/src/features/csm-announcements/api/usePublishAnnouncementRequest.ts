@@ -317,6 +317,7 @@ export function usePublishAnnouncementRequest(
             projectId,
             subject: request.subject,
             description: request.description,
+            isSecurityAnnouncement: request.isSecurityAnnouncement,
           });
           // The case genuinely exists the moment postCase succeeds,
           // independent of whether the security tag below then fails —
