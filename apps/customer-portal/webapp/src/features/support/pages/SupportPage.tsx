@@ -27,6 +27,7 @@ import OutstandingCasesList from "@features/support/components/support-overview-
 import ChatHistoryList from "@features/support/components/support-overview-cards/ChatHistoryList";
 import CloseChatConfirmDialog from "@features/support/components/close-chat/CloseChatConfirmDialog";
 import { useCloseConversationFlow } from "@features/support/hooks/useCloseConversationFlow";
+import { isConversationResumable } from "@features/support/utils/conversationsList";
 import { useGetProjectSupportStats } from "@features/support/api/useGetProjectSupportStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
@@ -136,6 +137,7 @@ export default function SupportPage(): JSX.Element {
     kbArticles: 0,
     status: c.state?.label ?? "Open",
     createdBy: c.createdBy ?? undefined,
+    isResumable: isConversationResumable(c.state?.label),
   }));
 
   const isActuallyLoading = isAuthLoading || isLoading || (!stats && !isError);
