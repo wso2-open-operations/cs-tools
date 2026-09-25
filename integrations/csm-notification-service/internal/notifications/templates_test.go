@@ -359,3 +359,29 @@ func TestRenderProjectContactInvitedEmail_OmitsRolesLineWhenEmpty(t *testing.T) 
 		}
 	}
 }
+
+// TestRenderProjectContactInvitedEmail_SignInButton: every invitation
+// variant ends with the orange pill button and a copyable fallback link,
+// and the portal URL is filled into all three places it appears (the
+// button, the fallback href and the fallback's visible text).
+func TestRenderProjectContactInvitedEmail_SignInButton(t *testing.T) {
+	const portal = "https://portal.example.com/sign-in?next=%2Fprojects"
+	for name, render := range map[string]func(ProjectContactInvitedEmailData) string{
+		"new":      RenderProjectContactInvitedNewEmail,
+		"existing": RenderProjectContactInvitedExistingEmail,
+		"reminder": RenderProjectContactInvitedReminderEmail,
+	} {
+		got := render(ProjectContactInvitedEmailData{DisplayName: "jane", Email: "jane@acme.com", ProjectName: "Acme Cloud", ProjectKey: "ACMECLOUD", PortalURL: portal})
+		for _, want := range []string{`bgcolor="#ff7300"`, "border-radius:999px", "Sign in to the Support Portal", "Button not working? Paste this link into your browser:"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: rendered email does not contain %q", name, want)
+			}
+		}
+		if n := strings.Count(got, portal); n != 3 {
+			t.Errorf("%s: portal URL appears %d times, want 3 (button, fallback href, fallback text)", name, n)
+		}
+		if strings.Contains(got, "text-decoration:underline") {
+			t.Errorf("%s: the old underlined sign-in link is still there", name)
+		}
+	}
+}
