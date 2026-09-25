@@ -82,6 +82,67 @@ func TestSNProjectService_SearchProjects_MapsAccountRef(t *testing.T) {
 	}
 }
 
+// TestSNProjectService_SearchProjects_MapsSfID verifies that the Salesforce id
+// added to ServiceNow's project search response is mapped into
+// domain.ProjectView.SfID, and that a project with no value (absent or
+// explicit null) maps to a nil SfID rather than an empty-string placeholder.
+func TestSNProjectService_SearchProjects_MapsSfID(t *testing.T) {
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"projects": []map[string]any{
+				{
+					"id": "11111111111111111111111111111111", "name": "With sfId", "key": "WS",
+					"type":    map[string]any{"name": "Subscription"},
+					"endDate": "", "createdOn": "2026-01-01 00:00:00",
+					"account": map[string]any{"id": "", "name": ""},
+					"sfId":    "0015g00000ExAmPLE",
+				},
+				{
+					"id": "22222222222222222222222222222222", "name": "Null sfId", "key": "NS",
+					"type":    map[string]any{"name": "Subscription"},
+					"endDate": "", "createdOn": "2026-01-01 00:00:00",
+					"account": map[string]any{"id": "", "name": ""},
+					"sfId":    nil,
+				},
+				{
+					"id": "33333333333333333333333333333333", "name": "Absent sfId", "key": "AS",
+					"type":    map[string]any{"name": "Subscription"},
+					"endDate": "", "createdOn": "2026-01-01 00:00:00",
+					"account": map[string]any{"id": "", "name": ""},
+				},
+			},
+			"totalRecords": 3, "offset": 0, "limit": 10,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	resp, err := svc.SearchProjects(contextWithUserIDToken("token"), domain.SearchProjectsRequest{
+		Pagination: domain.Pagination{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Projects) != 3 {
+		t.Fatalf("expected 3 projects, got %d", len(resp.Projects))
+	}
+
+	withSfID := resp.Projects[0]
+	if withSfID.SfID == nil || *withSfID.SfID != "0015g00000ExAmPLE" {
+		t.Errorf("SfID = %v, want \"0015g00000ExAmPLE\"", withSfID.SfID)
+	}
+
+	nullSfID := resp.Projects[1]
+	if nullSfID.SfID != nil {
+		t.Errorf("SfID = %v, want nil for explicit null", *nullSfID.SfID)
+	}
+
+	absentSfID := resp.Projects[2]
+	if absentSfID.SfID != nil {
+		t.Errorf("SfID = %v, want nil for absent field", *absentSfID.SfID)
+	}
+}
+
 // TestSNProjectService_SearchProjects_MapsOnboardingScopedFields verifies that
 // the onboarding-scoped dashboard fields added to ServiceNow's project search
 // response are mapped into domain.ProjectView: top-level onboardingStatus and

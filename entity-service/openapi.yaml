@@ -7008,6 +7008,12 @@ components:
           type: string
         key:
           type: string
+        sfId:
+          type: string
+          nullable: true
+          description: >
+            Salesforce id. Null when the backing data source has no value
+            recorded for this project.
         subscriptionType:
           type: string
           enum:

@@ -618,6 +618,9 @@ type ProjectView struct {
 	Name             string           `json:"name"`
 	Key              string           `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
+	// SfID is the project's Salesforce id, nil when the backing data source
+	// has no value recorded for this project (ServiceNow data source only).
+	SfID *string `json:"sfId"`
 	// StartDate is the start of the project's current renewed period, and is nil
 	// when the backing data source has no start date recorded for this project
 	// (e.g. ServiceNow leaves it blank).

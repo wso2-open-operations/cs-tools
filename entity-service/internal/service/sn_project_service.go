@@ -54,10 +54,14 @@ type snProjectClosureFields struct {
 }
 
 type snProject struct {
-	ID        string                  `json:"id"`
-	Name      string                  `json:"name"`
-	Key       string                  `json:"key"`
-	Type      snProjectType           `json:"type"`
+	ID   string        `json:"id"`
+	Name string        `json:"name"`
+	Key  string        `json:"key"`
+	Type snProjectType `json:"type"`
+	// SfID is the project's Salesforce id, nil when not recorded for this
+	// project. Sourced by a secondary lookup on the entity-service side; not
+	// every project search response carries it yet.
+	SfID      *string                 `json:"sfId"`
 	StartDate *string                 `json:"startDate"`
 	EndDate   string                  `json:"endDate"`
 	CreatedOn string                  `json:"createdOn"`
@@ -389,6 +393,7 @@ func (s *snProjectService) fetchProjectsPage(ctx context.Context, req domain.Sea
 			ID:               sysidToUUID(p.ID),
 			Name:             p.Name,
 			Key:              p.Key,
+			SfID:             p.SfID,
 			SubscriptionType: subType,
 			StartDate:        startDate,
 			EndDate:          endDate,
