@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -42,7 +43,8 @@ import (
 // its own doc comment below.
 
 type changeRequestService struct {
-	repo repository.ChangeRequestRepository
+	repo   repository.ChangeRequestRepository
+	access AccessService
 	// snMirror is nil in every mode except DATA_SOURCE=postgres-servicenow-dual-write
 	// (config.DataSourcePostgresServiceNowDualWrite) -- see
 	// NewChangeRequestServiceWithSNMirror's own doc comment. When set,
@@ -67,8 +69,8 @@ type changeRequestService struct {
 // DecideChangeRequestApproval always return a ServiceUnavailableError --
 // see ChangeRequestRepository's own package doc comment for exactly why
 // (no number-generation sequence; no approval-stage/approver tables).
-func NewChangeRequestService(repo repository.ChangeRequestRepository) ChangeRequestService {
-	return &changeRequestService{repo: repo}
+func NewChangeRequestService(repo repository.ChangeRequestRepository, access AccessService) ChangeRequestService {
+	return &changeRequestService{repo: repo, access: access}
 }
 
 // NewChangeRequestServiceWithSNMirror is NewChangeRequestService plus the
@@ -84,8 +86,8 @@ func NewChangeRequestService(repo repository.ChangeRequestRepository) ChangeRequ
 // NewServiceNowChangeRequestService) whose CreateChangeRequest performs the
 // real ServiceNow POST. It is never made the active ChangeRequestService
 // here -- reads always stay on Postgres in this mode.
-func NewChangeRequestServiceWithSNMirror(repo repository.ChangeRequestRepository, mirror ChangeRequestService) ChangeRequestService {
-	return &changeRequestService{repo: repo, snMirror: mirror}
+func NewChangeRequestServiceWithSNMirror(repo repository.ChangeRequestRepository, access AccessService, mirror ChangeRequestService) ChangeRequestService {
+	return &changeRequestService{repo: repo, access: access, snMirror: mirror}
 }
 
 // NewChangeRequestServiceWithSNWriteback is NewChangeRequestServiceWithSNMirror
@@ -96,8 +98,60 @@ func NewChangeRequestServiceWithSNMirror(repo repository.ChangeRequestRepository
 // NewChangeRequestServiceWithSNMirror's own signature: several existing
 // tests construct that one directly with dispatcher/writeback out of scope,
 // and keeping it as-is means they keep working unchanged.
-func NewChangeRequestServiceWithSNWriteback(repo repository.ChangeRequestRepository, mirror ChangeRequestService, dispatcher *SNWritebackDispatcher) ChangeRequestService {
-	return &changeRequestService{repo: repo, snMirror: mirror, snWriteback: dispatcher}
+func NewChangeRequestServiceWithSNWriteback(repo repository.ChangeRequestRepository, access AccessService, mirror ChangeRequestService, dispatcher *SNWritebackDispatcher) ChangeRequestService {
+	return &changeRequestService{repo: repo, access: access, snMirror: mirror, snWriteback: dispatcher}
+}
+
+// scopeChangeRequestProjectIDs narrows f.ProjectIDs to the caller's own
+// registered projects, so a caller can never search/aggregate change
+// requests outside their own AccessScope.ProjectIDs regardless of what the
+// request body asks for -- unrestricted (internal) callers are untouched.
+// If the caller also supplied their own projectIds filter, the two are
+// intersected (never unioned), so a caller narrowing down via the UI still
+// works but can never expand beyond their own scope.
+//
+// An empty result here (not unrestricted, and either no registered projects
+// or none of the requested ones overlap) must NOT be passed to the repo
+// layer as-is: changeRequestWhereClause treats a len-0 ProjectIDs slice as
+// "no filter requested" and returns every project's rows, not zero rows --
+// the opposite of fail-closed. Callers of this function must check for that
+// case themselves and short-circuit to an empty response instead of calling
+// the repo -- see SearchChangeRequests/AggregateChangeRequests.
+func scopeChangeRequestProjectIDs(scope AccessScope, requested []string) []string {
+	if scope.Unrestricted {
+		return requested
+	}
+	if len(requested) == 0 {
+		return scope.ProjectIDs
+	}
+	out := make([]string, 0, len(requested))
+	for _, id := range requested {
+		for _, allowed := range scope.ProjectIDs {
+			if strings.EqualFold(id, allowed) {
+				out = append(out, id)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// authorizeChangeRequestProject refuses a caller whose AccessScope doesn't
+// include projectID -- used after a by-id fetch to decide whether the
+// caller may see/act on that specific change request. Reported as
+// NotFound, never Forbidden, matching authorizeProject/GetCaseByID: a 403
+// would confirm the change request exists to someone not entitled to know
+// that.
+func authorizeChangeRequestProject(scope AccessScope, projectID string) error {
+	if scope.Unrestricted {
+		return nil
+	}
+	for _, id := range scope.ProjectIDs {
+		if strings.EqualFold(id, projectID) {
+			return nil
+		}
+	}
+	return &apierror.NotFoundError{Msg: "change request not found"}
 }
 
 func validateChangeRequestFilters(f domain.SearchChangeRequestsFilters) error {
@@ -145,6 +199,22 @@ func (s *changeRequestService) SearchChangeRequests(ctx context.Context, req dom
 		return domain.SearchChangeRequestsResponse{}, &apierror.ValidationError{Msg: "filters: createdOn lte bound must not be before its gte bound"}
 	}
 
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.SearchChangeRequestsResponse{}, err
+	}
+	req.Filters.ProjectIDs = scopeChangeRequestProjectIDs(scope, req.Filters.ProjectIDs)
+	if !scope.Unrestricted && len(req.Filters.ProjectIDs) == 0 {
+		// See scopeChangeRequestProjectIDs's own doc comment: an empty
+		// ProjectIDs here must short-circuit, not reach the repo -- the SQL
+		// WHERE-clause builder treats a len-0 slice as no filter at all.
+		return domain.SearchChangeRequestsResponse{
+			ChangeRequests: []domain.SearchChangeRequestView{},
+			Limit:          req.Pagination.Limit,
+			Offset:         req.Pagination.Offset,
+		}, nil
+	}
+
 	views, total, err := s.repo.SearchChangeRequests(ctx, req, parsed.CreatedStartDate, parsed.CreatedEndDate, parsed.Approval, parsed.AssignmentGroupIDs)
 	if err != nil {
 		return domain.SearchChangeRequestsResponse{}, err
@@ -177,6 +247,17 @@ func (s *changeRequestService) AggregateChangeRequests(ctx context.Context, req 
 		return domain.AggregateResponse{}, err
 	}
 
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	req.Filters.ProjectIDs = scopeChangeRequestProjectIDs(scope, req.Filters.ProjectIDs)
+	if !scope.Unrestricted && len(req.Filters.ProjectIDs) == 0 {
+		// See scopeChangeRequestProjectIDs's own doc comment: an empty
+		// ProjectIDs here must short-circuit, not reach the repo.
+		return domain.AggregateResponse{Groups: []domain.AggregateBucket{}}, nil
+	}
+
 	return s.repo.AggregateChangeRequests(ctx, req, req.GroupBy, maxGroups, parsed.CreatedStartDate, parsed.CreatedEndDate, parsed.Approval)
 }
 
@@ -185,7 +266,18 @@ func (s *changeRequestService) GetChangeRequest(ctx context.Context, id string) 
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ChangeRequest{}, err
 	}
-	return s.repo.GetChangeRequestByID(ctx, id)
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.ChangeRequest{}, err
+	}
+	cr, err := s.repo.GetChangeRequestByID(ctx, id)
+	if err != nil {
+		return domain.ChangeRequest{}, err
+	}
+	if err := authorizeChangeRequestProject(scope, cr.Project.ID); err != nil {
+		return domain.ChangeRequest{}, err
+	}
+	return cr, nil
 }
 
 // PatchChangeRequest implements ChangeRequestService.
@@ -225,6 +317,35 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	email, err := emailFromJWT(token)
 	if err != nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+	}
+
+	// Scope is checked against the row's CURRENT project, before the patch
+	// applies -- not the patch response afterward. A caller outside the
+	// change request's project must never be able to mutate it in the first
+	// place, even if the response would then correctly be withheld; checking
+	// after the fact would be too late.
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.PatchChangeRequestResponse{}, err
+	}
+	if !scope.Unrestricted {
+		existing, err := s.repo.GetChangeRequestByID(ctx, id)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, err
+		}
+		if err := authorizeChangeRequestProject(scope, existing.Project.ID); err != nil {
+			return domain.PatchChangeRequestResponse{}, err
+		}
+		// Also block reassigning the change request TO a project the caller
+		// doesn't own -- otherwise a caller who legitimately owns this row
+		// could move it into an unrelated project via req.ProjectID, even
+		// though the read/write checks above only ever validated the row's
+		// current project.
+		if req.ProjectID != nil {
+			if err := authorizeChangeRequestProject(scope, *req.ProjectID); err != nil {
+				return domain.PatchChangeRequestResponse{}, err
+			}
+		}
 	}
 
 	cr, err := s.repo.PatchChangeRequest(ctx, id, req, email)

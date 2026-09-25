@@ -33,16 +33,28 @@ import (
 type stubChangeRequestRepo struct {
 	createChangeRequestFromServiceNow func(ctx context.Context, req domain.CreateChangeRequestRequest, id, number, createdBy string) (domain.CreateChangeRequestResponse, error)
 	patchChangeRequest                func(ctx context.Context, id string, req domain.PatchChangeRequestRequest, email string) (domain.ChangeRequest, error)
+	searchChangeRequests              func(ctx context.Context, req domain.SearchChangeRequestsRequest) ([]domain.SearchChangeRequestView, int, error)
+	aggregateChangeRequests           func(ctx context.Context, req domain.AggregateChangeRequestsRequest) (domain.AggregateResponse, error)
+	getChangeRequestByID              func(ctx context.Context, id string) (domain.ChangeRequest, error)
 }
 
-func (s *stubChangeRequestRepo) SearchChangeRequests(context.Context, domain.SearchChangeRequestsRequest, *time.Time, *time.Time, *string, []string) ([]domain.SearchChangeRequestView, int, error) {
-	panic("not implemented")
+func (s *stubChangeRequestRepo) SearchChangeRequests(ctx context.Context, req domain.SearchChangeRequestsRequest, _, _ *time.Time, _ *string, _ []string) ([]domain.SearchChangeRequestView, int, error) {
+	if s.searchChangeRequests != nil {
+		return s.searchChangeRequests(ctx, req)
+	}
+	panic("SearchChangeRequests called unexpectedly")
 }
-func (s *stubChangeRequestRepo) AggregateChangeRequests(context.Context, domain.AggregateChangeRequestsRequest, string, int, *time.Time, *time.Time, *string) (domain.AggregateResponse, error) {
-	panic("not implemented")
+func (s *stubChangeRequestRepo) AggregateChangeRequests(ctx context.Context, req domain.AggregateChangeRequestsRequest, _ string, _ int, _, _ *time.Time, _ *string) (domain.AggregateResponse, error) {
+	if s.aggregateChangeRequests != nil {
+		return s.aggregateChangeRequests(ctx, req)
+	}
+	panic("AggregateChangeRequests called unexpectedly")
 }
-func (s *stubChangeRequestRepo) GetChangeRequestByID(context.Context, string) (domain.ChangeRequest, error) {
-	panic("not implemented")
+func (s *stubChangeRequestRepo) GetChangeRequestByID(ctx context.Context, id string) (domain.ChangeRequest, error) {
+	if s.getChangeRequestByID != nil {
+		return s.getChangeRequestByID(ctx, id)
+	}
+	panic("GetChangeRequestByID called unexpectedly")
 }
 func (s *stubChangeRequestRepo) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest, email string) (domain.ChangeRequest, error) {
 	if s.patchChangeRequest != nil {
@@ -102,7 +114,7 @@ func TestChangeRequestService_CreateChangeRequest_SNFailureLeavesPostgresUntouch
 	// panics if it's ever called, which is exactly the assertion: Postgres
 	// must stay untouched.
 	repo := &stubChangeRequestRepo{}
-	svc := NewChangeRequestServiceWithSNMirror(repo, mirror)
+	svc := NewChangeRequestServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	_, err := svc.CreateChangeRequest(context.Background(), validCreateChangeRequestRequest())
 	if err == nil {
@@ -132,7 +144,7 @@ func TestChangeRequestService_CreateChangeRequest_RejectsUnsupportedTypeBeforeSN
 		},
 	}
 	repo := &stubChangeRequestRepo{}
-	svc := NewChangeRequestServiceWithSNMirror(repo, mirror)
+	svc := NewChangeRequestServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	req := validCreateChangeRequestRequest()
 	unsupported := domain.ChangeRequestTypeSiteReliabilityOps
@@ -182,7 +194,7 @@ func TestChangeRequestService_CreateChangeRequest_SNSuccessCreatesPostgresRowWit
 			return resp, nil
 		},
 	}
-	svc := NewChangeRequestServiceWithSNMirror(repo, mirror)
+	svc := NewChangeRequestServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	resp, err := svc.CreateChangeRequest(context.Background(), validCreateChangeRequestRequest())
 	if err != nil {
@@ -216,7 +228,7 @@ func TestChangeRequestService_CreateChangeRequest_DoesNotRetryValidationError(t 
 		},
 	}
 	repo := &stubChangeRequestRepo{}
-	svc := NewChangeRequestServiceWithSNMirror(repo, mirror)
+	svc := NewChangeRequestServiceWithSNMirror(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror)
 
 	_, err := svc.CreateChangeRequest(context.Background(), validCreateChangeRequestRequest())
 	var ve *apierror.ValidationError
@@ -253,7 +265,7 @@ func TestChangeRequestService_PatchChangeRequest_MirrorsToServiceNow(t *testing.
 	}
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
-	svc := NewChangeRequestServiceWithSNWriteback(repo, mirror, dispatcher)
+	svc := NewChangeRequestServiceWithSNWriteback(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, dispatcher)
 
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 	if _, err := svc.PatchChangeRequest(ctx, testUUID, req); err != nil {
@@ -293,7 +305,7 @@ func TestChangeRequestService_PatchChangeRequest_MirrorFailureRecordsWritebackFa
 	}
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
-	svc := NewChangeRequestServiceWithSNWriteback(repo, mirror, dispatcher)
+	svc := NewChangeRequestServiceWithSNWriteback(repo, stubAccess{scope: AccessScope{Unrestricted: true}}, mirror, dispatcher)
 
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 	if _, err := svc.PatchChangeRequest(ctx, testUUID, req); err != nil {
@@ -301,4 +313,271 @@ func TestChangeRequestService_PatchChangeRequest_MirrorFailureRecordsWritebackFa
 	}
 
 	waitFor(t, func() bool { return failures.count() == 1 })
+}
+
+// TestChangeRequestService_SearchChangeRequests_ScopesToCallerProjects is the
+// core regression guard for the change-request authorization gap: before
+// this fix, filters.projectIds was purely a caller-supplied, optional
+// narrowing with nothing tying it to the caller's own AccessScope -- an
+// external caller omitting it (or asking for someone else's project) saw
+// every project's change requests. Confirmed live against a real database
+// copy: a real single-project customer contact could see all 3,279 change
+// requests in the system this way, not just their own 182.
+func TestChangeRequestService_SearchChangeRequests_ScopesToCallerProjects(t *testing.T) {
+	tests := []struct {
+		name            string
+		scope           AccessScope
+		requestedFilter []string
+		wantRepoCalled  bool
+		wantFilter      []string
+	}{
+		{
+			name:            "external caller with no filter is narrowed to their own projects",
+			scope:           AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+			requestedFilter: nil,
+			wantRepoCalled:  true,
+			wantFilter:      []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+		},
+		{
+			name:            "external caller's own filter is intersected with scope, not unioned",
+			scope:           AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+			requestedFilter: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},
+			wantRepoCalled:  true,
+			wantFilter:      []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+		},
+		{
+			name:            "external caller asking for an out-of-scope project alone gets zero results, not everyone's",
+			scope:           AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+			requestedFilter: []string{"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},
+			wantRepoCalled:  false,
+		},
+		{
+			name:            "external caller with no registered projects at all gets zero results",
+			scope:           AccessScope{ProjectIDs: nil},
+			requestedFilter: nil,
+			wantRepoCalled:  false,
+		},
+		{
+			name:            "internal (unrestricted) caller's request passes through untouched",
+			scope:           AccessScope{Unrestricted: true},
+			requestedFilter: nil,
+			wantRepoCalled:  true,
+			wantFilter:      nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			var gotFilter []string
+			repo := &stubChangeRequestRepo{
+				searchChangeRequests: func(_ context.Context, req domain.SearchChangeRequestsRequest) ([]domain.SearchChangeRequestView, int, error) {
+					called = true
+					gotFilter = req.Filters.ProjectIDs
+					return []domain.SearchChangeRequestView{}, 0, nil
+				},
+			}
+			svc := NewChangeRequestService(repo, stubAccess{scope: tc.scope})
+
+			_, err := svc.SearchChangeRequests(context.Background(), domain.SearchChangeRequestsRequest{
+				Filters:    domain.SearchChangeRequestsFilters{ProjectIDs: tc.requestedFilter},
+				Pagination: domain.Pagination{Limit: 20},
+			})
+			if err != nil {
+				t.Fatalf("SearchChangeRequests: %v", err)
+			}
+			if called != tc.wantRepoCalled {
+				t.Fatalf("repo called = %v, want %v", called, tc.wantRepoCalled)
+			}
+			if !called {
+				return
+			}
+			if len(gotFilter) != len(tc.wantFilter) {
+				t.Fatalf("repo received filters.projectIds = %v, want %v", gotFilter, tc.wantFilter)
+			}
+			for i := range gotFilter {
+				if gotFilter[i] != tc.wantFilter[i] {
+					t.Fatalf("repo received filters.projectIds = %v, want %v", gotFilter, tc.wantFilter)
+				}
+			}
+		})
+	}
+}
+
+// TestChangeRequestService_AggregateChangeRequests_ScopesToCallerProjects
+// mirrors the search test's fail-closed short-circuit: an external caller
+// whose scope resolves to zero usable projects must get an empty aggregate,
+// not the repo's real (unscoped) answer.
+func TestChangeRequestService_AggregateChangeRequests_ScopesToCallerProjects(t *testing.T) {
+	called := false
+	repo := &stubChangeRequestRepo{
+		aggregateChangeRequests: func(context.Context, domain.AggregateChangeRequestsRequest) (domain.AggregateResponse, error) {
+			called = true
+			return domain.AggregateResponse{TotalRecords: 999}, nil
+		},
+	}
+	svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+
+	resp, err := svc.AggregateChangeRequests(context.Background(), domain.AggregateChangeRequestsRequest{
+		Filters: domain.SearchChangeRequestsFilters{ProjectIDs: []string{"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}}, // out of scope
+		GroupBy: "state",
+	})
+	if err != nil {
+		t.Fatalf("AggregateChangeRequests: %v", err)
+	}
+	if called {
+		t.Fatal("repo.AggregateChangeRequests must not be called once scoping resolves to zero projects")
+	}
+	if resp.TotalRecords != 0 || len(resp.Groups) != 0 {
+		t.Errorf("resp = %+v, want an empty aggregate", resp)
+	}
+}
+
+// changeRequestWithProject builds a minimal domain.ChangeRequest with the
+// given project id -- everything else is zero-valued, which is fine since
+// these tests only assert on scoping/authorization, not field mapping.
+func changeRequestWithProject(id, projectID string) domain.ChangeRequest {
+	return domain.ChangeRequest{
+		SearchChangeRequestView: domain.SearchChangeRequestView{
+			ID:      id,
+			Project: domain.EntityRef{ID: projectID},
+		},
+	}
+}
+
+// TestChangeRequestService_GetChangeRequest_DeniesOutOfScopeProject is the
+// by-id counterpart of the search test: today, GetChangeRequestByID has no
+// project check at all, so any caller who knows/guesses a UUID can read a
+// change request from any project. Confirmed live: a real registered
+// customer contact could fetch CHG0038748, a real change request from a
+// completely unrelated project, with nothing stopping them.
+func TestChangeRequestService_GetChangeRequest_DeniesOutOfScopeProject(t *testing.T) {
+	const id = "11111111-1111-1111-1111-111111111111"
+	repo := &stubChangeRequestRepo{
+		getChangeRequestByID: func(context.Context, string) (domain.ChangeRequest, error) {
+			return changeRequestWithProject(id, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), nil
+		},
+	}
+
+	t.Run("external caller outside the project gets NotFound, not the row", func(t *testing.T) {
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+		_, err := svc.GetChangeRequest(context.Background(), id)
+		var nf *apierror.NotFoundError
+		if !asNotFoundError(err, &nf) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("external caller inside the project succeeds", func(t *testing.T) {
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{ProjectIDs: []string{"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}}})
+		cr, err := svc.GetChangeRequest(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetChangeRequest: %v", err)
+		}
+		if cr.ID != id {
+			t.Errorf("cr.ID = %q, want %q", cr.ID, id)
+		}
+	})
+
+	t.Run("internal caller succeeds regardless of project", func(t *testing.T) {
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{Unrestricted: true}})
+		if _, err := svc.GetChangeRequest(context.Background(), id); err != nil {
+			t.Fatalf("GetChangeRequest: %v", err)
+		}
+	})
+}
+
+// TestChangeRequestService_PatchChangeRequest_DeniesOutOfScopeProject checks
+// the mutation path specifically: the authorization check must happen
+// BEFORE repo.PatchChangeRequest is ever called, not after -- an
+// out-of-scope caller must be refused outright, never allowed to mutate the
+// row and have only the response withheld.
+func TestChangeRequestService_PatchChangeRequest_DeniesOutOfScopeProject(t *testing.T) {
+	const id = "11111111-1111-1111-1111-111111111111"
+	title := "new title"
+
+	t.Run("external caller outside the project is refused before any write", func(t *testing.T) {
+		patchCalled := false
+		repo := &stubChangeRequestRepo{
+			getChangeRequestByID: func(context.Context, string) (domain.ChangeRequest, error) {
+				return changeRequestWithProject(id, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), nil
+			},
+			patchChangeRequest: func(context.Context, string, domain.PatchChangeRequestRequest, string) (domain.ChangeRequest, error) {
+				patchCalled = true
+				return domain.ChangeRequest{}, nil
+			},
+		}
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+		_, err := svc.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{Title: &title})
+		var nf *apierror.NotFoundError
+		if !asNotFoundError(err, &nf) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+		if patchCalled {
+			t.Error("repo.PatchChangeRequest must never be called for an out-of-scope change request")
+		}
+	})
+
+	t.Run("external caller inside the project succeeds", func(t *testing.T) {
+		patchCalled := false
+		repo := &stubChangeRequestRepo{
+			getChangeRequestByID: func(context.Context, string) (domain.ChangeRequest, error) {
+				return changeRequestWithProject(id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), nil
+			},
+			patchChangeRequest: func(context.Context, string, domain.PatchChangeRequestRequest, string) (domain.ChangeRequest, error) {
+				patchCalled = true
+				return changeRequestWithProject(id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), nil
+			},
+		}
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+		if _, err := svc.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{Title: &title}); err != nil {
+			t.Fatalf("PatchChangeRequest: %v", err)
+		}
+		if !patchCalled {
+			t.Error("repo.PatchChangeRequest should have been called for an in-scope change request")
+		}
+	})
+
+	t.Run("reassigning to an out-of-scope project is refused even though the current project is in scope", func(t *testing.T) {
+		otherProject := "cccccccc-cccc-cccc-cccc-cccccccccccc"
+		patchCalled := false
+		repo := &stubChangeRequestRepo{
+			getChangeRequestByID: func(context.Context, string) (domain.ChangeRequest, error) {
+				return changeRequestWithProject(id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), nil
+			},
+			patchChangeRequest: func(context.Context, string, domain.PatchChangeRequestRequest, string) (domain.ChangeRequest, error) {
+				patchCalled = true
+				return domain.ChangeRequest{}, nil
+			},
+		}
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{ProjectIDs: []string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}})
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+		_, err := svc.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{ProjectID: &otherProject})
+		var nf *apierror.NotFoundError
+		if !asNotFoundError(err, &nf) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+		if patchCalled {
+			t.Error("repo.PatchChangeRequest must never be called when reassigning to an out-of-scope project")
+		}
+	})
+
+	t.Run("internal caller succeeds without a scope check", func(t *testing.T) {
+		repo := &stubChangeRequestRepo{
+			patchChangeRequest: func(context.Context, string, domain.PatchChangeRequestRequest, string) (domain.ChangeRequest, error) {
+				return changeRequestWithProject(id, "dddddddd-dddd-dddd-dddd-dddddddddddd"), nil
+			},
+		}
+		svc := NewChangeRequestService(repo, stubAccess{scope: AccessScope{Unrestricted: true}})
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+		if _, err := svc.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{Title: &title}); err != nil {
+			t.Fatalf("PatchChangeRequest: %v", err)
+		}
+	})
 }

@@ -718,9 +718,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// CreateChangeRequest/PatchChangeRequest are the only methods of it
 		// this mode ever calls.
 		snChangeRequestMirrorSvc := service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient)
-		activeChangeRequestSvc = service.NewChangeRequestServiceWithSNWriteback(changeRequestRepo, snChangeRequestMirrorSvc, snWritebackDispatcher)
+		activeChangeRequestSvc = service.NewChangeRequestServiceWithSNWriteback(changeRequestRepo, accessSvc, snChangeRequestMirrorSvc, snWritebackDispatcher)
 	default:
-		activeChangeRequestSvc = service.NewChangeRequestService(changeRequestRepo)
+		activeChangeRequestSvc = service.NewChangeRequestService(changeRequestRepo, accessSvc)
 	}
 	changeRequestHandler := handler.NewChangeRequestHandler(activeChangeRequestSvc)
 
