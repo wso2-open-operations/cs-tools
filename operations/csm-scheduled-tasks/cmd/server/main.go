@@ -45,6 +45,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 )
@@ -76,6 +77,23 @@ func main() {
 	// email client below.
 	entityServiceBaseURL := mustEnv("CUSTOMER_ENTITY_SERVICE_BASE_URL")
 	entityServiceScopes := splitComma(os.Getenv("CUSTOMER_ENTITY_SERVICE_SCOPES"))
+
+	// A further entity-service client, same deployment and credentials again.
+	// Query-hour consumption is unrelated to case content, announcements or
+	// this component's own ledger state — see internal/queryhours' own doc
+	// comment, which also explains why this is a cron rather than the
+	// record-triggered reaction ServiceNow used.
+	queryHoursClient, err := queryhours.NewClient(queryhours.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service query-hours client", "err", err)
+		os.Exit(1)
+	}
 	ledgerClient, err := ledger.NewClient(ledger.Config{
 		BaseURL:      entityServiceBaseURL,
 		TokenURL:     oauthTokenURL,
@@ -176,6 +194,9 @@ func main() {
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
 
+	const queryHoursTaskName = "query_hour_recompute"
+	queryHoursTo, queryHoursCc := recipientsFor(recipientOverrides, queryHoursTaskName)
+
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
 		// entity-service's scheduled_task_run table that succeeded or were
@@ -235,6 +256,29 @@ func main() {
 			Handler:  announcementpublish.PublishDue(announcementPublishClient),
 			To:       publishScheduledAnnouncementsTo,
 			Cc:       publishScheduledAnnouncementsCc,
+		},
+		// Recomputes each project's query-hour consumption and tells Choreo
+		// when the 75/90/100 percent state moves — the Go port of ServiceNow's
+		// `[Query Hour] UpdateTime Card` flow plus the `Set Project Query Hour
+		// State` and `Consumed Query Hour Update` business rules, which
+		// between them did this in three places.
+		//
+		// ServiceNow fires this per time-card approval. This runs hourly
+		// instead, because nothing in this stack writes `time_card` —
+		// csm-sync-service mirrors it in. See internal/queryhours' own doc
+		// comment for the full reasoning, including why hooking
+		// entity-service's PATCH /time-cards/{id} would race that sync.
+		//
+		// Registering this is a paired change with deactivating the SN flow
+		// AND both business rules, per the double-fire rule: two systems
+		// computing the same consumption and both telling Choreo is worse
+		// than neither.
+		{
+			Name:     queryHoursTaskName,
+			Schedule: scheduleFor(scheduleOverrides, queryHoursTaskName, "0 * * * *"),
+			Handler:  queryhours.RecomputeQueryHours(queryHoursClient, queryhours.DefaultStaleFor, queryhours.DefaultLimit),
+			To:       queryHoursTo,
+			Cc:       queryHoursCc,
 		},
 	}
 

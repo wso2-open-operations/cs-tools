@@ -111,6 +111,7 @@ var KnownTypes = []Type{
 	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
 	TypeSLATierReached, TypeCaseBillableStatusChanged,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
+	TypeQueryHourThresholdReached,
 	TypeProjectContactInvited,
 }
 
@@ -403,6 +404,51 @@ type CRApprovalRequestedPayload struct {
 	// Recipients are already resolved and de-duplicated. Never empty — a notice
 	// with nobody to send to is not published.
 	Recipients []string `json:"recipients"`
+}
+
+// TypeQueryHourThresholdReached fires when a project's query-hour consumption
+// crosses 75%, 90% or 100% of its entitlement. Published by entity-service.
+//
+// Port of ServiceNow's `[WSO2][Query Hour] Usage Notifications - Project`.
+const TypeQueryHourThresholdReached Type = "project.query_hour_threshold_reached"
+
+// QueryHourThresholdReachedPayload is TypeQueryHourThresholdReached's payload.
+// Mirrors entity-service's struct of the same name exactly; keep the two in
+// sync by hand, same reasoning as every payload above.
+//
+// Recipients/CcRecipients arrive already resolved, already filtered to
+// @wso2.com and already de-duplicated by the publisher, and Subject arrives
+// fully rendered. This service formats the body and sends; it decides nothing.
+//
+// No customer is ever in either list. The ServiceNow original had a complete
+// customer-facing branch — recipient collection, a separate HTML shell, its
+// own distribute flag — and every line of it was commented out. The port does
+// not reinstate it.
+type QueryHourThresholdReachedPayload struct {
+	ProjectID   string `json:"projectId"`
+	ProjectKey  string `json:"projectKey,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
+	AccountName string `json:"accountName,omitempty"`
+
+	State         int `json:"state"`
+	PreviousState int `json:"previousState"`
+
+	TotalQueryHours string `json:"totalQueryHours"`
+	ConsumedHours   string `json:"consumedHours"`
+	RemainingHours  string `json:"remainingHours"`
+
+	EntitlementMinutes int     `json:"entitlementMinutes"`
+	ConsumedMinutes    int     `json:"consumedMinutes"`
+	RemainingMinutes   int     `json:"remainingMinutes"`
+	PercentConsumed    float64 `json:"percentConsumed"`
+
+	// OwnerName is the account manager's display name, for the greeting.
+	OwnerName string `json:"ownerName,omitempty"`
+
+	Subject string `json:"subject"`
+
+	Recipients   []string `json:"recipients"`
+	CcRecipients []string `json:"ccRecipients,omitempty"`
 }
 
 // ProjectContactInvitedPayload is TypeProjectContactInvited's payload —

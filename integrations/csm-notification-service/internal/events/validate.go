@@ -254,6 +254,39 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if !validRecipients(p.Recipients) {
 			return fmt.Errorf("events: invalid recipients for %s", t)
 		}
+	case TypeQueryHourThresholdReached:
+		var p QueryHourThresholdReachedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		// Subject is rendered by the publisher and carries the threshold in
+		// its wording, so a notice without one cannot be sent or repaired by
+		// retrying.
+		if p.ProjectID == "" || p.Subject == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if p.ProjectID != entityID {
+			return fmt.Errorf("events: payload projectId %q does not match entityId %q", p.ProjectID, entityID)
+		}
+		// 1/2/3 mirror ServiceNow's u_query_hour_state. State 0 means "below
+		// every threshold" and has no message — the ServiceNow original built
+		// an email for it anyway, containing the literal word "undefined",
+		// which is precisely what this rejection prevents recurring.
+		if p.State < 1 || p.State > 3 {
+			return fmt.Errorf("events: %s has out-of-range state %d", t, p.State)
+		}
+		// Unlike every other notice here, an empty To is allowed: the standing
+		// cc groups are the real audience and an account with no owner on file
+		// must still raise the alarm. Both empty is not sendable.
+		if len(p.Recipients) == 0 && len(p.CcRecipients) == 0 {
+			return fmt.Errorf("events: %s has no recipients", t)
+		}
+		if len(p.Recipients) > 0 && !validRecipients(p.Recipients) {
+			return fmt.Errorf("events: invalid recipients for %s", t)
+		}
+		if len(p.CcRecipients) > 0 && !validRecipients(p.CcRecipients) {
+			return fmt.Errorf("events: invalid cc recipients for %s", t)
+		}
 	case TypeProjectContactInvited:
 		var p ProjectContactInvitedPayload
 		if err := decodeStrict(raw, &p); err != nil {

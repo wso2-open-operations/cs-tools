@@ -10,6 +10,188 @@ servers:
       port:
         default: "8080"
 paths:
+  /projects/{id}/query-hours:
+    get:
+      summary: Get a project's stored query-hour position.
+      description: >-
+        Postgres data source only. Returns the position as last computed; it
+        does not recompute. 404 when the project has never been computed.
+      operationId: getProjectQueryHours
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The project's stored query-hour position.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectQueryHours'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No query-hour position recorded for this project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/{id}/query-hours/recompute:
+    post:
+      summary: Recompute one project's query-hour position.
+      description: >-
+        Postgres data source only. Re-derives the position from the project's
+        approved time cards, stores it, and pushes the result to Choreo Sales
+        Operations when the state differs from what Choreo last accepted.
+        A failed push does not fail the call — the position is recorded and
+        the next recompute retries, which is reported via pushError.
+      operationId: recomputeProjectQueryHours
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The recomputed position.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecomputeQueryHoursResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /time-cards/{id}/query-hours/recompute:
+    post:
+      summary: Recompute the query-hour position of a time card's project.
+      description: >-
+        Postgres data source only. The direct replacement for ServiceNow's
+        `[Query Hour] UpdateTime Card` trigger. Recomputes only the time
+        card's own project — not, as the ServiceNow flow did, every project
+        under the card's account.
+      operationId: recomputeQueryHoursForTimeCard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The recomputed position of the card's project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecomputeQueryHoursResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Time card not found, or not linked to a project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /query-hours/sweep:
+    post:
+      summary: Recompute the stalest projects' query-hour positions.
+      description: >-
+        Postgres data source only. Backs the `query_hour_recompute` sub-cron
+        in operations/csm-scheduled-tasks. Returns 200 with per-project
+        errors in the body rather than failing the whole call when individual
+        projects fail — a sweep that abandoned everything on one bad project
+        would stall on it forever, since it stays the stalest.
+      operationId: sweepQueryHours
+      parameters:
+        - name: staleForMinutes
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 60
+          description: Only recompute positions older than this many minutes.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+            default: 50
+          description: >-
+            Maximum projects to recompute in this sweep. The sweep also stops
+            on its own 10-second budget, sized to finish inside the server's
+            15-second write deadline, so a large limit yields a partial result
+            rather than a failed request. Whatever is skipped stays the stalest
+            and is picked up by the next run.
+      responses:
+        "200":
+          description: The sweep result, including any per-project failures.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecomputeQueryHoursBatchResponse'
+        "400":
+          description: Bad request — staleForMinutes or limit is out of range.
+        "403":
+          description: >-
+            The caller is not an internal service. The sweep has no single
+            project to scope to, so it is restricted rather than filtered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /health:
     get:
       summary: Health check endpoint.
@@ -9543,6 +9725,108 @@ components:
         - id
         - created
 
+    ProjectQueryHours:
+      type: object
+      description: >-
+        A project's computed query-hour position. All durations are minutes.
+        ServiceNow carried these as "100h 0m" strings parsed by two rival
+        helpers that disagreed on malformed and negative values; the Postgres
+        columns are typed, so neither parser was ported.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        projectKey:
+          type: string
+        projectSfId:
+          type: string
+          description: The project's Salesforce id, used as the Choreo subscription id.
+        entitlementMinutes:
+          type: integer
+        consumedMinutes:
+          type: integer
+        billableMinutes:
+          type: integer
+        nonBillableMinutes:
+          type: integer
+        remainingMinutes:
+          type: integer
+          description: May be negative — a project can overrun its entitlement.
+        percentConsumed:
+          type: number
+          format: double
+          description: 0 when the project has no entitlement to divide by.
+        queryHourState:
+          type: integer
+          enum: [0, 1, 2, 3]
+          description: >-
+            0 under 75%, 1 at or above 75%, 2 at or above 90%, 3 at or above
+            100%. Mirrors ServiceNow's u_query_hour_state values. Unlike
+            ServiceNow, this is recomputed in both directions — a recalled or
+            corrected time card lowers it again.
+        lastPushedState:
+          type: integer
+          nullable: true
+          description: The state Choreo last accepted. Null means never pushed.
+        lastPushedAt:
+          type: string
+          format: date-time
+          nullable: true
+        computedAt:
+          type: string
+          format: date-time
+    RecomputeQueryHoursResponse:
+      allOf:
+        - $ref: '#/components/schemas/ProjectQueryHours'
+        - type: object
+          properties:
+            stateChanged:
+              type: boolean
+            pushed:
+              type: boolean
+              description: True only when the Choreo push succeeded on this recompute.
+            pushError:
+              type: string
+              description: Present when a push was attempted or skipped and did not succeed.
+            entitlementSource:
+              type: string
+              enum: [opportunity_lines, servicenow_synced]
+              description: >-
+                Which figure the entitlement came from. `opportunity_lines`
+                means it was derived here from the Salesforce product lines;
+                `servicenow_synced` means it was read from
+                project.total_query_duration because no active line covers
+                today, or the opportunity tables are not present yet.
+            syncedEntitlementMinutes:
+              type: integer
+              description: >-
+                ServiceNow's own figure, reported even when the derived one is
+                used, so the two can be compared during the parallel run.
+            unmatchedLineCount:
+              type: integer
+              description: >-
+                Active product lines whose product name is outside the six the
+                entitlement rule knows, and which therefore contributed zero
+                hours. Non-zero means a pack has been renamed or added and the
+                entitlement is quietly too low.
+    RecomputeQueryHoursBatchResponse:
+      type: object
+      properties:
+        requested:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecomputeQueryHoursResponse'
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+          description: One entry per failed project, keyed by project id.
     GithubWebhookPayload:
       type: object
       description: >-

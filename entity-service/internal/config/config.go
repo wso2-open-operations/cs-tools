@@ -104,6 +104,29 @@ type Config struct {
 	EventHubBroker           string
 	EventHubConnectionString string
 	EventHubTopic            string
+	// QueryHourChoreoBaseURL is the Choreo Sales Operations base URL for the
+	// subscription-closure push — the port of ServiceNow's REST message
+	// "Choreo API Sales Operations" / "Update Subscription Closure State".
+	// Empty disables pushing: the query-hour recompute still runs and still
+	// records its result, it just does not tell Choreo. Safe by default, the
+	// same way EventPublishingEnabled is.
+	QueryHourChoreoBaseURL string
+	// QueryHourChoreoAPIKey is sent as the `api-key` header when set.
+	QueryHourChoreoAPIKey string
+	// QueryHourNotificationsEnabled gates the 75/90/100 threshold email
+	// independently of Event Hub being configured at all.
+	//
+	// It exists because the Choreo kill switch alone was not enough: with
+	// EVENT_PUBLISHING_ENABLED already on for other events — which it is in
+	// any environment publishing case events — a parallel run with
+	// QUERY_HOUR_CHOREO_BASE_URL unset would still have emailed every
+	// threshold notice, duplicating the ServiceNow flow that is still live.
+	// That is exactly the double-fire the cutover is meant to avoid.
+	//
+	// Defaults to false. Turn it on at cutover, in the same change that
+	// deactivates the ServiceNow flow.
+	QueryHourNotificationsEnabled bool
+
 	// EventPublishingEnabled is a separate kill switch on top of
 	// EventHubBroker being set — it defaults to false (safe-by-default: an
 	// environment can have Event Hub fully configured and still not publish
@@ -309,6 +332,9 @@ func Load() *Config {
 		EventHubBroker:                           os.Getenv("EVENT_HUB_BROKER"),
 		EventHubConnectionString:                 os.Getenv("EVENT_HUB_CONNECTION_STRING"),
 		EventHubTopic:                            os.Getenv("EVENT_HUB_TOPIC"),
+		QueryHourChoreoBaseURL:                   os.Getenv("QUERY_HOUR_CHOREO_BASE_URL"),
+		QueryHourChoreoAPIKey:                    os.Getenv("QUERY_HOUR_CHOREO_API_KEY"),
+		QueryHourNotificationsEnabled:            os.Getenv("QUERY_HOUR_NOTIFICATIONS_ENABLED") == "true",
 		EventPublishingEnabled:                   os.Getenv("EVENT_PUBLISHING_ENABLED") == "true",
 		GithubIntegrationEnabled:                 os.Getenv("GITHUB_INTEGRATION_ENABLED") == "true",
 		GithubBaseURL:                            getEnvOrDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
