@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   stripWhitespaceStyleAndUnwrapSpans,
   stripWhitespaceStyleFromHtml,
+  stripLexicalTableStylingFromHtml,
 } from "./richTextEditor";
 
 describe("stripWhitespaceStyleAndUnwrapSpans", () => {
@@ -155,5 +156,62 @@ describe("stripWhitespaceStyleFromHtml", () => {
     expect(out).not.toContain("white-space");
     expect((out.match(/<span/g) ?? []).length).toBe(0);
     expect((out.match(/<strong/g) ?? []).length).toBe(RUNS);
+  });
+});
+
+describe("stripLexicalTableStylingFromHtml", () => {
+  it("strips the fixed per-cell width (and border/valign/textAlign/background) Lexical bakes into every cell on export", () => {
+    const html =
+      '<table><tbody><tr>' +
+      '<th style="border: 1px solid black; width: 75px; vertical-align: top; text-align: start; background-color: #f2f3f5;">Product</th>' +
+      '<td style="border: 1px solid black; width: 75px; vertical-align: top; text-align: start;">API Manager</td>' +
+      '</tr></tbody></table>';
+
+    const out = stripLexicalTableStylingFromHtml(html);
+
+    expect(out).not.toContain("style=");
+    expect(out).toContain("<th>Product</th>");
+    expect(out).toContain("<td>API Manager</td>");
+  });
+
+  it("removes the <colgroup>'s own <col style=\"width:...\"> entries", () => {
+    const html =
+      '<table><colgroup><col style="width: 75px;"><col style="width: 75px;"></colgroup>' +
+      "<tbody><tr><td>A</td><td>B</td></tr></tbody></table>";
+
+    const out = stripLexicalTableStylingFromHtml(html);
+
+    expect(out).not.toContain("colgroup");
+    expect(out).not.toContain("<col");
+  });
+
+  it("keeps colSpan/rowSpan attributes -- only style is presentational cruft", () => {
+    const html = '<table><tbody><tr><td colspan="2" style="width: 75px;">Merged</td></tr></tbody></table>';
+
+    const out = stripLexicalTableStylingFromHtml(html);
+
+    expect(out).toContain('colspan="2"');
+    expect(out).not.toContain("style=");
+  });
+
+  it("returns the exact same string reference when there is no table (fast-path bail)", () => {
+    const html = "<p>plain text</p>";
+
+    const out = stripLexicalTableStylingFromHtml(html);
+
+    expect(out).toBe(html);
+  });
+
+  it("preserves a source-authored style declaration outside Lexical's own set", () => {
+    const html =
+      '<table><tbody><tr>' +
+      '<td style="border: 1px solid black; width: 75px; color: red;">Flagged</td>' +
+      "</tr></tbody></table>";
+
+    const out = stripLexicalTableStylingFromHtml(html);
+
+    expect(out).toContain('style="color: red"');
+    expect(out).not.toContain("border");
+    expect(out).not.toContain("width");
   });
 });

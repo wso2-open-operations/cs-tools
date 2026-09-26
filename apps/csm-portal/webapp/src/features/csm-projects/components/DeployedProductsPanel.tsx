@@ -38,6 +38,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Ban, MoreVertical, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
 import QueryErrorState from "@components/QueryErrorState";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useState, type JSX } from "react";
 import { useSearchDeployedProducts } from "@features/csm-projects/api/useSearchDeployedProducts";
 import { useCreateDeployedProduct } from "@features/csm-projects/api/useCreateDeployedProduct";
@@ -84,6 +85,7 @@ export default function DeployedProductsPanel({
   deploymentId,
   projectId,
 }: DeployedProductsPanelProps): JSX.Element {
+  const { canWrite } = usePortalAccess();
   const { data, isLoading, isError, error } = useSearchDeployedProducts(deploymentId);
   const createDeployedProduct = useCreateDeployedProduct(deploymentId);
   const updateDeployedProduct = useUpdateDeployedProduct(deploymentId);
@@ -227,7 +229,7 @@ export default function DeployedProductsPanel({
         >
           Deployed products
         </Typography>
-        {projectId && (
+        {projectId && canWrite && (
           <Button
             size="small"
             variant="outlined"
@@ -273,15 +275,17 @@ export default function DeployedProductsPanel({
                 <TableCell align="right">{sizingValue(p.tps)}</TableCell>
                 <TableCell>{p.category ?? "—"}</TableCell>
                 <TableCell align="right">
-                  <Tooltip title="Product actions">
-                    <IconButton
-                      size="small"
-                      aria-label={"Actions for " + (p.product?.name ?? "deployed product")}
-                      onClick={(e) => openMenu(e, p)}
-                    >
-                      <MoreVertical size={14} />
-                    </IconButton>
-                  </Tooltip>
+                  {canWrite && (
+                    <Tooltip title="Product actions">
+                      <IconButton
+                        size="small"
+                        aria-label={"Actions for " + (p.product?.name ?? "deployed product")}
+                        onClick={(e) => openMenu(e, p)}
+                      >
+                        <MoreVertical size={14} />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

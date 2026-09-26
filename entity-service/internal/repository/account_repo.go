@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -31,28 +32,36 @@ import (
 )
 
 // AccountRow is the raw shape of one row read from the account table, together
-// with the joined technical-owner/account-manager person refs. It is mapped to
-// domain.AccountView / domain.AccountDetail by the service layer.
+// with the joined technical-owner/account-manager person refs and the joined
+// CRE/SRE team refs. It is mapped to domain.AccountView / domain.AccountDetail
+// by the service layer.
 type AccountRow struct {
-	ID                  string
-	Name                string
-	Classification      *string
-	Pod                 *string
-	SfID                *string
-	Region              *string
-	ActivationDate      *time.Time
-	DeactivationDate    *time.Time
-	TechnicalOwnerID    *string
-	TechnicalOwnerName  *string
-	TechnicalOwnerEmail *string
-	AccountManagerID    *string
-	AccountManagerName  *string
-	AccountManagerEmail *string
-	HasAgent            *bool
-	HasKbReferences     *bool
-	CreatedOn           time.Time
-	CreatedBy           string
-	UpdatedOn           time.Time
+	ID                         string
+	Name                       string
+	Classification             *string
+	Pod                        *string
+	SfID                       *string
+	Region                     *string
+	ActivationDate             *time.Time
+	DeactivationDate           *time.Time
+	TechnicalOwnerID           *string
+	TechnicalOwnerName         *string
+	TechnicalOwnerEmail        *string
+	AccountManagerID           *string
+	AccountManagerName         *string
+	AccountManagerEmail        *string
+	RenewalAccountManagerID    *string
+	RenewalAccountManagerName  *string
+	RenewalAccountManagerEmail *string
+	CreTeamID                  *string
+	CreTeamName                *string
+	SreTeamID                  *string
+	SreTeamName                *string
+	HasAgent                   *bool
+	HasKbReferences            *bool
+	CreatedOn                  time.Time
+	CreatedBy                  string
+	UpdatedOn                  time.Time
 }
 
 // AccountRepository defines the persistence operations for the account table.
@@ -64,6 +73,13 @@ type AccountRepository interface {
 	// GetAccountByID returns the account with the given UUID, or a NotFoundError
 	// if no such account exists.
 	GetAccountByID(ctx context.Context, id string) (AccountRow, error)
+	// UpdateAccountTeams sets the account's CRE and/or SRE team. A nil
+	// creTeamID/sreTeamID leaves that assignment unchanged; there is no way
+	// to explicitly clear an assignment to "no team" via this method (see
+	// its caller, AccountService.UpdateAccountTeams, for why). Returns a
+	// ValidationError if either non-nil id does not reference an existing
+	// team row, or a NotFoundError if the account does not exist.
+	UpdateAccountTeams(ctx context.Context, accountID string, creTeamID, sreTeamID *string) (AccountRow, error)
 	UpsertFromSalesforce(ctx context.Context, row domain.SalesforceAccountUpsert) error
 	SoftDeleteBySfID(ctx context.Context, sfID string) error
 	LookupUserIDByEmail(ctx context.Context, email string) (*string, error)
@@ -78,18 +94,30 @@ func NewAccountRepository(db *pgxpool.Pool) AccountRepository {
 	return &accountRepo{db: db}
 }
 
+// accountSelectColumns' cre/sre joins are the same "group" table
+// change_request_repo.go's own customer_group_id join already uses (see
+// that file's changeRequestDetailJoins) -- account.cre_team_id/sre_team_id
+// (renamed/added by migration 000074, ex-integration_cs_team_id) are real
+// FKs into "group" now, unlike when CreTeam/SreTeam were first documented
+// as "ServiceNow data source only" on domain.AccountView/AccountDetail;
+// this is what actually reads them back for the Postgres data source.
 const accountSelectColumns = `
 	a.id, a.name, a.classification, a.global_pod, a.sf_id, a.region,
 	a.activation_date, a.deactivation_date,
 	tow.id, COALESCE(tow.name, NULLIF(TRIM(CONCAT_WS(' ', tow.first_name, tow.last_name)), '')), tow.email,
 	mgr.id, COALESCE(mgr.name, NULLIF(TRIM(CONCAT_WS(' ', mgr.first_name, mgr.last_name)), '')), mgr.email,
+	ram.id, COALESCE(ram.name, NULLIF(TRIM(CONCAT_WS(' ', ram.first_name, ram.last_name)), '')), ram.email,
+	cre.id, cre.name, sre.id, sre.name,
 	a.ai_gen_response_enabled, a.smart_knowledge_base_suggestions_enabled,
 	a.created_on, a.created_by, a.updated_on`
 
 const accountFromJoins = `
 	FROM account a
 	LEFT JOIN "user" tow ON tow.id = a.technical_owner_id
-	LEFT JOIN "user" mgr ON mgr.id = a.account_manager_id`
+	LEFT JOIN "user" mgr ON mgr.id = a.account_manager_id
+	LEFT JOIN "user" ram ON ram.id = a.renewal_account_manager_id
+	LEFT JOIN "group" cre ON cre.id = a.cre_team_id
+	LEFT JOIN "group" sre ON sre.id = a.sre_team_id`
 
 func scanAccountRow(row interface{ Scan(...any) error }) (AccountRow, error) {
 	var a AccountRow
@@ -98,6 +126,8 @@ func scanAccountRow(row interface{ Scan(...any) error }) (AccountRow, error) {
 		&a.ActivationDate, &a.DeactivationDate,
 		&a.TechnicalOwnerID, &a.TechnicalOwnerName, &a.TechnicalOwnerEmail,
 		&a.AccountManagerID, &a.AccountManagerName, &a.AccountManagerEmail,
+		&a.RenewalAccountManagerID, &a.RenewalAccountManagerName, &a.RenewalAccountManagerEmail,
+		&a.CreTeamID, &a.CreTeamName, &a.SreTeamID, &a.SreTeamName,
 		&a.HasAgent, &a.HasKbReferences,
 		&a.CreatedOn, &a.CreatedBy, &a.UpdatedOn,
 	)
@@ -197,6 +227,35 @@ func (r *accountRepo) GetAccountByID(ctx context.Context, id string) (AccountRow
 		return AccountRow{}, fmt.Errorf("get account by id: %w", err)
 	}
 	return a, nil
+}
+
+// updateAccountTeamsQuery leaves cre_team_id/sre_team_id unchanged when the
+// corresponding parameter is NULL (a nil Go pointer) -- the same "nil means
+// don't touch this field" convention UpdateCase uses, here expressed with
+// COALESCE rather than a CASE/empty-string guard since UUID has no such
+// sentinel value. There is no parameter combination that clears a team
+// assignment to "no team" once set; see UpdateAccountTeams's doc comment.
+const updateAccountTeamsQuery = `
+	UPDATE account
+	SET cre_team_id = COALESCE($2::uuid, cre_team_id),
+	    sre_team_id = COALESCE($3::uuid, sre_team_id),
+	    updated_on = now()
+	WHERE id = $1`
+
+// UpdateAccountTeams implements AccountRepository.
+func (r *accountRepo) UpdateAccountTeams(ctx context.Context, accountID string, creTeamID, sreTeamID *string) (AccountRow, error) {
+	tag, err := r.db.Exec(ctx, updateAccountTeamsQuery, accountID, creTeamID, sreTeamID)
+	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			// foreign_key_violation — creTeamID or sreTeamID does not reference an existing team.
+			return AccountRow{}, &apierror.ValidationError{Msg: "one or more referenced team IDs do not exist: " + pgErr.Detail}
+		}
+		return AccountRow{}, fmt.Errorf("update account teams: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return AccountRow{}, &apierror.NotFoundError{Msg: "account not found"}
+	}
+	return r.GetAccountByID(ctx, accountID)
 }
 
 const salesforceSyncActor = domain.SalesforceSyncActor

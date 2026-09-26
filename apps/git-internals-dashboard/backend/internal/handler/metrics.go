@@ -59,7 +59,7 @@ func NewMetricsHandler(pool *pgxpool.Pool, cfg *config.AppConfig, cacheCfg appco
 // GetOverview handles GET /metrics/overview.
 func (h *MetricsHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	var repo, priority *string
+	var repo, priority, abtTeam *string
 	if raw := v.Get("repo"); raw != "" {
 		if !repoParamRe.MatchString(raw) { // shared with issues_query.go
 			apierror.ValidationFailed(w, "repo must be owner/name")
@@ -67,17 +67,26 @@ func (h *MetricsHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		}
 		repo = &raw
 	}
-	if raw := v.Get("priority"); raw != "" {
-		if len(raw) > h.api.PriorityParamMaxLength {
-			apierror.ValidationFailed(w, fmt.Sprintf("priority must be at most %d characters", h.api.PriorityParamMaxLength))
-			return
-		}
-		priority = &raw
+	priorityRaw, errMsg := optionalText(v, "priority", h.api.PriorityParamMaxLength)
+	if errMsg != "" {
+		apierror.ValidationFailed(w, errMsg)
+		return
+	}
+	if priorityRaw != "" {
+		priority = &priorityRaw
+	}
+	abtTeamRaw, errMsg := optionalText(v, "abtTeam", h.api.AbtTeamParamMaxLength)
+	if errMsg != "" {
+		apierror.ValidationFailed(w, errMsg)
+		return
+	}
+	if abtTeamRaw != "" {
+		abtTeam = &abtTeamRaw
 	}
 
-	key := fmt.Sprintf("%v|%v", derefOr(repo, ""), derefOr(priority, ""))
-	result, err := h.overviewCache.GetOrSet(key, func() (metrics.Overview, error) {
-		return metrics.BuildOverview(r.Context(), h.pool, h.cfg, repo, priority)
+	f := metrics.Filter{Repo: repo, Priority: priority, AbtTeam: abtTeam}
+	result, err := h.overviewCache.GetOrSet(f.CacheKey(), func() (metrics.Overview, error) {
+		return metrics.BuildOverview(r.Context(), h.pool, h.cfg, f)
 	})
 	if err != nil {
 		apierror.Internal(w, r, "build overview failed", err)
@@ -89,13 +98,21 @@ func (h *MetricsHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 // GetTimeseries handles GET /metrics/timeseries.
 func (h *MetricsHandler) GetTimeseries(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	var repo *string
+	var repo, abtTeam *string
 	if raw := v.Get("repo"); raw != "" {
 		if !repoParamRe.MatchString(raw) {
 			apierror.ValidationFailed(w, "repo must be owner/name")
 			return
 		}
 		repo = &raw
+	}
+	abtTeamRaw, errMsg := optionalText(v, "abtTeam", h.api.AbtTeamParamMaxLength)
+	if errMsg != "" {
+		apierror.ValidationFailed(w, errMsg)
+		return
+	}
+	if abtTeamRaw != "" {
+		abtTeam = &abtTeamRaw
 	}
 
 	days := h.api.TimeseriesDefaultDays
@@ -128,23 +145,16 @@ func (h *MetricsHandler) GetTimeseries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	key := fmt.Sprintf("%v|%d|%s|%s", derefOr(repo, ""), days, groupBy, metric)
+	f := metrics.Filter{Repo: repo, AbtTeam: abtTeam}
+	key := fmt.Sprintf("%s|%d|%s|%s", f.CacheKey(), days, groupBy, metric)
 	result, err := h.timeseriesCache.GetOrSet(key, func() (metrics.Timeseries, error) {
-		return metrics.BuildTimeseries(r.Context(), h.pool, h.cfg, repo, days, groupBy, metric)
+		return metrics.BuildTimeseries(r.Context(), h.pool, h.cfg, f, days, groupBy, metric)
 	})
 	if err != nil {
 		apierror.Internal(w, r, "build timeseries failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-// derefOr returns *s, or fallback if s is nil.
-func derefOr(s *string, fallback string) string {
-	if s == nil {
-		return fallback
-	}
-	return *s
 }
 
 // parseIntInRange parses raw as an int and rejects it if outside [lo, hi].

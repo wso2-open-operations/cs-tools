@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -36,16 +37,16 @@ func NewAlertIncidentMappingService(repo repository.AlertIncidentMappingReposito
 
 // CreateAlertIncidentMapping implements AlertIncidentMappingService.
 func (s *alertIncidentMappingService) CreateAlertIncidentMapping(ctx context.Context, req domain.CreateAlertIncidentMappingRequest) (domain.AlertIncidentMappingView, error) {
-	if req.AlertNumber == "" {
+	if strings.TrimSpace(req.AlertNumber) == "" {
 		return domain.AlertIncidentMappingView{}, &apierror.ValidationError{Msg: "alertNumber is required"}
 	}
-	if req.Source == "" {
+	if strings.TrimSpace(req.Source) == "" {
 		return domain.AlertIncidentMappingView{}, &apierror.ValidationError{Msg: "source is required"}
 	}
-	if req.AlertStatus == "" {
+	if strings.TrimSpace(req.AlertStatus) == "" {
 		return domain.AlertIncidentMappingView{}, &apierror.ValidationError{Msg: "alertStatus is required"}
 	}
-	if req.IncidentID == "" {
+	if strings.TrimSpace(req.IncidentID) == "" {
 		return domain.AlertIncidentMappingView{}, &apierror.ValidationError{Msg: "incidentId is required"}
 	}
 	return s.repo.Create(ctx, req)

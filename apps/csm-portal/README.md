@@ -326,8 +326,14 @@ received case event` from both activity-stream services.
 
 **sre-alert-ingestion-service creates a real row:**
 
+This service authenticates `POST /alerts` itself via HTTP Basic Auth (no gateway in front
+of it locally, matching its real AKS deployment) — the `-u` flag below is required, not
+optional. The dev-only credential (`devuser` / `devpassword`) is set via
+`SRE_ALERT_AUTH_USERS` in `docker-compose.yml`.
+
 ```sh
-curl -X POST http://localhost:8087/alerts -H 'Content-Type: application/json' -d '{
+curl -X POST http://localhost:8087/alerts -H 'Content-Type: application/json' \
+  -u devuser:devpassword -d '{
   "source": "prometheus", "severity": "critical",
   "service": "smoke-test", "metricName": "test_metric",
   "description": "verification"

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,23 +69,81 @@ func CallRequestStateFromEnum(enumLabel string) domain.CallRequestState {
 	return domain.CallRequestState{ID: string(id), Label: label}
 }
 
+// finalTimeLayouts are the timestamp spellings customer_call.final_times
+// holds. Synced rows carry two ServiceNow-side spellings (checked against
+// staging: MM/DD/YYYY 324, YYYY-MM-DD 168 of the parseable times), and rows
+// written by this service carry RFC 3339. Every one is UTC -- scheduled_on
+// equals the first time as a UTC instant on synced rows.
+var finalTimeLayouts = []string{time.RFC3339, "2006-01-02 15:04:05", "01/02/2006 15:04:05"}
+
+// normalizeFinalTime returns raw as RFC 3339 UTC, or false if it is not a time
+// in any known layout. The column also holds ServiceNow script error text where
+// a time should be (e.g. "Error: Missing parameters (localTime or timezone)."),
+// which must not reach the UI as if it were a time.
+func normalizeFinalTime(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range finalTimeLayouts {
+		if t, err := time.ParseInLocation(layout, raw, time.UTC); err == nil {
+			return t.UTC().Format(time.RFC3339), true
+		}
+	}
+	return "", false
+}
+
 // decodeFinalTimes reads customer_call.final_times (JSONB, migration 000072)
-// as the call request's preferred times. Only a JSON array of strings is
-// understood; NULL or any other shape yields an empty (non-nil, so it
-// serializes as []) list rather than an error -- the column's real-world
-// contents haven't been confirmed against synced data, so a shape mismatch
-// must degrade rather than fail the whole search. TODO: confirm the shape
-// against real rows.
+// as the call request's preferred times, as RFC 3339 UTC strings.
+//
+// Two shapes exist in the column: synced rows are an array of objects
+// ({"time": "...", "index": 0}, sometimes with extra keys such as "state"),
+// ordered by "index" when present; rows this service writes are a plain array of
+// strings. Both are read. An element that is not a recognisable time is skipped.
+// NULL or any other shape yields an empty (non-nil, so it serializes as [])
+// list rather than an error, so one odd row cannot fail a whole search.
 func decodeFinalTimes(raw []byte) []string {
 	out := []string{}
 	if len(raw) == 0 {
 		return out
 	}
-	var times []string
-	if err := json.Unmarshal(raw, &times); err != nil || times == nil {
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
 		return out
 	}
-	return times
+
+	type entry struct {
+		at    string
+		index int
+		pos   int
+	}
+	entries := make([]entry, 0, len(elems))
+	for pos, e := range elems {
+		var (
+			text  string
+			index = pos
+		)
+		var obj struct {
+			Time  string `json:"time"`
+			Index *int   `json:"index"`
+		}
+		switch {
+		case json.Unmarshal(e, &text) == nil:
+			// a plain string element
+		case json.Unmarshal(e, &obj) == nil:
+			text = obj.Time
+			if obj.Index != nil {
+				index = *obj.Index
+			}
+		default:
+			continue
+		}
+		if at, ok := normalizeFinalTime(text); ok {
+			entries = append(entries, entry{at: at, index: index, pos: pos})
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].index < entries[j].index })
+	for _, e := range entries {
+		out = append(out, e.at)
+	}
+	return out
 }
 
 // parseActualDurationMin parses customer_call.actual_call_duration (a free

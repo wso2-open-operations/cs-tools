@@ -37,7 +37,8 @@ function jsonResponse(body: unknown): Response {
 
 const OVERVIEW = {
   refreshedAt: "2026-01-01T00:00:00Z",
-  filters: { repo: null, priority: null },
+  filters: { repo: null, priority: null, abtTeam: null },
+  abtTeams: [],
   hero: {
     violated: { n: 1, delta: 0, spark: [] },
     atRisk: { n: 0, delta: 0, spark: [] },
@@ -72,17 +73,27 @@ const OVERVIEW = {
       allClear: true,
     },
   ],
-  priorities: [],
+  priorities: [
+    { key: "Critical(P1)", code: "P1", label: "Critical", budgetHours: 24, violated: 1, atRisk: 0, cs: 0, onTrack: 0, total: 1 },
+    { key: "High(P2)", code: "P2", label: "High", budgetHours: 24, violated: 0, atRisk: 0, cs: 0, onTrack: 2, total: 2 },
+    { key: "Medium(P3)", code: "P3", label: "Medium", budgetHours: 48, violated: 0, atRisk: 0, cs: 0, onTrack: 3, total: 3 },
+  ],
   matrix: { rows: [], totals: { violated: 0, atRisk: 0, onTrack: 0, cs: 0 }, grandTotal: 0 },
   volume: [],
   unknownStatuses: [],
 };
 
-/** Renders DashboardPage under a fresh QueryClient and a memory router at /. */
-function renderDashboardPage(fetchMock: ReturnType<typeof vi.fn>) {
+/** Renders DashboardPage under a fresh QueryClient and a memory router at /, with a stub /issues route so a drill navigation has somewhere to land. */
+function renderDashboardPage(fetchMock: ReturnType<typeof vi.fn>, initialEntries: string[] = ["/"]) {
   vi.stubGlobal("fetch", fetchMock);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const router = createMemoryRouter([{ path: "/", element: <DashboardPage /> }], { initialEntries: ["/"] });
+  const router = createMemoryRouter(
+    [
+      { path: "/", element: <DashboardPage /> },
+      { path: "/issues", element: <div>Issues</div> },
+    ],
+    { initialEntries },
+  );
   render(
     <QueryClientProvider client={queryClient}>
       <FetchProgressProvider>
@@ -131,7 +142,6 @@ describe("DashboardPage", () => {
       if (url.includes("/metrics/timeseries"))
         return Promise.resolve(jsonResponse({ window: 12, metric: "violated", groupBy: "priority", dates: [], series: [] }));
       if (url.includes("/taxonomy")) return Promise.resolve(jsonResponse({ statuses: [], csStatuses: [] }));
-      if (url.includes("/issues/titles")) return Promise.resolve(jsonResponse({ titles: {} }));
       if (url.includes("/issues")) return Promise.resolve(jsonResponse([]));
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
     });
@@ -154,5 +164,49 @@ describe("DashboardPage", () => {
     resolveFocusedOverview?.(jsonResponse(OVERVIEW));
 
     await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+  });
+
+  it("carries the abtTeam filter through a drill link", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/metrics/overview")) return Promise.resolve(jsonResponse(OVERVIEW));
+      if (url.includes("/metrics/timeseries"))
+        return Promise.resolve(jsonResponse({ window: 12, metric: "violated", groupBy: "priority", dates: [], series: [] }));
+      if (url.includes("/taxonomy")) return Promise.resolve(jsonResponse({ statuses: [], csStatuses: [] }));
+      if (url.includes("/issues")) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const router = renderDashboardPage(fetchMock, ["/?abtTeam=Atlas"]);
+
+    const violatedButton = await screen.findByTitle("View violated issues");
+    fireEvent.click(violatedButton);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/issues"));
+    expect(router.state.location.search).toContain("abtTeam=Atlas");
+    expect(router.state.location.search).toContain("slaState=VIOLATED");
+  });
+
+  it("ticks every configured priority tier instead of a bucket=tracked scope chip when drilling 'Open tracked'", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/metrics/overview")) return Promise.resolve(jsonResponse(OVERVIEW));
+      if (url.includes("/metrics/timeseries"))
+        return Promise.resolve(jsonResponse({ window: 12, metric: "violated", groupBy: "priority", dates: [], series: [] }));
+      if (url.includes("/taxonomy")) return Promise.resolve(jsonResponse({ statuses: [], csStatuses: [] }));
+      if (url.includes("/issues")) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const router = renderDashboardPage(fetchMock);
+
+    // Alpha's card renders first among the two project cards.
+    const openTrackedButtons = await screen.findAllByText("Open tracked");
+    fireEvent.click(openTrackedButtons[0]);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/issues"));
+    const search = new URLSearchParams(router.state.location.search);
+    expect(search.getAll("priority")).toEqual(["Critical(P1)", "High(P2)", "Medium(P3)"]);
+    expect(search.get("bucket")).toBeNull();
   });
 });

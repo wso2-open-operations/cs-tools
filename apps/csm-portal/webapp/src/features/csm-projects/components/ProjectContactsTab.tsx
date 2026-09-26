@@ -105,7 +105,7 @@ interface ProjectContactsTabProps {
  * profile via `UserRefLink` (so nullable-id resolution and the plain-text
  * fallback come for free); a row that would fail the customer portal's own
  * access rule renders unlinked-or-flagged with an inline reason, since
- * that's precisely the case a support engineer needs to notice without
+ * that's precisely the case a CS engineer needs to notice without
  * hovering — a row can fail access two distinct ways (no linked contact
  * record at all, or a linked contact whose email doesn't match what this row
  * was invited under), and the reason line says which.

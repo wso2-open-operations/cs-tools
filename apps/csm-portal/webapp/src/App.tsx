@@ -25,6 +25,7 @@ import {
   useSearchParams,
 } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
+import { plgRoutes } from "@features/plg/PlgRoutes";
 import {
   LegacyQueryTabRedirect,
   SectionIndexRedirect,
@@ -34,6 +35,7 @@ import {
   featureStateForPath,
   firstEnabledDestination,
 } from "@config/featureFlags";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   POST_LOGIN_REDIRECT_KEY,
   PostLoginRedirectConsumer,
@@ -43,6 +45,7 @@ import CsmComingSoonPage from "@features/csm-coming-soon/pages/CsmComingSoonPage
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
 import Error404Page from "@components/error/Error404Page";
+import RequireWriteAccess from "@components/RequireWriteAccess";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
@@ -165,11 +168,14 @@ function RootLanding(): JSX.Element | null {
  */
 function FeatureRouteGuard(): JSX.Element {
   const { pathname } = useLocation();
+  const access = usePortalAccess();
   const node = navNodeForPath(pathname);
-  const state = featureStateForPath(pathname);
+  // Per-user: a page the user's roles don't unlock (e.g. Operations for a
+  // view-only role) is hidden the same way a deployment-hidden page is.
+  const state = featureStateForPath(pathname, access);
 
   if (state === "hidden") {
-    const fallback = firstEnabledDestination();
+    const fallback = firstEnabledDestination(access);
     const samePath = fallback !== undefined && fallback.split(/[?#]/)[0] === pathname;
     return <Navigate to={!fallback || samePath ? "/404" : fallback} replace />;
   }
@@ -274,6 +280,12 @@ export default function App(): JSX.Element {
               <Route element={<AuthGuard />}>
                 <Route element={<FeatureRouteGuard />}>
                   <Route path="/" element={<RootLanding />} />
+
+                  {/* PLG Customer Success Portal. Its pages, API hooks and nav
+                      section live under features/plg — this is the only line of
+                      csm-portal's routing the merge touches.
+                      */}
+                  {plgRoutes()}
 
                   {/* Customers — Accounts + Projects under one tabbed section.
                       BFF-backed pages (entity-service search + by-id endpoints).
@@ -442,7 +454,14 @@ export default function App(): JSX.Element {
                     element={<DashboardWidgetPreviewPage />}
                   />
                   <Route path="cases" element={<CsmCasesPage />} />
-                  <Route path="cases/new" element={<CsmCaseCreatePage />} />
+                  <Route
+                    path="cases/new"
+                    element={
+                      <RequireWriteAccess to="/cases">
+                        <CsmCaseCreatePage />
+                      </RequireWriteAccess>
+                    }
+                  />
                   <Route
                     path="cases/:caseId"
                     element={<CaseDetailRouteSync kind="case" />}
@@ -474,32 +493,71 @@ export default function App(): JSX.Element {
                       }
                     />
                     <Route path=":tab" element={<OperationsPage />} />
-                    <Route path="service-requests/new" element={<CreateServiceRequestPage />} />
+                    <Route
+                      path="service-requests/new"
+                      element={
+                        <RequireWriteAccess to="/operations">
+                          <CreateServiceRequestPage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route
                       path="service-requests/:caseId"
                       element={<CaseDetailRouteSync kind="service_request" />}
                     />
                     <Route
                       path="change-requests/new"
-                      element={<CreateChangeRequestPage />}
+                      element={
+                        <RequireWriteAccess to="/operations">
+                          <CreateChangeRequestPage />
+                        </RequireWriteAccess>
+                      }
                     />
                     <Route
                       path="change-requests/:id"
                       element={<CaseDetailRouteSync kind="change_request" paramName="id" />}
                     />
-                    <Route path="incidents/new" element={<CreateIncidentPage />} />
+                    <Route
+                      path="incidents/new"
+                      element={
+                        <RequireWriteAccess to="/operations">
+                          <CreateIncidentPage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route
                       path="incidents/:id"
                       element={<CaseDetailRouteSync kind="incident" paramName="id" />}
                     />
-                    <Route path="problems/new" element={<CreateProblemPage />} />
+                    <Route
+                      path="problems/new"
+                      element={
+                        <RequireWriteAccess to="/operations">
+                          <CreateProblemPage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route path="problems/:id" element={<ProblemDetailPage />} />
-                    <Route path="outages/new" element={<CreateOutagePage />} />
+                    <Route
+                      path="outages/new"
+                      element={
+                        <RequireWriteAccess to="/operations">
+                          <CreateOutagePage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route path="outages/:id" element={<OutageDetailPage />} />
                   </Route>
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />
-                  <Route path="engagements/new" element={<CsmEngagementCreatePage />} />
+                  <Route
+                    path="engagements/new"
+                    element={
+                      <RequireWriteAccess to="/engagements">
+                        <CsmEngagementCreatePage />
+                      </RequireWriteAccess>
+                    }
+                  />
                   <Route
                     path="engagements/:caseId"
                     element={<CaseDetailRouteSync kind="engagement" />}
@@ -519,7 +577,14 @@ export default function App(): JSX.Element {
                       }
                     />
                     <Route path=":tab" element={<CsmSecurityCenterPage />} />
-                    <Route path="reports/new" element={<CreateSecurityReportPage />} />
+                    <Route
+                      path="reports/new"
+                      element={
+                        <RequireWriteAccess to="/security-center">
+                          <CreateSecurityReportPage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route
                       path="vulnerabilities/:id"
                       element={<ProductVulnerabilityDetailPage />}
@@ -533,7 +598,11 @@ export default function App(): JSX.Element {
                   <Route path="announcements" element={<CsmAnnouncementsPage />} />
                   <Route
                     path="announcements/new"
-                    element={<CsmAnnouncementCreatePage />}
+                    element={
+                      <RequireWriteAccess to="/announcements">
+                        <CsmAnnouncementCreatePage />
+                      </RequireWriteAccess>
+                    }
                   />
                   <Route
                     path="announcements/:caseId"

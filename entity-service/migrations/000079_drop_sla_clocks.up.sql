@@ -1,0 +1,26 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- sla_clocks (000042/000046) was a stand-in built before real, synced SLA
+-- data existed in Postgres: it hand-registered a clock per case using a
+-- hardcoded severity->duration guess (internal/service/sla_policy.go, now
+-- removed), rather than reading ServiceNow's own SLA computation. The "sla"
+-- table (000052) is that real data -- current business_elapsed_percentage/
+-- has_breached/stage per (work_item, sla_policy), synced from ServiceNow
+-- directly. GET /sla-status now reads it live; there is nothing left to
+-- schedule or register, so this table and everything that wrote to it are
+-- removed rather than kept as unused schema.
+DROP TABLE IF EXISTS sla_clocks;

@@ -382,13 +382,35 @@ responses are fanned out into eight differently-shaped, purpose-built views rath
 
 ## Middleware chain
 
-`CORS → SecurityHeaders → CorrelationID → Auth → Logger → Mux`
+`CORS → SecurityHeaders → CorrelationID → Auth → Logger → NormalizeSysIDs → Mux`
+
+`NormalizeSysIDs` (`internal/middleware/normalize_ids.go`) sits directly in front of both muxes
+(REST and WebSocket). Ids used to reach this API without hyphens, so a client holding one from before
+the switch (cached bundle, persisted query state, bookmarked URL) would otherwise hit the strict
+`uuidRe` checks — or entity-service's own `validateUUIDs` — and get a 400 on page load. The backend
+converts every bare 32-hex sysid to a dashed lowercase UUID before entity-service sees it:
+
+- **Path segments and query values** — rewritten by `NormalizeSysIDs` before routing, so every
+  `r.PathValue(...)` and `r.URL.Query()` read is already canonical. Handlers need no per-route
+  conversion, and `uuidRe` is correct for path params.
+- **JSON body ids** — rewritten inside `readJSONBody` (`internal/handler/normalize_body_ids.go`),
+  at any depth, but **only under the keys in `sysidBodyKeys`** — the id fields entity-service
+  validates as UUIDs. A 32-hex value under any other key (an `applicationId` issued by the
+  product-consumption service, free text) is deliberately left as sent, and a body with nothing to
+  rewrite is returned byte-for-byte. When a new request field carries an entity-validated id, add
+  its (lowercased) key to `sysidBodyKeys`. Every JSON handler must read its body via
+  `readJSONBody`; decoding `r.Body` directly bypasses this.
+- **WebSocket frames** never pass through either, so `conversationId` is normalised with
+  `dashIfSysID` where the frame is parsed.
+
+Do not add a path route that carries an id issued by another service without excluding it from
+`NormalizeSysIDs`, since it must go back in whatever form it was issued.
 
 Apart from `CORS`, identical to `apps/csm-portal/backend`'s chain — see that backend's CLAUDE.md for
 the rationale of each layer. `middleware.ConfigureLogger()` must be called at startup.
 
 **This chain covers the REST listener (`PORT`, 8080) only.** The WebSocket listener (`WS_PORT`,
-8081) runs a shorter chain — `SecurityHeaders → CorrelationID → Logger → Mux` — with **no `Auth`
+8081) runs a shorter chain — `SecurityHeaders → CorrelationID → Logger → NormalizeSysIDs → Mux` — with **no `Auth`
 and no `CORS`**: `Auth` is impossible there (a browser cannot send `x-jwt-assertion` on a WebSocket
 handshake, so `WebSocketHandler` authenticates the token itself), and `CORS` is irrelevant since a
 WebSocket handshake is not subject to preflight. See "The AI chat agent" above.
@@ -704,7 +726,10 @@ struct actually carries it), and a stray extra check on `PATCH` would just be de
 - **Body size**: use the shared `readJSONBody(w, r)` helper (`internal/handler/response.go`) — caps
   at `maxRequestBodyBytes` (1 MiB) and validates the body is well-formed JSON.
 - **Path params**: guard against empty string after `r.PathValue("id")`; validate UUID-shaped IDs
-  with the package-level `uuidRe` and return 400 on mismatch before calling entity-service.
+  with the package-level `uuidRe` and return 400 on mismatch before calling entity-service. Bare
+  sysids in the path are already dashed by `NormalizeSysIDs`, so `uuidRe` is correct here.
+- **Body/query ids**: already dashed by `NormalizeSysIDs` (query) and `readJSONBody` (body) — see
+  the middleware chain section. Only WebSocket frame fields need `dashIfSysID` by hand.
 - **Upstream errors**: always use `mapUpstreamError(w, err, "<fallback message>")` — never write
   custom status mappings inline. For a 400, this now returns entity-service's own message
   (`apiErr.Body`) verbatim to the caller instead of a generic string — entity-service's validation

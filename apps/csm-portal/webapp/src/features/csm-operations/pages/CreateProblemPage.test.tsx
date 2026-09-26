@@ -22,7 +22,10 @@ const navigateMock = vi.fn();
 const postProblemMutateMock = vi.fn();
 const showErrorMock = vi.fn();
 const isPending = false;
-let locationState: { from?: string } | undefined;
+let locationState:
+  | { from?: string }
+  | { incidentId: string; incidentNumber?: string; incidentSubject?: string; from?: string }
+  | undefined;
 
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
@@ -228,5 +231,37 @@ describe("CreateProblemPage — Back navigation", () => {
     render(<CreateProblemPage />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(navigateMock).toHaveBeenCalledWith("/customers/projects/proj-1?tab=workItems");
+  });
+});
+
+// Regression test: a plain `{ from }` navigation (e.g. opened from the
+// Problems list) is still a truthy object, so an unchecked cast to the
+// incident nav-state shape read it as "opened from an incident" and rendered
+// the incident-origin notice/prefill even though no incident was involved.
+describe("CreateProblemPage — plain { from } navigation is not mistaken for an incident origin", () => {
+  beforeEach(() => {
+    locationState = undefined;
+    navigateMock.mockReset();
+    postProblemMutateMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
+  it("does not show the incident-origin notice or prefill Primary incident when opened with only { from }", () => {
+    locationState = { from: "/operations?tab=problems" };
+    render(<CreateProblemPage />);
+    expect(screen.queryByText(/opened from/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/primary incident/i)).toHaveValue("");
+    expect(screen.getByLabelText(/subject/i)).toHaveValue("");
+  });
+
+  it("does show the incident-origin notice and prefill when opened from an incident", () => {
+    locationState = {
+      incidentId: "inc-456",
+      incidentNumber: "INC0012345",
+      incidentSubject: "Gateway 502s",
+    };
+    render(<CreateProblemPage />);
+    expect(screen.getByText(/opened from INC0012345/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/primary incident/i)).toHaveValue("inc-456");
   });
 });

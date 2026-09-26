@@ -62,8 +62,12 @@ func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(project)
 }
 
-// ProjectUpdateHandler handles the project update endpoint, backed by the
-// ServiceNow data source only.
+// ProjectUpdateHandler handles the project update endpoint. Registered for
+// every data source -- svc is the ServiceNow-backed or Postgres-backed
+// ProjectUpdateService implementation for the active DATA_SOURCE (see
+// routes.go); either way it accepts the same domain.ProjectUpdateRequest
+// shape, just with a narrower set of settable fields on the Postgres data
+// sources (see pgProjectUpdateService's own doc comment).
 type ProjectUpdateHandler struct {
 	svc service.ProjectUpdateService
 }

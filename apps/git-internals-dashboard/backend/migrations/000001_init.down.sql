@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS unknown_statuses;
 DROP TABLE IF EXISTS sync_runs;
 DROP TABLE IF EXISTS sla_snapshots;
 DROP TABLE IF EXISTS issue_sla;

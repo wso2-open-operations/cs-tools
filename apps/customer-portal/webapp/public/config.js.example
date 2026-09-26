@@ -265,4 +265,16 @@ window.config = {
   //   true  – iPad and Android tablets also see the download prompt.
   //           Desktop browsers are never affected by this setting.
   CUSTOMER_PORTAL_MOBILE_APP_INCLUDE_TABLETS: false,
+
+  // ── Case creation: inline add deployment/product ────────────────────────────
+  //
+  // CUSTOMER_PORTAL_ALLOW_DEPLOYMENT_SETUP_DURING_CASE_CREATION  (optional — default: true)
+  //   Kill switch for the case-creation empty-state feature: the
+  //   deployment/product empty-state alert, the in-menu "Add
+  //   Deployment"/"Add Product" row, the two-step add-deployment wizard, and
+  //   auto-selecting a single deployment/product option.
+  //   true  – feature enabled (default when this key is omitted).
+  //   false – reverts to the legacy behavior: a disabled dropdown with no
+  //           alert or CTA, and the form is never blocked on empty options.
+  CUSTOMER_PORTAL_ALLOW_DEPLOYMENT_SETUP_DURING_CASE_CREATION: true,
 };

@@ -20,10 +20,124 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
+
+// stubCallRequestRepo is a minimal repository.CallRequestRepository whose
+// unconfigured methods panic if called -- same convention as
+// stubProblemRepo (problem_service_test.go).
+type stubCallRequestRepo struct {
+	createCallRequest func(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error)
+}
+
+func (s *stubCallRequestRepo) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error) {
+	if s.createCallRequest != nil {
+		return s.createCallRequest(ctx, req, callerID, callerEmail)
+	}
+	panic("not implemented")
+}
+func (s *stubCallRequestRepo) SearchCallRequests(context.Context, string, []domain.CallRequestStateType, domain.Pagination) ([]domain.CallRequestView, int, error) {
+	panic("not implemented")
+}
+func (s *stubCallRequestRepo) SearchAllCallRequests(context.Context, domain.SearchAllCallRequestsFilters, domain.CallRequestSort, domain.Pagination) ([]domain.CallRequestView, int, error) {
+	panic("not implemented")
+}
+func (s *stubCallRequestRepo) UpdateCallRequest(context.Context, domain.UpdateCallRequestRequest, *string, string) (domain.UpdateCallRequestResponse, error) {
+	panic("not implemented")
+}
+
+// stubMirrorCallRequestService embeds CallRequestService (nil) and overrides
+// only CreateCallRequest -- same convention as stubMirrorProblemService.
+type stubMirrorCallRequestService struct {
+	CallRequestService
+	createCallRequest func(ctx context.Context, req domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error)
+}
+
+func (s *stubMirrorCallRequestService) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error) {
+	return s.createCallRequest(ctx, req)
+}
+
+// TestCallRequestService_CreateCallRequest_MirrorsToServiceNow covers the
+// writeback wiring: on a successful Postgres create, the mirror's
+// CreateCallRequest is dispatched asynchronously and does not block or
+// affect the response, and a mirror failure is recorded to
+// sn_writeback_failures rather than failing the call.
+func TestCallRequestService_CreateCallRequest_MirrorsToServiceNow(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	req := domain.CreateCallRequestRequest{CaseID: testUUID, Reason: "r", UTCTimes: []string{"2026-10-01T10:00:00Z"}, DurationMinutes: 30}
+
+	called := make(chan domain.CreateCallRequestRequest, 1)
+	mirror := &stubMirrorCallRequestService{
+		createCallRequest: func(_ context.Context, mirrorReq domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error) {
+			called <- mirrorReq
+			return domain.CreateCallRequestResponse{}, nil
+		},
+	}
+	repo := &stubCallRequestRepo{
+		createCallRequest: func(_ context.Context, req domain.CreateCallRequestRequest, _, _ string) (domain.CreateCallRequestResponse, error) {
+			var resp domain.CreateCallRequestResponse
+			resp.CallRequest.ID = testUUID
+			return resp, nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	svc := NewCallRequestServiceWithSNWriteback(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
+	}, dispatcher, mirror)
+
+	if _, err := svc.CreateCallRequest(ctx, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case got := <-called:
+		if got.CaseID != req.CaseID || got.Reason != req.Reason {
+			t.Errorf("mirror got %+v, want caseId/reason to match %+v", got, req)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.CreateCallRequest was never called")
+	}
+	if got := failures.count(); got != 0 {
+		t.Errorf("expected 0 sn_writeback_failures records for a successful mirror, got %d", got)
+	}
+}
+
+// TestCallRequestService_CreateCallRequest_MirrorFailureRecordsWritebackFailure
+// covers the failure half: Postgres already succeeded, so the call must
+// still report success, but the mirror error lands in sn_writeback_failures
+// for manual backfill.
+func TestCallRequestService_CreateCallRequest_MirrorFailureRecordsWritebackFailure(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	req := domain.CreateCallRequestRequest{CaseID: testUUID, Reason: "r", UTCTimes: []string{"2026-10-01T10:00:00Z"}, DurationMinutes: 30}
+
+	mirror := &stubMirrorCallRequestService{
+		createCallRequest: func(context.Context, domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error) {
+			return domain.CreateCallRequestResponse{}, errors.New("sn downstream unreachable")
+		},
+	}
+	repo := &stubCallRequestRepo{
+		createCallRequest: func(context.Context, domain.CreateCallRequestRequest, string, string) (domain.CreateCallRequestResponse, error) {
+			var resp domain.CreateCallRequestResponse
+			resp.CallRequest.ID = testUUID
+			return resp, nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	svc := NewCallRequestServiceWithSNWriteback(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
+	}, dispatcher, mirror)
+
+	if _, err := svc.CreateCallRequest(ctx, req); err != nil {
+		t.Fatalf("expected the Postgres-side success to be reported despite the mirror failure, got %v", err)
+	}
+
+	waitFor(t, func() bool { return failures.count() == 1 })
+}
 
 const testUUID = "99999999-0000-4000-8000-000000000001"
 

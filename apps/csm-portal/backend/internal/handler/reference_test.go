@@ -150,7 +150,7 @@ func TestUsersHandler_GetUser(t *testing.T) {
 	const testUserID = "11111111-1111-1111-1111-111111111111"
 
 	t.Run("rejects an unauthenticated caller", func(t *testing.T) {
-		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{}, testDirectory(t), false, nil)
+		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{}, testDirectory(t), false)
 		w := httptest.NewRecorder()
 		h.GetUser(w, httptest.NewRequest(http.MethodGet, "/users/abc", nil))
 		assertStatus(t, w, http.StatusUnauthorized)
@@ -163,7 +163,7 @@ func TestUsersHandler_GetUser(t *testing.T) {
 				gotID = id
 				return []byte(`{"id":"` + id + `","userType":"internal","groups":[],"teams":[]}`), nil
 			},
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), false)
 		r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+testUserID, nil))
 		r.SetPathValue("id", testUserID)
 		w := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestUsersHandler_GetUser(t *testing.T) {
 	})
 
 	t.Run("rejects a missing id", func(t *testing.T) {
-		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{}, testDirectory(t), false, nil)
+		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{}, testDirectory(t), false)
 		w := httptest.NewRecorder()
 		h.GetUser(w, withUser(httptest.NewRequest(http.MethodGet, "/users/", nil)))
 		assertStatus(t, w, http.StatusBadRequest)
@@ -192,7 +192,7 @@ func TestUsersHandler_GetUser(t *testing.T) {
 				called = true
 				return []byte(`{}`), nil
 			},
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), false)
 		r := withUser(httptest.NewRequest(http.MethodGet, "/users/not-a-uuid", nil))
 		r.SetPathValue("id", "not-a-uuid")
 		w := httptest.NewRecorder()
@@ -210,7 +210,7 @@ func TestUsersHandler_GetUser(t *testing.T) {
 			getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 				return nil, errors.New("not found")
 			},
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), false)
 		r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+testUserID, nil))
 		r.SetPathValue("id", testUserID)
 		w := httptest.NewRecorder()

@@ -32,9 +32,11 @@ type mockCreateCaseClient struct {
 	getProjectErr error
 	createdCase   entity.CreateCaseResponse
 	createCaseErr error
+	gotProjectID  string
 }
 
 func (m *mockCreateCaseClient) GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error) {
+	m.gotProjectID = id
 	if m.getProjectErr != nil {
 		return entity.ProjectDetailsView{}, m.getProjectErr
 	}
@@ -71,12 +73,22 @@ func TestCreateCase_SuspendedProject_Forbidden(t *testing.T) {
 	}
 }
 
-func TestCreateCase_ExpiredProject_Forbidden(t *testing.T) {
+// A lapsed contract used to be refused here, which stopped a customer raising a
+// case the moment their contract expired. Per customer request an expired
+// project creates cases exactly like an active one; only an explicit suspended
+// closure state refuses (see TestCreateCase_SuspendedProject_Forbidden).
+func TestCreateCase_ExpiredProject_Success(t *testing.T) {
 	pastDate := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
 	mock := &mockCreateCaseClient{
 		project: entity.ProjectDetailsView{
 			ID:      "11111111-1111-1111-1111-111111111111",
 			EndDate: pastDate,
+		},
+		createdCase: entity.CreateCaseResponse{
+			Case: entity.CreateCaseDetails{
+				ID:     "22222222-2222-2222-2222-222222222222",
+				Number: "CS12345",
+			},
 		},
 	}
 	h := NewCaseHandler(mock)
@@ -87,8 +99,8 @@ func TestCreateCase_ExpiredProject_Forbidden(t *testing.T) {
 
 	h.CreateCase(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 Forbidden, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -131,5 +143,33 @@ func TestCreateCase_InvalidProjectID_BadRequest(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A client still holding a bare sysid from before ids were dashed must not be
+// rejected, and entity-service must receive the dashed form.
+func TestCreateCase_BareSysIDProjectID_ForwardedDashed(t *testing.T) {
+	mock := &mockCreateCaseClient{
+		project: entity.ProjectDetailsView{
+			ID:      "11111111-1111-1111-1111-111111111111",
+			EndDate: time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC),
+		},
+		createdCase: entity.CreateCaseResponse{
+			Case: entity.CreateCaseDetails{ID: "22222222-2222-2222-2222-222222222222", Number: "CS12345"},
+		},
+	}
+	h := NewCaseHandler(mock)
+
+	reqBody := `{"projectId":"11111111111111111111111111111111","title":"Test Case","description":"Details"}`
+	req := authedRequest(http.MethodPost, "/cases", reqBody)
+	rec := httptest.NewRecorder()
+
+	h.CreateCase(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if want := "11111111-1111-1111-1111-111111111111"; mock.gotProjectID != want {
+		t.Errorf("entity GetProject got project id %q, want %q", mock.gotProjectID, want)
 	}
 }

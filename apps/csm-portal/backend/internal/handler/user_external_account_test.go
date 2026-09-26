@@ -41,7 +41,7 @@ func TestGetUser_ExternalAccountStatus_AppendedForExternalContacts(t *testing.T)
 		getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 			return []byte(`{"id":"` + id + `","email":"contact@example.com","userType":"external"}`), nil
 		},
-	}, testDirectory(t), false, nil)
+	}, testDirectory(t), false)
 
 	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)
@@ -81,7 +81,7 @@ func TestGetUser_ExternalAccountStatus_SkippedForInternalStaff(t *testing.T) {
 		getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 			return []byte(`{"id":"` + id + `","email":"staff@example.com","userType":"internal"}`), nil
 		},
-	}, testDirectory(t), false, nil)
+	}, testDirectory(t), false)
 
 	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)
@@ -114,7 +114,7 @@ func TestGetUser_ExternalAccountStatus_SkippedForWso2Email(t *testing.T) {
 		getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 			return []byte(`{"id":"` + id + `","email":"tester@wso2.com","userType":"external"}`), nil
 		},
-	}, testDirectory(t), false, nil)
+	}, testDirectory(t), false)
 
 	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)
@@ -144,7 +144,7 @@ func TestGetUser_ExternalAccountStatus_FailureDoesNotFailTheRequest(t *testing.T
 		getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 			return []byte(`{"id":"` + id + `","email":"contact@example.com","userType":"external"}`), nil
 		},
-	}, testDirectory(t), false, nil)
+	}, testDirectory(t), false)
 
 	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)

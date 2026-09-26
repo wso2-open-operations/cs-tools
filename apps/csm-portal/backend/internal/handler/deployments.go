@@ -66,6 +66,7 @@ type entityDeploymentClient interface {
 	PostDeployment(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
+	SearchProjectsByProductVersion(ctx context.Context, body []byte) ([]byte, error)
 	PatchDeployment(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
 	PostDeployedProduct(ctx context.Context, body []byte) ([]byte, error)
 	PatchDeployedProduct(ctx context.Context, deployedProductID string, body []byte) ([]byte, error)
@@ -237,6 +238,41 @@ func (h *DeploymentHandler) SearchDeployedProducts(w http.ResponseWriter, r *htt
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployedProducts failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search deployed products.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchProjectsByProductVersion handles POST /deployed-products/projects/search.
+func (h *DeploymentHandler) SearchProjectsByProductVersion(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchProjectsByProductVersion(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchProjectsByProductVersion failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to search projects by product version.")
 		return
 	}
 

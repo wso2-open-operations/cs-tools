@@ -39,6 +39,7 @@ import {
   unwrapNestedPreCodeElements,
   collapseEmptyParagraphElements,
   stripWhitespaceStyleFromHtml,
+  stripLexicalTableStylingFromHtml,
   htmlToPlainText,
 } from "@components/rich-text-editor/richTextEditor";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
@@ -58,6 +59,8 @@ import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
 import { LinkNode } from "@lexical/link";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
+import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
+import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -127,7 +130,9 @@ const OnChangeHTMLPlugin = ({
       onChange={(editorState) => {
         editorState.read(() => {
           const html = $generateHtmlFromNodes(editor);
-          onChange?.(stripWhitespaceStyleFromHtml(html));
+          onChange?.(
+            stripLexicalTableStylingFromHtml(stripWhitespaceStyleFromHtml(html)),
+          );
         });
       }}
     />
@@ -453,6 +458,9 @@ const DEFAULT_EDITOR_CONFIG = {
     LinkNode,
     HeadingNode,
     QuoteNode,
+    TableNode,
+    TableRowNode,
+    TableCellNode,
   ],
   theme: {
     text: {
@@ -676,6 +684,39 @@ const Editor = ({
               border: "1px solid",
               borderColor: "divider",
             },
+            // Mirrors CsmCaseCommentBubble's read-view table styling so a
+            // table looks the same while composing as it will once posted.
+            "& table": {
+              display: "block",
+              overflowX: "auto",
+              maxWidth: "100%",
+              width: "max-content",
+              minWidth: "100%",
+              borderCollapse: "collapse",
+              margin: "8px 0",
+            },
+            // Lexical's table importer stamps every cell with an inline
+            // `style="width: 75px"` (its own COLUMN_WIDTH default) whenever
+            // the source HTML carries no explicit column widths — without
+            // this override every imported table renders as a cramped,
+            // heavily-wrapped 75px-per-column grid regardless of actual
+            // content, no matter what width this stylesheet rule sets,
+            // since an inline style otherwise always wins. `!important` is
+            // the only way to reclaim natural (`table-layout: auto`)
+            // content-based sizing from it.
+            "& th, & td": {
+              border: 1,
+              borderColor: "divider",
+              px: 1,
+              py: 0.5,
+              textAlign: "left",
+              width: "auto !important",
+              minWidth: 75,
+            },
+            "& th": {
+              bgcolor: "action.hover",
+              fontWeight: 600,
+            },
           }}
         >
           <RichTextPlugin
@@ -710,6 +751,7 @@ const Editor = ({
           {autoFocus && <AutoFocusPlugin />}
           <HistoryPlugin />
           <ListPlugin />
+          <TablePlugin />
           <ImagesPlugin />
           <ClipboardImagePlugin onPasteError={onPasteError} />
           <PasteNormalizationPlugin />

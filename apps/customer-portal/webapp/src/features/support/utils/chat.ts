@@ -69,3 +69,20 @@ export function getFinalMessageFromPayload(
   }
   return "";
 }
+
+/**
+ * Does this assistant text announce that a token/usage limit was hit?
+ *
+ * Call this when a message ARRIVES from the websocket, not while rendering.
+ * The result is stored on the message (`Message.isTokenLimitNotice`) so the
+ * "request an increase" CTA is tied to a limit hit in *this* session. Matching
+ * on render instead would also match messages replayed from REST history, and
+ * the CTA would then sit on a months-old notice forever — including after
+ * support had already raised the limit.
+ *
+ * Kept deliberately narrow (no bare credit/billing/quota) so an ordinary answer
+ * that merely mentions those words does not sprout a CTA.
+ */
+export function isTokenLimitNoticeText(text: string): boolean {
+  return !!text && /token limit|usage limit|rate limit/i.test(text);
+}

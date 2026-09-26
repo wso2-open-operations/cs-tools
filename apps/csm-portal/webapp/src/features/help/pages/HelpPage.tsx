@@ -57,6 +57,7 @@ import {
 } from "react";
 import { type CsmNavNode, navNodeById } from "@config/csmNavItems";
 import { enabledNavChildren } from "@config/featureFlags";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import HelpTopicSection from "@features/help/components/HelpTopicSection";
 import {
   findTopicMatch,
@@ -163,14 +164,16 @@ function findScrollAncestor(el: HTMLElement): HTMLElement {
  *
  * Topics are still declared once, in `csmNavItems.ts`'s `help` node, and
  * filtered here to the ones this deployment has enabled via
- * `CSM_PORTAL_FEATURE_OVERRIDES` (`enabledNavChildren`), same as every other
- * section's tab strip.
+ * `CSM_PORTAL_FEATURE_OVERRIDES` and to what this user's roles unlock
+ * (`enabledNavChildren`), same as every other section's tab strip — so a user
+ * who cannot open Operations, Updates or Time cards is not shown their help.
  */
 export default function HelpPage(): JSX.Element {
   const helpSection = navNodeById("help");
+  const access = usePortalAccess();
   const topics = useMemo(
-    () => (helpSection ? enabledNavChildren(helpSection) : []),
-    [helpSection],
+    () => (helpSection ? enabledNavChildren(helpSection, access) : []),
+    [helpSection, access],
   );
 
   const [activeTopicId, setActiveTopicId] = useState<string>(() => resolveInitialTopicId(topics));

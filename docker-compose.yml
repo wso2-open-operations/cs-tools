@@ -86,6 +86,34 @@ services:
       - ./scripts/csm-compose/migrate-and-seed.sh:/migrate.sh:ro
     entrypoint: ["sh", "/migrate.sh"]
 
+  # One-shot: generates a broader, randomized set of dummy CSM data (extra
+  # accounts/projects/deployments/products/users and a spread of work items
+  # across case/service_request/change_request/incident/engagement/problem,
+  # plus comments, time cards, watchers, tags, escalations, and SLAs) into
+  # entity-service's database, on top of migrate's fixed single-case seed --
+  # see scripts/csm-compose/seed-generator's doc comment. Deliberately its
+  # own one-shot service, not an extra step appended to migrate-and-seed.sh:
+  # migrate's image (postgres:16-alpine) has no Go toolchain to build or run
+  # this program inside that container, so it gets its own image, built the
+  # same way mock-oidc and gateway-shim already are, and chains off
+  # migrate's completion the same way kafka-topics-init chains off kafka's.
+  # Idempotent via a marker table (see main.go): safe to leave running on
+  # every `docker compose up`.
+  seed-generator:
+    build:
+      context: ./scripts/csm-compose/seed-generator
+      dockerfile: ../../../docker/local/seed-generator.Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: devpassword
+      DB_NAME: csm_platform
+      DB_SSLMODE: disable
+
   # KRaft-mode Kafka broker standing in for production's Azure Event Hub
   # Kafka-compatible endpoint. entity-service/internal/eventbus,
   # csm-notification-service, and both activity-stream services all
@@ -170,6 +198,11 @@ services:
       PORT: "9100"
     ports:
       - "9100:9100"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9100/oauth2/jwks"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
 
   # ── Core platform ─────────────────────────────────────────────────────────
 
@@ -178,9 +211,15 @@ services:
       context: ./entity-service
       dockerfile: ../docker/local/entity-service.Dockerfile
     depends_on:
-      migrate:
+      # seed-generator itself depends on migrate completing (see above), so
+      # this transitively waits for migrations + both seed steps -- not just
+      # migrate directly -- so the API never starts serving before the bulk
+      # seed data exists.
+      seed-generator:
         condition: service_completed_successfully
       kafka:
+        condition: service_healthy
+      mock-oidc:
         condition: service_healthy
     environment:
       SERVER_PORT: "8080"
@@ -196,6 +235,15 @@ services:
       EVENT_HUB_TOPIC: case-events
       EVENT_PUBLISHING_ENABLED: "true"
       SSL_CERT_FILE: /certs/ca.crt
+      # Token validation is always on (see internal/config/config.go), so this
+      # stack needs a real issuer to start at all -- mock-oidc, the same one
+      # csm-portal-backend/customer-portal-backend already validate against,
+      # exercising the same code path this compose stack otherwise wouldn't
+      # cover.
+      AUTH_ISSUER: http://localhost:9100/oauth2/token
+      AUTH_JWKS_URL: http://mock-oidc:9100/oauth2/jwks
+      AUTH_USER_TOKEN_AUDIENCES: csm-portal-webapp,customer-portal-webapp
+      AUTH_INTERNAL_CLIENT_IDS: csm-portal-backend-dev-client,csm-integration-service-dev-client
     volumes:
       - csm-dev-certs:/certs:ro
     ports:
@@ -219,11 +267,49 @@ services:
       UPDATES_BASE_URL: https://updates.local.invalid
       SCIM_BASE_URL: https://scim.local.invalid
       AUTH_JWKS_ENDPOINT: http://mock-oidc:9100/oauth2/jwks
-      AUTH_ISSUER: http://localhost:9100
+      AUTH_ISSUER: http://localhost:9100/oauth2/token
       AUTH_AUDIENCE: csm-portal-webapp
       AUTH_TOKEN_VALIDATOR_ENABLED: "true"
+      # Local-dev role-group mappings: mock-oidc's login form "Groups"
+      # field becomes the token's roles claim verbatim, so these names are
+      # what you type there to sign in at each portal-access tier (cs_engineer
+      # gets full support-engineer-level access -- see internal/handler/access.go).
+      AUTH_VIEWER_ROLES: cs_viewer
+      AUTH_COMMENTER_ROLES: cs_commenter
+      AUTH_ESCALATOR_ROLES: cs_escalator
+      AUTH_ATTACHMENT_DOWNLOADER_ROLES: cs_attachment_downloader
+      AUTH_USAGE_METRICS_VIEWER_ROLES: cs_usage_metrics_viewer
+      AUTH_SUPPORT_ENGINEER_ROLES: cs_engineer
+      AUTH_ADMIN_ROLES: cs_admin
+      AUTH_TIMECARD_APPROVER_ROLES: cs_timecard_approver
+      AUTH_DASHBOARD_DESIGNER_ROLES: cs_dashboard_designer
+      CORS_ALLOWED_ORIGINS: http://localhost:3001
       PORT: "8080"
       DASHBOARDS_DIR: ./dashboards.example
+    # No host port published: csm-portal-gateway-shim below takes over
+    # :8082 on the host so it sits on the request path (Authorization ->
+    # x-jwt-assertion), the one job Choreo's real gateway does in
+    # production. The backend stays reachable from other containers via
+    # Docker DNS at csm-portal-backend:8080.
+
+  # LOCAL DEV ONLY. Stands in for the one job Choreo's real API gateway
+  # does in production for this BFF: turn the webapp's
+  # `Authorization: Bearer <token>` into the `x-jwt-assertion` header
+  # csm-portal-backend's auth middleware requires. See
+  # scripts/csm-compose/gateway-shim/main.go for why no claim synthesis is
+  # needed against this stack's mock-oidc. Takes over the host port
+  # (:8082) that csm-portal-backend published before this shim existed --
+  # CSM_PORTAL_BACKEND_BASE_URL below is unchanged, so this is transparent
+  # to the webapp.
+  csm-portal-gateway-shim:
+    build:
+      context: ./scripts/csm-compose/gateway-shim
+      dockerfile: ../../../docker/local/gateway-shim.Dockerfile
+    depends_on:
+      - csm-portal-backend
+    environment:
+      PORT: "8080"
+      UPSTREAM_URL: http://csm-portal-backend:8080
     ports:
       - "127.0.0.1:8082:8080"
 
@@ -267,16 +353,39 @@ services:
       USER_MANAGEMENT_BASE_URL: https://usermanagement.local.invalid
       AUTH_ADMIN_ROLE: cs_admin
       AUTH_JWKS_ENDPOINT: http://mock-oidc:9100/oauth2/jwks
-      AUTH_ISSUER: http://localhost:9100
+      AUTH_ISSUER: http://localhost:9100/oauth2/token
       AUTH_AUDIENCE: customer-portal-webapp
       AUTH_TOKEN_VALIDATOR_ENABLED: "true"
       PORT: "8080"
       # Must be set explicitly: this service's own WS_PORT default (8081)
       # collides with entity-service's default port.
       WS_PORT: "8092"
+    # No host port published for :8080 -- customer-portal-gateway-shim
+    # below takes over :8090 on the host (see the comment on that
+    # service). The WebSocket listener on :8092 is unaffected: it
+    # authenticates the client's id token itself (see
+    # internal/middleware/auth.go's DecodeUnverified), never reads
+    # x-jwt-assertion, and this shim does not proxy it -- so :8092 keeps
+    # publishing directly from this service.
+    ports:
+      - "127.0.0.1:8092:8092"
+
+  # LOCAL DEV ONLY. Same job as csm-portal-gateway-shim above, for
+  # customer-portal-backend-v2. Takes over the host port (:8090) that
+  # backend published before this shim existed --
+  # CUSTOMER_PORTAL_BACKEND_BASE_URL below is unchanged, so this is
+  # transparent to the webapp.
+  customer-portal-gateway-shim:
+    build:
+      context: ./scripts/csm-compose/gateway-shim
+      dockerfile: ../../../docker/local/gateway-shim.Dockerfile
+    depends_on:
+      - customer-portal-backend-v2
+    environment:
+      PORT: "8080"
+      UPSTREAM_URL: http://customer-portal-backend-v2:8080
     ports:
       - "127.0.0.1:8090:8080"
-      - "127.0.0.1:8092:8092"
 
   customer-portal-webapp:
     build:
@@ -367,7 +476,7 @@ services:
       EVENT_HUB_CONSUMER_GROUP: csm-portal-activity-stream-service
       SSL_CERT_FILE: /certs/ca.crt
       AUTH_JWKS_ENDPOINT: http://mock-oidc:9100/oauth2/jwks
-      AUTH_ISSUER: http://localhost:9100
+      AUTH_ISSUER: http://localhost:9100/oauth2/token
       AUTH_AUDIENCE: csm-portal-webapp
       HEALTH_PORT: "8080"
       STREAM_PORT: "9092"
@@ -399,7 +508,7 @@ services:
       EVENT_HUB_CONSUMER_GROUP: customer-portal-activity-stream-service
       SSL_CERT_FILE: /certs/ca.crt
       AUTH_JWKS_ENDPOINT: http://mock-oidc:9100/oauth2/jwks
-      AUTH_ISSUER: http://localhost:9100
+      AUTH_ISSUER: http://localhost:9100/oauth2/token
       AUTH_AUDIENCE: customer-portal-webapp
       HEALTH_PORT: "8080"
       STREAM_PORT: "9092"
@@ -419,12 +528,30 @@ services:
       csm-integration-service:
         condition: service_started
     environment:
-      SRE_ALERT_DATABASE_URL: postgres://postgres:devpassword@postgres:5432/sre_alerts?sslmode=disable
+      # Discrete DB_* vars, not a single connection-string var — this
+      # service's cmd/server/main.go builds its own DSN from
+      # DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/DB_SSLMODE (see its
+      # buildDatabaseDSN) and never reads a combined URL.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: devpassword
+      DB_NAME: sre_alerts
+      DB_SSLMODE: disable
       CSM_INTEGRATION_BASE_URL: http://csm-integration-service:8080
       CSM_INTEGRATION_TOKEN_URL: http://mock-oidc:9100/oauth2/token
       CSM_INTEGRATION_CLIENT_ID: sre-alert-ingestion-dev-client
       CSM_INTEGRATION_CLIENT_SECRET: dev-secret
       SRE_ALERT_CALLER_ID: local-dev-sre-ingestion
+      # Required: this service authenticates POST /alerts itself via HTTP
+      # Basic Auth (see internal/middleware.BasicAuth) rather than trusting a
+      # gateway. "devuser:devpassword" bcrypt-hashed at bcrypt.DefaultCost,
+      # generated with this service's own cmd/gen-basic-auth-hash — a
+      # throwaway local-dev credential, not a real secret. Every literal "$"
+      # in the hash must be escaped as "$$" or Compose's own variable
+      # interpolation mangles it (confirmed empirically: unescaped, Compose
+      # reads "$XQZsg..." as an unset variable and silently blanks it out).
+      SRE_ALERT_AUTH_USERS: "devuser:$$2a$$10$$XQZsgUlDouJfvZ/PGMspiOE6scpOj1BaEsYbmSGT3tNleZx0tLAYy"
       PORT: "8080"
     ports:
       - "127.0.0.1:8087:8080"

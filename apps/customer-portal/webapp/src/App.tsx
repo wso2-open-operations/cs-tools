@@ -18,6 +18,7 @@ import { type JSX } from "react";
 import { Route, Routes, Navigate } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
 import ProjectGuard from "@layouts/ProjectGuard";
+import CustomerRoleGuard from "@layouts/CustomerRoleGuard";
 import ProjectHubPage from "@features/project-hub/pages/ProjectHub";
 import ProjectDetailsPage from "@features/project-details/pages/ProjectDetails";
 import DashboardPage from "@features/dashboard/pages/DashboardPage";
@@ -144,7 +145,21 @@ export default function App(): JSX.Element {
                     element={<ProjectDetailsPage />}
                   />
                   {/* Operations */}
-                  <Route path="operations">
+                  {/* Guarded on the wrapper, not the index: the index alone
+                      left operations/service-requests reachable by direct URL
+                      for a role the landing page refused, so the section was
+                      only half gated. There is no service_requests module in
+                      the permission matrix, so change_requests:read is what
+                      governs the whole section. */}
+                  <Route
+                    path="operations"
+                    element={
+                      <CustomerRoleGuard
+                        module="change_requests"
+                        action="read"
+                      />
+                    }
+                  >
                     <Route index element={<OperationsPage />} />
                     <Route path="service-requests">
                       <Route index element={<ServiceRequestsPage />} />
@@ -157,7 +172,15 @@ export default function App(): JSX.Element {
                         element={<ServiceRequestDetailsPage />}
                       />
                     </Route>
-                    <Route path="change-requests">
+                    <Route
+                      path="change-requests"
+                      element={
+                        <CustomerRoleGuard
+                          module="change_requests"
+                          action="read"
+                        />
+                      }
+                    >
                       <Route index element={<ChangeRequestsPage />} />
                       <Route
                         path=":changeRequestId"
@@ -172,7 +195,15 @@ export default function App(): JSX.Element {
                       <Route index element={<AllCasesPage />} />
                       <Route path=":caseId" element={<CaseDetailsPage />} />
                     </Route>
-                    <Route path="change-requests">
+                    <Route
+                      path="change-requests"
+                      element={
+                        <CustomerRoleGuard
+                          module="change_requests"
+                          action="read"
+                        />
+                      }
+                    >
                       <Route index element={<ChangeRequestsPage />} />
                       <Route
                         path=":changeRequestId"
@@ -205,16 +236,38 @@ export default function App(): JSX.Element {
                       />
                       <Route
                         path="describe-issue"
-                        element={<DescribeIssuePage />}
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <DescribeIssuePage />
+                          </CustomerRoleGuard>
+                        }
                       />
-                      <Route path="create-case" element={<CreateCasePage />} />
+                      <Route
+                        path="create-case"
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <CreateCasePage />
+                          </CustomerRoleGuard>
+                        }
+                      />
                       <Route
                         path="create-related-case"
-                        element={<CreateCasePage />}
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <CreateCasePage />
+                          </CustomerRoleGuard>
+                        }
                       />
                     </Route>
                     <Route path="security-report">
-                      <Route path="create" element={<CreateCasePage />} />
+                      <Route
+                        path="create"
+                        element={
+                          <CustomerRoleGuard module="cases" action="create">
+                            <CreateCasePage />
+                          </CustomerRoleGuard>
+                        }
+                      />
                     </Route>
                   </Route>
                   {/* Updates */}
@@ -229,6 +282,12 @@ export default function App(): JSX.Element {
                     </Route>
                   </Route>
                   {/* SecurityCenter */}
+                  {/* Not RBAC gated: Security Center access comes from the
+                      project's own feature flags (hasSraReadAccess /
+                      hasComponentAnalysisReadAccess), as it did before RBAC.
+                      The security_admin module had only super_admin, which no
+                      data source emits, so gating here closed the section to
+                      every user. */}
                   <Route path="security-center">
                     <Route index element={<SecurityPage />} />
                     <Route

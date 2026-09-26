@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -36,57 +35,145 @@ var (
 	qParamRe = regexp.MustCompile(`^\d{1,9}$`)
 )
 
-// issuesQuery is GET /issues's validated query params.
+// noPriorityValue is the `priority` sentinel meaning "issue has no
+// priority" (i.priority IS NULL). Matches the webapp's NO_PRIORITY_VALUE
+// (src/lib/filters.ts) one-for-one.
+const noPriorityValue = "__none__"
+
+// issuesQuery is GET /issues's validated query params. Repos, Priorities,
+// Statuses, AbtTeams and SlaStates hold every value from a possibly-repeated
+// query key (e.g. `?status=WOC&status=Pending+Patch+Queue`); values within
+// one are OR-ed together by buildIssuesWhere.
 type issuesQuery struct {
-	Repo     string
-	Priority string
-	State    string
-	SlaState string
-	Status   string
-	Q        string
-	Limit    int
-	Bucket   string
-	Order    string
+	Repos      []string
+	Priorities []string
+	State      string
+	SlaStates  []string
+	Statuses   []string
+	AbtTeams   []string
+	Q          string
+	Limit      int
+	Offset     int
+	Bucket     string
+	Sort       issueSortField
+	Order      issueSortOrder
+}
+
+// multiValues reads name's repeated values from v, dropping empty strings
+// and de-duplicating while preserving first-seen order, so an OR-list never
+// carries a redundant SQL array element.
+func multiValues(v url.Values, name string) []string {
+	raw := v[name]
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, s := range raw {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// parseMultiParam reads name's values via multiValues, rejects more than
+// maxValues of them, and validates each with validate. A non-empty return
+// from validate short-circuits with that message.
+func parseMultiParam(v url.Values, name string, maxValues int, validate func(string) string) ([]string, string) {
+	values := multiValues(v, name)
+	if len(values) > maxValues {
+		return nil, fmt.Sprintf("%s accepts at most %d values", name, maxValues)
+	}
+	for _, val := range values {
+		if errMsg := validate(val); errMsg != "" {
+			return nil, errMsg
+		}
+	}
+	return values, ""
+}
+
+// optionalText reads name from v, validating it against maxLen. Returns
+// ("", "") when the param is absent, (value, "") when present and valid, or
+// ("", errMsg) on the first length violation. Used by the single-valued
+// metrics endpoints; /issues uses parseMultiParam instead.
+func optionalText(v url.Values, name string, maxLen int) (value string, errMsg string) {
+	raw := v.Get(name)
+	if raw == "" {
+		return "", ""
+	}
+	if len(raw) > maxLen {
+		return "", fmt.Sprintf("%s must be at most %d characters", name, maxLen)
+	}
+	return raw, ""
+}
+
+func maxLengthValidator(name string, maxLen int) func(string) string {
+	return func(s string) string {
+		if len(s) > maxLen {
+			return fmt.Sprintf("%s must be at most %d characters", name, maxLen)
+		}
+		return ""
+	}
 }
 
 // parseIssuesQuery validates v against lim and returns a non-empty error
 // message on the first violation found. Unknown query parameter names are
 // intentionally ignored rather than rejected.
 func parseIssuesQuery(v url.Values, lim appconfig.API) (issuesQuery, string) {
-	q := issuesQuery{Limit: lim.IssuesDefaultLimit, Order: "updated_desc"}
+	q := issuesQuery{Limit: lim.IssuesDefaultLimit, Sort: defaultIssueSort, Order: defaultIssueSortOrder}
 
-	if repo := v.Get("repo"); repo != "" {
-		if !repoParamRe.MatchString(repo) {
-			return q, "repo must be owner/name"
+	repos, errMsg := parseMultiParam(v, "repo", lim.FilterParamMaxValues, func(s string) string {
+		if !repoParamRe.MatchString(s) {
+			return "repo must be owner/name"
 		}
-		q.Repo = repo
+		return ""
+	})
+	if errMsg != "" {
+		return q, errMsg
 	}
-	if priority := v.Get("priority"); priority != "" {
-		if len(priority) > lim.PriorityParamMaxLength {
-			return q, fmt.Sprintf("priority must be at most %d characters", lim.PriorityParamMaxLength)
-		}
-		q.Priority = priority
+	q.Repos = repos
+
+	priorities, errMsg := parseMultiParam(v, "priority", lim.FilterParamMaxValues, maxLengthValidator("priority", lim.PriorityParamMaxLength))
+	if errMsg != "" {
+		return q, errMsg
 	}
+	q.Priorities = priorities
+
 	if state := v.Get("state"); state != "" {
 		if state != "OPEN" && state != "CLOSED" {
 			return q, "state must be OPEN or CLOSED"
 		}
 		q.State = state
 	}
-	if slaState := v.Get("slaState"); slaState != "" {
-		switch slaState {
+
+	slaStates, errMsg := parseMultiParam(v, "slaState", lim.FilterParamMaxValues, func(s string) string {
+		switch s {
 		case "NO_SLA", "OK", "AT_RISK", "VIOLATED", "TERMINAL":
-			q.SlaState = slaState
+			return ""
 		default:
-			return q, "slaState must be one of NO_SLA, OK, AT_RISK, VIOLATED, TERMINAL"
+			return "slaState must be one of NO_SLA, OK, AT_RISK, VIOLATED, TERMINAL"
 		}
+	})
+	if errMsg != "" {
+		return q, errMsg
 	}
-	if status := v.Get("status"); status != "" {
-		if len(status) > lim.StatusParamMaxLength {
-			return q, fmt.Sprintf("status must be at most %d characters", lim.StatusParamMaxLength)
-		}
-		q.Status = status
+	q.SlaStates = slaStates
+
+	statuses, errMsg := parseMultiParam(v, "status", lim.FilterParamMaxValues, maxLengthValidator("status", lim.StatusParamMaxLength))
+	if errMsg != "" {
+		return q, errMsg
 	}
+	q.Statuses = statuses
+
+	abtTeams, errMsg := parseMultiParam(v, "abtTeam", lim.FilterParamMaxValues, maxLengthValidator("abtTeam", lim.AbtTeamParamMaxLength))
+	if errMsg != "" {
+		return q, errMsg
+	}
+	q.AbtTeams = abtTeams
+
 	if qq := v.Get("q"); qq != "" {
 		if !qParamRe.MatchString(qq) {
 			return q, "q must be an issue number"
@@ -100,6 +187,13 @@ func parseIssuesQuery(v url.Values, lim appconfig.API) (issuesQuery, string) {
 		}
 		q.Limit = n
 	}
+	if offsetStr := v.Get("offset"); offsetStr != "" {
+		n, err := strconv.Atoi(offsetStr)
+		if err != nil || n < 0 {
+			return q, "offset must be a non-negative integer"
+		}
+		q.Offset = n
+	}
 	if bucket := v.Get("bucket"); bucket != "" {
 		switch bucket {
 		case "all", "violated", "at_risk", "on_track", "cs", "product_side", "tracked", "untracked", "attention":
@@ -108,12 +202,19 @@ func parseIssuesQuery(v url.Values, lim appconfig.API) (issuesQuery, string) {
 			return q, "bucket must be one of all, violated, at_risk, on_track, cs, product_side, tracked, untracked, attention"
 		}
 	}
+	if sort := v.Get("sort"); sort != "" {
+		field := issueSortField(sort)
+		if _, ok := issueSortColumns[field]; !ok {
+			return q, "sort must be one of " + strings.Join(validIssueSortValues(), ", ")
+		}
+		q.Sort = field
+	}
 	if order := v.Get("order"); order != "" {
-		switch order {
-		case "budget_desc", "updated_desc":
-			q.Order = order
+		switch issueSortOrder(order) {
+		case orderAsc, orderDesc:
+			q.Order = issueSortOrder(order)
 		default:
-			return q, "order must be budget_desc or updated_desc"
+			return q, "order must be one of asc, desc"
 		}
 	}
 	return q, ""
@@ -123,8 +224,8 @@ func parseIssuesQuery(v url.Values, lim appconfig.API) (issuesQuery, string) {
 // placeholders in the order they're added. Only ever populated during the
 // final materialization pass in buildIssuesWhere, so every allocated
 // placeholder is guaranteed to appear in the rendered SQL — an argument
-// added and then never referenced (e.g. because a later decision replaced
-// it) leaves Postgres unable to infer that parameter's type at prepare time.
+// added and then never referenced leaves Postgres unable to infer that
+// parameter's type at prepare time.
 type sqlArgs struct{ values []any }
 
 // add appends v and returns its "$N" placeholder.
@@ -133,48 +234,67 @@ func (a *sqlArgs) add(v any) string {
 	return fmt.Sprintf("$%d", len(a.values))
 }
 
-// slaFilter, priorityFilter, and statusFilter describe the *decided* filter
-// for that column — a plain data value, not SQL text — so a bucket
-// overriding an earlier decision (e.g. a param-driven priority filter)
-// simply replaces the Go value instead of leaving an orphaned SQL argument
-// behind. SQL is materialized only once, at the very end, from whichever
-// values survive every override.
+// slaFilter and statusFilter describe the *decided* bucket-derived filter
+// for that column — a plain data value, not SQL text — so materializing SQL
+// only once, at the very end, never allocates a placeholder that ends up
+// unused.
 type slaFilter struct {
 	mode  string // "notTerminal" | "eq" | "none"
 	value string
 }
 
-type priorityFilter struct {
-	mode  string // "" | "eq" | "notNull" | "isNull"
-	value string
-}
-
 type statusFilter struct {
-	mode   string // "" | "eq" | "in" | "notIn"
-	value  string
+	mode   string // "" | "in" | "notIn"
 	values []string
 }
 
+// priorityListCondition renders the explicit `priority` filter: real values
+// OR-ed via ANY, with i.priority IS NULL added when noPriorityValue is
+// present (or standing alone if it's the only value). Returns "" when
+// priorities is empty.
+func priorityListCondition(args *sqlArgs, priorities []string) string {
+	if len(priorities) == 0 {
+		return ""
+	}
+	var real []string
+	hasNone := false
+	for _, p := range priorities {
+		if p == noPriorityValue {
+			hasNone = true
+			continue
+		}
+		real = append(real, p)
+	}
+	switch {
+	case len(real) == 0:
+		return "i.priority IS NULL"
+	case hasNone:
+		return "(i.priority = ANY(" + args.add(real) + ") OR i.priority IS NULL)"
+	default:
+		return "i.priority = ANY(" + args.add(real) + ")"
+	}
+}
+
 // buildIssuesWhere translates q into a SQL WHERE clause body (without the
-// "WHERE" keyword) plus its parameter args. Each bucket overrides the base
-// scope field-by-field (e.g. "cs" clears the sla filter so NO_SLA issues on
-// the CS side are included; "attention" = VIOLATED ∪ AT_RISK ∪ current CS
-// statuses). csStatuses and productSideStatuses must be sortOrder-ascending
+// "WHERE" keyword) plus its parameter args. `bucket` defines a scope —
+// today's SLA/status/priority/attention conditions for violated, at_risk,
+// on_track, cs, product_side, tracked, untracked and attention — and every
+// explicit filter list (repo, priority, abtTeam, status, slaState) is AND-ed
+// on top of it: a bucket never overrides an explicit filter. The one
+// exception is slaState: when the bucket left the SLA rule at the
+// base "exclude TERMINAL" default, an explicit slaState list replaces that
+// default instead of AND-ing with it, since a caller who names SLA states
+// explicitly is stating the whole SLA scope themselves (this also covers
+// `slaState=NO_SLA` matching an issue with no issue_sla row at all, via
+// COALESCE). csStatuses and productSideStatuses must be sortOrder-ascending
 // status names categorized CS_SIDE and PRODUCT_SIDE respectively.
 func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (string, []any) {
 	// Base scope: open, non-terminal issues from enabled repos.
 	state := "OPEN"
 	sla := slaFilter{mode: "notTerminal"}
-	var priority priorityFilter
-	var status statusFilter
+	priorityBucket := "" // "" | "notNull" | "isNull"
+	var statusBucket statusFilter
 	attention := false
-
-	if q.Priority != "" {
-		priority = priorityFilter{mode: "eq", value: q.Priority}
-	}
-	if q.Status != "" {
-		status = statusFilter{mode: "eq", value: q.Status}
-	}
 
 	switch q.Bucket {
 	case "violated":
@@ -183,43 +303,33 @@ func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (
 		sla = slaFilter{mode: "eq", value: "AT_RISK"}
 	case "on_track":
 		sla = slaFilter{mode: "eq", value: "OK"}
-		status = statusFilter{mode: "notIn", values: csStatuses}
+		statusBucket = statusFilter{mode: "notIn", values: csStatuses}
 	case "cs":
-		// Narrow to a single CS status when one is requested, otherwise show
-		// all CS statuses. The sla filter is cleared so NO_SLA issues
-		// currently on the CS side are still included.
-		if q.Status != "" && slices.Contains(csStatuses, q.Status) {
-			status = statusFilter{mode: "eq", value: q.Status}
-		} else {
-			status = statusFilter{mode: "in", values: csStatuses}
-		}
+		// The sla filter is cleared so NO_SLA issues currently on the CS
+		// side are still included.
+		statusBucket = statusFilter{mode: "in", values: csStatuses}
 		sla = slaFilter{mode: "none"}
 	case "product_side":
 		// Mirrors overview.go's hero.productSide count: base open/non-terminal
 		// scope (sla stays "notTerminal"), narrowed to statuses currently
-		// categorized PRODUCT_SIDE. As with "cs" above, narrow to a single
-		// status when one is requested, otherwise show all PRODUCT_SIDE
-		// statuses.
-		if q.Status != "" && slices.Contains(productSideStatuses, q.Status) {
-			status = statusFilter{mode: "eq", value: q.Status}
-		} else {
-			status = statusFilter{mode: "in", values: productSideStatuses}
-		}
+		// categorized PRODUCT_SIDE.
+		statusBucket = statusFilter{mode: "in", values: productSideStatuses}
 	case "tracked":
-		priority = priorityFilter{mode: "notNull"}
+		priorityBucket = "notNull"
 	case "untracked":
-		priority = priorityFilter{mode: "isNull"}
+		priorityBucket = "isNull"
 		sla = slaFilter{mode: "none"}
 	case "attention":
 		sla = slaFilter{mode: "none"}
 		attention = true
-	default: // "all" or unset — keep base scope; honor explicit params.
-		if q.SlaState != "" {
-			sla = slaFilter{mode: "eq", value: q.SlaState}
-		}
+	default: // "all" or unset — keep base scope.
 		if q.State != "" {
 			state = q.State
 		}
+	}
+
+	if len(q.SlaStates) > 0 && sla.mode == "notTerminal" {
+		sla = slaFilter{mode: "none"}
 	}
 
 	args := &sqlArgs{}
@@ -231,23 +341,28 @@ func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (
 	case "eq":
 		conditions = append(conditions, "s.sla_state = "+args.add(sla.value))
 	}
+	if len(q.SlaStates) > 0 {
+		conditions = append(conditions, "COALESCE(s.sla_state, 'NO_SLA') = ANY("+args.add(q.SlaStates)+")")
+	}
 
-	switch priority.mode {
-	case "eq":
-		conditions = append(conditions, "i.priority = "+args.add(priority.value))
+	switch priorityBucket {
 	case "notNull":
 		conditions = append(conditions, "i.priority IS NOT NULL")
 	case "isNull":
 		conditions = append(conditions, "i.priority IS NULL")
 	}
+	if cond := priorityListCondition(args, q.Priorities); cond != "" {
+		conditions = append(conditions, cond)
+	}
 
-	switch status.mode {
-	case "eq":
-		conditions = append(conditions, "i.current_status = "+args.add(status.value))
+	switch statusBucket.mode {
 	case "in":
-		conditions = append(conditions, "i.current_status = ANY("+args.add(status.values)+")")
+		conditions = append(conditions, "i.current_status = ANY("+args.add(statusBucket.values)+")")
 	case "notIn":
-		conditions = append(conditions, "i.current_status <> ALL("+args.add(status.values)+")")
+		conditions = append(conditions, "i.current_status <> ALL("+args.add(statusBucket.values)+")")
+	}
+	if len(q.Statuses) > 0 {
+		conditions = append(conditions, "i.current_status = ANY("+args.add(q.Statuses)+")")
 	}
 
 	if attention {
@@ -257,13 +372,15 @@ func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (
 		))
 	}
 
-	if q.Repo != "" {
-		owner, name, _ := strings.Cut(q.Repo, "/") // format guaranteed by parseIssuesQuery
-		conditions = append(conditions, fmt.Sprintf("r.owner = %s AND r.name = %s", args.add(owner), args.add(name)))
+	if len(q.Repos) > 0 {
+		conditions = append(conditions, "(r.owner || '/' || r.name) = ANY("+args.add(q.Repos)+")")
 	}
 	if q.Q != "" {
 		n, _ := strconv.Atoi(q.Q) // format guaranteed by parseIssuesQuery
 		conditions = append(conditions, "i.github_number = "+args.add(n))
+	}
+	if len(q.AbtTeams) > 0 {
+		conditions = append(conditions, "i.abt_team = ANY("+args.add(q.AbtTeams)+")")
 	}
 
 	return strings.Join(conditions, " AND "), args.values

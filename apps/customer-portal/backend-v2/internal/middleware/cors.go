@@ -19,10 +19,11 @@ package middleware
 import "net/http"
 
 // corsAllowedHeaders lists every request header the frontend may need to send
-// on a cross-origin call: the JWT assertion and impersonation headers Auth
-// reads, the correlation ID header, and the standard content-type/upload
-// headers used by JSON and binary (zip upload) request bodies.
-const corsAllowedHeaders = "Content-Type, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID"
+// on a cross-origin call: the bearer token, the JWT assertion and
+// impersonation headers Auth reads, the correlation ID header, and the
+// standard content-type/upload headers used by JSON and binary (zip upload)
+// request bodies.
+const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID"
 
 // CORS returns an HTTP middleware that handles cross-origin requests from the
 // browser-based frontend. It MUST be the outermost middleware in the chain

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -130,11 +131,26 @@ type snDeployedProductFilters struct {
 
 type snDeployedProductService struct {
 	client *integrationservice.Client
+	// deploymentSvc is used only by SearchProjectsByProductVersion, to
+	// enumerate every deployment platform-wide (deployment -> project is a
+	// join this service has no other way to make — see that method's own
+	// doc comment). Always the ServiceNow-backed DeploymentService in
+	// practice: routes.go only ever constructs this service at all when
+	// cfg.DataSource is already ServiceNow, and it wires the matching
+	// DeploymentService from that same branch.
+	deploymentSvc DeploymentService
+	// projectSvc is used only by SearchProjectsByProductVersion, to resolve
+	// which of the product-version-matched projects are actually eligible
+	// for an announcement (excludeClosureStates/excludeSubscriptionTypes) —
+	// see that method's own doc comment. Same practice as deploymentSvc:
+	// always the ServiceNow-backed ProjectService, wired from the same
+	// routes.go branch.
+	projectSvc ProjectService
 }
 
 // NewServiceNowDeployedProductService constructs a DeployedProductService backed by the SN integration service.
-func NewServiceNowDeployedProductService(client *integrationservice.Client) DeployedProductService {
-	return &snDeployedProductService{client: client}
+func NewServiceNowDeployedProductService(client *integrationservice.Client, deploymentSvc DeploymentService, projectSvc ProjectService) DeployedProductService {
+	return &snDeployedProductService{client: client, deploymentSvc: deploymentSvc, projectSvc: projectSvc}
 }
 
 // snCreateDeployedProductPayload is the Choreo POST /deployed-products request body.
@@ -430,6 +446,242 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 		Offset:           req.Pagination.Offset,
 		HasMore:          req.Pagination.Offset+len(views) < total,
 	}, nil
+}
+
+// maxProjectsByProductVersionDeploymentPages bounds the platform-wide
+// deployment-enumeration loop in fetchAllDeploymentProjects against a wrong/
+// always-true upstream hasMore, mirroring the same safety-bound convention
+// sn_project_service.go's fetchAllProjectsFiltered uses for exclude-filter
+// pagination.
+const maxProjectsByProductVersionDeploymentPages = 200
+
+// maxProjectsByProductVersionDeployedProductPages bounds, per chunk of
+// deployment ids, how many pages of deployed products SearchProjectsByProductVersion
+// pages through before giving up — same reasoning as the constant above.
+const maxProjectsByProductVersionDeployedProductPages = 200
+
+// mandatoryExcludeClosureStates and mandatoryExcludeSubscriptionTypes are the
+// fixed exclusions SearchProjectsByProductVersion always applies — not a
+// caller-supplied filter. This mirrors the real ServiceNow flow it replaces
+// ("DRY RUN - Create [EOL] Product Announcements"), whose own first step
+// ("Look Up Customer Project Records") applies this exact same four-condition
+// exclusion unconditionally: Project Type is not Cloud Evaluation Support,
+// Project Type is not Cloud Support, WSO2 Closure State is not Restricted,
+// WSO2 Closure State is not Suspended. That flow gives whoever triggers it no
+// way to opt out; this endpoint doesn't either.
+//
+// fetchEligibleProjectIDs additionally excludes any project whose contract
+// has ended (EndDate in the past) — a fifth, unconditional exclusion beyond
+// the four the SN flow above checks. WSO2 Closure State is frequently left
+// unset (nil) for a project whose subscription simply expired rather than
+// being explicitly marked "Suspended"/"Restricted", so closure-state alone
+// misses it. The customer portal itself already treats an expired end date
+// as equivalent to "Suspended" for access purposes (isProjectSuspended in
+// apps/customer-portal/webapp/src/utils/permission.ts) and blocks the
+// customer from even viewing the project — an EOL announcement audience
+// must not include a project the customer portal itself considers
+// inaccessible.
+var mandatoryExcludeClosureStates = []string{"Restricted", "Suspended"}
+var mandatoryExcludeSubscriptionTypes = []domain.SubscriptionType{
+	domain.SubscriptionTypeCloudSupport,
+	domain.SubscriptionTypeCloudEvaluationSupport,
+}
+
+// SearchProjectsByProductVersion implements DeployedProductService. There is
+// no upstream query that goes directly from "product X, version Y" to the
+// projects running it — SearchDeployedProducts only accepts DeploymentIDs as
+// a filter, which assumes the caller already knows which deployments to look
+// at. This resolves the reverse direction itself: page through every
+// deployment platform-wide to learn its owning project (fetchAllDeploymentProjects),
+// then page through every deployed product on those deployments — in chunks,
+// since DeploymentIDs is the only supported filter, reusing the already-tested
+// SearchDeployedProducts rather than hand-rolling new wire parsing — and keep
+// the ones matching the requested product+version, joining back to the
+// project via the first pass. The result is deduplicated by project (a
+// project can have several deployments, or several matching deployed
+// products on one deployment), then intersected with the mandatory-exclusion
+// eligible set above (see fetchEligibleProjectIDs) before the caller's own
+// pagination is applied, over the deduplicated, name-sorted set.
+func (s *snDeployedProductService) SearchProjectsByProductVersion(ctx context.Context, req domain.SearchProjectsByProductVersionRequest) (domain.SearchProjectsByProductVersionResponse, error) {
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+	if err := validateUUIDs("productId", []string{req.ProductID}); err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+	if err := validateUUIDs("productVersionId", []string{req.ProductVersionID}); err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+
+	deploymentProjects, err := s.fetchAllDeploymentProjects(ctx)
+	if err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+	if len(deploymentProjects) == 0 {
+		return domain.SearchProjectsByProductVersionResponse{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
+	}
+
+	deploymentIDs := make([]string, 0, len(deploymentProjects))
+	for id := range deploymentProjects {
+		deploymentIDs = append(deploymentIDs, id)
+	}
+
+	matchedProjects := make(map[string]domain.EntityRef)
+	for start := 0; start < len(deploymentIDs); start += maxLimit {
+		end := start + maxLimit
+		if end > len(deploymentIDs) {
+			end = len(deploymentIDs)
+		}
+		chunk := deploymentIDs[start:end]
+
+		offset := 0
+		for page := 0; ; page++ {
+			if page == maxProjectsByProductVersionDeployedProductPages {
+				return domain.SearchProjectsByProductVersionResponse{}, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf(
+					"too many deployed products to resolve product/version matches safely (exceeded %d pages of %d for one deployment batch)",
+					maxProjectsByProductVersionDeployedProductPages, maxLimit,
+				)}
+			}
+
+			resp, err := s.SearchDeployedProducts(ctx, domain.SearchDeployedProductsRequest{
+				Pagination:    domain.Pagination{Limit: maxLimit, Offset: offset},
+				DeploymentIDs: chunk,
+			})
+			if err != nil {
+				return domain.SearchProjectsByProductVersionResponse{}, err
+			}
+			for _, dp := range resp.DeployedProducts {
+				if dp.Product.ID != req.ProductID {
+					continue
+				}
+				if dp.Version == nil || dp.Version.ID != req.ProductVersionID {
+					continue
+				}
+				if proj, ok := deploymentProjects[dp.Deployment.ID]; ok {
+					matchedProjects[proj.ID] = proj
+				}
+			}
+			offset += len(resp.DeployedProducts)
+			if !resp.HasMore || len(resp.DeployedProducts) == 0 {
+				break
+			}
+		}
+	}
+
+	eligible, err := s.fetchEligibleProjectIDs(ctx, mandatoryExcludeClosureStates, mandatoryExcludeSubscriptionTypes)
+	if err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+	for id := range matchedProjects {
+		if _, ok := eligible[id]; !ok {
+			delete(matchedProjects, id)
+		}
+	}
+
+	sorted := make([]domain.EntityRef, 0, len(matchedProjects))
+	for _, p := range matchedProjects {
+		sorted = append(sorted, p)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Name == sorted[j].Name {
+			return sorted[i].ID < sorted[j].ID
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	total := len(sorted)
+	start := req.Pagination.Offset
+	if start > total {
+		start = total
+	}
+	end := start + req.Pagination.Limit
+	if end > total {
+		end = total
+	}
+
+	return domain.SearchProjectsByProductVersionResponse{
+		Projects: sorted[start:end],
+		Total:    total,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+		HasMore:  end < total,
+	}, nil
+}
+
+// fetchAllDeploymentProjects pages through every deployment platform-wide
+// (no project/type/search filter), returning a map of deployment id ->
+// owning project ref. Bounded against a wrong/always-true upstream hasMore
+// the same way sn_project_service.go's fetchAllProjectsFiltered is; returns
+// an error rather than a silently incomplete map if the bound is hit before
+// every deployment is seen — see that function's own reasoning for why
+// silent truncation here would be worse than failing loudly: a caller
+// resolving an EOL-announcement audience from a partial map could
+// under-count real recipients and never know.
+func (s *snDeployedProductService) fetchAllDeploymentProjects(ctx context.Context) (map[string]domain.EntityRef, error) {
+	result := make(map[string]domain.EntityRef)
+	offset := 0
+	for page := 0; page < maxProjectsByProductVersionDeploymentPages; page++ {
+		resp, err := s.deploymentSvc.SearchDeployments(ctx, domain.SearchDeploymentsRequest{
+			Pagination: domain.Pagination{Limit: maxLimit, Offset: offset},
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range resp.Deployments {
+			result[d.ID] = d.Project
+		}
+		offset += len(resp.Deployments)
+		if !resp.HasMore || len(resp.Deployments) == 0 {
+			return result, nil
+		}
+	}
+	return nil, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf(
+		"too many deployments to resolve product/version matches safely (exceeded %d pages of %d)",
+		maxProjectsByProductVersionDeploymentPages, maxLimit,
+	)}
+}
+
+// maxProjectsByProductVersionEligiblePages bounds the eligible-project
+// enumeration loop in fetchEligibleProjectIDs against a wrong/always-true
+// upstream hasMore, same convention as the other bounds in this file.
+const maxProjectsByProductVersionEligiblePages = 200
+
+// fetchEligibleProjectIDs pages through every project matching the given
+// exclude filters via ProjectService.SearchProjects — the single source of
+// truth for this exclusion logic (see SearchProjectsByProductVersion's own
+// doc comment for why an EOL announcement's real audience is this set
+// intersected with the product-version match, not the product-version match
+// alone) — and returns their ids as a set. Bounded and fails loudly rather
+// than truncating, same reasoning as fetchAllDeploymentProjects: a partial
+// eligible set here would silently exclude projects that are actually
+// eligible, under-counting the real audience.
+func (s *snDeployedProductService) fetchEligibleProjectIDs(ctx context.Context, excludeClosureStates []string, excludeSubscriptionTypes []domain.SubscriptionType) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	offset := 0
+	for page := 0; page < maxProjectsByProductVersionEligiblePages; page++ {
+		resp, err := s.projectSvc.SearchProjects(ctx, domain.SearchProjectsRequest{
+			Pagination:               domain.Pagination{Limit: maxLimit, Offset: offset},
+			ExcludeClosureStates:     excludeClosureStates,
+			ExcludeSubscriptionTypes: excludeSubscriptionTypes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range resp.Projects {
+			if isProjectContractEnded(p.EndDate, time.Now()) {
+				continue
+			}
+			result[p.ID] = struct{}{}
+		}
+		offset += len(resp.Projects)
+		if !resp.HasMore || len(resp.Projects) == 0 {
+			return result, nil
+		}
+	}
+	return nil, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf(
+		"too many projects to resolve eligible-project exclusions safely (exceeded %d pages of %d)",
+		maxProjectsByProductVersionEligiblePages, maxLimit,
+	)}
 }
 
 // snDeployedProductMetricsInstance mirrors the Choreo

@@ -22,16 +22,34 @@ import (
 	"time"
 )
 
-// responseWriter wraps http.ResponseWriter to capture the status code written
-// by the downstream handler so it can be included in the access log.
+// responseWriter wraps http.ResponseWriter to capture the status code
+// actually committed to the client, for the access log. net/http commits
+// only the *first* WriteHeader call — a later one is a no-op on the wire —
+// so wroteHeader guards against a handler that calls WriteHeader more than
+// once from silently overwriting rw.status with a code the client never
+// saw. Write must also be overridden: calling it without a prior
+// WriteHeader implicitly commits 200, and without this override that
+// implicit 200 would never update rw.status at all.
 type responseWriter struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(p []byte) (int, error) {
+	if !rw.wroteHeader {
+		rw.WriteHeader(http.StatusOK)
+	}
+	return rw.ResponseWriter.Write(p)
 }
 
 // Logger is an HTTP middleware that logs each completed request via slog. The

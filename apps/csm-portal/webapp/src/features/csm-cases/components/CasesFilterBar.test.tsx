@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -26,9 +26,49 @@ import { DEFAULT_CASES_FILTERS } from "@features/csm-cases/utils/casesFiltersUrl
 import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
 const postMock = vi.fn();
+let seededSavedViews: { name: string; qs: string }[] = [];
+
+const getMock = vi.fn(async (path: string) => {
+  if (String(path).includes("saved-filter-views")) {
+    return { views: [...seededSavedViews] };
+  }
+  return null;
+});
+const patchMock = vi.fn(async (_path: string, body: { name: string; qs: string }) => {
+  const name = body.name.trim();
+  seededSavedViews = [
+    { name, qs: body.qs },
+    ...seededSavedViews.filter((v) => v.name.toLowerCase() !== name.toLowerCase()),
+  ];
+  return { views: [...seededSavedViews] };
+});
+const delMock = vi.fn(async (path: string) => {
+  const name = new URL(path, "http://local").searchParams.get("name") ?? "";
+  seededSavedViews = seededSavedViews.filter((v) => v.name.toLowerCase() !== name.toLowerCase());
+  return { views: [...seededSavedViews] };
+});
 
 vi.mock("@api/backend/client", () => ({
-  useBackendApi: () => ({ post: postMock, get: vi.fn() }),
+  useBackendApi: () => ({
+    post: async (path: string, body: { name?: string; direction?: "up" | "down" }) => {
+      if (String(path).includes("reorder")) {
+        const i = seededSavedViews.findIndex(
+          (v) => v.name.toLowerCase() === (body.name ?? "").toLowerCase(),
+        );
+        const t = body.direction === "up" ? i - 1 : i + 1;
+        if (i >= 0 && t >= 0 && t < seededSavedViews.length) {
+          const next = [...seededSavedViews];
+          [next[i], next[t]] = [next[t], next[i]];
+          seededSavedViews = next;
+        }
+        return { views: [...seededSavedViews] };
+      }
+      return postMock(path, body);
+    },
+    get: getMock,
+    patch: patchMock,
+    del: delMock,
+  }),
 }));
 
 vi.mock("@config/apiConfig", () => ({
@@ -58,6 +98,7 @@ function mockTagSearchResult(
 // of a mock.
 beforeEach(() => {
   mockTagSearchResult({});
+  seededSavedViews = [];
 });
 
 function renderBar(
@@ -522,12 +563,8 @@ describe("CasesFilterBar — switching to Quick filters from an Advanced-only fi
   // clicking Advanced right after either one could resurrect the
   // pre-Quick-filters criteria over what the user just deliberately applied
   // or cleared.
-  it("applying a saved view drops the stash — Advanced afterward shows the view, not resurrected tags", () => {
-    localStorage.clear();
-    localStorage.setItem(
-      "csm.savedFilters.v1",
-      JSON.stringify([{ name: "First", qs: "states=open" }]),
-    );
+  it("applying a saved view drops the stash — Advanced afterward shows the view, not resurrected tags", async () => {
+    seededSavedViews = [{ name: "First", qs: "states=open" }];
     const original = { ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"] };
     const { onChange, rerenderWith } = renderBar(original);
 
@@ -535,6 +572,7 @@ describe("CasesFilterBar — switching to Quick filters from an Advanced-only fi
     rerenderWith(onChange.mock.calls[0][0] as CasesFilters);
 
     fireEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await waitFor(() => screen.getByText("First"));
     fireEvent.click(screen.getByText("First"));
     const viewApplied = onChange.mock.calls[1][0] as CasesFilters;
     expect(viewApplied.states).toEqual(["open"]);
@@ -679,68 +717,51 @@ describe("CasesFilterBar — work state has no bar control, only a chip", () => 
 describe("CasesFilterBar — saved views reordering", () => {
   beforeEach(() => {
     postMock.mockReset();
-    localStorage.clear();
-    localStorage.setItem(
-      "csm.savedFilters.v1",
-      JSON.stringify([
-        { name: "First", qs: "states=open" },
-        { name: "Second", qs: "states=closed" },
-      ]),
-    );
+    seededSavedViews = [
+      { name: "First", qs: "states=open" },
+      { name: "Second", qs: "states=closed" },
+    ];
   });
 
-  function openSavedViewsMenu(): void {
+  async function openSavedViewsMenu(): Promise<void> {
     fireEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await waitFor(() =>
+      screen.getByRole("button", { name: "Drag to reorder saved view First" }),
+    );
   }
 
-  it("renders move up/down buttons for saved views; the Suggested section is gone", () => {
+  it("renders a drag button for saved views; the Suggested section is gone", async () => {
     renderBar({ ...DEFAULT_CASES_FILTERS });
-    openSavedViewsMenu();
+    await openSavedViewsMenu();
 
-    // The built-in Suggested section has been removed entirely.
     expect(screen.queryByText("Suggested")).not.toBeInTheDocument();
     expect(screen.queryByText("S0/S1 active")).not.toBeInTheDocument();
-
-    // Saved (user) views get reorder controls.
     expect(
-      screen.getByRole("button", { name: "Move saved view First down" }),
+      screen.getByRole("button", { name: "Drag to reorder saved view First" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Move saved view Second up" }),
+      screen.getByRole("button", { name: "Drag to reorder saved view Second" }),
     ).toBeInTheDocument();
   });
 
-  it("disables (or omits an enabled) up-arrow on the first item", () => {
-    renderBar({ ...DEFAULT_CASES_FILTERS });
-    openSavedViewsMenu();
-
-    expect(
-      screen.getByRole("button", { name: "Move saved view First up" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Move saved view Second down" }),
-    ).toBeDisabled();
-  });
-
-  it("clicking move-down on the first saved view reorders the list without applying it", () => {
+  it("arrow-down on the first saved view reorders the list without applying it", async () => {
     const { onChange } = renderBar({ ...DEFAULT_CASES_FILTERS });
-    openSavedViewsMenu();
+    await openSavedViewsMenu();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Move saved view First down" }),
-    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "Drag to reorder saved view First" }), {
+      key: "ArrowDown",
+    });
 
-    // Reordering must not also apply/select the view.
     expect(onChange).not.toHaveBeenCalled();
 
-    // The persisted order flips, reflected back through the reactive hook —
-    // "Second" now moves up-button-enabled into the first slot.
-    expect(
-      screen.getByRole("button", { name: "Move saved view Second up" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Move saved view First up" }),
-    ).not.toBeDisabled();
+    await waitFor(() => {
+      const items = screen.getAllByRole("menuitem");
+      const labels = items.map((el) => el.textContent ?? "");
+      const second = labels.findIndex((t) => t.includes("Second"));
+      const first = labels.findIndex((t) => t.includes("First"));
+      expect(second).toBeGreaterThan(-1);
+      expect(first).toBeGreaterThan(second);
+    });
   });
 });
 

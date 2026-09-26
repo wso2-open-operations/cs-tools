@@ -180,6 +180,83 @@ func TestSearchDeployments(t *testing.T) {
 	})
 }
 
+func TestSearchProjectsByProductVersion(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/deployed-products/projects/search", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.SearchProjectsByProductVersion(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployed-products/projects/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.SearchProjectsByProductVersion(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployed-products/projects/search", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.SearchProjectsByProductVersion(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200", func(t *testing.T) {
+		const reqPayload = `{"productId":"11111111-1111-1111-1111-111111111111","productVersionId":"22222222-2222-2222-2222-222222222222"}`
+		var capturedBody []byte
+		client := &mockEntityDeploymentClient{
+			searchProjectsByProductVersionFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"projects":[{"id":"proj-1","name":"Project A"}],"total":1}`), nil
+			},
+		}
+		h := NewDeploymentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployed-products/projects/search", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.SearchProjectsByProductVersion(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to search projects by product version.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityDeploymentClient{
+					searchProjectsByProductVersionFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewDeploymentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/deployed-products/projects/search", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.SearchProjectsByProductVersion(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestPatchDeployment(t *testing.T) {
 	const validID = "11111111-1111-1111-1111-111111111111"
 

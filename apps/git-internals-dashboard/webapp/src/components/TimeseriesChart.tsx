@@ -57,6 +57,7 @@ const TITLE: Record<Metric, string> = {
 
 interface TimeseriesChartProps {
   repo?: string;
+  abtTeam?: string;
   activePriority?: string;
   onPriorityFilter: (priority: string) => void;
 }
@@ -102,11 +103,11 @@ function Segmented<T extends string | number>({
 }
 
 /** Per-priority SLA metric line chart, with metric/window toggles and a clickable legend. */
-export function TimeseriesChart({ repo, activePriority, onPriorityFilter }: TimeseriesChartProps) {
+export function TimeseriesChart({ repo, abtTeam, activePriority, onPriorityFilter }: TimeseriesChartProps) {
   const [metric, setMetric] = useState<Metric>("violated");
   const [days, setDays] = useState<number>(30);
 
-  const { data, isLoading, isError, error, refetch } = useTimeseries({ repo, metric, days, groupBy: "priority" });
+  const { data, isLoading, isError, error, refetch } = useTimeseries({ repo, abtTeam, metric, days, groupBy: "priority" });
 
   const chartData =
     data?.dates.map((date, i) => {

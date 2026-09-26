@@ -51,12 +51,14 @@ vi.mock("@features/csm-cases/api/attachmentStorageTus", () => ({
 vi.mock("@utils/saveBlob", () => ({ saveBlob: vi.fn() }));
 
 import {
+  useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
 import { saveBlob } from "@utils/saveBlob";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
+import type { BeAttachment } from "@api/backend/types";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -68,6 +70,85 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 const FILE = new File(["hello world"], "hello.txt", { type: "text/plain" });
+
+function beAttachment(id: string): BeAttachment {
+  return {
+    id,
+    referenceId: "case-1",
+    referenceType: "case",
+    name: `${id}.txt`,
+    type: "text/plain",
+    sizeBytes: 11,
+    createdBy: { id: null, email: "jane.doe@example.com", name: "Jane Doe" },
+    createdOn: "2026-07-01T00:00:00Z",
+  };
+}
+
+describe("useGetCsmCaseAttachments", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  it("follows hasMore across pages instead of stopping at the first BE_MAX_PAGE_LIMIT page", async () => {
+    // Page 1: a full page (50 rows) with hasMore true. Page 2: a partial
+    // page, hasMore false — the loop must fetch both and return all 53
+    // attachments, not silently drop the 3 past the first page.
+    const page1 = Array.from({ length: 50 }, (_, i) => beAttachment(`a${i}`));
+    const page2 = Array.from({ length: 3 }, (_, i) => beAttachment(`a${50 + i}`));
+    postMock
+      .mockResolvedValueOnce({ attachments: page1, total: 53, limit: 50, offset: 0, hasMore: true })
+      .mockResolvedValueOnce({ attachments: page2, total: 53, limit: 50, offset: 50, hasMore: false });
+
+    const { result } = renderHook(() => useGetCsmCaseAttachments("case-1"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data).toHaveLength(53);
+    expect(postMock).toHaveBeenCalledTimes(2);
+    expect(postMock.mock.calls[0][1].pagination).toEqual({ offset: 0, limit: 50 });
+    expect(postMock.mock.calls[1][1].pagination).toEqual({ offset: 50, limit: 50 });
+  });
+
+  it("stops after a single page when the BE reports no more", async () => {
+    const rows = [beAttachment("only-one")];
+    postMock.mockResolvedValueOnce({ attachments: rows, total: 1, limit: 50, offset: 0, hasMore: false });
+
+    const { result } = renderHook(() => useGetCsmCaseAttachments("case-2"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data).toHaveLength(1);
+    expect(postMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops at the safety bound if the BE reports hasMore forever", async () => {
+    // Every page is a full, `hasMore: true` page — without the
+    // MAX_ATTACHMENT_PAGES bound this would loop forever.
+    postMock.mockImplementation(() =>
+      Promise.resolve({
+        attachments: Array.from({ length: 50 }, (_, i) => beAttachment(`x${i}`)),
+        total: 999_999,
+        limit: 50,
+        offset: 0,
+        hasMore: true,
+      }),
+    );
+
+    const { result } = renderHook(() => useGetCsmCaseAttachments("case-3"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    // 200 pages * 50 rows/page, per MAX_ATTACHMENT_PAGES in the hook.
+    expect(result.current.data).toHaveLength(200 * 50);
+    expect(postMock).toHaveBeenCalledTimes(200);
+  });
+});
 
 describe("usePostCsmCaseAttachment", () => {
   beforeEach(() => {

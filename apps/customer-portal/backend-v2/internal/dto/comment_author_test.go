@@ -107,6 +107,59 @@ func TestMapSearchComments_HandlesAnUnresolvedAuthor(t *testing.T) {
 	}
 }
 
+// TestMapSearchCaseActivities_AutomationAuthorRendersAsSystem is the regression
+// guard for an automation/integration-authored case comment (e.g. an unattended
+// workflow posting on a case) rendering as "" instead of a usable author. An
+// empty createdBy is indistinguishable from a genuinely unknown author, so
+// downstream consumers showed "Unknown" for what should read as "System" — the
+// literal string the previous entity-service contract sent for the same case.
+func TestMapSearchCaseActivities_AutomationAuthorRendersAsSystem(t *testing.T) {
+	out := MapSearchCaseActivities(entity.SearchCaseActivitiesResponse{
+		Activity: []entity.CaseActivity{
+			// No resolvable identity at all: the shape an automation-authored
+			// comment arrives in.
+			{ID: "a1", Type: "comment", Content: "auto-update", CreatedBy: nil},
+			// Present but empty on every field — same "nobody real" case as nil.
+			{ID: "a2", Type: "comment", Content: "auto-update 2", CreatedBy: &entity.UserReference{}},
+			// A real person still resolves normally and is unaffected.
+			{ID: "a3", Type: "comment", Content: "hi", CreatedBy: &entity.UserReference{Email: "jane.doe@example.com", Name: "Jane Doe"}},
+			// Resolved to a real account (email present) but with no name to
+			// display: a person, not an automation actor, even though we
+			// cannot label them — must stay empty, not "system".
+			{ID: "a4", Type: "comment", Content: "email only", CreatedBy: &entity.UserReference{Email: "a@example.com"}},
+			// The automation account: the upstream data source has no real user
+			// record to resolve it against, so it reuses the raw "system"
+			// literal in the email slot, with whatever display name it also
+			// carries for that account.
+			{ID: "a5", Type: "comment", Content: "auto-update 3", CreatedBy: &entity.UserReference{Email: "system", Name: "System"}},
+			// Same automation account, but with the name slot blank — must still
+			// render as "system", not empty.
+			{ID: "a6", Type: "comment", Content: "auto-update 4", CreatedBy: &entity.UserReference{Email: "system", Name: ""}},
+		},
+		Total: 6,
+	})
+	if len(out.Activities) != 6 {
+		t.Fatalf("mapped %d activities, want 6", len(out.Activities))
+	}
+	for _, a := range []CaseActivity{out.Activities[0], out.Activities[1], out.Activities[4], out.Activities[5]} {
+		if a.CreatedBy != systemAuthorLabel {
+			t.Errorf("%s: createdBy = %q, want %q", a.ID, a.CreatedBy, systemAuthorLabel)
+		}
+		if a.CreatedByFullName != systemAuthorLabel {
+			t.Errorf("%s: createdByFullName = %q, want %q", a.ID, a.CreatedByFullName, systemAuthorLabel)
+		}
+	}
+	if out.Activities[2].CreatedBy != "Jane Doe" {
+		t.Errorf("human author: createdBy = %q, want the display name", out.Activities[2].CreatedBy)
+	}
+	if out.Activities[3].CreatedBy != "" {
+		t.Errorf("email-only author: createdBy = %q, want empty rather than \"system\"", out.Activities[3].CreatedBy)
+	}
+	if out.Activities[3].CreatedByFullName != "" {
+		t.Errorf("email-only author: createdByFullName = %q, want empty rather than \"system\"", out.Activities[3].CreatedByFullName)
+	}
+}
+
 // TestMapCommentCreate_UsesTheAuthorName covers the create path, which mapped the
 // same removed FullName field.
 func TestMapCommentCreate_UsesTheAuthorName(t *testing.T) {

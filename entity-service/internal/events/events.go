@@ -58,15 +58,13 @@ const (
 	// real and live, only the actual Publish call is inert, so there's
 	// nothing for that consumer to receive yet either.
 	TypeCaseBillableStatusChanged Type = "case.billable_status_changed"
-	// TypeSLAClockRegister belongs to csm-notification-service's own
-	// internal/slaengine, not its internal/dispatch — see
-	// SLAClockRegisterPayload's own doc comment. Published once, from
-	// sn_case_service.go's publishCaseCreated; unlike every payload above,
-	// there is no separate "tier reached"/breach event type here —
-	// csm-notification-service's slaengine owns that half of the mechanism
-	// entirely (it also sends the Google Chat breach alert directly,
-	// without a second event round-trip through this topic).
-	TypeSLAClockRegister Type = "sla.clock.register"
+	// TypeProjectContactInvited is Postgres-data-source-only. Published by
+	// the Salesforce membership ingest (salesforceEventService) after a
+	// Project_Contact__c in state INVITED / RE-INVITED has been written to the
+	// database. csm-notification-service consumes it to create the Asgardeo
+	// identity (via scim-operations-service) and send the invitation email —
+	// see ProjectContactInvitedPayload. Keyed by the Salesforce membership Id.
+	TypeProjectContactInvited Type = "project_contact.invited"
 )
 
 // Envelope is the wire shape of every record on the case-events topic.
@@ -284,38 +282,41 @@ type IncidentCreatedPayload struct {
 	ShortDescription string `json:"shortDescription"`
 }
 
-// SLAClockRegisterPayload is the Payload shape for TypeSLAClockRegister —
-// mirrors csm-notification-service's own SLAClockRegisterPayload exactly;
-// keep the two in sync by hand, same reasoning as every payload above.
-// Durations is a Go duration string (e.g. "2h") per clock type
-// ("response"/"workaround"/"resolution" — see internal/service/
-// sla_policy.go), added to CaseCreatedAt (not the publish/consume-time
-// "now" — a delayed publish or consumer backlog must not start the SLA
-// clock late) by csm-notification-service's slaengine to compute each
-// clock's due time. CaseCreatedAt is an RFC3339 timestamp; an empty or
-// unparsable value falls back to consume-time "now" (see slaengine's own
-// registerClocks). AvoidWeekendDueDate names the subset of those clock
-// types whose computed due date must not land on a Saturday/Sunday
-// (currently only ever "resolution", for MEDIUM severity's "1 Business
-// Week" SLA — see sla_policy.go's slaAvoidWeekendClockTypes) —
-// csm-notification-service's slaengine is what actually performs that
-// roll-forward, since only it knows the real startedAt/dueAt at consume
-// time. The remaining fields (including State — the case's own state at
-// registration time, UPPER_SNAKE_CASE, e.g. "WORK_IN_PROGRESS") are purely
-// for display in a Google Chat breach card and are stored verbatim on the
-// registered sla_clocks row — see domain.SLAClock's own doc comment for
-// why they're a point-in-time snapshot, not kept live.
-type SLAClockRegisterPayload struct {
-	CaseID              string            `json:"caseId"`
-	Durations           map[string]string `json:"durations"`
-	CaseCreatedAt       string            `json:"caseCreatedAt,omitempty"`
-	AvoidWeekendDueDate []string          `json:"avoidWeekendDueDate,omitempty"`
-	CaseNumber          string            `json:"caseNumber,omitempty"`
-	WSO2CaseID          string            `json:"wso2CaseId,omitempty"`
-	CaseTitle           string            `json:"caseTitle,omitempty"`
-	CaseType            string            `json:"caseType,omitempty"`
-	Product             string            `json:"product,omitempty"`
-	Team                string            `json:"team,omitempty"`
-	Priority            string            `json:"priority,omitempty"`
-	State               string            `json:"state,omitempty"`
+// ProjectContactInvitedPayload is the payload of TypeProjectContactInvited:
+// everything csm-notification-service needs to provision the invited person
+// and address the invitation, so it never has to re-read Salesforce. Roles
+// are the raw Salesforce Project_Role__c values (e.g. "Admin",
+// "Portal user"). IsIntegrationUser=true means: record the identity and email
+// steps as SKIPPED — integration users never sign in and get no email. Type is
+// the Salesforce Contact_Type__c ("OWN CONTACT" / "PARTNER CONTACT" /
+// "RELATED CONTACT"). Mirror any change here in csm-notification-service's
+// own copy of this struct.
+type ProjectContactInvitedPayload struct {
+	MembershipSfID    string   `json:"membershipSfId"`
+	ContactSfID       string   `json:"contactSfId"`
+	Email             string   `json:"email"`
+	GivenName         string   `json:"givenName"`
+	FamilyName        string   `json:"familyName"`
+	ProjectName       string   `json:"projectName"`
+	ProjectKey        string   `json:"projectKey"`
+	Roles             []string `json:"roles"`
+	IsIntegrationUser bool     `json:"isIntegrationUser"`
+	Type              string   `json:"type"`
+	// EventModifiedOn is the Salesforce LastModifiedDate of the membership
+	// version this event describes, RFC 3339 UTC. The consumer stamps its
+	// onboarding-step writes with it so a delayed older invitation cannot
+	// overwrite a newer one's outcome (the step upsert only applies writes
+	// whose eventModifiedOn is not older than the stored one). Empty only
+	// when Salesforce returned no parseable date.
+	EventModifiedOn string `json:"eventModifiedOn,omitempty"`
+	// Resend marks a deliberate re-send of an invitation that was already
+	// sent once (POST /projects/{id}/contacts/{email}/resend-invitation).
+	// csm-notification-service refuses to send a second invitation for a
+	// membership it has already recorded an EMAIL step for -- that guard is
+	// what stops a duplicate Salesforce event turning into a duplicate
+	// email -- and this field is the one thing that tells it a second send
+	// is what was actually asked for. Omitted on every ordinary invitation,
+	// so the wire shape is unchanged for them. Mirror any change here in
+	// csm-notification-service's own copy of this struct.
+	Resend bool `json:"resend,omitempty"`
 }

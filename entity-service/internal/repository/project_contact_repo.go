@@ -48,7 +48,24 @@ type ProjectContactRow struct {
 	// this contact belongs to (via project_contact_group). Never nil --
 	// COALESCE'd to an empty array in the query.
 	Roles []string
+	// AccountRoles is the resolved user's account-level roles (user_role ->
+	// role.name), restricted to the five names the membership write owns:
+	// external, customer, partner and the derived customer_admin/
+	// partner_admin. Never nil, and empty for a row with no linked "user".
+	//
+	// A separate list from Roles on purpose -- see
+	// domain.ProjectContact.AccountRoles. The admin entry is the derived
+	// account-level role: the membership write recomputes it from every
+	// membership the user holds and materialises it in user_role, so reading
+	// it back is one join rather than a second pass over the project groups.
+	AccountRoles []string
 }
+
+// accountLevelRoleNames is the allow-list applied to a contact's user_role
+// rows before they are returned. Restricting it here rather than returning
+// every role the user holds keeps an internal role (admin, agent, internal)
+// on a staff account from ever appearing in a customer-facing contact list.
+const accountLevelRoleNames = `ARRAY['external','customer','partner','customer_admin','partner_admin']::text[]`
 
 // ProjectContactRepository defines the read operations for the
 // project_contact table and its associated group-role tables.
@@ -86,6 +103,12 @@ const projectContactColumns = `
 		JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
 		JOIN project_role pr ON pr.id = pgr.project_role_id
 		WHERE pcg.project_contact_id = pc.id
+	), ARRAY[]::text[]),
+	COALESCE((
+		SELECT array_agg(r.name ORDER BY r.name)
+		FROM user_role ur
+		JOIN role r ON r.id = ur.role_id
+		WHERE ur.user_id = u.id AND r.name = ANY(` + accountLevelRoleNames + `)
 	), ARRAY[]::text[])`
 
 const projectContactFromJoins = `
@@ -96,7 +119,7 @@ const projectContactFromJoins = `
 func scanProjectContact(row interface{ Scan(...any) error }) (ProjectContactRow, error) {
 	var c ProjectContactRow
 	var state *string
-	err := row.Scan(&c.Email, &state, &c.ResolvedUserID, &c.ResolvedName, &c.ResolvedEmail, &c.Roles)
+	err := row.Scan(&c.Email, &state, &c.ResolvedUserID, &c.ResolvedName, &c.ResolvedEmail, &c.Roles, &c.AccountRoles)
 	if err != nil {
 		return ProjectContactRow{}, err
 	}

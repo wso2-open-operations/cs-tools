@@ -64,3 +64,41 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// UpdateComment handles PATCH /comments/{id}.
+func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateCommentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	resp, err := h.svc.UpdateComment(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// DeleteComment handles DELETE /comments/{id}.
+func (h *CommentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := h.svc.DeleteComment(r.Context(), id); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetCommentEditHistory handles GET /comments/{id}/history.
+func (h *CommentHandler) GetCommentEditHistory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	resp, err := h.svc.GetCommentEditHistory(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

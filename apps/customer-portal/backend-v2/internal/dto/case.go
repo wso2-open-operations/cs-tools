@@ -30,6 +30,27 @@ type Ref struct {
 	Name string `json:"name"`
 }
 
+// Tag is a free-text label attached to a case (e.g. "Security Announcement",
+// attached to every case a security announcement creates) — customer-
+// appropriate as-is, unlike most of this file's trimming: a tag is written
+// specifically to be visible, not an internal CSM annotation.
+type Tag struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Color *string `json:"color,omitempty"`
+}
+
+func mapTags(tags []entity.Tag) []Tag {
+	if len(tags) == 0 {
+		return nil
+	}
+	out := make([]Tag, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, Tag{ID: t.ID, Label: t.Label, Color: t.Color})
+	}
+	return out
+}
+
 func mapRef(r *entity.EntityRef) *Ref {
 	if r == nil {
 		return nil
@@ -345,6 +366,7 @@ type CaseDetails struct {
 	// the label is built here — the same split as case status and severity.
 	EscalationLevel *IDLabelRef `json:"escalationLevel,omitempty"`
 	IsEscalated     *bool       `json:"isEscalated,omitempty"`
+	Tags            []Tag       `json:"tags,omitempty"`
 }
 
 // MapCaseDetails builds the portal response from entity-service's CaseView.
@@ -419,6 +441,7 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 		Duration:            c.Duration,
 		EscalationLevel:     caseEscalationLevelRef(c.EscalationLevel),
 		IsEscalated:         c.IsEscalated,
+		Tags:                mapTags(c.Tags),
 	}
 }
 
@@ -752,10 +775,15 @@ func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseAc
 			// name preserves the portal's existing output rather than quietly
 			// switching it to an email; CommentBubble falls back to createdBy
 			// when createdByFullName is empty, so both must resolve the same way.
-			CreatedBy:          userRefDisplayName(a.CreatedBy),
+			//
+			// userRefDisplayNameOrSystem (not the plain userRefDisplayName used
+			// elsewhere) so an automation/integration-authored activity — no
+			// resolvable name or email — renders as "system" instead of an empty
+			// string indistinguishable from a genuinely unknown author.
+			CreatedBy:          userRefDisplayNameOrSystem(a.CreatedBy),
 			CreatedByFirstName: a.CreatedByFirstName,
 			CreatedByLastName:  a.CreatedByLastName,
-			CreatedByFullName:  userRefDisplayName(a.CreatedBy),
+			CreatedByFullName:  userRefDisplayNameOrSystem(a.CreatedBy),
 			CommentType:        commentType,
 			FileName:           a.FileName,
 			ContentType:        a.ContentType,

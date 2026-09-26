@@ -48,13 +48,15 @@ const (
 	TypeSeverityChanged  Type = "case.severity_changed"
 	TypeIncidentCreated  Type = "incident.created"
 
-	// TypeSLAClockRegister and TypeSLATierReached belong to internal/slaengine,
-	// not internal/dispatch — see SLAClockRegisterPayload/SLATierReachedPayload
-	// below. Neither is an email trigger (no Recipients), so dispatch.Handle's
-	// switch has no case for them; they're declared here anyway since this is
-	// the one place every event Type this service touches is registered.
-	TypeSLAClockRegister Type = "sla.clock.register"
-	TypeSLATierReached   Type = "sla.tier_reached"
+	// TypeSLATierReached belongs to internal/slaengine, not internal/dispatch
+	// — see SLATierReachedPayload below. Not an email trigger (no
+	// Recipients), so dispatch.Handle's switch has no case for it; it's
+	// declared here anyway since this is the one place every event Type
+	// this service touches is registered. Published by internal/slaengine's
+	// own Engine.Tick (polling entity-service's GET /sla-status, not
+	// consuming a Kafka registration event — this service no longer has
+	// one; see that package's own doc comment for the full redesign).
+	TypeSLATierReached Type = "sla.tier_reached"
 
 	// TypeCRApprovalRequested is published by csm-flow-service's
 	// cr_approval_notice flow when a change request enters an approval state.
@@ -64,18 +66,17 @@ const (
 	TypeCRApprovalRequested Type = "change_request.approval_requested"
 
 	// TypeCaseBillableStatusChanged is Postgres-data-source-only on the
-	// entity-service side, and — like TypeSLAClockRegister/TypeSLATierReached
-	// above — not an email/Chat trigger, so dispatch.Handle's switch has no
-	// case for it either. Unlike those two, it isn't even handled by
-	// dispatch's own no-op case: internal/timecardengine.Engine consumes it
-	// instead, on its own dedicated consumer group (see
-	// cmd/server/main.go's TIME_CARD_CONSUMER_GROUP/_COUNT) — the
-	// same reasoning internal/slaengine's SLA_CONSUMER_GROUP/
-	// SLA_CONSUMER_COUNT already established: eventbus.Consumer.Run
-	// processes one record at a time, fully sequentially (fetch, handle,
-	// commit, repeat), so a future bulk update over "several time cards,"
-	// each its own HTTP round trip to entity-service, must not delay
-	// unrelated email/Chat delivery on dispatch's own consumer instance.
+	// entity-service side, and — like TypeSLATierReached above — not an
+	// email/Chat trigger, so dispatch.Handle's switch has no
+	// case for it either. Unlike TypeSLATierReached, it isn't even handled
+	// by dispatch's own no-op case: internal/timecardengine.Engine consumes
+	// it instead, on its own dedicated consumer group (see
+	// cmd/server/main.go's TIME_CARD_CONSUMER_GROUP/_COUNT) — because
+	// eventbus.Consumer.Run processes one record at a time, fully
+	// sequentially (fetch, handle, commit, repeat), so a future bulk update
+	// over "several time cards," each its own HTTP round trip to
+	// entity-service, must not delay unrelated email/Chat delivery on
+	// dispatch's own consumer instance.
 	//
 	// TODO: internal/timecardengine.Engine.Handle only logs today — the
 	// actual reaction (bulk-flipping every time card's billable flag for
@@ -89,6 +90,18 @@ const (
 	// internal/events/events.go, so the two schemas never drift even while
 	// this type is otherwise dormant.
 	TypeCaseBillableStatusChanged Type = "case.billable_status_changed"
+
+	// TypeProjectContactInvited is published by entity-service's Salesforce
+	// membership ingest once a Project_Contact__c in state INVITED /
+	// RE-INVITED has been written to Postgres (see that repo's own CLAUDE.md,
+	// "Salesforce membership ingest and onboarding steps"). This service is
+	// its consumer: dispatch.handleProjectContactInvited provisions the
+	// invitee's Asgardeo identity through the SCIM operations service
+	// (internal/scim) and sends the invitation email, recording each step's
+	// outcome back on entity-service's onboarding-step ledger
+	// (internal/entity.RecordOnboardingStep). Keyed by the Salesforce
+	// membership Id — see ProjectContactInvitedPayload.
+	TypeProjectContactInvited Type = "project_contact.invited"
 )
 
 // KnownTypes lists every Type this service accepts, in the order they're
@@ -96,8 +109,9 @@ const (
 // that enumerate valid values.
 var KnownTypes = []Type{
 	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
-	TypeSLAClockRegister, TypeSLATierReached, TypeCaseBillableStatusChanged,
+	TypeSLATierReached, TypeCaseBillableStatusChanged,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
+	TypeProjectContactInvited,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -308,58 +322,12 @@ type IncidentCreatedPayload struct {
 	CallTo string `json:"callTo"`
 }
 
-// SLAClockRegisterPayload is TypeSLAClockRegister's payload — the trigger
-// internal/slaengine.Handle reacts to by registering an SLA clock per entry
-// in Durations via entity-service's POST /cases/{caseId}/sla-clocks. Each
-// Durations value is a Go duration string (e.g. "2h"), added to the
-// publish-time "now" to compute the clock's due time — the exact durations
-// to use per clock type is a policy decision entity-service makes (see its
-// own internal/service/sla_policy.go) and supplies here directly, mirroring
-// how the SLA timer engine POC this was ported from treated durations as a
-// caller-supplied stand-in for that policy. CaseID must match the
-// envelope's EntityID, same requirement as the case.* types.
-//
-// AvoidWeekendDueDate names the subset of Durations' keys whose computed
-// due date must not land on a Saturday/Sunday — currently only ever
-// "resolution", for a MEDIUM-severity case's "1 Business Week" SLA (see
-// entity-service's sla_policy.go). internal/slaengine.registerClocks is
-// what actually performs the roll-forward, since only it knows the real
-// startedAt/dueAt at consume time; entity-service can only signal which
-// clock type needs it.
-//
-// CaseCreatedAt is an RFC3339 timestamp of the case's actual creation time
-// — internal/slaengine.registerClocks uses it (not consume-time "now") as
-// each clock's startedAt, so a delayed publish or consumer backlog doesn't
-// start the SLA clock late; an empty or unparsable value falls back to
-// consume-time "now" there.
-//
-// The remaining fields are purely for display in a Google Chat breach
-// card (see internal/slaengine.Engine.sendBreachAlert) and are stored
-// verbatim on the registered sla_clocks row so that card can be built from
-// one GetClock call at tick time, with no second lookup — this service has
-// no other way to reach case data. They're a point-in-time snapshot from
-// registration, not kept live; State/Priority in particular can go stale
-// by the time a breach actually fires.
-type SLAClockRegisterPayload struct {
-	CaseID              string            `json:"caseId"`
-	Durations           map[string]string `json:"durations"`
-	CaseCreatedAt       string            `json:"caseCreatedAt,omitempty"`
-	AvoidWeekendDueDate []string          `json:"avoidWeekendDueDate,omitempty"`
-	CaseNumber          string            `json:"caseNumber,omitempty"`
-	WSO2CaseID          string            `json:"wso2CaseId,omitempty"`
-	CaseTitle           string            `json:"caseTitle,omitempty"`
-	CaseType            string            `json:"caseType,omitempty"`
-	Product             string            `json:"product,omitempty"`
-	Team                string            `json:"team,omitempty"`
-	Priority            string            `json:"priority,omitempty"`
-	State               string            `json:"state,omitempty"`
-}
-
 // SLATierReachedPayload is TypeSLATierReached's payload — published by
-// internal/slaengine.Tick when a clock's wake index shows a tier (50, 75, or
-// 100) has been crossed. Nothing in this service consumes it yet; it exists
-// for whatever future notification (e.g. a breach-warning email) or other
-// system reacts to it.
+// internal/slaengine.Engine.Tick when a poll of entity-service's GET
+// /sla-status shows a clock has newly crossed a tier (50, 75, or 100
+// percent elapsed) since the last poll. Nothing in this service consumes it
+// yet; it exists for whatever future notification (e.g. a breach-warning
+// email) or other system reacts to it.
 type SLATierReachedPayload struct {
 	CaseID    string `json:"caseId"`
 	ClockType string `json:"clockType"`
@@ -435,4 +403,50 @@ type CRApprovalRequestedPayload struct {
 	// Recipients are already resolved and de-duplicated. Never empty — a notice
 	// with nobody to send to is not published.
 	Recipients []string `json:"recipients"`
+}
+
+// ProjectContactInvitedPayload is TypeProjectContactInvited's payload —
+// mirrors entity-service's own ProjectContactInvitedPayload exactly (keep
+// the two in sync by hand, the same way every other shared payload here
+// is): everything this service needs to provision the invited person and
+// address the invitation, so it never has to re-read Salesforce.
+//
+// MembershipSfID is the Salesforce Project_Contact__c Id — also the
+// envelope's EntityID (Validate enforces the match, like the case.* types'
+// CaseID) and the key every onboarding-step write is recorded under.
+// ContactSfID is the Salesforce Contact Id, passed through to the step
+// ledger for cross-referencing. GivenName/FamilyName may both be empty
+// (Salesforce doesn't require a first name) — dispatch falls back to the
+// email's local part for display. Roles are the raw Salesforce
+// Project_Role__c values (e.g. "Admin", "Portal user"), shown in the email
+// when non-empty. IsIntegrationUser=true means the contact is a machine
+// account that never signs in: dispatch records IDENTITY and EMAIL as
+// SKIPPED and does nothing else. Type is the Salesforce Contact_Type__c
+// ("OWN CONTACT" / "PARTNER CONTACT" / an integration-user type) — carried
+// for completeness, not used to branch on here today.
+type ProjectContactInvitedPayload struct {
+	MembershipSfID    string   `json:"membershipSfId"`
+	ContactSfID       string   `json:"contactSfId"`
+	Email             string   `json:"email"`
+	GivenName         string   `json:"givenName"`
+	FamilyName        string   `json:"familyName"`
+	ProjectName       string   `json:"projectName"`
+	ProjectKey        string   `json:"projectKey"`
+	Roles             []string `json:"roles"`
+	IsIntegrationUser bool     `json:"isIntegrationUser"`
+	Type              string   `json:"type"`
+	// EventModifiedOn is the Salesforce LastModifiedDate of the membership
+	// version this event describes (RFC 3339); dispatch stamps its
+	// onboarding-step writes with it. Optional: an empty value means
+	// entity-service could not parse the Salesforce date.
+	EventModifiedOn string `json:"eventModifiedOn,omitempty"`
+	// IsResend marks a deliberate re-invitation — an admin pressing
+	// "Resend invitation" in the portal, which entity-service republishes
+	// as this same event with the marker set. Optional: an absent value
+	// means a normal, first invitation. dispatch then skips the
+	// duplicate-invitation ledger check (the whole point of a resend is to
+	// send again) and uses the short reminder wording, which claims
+	// nothing about whether the account was just created — see
+	// dispatch.handleProjectContactInvited.
+	IsResend bool `json:"isResend,omitempty"`
 }

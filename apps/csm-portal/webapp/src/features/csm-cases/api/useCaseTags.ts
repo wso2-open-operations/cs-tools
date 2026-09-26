@@ -55,6 +55,34 @@ export function useAddCaseTag(
 }
 
 /**
+ * Add a free-text tag to a case given at call time, rather than bound to one
+ * case per hook instance like {@link useAddCaseTag} above — for a flow that
+ * creates several cases and tags each one afterward (e.g. the announcement
+ * create page's security-label flow), where the case ids aren't known until
+ * each create call resolves.
+ */
+export function useAddTagToCase(): UseMutationResult<
+  BeTag,
+  Error,
+  { caseId: string; label: string }
+> {
+  const api = useBackendApi();
+  const queryClient = useQueryClient();
+
+  return useMutation<BeTag, Error, { caseId: string; label: string }>({
+    mutationFn: async ({ caseId, label }): Promise<BeTag> =>
+      api.post<BeAddCaseTagPayload, BeTag>(`/cases/${encodeURIComponent(caseId)}/tags`, {
+        label,
+      }),
+    onSuccess: (_tag, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CSM_CASE_DETAIL, variables.caseId],
+      });
+    },
+  });
+}
+
+/**
  * Remove a tag from a case via `DELETE /cases/{id}/tags/{tagId}` (ServiceNow
  * data source only). On success, invalidates the case detail so the chip
  * drops without a manual refetch.

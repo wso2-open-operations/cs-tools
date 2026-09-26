@@ -1124,15 +1124,25 @@ export function AttachmentsWidget({
                   : "Upload"}
               </Button>
             )}
-            <Button
-              size="small"
-              variant="text"
-              startIcon={<Download size={14} />}
-              onClick={onDownloadAll}
-              disabled={sorted.length === 0}
+            <Tooltip
+              title={
+                onDownloadAll
+                  ? ""
+                  : "You don't have permission to download attachments."
+              }
             >
-              Download all
-            </Button>
+              <Box component="span">
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={<Download size={14} />}
+                  onClick={onDownloadAll}
+                  disabled={!onDownloadAll || sorted.length === 0}
+                >
+                  Download all
+                </Button>
+              </Box>
+            </Tooltip>
           </Box>
         }
       >
@@ -1248,16 +1258,26 @@ export function AttachmentsWidget({
                       Preview
                     </Button>
                   )}
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<Download size={14} />}
-                  onClick={() => onDownload?.(a)}
-                  aria-label={`Download ${a.filename}`}
-                  sx={{ flexShrink: 0 }}
+                <Tooltip
+                  title={
+                    onDownload
+                      ? ""
+                      : "You don't have permission to download attachments."
+                  }
                 >
-                  Download
-                </Button>
+                  <Box component="span" sx={{ flexShrink: 0 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<Download size={14} />}
+                      onClick={() => onDownload?.(a)}
+                      disabled={!onDownload}
+                      aria-label={`Download ${a.filename}`}
+                    >
+                      Download
+                    </Button>
+                  </Box>
+                </Tooltip>
                 {onDelete && (
                   <IconButton
                     size="small"

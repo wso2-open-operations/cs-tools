@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
@@ -102,6 +103,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Same entity-service deployment and credentials again — a fourth,
+	// separate client for the same reason entityCasesClient is its own:
+	// this one's Bearer token must satisfy entity-service's own
+	// AUTH_INTERNAL_CLIENT_IDS (AutoPublish is internal-caller-only), a
+	// concern specific to this one task, not shared with case search or
+	// the scheduled_task_run ledger.
+	announcementPublishClient, err := announcementpublish.NewClient(announcementpublish.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service announcement-publish client", "err", err)
+		os.Exit(1)
+	}
+
 	// Global kill switch for every failure alert email — see
 	// engine.Engine.AlertsEnabled's own doc comment. Defaults to true (the
 	// current always-alert behavior); set to false to go quiet without
@@ -154,6 +173,9 @@ func main() {
 	const openCasesTaskName = "open_cases_report"
 	openCasesTo, openCasesCc := recipientsFor(recipientOverrides, openCasesTaskName)
 
+	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
+	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
+
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
 		// entity-service's scheduled_task_run table that succeeded or were
@@ -197,6 +219,22 @@ func main() {
 			Handler:  opencases.SendReport(entityCasesClient, emailClient, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
+		},
+		// The first sub-cron here that does real, per-row, multi-step,
+		// partial-failure-tolerant work rather than a bulk delete or a
+		// read-only report — see internal/announcementpublish's own doc
+		// comments for the full design. Default schedule is tight (every 15
+		// minutes) so it's ready the moment this component's own Choreo
+		// Scheduled Task trigger cadence is tightened to match — actual
+		// publish promptness is bounded by that shared trigger frequency,
+		// not by this schedule string alone (see this component's own
+		// CLAUDE.md, "The core mechanism").
+		{
+			Name:     publishScheduledAnnouncementsTaskName,
+			Schedule: scheduleFor(scheduleOverrides, publishScheduledAnnouncementsTaskName, "*/15 * * * *"),
+			Handler:  announcementpublish.PublishDue(announcementPublishClient),
+			To:       publishScheduledAnnouncementsTo,
+			Cc:       publishScheduledAnnouncementsCc,
 		},
 	}
 

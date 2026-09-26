@@ -83,6 +83,24 @@ describe("WallboardCreSection", () => {
     warn.mockRestore();
   });
 
+  // Regression test (CodeRabbit): the widget that lost a primary-slot
+  // collision (see the warning test above) must not fall through and
+  // render a SECOND time as a secondary tile — the secondary list has to
+  // be built from `byName`'s own deduplicated values, not the raw
+  // `widgets` array.
+  it("does not also render the losing widget of a primary-slot collision as a secondary tile", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      <WallboardCreSection
+        widgets={[widget("w1", "Open"), widget("w2", "Open"), widget("w3", "Migration")]}
+      />,
+    );
+    expect(screen.getByTestId("primary-grid")).toHaveTextContent("Open");
+    const secondaryTiles = screen.getAllByTestId("secondary-tile").map((el) => el.textContent);
+    expect(secondaryTiles).toEqual(["Migration"]);
+    vi.restoreAllMocks();
+  });
+
   it("renders the secondary tier in CRE_SECONDARY_ORDER's own fixed order, regardless of input array order", () => {
     render(
       <WallboardCreSection

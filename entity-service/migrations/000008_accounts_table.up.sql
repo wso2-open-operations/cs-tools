@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS account (
     technical_owner_id UUID REFERENCES "user"(id),
     secondary_technical_owner_id UUID REFERENCES "user"(id),
     account_manager_id UUID REFERENCES "user"(id),
+    renewal_account_manager_id UUID REFERENCES "user"(id) ON DELETE SET NULL,
     country VARCHAR(100),
     region VARCHAR(100),
     state_province VARCHAR(100),
@@ -58,3 +59,4 @@ CREATE INDEX IF NOT EXISTS idx_account_customer_success_manager ON account (cust
 CREATE INDEX IF NOT EXISTS idx_account_technical_owner ON account (technical_owner_id);
 CREATE INDEX IF NOT EXISTS idx_account_secondary_technical_owner ON account (secondary_technical_owner_id);
 CREATE INDEX IF NOT EXISTS idx_account_account_manager ON account (account_manager_id);
+CREATE INDEX IF NOT EXISTS idx_account_renewal_account_manager ON account (renewal_account_manager_id);

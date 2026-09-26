@@ -40,6 +40,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/notifications"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg"
+	plgconfig "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/config"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/sftpgo"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
@@ -78,10 +80,30 @@ func main() {
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
-	dashboardHandler := handler.NewDashboardHandler()
+	// Optional: with the engineering entity service configured, "Open Git issue"
+	// (POST /cases/{id}/github-issues) files the issue through it rather than
+	// forwarding to the entity service. It authenticates as the same shared
+	// OAuth2 app as every other upstream; only its base URL and scopes are its
+	// own. Unset keeps the entity-service path exactly as it was.
+	if engineeringBaseURL := strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")); engineeringBaseURL != "" {
+		engineeringBaseURL = mustHTTPSBaseURL("ENGINEERING_ENTITY_BASE_URL", engineeringBaseURL)
+		caseHandler.WithEngineeringClient(entity.NewEngineeringEntityClient(entity.EngineeringEntityConfig{
+			BaseURL:      engineeringBaseURL,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       splitComma(os.Getenv("ENGINEERING_ENTITY_SCOPES")),
+		}))
+		slog.Info("GitHub issues are created through the engineering entity service")
+	}
 	metadataHandler := handler.NewMetadataHandler()
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
+	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
+	validateAnnouncementDataSourceCompatibility(loadCustomerEntityDataSource(), announcementExcludedProjectKeys)
+	announcementHandler := handler.NewAnnouncementHandler(customerEntityClient, announcementExcludedProjectKeys)
+	announcementRequestHandler := handler.NewAnnouncementRequestHandler(customerEntityClient, announcementExcludedProjectKeys)
+	announcementRegistryHandler := handler.NewAnnouncementRegistryHandler(customerEntityClient)
 	productHandler := handler.NewProductHandler(customerEntityClient)
 	deploymentHandler := handler.NewDeploymentHandler(customerEntityClient)
 	kbArticleHandler := handler.NewKBArticleHandler(customerEntityClient)
@@ -103,6 +125,7 @@ func main() {
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
+	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
 	// are read with os.Getenv (never mustEnv) — a missing or malformed value
@@ -148,7 +171,12 @@ func main() {
 		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
 	}
 	scimClient := scim.NewClient(scimCfg)
-	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, sftpgoAttachmentStorageEnabled, loadDashboardDesignerEmails())
+	// One guard authorises every route below and also backs the permissions
+	// GET /users/me reports, so the two cannot drift apart.
+	accessGuard := handler.NewAccessGuard(loadAccessConfig())
+	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, sftpgoAttachmentStorageEnabled).WithAccessGuard(accessGuard)
+	dashboardHandler := handler.NewDashboardHandler(accessGuard)
+	caseHandler = caseHandler.WithAccessGuard(accessGuard)
 
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
@@ -158,162 +186,201 @@ func main() {
 		TokenValidatorEnabled: os.Getenv("AUTH_TOKEN_VALIDATOR_ENABLED") != "false",
 	}
 
+	// Every route goes through route(), which takes the permission it needs as
+	// a required argument: there is no default, so a new route cannot be
+	// registered without someone deciding who may call it. /health is the one
+	// exception and is exempt in the Auth middleware too.
 	mux := http.NewServeMux()
+	route := func(pattern string, perm handler.Permission, h http.HandlerFunc) {
+		mux.HandleFunc(pattern, accessGuard.Require(perm, h))
+	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
-	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
-	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
-	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
-	mux.HandleFunc("POST /cases/{id}/request-update", caseHandler.RequestCaseUpdate)
-	mux.HandleFunc("GET /case-update-request-templates", caseHandler.GetCaseUpdateRequestTemplates)
-	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
-	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
-	mux.HandleFunc("GET /cases/{id}/escalations", caseHandler.GetCaseEscalations)
-	mux.HandleFunc("POST /cases/{id}/escalations", caseHandler.CreateCaseEscalation)
-	mux.HandleFunc("POST /attachments", caseHandler.CreateCaseAttachment)
-	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
-	mux.HandleFunc("GET /attachments/{id}/content", caseHandler.GetCaseAttachmentContent)
-	mux.HandleFunc("DELETE /attachments/{id}", caseHandler.DeleteCaseAttachment)
+	route("POST /cases", handler.PermWrite, caseHandler.CreateCase)
+	route("GET /cases/{id}", handler.PermView, caseHandler.GetCase)
+	route("PATCH /cases/{id}", handler.PermWrite, caseHandler.PatchCase)
+	route("POST /cases/{id}/comments", handler.PermWrite, caseHandler.CreateCaseComment)
+	route("POST /cases/{id}/request-update", handler.PermWrite, caseHandler.RequestCaseUpdate)
+	route("GET /case-update-request-templates", handler.PermView, caseHandler.GetCaseUpdateRequestTemplates)
+	route("POST /cases/{id}/comments/search", handler.PermView, caseHandler.SearchCaseComments)
+	// Generic comment edit/delete — applies to a comment by id regardless of
+	// which aggregate (case, change request, incident, ...) it was created
+	// under. Case, incident and change-request comments are PermWrite (see
+	// backend CLAUDE.md's Access control section); this is the same
+	// underlying resource.
+	route("PATCH /comments/{id}", handler.PermWrite, commentHandler.UpdateComment)
+	route("DELETE /comments/{id}", handler.PermWrite, commentHandler.DeleteComment)
+	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
+	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
+	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
+	route("POST /attachments", handler.PermWrite, caseHandler.CreateCaseAttachment)
+	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
+	route("GET /attachments/{id}/content", handler.PermDownloadAttachment, caseHandler.GetCaseAttachmentContent)
+	route("DELETE /attachments/{id}", handler.PermWrite, caseHandler.DeleteCaseAttachment)
 	// The SFTPGo-backed attachment-storage routes only exist on the mux when
 	// the feature flag is on: with it off (default), these paths are not
 	// registered at all and 404, rather than existing but erroring, so
 	// shipping this dark carries zero risk to the routes above.
 	if attachmentStorageHandler != nil {
-		mux.HandleFunc("POST /cases/{id}/attachments/upload-token", attachmentStorageHandler.MintUploadToken)
-		mux.HandleFunc("POST /attachments/{id}/share", attachmentStorageHandler.CreateAttachmentShare)
-		mux.HandleFunc("POST /cases/{caseId}/attachments/{attachmentId}/confirm", attachmentStorageHandler.ConfirmUpload)
+		route("POST /cases/{id}/attachments/upload-token", handler.PermWrite, attachmentStorageHandler.MintUploadToken)
+		route("POST /attachments/{id}/share", handler.PermDownloadAttachment, attachmentStorageHandler.CreateAttachmentShare)
+		route("POST /cases/{caseId}/attachments/{attachmentId}/confirm", handler.PermWrite, attachmentStorageHandler.ConfirmUpload)
 	}
-	mux.HandleFunc("GET /attachments/{id}", caseHandler.GetAttachment)
-	mux.HandleFunc("PATCH /attachments/{id}", caseHandler.UpdateAttachment)
-	mux.HandleFunc("POST /cases/{id}/call-requests", caseHandler.CreateCallRequest)
-	mux.HandleFunc("POST /cases/{id}/call-requests/search", caseHandler.SearchCallRequests)
-	mux.HandleFunc("POST /call-requests/search", caseHandler.SearchAllCallRequests)
-	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{callRequestId}", caseHandler.PatchCallRequest)
-	mux.HandleFunc("POST /cases/{id}/github-issues", caseHandler.CreateCaseGithubIssue)
-	mux.HandleFunc("GET /metadata", metadataHandler.GetMetadata)
-	mux.HandleFunc("POST /cases/{id}/tags", caseHandler.AddCaseTag)
-	mux.HandleFunc("DELETE /cases/{id}/tags/{tagId}", caseHandler.RemoveCaseTag)
-	mux.HandleFunc("POST /tags/search", caseHandler.SearchTags)
+	route("GET /attachments/{id}", handler.PermView, caseHandler.GetAttachment)
+	route("PATCH /attachments/{id}", handler.PermWrite, caseHandler.UpdateAttachment)
+	route("POST /cases/{id}/call-requests", handler.PermWrite, caseHandler.CreateCallRequest)
+	route("POST /cases/{id}/call-requests/search", handler.PermView, caseHandler.SearchCallRequests)
+	route("POST /call-requests/search", handler.PermView, caseHandler.SearchAllCallRequests)
+	route("PATCH /cases/{caseId}/call-requests/{callRequestId}", handler.PermWrite, caseHandler.PatchCallRequest)
+	route("POST /cases/{id}/github-issues", handler.PermWrite, caseHandler.CreateCaseGithubIssue)
+	route("GET /metadata", handler.PermView, metadataHandler.GetMetadata)
+	route("POST /cases/{id}/tags", handler.PermWrite, caseHandler.AddCaseTag)
+	route("DELETE /cases/{id}/tags/{tagId}", handler.PermWrite, caseHandler.RemoveCaseTag)
+	route("POST /tags/search", handler.PermView, caseHandler.SearchTags)
 	// Deprecated: the query-parameter form of tag search, kept for one release
 	// so this service and its callers can be deployed independently. Remove it
 	// (and CaseHandler.SearchTagsQuery) once every caller is on the POST.
 	//nolint:staticcheck // SA1019: intentional one-release compatibility route; remove with the handler.
-	mux.HandleFunc("GET /tags/search", caseHandler.SearchTagsQuery)
-	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
-	mux.HandleFunc("POST /cases/aggregate", caseHandler.AggregateCases)
-	mux.HandleFunc("POST /cases/feedback/search", caseHandler.SearchFeedback)
-	mux.HandleFunc("POST /cases/feedback/aggregate", caseHandler.AggregateFeedback)
-	mux.HandleFunc("GET /dashboards", dashboardHandler.GetDashboards)
+	route("GET /tags/search", handler.PermView, caseHandler.SearchTagsQuery)
+	route("POST /cases/search", handler.PermView, caseHandler.SearchCases)
+	route("POST /cases/aggregate", handler.PermView, caseHandler.AggregateCases)
+	route("POST /cases/feedback/search", handler.PermView, caseHandler.SearchFeedback)
+	route("POST /cases/feedback/aggregate", handler.PermView, caseHandler.AggregateFeedback)
+	route("GET /dashboards", handler.PermView, dashboardHandler.GetDashboards)
 	// Registered before the {dashboardId} wildcard purely for readability —
 	// net/http's ServeMux resolves by specificity, not registration order,
 	// so these literal paths win over the wildcard regardless.
-	mux.HandleFunc("GET /dashboards/filter-presets", dashboardHandler.GetFilterPresets)
-	mux.HandleFunc("GET /dashboards/sections", dashboardHandler.GetSharedSections)
-	mux.HandleFunc("GET /dashboards/{dashboardId}", dashboardHandler.GetDashboardDetail)
-	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
-	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
-	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
-	mux.HandleFunc("PATCH /users/me", usersHandler.PatchMe)
-	mux.HandleFunc("POST /users/search", usersHandler.SearchUsers)
-	mux.HandleFunc("POST /users/by-ids", usersHandler.GetUsersByIDs)
-	mux.HandleFunc("GET /users/{id}", usersHandler.GetUser)
-	mux.HandleFunc("POST /roles/search", referenceHandler.SearchRoles)
-	mux.HandleFunc("POST /teams/search", referenceHandler.SearchTeams)
-	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
-	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
-	mux.HandleFunc("POST /accounts/{id}/contacts/search", accountHandler.SearchAccountContacts)
-	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
-	mux.HandleFunc("GET /projects/{id}/metadata", projectHandler.GetProjectMetadata)
-	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
-	mux.HandleFunc("POST /projects/{id}/contacts/search", projectHandler.SearchProjectContacts)
-	mux.HandleFunc("GET /projects/{id}/contacts/{contactId}", projectHandler.GetProjectContact)
-	mux.HandleFunc("PATCH /projects/{id}", projectHandler.UpdateProject)
-	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
-	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
-	mux.HandleFunc("POST /deployments", deploymentHandler.PostDeployment)
-	mux.HandleFunc("POST /kb-articles", kbArticleHandler.CreateKBArticle)
-	mux.HandleFunc("GET /kb-articles/{id}", kbArticleHandler.GetKBArticle)
-	mux.HandleFunc("POST /kb-articles/search", kbArticleHandler.SearchKBArticles)
-	mux.HandleFunc("PATCH /kb-articles/{id}/state", kbArticleHandler.PatchKBArticleState)
-	mux.HandleFunc("PATCH /kb-articles/{id}", kbArticleHandler.PatchKBArticleContent)
-	mux.HandleFunc("GET /knowledge-bases", kbArticleHandler.ListKnowledgeBases)
-	mux.HandleFunc("POST /knowledge-bases", kbAdminHandler.CreateKnowledgeBase)
-	mux.HandleFunc("PATCH /knowledge-bases/{id}", kbAdminHandler.UpdateKnowledgeBaseName)
-	mux.HandleFunc("PATCH /knowledge-bases/{id}/active", kbAdminHandler.SetKnowledgeBaseActive)
-	mux.HandleFunc("POST /kb-managers/search", kbAdminHandler.SearchKBManagers)
-	mux.HandleFunc("POST /kb-managers", kbAdminHandler.CreateKBManager)
-	mux.HandleFunc("DELETE /kb-managers", kbAdminHandler.DeleteKBManager)
-	mux.HandleFunc("GET /kb-managers/my-knowledge-bases", kbArticleHandler.ListMyManagedKnowledgeBases)
-	mux.HandleFunc("DELETE /kb-articles/{id}", kbArticleHandler.DeleteKBArticle)
-	mux.HandleFunc("GET /kb-articles/{id}/history", kbArticleHandler.ListKBArticleHistory)
-	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
-	mux.HandleFunc("PATCH /deployments/{id}", deploymentHandler.PatchDeployment)
-	mux.HandleFunc("POST /deployments/{id}/products", deploymentHandler.PostDeployedProduct)
-	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
-	mux.HandleFunc("PATCH /deployments/{deploymentId}/products/{productId}", deploymentHandler.PatchDeployedProduct)
-	mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
-	mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
-	mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
-	mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
-	mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
-	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
-	mux.HandleFunc("POST /change-requests/aggregate", changeRequestHandler.AggregateChangeRequests)
-	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
-	mux.HandleFunc("POST /service-offerings/search", serviceOfferingHandler.SearchServiceOfferings)
-	mux.HandleFunc("POST /groups/search", groupHandler.SearchGroups)
-	mux.HandleFunc("POST /configuration-items/search", configurationItemHandler.SearchConfigurationItems)
-	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
-	mux.HandleFunc("POST /time-cards", timeCardHandler.CreateTimeCard)
-	mux.HandleFunc("PATCH /time-cards/{id}", timeCardHandler.UpdateTimeCard)
-	mux.HandleFunc("DELETE /time-cards/{id}", timeCardHandler.DeleteTimeCard)
-	mux.HandleFunc("POST /catalogs/search", catalogHandler.SearchCatalogs)
-	mux.HandleFunc("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", catalogHandler.GetCatalogItemVariables)
-	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
-	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)
-	mux.HandleFunc("GET /conversations/{id}/messages", conversationHandler.GetConversationMessages)
-	mux.HandleFunc("POST /conversations/search", conversationHandler.SearchConversations)
-	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
-	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
-	mux.HandleFunc("POST /cases/{caseId}/tasks/search", taskHandler.SearchCaseTasks)
-	mux.HandleFunc("POST /tasks/search", taskHandler.SearchTasks)
-	mux.HandleFunc("GET /tasks/{id}", taskHandler.GetTask)
-	mux.HandleFunc("POST /cases/{caseId}/tasks", taskHandler.CreateCaseTask)
-	mux.HandleFunc("PATCH /tasks/{id}", taskHandler.UpdateTask)
-	mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
-	mux.HandleFunc("POST /incidents/aggregate", incidentHandler.AggregateIncidents)
-	mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
-	mux.HandleFunc("GET /incidents/{id}", incidentHandler.GetIncident)
-	mux.HandleFunc("PATCH /incidents/{id}", incidentHandler.PatchIncident)
-	mux.HandleFunc("POST /incidents/{id}/comments", incidentHandler.CreateIncidentComment)
-	mux.HandleFunc("POST /incidents/{id}/comments/search", incidentHandler.SearchIncidentComments)
-	mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
-	mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", incidentHandler.HandOffIncidentToSpecialist)
-	mux.HandleFunc("GET /alerts/{id}", alertHandler.GetAlert)
-	mux.HandleFunc("GET /smart-alerts/{id}", alertHandler.GetSmartAlert)
-	mux.HandleFunc("POST /change-requests/{id}/comments", changeRequestHandler.CreateChangeRequestComment)
-	mux.HandleFunc("POST /change-requests/{id}/comments/search", changeRequestHandler.SearchChangeRequestComments)
-	mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
-	mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
-	mux.HandleFunc("PATCH /problems/{id}", problemHandler.PatchProblem)
-	mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
-	mux.HandleFunc("POST /problems/aggregate", problemHandler.AggregateProblems)
-	mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
-	mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
-	mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
-	mux.HandleFunc("POST /outages", outageHandler.CreateOutage)
-	mux.HandleFunc("POST /outages/search", outageHandler.SearchOutages)
+	route("GET /dashboards/filter-presets", handler.PermView, dashboardHandler.GetFilterPresets)
+	route("GET /dashboards/sections", handler.PermView, dashboardHandler.GetSharedSections)
+	route("GET /dashboards/{dashboardId}", handler.PermView, dashboardHandler.GetDashboardDetail)
+	route("GET /updates/product-update-levels", handler.PermTimeCardsAndUpdates, updatesHandler.GetProductUpdateLevels)
+	route("POST /updates/levels/search", handler.PermTimeCardsAndUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
+	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
+	route("PATCH /users/me", handler.PermAuthenticated, usersHandler.PatchMe)
+	route("GET /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.ListSavedFilterViews)
+	route("PATCH /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.SaveSavedFilterView)
+	route("DELETE /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.DeleteSavedFilterView)
+	route("POST /users/me/saved-filter-views/reorder", handler.PermAuthenticated, usersHandler.ReorderSavedFilterView)
+	route("POST /users/search", handler.PermView, usersHandler.SearchUsers)
+	route("GET /users/{id}", handler.PermView, usersHandler.GetUser)
+	route("POST /users", handler.PermAdmin, usersHandler.CreateUser)
+	route("POST /roles/search", handler.PermView, referenceHandler.SearchRoles)
+	route("POST /teams/search", handler.PermView, referenceHandler.SearchTeams)
+	route("GET /accounts/{id}", handler.PermView, accountHandler.GetAccount)
+	// Admin-only: CRE/SRE team is a temporary override of ServiceNow's own
+	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
+	// staff role should be able to set it.
+	route("PATCH /accounts/{id}", handler.PermAdmin, accountHandler.UpdateAccountTeams)
+	route("POST /accounts/search", handler.PermView, accountHandler.SearchAccounts)
+	route("POST /accounts/{id}/contacts/search", handler.PermView, accountHandler.SearchAccountContacts)
+	route("GET /projects/{id}", handler.PermView, projectHandler.GetProject)
+	route("GET /projects/{id}/metadata", handler.PermView, projectHandler.GetProjectMetadata)
+	route("POST /projects/search", handler.PermView, projectHandler.SearchProjects)
+	route("POST /announcements/audience/search", handler.PermView, announcementHandler.SearchCustomerAnnouncementAudience)
+	route("GET /announcements/audience/excluded-project-keys", handler.PermView, announcementHandler.GetExcludedProjectKeys)
+	route("POST /announcement-requests", handler.PermWrite, announcementRequestHandler.CreateAnnouncementRequest)
+	route("GET /announcement-requests/{id}", handler.PermView, announcementRequestHandler.GetAnnouncementRequest)
+	route("POST /announcement-requests/search", handler.PermView, announcementRequestHandler.SearchAnnouncementRequests)
+	route("POST /announcements/registry/search", handler.PermView, announcementRegistryHandler.SearchAnnouncementRegistry)
+	route("PATCH /announcement-requests/{id}", handler.PermWrite, announcementRequestHandler.UpdateAnnouncementRequest)
+	route("POST /announcement-requests/{id}/dry-run", handler.PermWrite, announcementRequestHandler.RecordAnnouncementRequestDryRun)
+	route("POST /announcement-requests/{id}/submit", handler.PermWrite, announcementRequestHandler.SubmitAnnouncementRequest)
+	route("POST /announcement-requests/{id}/approve", handler.PermWrite, announcementRequestHandler.ApproveAnnouncementRequest)
+	route("POST /announcement-requests/{id}/schedule", handler.PermWrite, announcementRequestHandler.ScheduleAnnouncementRequest)
+	route("POST /announcement-requests/{id}/publish", handler.PermWrite, announcementRequestHandler.PublishAnnouncementRequest)
+	route("POST /announcement-requests/{id}/updates", handler.PermWrite, announcementRequestHandler.CreateAnnouncementRequestUpdate)
+	route("GET /announcement-requests/{id}/updates", handler.PermView, announcementRequestHandler.ListAnnouncementRequestUpdates)
+	route("POST /announcement-requests/{id}/deliveries", handler.PermWrite, announcementRequestHandler.RecordAnnouncementRequestDeliveries)
+	route("GET /announcement-requests/{id}/deliveries", handler.PermView, announcementRequestHandler.ListAnnouncementRequestDeliveries)
+	route("POST /projects/{id}/contacts/search", handler.PermView, projectHandler.SearchProjectContacts)
+	route("GET /projects/{id}/contacts/{contactId}", handler.PermView, projectHandler.GetProjectContact)
+	route("PATCH /projects/{id}", handler.PermWrite, projectHandler.UpdateProject)
+	route("POST /products/search", handler.PermView, productHandler.SearchProducts)
+	route("POST /products/{id}/versions/search", handler.PermView, productHandler.SearchProductVersions)
+	route("POST /deployments", handler.PermWrite, deploymentHandler.PostDeployment)
+	route("POST /kb-articles", handler.PermWrite, kbArticleHandler.CreateKBArticle)
+	route("GET /kb-articles/{id}", handler.PermView, kbArticleHandler.GetKBArticle)
+	route("POST /kb-articles/search", handler.PermView, kbArticleHandler.SearchKBArticles)
+	route("PATCH /kb-articles/{id}/state", handler.PermWrite, kbArticleHandler.PatchKBArticleState)
+	route("PATCH /kb-articles/{id}", handler.PermWrite, kbArticleHandler.PatchKBArticleContent)
+	route("GET /knowledge-bases", handler.PermView, kbArticleHandler.ListKnowledgeBases)
+	route("POST /knowledge-bases", handler.PermAdmin, kbAdminHandler.CreateKnowledgeBase)
+	route("PATCH /knowledge-bases/{id}", handler.PermAdmin, kbAdminHandler.UpdateKnowledgeBaseName)
+	route("PATCH /knowledge-bases/{id}/active", handler.PermAdmin, kbAdminHandler.SetKnowledgeBaseActive)
+	route("POST /kb-managers/search", handler.PermAdmin, kbAdminHandler.SearchKBManagers)
+	route("POST /kb-managers", handler.PermAdmin, kbAdminHandler.CreateKBManager)
+	route("DELETE /kb-managers", handler.PermAdmin, kbAdminHandler.DeleteKBManager)
+	route("GET /kb-managers/my-knowledge-bases", handler.PermView, kbArticleHandler.ListMyManagedKnowledgeBases)
+	route("DELETE /kb-articles/{id}", handler.PermWrite, kbArticleHandler.DeleteKBArticle)
+	route("GET /kb-articles/{id}/history", handler.PermView, kbArticleHandler.ListKBArticleHistory)
+	route("POST /deployments/search", handler.PermView, deploymentHandler.SearchDeployments)
+	route("PATCH /deployments/{id}", handler.PermWrite, deploymentHandler.PatchDeployment)
+	route("POST /deployments/{id}/products", handler.PermWrite, deploymentHandler.PostDeployedProduct)
+	route("POST /deployments/{id}/products/search", handler.PermView, deploymentHandler.SearchDeployedProducts)
+	route("PATCH /deployments/{deploymentId}/products/{productId}", handler.PermWrite, deploymentHandler.PatchDeployedProduct)
+	route("POST /deployed-products/projects/search", handler.PermView, deploymentHandler.SearchProjectsByProductVersion)
+	route("POST /change-requests", handler.PermWrite, changeRequestHandler.CreateChangeRequest)
+	route("GET /change-requests/{id}", handler.PermViewOperations, changeRequestHandler.GetChangeRequest)
+	route("GET /change-requests/{id}/approvals", handler.PermViewOperations, changeRequestHandler.GetChangeRequestApprovals)
+	route("POST /change-requests/{id}/approvals/decision", handler.PermWrite, changeRequestHandler.DecideChangeRequestApproval)
+	route("PATCH /change-requests/{id}", handler.PermWrite, changeRequestHandler.PatchChangeRequest)
+	route("POST /change-requests/search", handler.PermViewOperations, changeRequestHandler.SearchChangeRequests)
+	route("POST /change-requests/aggregate", handler.PermViewOperations, changeRequestHandler.AggregateChangeRequests)
+	route("POST /services/search", handler.PermView, itServiceHandler.SearchITServices)
+	route("POST /service-offerings/search", handler.PermView, serviceOfferingHandler.SearchServiceOfferings)
+	route("POST /groups/search", handler.PermView, groupHandler.SearchGroups)
+	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
+	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
+	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)
+	route("PATCH /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.UpdateTimeCard)
+	route("DELETE /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.DeleteTimeCard)
+	route("POST /catalogs/search", handler.PermView, catalogHandler.SearchCatalogs)
+	route("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", handler.PermView, catalogHandler.GetCatalogItemVariables)
+	route("POST /products/vulnerabilities/search", handler.PermViewSecurityCenter, productVulnerabilityHandler.SearchProductVulnerabilities)
+	route("GET /products/vulnerabilities/{id}", handler.PermViewSecurityCenter, productVulnerabilityHandler.GetProductVulnerability)
+	route("GET /conversations/{id}/messages", handler.PermView, conversationHandler.GetConversationMessages)
+	route("POST /conversations/search", handler.PermView, conversationHandler.SearchConversations)
+	route("POST /slas/search", handler.PermView, taskSlaHandler.SearchTaskSlas)
+	route("GET /slas/{id}", handler.PermView, taskSlaHandler.GetTaskSla)
+	route("POST /cases/{caseId}/tasks/search", handler.PermView, taskHandler.SearchCaseTasks)
+	route("POST /tasks/search", handler.PermView, taskHandler.SearchTasks)
+	route("GET /tasks/{id}", handler.PermView, taskHandler.GetTask)
+	route("POST /cases/{caseId}/tasks", handler.PermWrite, taskHandler.CreateCaseTask)
+	route("PATCH /tasks/{id}", handler.PermWrite, taskHandler.UpdateTask)
+	route("POST /incidents/search", handler.PermViewOperations, incidentHandler.SearchIncidents)
+	route("POST /incidents/aggregate", handler.PermViewOperations, incidentHandler.AggregateIncidents)
+	route("POST /incidents", handler.PermWrite, incidentHandler.CreateIncident)
+	route("GET /incidents/{id}", handler.PermViewOperations, incidentHandler.GetIncident)
+	route("PATCH /incidents/{id}", handler.PermWrite, incidentHandler.PatchIncident)
+	route("POST /incidents/{id}/comments", handler.PermWrite, incidentHandler.CreateIncidentComment)
+	route("POST /incidents/{id}/comments/search", handler.PermViewOperations, incidentHandler.SearchIncidentComments)
+	route("POST /incidents/{id}/activities/search", handler.PermViewOperations, incidentHandler.SearchIncidentActivities)
+	route("POST /incidents/{id}/specialist-handoffs", handler.PermWrite, incidentHandler.HandOffIncidentToSpecialist)
+	route("GET /alerts/{id}", handler.PermViewOperations, alertHandler.GetAlert)
+	route("GET /smart-alerts/{id}", handler.PermViewOperations, alertHandler.GetSmartAlert)
+	route("POST /change-requests/{id}/comments", handler.PermWrite, changeRequestHandler.CreateChangeRequestComment)
+	route("POST /change-requests/{id}/comments/search", handler.PermViewOperations, changeRequestHandler.SearchChangeRequestComments)
+	route("POST /problems", handler.PermWrite, problemHandler.CreateProblem)
+	route("GET /problems/{id}", handler.PermViewOperations, problemHandler.GetProblem)
+	route("PATCH /problems/{id}", handler.PermWrite, problemHandler.PatchProblem)
+	route("POST /problems/search", handler.PermViewOperations, problemHandler.SearchProblems)
+	route("POST /problems/aggregate", handler.PermViewOperations, problemHandler.AggregateProblems)
+	route("GET /incident-tasks/{id}", handler.PermViewOperations, incidentTaskHandler.GetIncidentTask)
+	route("POST /incident-tasks/search", handler.PermViewOperations, incidentTaskHandler.SearchIncidentTasks)
+	route("POST /incident-tasks/aggregate", handler.PermViewOperations, incidentTaskHandler.AggregateIncidentTasks)
+	route("POST /outages", handler.PermWrite, outageHandler.CreateOutage)
+	route("POST /outages/search", handler.PermViewOperations, outageHandler.SearchOutages)
 	// Registered before the {id} wildcard purely for readability — net/http's
 	// ServeMux resolves by specificity, not registration order, so this
 	// literal path wins over the wildcard regardless.
-	mux.HandleFunc("GET /outages/metadata", outageHandler.GetOutageMetadata)
-	mux.HandleFunc("GET /outages/{id}", outageHandler.GetOutage)
-	mux.HandleFunc("PATCH /outages/{id}", outageHandler.PatchOutage)
-	mux.HandleFunc("POST /outages/{id}/communications", outageHandler.AddOutageCommunication)
-	mux.HandleFunc("POST /outages/{id}/communications/search", outageHandler.SearchOutageCommunications)
+	route("GET /outages/metadata", handler.PermViewOperations, outageHandler.GetOutageMetadata)
+	route("GET /outages/{id}", handler.PermViewOperations, outageHandler.GetOutage)
+	route("PATCH /outages/{id}", handler.PermWrite, outageHandler.PatchOutage)
+	route("POST /outages/{id}/communications", handler.PermWrite, outageHandler.AddOutageCommunication)
+	route("POST /outages/{id}/communications/search", handler.PermViewOperations, outageHandler.SearchOutageCommunications)
 	// Called manually today; not yet wired into real incident/case creation.
-	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
+	route("POST /notifications/google-chat/alerts", handler.PermWrite, notificationHandler.PostGoogleChatAlert)
 
 	// Built once and reused on both listeners below: Auth() does a real JWKS
 	// fetch (when TokenValidatorEnabled), so calling it a second time would
@@ -324,6 +391,31 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// PLG Customer Success Portal. Its config, entity-service client, services,
+	// handlers, identity middleware and 26 plg/* routes are all assembled in
+	// internal/plg — this is the only line of csm-portal's own wiring the merge
+	// touches.
+	//
+	// Mounted on the same mux, so PLG runs inside the middleware chain below:
+	// SecurityHeaders, CORS, CorrelationID and — the reason the merge is worth
+	// doing — Auth. PLG's routes are JWT-validated by csm-portal, and the
+	// X-PLG-User header the standalone build trusted no longer exists.
+	//
+	// PLG inherits entity-service's address and credentials rather than keeping
+	// its own copy: it reaches the same service as the same OAuth2 application
+	// as every other upstream client above. PLG_* overrides exist but are not
+	// normally set.
+	if err := plg.Mount(mux, os.Getenv("PLG_CONFIG_FILE"), plgconfig.EntityDefaults{
+		BaseURL:      customerEntityCfg.BaseURL,
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
+	}); err != nil {
+		slog.Error("failed to mount PLG", "err", err)
+		os.Exit(1)
+	}
 
 	addr := ":" + mustPort("PORT", "8080")
 
@@ -535,38 +627,159 @@ func loadDirectory() *directory.Directory {
 	return dir
 }
 
-// loadDashboardDesignerEmails resolves the synthetic "dashboard_designer" role
-// grant list from its configuration form:
+// loadAccessConfig resolves, per portal role, the token role names that grant it:
 //
-//	DASHBOARD_DESIGNER_EMAILS  A comma-separated list of email addresses,
-//	                        whitespace around each entry trimmed. GET
-//	                        /users/me grants the caller an extra
-//	                        "dashboard_designer" role (on top of whatever the
-//	                        entity service reports) when their email
-//	                        matches, case-insensitively.
+//	AUTH_VIEWER_ROLES, AUTH_ESCALATOR_ROLES,
+//	AUTH_ATTACHMENT_DOWNLOADER_ROLES, AUTH_USAGE_METRICS_VIEWER_ROLES,
+//	AUTH_SUPPORT_ENGINEER_ROLES, AUTH_ADMIN_ROLES, AUTH_TIMECARD_APPROVER_ROLES,
+//	AUTH_DASHBOARD_DESIGNER_ROLES
+//	    Each is a comma-separated list of role names; a caller whose token's
+//	    "roles" claim holds any one of them has that role.
+//
+// There is deliberately no default: role names are organisation vocabulary
+// that must not be committed here, the same reasoning CSM_TEAM_REGISTRY's own
+// lack of a default follows. A role whose variable is unset or empty is held by
+// nobody, and startup warns naming each one, since with none configured at all
+// nobody can use the portal.
+func loadAccessConfig() handler.AccessConfig {
+	var unset []string
+	roles := func(name string) []string {
+		configured := splitComma(os.Getenv(name))
+		if len(configured) == 0 {
+			unset = append(unset, name)
+		}
+		return configured
+	}
+	cfg := handler.AccessConfig{
+		Viewer:               roles("AUTH_VIEWER_ROLES"),
+		Escalator:            roles("AUTH_ESCALATOR_ROLES"),
+		AttachmentDownloader: roles("AUTH_ATTACHMENT_DOWNLOADER_ROLES"),
+		UsageMetricsViewer:   roles("AUTH_USAGE_METRICS_VIEWER_ROLES"),
+		// The env var name stays AUTH_SUPPORT_ENGINEER_ROLES even though the
+		// portal role itself was renamed to cs_engineer -- see
+		// handler.AccessConfig.CsEngineer's own doc comment for why.
+		CsEngineer:        roles("AUTH_SUPPORT_ENGINEER_ROLES"),
+		Admin:             roles("AUTH_ADMIN_ROLES"),
+		TimecardApprover:  roles("AUTH_TIMECARD_APPROVER_ROLES"),
+		DashboardDesigner: roles("AUTH_DASHBOARD_DESIGNER_ROLES"),
+	}
+	if len(unset) > 0 {
+		slog.Warn("access-control role variables are unset, so no token role grants them", "variables", unset)
+	}
+	return cfg
+}
+
+// loadAnnouncementExcludedProjectKeys resolves the "All customer projects"
+// announcement audience's mandatory excluded-project-key denylist from its
+// configuration form:
+//
+//	CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS  A comma-separated list of project
+//	                                         keys, whitespace around each
+//	                                         entry trimmed. AnnouncementHandler
+//	                                         injects this list into every
+//	                                         POST /announcements/audience/search
+//	                                         call unconditionally — the
+//	                                         caller cannot opt out — mirroring
+//	                                         the real ServiceNow flow this
+//	                                         replaces, whose own "Create
+//	                                         announcement for customers" flow
+//	                                         hardcodes an equivalent Project
+//	                                         Key exclusion with no way for
+//	                                         whoever triggers it to opt out.
 //
 // Unlike directory.DefaultRoles, this deliberately has no committed default:
-// email addresses are organisation-specific data, not generic platform
-// vocabulary, so there is nothing safe to commit -- the same reasoning
+// project keys are organisation-specific data, not generic platform
+// vocabulary, so there is nothing safe to commit — the same reasoning
 // CSM_TEAM_REGISTRY's own lack of a default follows. An unset or empty value
-// yields an empty set, so behavior is unchanged from before this flag
-// existed: nobody gets the extra role.
+// yields no exclusions, so a deployment that has not configured this yet
+// still starts and simply excludes nothing extra.
+func loadAnnouncementExcludedProjectKeys() []string {
+	keys := splitComma(os.Getenv("CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS"))
+	slog.Info("resolved announcement excluded-project-key list", "count", len(keys))
+	return keys
+}
+
+// customerEntityDataSourcePostgres and customerEntityDataSourceServiceNow
+// mirror entity-service's own DATA_SOURCE values exactly (see
+// entity-service/internal/config/config.go's DataSource type) — this is not
+// an independent enum, it describes a property of the entity service this
+// backend is paired with.
+const (
+	customerEntityDataSourcePostgres   = "postgres"
+	customerEntityDataSourceServiceNow = "servicenow"
+)
+
+// validateCustomerEntityDataSource is the pure check behind
+// loadCustomerEntityDataSource: v (already lowercased/trimmed) must be
+// "postgres" or "servicenow".
+func validateCustomerEntityDataSource(v string) error {
+	if v != customerEntityDataSourcePostgres && v != customerEntityDataSourceServiceNow {
+		return fmt.Errorf("CUSTOMER_ENTITY_DATA_SOURCE must be %q or %q, got %q",
+			customerEntityDataSourcePostgres, customerEntityDataSourceServiceNow, v)
+	}
+	return nil
+}
+
+// loadCustomerEntityDataSource resolves which data source the paired
+// entity-service instance is configured with, from CUSTOMER_ENTITY_DATA_SOURCE
+// ("postgres" or "servicenow"). Defaults to "servicenow" when unset — the
+// data source every existing deployment has always effectively used, since
+// nothing here read this before now.
 //
-// A duplicate entry is silently deduplicated rather than treated as a
-// startup error, unlike ParseRoles' handling of a duplicate role name: a
-// human-maintained email list is far more likely to pick up an accidental
-// duplicate than a typo'd role name is, and failing the whole deploy over
-// that would be disproportionate.
-func loadDashboardDesignerEmails() map[string]struct{} {
-	emails := splitComma(os.Getenv("DASHBOARD_DESIGNER_EMAILS"))
-	if len(emails) == 0 {
-		return nil
+// This exists purely so checkAnnouncementDataSourceCompatibility (see below)
+// can catch a specific, otherwise-silent misconfiguration at startup:
+// entity-service's Postgres-backed project search rejects
+// excludeClosureStates/excludeSubscriptionTypes/excludeProjectKeys outright
+// (see entity-service/internal/service/project_service.go), so a deployment
+// with both DATA_SOURCE=postgres on entity-service and a non-empty
+// CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS here would have every "All customer
+// projects" audience search fail with a 400 — every time, with no caller
+// action able to avoid it, since the mandatory denylist is injected
+// unconditionally. Exits the process on an unrecognized value, same as any
+// other malformed required config in this file.
+func loadCustomerEntityDataSource() string {
+	v := strings.ToLower(strings.TrimSpace(envOrDefault("CUSTOMER_ENTITY_DATA_SOURCE", customerEntityDataSourceServiceNow)))
+	if err := validateCustomerEntityDataSource(v); err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
-	set := make(map[string]struct{}, len(emails))
-	for _, e := range emails {
-		set[strings.ToLower(e)] = struct{}{}
+	slog.Info("resolved paired entity-service data source", "dataSource", v)
+	return v
+}
+
+// checkAnnouncementDataSourceCompatibility is the pure check behind
+// validateAnnouncementDataSourceCompatibility: non-nil exactly when the
+// announcement audience-search feature is configured in a way it can never
+// actually serve — a mandatory excluded-project-key denylist with no way to
+// enforce it. See loadCustomerEntityDataSource's doc comment for why this
+// specific combination is unserviceable rather than merely degraded.
+func checkAnnouncementDataSourceCompatibility(dataSource string, excludedProjectKeys []string) error {
+	if dataSource == customerEntityDataSourcePostgres && len(excludedProjectKeys) > 0 {
+		return fmt.Errorf(
+			"CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS is set (%d keys) but the paired entity-service runs "+
+				"DATA_SOURCE=postgres, which does not support excludeProjectKeys — every announcement audience "+
+				"search would fail. Either unset CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS, or point "+
+				"CUSTOMER_ENTITY_DATA_SOURCE at a servicenow-backed entity-service instance",
+			len(excludedProjectKeys),
+		)
 	}
-	return set
+	return nil
+}
+
+// validateAnnouncementDataSourceCompatibility exits the process if
+// checkAnnouncementDataSourceCompatibility finds a problem.
+//
+// This is deliberately a hard startup failure, not a runtime fallback that
+// silently stops enforcing the denylist when it can't be sent — the whole
+// point of CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS is that an "All customer
+// projects" send must never reach those projects; quietly omitting the
+// filter so the request merely succeeds would defeat that guarantee instead
+// of failing loudly the one time it's actually needed.
+func validateAnnouncementDataSourceCompatibility(dataSource string, excludedProjectKeys []string) {
+	if err := checkAnnouncementDataSourceCompatibility(dataSource, excludedProjectKeys); err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
 }
 
 // loadSftpgoConfig resolves the SFTPGo-backed attachment-storage feature
@@ -624,6 +837,17 @@ func loadSftpgoConfig() (bool, sftpgo.Config) {
 // internal/sftpgo.Client.PublicShareURL), so a non-HTTPS or spoofed-looking
 // value here is a credential-leak/MITM risk, not just a misconfiguration —
 // refuse to start rather than proceed with it.
+// mustHTTPSBaseURL is mustHTTPSURL for a base URL that may carry a path; see
+// validateHTTPSBaseURL. Used for upstream services the backend authenticates to
+// with an OAuth2 client, whose token and requests must not travel in cleartext.
+func mustHTTPSBaseURL(key, value string) string {
+	if err := validateHTTPSBaseURL(value); err != nil {
+		slog.Error("invalid environment variable", "key", key, "err", err)
+		os.Exit(1)
+	}
+	return value
+}
+
 func mustHTTPSURL(key, value string) string {
 	if err := validateHTTPSURL(value); err != nil {
 		// Deliberately omit the raw value from this log line: it may carry
@@ -645,6 +869,18 @@ func mustHTTPSURL(key, value string) string {
 // (e.g. "https://host/api") would silently double up into
 // "https://host/api/api/v2/user/token" rather than erroring.
 func validateHTTPSURL(value string) error {
+	return validateSecureURL(value, false)
+}
+
+// validateHTTPSBaseURL is validateHTTPSURL for a base URL that API paths are
+// appended to and that may itself sit under a path (a gateway-hosted service
+// such as "https://host/org/service/v1.0"): the same https, host, userinfo,
+// query and fragment rules, but a path is allowed.
+func validateHTTPSBaseURL(value string) error {
+	return validateSecureURL(value, true)
+}
+
+func validateSecureURL(value string, allowPath bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return fmt.Errorf("not a valid URL: %w", err)
@@ -658,7 +894,7 @@ func validateHTTPSURL(value string) error {
 	if parsed.User != nil {
 		return errors.New("must not contain embedded userinfo (e.g. \"https://user:pass@host/...\")")
 	}
-	if path := parsed.EscapedPath(); path != "" && path != "/" {
+	if path := parsed.EscapedPath(); !allowPath && path != "" && path != "/" {
 		return fmt.Errorf("must not include a path (got %q); this value is concatenated with API paths, e.g. \"https://host\" not \"https://host/api\"", path)
 	}
 	if parsed.RawQuery != "" {

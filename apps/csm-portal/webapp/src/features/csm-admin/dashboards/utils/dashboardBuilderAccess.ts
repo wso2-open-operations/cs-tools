@@ -23,10 +23,10 @@
 const ADMIN_ROLE_KEY = "admin";
 
 /**
- * A narrower, dashboard-builder-only role key. The backend appends this to
- * `GET /users/me`'s `roles` for individual users on a configurable email
- * allowlist (`DASHBOARD_DESIGNER_EMAILS`), alongside whatever other roles
- * (possibly none) they already hold — this lets specific non-admin users
+ * A narrower, dashboard-builder-only role key. The backend includes this in
+ * `GET /users/me`'s `roles` for users whose token carries the configured
+ * dashboard-designer role (`AUTH_DASHBOARD_DESIGNER_ROLES`), alongside
+ * whatever other roles they hold — this lets specific non-admin users
  * design dashboards without granting them the full `admin` role. Matched
  * case-insensitively, same as `ADMIN_ROLE_KEY`.
  */
@@ -35,7 +35,7 @@ const DASHBOARD_DESIGNER_ROLE_KEY = "dashboard_designer";
 /**
  * True when the given `GET /users/me` roles grant dashboard-builder access:
  * either the full platform `admin` role, or the narrower `dashboard_designer`
- * role (backend-allowlisted per email for dashboard-only access). Frontend
+ * role (granted per user by the backend for dashboard-only access). Frontend
  * -only gate for the dashboard builder (see `csmNavItems.ts`'s own comment
  * on `admin.dashboards`): unlike every other `/admin` tab, this one has no
  * privileged backend action to fall back on for enforcement — everything

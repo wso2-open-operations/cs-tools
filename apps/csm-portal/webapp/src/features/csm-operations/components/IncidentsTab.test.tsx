@@ -30,6 +30,15 @@ vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {},
   useBackendApi: () => ({ post: vi.fn() }),
 }));
+vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
+  useSavedFilterViews: () => ({
+    views: [],
+    isLoading: false,
+    saveFilterView: vi.fn(),
+    deleteFilterView: vi.fn(),
+    moveFilterView: vi.fn(),
+  }),
+}));
 
 vi.mock("@features/csm-operations/api/useSearchIncidents", () => ({
   useSearchIncidents: vi.fn(),
@@ -97,7 +106,7 @@ function mockResult(overrides: Partial<ReturnType<typeof useSearchIncidents>>): 
 
 beforeEach(() => {
   mockedUseSearch.mockReset();
-  window.localStorage.clear();
+  window.localStorage?.clear();
 });
 
 describe("IncidentsTab — list states", () => {

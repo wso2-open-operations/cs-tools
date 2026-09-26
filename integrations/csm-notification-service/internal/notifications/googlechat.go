@@ -134,6 +134,38 @@ func redactURLError(err error) error {
 // single card message: https://developers.google.com/chat/api/guides/message-formats/cards
 type chatCardMessage struct {
 	CardsV2 []chatCardWrapper `json:"cardsV2"`
+	// Thread groups this message into an existing Chat thread instead of
+	// posting a new top-level message -- see chatThreadKey's own doc
+	// comment. nil (omitempty) for every card that doesn't opt into
+	// threading.
+	Thread *chatThread `json:"thread,omitempty"`
+}
+
+// chatThread carries Google Chat's threadKey, which groups every message
+// sharing the same key into one conversation thread within the space. Only
+// SendCaseCreatedAlert/SendCaseAcknowledgedAlert set this today, so a case's
+// acknowledgment lands as a reply under its own case.created alert instead
+// of as a new top-level message -- explicit product request, since the two
+// are about the same case and read better grouped together.
+type chatThread struct {
+	ThreadKey string `json:"threadKey,omitempty"`
+}
+
+// chatThreadReplyOption must be appended as a query parameter (not a body
+// field) whenever a webhook POST sets chatThread.ThreadKey: Google Chat's
+// webhook endpoint otherwise ignores threadKey and always starts a new
+// thread. REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD replies into the thread if
+// one with this key already exists (the case.acknowledged alert, posted
+// after case.created), or starts one if this is the first message with
+// that key (case.created itself) -- see
+// https://developers.google.com/workspace/chat/format-structure-send-message#thread_a_message.
+const chatThreadReplyOption = "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+
+// chatThreadKey derives a stable Google Chat threadKey from a case's own
+// number -- already required/unique on every card that sets it, so no
+// separate case-id parameter is needed just for this.
+func chatThreadKey(caseNumber string) string {
+	return "case-" + caseNumber
 }
 
 type chatCardWrapper struct {
@@ -333,6 +365,7 @@ func (c *GoogleChatClient) SendCaseCreatedAlert(ctx context.Context, product, se
 				},
 			},
 		},
+		Thread: &chatThread{ThreadKey: chatThreadKey(caseNumber)},
 	}
 	return c.sendCard(ctx, product, msg)
 }
@@ -373,6 +406,12 @@ func (c *GoogleChatClient) SendSecurityReportAnalysisAlert(ctx context.Context, 
 				},
 			},
 		},
+		// A security_report_analysis case can still be acknowledged (see
+		// SendCaseAcknowledgedAlert's own doc comment) -- without this, its
+		// case.acknowledged alert would fall back to a new thread instead
+		// of replying to this creation alert, the same reasoning
+		// SendCaseCreatedAlert's own Thread field documents.
+		Thread: &chatThread{ThreadKey: chatThreadKey(caseNumber)},
 	}
 	return c.sendCard(ctx, product, msg)
 }
@@ -418,6 +457,7 @@ func (c *GoogleChatClient) SendCaseAcknowledgedAlert(ctx context.Context, produc
 				},
 			},
 		},
+		Thread: &chatThread{ThreadKey: chatThreadKey(caseNumber)},
 	}
 	return c.sendCard(ctx, product, msg)
 }
@@ -481,6 +521,20 @@ func (c *GoogleChatClient) sendCard(ctx context.Context, product string, msg cha
 		}
 		slog.WarnContext(ctx, "notifications: no google chat space configured for product; falling back to the default space", "product", product)
 		webhookURL = fallbackURL
+	}
+
+	// A threaded message needs chatThreadReplyOption as a query parameter,
+	// not just msg.Thread's own body field -- see that constant's own doc
+	// comment for why the webhook endpoint otherwise ignores threadKey.
+	if msg.Thread != nil && msg.Thread.ThreadKey != "" {
+		parsedURL, err := url.Parse(webhookURL)
+		if err != nil {
+			return fmt.Errorf("notifications: parse google chat webhook url: %w", redactURLError(err))
+		}
+		q := parsedURL.Query()
+		q.Set("messageReplyOption", chatThreadReplyOption)
+		parsedURL.RawQuery = q.Encode()
+		webhookURL = parsedURL.String()
 	}
 
 	body, err := json.Marshal(msg)

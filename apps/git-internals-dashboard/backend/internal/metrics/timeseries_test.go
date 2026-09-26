@@ -39,7 +39,7 @@ func TestBuildTimeseriesGroupByPriorityGapFillsAndPreseedsAllTiers(t *testing.T)
 	seedMetricsFixture(t, pool)
 	repoFilter := metricsFixtureRepo
 
-	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig, &repoFilter, 7, "priority", "violated")
+	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig, Filter{Repo: &repoFilter}, 7, "priority", "violated")
 	if err != nil {
 		t.Fatalf("BuildTimeseries: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestBuildTimeseriesMetricAtRisk(t *testing.T) {
 	seedMetricsFixture(t, pool)
 	repoFilter := metricsFixtureRepo
 
-	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig, &repoFilter, 7, "priority", "at_risk")
+	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig, Filter{Repo: &repoFilter}, 7, "priority", "at_risk")
 	if err != nil {
 		t.Fatalf("BuildTimeseries: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestBuildTimeseriesGroupByNoneUsesSingleAllSeries(t *testing.T) {
 	seedMetricsFixture(t, pool)
 	repoFilter := metricsFixtureRepo
 
-	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig, &repoFilter, 7, "none", "total")
+	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig, Filter{Repo: &repoFilter}, 7, "none", "total")
 	if err != nil {
 		t.Fatalf("BuildTimeseries: %v", err)
 	}
@@ -122,5 +122,75 @@ func TestBuildTimeseriesGroupByNoneUsesSingleAllSeries(t *testing.T) {
 	}
 	if ts.Series[0].Points[6] != 3 { // all 3 issues are tracked (priority IS NOT NULL)
 		t.Errorf("expected today's total=3, got %d", ts.Series[0].Points[6])
+	}
+}
+
+// TestBuildTimeseriesAbtTeamFilterNarrowsSeries verifies an abtTeam filter
+// narrows the series to that team's issues, leaving the same query
+// unfiltered as the baseline it must differ from.
+func TestBuildTimeseriesAbtTeamFilterNarrowsSeries(t *testing.T) {
+	pool := testPool(t)
+	seedAbtTeamFixture(t, pool)
+	ctx := context.Background()
+	repoFilter := abtFixtureRepo
+
+	// Unfiltered, the repo's P1 VIOLATED series counts both the Alpha issue
+	// and the team-less one.
+	all, err := BuildTimeseries(ctx, pool, metricsTestConfig, Filter{Repo: &repoFilter}, 7, "priority", "violated")
+	if err != nil {
+		t.Fatalf("BuildTimeseries: %v", err)
+	}
+	p1 := findSeries(all.Series, "Critical(P1)")
+	if p1 == nil || p1.Points[6] != 2 {
+		t.Fatalf("expected an unfiltered Critical(P1) violated today=2, got %+v", p1)
+	}
+
+	cases := []struct {
+		name  string
+		team  string
+		key   string
+		today int
+	}{
+		{name: "alpha owns one violated P1", team: abtTeamAlpha, key: "Critical(P1)", today: 1},
+		{name: "beta owns none", team: abtTeamBeta, key: "Critical(P1)", today: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			team := tc.team
+			ts, err := BuildTimeseries(ctx, pool, metricsTestConfig,
+				Filter{Repo: &repoFilter, AbtTeam: &team}, 7, "priority", "violated")
+			if err != nil {
+				t.Fatalf("BuildTimeseries: %v", err)
+			}
+			s := findSeries(ts.Series, tc.key)
+			if s == nil {
+				t.Fatalf("expected a %s series, got %+v", tc.key, ts.Series)
+			}
+			if s.Points[6] != tc.today {
+				t.Errorf("expected today's %s violated=%d for %s, got %d", tc.key, tc.today, tc.team, s.Points[6])
+			}
+		})
+	}
+}
+
+// TestBuildTimeseriesAbtTeamFilterAppliesToGroupByNone verifies the abtTeam
+// filter reaches the ungrouped "all" series too, where the metric counts
+// every tracked issue rather than one sla_state.
+func TestBuildTimeseriesAbtTeamFilterAppliesToGroupByNone(t *testing.T) {
+	pool := testPool(t)
+	seedAbtTeamFixture(t, pool)
+	repoFilter := abtFixtureRepo
+	team := abtTeamAlpha
+
+	ts, err := BuildTimeseries(context.Background(), pool, metricsTestConfig,
+		Filter{Repo: &repoFilter, AbtTeam: &team}, 7, "none", "total")
+	if err != nil {
+		t.Fatalf("BuildTimeseries: %v", err)
+	}
+	if len(ts.Series) != 1 || ts.Series[0].Key != "all" {
+		t.Fatalf("expected a single 'all' series, got %+v", ts.Series)
+	}
+	if ts.Series[0].Points[6] != 2 { // Alpha's 2 tracked open issues
+		t.Errorf("expected today's total=2 for %s, got %d", team, ts.Series[0].Points[6])
 	}
 }

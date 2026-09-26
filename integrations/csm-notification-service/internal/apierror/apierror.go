@@ -28,5 +28,8 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("upstream returned %d", e.StatusCode)
+	}
 	return fmt.Sprintf("upstream returned %d: %s", e.StatusCode, e.Body)
 }

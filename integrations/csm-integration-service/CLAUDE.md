@@ -1,7 +1,7 @@
 # CSM Integration Service
 
 Go HTTP server (`net/http`, Go 1.26+) exposing Project/Account search and their
-Contacts sub-resource, a subset of Case operations, incident creation and
+Contacts sub-resource, plus a subset of Case operations, incident creation and
 search, and alert-incident mapping create/lookup, to third-party (M2M)
 consumers. It forwards requests to the entity service and returns responses
 as-is — it does not shape or authenticate on behalf of an end user.
@@ -34,9 +34,14 @@ holds — see git history for the removal if context is needed.
 
 Practical implication: this service can only ever serve entity-service data that
 doesn't require a forwarded user identity (Postgres-backed operations). Any
-operation that can reach a ServiceNow-backed entity-service operation will
-**always** get a mapped 401 from `mapUpstreamError` — not conditionally, always,
-since there is no longer any path for a user token to reach entity-service.
+operation that can reach a ServiceNow-backed entity-service operation that
+*strictly requires* a forwarded user identity will get a mapped 401 from
+`mapUpstreamError` unconditionally, since there is no longer any path for a
+user token to reach entity-service. **`POST /incidents`/`POST /incidents/search`
+are a documented exception to this** — see their own paragraph below — because
+their underlying ServiceNow operation has a separately-configured M2M
+credential fallback, so it doesn't strictly require a forwarded user token the
+way `UpdateProject` and `CreateCaseComment` do.
 
 **`PATCH /projects/{id}` (`UpdateProject`) is kept despite this — deliberately, not
 by oversight.** It was added for the Account Closure Process (ACP) automation, but
@@ -48,25 +53,58 @@ completeness (a real caller has somewhere to point at, and the shape of the
 request/response is documented and stable), not because it works today.
 
 **`POST /incidents` (`CreateIncident`) and `POST /incidents/search`
-(`SearchIncidents`) are in the same state, for the same reason.** Both proxy
-entity-service incident operations that are ServiceNow-backed and also require a
-forwarded end-user identity token. This service cannot supply one, so **every call
-to either endpoint currently receives a mapped 401 from `mapUpstreamError`,
-unconditionally** — same as `UpdateProject` above. They're kept for API-shape
-completeness so a real third-party caller has a stable, documented place to point
-at once the identity-forwarding groundwork (see the paragraph above) exists, not
-because they work today.
+(`SearchIncidents`) are NOT in the same "always 401" state as `UpdateProject`,
+despite proxying ServiceNow-backed entity-service incident operations.** Their
+underlying ServiceNow layer has a deliberate fallback: when no end-user identity
+token is forwarded, it uses a separately-configured M2M ServiceNow credential
+instead of erroring, and only 401s if that fallback credential is itself
+unconfigured in the target environment. A live end-to-end call through this
+exact path against `wso2sndev` on 2026-09-20 succeeded with no 401, creating a
+real incident (`INC0096966`). So whether these two endpoints 401 depends on the
+target ServiceNow environment's M2M credential configuration — it is not an
+unconditional consequence of this service being M2M-only. Treat a 401 from
+either endpoint as a possible, retryable outcome (see
+`internal/csmclient/incidents.go`'s doc comment in `sre-alert-ingestion-service`
+for the caller-side reasoning), not as proof the endpoint is permanently broken.
 
-Confirmed directly from the owning team's internal issue (written by the
-engineer who built this): the full HTTP path was "deferred pending a captured
-end-user token" even in the original implementation — there is no existing
-service/system identity anywhere in this stack that this endpoint, or ACP, could
-use instead. Making this endpoint actually succeed requires either (a) a
-dedicated ServiceNow/Asgardeo service account provisioned and wired into
-entity-service as a fallback identity, or (b) ACP reaching entity-service through
-some other path with its own credential. Neither is solved by this service's own
-code — don't attempt to "fix" this endpoint locally without that groundwork
-existing first.
+**`POST /services/search` (`SearchITServices`) uses this exact same
+M2M-fallback mechanism** — it proxies a ServiceNow-backed entity-service CMDB
+IT-service search operation, confirmed to go through the identical code path
+as `CreateIncident`/`SearchIncidents` above. It works over M2M the same way
+those two now do: a 401 is possible if the target environment's M2M
+ServiceNow credential isn't configured, but that is not unconditional. This
+endpoint backs `sre-alert-ingestion-service`'s live service-UUID resolution
+fallback (see that service's own CLAUDE.md) — a static label-to-UUID map is
+consulted first, synchronously, before an alert is ever buffered; this
+endpoint is only called, at delivery-attempt time, for a label the static map
+doesn't cover.
+
+**`PATCH /incidents/{id}` (`PatchIncident`) uses this exact same M2M-fallback
+mechanism as `CreateIncident`/`SearchIncidents`/`SearchITServices` above — but
+unlike `PATCH /cases/{id}` below, it has no Postgres-data-source path at
+all.** On `DATA_SOURCE=postgres`, entity-service's `incidentService.UpdateIncident`
+unconditionally returns a 503 (not supported on this data source yet — several
+fields have no backing Postgres column, and others would need comment-table
+side effects not implemented there); there is no field combination that
+succeeds. On `DATA_SOURCE=servicenow`, it goes through the identical
+M2M-credential-fallback code path as the other three endpoints above: a 401
+is possible if the target environment's M2M ServiceNow credential isn't
+configured, but not unconditional. **Do not describe this endpoint as "always
+401" (that's `UpdateProject`'s situation) or as a field-dependent partial
+exception like `PATCH /cases/{id}` (that endpoint's Postgres path narrows to
+specific fields instead of failing outright) — its actual behavior is
+"unconditionally ServiceNow-backed, no Postgres fallback, M2M-credential-
+dependent on that data source."** Added for `sre-alert-ingestion-service`'s
+group-attach work-note push (see that service's own CLAUDE.md): when it
+attaches a new alert to an already-existing incident instead of creating one,
+it pushes a work note summarizing the new alert via this endpoint —
+best-effort, non-blocking, matching that service's existing failure-tolerance
+conventions.
+
+The "deferred pending a captured end-user token" history below (from the owning
+team's internal issue, written by the engineer who built the ACP path) describes
+`UpdateProject`'s situation specifically — that endpoint's ServiceNow operation
+has no equivalent M2M fallback, so it remains unconditionally 401 as described.
 
 **`PATCH /cases/{id}` (`PatchCase`) is a partial exception to "always 401" —
 know the difference before assuming every writable endpoint here behaves like
@@ -102,17 +140,20 @@ same API-shape-completeness reason as `UpdateProject`.
 
 ## `POST /alert-incident-mappings` and `POST /alert-incident-mappings/lookup` are functional today
 
-**Unlike `POST /incidents`, `POST /incidents/search`, and `PATCH /projects/{id}`
-above, these two endpoints are NOT stuck in an always-401 state.** They proxy
-a Postgres-only entity-service operation with no ServiceNow dependency, so no
-forwarded end-user identity is required — this service's M2M-only identity to
-entity-service is sufficient on its own. A caller through Choreo's gateway can
-expect a real `201`/`200` from these today, not a guaranteed `401`. Don't
-assume every endpoint in this service is in the "kept for API-shape
-completeness, doesn't work yet" state described above — check whether the
-underlying entity-service operation is ServiceNow-backed (needs a forwarded
-identity, will 401 here) or Postgres-only (works fine over M2M) before
-documenting a new endpoint one way or the other.
+**Unlike `PATCH /projects/{id}` above, these two endpoints are NOT stuck in an
+always-401 state.** They proxy a Postgres-only entity-service operation with no
+ServiceNow dependency, so no forwarded end-user identity is required — this
+service's M2M-only identity to entity-service is sufficient on its own. A
+caller through Choreo's gateway can expect a real `201`/`200` from these today,
+not a guaranteed `401`. (`POST /incidents` and `POST /incidents/search` are
+also not guaranteed-401 — see their own paragraph above — but unlike these two,
+their success still depends on the target ServiceNow environment's M2M
+credential being configured.) Don't assume every endpoint in this service is in
+the "kept for API-shape completeness, doesn't work yet" state described above —
+check whether the underlying entity-service operation is ServiceNow-backed
+(needs either a forwarded identity or a configured M2M fallback) or
+Postgres-only (works fine over M2M unconditionally) before documenting a new
+endpoint one way or the other.
 
 ## Middleware chain
 
@@ -139,7 +180,7 @@ handler so every `slog.*Context(r.Context(), …)` call automatically includes
 
 | Package | Upstream | Notes |
 |---------|----------|-------|
-| `entity` | Entity service | Account/Project + Contacts sub-resource, Case (patch + comment create), Opportunity/Invoice/ProjectOpportunityLink (read-only), incident creation/search, alert-incident mapping create/lookup; raw `[]byte` passthrough |
+| `entity` | Entity service | Account/Project + Contacts sub-resource, Case (patch + comment create), Opportunity/Invoice/ProjectOpportunityLink (read-only), incident creation/search/update, alert-incident mapping create/lookup; raw `[]byte` passthrough |
 
 A new upstream service would get its own package under `internal/`, following the
 same `Config`/`Client`/`NewClient`/`do()` pattern as `internal/entity`.

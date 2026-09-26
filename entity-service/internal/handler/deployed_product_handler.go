@@ -50,6 +50,21 @@ func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// SearchProjectsByProductVersion handles POST /deployed-products/projects/search.
+func (h *DeployedProductHandler) SearchProjectsByProductVersion(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchProjectsByProductVersionRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchProjectsByProductVersion(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // CreateDeployedProduct handles POST /deployed-products.
 func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateDeployedProductRequest

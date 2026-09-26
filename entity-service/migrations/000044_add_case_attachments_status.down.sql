@@ -14,5 +14,5 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
-DROP INDEX IF EXISTS idx_case_attachments_status_created;
-ALTER TABLE case_attachments DROP COLUMN IF EXISTS status;
+DROP INDEX IF EXISTS idx_case_attachment_status_created;
+ALTER TABLE case_attachment DROP COLUMN IF EXISTS status;

@@ -43,7 +43,6 @@ import {
   readIncidentFiltersFromUrl,
   writeIncidentFiltersToUrl,
 } from "@features/csm-operations/utils/incidentsFiltersUrl";
-import { incidentsSavedViews } from "@features/csm-operations/utils/incidentsSavedViews";
 import IncidentProductMultiSelect from "@features/csm-operations/components/IncidentProductMultiSelect";
 import SavedViewsMenu from "@features/csm-operations/components/SavedViewsMenu";
 import MultiSelectField from "@components/MultiSelectField";
@@ -216,7 +215,7 @@ export default function IncidentsFilterBar({
           activeCount={activeCount}
           hasSearch={filters.search.trim().length > 0}
           onApply={(qs) => onChange(readIncidentFiltersFromUrl(new URLSearchParams(qs)))}
-          store={incidentsSavedViews}
+          listKey="incidents"
         />
 
         <Button

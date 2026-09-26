@@ -15,11 +15,15 @@
 // under the License.
 
 import { Box, Stack, Typography } from "@wso2/oxygen-ui";
-import { type JSX } from "react";
+import { type JSX, type ReactNode } from "react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 
 export interface EmptyStateProps {
   description: string;
+  /** Optional second line, rendered below the description in a more muted tone. */
+  secondaryDescription?: string;
+  /** Optional call-to-action (e.g. a Button) rendered below the description. */
+  action?: ReactNode;
 }
 
 /**
@@ -30,6 +34,8 @@ export interface EmptyStateProps {
  */
 export default function EmptyState({
   description,
+  secondaryDescription,
+  action,
 }: EmptyStateProps): JSX.Element {
   return (
     <Stack
@@ -48,9 +54,21 @@ export default function EmptyState({
       >
         <EmptyIcon />
       </Box>
-      <Typography variant="body2" color="text.secondary">
-        {description}
-      </Typography>
+      <Stack spacing={0.5} alignItems="center">
+        <Typography variant="body2" color="text.secondary" textAlign="center">
+          {description}
+        </Typography>
+        {secondaryDescription && (
+          <Typography variant="caption" color="text.disabled" textAlign="center">
+            {secondaryDescription}
+          </Typography>
+        )}
+      </Stack>
+      {action && (
+        <Box sx={{ display: "flex", justifyContent: "center", mt: 1 }}>
+          {action}
+        </Box>
+      )}
     </Stack>
   );
 }

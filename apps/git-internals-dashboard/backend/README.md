@@ -72,7 +72,7 @@ Copy `.env.example` to `.env` and fill in the values.
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres DSN. Local default `postgres://gid:gid@localhost:5433/gid?sslmode=disable`. |
 | `PORT` | no (default `8080`) | HTTP listen port. |
-| `GITHUB_TOKEN` | no | Fine-grained PAT (`Issues:Read` + `Projects:Read`). Used by on-demand titles, incremental sync, and the real-GitHub seed. Unset ⇒ titles resolve to `null`, `POST /sync/runs` returns `sync_token_missing`, seed falls back to synthetic fixtures. |
+| `GITHUB_TOKEN` | no | Fine-grained PAT (`Issues:Read` + `Projects:Read`). Used by incremental sync (`POST /sync/runs`), the real-GitHub seed (`cmd/seed`), and the metadata backfill (`cmd/backfill-meta`). Unset ⇒ `POST /sync/runs` returns `sync_token_missing`, seed falls back to synthetic fixtures, and backfill-meta fails immediately (it has no synthetic mode). |
 | `CORS_ALLOWED_ORIGINS` | no | Comma-separated Origin allow-list. Empty ⇒ no cross-origin browser request allowed (fail closed). Local dev: `http://localhost:5173`. |
 | `RECOMPUTE_ENABLED` | no (default on) | `0` disables the recompute scheduler (tests/CI). |
 | `SLA_CONFIG_PATH` | no | Override config path (default `config/sla-config.yaml`). |
@@ -191,7 +191,8 @@ database and changes on its own cadence (per environment, per load profile).
 backend/
 ├── cmd/
 │   ├── server/main.go       # Entry point — routes + server startup
-│   └── seed/main.go         # Synthetic or real-GitHub seed data
+│   ├── seed/main.go         # Synthetic or real-GitHub seed data
+│   └── backfill-meta/main.go  # One-time backfill of title/abtTeam/openedBy for existing rows
 ├── internal/
 │   ├── apierror/            # {"error":{"code","message"}} envelope + write helpers
 │   ├── middleware/           # logger.go, recovery.go, cors.go, headers.go
@@ -199,13 +200,13 @@ backend/
 │   ├── appconfig/              # app-config.yaml load + validate (operational tuning)
 │   ├── db/                     # pgxpool init, config-sync
 │   ├── sla/                     # Pure SLA engine — no I/O
-│   ├── github/                   # GraphQL client: search, issue detail, titles
+│   ├── github/                   # GraphQL client: search, issue detail
 │   ├── ingest/                     # normalize.go, ingest.go — the single write path for GitHub-derived data
 │   ├── sync/                        # Incremental GitHub fetch + ingest, per-repo watermarks
 │   ├── jobs/                          # lock.go (advisory lock), scheduler.go (recompute tick)
 │   ├── metrics/                        # ttlcache.go, overview.go, timeseries.go
 │   ├── taxonomy/                        # Config-driven status taxonomy helpers
-│   └── handler/                          # issues.go, taxonomy.go, metrics.go, sync.go, titles.go
+│   └── handler/                          # issues.go, taxonomy.go, metrics.go, sync.go
 ├── migrations/                # golang-migrate SQL migrations
 ├── config/
 │   ├── sla-config.yaml         # SLA domain config: repos, taxonomy, budgets
@@ -220,7 +221,6 @@ backend/
 - `GET /taxonomy` — Get the configured status taxonomy
 - `GET /issues` — List issues
 - `GET /issues/{id}` — Get issue by ID
-- `POST /issues/titles` — Resolve issue titles live from GitHub (never persisted)
 - `GET /metrics/overview` — Aggregate SLA/volume overview
 - `GET /metrics/timeseries` — SLA/volume trend over time
 - `POST /sync/runs` — Trigger an incremental GitHub sync
@@ -241,10 +241,10 @@ See `openapi.yaml` for the full request/response contract.
 
 ## Privacy
 
-No issue titles, labels, assignees, openers, or event actors are ever persisted to the database
-or returned by any endpoint except `POST /issues/titles` (fetched live from GitHub, cached in
-memory only). Labels are read transiently during ingest solely to derive an issue's priority,
-then discarded.
+Persisted: issue title, ABT team, and opened-by (only a `@wso2.com` address), as approved by
+Security. The issue body is read transiently during ingest solely to derive ABT team and
+opened-by, then discarded. Labels are read transiently to derive priority, then discarded.
+Assignees and status-event actors are never fetched or stored.
 
 ## Deploying
 
@@ -255,3 +255,20 @@ server startup:
 ```bash
 migrate -path migrations -database "$DATABASE_URL" up
 ```
+
+### Backfilling issue metadata
+
+After deploying a release that adds new issue metadata columns, run the backfill once so
+existing rows pick up the new values:
+
+```bash
+GITHUB_TOKEN=... DATABASE_URL=... make backfill-meta
+```
+
+It only updates existing rows (never inserts, never touches SLA history) and is safe to
+re-run.
+
+The backfill only reaches issues within the search lookback window
+(`settings.seedClosedLookbackDays`); issues closed longer ago than that keep `NULL`
+title/abt_team/opened_by permanently unless the lookback setting is widened, but since
+they're closed, the default open-only views never show them anyway.

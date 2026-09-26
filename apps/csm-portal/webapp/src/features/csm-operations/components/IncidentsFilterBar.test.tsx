@@ -46,6 +46,15 @@ const useTeamsMock = vi.fn(() => ({
 vi.mock("@features/csm-dashboard/api/useTeams", () => ({
   useTeams: () => useTeamsMock(),
 }));
+vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
+  useSavedFilterViews: () => ({
+    views: [],
+    isLoading: false,
+    saveFilterView: vi.fn(),
+    deleteFilterView: vi.fn(),
+    moveFilterView: vi.fn(),
+  }),
+}));
 
 /**
  * Render the filter bar over `DEFAULT_INCIDENT_FILTERS` with the given prop

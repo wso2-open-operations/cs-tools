@@ -168,6 +168,139 @@ func TestCreateIncident_ForwardsCorrelationID(t *testing.T) {
 	}
 }
 
+func TestUpdateIncident_Success(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody updateIncidentRequest
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"updated","incident":{"id":"inc-1"}}`))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := newClient(Config{BaseURL: upstream.URL, TokenURL: tokenSrv.URL, ClientID: "id", ClientSecret: "secret"}, true)
+
+	if err := client.UpdateIncident(context.Background(), "inc-1", "this condition fired again"); err != nil {
+		t.Fatalf("UpdateIncident() error = %v, want nil", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/incidents/inc-1" {
+		t.Errorf("request = %s %s, want PATCH /incidents/inc-1", gotMethod, gotPath)
+	}
+	if gotBody.WorkNotes != "this condition fired again" {
+		t.Errorf("request body WorkNotes = %q, want %q", gotBody.WorkNotes, "this condition fired again")
+	}
+}
+
+// TestUpdateIncident_PathEscapesIncidentID confirms a delimiter- or
+// reserved-character-bearing incidentID cannot smuggle extra path segments
+// into the request — the id is always sent as csm-integration-service
+// itself returned it (a CMDB/ServiceNow sys_id), but PathEscape is applied
+// unconditionally rather than trusting that shape.
+func TestUpdateIncident_PathEscapesIncidentID(t *testing.T) {
+	var gotEscapedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// r.URL.Path is net/http's already-decoded form ("/incidents/inc/1"
+		// either way) — EscapedPath() is what actually went out on the wire,
+		// which is what this test needs to distinguish "id sent as one
+		// escaped segment" from "id sent as two path segments".
+		gotEscapedPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"updated","incident":{"id":"inc-1"}}`))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := newClient(Config{BaseURL: upstream.URL, TokenURL: tokenSrv.URL, ClientID: "id", ClientSecret: "secret"}, true)
+
+	if err := client.UpdateIncident(context.Background(), "inc/1", "note"); err != nil {
+		t.Fatalf("UpdateIncident() error = %v, want nil", err)
+	}
+	if gotEscapedPath != "/incidents/inc%2F1" {
+		t.Errorf("request escaped path = %q, want the escaped %q", gotEscapedPath, "/incidents/inc%2F1")
+	}
+}
+
+func TestUpdateIncident_401IsAReturnedAPIError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"Missing or invalid user ID token header."}`))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := newClient(Config{BaseURL: upstream.URL, TokenURL: tokenSrv.URL, ClientID: "id", ClientSecret: "secret"}, true)
+
+	err := client.UpdateIncident(context.Background(), "inc-1", "note")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *apierror.Error", err)
+	}
+	if apiErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+// TestUpdateIncident_503IsAReturnedAPIError pins the Postgres-data-source
+// case (csm-integration-service's own CLAUDE.md: this endpoint has no
+// Postgres fallback path, unlike PATCH /cases/{id}) — a 503 from upstream
+// must surface as a typed error, not be swallowed.
+func TestUpdateIncident_503IsAReturnedAPIError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"message":"updating an incident is not available on this data source yet"}`))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := newClient(Config{BaseURL: upstream.URL, TokenURL: tokenSrv.URL, ClientID: "id", ClientSecret: "secret"}, true)
+
+	err := client.UpdateIncident(context.Background(), "inc-1", "note")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *apierror.Error", err)
+	}
+	if apiErr.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// TestNewClient_TokenFetchDoesNotFollowRedirects guards against the
+// client-credentials POST (ClientID/ClientSecret in the form body) being
+// resent to a redirect target: a 307/308 from the token endpoint must not
+// be followed.
+func TestNewClient_TokenFetchDoesNotFollowRedirects(t *testing.T) {
+	redirectTargetCalled := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectTargetCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"test-token","token_type":"bearer","expires_in":3600}`))
+	}))
+	defer target.Close()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer tokenSrv.Close()
+
+	client := newClient(Config{BaseURL: tokenSrv.URL, TokenURL: tokenSrv.URL + "/token", ClientID: "id", ClientSecret: "secret"}, true)
+	_, err := client.CreateIncident(context.Background(), CreateIncidentRequest{})
+	if err == nil {
+		t.Fatal("expected an error for an unfollowed token-endpoint redirect, got nil")
+	}
+	if redirectTargetCalled {
+		t.Error("client followed the redirect; ClientID/ClientSecret were resubmitted to the redirect target")
+	}
+}
+
 func TestTokenFetchTimeout(t *testing.T) {
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)

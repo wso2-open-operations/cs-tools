@@ -169,7 +169,16 @@ func (h *AIChatHandler) SearchConversations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	result, err := h.entity.SearchConversations(r.Context(), dto.BuildEntitySearchConversationsRequest(projectID, req))
+	entityReq, err := dto.BuildEntitySearchConversationsRequest(projectID, req)
+	if err != nil {
+		// A state id this backend cannot map is refused rather than answered.
+		// Dropping it would leave the search unfiltered, which returns every
+		// conversation in the project and looks like a working filter.
+		writeError(w, http.StatusBadRequest, "Unsupported conversation state filter.")
+		return
+	}
+
+	result, err := h.entity.SearchConversations(r.Context(), entityReq)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchConversations failed", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve conversations.")

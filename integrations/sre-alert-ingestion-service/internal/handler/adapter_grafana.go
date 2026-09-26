@@ -125,6 +125,16 @@ func renderGrafanaDescription(p grafanaPayload) string {
 // gets a 200 with a small acknowledgment body, never a 400 — see
 // mapGrafanaPayload's doc comment.
 func (h *AlertHandler) CreateAlertFromGrafana(w http.ResponseWriter, r *http.Request) {
+	// Checked first, before reading or parsing the body at all: this
+	// adapter's Source is the fixed literal "grafana", not derived from the
+	// payload, so authorization never depends on payload content. Doing
+	// this after the ignored-payload short-circuit below let a caller
+	// authenticated as a different source still get a 200 for a
+	// non-"alerting" state instead of the 403 the mismatch warrants.
+	if !h.requireAuthenticatedSource(w, r, "grafana") {
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {

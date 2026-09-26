@@ -19,13 +19,16 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,6 +43,17 @@ import (
 )
 
 func main() {
+	// "gen-basic-auth-hash" is a one-shot local CLI subcommand (not the
+	// server), invoked as `go run . gen-basic-auth-hash` — see
+	// genBasicAuthHash's doc comment. Dispatched before loadDotEnv/
+	// ConfigureLogger since it needs neither: no server config, no logger,
+	// no CSM/database env vars — those are mustEnv'd below and would fail
+	// startup for a caller who only wants a password hash.
+	if len(os.Args) > 1 && os.Args[1] == "gen-basic-auth-hash" {
+		genBasicAuthHash()
+		return
+	}
+
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
 
@@ -102,25 +116,66 @@ func main() {
 		"SRE Alert Ingestion Service: incident delivery to CSM has been failing",
 	)
 
+	// PollInterval feeds time.NewTicker, which panics for a non-positive
+	// duration — validated here instead of letting a misconfigured
+	// SRE_ALERT_POLL_INTERVAL_SECONDS=0 (or negative) crash the worker
+	// goroutine after startup.
+	pollIntervalSeconds := envInt("SRE_ALERT_POLL_INTERVAL_SECONDS", 15)
+	if pollIntervalSeconds <= 0 {
+		slog.Error("SRE_ALERT_POLL_INTERVAL_SECONDS must be greater than zero", "value", pollIntervalSeconds)
+		os.Exit(1)
+	}
+
+	// UnknownServiceID: a real, operator-provisioned CMDB "Unclassified"
+	// service UUID. Required config, mustEnv'd the same way SRE_ALERT_CALLER_ID
+	// is below — see worker.Config.UnknownServiceID's doc comment for why
+	// this is unconditional rather than optional-with-a-fallback: a
+	// deployment whose SRE_ALERT_SERVICE_MAP already covers every label it
+	// sends can just set this once and never see it used. Validated as a
+	// real UUID here, not left to fail downstream: an invalid value here
+	// would otherwise only surface once resolveServiceID's zero-result
+	// fallback actually fires, as a 400 from entity-service's own
+	// validateUUIDs — a permanent (non-retryable) delivery failure per
+	// worker.isRetryable, not a clean startup error.
+	unknownServiceID := mustEnv("SRE_ALERT_UNKNOWN_SERVICE_ID")
+	if !isCanonicalUUID(unknownServiceID) {
+		slog.Error("SRE_ALERT_UNKNOWN_SERVICE_ID must be a UUID", "value", unknownServiceID)
+		os.Exit(1)
+	}
+
 	w := worker.New(dbStore, csmClient, escalator, worker.Config{
-		MaxRetries:   envInt("SRE_ALERT_MAX_RETRIES", 3),
-		PollInterval: time.Duration(envInt("SRE_ALERT_POLL_INTERVAL_SECONDS", 15)) * time.Second,
-		GroupWindow:  time.Duration(envInt("SRE_ALERT_GROUP_WINDOW_MINUTES", 15)) * time.Minute,
+		MaxRetries:       envInt("SRE_ALERT_MAX_RETRIES", 3),
+		PollInterval:     time.Duration(pollIntervalSeconds) * time.Second,
+		GroupWindow:      time.Duration(envInt("SRE_ALERT_GROUP_WINDOW_MINUTES", 15)) * time.Minute,
+		UnknownServiceID: unknownServiceID,
 	})
 
 	// callerID: a real, operator-provisioned CSM user id. CSM has no
 	// "system"/machine-caller concept today, so this is required config,
 	// never guessed here — see handler.AlertHandler's doc comment and this
 	// service's README/CLAUDE.md.
-	alertHandler := handler.NewAlertHandler(dbStore, mustEnv("SRE_ALERT_CALLER_ID"))
+	//
+	// serviceMap: the static, exact-match Service-label -> CMDB service UUID
+	// table (SRE_ALERT_SERVICE_MAP), parsed once here at startup — never
+	// re-parsed per request. Optional: unset/empty is valid and means "no
+	// static entries" (every alert falls through to the worker's live
+	// resolution), not a startup error — only malformed JSON fails startup,
+	// matching this service's existing fail-fast-on-bad-config convention
+	// (see mustEnv and the SRE_ALERT_AUTH_USERS handling below).
+	serviceMap, err := parseServiceMap(os.Getenv("SRE_ALERT_SERVICE_MAP"))
+	if err != nil {
+		slog.Error("invalid SRE_ALERT_SERVICE_MAP", "err", err)
+		os.Exit(1)
+	}
+	alertHandler := handler.NewAlertHandler(dbStore, mustEnv("SRE_ALERT_CALLER_ID"), serviceMap)
 	healthHandler := handler.NewHealthHandler(dbStore)
 
 	// SRE_ALERT_AUTH_USERS is required: this service's only inbound
 	// authentication is HTTP Basic Auth on POST /alerts (see the wiring
 	// comment below), so a missing/malformed value must fail startup, not
 	// silently leave the route unauthenticated. See internal/middleware.BasicAuth
-	// and cmd/gen-basic-auth-hash for the credential format and how to
-	// generate a hash.
+	// and the "gen-basic-auth-hash" subcommand (gen_basic_auth_hash.go) for
+	// the credential format and how to generate a hash.
 	authUsers, err := middleware.ParseBasicAuthUsers(mustEnv("SRE_ALERT_AUTH_USERS"))
 	if err != nil {
 		slog.Error("invalid SRE_ALERT_AUTH_USERS", "err", err)
@@ -146,6 +201,7 @@ func main() {
 	mux.Handle("POST /alerts/adapters/site24x7", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromSite24x7)))
 	mux.Handle("POST /alerts/adapters/opensearch", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromOpenSearch)))
 	mux.Handle("POST /alerts/adapters/grafana", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromGrafana)))
+	mux.Handle("POST /alerts/adapters/choreodp", basicAuth(http.HandlerFunc(alertHandler.CreateAlertFromChoreoDP)))
 
 	addr := ":" + envOrDefault("PORT", "8080")
 
@@ -280,6 +336,48 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// canonicalUUIDPattern matches a canonical, hyphenated UUID
+// (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Used to fail fast on a
+// misconfigured service UUID — see isCanonicalUUID and parseServiceMap.
+var canonicalUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// isCanonicalUUID reports whether s is a canonical, hyphenated UUID.
+func isCanonicalUUID(s string) bool {
+	return canonicalUUIDPattern.MatchString(s)
+}
+
+// parseServiceMap parses SRE_ALERT_SERVICE_MAP — a JSON object string
+// mapping an alert's raw Service label to a CMDB service UUID, e.g.
+// {"Azure Monitoring":"33333333-3333-3333-3333-333333333333"}. An empty raw
+// string is valid and returns (nil, nil): "unset" means "no static entries,"
+// not a configuration error — see handler.AlertHandler.serviceMap's doc
+// comment. Any non-empty value that isn't valid JSON, isn't a flat
+// string->string object, has an empty label, or maps a label to a value
+// that isn't a real UUID, is a startup error (the caller fails fast on it) —
+// an invalid entry left unvalidated would otherwise pass MapToIncident's
+// static lookup silently and only surface once that alert reaches
+// CreateIncident, as a permanent (non-retryable) 400 from entity-service's
+// own validateUUIDs, matching this service's existing "fail fast on bad
+// config" convention rather than deferring the failure to request time.
+func parseServiceMap(raw string) (map[string]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, err
+	}
+	for label, id := range m {
+		if label == "" {
+			return nil, fmt.Errorf("SRE_ALERT_SERVICE_MAP: empty label")
+		}
+		if !isCanonicalUUID(id) {
+			return nil, fmt.Errorf("SRE_ALERT_SERVICE_MAP: value for %q is not a UUID: %q", label, id)
+		}
+	}
+	return m, nil
 }
 
 // envInt parses key as an int, falling back to def on anything unset or

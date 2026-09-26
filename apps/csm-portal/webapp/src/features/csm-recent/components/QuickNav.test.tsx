@@ -19,6 +19,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({
+    user: { roles: ["cs_engineer"] },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({ isSignedIn: true }),
 }));
@@ -28,6 +36,7 @@ vi.mock("@features/csm-recent/hooks/useRecentViews", () => ({
 }));
 
 vi.mock("@config/featureFlags", () => ({
+  featureStateForPath: () => "enabled",
   navigableNavNodes: () => [],
 }));
 

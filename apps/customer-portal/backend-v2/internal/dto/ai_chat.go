@@ -17,6 +17,9 @@
 package dto
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/aichatagent"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 )
@@ -268,6 +271,10 @@ func MapSearchConversations(r entity.SearchConversationsResponse) SearchConversa
 	}
 }
 
+// ErrUnsupportedConversationState reports a stateKeys value this backend
+// cannot translate. Surfaced as a 400 rather than silently widening the search.
+var ErrUnsupportedConversationState = errors.New("unsupported conversation state filter")
+
 // ConversationSearchFilters holds the optional filter criteria for
 // POST /projects/{id}/conversations/search — shaped to match the frontend's
 // actual request body. StateKeys carries ServiceNow's numeric choice-list
@@ -293,15 +300,24 @@ type ConversationSearchRequest struct {
 // into entity-service's SearchConversationsRequest. projectID (the {id}
 // path parameter) always populates Filters.ProjectIDs — never the request
 // body.
-func BuildEntitySearchConversationsRequest(projectID string, req ConversationSearchRequest) entity.SearchConversationsRequest {
+//
+// Returns an error when a supplied stateKey has no mapping. It must not fall
+// back to an unfiltered search: entity-service reads an empty States as "no
+// state filter", so a dropped id turns "show me Open conversations" into "show
+// me everything" — which is what it did for ServiceNow's "Open" state (id 1).
+func BuildEntitySearchConversationsRequest(projectID string, req ConversationSearchRequest) (entity.SearchConversationsRequest, error) {
+	states, unmapped, ok := conversationIDsToEnums(req.Filters.StateKeys)
+	if !ok {
+		return entity.SearchConversationsRequest{}, fmt.Errorf("%w: %d", ErrUnsupportedConversationState, unmapped)
+	}
 	return entity.SearchConversationsRequest{
 		Filters: entity.SearchConversationsFilters{
 			ProjectIDs:  []string{projectID},
-			States:      conversationIDsToEnums(req.Filters.StateKeys),
+			States:      states,
 			SearchQuery: req.Filters.SearchQuery,
 			CreatedByMe: req.Filters.CreatedByMe,
 		},
 		SortBy:     req.SortBy,
 		Pagination: req.Pagination,
-	}
+	}, nil
 }

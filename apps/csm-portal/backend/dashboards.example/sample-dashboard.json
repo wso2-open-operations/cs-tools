@@ -7,6 +7,120 @@
   "isTeamBased": false,
   "widgets": [
     {
+      "id": "case-summary-open",
+      "displayName": "Open",
+      "resourceType": "case",
+      "shape": "count",
+      "gridWidth": 4,
+      "section": "Case Summary",
+      "query": {
+        "filters": [
+          {
+            "field": "state",
+            "op": "in",
+            "values": [
+              "open"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-summary-work-in-progress",
+      "displayName": "Work In Progress",
+      "resourceType": "case",
+      "shape": "count",
+      "gridWidth": 4,
+      "section": "Case Summary",
+      "query": {
+        "filters": [
+          {
+            "field": "state",
+            "op": "in",
+            "values": [
+              "work_in_progress"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-summary-awaiting-info",
+      "displayName": "Awaiting Info",
+      "resourceType": "case",
+      "shape": "count",
+      "gridWidth": 4,
+      "section": "Case Summary",
+      "query": {
+        "filters": [
+          {
+            "field": "state",
+            "op": "in",
+            "values": [
+              "awaiting_info"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-summary-solution-proposed",
+      "displayName": "Solution Proposed",
+      "resourceType": "case",
+      "shape": "count",
+      "gridWidth": 4,
+      "section": "Case Summary",
+      "query": {
+        "filters": [
+          {
+            "field": "state",
+            "op": "in",
+            "values": [
+              "solution_proposed"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-summary-waiting-on-wso2",
+      "displayName": "Waiting on WSO2",
+      "resourceType": "case",
+      "shape": "count",
+      "gridWidth": 4,
+      "section": "Case Summary",
+      "query": {
+        "filters": [
+          {
+            "field": "state",
+            "op": "in",
+            "values": [
+              "waiting_on_wso2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-summary-reopened",
+      "displayName": "Reopened",
+      "resourceType": "case",
+      "shape": "count",
+      "gridWidth": 4,
+      "section": "Case Summary",
+      "query": {
+        "filters": [
+          {
+            "field": "state",
+            "op": "in",
+            "values": [
+              "reopened"
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": "my-open-cases",
       "displayName": "My Open Cases",
       "resourceType": "case",

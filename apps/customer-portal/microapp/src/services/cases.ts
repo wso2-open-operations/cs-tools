@@ -112,11 +112,23 @@ const classify = async (
 };
 
 const getCasesStats = async (id: string, body: Partial<GetCasesStatsRequestDto>): Promise<CasesStatsDto> => {
-  return (
-    await apiClient.get<CasesStatsDto>(CASE_STATS_ENDPOINT(id), {
-      params: { ...body, caseTypes: body.caseTypes?.join(",") },
-    })
-  ).data;
+  // caseTypes is declared `style: form, explode: true` in the backend's OpenAPI,
+  // meaning one entry per value (?caseTypes=a&caseTypes=b). It used to be sent
+  // comma joined, which the backend rejected whole with
+  // "caseTypes contains invalid value: a,b,c", so case statistics never loaded.
+  // Built explicitly rather than left to axios, whose default array format is
+  // caseTypes[]=a and is equally wrong here.
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, String(item)));
+    } else {
+      params.append(key, String(value));
+    }
+  }
+
+  return (await apiClient.get<CasesStatsDto>(CASE_STATS_ENDPOINT(id), { params })).data;
 };
 
 const getComments = async (id: string): Promise<Comment[]> => {

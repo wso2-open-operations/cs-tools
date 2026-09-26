@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,7 +30,7 @@ import (
 // InstanceRepository defines the persistence operations for the "instance"
 // concept -- a single running deployment node, backed by deployment_node
 // (migration 000054) and its satellite facts tables (deployment_information,
-// usage_count, daily_usage_summary). See instanceRefJoins' own doc comment
+// hourly_usage_summary, daily_usage_summary). See instanceRefJoins' own doc comment
 // for the caveats around resolving an instance's project/deployment/
 // deployed-product references.
 type InstanceRepository interface {
@@ -47,7 +46,7 @@ type InstanceRepository interface {
 	// newest first, within the given date range.
 	SearchInstanceMetrics(ctx context.Context, filters domain.InstanceDateRangeFilters) ([]domain.InstanceMetric, int, error)
 
-	// SearchInstanceUsage returns each matching instance's usage_count history,
+	// SearchInstanceUsage returns each matching instance's hourly_usage_summary history,
 	// grouped into one InstanceSummary per (instance, day).
 	SearchInstanceUsage(ctx context.Context, filters domain.InstanceDateRangeFilters) ([]domain.InstanceUsageEntry, int, error)
 
@@ -76,25 +75,31 @@ func NewInstanceRepository(db *pgxpool.Pool) InstanceRepository {
 //
 // product_version_id is a real foreign key (dn.product_version_id ->
 // product_version.id -> product.id), so the Product reference is always
-// reliable. Project/Deployment/DeployedProduct are not: deployment_node has
-// no foreign key to deployment or deployed_product at all, only a free-text
-// deployment_ref column the migration's own comment admits is inconsistent
-// ("node identity is not consistent upstream"). deployment_ref is cast to
-// uuid and matched against deployment.id as a best-effort join, guarded by a
-// regex so a non-UUID value degrades to "no match" instead of a cast error
-// -- but this assumption is UNVERIFIED against real data (the table has no
-// rows in staging yet, see CLAUDE.md's own note on this). DeployedProduct is
-// resolved by additionally requiring deployed_product.version_id to match
-// the same product_version, since deployment_id alone doesn't uniquely
-// identify one deployed product.
+// reliable. deployment_node has no foreign key to project, deployment or
+// deployed_product, only two free-text columns copied from the reported
+// payload, so the rest is resolved from them:
+//
+//   - project_key is matched to project.key (unique, and populated on every
+//     node), so a node's Project never depends on its deployment resolving.
+//   - deployment_number is matched to deployment.number (unique) ONLY IF that
+//     deployment belongs to the node's own project. The reported value is not
+//     always a deployment number: staging has a sys_id-like hex string and a
+//     bare "320" that happens to equal the number of a deployment in a
+//     different project, so matching on the number alone would attach those
+//     nodes to the wrong project. Requiring the project to agree leaves them
+//     unresolved instead (Deployment/DeployedProduct nil, Project still set).
+//   - DeployedProduct additionally requires deployed_product.version_id to
+//     match the node's product_version, since deployment_id alone doesn't
+//     uniquely identify one deployed product.
+//
+// Verified against staging's 16 nodes: 14 resolve to a project and 11 to a
+// deployment (each within the node's own project), and none resolves to a
+// deployment of another project.
 const instanceRefJoins = `
 	LEFT JOIN product_version pv ON pv.id = dn.product_version_id
 	LEFT JOIN product p ON p.id = pv.product_id
-	LEFT JOIN deployment dep ON dep.id = CASE
-		WHEN dn.deployment_ref ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-		THEN dn.deployment_ref::uuid
-	END
-	LEFT JOIN project proj ON proj.id = dep.project_id
+	LEFT JOIN project proj ON proj.key = dn.project_key
+	LEFT JOIN deployment dep ON dep.number = dn.deployment_number AND dep.project_id = proj.id
 	LEFT JOIN deployed_product dprod ON dprod.deployment_id = dep.id AND dprod.version_id = dn.product_version_id`
 
 const instanceRefColumns = `proj.id, proj.name, dep.id, dep.name, p.id, p.name, dprod.id, dprod.name`
@@ -211,32 +216,16 @@ func (r *instanceRepo) SearchInstances(ctx context.Context, req domain.SearchIns
 	return instances, total, nil
 }
 
-// parseCoreCount attempts to parse deployment_information.number_of_cores
-// (a free-text VARCHAR upstream -- e.g. "8" but possibly "8 (4 physical)")
-// as a plain integer. Returns nil rather than a best-effort partial parse
-// when it isn't one, per this codebase's "leave unset rather than guess"
-// convention for ambiguous upstream text.
-func parseCoreCount(raw *string) *int {
-	if raw == nil {
-		return nil
-	}
-	n, err := strconv.Atoi(*raw)
-	if err != nil {
-		return nil
-	}
-	return &n
-}
-
 // latestDeploymentInformation batch-fetches each node's most recent
-// deployment_information row (by reported_updated_on), keyed by node_id.
+// deployment_information row (by payload_updated_on), keyed by node_id.
 func (r *instanceRepo) latestDeploymentInformation(ctx context.Context, nodeIDs []string) (map[string]*domain.InstanceMetadata, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT ON (node_id)
-		       node_id, id, jdk_version, number_of_cores, deployment_info,
-		       created_on, updated_on, reported_created_on, reported_updated_on
+		       node_id, id, jdk_version, core_count, deployment_info,
+		       created_on, updated_on, payload_created_on, payload_updated_on
 		FROM deployment_information
 		WHERE node_id = ANY($1::text[])
-		ORDER BY node_id, reported_updated_on DESC`,
+		ORDER BY node_id, payload_updated_on DESC`,
 		nodeIDs,
 	)
 	if err != nil {
@@ -247,10 +236,11 @@ func (r *instanceRepo) latestDeploymentInformation(ctx context.Context, nodeIDs 
 	result := make(map[string]*domain.InstanceMetadata, len(nodeIDs))
 	for rows.Next() {
 		var nodeID, id string
-		var jdkVersion, numberOfCores *string
+		var jdkVersion *string
+		var coreCount *int
 		var rawInfo []byte
 		var createdOn, updatedOn, reportedCreatedOn, reportedUpdatedOn time.Time
-		if err := rows.Scan(&nodeID, &id, &jdkVersion, &numberOfCores, &rawInfo, &createdOn, &updatedOn, &reportedCreatedOn, &reportedUpdatedOn); err != nil {
+		if err := rows.Scan(&nodeID, &id, &jdkVersion, &coreCount, &rawInfo, &createdOn, &updatedOn, &reportedCreatedOn, &reportedUpdatedOn); err != nil {
 			return nil, fmt.Errorf("scan deployment_information: %w", err)
 		}
 		var info map[string]any
@@ -263,7 +253,7 @@ func (r *instanceRepo) latestDeploymentInformation(ctx context.Context, nodeIDs 
 		customUpdated := reportedUpdatedOn.UTC().Format(time.RFC3339)
 		result[nodeID] = &domain.InstanceMetadata{
 			ID:        id,
-			CoreCount: parseCoreCount(numberOfCores),
+			CoreCount: coreCount,
 			// Updates has no backing column on deployment_information --
 			// deployed_product.update_level_info is a different, per-deployed-
 			// product concept, not per-node. Left nil, same "no confirmed
@@ -285,7 +275,7 @@ func (r *instanceRepo) latestDeploymentInformation(ctx context.Context, nodeIDs 
 
 // SearchInstanceMetrics implements InstanceRepository.
 func (r *instanceRepo) SearchInstanceMetrics(ctx context.Context, filters domain.InstanceDateRangeFilters) ([]domain.InstanceMetric, int, error) {
-	where := "WHERE di.reported_updated_on::date BETWEEN $1::date AND $2::date"
+	where := "WHERE di.payload_updated_on::date BETWEEN $1::date AND $2::date"
 	args := []any{filters.StartDate, filters.EndDate}
 	clause, clauseArgs := instanceIDFilterClause(filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
 	where += clause
@@ -293,11 +283,11 @@ func (r *instanceRepo) SearchInstanceMetrics(ctx context.Context, filters domain
 
 	query := fmt.Sprintf(
 		`SELECT dn.id, dn.node_id, %s,
-		        di.reported_updated_on, di.created_on, di.number_of_cores, di.jdk_version, di.deployment_info
+		        di.payload_updated_on, di.created_on, di.core_count, di.jdk_version, di.deployment_info
 		 FROM deployment_node dn
 		 JOIN deployment_information di ON di.node_id = dn.node_id
 		 %s %s
-		 ORDER BY dn.id, di.reported_updated_on DESC`,
+		 ORDER BY dn.id, di.payload_updated_on DESC`,
 		instanceRefColumns, instanceRefJoins, where,
 	)
 
@@ -313,11 +303,12 @@ func (r *instanceRepo) SearchInstanceMetrics(ctx context.Context, filters domain
 		var instanceID, nodeID string
 		var projID, projName, depID, depName, prodID, prodName, dprodID, dprodName *string
 		var reportedUpdatedOn, createdOn time.Time
-		var numberOfCores, jdkVersion *string
+		var jdkVersion *string
+		var coreCount *int
 		var rawInfo []byte
 		if err := rows.Scan(
 			&instanceID, &nodeID, &projID, &projName, &depID, &depName, &prodID, &prodName, &dprodID, &dprodName,
-			&reportedUpdatedOn, &createdOn, &numberOfCores, &jdkVersion, &rawInfo,
+			&reportedUpdatedOn, &createdOn, &coreCount, &jdkVersion, &rawInfo,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan instance metric: %w", err)
 		}
@@ -345,7 +336,7 @@ func (r *instanceRepo) SearchInstanceMetrics(ctx context.Context, filters domain
 		m.DataPoints = append(m.DataPoints, domain.InstanceDataPoint{
 			Date:               reportedUpdatedOn.UTC().Format("2006-01-02"),
 			CreatedOn:          createdOn.UTC().Format(time.RFC3339),
-			CoreCount:          parseCoreCount(numberOfCores),
+			CoreCount:          coreCount,
 			JDKVersion:         jdkVersion,
 			Updates:            nil,
 			DeploymentMetadata: info,
@@ -374,7 +365,7 @@ func (r *instanceRepo) SearchInstanceUsage(ctx context.Context, filters domain.I
 		`SELECT dn.id, dn.node_id, %s,
 		        uc.counted_on::date, uc.count_type, SUM(uc.count)
 		 FROM deployment_node dn
-		 JOIN usage_count uc ON uc.deployment_node_id = dn.id
+		 JOIN hourly_usage_summary uc ON uc.deployment_node_id = dn.id
 		 %s %s
 		 GROUP BY dn.id, dn.node_id, proj.id, proj.name, dep.id, dep.name, p.id, p.name, dprod.id, dprod.name,
 		          uc.counted_on::date, uc.count_type
@@ -459,14 +450,14 @@ func (r *instanceRepo) SearchInstanceUsage(ctx context.Context, filters domain.I
 // non-nil DataSource filter before this is ever called rather than silently
 // ignoring it.
 func (r *instanceRepo) SearchInstanceMetricsStats(ctx context.Context, filters domain.InstanceDateRangeFilters) (domain.InstanceMetricsStatsResponse, error) {
-	where := "WHERE di.reported_updated_on::date BETWEEN $1::date AND $2::date"
+	where := "WHERE di.payload_updated_on::date BETWEEN $1::date AND $2::date"
 	args := []any{filters.StartDate, filters.EndDate}
 	clause, clauseArgs := instanceIDFilterClause(filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
 	where += clause
 	args = append(args, clauseArgs...)
 
 	query := fmt.Sprintf(
-		`SELECT di.reported_updated_on::date, dn.id, di.number_of_cores
+		`SELECT di.payload_updated_on::date, dn.id, di.core_count
 		 FROM deployment_node dn
 		 JOIN deployment_information di ON di.node_id = dn.node_id
 		 %s %s`,
@@ -484,12 +475,11 @@ func (r *instanceRepo) SearchInstanceMetricsStats(ctx context.Context, filters d
 	for rows.Next() {
 		var day time.Time
 		var instanceID string
-		var numberOfCores *string
-		if err := rows.Scan(&day, &instanceID, &numberOfCores); err != nil {
+		var cores *int
+		if err := rows.Scan(&day, &instanceID, &cores); err != nil {
 			return domain.InstanceMetricsStatsResponse{}, fmt.Errorf("scan instance metrics stats: %w", err)
 		}
 		instancesSeen[instanceID] = struct{}{}
-		cores := parseCoreCount(numberOfCores)
 		if cores == nil {
 			continue
 		}
@@ -552,7 +542,7 @@ func (r *instanceRepo) SearchInstanceUsageStats(ctx context.Context, filters dom
 	query := fmt.Sprintf(
 		// daily_usage_summary.usage_type was renamed to count_type after
 		// this was first written (migration 000054 was edited in place
-		// post-merge) -- matching usage_count.count_type's own column name
+		// post-merge) -- matching hourly_usage_summary.count_type's own column name
 		// for the same open-ended count-type concept.
 		`SELECT dus.summary_date, dn.id, dus.count_type, SUM(dus.value)
 		 FROM deployment_node dn

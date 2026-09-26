@@ -15,7 +15,28 @@
 // under the License.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { request } from "./client";
+import { qs, request } from "./client";
+
+describe("qs", () => {
+  it("emits an array value as one repeated key per element", () => {
+    expect(qs({ status: ["WOC", "Pending Patch Queue"] })).toBe(
+      "?status=WOC&status=Pending+Patch+Queue",
+    );
+  });
+
+  it("drops an empty array entirely, without emitting the bare key", () => {
+    expect(qs({ status: [], repo: "org/alpha" })).toBe("?repo=org%2Falpha");
+  });
+
+  it("mixes scalar and array params in one query string", () => {
+    const s = qs({ q: "42", status: ["WOC", "Open"], limit: 20 });
+    expect(s).toBe("?q=42&status=WOC&status=Open&limit=20");
+  });
+
+  it("drops undefined and empty-string entries, scalar or array element", () => {
+    expect(qs({ repo: undefined, priority: ["", "High(P2)"] })).toBe("?priority=High%28P2%29");
+  });
+});
 
 describe("request", () => {
   beforeEach(() => {
@@ -43,7 +64,8 @@ describe("request", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await request("/issues/titles", { method: "POST", body: JSON.stringify({ ids: [1] }) });
+    // Body content is irrelevant here; this only checks the Content-Type header.
+    await request("/sync/runs", { method: "POST", body: JSON.stringify({}) });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");

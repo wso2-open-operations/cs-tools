@@ -33,8 +33,10 @@ import (
 )
 
 // IssuesHandler serves GET /issues and GET /issues/{id}.
-// Privacy: the row shape it returns carries no title, labels, assignees,
-// opener, or event actors.
+// Privacy: the row shape it returns includes title, ABT team, and
+// opened-by (a @wso2.com address) inline on each issue, but it still never
+// returns labels, assignees, or event actors, and the issue body itself is
+// never returned by any API.
 type IssuesHandler struct {
 	pool *pgxpool.Pool
 	cfg  *config.AppConfig
@@ -70,6 +72,9 @@ type issueWire struct {
 	GithubCreatedAt *time.Time `json:"githubCreatedAt"`
 	GithubUpdatedAt *time.Time `json:"githubUpdatedAt"`
 	Sla             *slaWire   `json:"sla"`
+	Title           *string    `json:"title"`
+	AbtTeam         *string    `json:"abtTeam"`
+	OpenedBy        *string    `json:"openedBy"`
 }
 
 type issueRow struct {
@@ -90,12 +95,16 @@ type issueRow struct {
 	SlaState        *string
 	SlaRunning      *bool
 	BreachedEver    *bool
+	Title           *string
+	AbtTeam         *string
+	OpenedBy        *string
 }
 
 const issueListSelect = `
 	i.id, i.github_number, i.state, i.html_url, r.owner, r.name, i.priority, i.current_status,
 	i.github_created_at, i.github_updated_at,
-	s.budget_hours, s.consumed_hours, s.remaining_hours, s.pct_consumed, s.sla_state, s.sla_running, s.breached_ever
+	s.budget_hours, s.consumed_hours, s.remaining_hours, s.pct_consumed, s.sla_state, s.sla_running, s.breached_ever,
+	i.title, i.abt_team, i.opened_by
 `
 
 const issueListFrom = `
@@ -112,6 +121,7 @@ func scanIssueRow(row pgx.Row) (issueRow, error) {
 		&r.ID, &r.GithubNumber, &r.State, &r.HTMLURL, &r.Owner, &r.Name, &r.Priority, &r.CurrentStatus,
 		&r.GithubCreatedAt, &r.GithubUpdatedAt,
 		&r.BudgetHours, &r.ConsumedHours, &r.RemainingHours, &r.PctConsumed, &r.SlaState, &r.SlaRunning, &r.BreachedEver,
+		&r.Title, &r.AbtTeam, &r.OpenedBy,
 	)
 	return r, err
 }
@@ -130,6 +140,9 @@ func toIssueWire(r issueRow) issueWire {
 		CurrentStatus:   r.CurrentStatus,
 		GithubCreatedAt: r.GithubCreatedAt,
 		GithubUpdatedAt: r.GithubUpdatedAt,
+		Title:           r.Title,
+		AbtTeam:         r.AbtTeam,
+		OpenedBy:        r.OpenedBy,
 	}
 	if r.SlaState != nil {
 		consumed := 0.0
@@ -157,6 +170,16 @@ func toIssueWire(r issueRow) issueWire {
 	return w
 }
 
+// issueListWire is GET /issues's response envelope: the page of issues plus
+// enough to know whether there's more (total/offset+len(Issues) vs. total).
+type issueListWire struct {
+	Issues  []issueWire `json:"issues"`
+	Total   int         `json:"total"`
+	Limit   int         `json:"limit"`
+	Offset  int         `json:"offset"`
+	HasMore bool        `json:"hasMore"`
+}
+
 // ListIssues handles GET /issues.
 func (h *IssuesHandler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	q, errMsg := parseIssuesQuery(r.URL.Query(), h.api)
@@ -166,18 +189,15 @@ func (h *IssuesHandler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	whereSQL, args := buildIssuesWhere(taxonomy.CsStatuses(h.cfg), taxonomy.ProductSideStatuses(h.cfg), q)
+	orderSQL := issueOrderBy(q.Sort, q.Order)
 
-	orderSQL := "i.github_updated_at DESC"
-	if q.Order == "budget_desc" {
-		// Uses the issue_sla.pct_consumed index.
-		orderSQL = "s.pct_consumed DESC NULLS LAST"
-	}
+	pageArgs := &sqlArgs{values: args}
+	limitPlaceholder := pageArgs.add(q.Limit)
+	offsetPlaceholder := pageArgs.add(q.Offset)
 
-	limitArgs := &sqlArgs{values: args}
-	limitPlaceholder := limitArgs.add(q.Limit)
-
-	query := fmt.Sprintf("SELECT %s %s WHERE %s ORDER BY %s LIMIT %s", issueListSelect, issueListFrom, whereSQL, orderSQL, limitPlaceholder)
-	rows, err := h.pool.Query(r.Context(), query, limitArgs.values...)
+	query := fmt.Sprintf("SELECT %s %s WHERE %s ORDER BY %s LIMIT %s OFFSET %s",
+		issueListSelect, issueListFrom, whereSQL, orderSQL, limitPlaceholder, offsetPlaceholder)
+	rows, err := h.pool.Query(r.Context(), query, pageArgs.values...)
 	if err != nil {
 		apierror.Internal(w, r, "list issues query failed", err)
 		return
@@ -198,7 +218,24 @@ func (h *IssuesHandler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	// Separate query (same WHERE, no LIMIT/OFFSET) rather than a COUNT(*)
+	// OVER() window column on the page query above — this stays correct on
+	// an empty page (offset past the end) without extra scanning logic, and
+	// the result set is small enough that the extra round trip is cheap.
+	countQuery := fmt.Sprintf("SELECT count(*) %s WHERE %s", issueListFrom, whereSQL)
+	var total int
+	if err := h.pool.QueryRow(r.Context(), countQuery, args...).Scan(&total); err != nil {
+		apierror.Internal(w, r, "count issues query failed", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, issueListWire{
+		Issues:  result,
+		Total:   total,
+		Limit:   q.Limit,
+		Offset:  q.Offset,
+		HasMore: q.Offset+len(result) < total,
+	})
 }
 
 type eventWire struct {

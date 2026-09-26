@@ -19,9 +19,11 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +36,16 @@ const (
 	DataSourcePostgres DataSource = "postgres"
 	// DataSourceServiceNow uses the Choreo ServiceNow API.
 	DataSourceServiceNow DataSource = "servicenow"
+	// DataSourcePostgresServiceNowDualWrite serves every read and write from
+	// PostgreSQL (authoritative, same as DataSourcePostgres) and additionally
+	// best-effort mirrors writes to ServiceNow afterward, so that ServiceNow
+	// stays a genuine rollback target rather than going silently stale ahead
+	// of the Postgres cutover. One-way (Postgres -> ServiceNow) and
+	// asynchronous: ServiceNow is never read from in this mode, never
+	// authoritative, and a failed mirror write is recorded (see
+	// SNWritebackFailureRepository) rather than retried or surfaced to the
+	// caller. Piloted on the account entity only — see routes.go.
+	DataSourcePostgresServiceNowDualWrite DataSource = "postgres-servicenow-dual-write"
 )
 
 // Config holds all environment-driven settings for the service.
@@ -65,6 +77,23 @@ type Config struct {
 	ServiceNowIntegrationServiceClientID     string
 	ServiceNowIntegrationServiceClientSecret string
 	ServiceNowIntegrationServiceScopes       string
+	// ConsumptionOperationBaseURL is the base URL of the Choreo subscription
+	// operation (operations/choreo-subscription-on-project-create), with the
+	// client credentials it is reached with.
+	//
+	// There is deliberately no default. The operation creates Choreo
+	// applications and issues signed licences for real customers, so a
+	// deployment that forgets to configure it must fail to register the
+	// licence route rather than quietly provision against whatever
+	// environment a baked-in default names.
+	ConsumptionOperationBaseURL      string
+	ConsumptionOperationTokenURL     string
+	ConsumptionOperationClientID     string
+	ConsumptionOperationClientSecret string
+	ConsumptionOperationScopes       string
+	// ConsumptionDualWriteEnabled controls whether provisioning state and
+	// artifacts are mirrored into Postgres alongside ServiceNow. Defaults to true.
+	ConsumptionDualWriteEnabled bool
 	// EventHubBroker/EventHubConnectionString/EventHubTopic configure this
 	// service's EventPublisherService (internal/service/
 	// event_publisher_service.go). Optional — gated on EventHubBroker being
@@ -82,6 +111,62 @@ type Config struct {
 	// constructs EventPublisherService when both this is true AND
 	// EventHubBroker is set.
 	EventPublishingEnabled bool
+	// CSMMigrationSalesforceMembershipIngestEnabled turns on the
+	// Project_Contact__c / Contact branch of POST /salesforce/events (the
+	// customer onboarding database write), from
+	// CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true. Defaults to
+	// false: those envelopes are then acknowledged and ignored, as before
+	// the branch existed. The Account branch is unaffected by this flag.
+	CSMMigrationSalesforceMembershipIngestEnabled bool
+	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
+	// which marks the signed-in user's still-INVITED memberships as
+	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
+	// false, and while it is false routes.go does not register the route at
+	// all — it 404s, and nothing on this path can write to Salesforce.
+	CSMMigrationMembershipRegistrationEnabled bool
+	// CSMMigrationPortalWritesEnabled turns on the portal-driven membership
+	// write endpoints (POST/PATCH/DELETE /projects/{id}/contacts[/{email}]
+	// and the resend-invitation call). Both portals invite, re-role and
+	// deactivate customer users through them, and each one writes Postgres
+	// and Salesforce together.
+	//
+	// OFF BY DEFAULT (the value must be exactly "true"), and with it off the
+	// routes are not registered at all rather than answering 403: until the
+	// Sales Entity create endpoints this depends on are deployed, a portal
+	// that called them would write the database and leave Salesforce behind.
+	CSMMigrationPortalWritesEnabled bool
+	// GithubIntegrationEnabled gates the GitHub change-request sync: the
+	// webhook endpoint and the client that answers it.
+	//
+	// OFF BY DEFAULT. The endpoint is reachable without a bearer token -- the
+	// HMAC signature is its authentication -- so it must not appear merely
+	// because a database happens to be configured.
+	GithubIntegrationEnabled bool
+	// GithubBaseURL is the API root: api.github.com, or an Enterprise host.
+	GithubBaseURL string
+	// GithubToken authenticates our calls out to GitHub.
+	GithubToken string
+	// GithubWebhookSecret is the HMAC key GitHub signs deliveries with. This
+	// IS the authentication on the webhook endpoint, so an empty value makes
+	// VerifySignature refuse everything rather than accept everything.
+	GithubWebhookSecret string
+	// GithubIntegrationLogin is our own GitHub account. Events it sent are our
+	// own writes coming back, and are dropped by identity rather than by
+	// pattern-matching the comment body.
+	GithubIntegrationLogin string
+	// GithubOutboundInterval is how often to drain the outbound queue when the
+	// last pass came back short. A backlog drains at full speed regardless.
+	GithubOutboundInterval time.Duration
+
+	// CSMPortalBaseURL builds the link back to a change request in comments
+	// posted to GitHub. Empty omits the link rather than rendering a broken one.
+	CSMPortalBaseURL string
+	// GitHub label vocabulary overrides. Empty keeps .github/labels.yml's value.
+	GithubLabelTypeIncident       string
+	GithubLabelTypeServiceRequest string
+	GithubLabelsClass             string
+	GithubLabelStatusAssigned     string
+
 	// CRNoticesEnabled turns on the change-request notice drainer: the poller
 	// that reads event_outbox and asks csm-notification-service to send the
 	// approval and plan-start-date mails.
@@ -99,24 +184,21 @@ type Config struct {
 	// A distinct topic is what actually isolates the two volumes; a distinct
 	// consumer group alone would only isolate the processing.
 	CREventHubTopic string
+
+	// ProjectEventHubTopic carries the onboarding events
+	// (project_contact.invited) rather than the shared EventHubTopic, so a
+	// backlog of case events can never delay an invitation and the
+	// onboarding dead-letter queue can be watched on its own.
+	// csm-notification-service consumes it with its own consumer group.
+	ProjectEventHubTopic string
 	// CRNoticePollInterval is how often to poll event_outbox when the last
 	// pass came back short. A backlog drains at full speed regardless, so this
 	// governs only the idle case: notice latency against query volume.
 	CRNoticePollInterval time.Duration
-	// SupportEngineerRole is the ServiceNow role name (e.g. an org-specific
-	// "sn_*" role) whose presence on a case comment's resolved author marks
-	// that comment as a qualifying support-engineer response — see
-	// sn_case_service.go's applyResponseSLAOnComment. Deliberately no
-	// committed default: this is organisation-specific vocabulary, the same
-	// reasoning apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not
-	// shipping one. Left unset, that function simply can't confirm
-	// engineer-authorship and skips (logged) — not fatal, not required by
-	// Validate.
-	SupportEngineerRole string
-	// CustomerRoles is a comma-separated list of ServiceNow role names (see
-	// SUPPORT_ENGINEER_ROLE's own doc comment for the same
-	// organisation-specific-vocabulary reasoning — deliberately no
-	// committed default here either) whose presence on a case comment's
+	// CustomerRoles is a comma-separated list of ServiceNow role names
+	// (organisation-specific vocabulary, the same reasoning
+	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
+	// a committed default) whose presence on a case comment's
 	// resolved author marks that comment as a customer reply — see
 	// sn_case_service.go's applyCustomerReplyStateTransition, which moves
 	// the case back to Work In Progress when a customer replies while it's
@@ -128,6 +210,41 @@ type Config struct {
 	// nothing to do with case state) — the two are read by separate
 	// processes/environments and don't interact.
 	CustomerRoles []string
+	// Auth* configure token validation (internal/auth), always on -- there is
+	// no config flag to disable it. AuthIssuer/AuthJWKSURL/
+	// AuthUserTokenAudiences are required (Validate rejects startup without
+	// them, and NewRouter panics if the JWKS can't be loaded), so a caller's
+	// identity is always verified.
+	//
+	// AuthIssuer/AuthJWKSURL locate the Asgardeo issuer's signing keys, used to
+	// validate both tokens a request can carry: the end user's ID token in
+	// x-user-id-token, and the calling application's client-credentials access
+	// token in Authorization: Bearer. AuthUserTokenAudiences are the client ids
+	// (Asgardeo SPA/application ids) an ID token's aud must contain to be
+	// accepted as a user token.
+	AuthIssuer             string
+	AuthJWKSURL            string
+	AuthUserTokenAudiences []string
+	AuthClockSkew          time.Duration
+	// AuthInternalClientIDsRaw is the AUTH_INTERNAL_CLIENT_IDS value, a
+	// comma-separated list of Asgardeo application client ids;
+	// AuthInternalClientIDs is its parsed set. A request whose
+	// Authorization: Bearer client-credentials token names one of these ids
+	// is unconditionally treated as an internal caller with unrestricted
+	// access to every project and case, regardless of any x-user-id-token it
+	// also carries -- a forwarded user token from an internal caller is used
+	// only for attribution (created_by/updated_by), never for scoping,
+	// because every caller this deployment configures here is itself an
+	// already-trusted internal service.
+	//
+	// A client id NOT in this set is resolved purely from its
+	// x-user-id-token: an INTERNAL user_type still sees everything, an
+	// EXTERNAL (customer) user sees only their REGISTERED project_contact
+	// projects, and no user token at all is refused. Which real client ids
+	// go in this list is a deployment decision, not something this file
+	// prescribes.
+	AuthInternalClientIDsRaw string
+	AuthInternalClientIDs    map[string]bool
 	// SalesEntity* is the Choreo connection to REST sales/sales-entity-service
 	// (POST /customer-search), not GraphQL sales/entity-graphql-service and not
 	// Salesforce. The four connection fields are all-or-nothing like Event Hub.
@@ -143,7 +260,7 @@ type Config struct {
 // Config. Missing variables fall back to sensible defaults; callers should
 // validate required fields (e.g. DBUser, DBPassword, DBName) before use.
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		DBHost:                                   getEnvOrDefault("DB_HOST", "localhost"),
 		DBPort:                                   getEnvOrDefault("DB_PORT", "5432"),
 		DBUser:                                   os.Getenv("DB_USER"),
@@ -158,21 +275,60 @@ func Load() *Config {
 		ServiceNowIntegrationServiceClientID:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID"),
 		ServiceNowIntegrationServiceClientSecret: os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET"),
 		ServiceNowIntegrationServiceScopes:       os.Getenv("SERVICENOW_INTEGRATION_SERVICE_SCOPES"),
+		ConsumptionOperationBaseURL:              os.Getenv("PRODUCT_CONSUMPTION_OPERATION_URL"),
+		ConsumptionOperationTokenURL:             os.Getenv("PRODUCT_CONSUMPTION_OPERATION_TOKEN_URL"),
+		ConsumptionOperationClientID:             os.Getenv("PRODUCT_CONSUMPTION_OPERATION_CLIENT_ID"),
+		ConsumptionOperationClientSecret:         os.Getenv("PRODUCT_CONSUMPTION_OPERATION_CLIENT_SECRET"),
+		ConsumptionOperationScopes:               os.Getenv("PRODUCT_CONSUMPTION_OPERATION_SCOPES"),
+		ConsumptionDualWriteEnabled:              getBoolOrDefault("CONSUMPTION_DUAL_WRITE_ENABLED", true),
 		EventHubBroker:                           os.Getenv("EVENT_HUB_BROKER"),
 		EventHubConnectionString:                 os.Getenv("EVENT_HUB_CONNECTION_STRING"),
 		EventHubTopic:                            os.Getenv("EVENT_HUB_TOPIC"),
 		EventPublishingEnabled:                   os.Getenv("EVENT_PUBLISHING_ENABLED") == "true",
+		GithubIntegrationEnabled:                 os.Getenv("GITHUB_INTEGRATION_ENABLED") == "true",
+		GithubBaseURL:                            getEnvOrDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
+		GithubToken:                              os.Getenv("GITHUB_TOKEN"),
+		GithubWebhookSecret:                      os.Getenv("GITHUB_WEBHOOK_SECRET"),
+		GithubIntegrationLogin:                   os.Getenv("GITHUB_INTEGRATION_LOGIN"),
+		GithubOutboundInterval:                   envDuration("GITHUB_OUTBOUND_INTERVAL", 15*time.Second),
+		CSMPortalBaseURL:                         os.Getenv("CSM_PORTAL_BASE_URL"),
+		GithubLabelTypeIncident:                  os.Getenv("GITHUB_LABEL_TYPE_INCIDENT"),
+		GithubLabelTypeServiceRequest:            os.Getenv("GITHUB_LABEL_TYPE_SERVICE_REQUEST"),
+		GithubLabelsClass:                        os.Getenv("GITHUB_LABELS_CLASS"),
+		GithubLabelStatusAssigned:                os.Getenv("GITHUB_LABEL_STATUS_ASSIGNED"),
 		CRNoticesEnabled:                         os.Getenv("CR_NOTICES_ENABLED") == "true",
-		CREventHubTopic:                          getEnvOrDefault("CR_EVENT_HUB_TOPIC", "cr-events"),
-		CRNoticePollInterval:                     envDuration("CR_NOTICE_POLL_INTERVAL", 5*time.Second),
-		SupportEngineerRole:                      os.Getenv("SUPPORT_ENGINEER_ROLE"),
-		CustomerRoles:                            splitComma(os.Getenv("CUSTOMER_ROLES")),
-		SalesEntityBaseURL:                       os.Getenv("SALES_ENTITY_BASE_URL"),
-		SalesEntityTokenURL:                      os.Getenv("SALES_ENTITY_TOKEN_URL"),
-		SalesEntityClientID:                      os.Getenv("SALES_ENTITY_CLIENT_ID"),
-		SalesEntityClientSecret:                  os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
-		SalesEntityScopes:                        os.Getenv("SALES_ENTITY_SCOPES"),
+		CSMMigrationSalesforceMembershipIngestEnabled: os.Getenv("CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED") == "true",
+		CSMMigrationPortalWritesEnabled:               os.Getenv("CSM_MIGRATION_PORTAL_WRITES_ENABLED") == "true",
+		CREventHubTopic:                               getEnvOrDefault("CR_EVENT_HUB_TOPIC", "cr-events"),
+		ProjectEventHubTopic:                          getEnvOrDefault("PROJECT_EVENT_HUB_TOPIC", "project-events"),
+		CRNoticePollInterval:                          envDuration("CR_NOTICE_POLL_INTERVAL", 5*time.Second),
+		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
+		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
+		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
+		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
+		AuthInternalClientIDsRaw:                      os.Getenv("AUTH_INTERNAL_CLIENT_IDS"),
+		CustomerRoles:                                 splitComma(os.Getenv("CUSTOMER_ROLES")),
+		SalesEntityBaseURL:                            os.Getenv("SALES_ENTITY_BASE_URL"),
+		SalesEntityTokenURL:                           os.Getenv("SALES_ENTITY_TOKEN_URL"),
+		SalesEntityClientID:                           os.Getenv("SALES_ENTITY_CLIENT_ID"),
+		SalesEntityClientSecret:                       os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
+		SalesEntityScopes:                             os.Getenv("SALES_ENTITY_SCOPES"),
+		CSMMigrationMembershipRegistrationEnabled:     os.Getenv("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED") == "true",
 	}
+	cfg.AuthInternalClientIDs = ParseInternalClientIDs(cfg.AuthInternalClientIDsRaw)
+	return cfg
+}
+
+// ParseInternalClientIDs parses AUTH_INTERNAL_CLIENT_IDS ("clientId,clientId")
+// into a set for O(1) membership checks. Unlike most of this file's other
+// comma-separated values, this one has no per-entry validation to fail: any
+// non-empty, trimmed entry is a valid client id.
+func ParseInternalClientIDs(raw string) map[string]bool {
+	out := make(map[string]bool)
+	for _, id := range splitComma(raw) {
+		out[id] = true
+	}
+	return out
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -182,9 +338,31 @@ func getEnvOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
+// getBoolOrDefault parses a boolean env var, falling back to defaultVal when it
+// is unset or unparseable.
+//
+// The other boolean flags here compare against "true" directly, which is safe
+// for a flag that defaults to off: a typo leaves it off, as it already was.
+// This one exists for flags that default to ON — there, "TRUE" or "1" silently
+// turning the flag off is a real failure, so accept everything ParseBool does.
+func getBoolOrDefault(key string, defaultVal bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		slog.Warn("ignoring unparseable boolean configuration value",
+			"key", key, "value", v, "using", defaultVal)
+		return defaultVal
+	}
+	return parsed
+}
+
 // splitComma parses a comma-separated env var into a trimmed, non-empty
 // slice ("" for an unset/empty var, matching integrations/csm-notification-service's
 // own copy of this exact helper).
+
 func splitComma(s string) []string {
 	if s == "" {
 		return nil
@@ -249,19 +427,19 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.DataSource {
-	case DataSourcePostgres, DataSourceServiceNow:
+	case DataSourcePostgres, DataSourceServiceNow, DataSourcePostgresServiceNowDualWrite:
 		// valid
 	default:
-		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
+		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q, %q, or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow, DataSourcePostgresServiceNowDualWrite)
 	}
-	// Postgres credentials are required only for DATA_SOURCE=postgres.
-	// servicenow mode skips the pool (db.NewPoolIfNeeded) so a local
-	// customer-portal can start without a reachable database. Side tables
-	// that have no ServiceNow equivalent are registered only when a pool
-	// is available — see routes.go.
-	//
-	// DB_USER/DB_PASSWORD/DB_NAME are required only when DATA_SOURCE=postgres,
-	// which serves every entity read and write from this pool.
+	// Postgres credentials are required for DATA_SOURCE=postgres and
+	// DATA_SOURCE=postgres-servicenow-dual-write — both serve every entity read
+	// and write from the pool (the fallback mode's ServiceNow leg is a
+	// best-effort mirror on top, never a read source). servicenow mode skips
+	// the pool (db.NewPoolIfNeeded) so a local customer-portal can start
+	// without a reachable database. Side tables that have no ServiceNow
+	// equivalent are registered only when a pool is available — see
+	// routes.go.
 	//
 	// When DATA_SOURCE=servicenow they are OPTIONAL. Entity traffic goes to
 	// the SN integration service instead, and the two Postgres-only features
@@ -272,15 +450,16 @@ func (c *Config) Validate() error {
 	// with "DB_USER is required", which is what this branch exists to prevent.
 	dbSet := c.DBUser != "" || c.DBPassword != "" || c.DBName != ""
 	dbComplete := c.DBUser != "" && c.DBPassword != "" && c.DBName != ""
+	dbRequired := c.DataSource == DataSourcePostgres || c.DataSource == DataSourcePostgresServiceNowDualWrite
 
-	if c.DataSource == DataSourcePostgres && !dbComplete {
+	if dbRequired && !dbComplete {
 		if c.DBUser == "" {
-			return fmt.Errorf("DB_USER is required when DATA_SOURCE=%s", DataSourcePostgres)
+			return fmt.Errorf("DB_USER is required when DATA_SOURCE=%s", c.DataSource)
 		}
 		if c.DBPassword == "" {
-			return fmt.Errorf("DB_PASSWORD is required when DATA_SOURCE=%s", DataSourcePostgres)
+			return fmt.Errorf("DB_PASSWORD is required when DATA_SOURCE=%s", c.DataSource)
 		}
-		return fmt.Errorf("DB_NAME is required when DATA_SOURCE=%s", DataSourcePostgres)
+		return fmt.Errorf("DB_NAME is required when DATA_SOURCE=%s", c.DataSource)
 	}
 
 	// A partial set is always a misconfiguration, in either mode — the same
@@ -290,18 +469,23 @@ func (c *Config) Validate() error {
 	if dbSet && !dbComplete {
 		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME must be set together or not at all")
 	}
-	if c.DataSource == DataSourceServiceNow {
+	// ServiceNow integration service credentials are required for
+	// DATA_SOURCE=servicenow (reads go there) and also for
+	// DATA_SOURCE=postgres-servicenow-dual-write (the best-effort mirror write
+	// goes there, via the same client — see SNWritebackDispatcher).
+	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite
+	if snRequired {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=servicenow")
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s", c.DataSource)
 		}
 		if c.ServiceNowIntegrationServiceTokenURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=servicenow")
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s", c.DataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientID == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=servicenow")
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s", c.DataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientSecret == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=servicenow")
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s", c.DataSource)
 		}
 	}
 	// EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/EVENT_HUB_TOPIC are
@@ -317,11 +501,34 @@ func (c *Config) Validate() error {
 	if eventHubSet && !eventHubComplete {
 		return fmt.Errorf("EVENT_HUB_BROKER, EVENT_HUB_CONNECTION_STRING, and EVENT_HUB_TOPIC must be set together or not at all")
 	}
+	// Token validation is always on and unconditionally needs to know whose
+	// keys to trust and which audiences make an ID token a user token, or it
+	// would either accept everything or reject everything. Reject that at
+	// startup rather than at the first request.
+	if c.AuthIssuer == "" || c.AuthJWKSURL == "" {
+		return fmt.Errorf("AUTH_ISSUER and AUTH_JWKS_URL are required")
+	}
+	if len(c.AuthUserTokenAudiences) == 0 {
+		return fmt.Errorf("AUTH_USER_TOKEN_AUDIENCES is required")
+	}
 	salesEntitySet := c.SalesEntityBaseURL != "" || c.SalesEntityTokenURL != "" || c.SalesEntityClientID != "" || c.SalesEntityClientSecret != "" || c.SalesEntityScopes != ""
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
 	}
 	return nil
+}
+
+// HasPortalMembershipWrites reports whether the portal-driven membership
+// write endpoints may be registered: the flag is on, the data source is
+// Postgres (the write is a Postgres transaction — there is no ServiceNow
+// equivalent), and the REST sales/sales-entity-service connection is
+// complete, since half of every one of those writes goes to Salesforce.
+// routes.go ANDs this with db != nil, the same way every other
+// Postgres-only feature set is gated.
+func (c *Config) HasPortalMembershipWrites() bool {
+	return c.CSMMigrationPortalWritesEnabled &&
+		c.DataSource == DataSourcePostgres &&
+		c.SalesEntityConfigured()
 }
 
 // SalesEntityConfigured reports whether every REST sales/sales-entity-service env var is set.
@@ -344,6 +551,17 @@ func (c *Config) DSN() string {
 	q.Set("sslmode", c.DBSSLMode)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// HasGithubIntegration reports whether the GitHub sync is both switched on and
+// configured well enough to run. The webhook secret is required rather than
+// optional: without it the endpoint could not authenticate a caller, and an
+// endpoint that mutates change requests must never be reachable unverified.
+func (c *Config) HasGithubIntegration() bool {
+	return c.GithubIntegrationEnabled &&
+		c.GithubWebhookSecret != "" &&
+		c.GithubToken != "" &&
+		c.GithubIntegrationLogin != ""
 }
 
 // envDuration reads a Go duration string (e.g. "5s", "500ms"), falling back to

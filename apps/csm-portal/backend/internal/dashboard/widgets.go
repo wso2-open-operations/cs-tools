@@ -306,6 +306,16 @@ type Dashboard struct {
 	// picker); it is not enforced anywhere. GET /dashboards still returns
 	// every dashboard to every caller regardless of team membership.
 	TargetTeam string `json:"targetTeam"`
+	// Restricted marks a dashboard only cs_engineer/admin may see —
+	// unlike TargetTeam, this IS enforced: handler.DashboardHandler filters a
+	// restricted dashboard out of GET /dashboards and 403s a direct
+	// GET /dashboards/{id} for anyone else. Every other portal role sees only
+	// the unrestricted dashboards (the default, false). Intended for a
+	// team/advanced dashboard (e.g. one built from a wider set of business
+	// data than the general case-summary view every role gets); it is not
+	// itself a team-selection mechanism — pair it with TargetTeam/Type as
+	// today, this only adds a floor under who may open it at all.
+	Restricted bool `json:"restricted,omitempty"`
 	// IsTeamBased marks a dashboard whose FE view should offer a team
 	// selector (populated from POST /teams/search) alongside the dashboard
 	// switcher. This is currently UI skeleton only: selecting a team does

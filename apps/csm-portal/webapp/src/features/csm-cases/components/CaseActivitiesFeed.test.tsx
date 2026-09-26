@@ -666,4 +666,24 @@ describe("CaseActivitiesFeed — attachment preview affordance", () => {
       screen.getByRole("button", { name: `Download ${ZIP_ATTACHMENT.filename}` }),
     ).toBeInTheDocument();
   });
+
+  it("without onDownloadAttachment, Download stays visible but disabled with a permission tooltip", async () => {
+    renderWithRouter(
+      <CaseActivitiesFeedHarness
+        comments={[]}
+        audit={[]}
+        attachments={[ZIP_ATTACHMENT]}
+      />,
+    );
+    const button = screen.getByRole("button", {
+      name: `Download ${ZIP_ATTACHMENT.filename}`,
+    });
+    expect(button).toBeDisabled();
+    fireEvent.mouseOver(button);
+    expect(
+      await screen.findByText(
+        "You don't have permission to download attachments.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

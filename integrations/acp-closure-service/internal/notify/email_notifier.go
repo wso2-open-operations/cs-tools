@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"net/url"
 	"strings"
 )
 
@@ -197,6 +198,21 @@ type EmailNotifier struct {
 	// production environment, once that's a deliberate decision — not
 	// something to flip casually to "make a test work".
 	AllowNonWSO2Recipients bool
+	// StandingCC is a fixed list of addresses cc'd on every notice this
+	// component sends — internal, customer-facing, and the
+	// no-business-contact nudge alike, subscription and invoice cascades
+	// alike, since none of this varies by notice shape. Confirmed against
+	// every real reference email this project has (both internal and
+	// customer-facing): each one cc's customer-lifecycle-notification@wso2.com
+	// and billing@wso2.com, which this port never sent until this field was
+	// added — a real gap, not a documented simplification. Configurable
+	// (STANDING_CC_RECIPIENTS in main.go) rather than a hardcoded constant
+	// specifically so staging can leave it empty — these are real
+	// production distribution lists that must not receive test traffic,
+	// the same reasoning behind AllowNonWSO2Recipients defaulting false.
+	// Entries still pass through filterRecipients like any other recipient;
+	// this is additive cc, not a bypass of the WSO2-only staging safeguard.
+	StandingCC []string
 }
 
 // Send builds the to/cc recipient lists, converts Body to simple HTML, and
@@ -215,6 +231,7 @@ type EmailNotifier struct {
 // kind.
 func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	to, cc := recipientsToToCC(notice.Recipients)
+	cc = append(cc, n.StandingCC...)
 	to = n.filterRecipients(to)
 	cc = n.filterRecipients(cc)
 
@@ -237,7 +254,7 @@ func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	// fragment with no real block-level container was also the likely
 	// cause of a real symptom seen in a live test: the trailing "WSO2
 	// Team" signature line visually missing in the received email.
-	htmlBody := renderInternalEmailHTML(notice.Body)
+	htmlBody := renderInternalEmailHTML(notice.Body, notice.ProjectSfID)
 	if notice.Recipients.Customer != nil {
 		htmlBody = renderEmailHTML(notice.Body)
 	}
@@ -331,27 +348,33 @@ const noBusinessContactBodyParagraphCount = 5
 // (noBusinessContactBodyParagraphCount) — each dispatched to its matching
 // renderer below. Anything else falls back to internalEmailFallbackTemplate
 // — same card styling, without assuming a shape that doesn't hold for it.
-func renderInternalEmailHTML(body string) string {
+// sfID is threaded through to whichever renderer handles the "Project Name"
+// field row — see projectNameFieldRowHTML.
+func renderInternalEmailHTML(body, sfID string) string {
 	paragraphs := strings.Split(body, "\n\n")
 	switch len(paragraphs) {
 	case internalInvoiceBodyParagraphCount:
-		return renderInternalInvoiceEmailHTML(paragraphs)
+		return renderInternalInvoiceEmailHTML(paragraphs, sfID)
 	case internalBodyParagraphCount:
-		return renderInternalSubscriptionEmailHTML(paragraphs)
+		return renderInternalSubscriptionEmailHTML(paragraphs, sfID)
 	case noBusinessContactBodyParagraphCount:
-		return renderNoBusinessContactEmailHTML(paragraphs)
+		return renderNoBusinessContactEmailHTML(paragraphs, sfID)
 	default:
 		return fmt.Sprintf(internalEmailFallbackTemplate, plainTextToHTML(body), wso2LogoURL)
 	}
 }
 
 // renderInternalSubscriptionEmailHTML builds the subscription-based
-// internal notice's HTML from its already-validated 9-paragraph body.
-func renderInternalSubscriptionEmailHTML(paragraphs []string) string {
+// internal notice's HTML from its already-validated 9-paragraph body. The
+// first project field (paragraphs[2]) is always "Project Name: X" — see
+// internalReminderBodyTemplate/internalSuspensionBodyTemplate — so it's the
+// one row rendered via projectNameFieldRowHTML instead of fieldRowHTML.
+func renderInternalSubscriptionEmailHTML(paragraphs []string, sfID string) string {
 	greeting := plainTextToHTML(paragraphs[0])
 	intro := plainTextToHTML(paragraphs[1])
 	var fields strings.Builder
-	for _, p := range paragraphs[2:7] {
+	fields.WriteString(projectNameFieldRowHTML(paragraphs[2], sfID))
+	for _, p := range paragraphs[3:7] {
 		fields.WriteString(fieldRowHTML(p))
 	}
 	closing := plainTextToHTML(paragraphs[7])
@@ -362,13 +385,16 @@ func renderInternalSubscriptionEmailHTML(paragraphs []string) string {
 
 // renderInternalInvoiceEmailHTML builds the invoice-based internal notice's
 // HTML from its already-validated 12-paragraph body — the 5 project fields
-// render in the main detail box same as the subscription-based notice, the
-// 3 invoice fields render in their own nested box inside it.
-func renderInternalInvoiceEmailHTML(paragraphs []string) string {
+// render in the main detail box same as the subscription-based notice
+// (paragraphs[2], "Project Name: X", again rendered via
+// projectNameFieldRowHTML), the 3 invoice fields render in their own nested
+// box inside it, never linked.
+func renderInternalInvoiceEmailHTML(paragraphs []string, sfID string) string {
 	greeting := plainTextToHTML(paragraphs[0])
 	intro := plainTextToHTML(paragraphs[1])
 	var projectFields strings.Builder
-	for _, p := range paragraphs[2:7] {
+	projectFields.WriteString(projectNameFieldRowHTML(paragraphs[2], sfID))
+	for _, p := range paragraphs[3:7] {
 		projectFields.WriteString(fieldRowHTML(p))
 	}
 	var invoiceFields strings.Builder
@@ -389,23 +415,28 @@ func renderInternalInvoiceEmailHTML(paragraphs []string) string {
 // the plain-text body's prose — only the project name (pulled from the
 // structured "Project Name: X" field line, the same reliable source the
 // field box itself uses) and the field values are genuinely dynamic here.
-func renderNoBusinessContactEmailHTML(paragraphs []string) string {
+// Only the structured field row is ever linked via sfID — the warning
+// paragraph's own bolded project-name mention stays plain text.
+func renderNoBusinessContactEmailHTML(paragraphs []string, sfID string) string {
 	intro := plainTextToHTML(paragraphs[1])
 
 	fieldLines := strings.Split(paragraphs[4], "\n")
 	var fields strings.Builder
 	var projectName string
 	for _, line := range fieldLines {
-		fields.WriteString(fieldRowHTML(line))
-		if label, value, ok := strings.Cut(line, ": "); ok && label == "Project Name" {
+		label, value, ok := strings.Cut(line, ": ")
+		if ok && label == "Project Name" {
 			projectName = value
+			fields.WriteString(projectNameFieldRowHTML(line, sfID))
+			continue
 		}
+		fields.WriteString(fieldRowHTML(line))
 	}
 
 	return fmt.Sprintf(noBusinessContactEmailHTMLTemplate, intro, html.EscapeString(projectName), wso2BusinessContactDocURL, fields.String(), wso2LogoURL)
 }
 
-// fieldRowHTML renders one "Label: value" paragraph (e.g. "Project Name:
+// fieldRowHTML renders one "Label: value" paragraph (e.g. "Project Key:
 // X") as its own styled row inside the internal template's detail box,
 // bolding the value. Falls back to a plain escaped line if a paragraph
 // doesn't have the expected "Label: value" shape, rather than dropping it.
@@ -416,6 +447,41 @@ func fieldRowHTML(paragraph string) string {
 	}
 	return fmt.Sprintf(`<p style="margin:0 0 8px 0;color:#333333;font-size:14px;">%s: <strong>%s</strong></p>`,
 		html.EscapeString(label), html.EscapeString(value))
+}
+
+// wso2SalesforceBaseURL is Salesforce's generic record-redirect URL for
+// WSO2's org — https://<mydomain>.my.salesforce.com/<recordId> resolves to
+// the record regardless of object type. Confirmed against a real reference
+// email (local-docs/actual_0_days_invoice_email.html): the internal
+// notice's "Project Name" value links exactly this way, using the
+// project's own Salesforce ID.
+const wso2SalesforceBaseURL = "https://wso2.my.salesforce.com/"
+
+// salesforceRecordURL builds a Salesforce record link for sfID.
+// url.PathEscape is cheap insurance, not a response to any observed
+// problem — real Salesforce IDs are always plain alphanumeric.
+func salesforceRecordURL(sfID string) string {
+	return wso2SalesforceBaseURL + url.PathEscape(sfID)
+}
+
+// projectNameFieldRowHTML renders the "Project Name: X" row exactly like
+// fieldRowHTML, except the value becomes a hyperlink to the project's
+// Salesforce record (salesforceRecordURL) when sfID is non-empty — this is
+// the one field row that links in the real reference emails; every other
+// field (Project Key, Invoice Id, ...) always stays fieldRowHTML's plain
+// bolded text. Falls back to fieldRowHTML's plain rendering when sfID is
+// empty (no Salesforce ID on file for this project) or the paragraph
+// doesn't have the expected "Label: value" shape.
+func projectNameFieldRowHTML(paragraph, sfID string) string {
+	if sfID == "" {
+		return fieldRowHTML(paragraph)
+	}
+	label, value, ok := strings.Cut(paragraph, ": ")
+	if !ok {
+		return fieldRowHTML(paragraph)
+	}
+	return fmt.Sprintf(`<p style="margin:0 0 8px 0;color:#333333;font-size:14px;">%s: <a href="%s" style="color:#2c66bd;font-weight:700;text-decoration:none;" target="_blank">%s</a></p>`,
+		html.EscapeString(label), html.EscapeString(salesforceRecordURL(sfID)), html.EscapeString(value))
 }
 
 // plainTextToHTML converts a plain-text notice Body (every existing

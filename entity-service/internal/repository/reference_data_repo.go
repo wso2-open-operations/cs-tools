@@ -26,10 +26,36 @@ import (
 )
 
 // ProjectTypeRow is one row of the project_type table (migration
-// 000026_project_type_table).
+// 000026_project_type_table), including the feature-entitlement columns
+// migration 000085 added -- a transcription of ServiceNow's
+// ProjectTypeFeatureManager.FEATURE_MATRIX. The has_* columns default FALSE
+// and AcceptedSeverityValues/*ProductCategories default nil/empty for a type
+// FEATURE_MATRIX itself has no entry for, so a caller needs no separate
+// nil-check the way a second, joined table would have required.
 type ProjectTypeRow struct {
 	ID   string
 	Name string
+
+	HasServiceRequestWriteAccess   bool
+	HasServiceRequestReadAccess    bool
+	HasChangeRequestReadAccess     bool
+	HasSraWriteAccess              bool
+	HasSraReadAccess               bool
+	HasEngagementsReadAccess       bool
+	HasUpdatesReadAccess           bool
+	HasDeploymentWriteAccess       bool
+	HasDeploymentReadAccess        bool
+	HasTimeLogsReadAccess          bool
+	HasComponentAnalysisReadAccess bool
+	HasUsageMetricsReadAccess      bool
+	// AcceptedSeverityValues/*ProductCategories carry this schema's own enum
+	// labels verbatim (case_severity_enum's "S0".."S4",
+	// deployed_product_category_enum's "MS"/"PC"/"CL"/"PDP"/"PS") -- the
+	// service layer translates them into whatever wire shape a caller
+	// expects (see project_metadata_service.go's severityChoiceItems).
+	AcceptedSeverityValues       []string
+	DefaultCaseProductCategories []string
+	SrProductCategories          []string
 }
 
 // ReferenceDataRepository backs the choice-list/reference-data reads shared
@@ -81,13 +107,38 @@ func (r *referenceDataRepo) ListProjectTypes(ctx context.Context) ([]ProjectType
 
 // GetProjectByID implements ReferenceDataRepository.
 func (r *referenceDataRepo) GetProjectByID(ctx context.Context, projectID string) (bool, *ProjectTypeRow, error) {
-	var ptID, ptName *string
+	var (
+		ptID, ptName *string
+		hasSRWrite, hasSRRead, hasCR, hasSraWrite, hasSraRead, hasEngagements, hasUpdates,
+		hasDeployWrite, hasDeployRead, hasTimeLogs, hasComponentAnalysis, hasUsageMetrics *bool
+		acceptedSeverities                  []string
+		defaultCaseCategories, srCategories []string
+	)
+	// ::TEXT[] on the three enum-array columns: this connection's pgx type map
+	// has no custom enum types registered, so scanning case_severity_enum[]/
+	// deployed_product_category_enum[] directly into []string fails -- same
+	// reason every other enum column in this repository package is selected
+	// as ::TEXT (see e.g. case_repo.go's severity::TEXT) rather than its
+	// native enum type.
 	err := r.db.QueryRow(ctx,
-		`SELECT pt.id, pt.name
+		`SELECT
+			pt.id, pt.name,
+			pt.has_service_request_write_access, pt.has_service_request_read_access, pt.has_change_request_read_access,
+			pt.has_sra_write_access, pt.has_sra_read_access, pt.has_engagements_read_access, pt.has_updates_read_access,
+			pt.has_deployment_write_access, pt.has_deployment_read_access, pt.has_time_logs_read_access,
+			pt.has_component_analysis_read_access, pt.has_usage_metrics_read_access,
+			pt.accepted_severity_values::TEXT[], pt.default_case_product_categories::TEXT[], pt.sr_product_categories::TEXT[]
 		 FROM project p
 		 LEFT JOIN project_type pt ON pt.id = p.project_type_id
 		 WHERE p.id = $1`, projectID,
-	).Scan(&ptID, &ptName)
+	).Scan(
+		&ptID, &ptName,
+		&hasSRWrite, &hasSRRead, &hasCR,
+		&hasSraWrite, &hasSraRead, &hasEngagements, &hasUpdates,
+		&hasDeployWrite, &hasDeployRead, &hasTimeLogs,
+		&hasComponentAnalysis, &hasUsageMetrics,
+		&acceptedSeverities, &defaultCaseCategories, &srCategories,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil, nil
 	}
@@ -97,7 +148,37 @@ func (r *referenceDataRepo) GetProjectByID(ctx context.Context, projectID string
 	if ptID == nil {
 		return true, nil, nil
 	}
-	return true, &ProjectTypeRow{ID: *ptID, Name: *ptName}, nil
+	// The has_* columns are NOT NULL on project_type itself, but the LEFT
+	// JOIN still produces NULL for all of them when a project has no
+	// project_type_id at all (ptID == nil, handled above) -- deref helper
+	// below covers the remaining case where LEFT JOIN found no matching
+	// project_type row for some other reason.
+	deref := func(b *bool) bool {
+		if b == nil {
+			return false
+		}
+		return *b
+	}
+	return true, &ProjectTypeRow{
+		ID:   *ptID,
+		Name: *ptName,
+
+		HasServiceRequestWriteAccess:   deref(hasSRWrite),
+		HasServiceRequestReadAccess:    deref(hasSRRead),
+		HasChangeRequestReadAccess:     deref(hasCR),
+		HasSraWriteAccess:              deref(hasSraWrite),
+		HasSraReadAccess:               deref(hasSraRead),
+		HasEngagementsReadAccess:       deref(hasEngagements),
+		HasUpdatesReadAccess:           deref(hasUpdates),
+		HasDeploymentWriteAccess:       deref(hasDeployWrite),
+		HasDeploymentReadAccess:        deref(hasDeployRead),
+		HasTimeLogsReadAccess:          deref(hasTimeLogs),
+		HasComponentAnalysisReadAccess: deref(hasComponentAnalysis),
+		HasUsageMetricsReadAccess:      deref(hasUsageMetrics),
+		AcceptedSeverityValues:         acceptedSeverities,
+		DefaultCaseProductCategories:   defaultCaseCategories,
+		SrProductCategories:            srCategories,
+	}, nil
 }
 
 // EnumLabels implements ReferenceDataRepository.

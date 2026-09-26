@@ -15,44 +15,61 @@
 // under the License.
 
 import type { ReactNode } from "react";
-import { Box, MenuItem, Select, type SelectChangeEvent } from "@mui/material";
-import { Outlet, useSearchParams } from "react-router";
+import { Box, MenuItem } from "@mui/material";
+import { Outlet, useMatch } from "react-router";
 import { useOverview } from "@api/hooks";
 import { FetchProgressBar, FetchProgressProvider } from "@components/FetchProgressBar";
+import { FilterSelect } from "@components/FilterSelect";
+import { IssueSearchBox } from "@components/IssueSearchBox";
 import { SyncButton } from "@components/SyncButton";
 import { UserProfile } from "@components/UserProfile";
 import { useFetchProgressActive } from "@lib/fetchProgress";
+import { priorityOptionsFrom, useGlobalFilters } from "@lib/filters";
 
-const PRIORITY_OPTIONS = [
-  { value: "Critical(P1)", label: "Critical · P1" },
-  { value: "High(P2)", label: "High · P2" },
-  { value: "Medium(P3)", label: "Medium · P3" },
-  { value: "Low(P4)", label: "Low · P4" },
-];
+/**
+ * The header's global Project/Priority/ABT Team selects, plus the filtered
+ * `useOverview` call that backs their option lists. Rendered only off
+ * `/issues`, whose own filter dropdowns already own those URL keys and fetch
+ * overview unfiltered — mounting this here too would fire a second,
+ * redundant (and differently-scoped) overview request on that page.
+ */
+function GlobalFilterSelects() {
+  const { repo, priority, abtTeam, setFilter } = useGlobalFilters();
+  const { data: overview } = useOverview({ repo, priority, abtTeam });
 
-// A native <select>'s options popup is rendered by the OS/browser, not the
-// page — no CSS/theme can reach it. MUI's Select renders its popup via
-// Popover/MenuItem, which Oxygen UI's AcrylicBaseTheme already themes
-// (background.paper + blur.medium, see MuiPopover/MuiMenuItem overrides in
-// node_modules/@wso2/oxygen-ui) — no custom sx needed for the popup itself.
-function FilterSelect({
-  value,
-  onChange,
-  children,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  children: ReactNode;
-}) {
+  const repoOptions = overview?.projects ?? [];
+  const priorityOptions = priorityOptionsFrom(overview?.priorities);
+  const abtTeamOptions = overview?.abtTeams ?? [];
+
   return (
-    <Select
-      value={value}
-      onChange={(e: SelectChangeEvent) => onChange(e.target.value)}
-      size="small"
-      sx={{ minWidth: 150 }}
-    >
-      {children}
-    </Select>
+    <Box sx={{ display: "flex", alignItems: "center", gap: "10px" }}>
+      <FilterSelect value={repo ?? "all"} onChange={(v) => setFilter("repo", v === "all" ? "" : v)}>
+        <MenuItem value="all">All Projects</MenuItem>
+        {repoOptions.map((r) => (
+          <MenuItem key={r.repoId} value={r.repo}>
+            {r.name}
+          </MenuItem>
+        ))}
+      </FilterSelect>
+
+      <FilterSelect value={priority ?? "all"} onChange={(v) => setFilter("priority", v === "all" ? "" : v)}>
+        <MenuItem value="all">All Priorities</MenuItem>
+        {priorityOptions.map((p) => (
+          <MenuItem key={p.value} value={p.value}>
+            {p.label}
+          </MenuItem>
+        ))}
+      </FilterSelect>
+
+      <FilterSelect value={abtTeam ?? "all"} onChange={(v) => setFilter("abtTeam", v === "all" ? "" : v)}>
+        <MenuItem value="all">All ABT Teams</MenuItem>
+        {abtTeamOptions.map((team) => (
+          <MenuItem key={team} value={team}>
+            {team}
+          </MenuItem>
+        ))}
+      </FilterSelect>
+    </Box>
   );
 }
 
@@ -61,7 +78,7 @@ function Logo() {
   return <Box component="img" src="/wso2-pulse.svg" alt="WSO2" sx={{ height: 34, width: 34, display: "block" }} />;
 }
 
-/** The signed-in app frame: top nav with global repo/priority filters, routed content below. */
+/** The signed-in app frame: top nav with global repo/priority/ABT-team filters, routed content below. */
 export default function AppShell({ children }: { children?: ReactNode }) {
   return (
     <FetchProgressProvider>
@@ -72,21 +89,7 @@ export default function AppShell({ children }: { children?: ReactNode }) {
 
 function AppShellContent({ children }: { children?: ReactNode }) {
   const progressActive = useFetchProgressActive();
-  const [params, setParams] = useSearchParams();
-  const repo = params.get("repo") ?? undefined;
-  const priority = params.get("priority") ?? undefined;
-
-  const { data: overview } = useOverview(repo, priority);
-
-  // Sets or clears (empty value) one global filter in the URL.
-  const setFilter = (key: "repo" | "priority", v: string) => {
-    const next = new URLSearchParams(params);
-    if (v) next.set(key, v);
-    else next.delete(key);
-    setParams(next, { replace: true });
-  };
-
-  const repoOptions = overview?.projects ?? [];
+  const onIssuesPage = useMatch("/issues");
 
   return (
     // No bgcolor here — Oxygen UI's MuiCssBaseline override paints the
@@ -128,25 +131,7 @@ function AppShellContent({ children }: { children?: ReactNode }) {
             </Box>
           </Box>
 
-          <Box sx={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <FilterSelect value={repo ?? "all"} onChange={(v) => setFilter("repo", v === "all" ? "" : v)}>
-              <MenuItem value="all">All Projects</MenuItem>
-              {repoOptions.map((r) => (
-                <MenuItem key={r.repoId} value={r.repo}>
-                  {r.name}
-                </MenuItem>
-              ))}
-            </FilterSelect>
-
-            <FilterSelect value={priority ?? "all"} onChange={(v) => setFilter("priority", v === "all" ? "" : v)}>
-              <MenuItem value="all">All Priorities</MenuItem>
-              {PRIORITY_OPTIONS.map((p) => (
-                <MenuItem key={p.value} value={p.value}>
-                  {p.label}
-                </MenuItem>
-              ))}
-            </FilterSelect>
-          </Box>
+          {onIssuesPage ? <IssueSearchBox /> : <GlobalFilterSelects />}
 
           <Box sx={{ display: "flex", alignItems: "center", gap: "10px", pl: 1 }}>
             <SyncButton />

@@ -65,6 +65,40 @@ func (s *deployedProductService) SearchDeployedProducts(ctx context.Context, req
 	}, nil
 }
 
+// SearchProjectsByProductVersion implements DeployedProductService.
+// deployed_product.project_id (migration 000014) is a direct FK to project,
+// so unlike the ServiceNow implementation this doesn't need to page through
+// deployments platform-wide to resolve the join -- the repository does it
+// in one query. The same mandatoryExcludeClosureStates/
+// mandatoryExcludeSubscriptionTypes policy defined alongside the ServiceNow
+// implementation (sn_deployed_product_service.go) is applied here too, so
+// the "can't be turned off" EOL-audience exclusion guarantee holds
+// identically regardless of data source.
+func (s *deployedProductService) SearchProjectsByProductVersion(ctx context.Context, req domain.SearchProjectsByProductVersionRequest) (domain.SearchProjectsByProductVersionResponse, error) {
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+	if err := validateUUIDs("productId", []string{req.ProductID}); err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+	if err := validateUUIDs("productVersionId", []string{req.ProductVersionID}); err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+
+	projects, total, err := s.repo.SearchProjectsByProductVersion(ctx, req, mandatoryExcludeClosureStates, mandatoryExcludeSubscriptionTypes)
+	if err != nil {
+		return domain.SearchProjectsByProductVersionResponse{}, err
+	}
+
+	return domain.SearchProjectsByProductVersionResponse{
+		Projects: projects,
+		Total:    total,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+		HasMore:  req.Pagination.Offset+len(projects) < total,
+	}, nil
+}
+
 // CreateDeployedProduct is not supported for the PostgreSQL data source.
 func (s *deployedProductService) CreateDeployedProduct(_ context.Context, _ domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error) {
 	return domain.CreateDeployedProductResponse{}, &apierror.ValidationError{Msg: "CreateDeployedProduct is not supported for the PostgreSQL data source"}
@@ -76,7 +110,7 @@ func (s *deployedProductService) UpdateDeployedProduct(_ context.Context, _ doma
 }
 
 // SearchDeployedProductMetrics implements DeployedProductService, backed by
-// usage_count (migration 000054) -- see DeployedProductRepository's own doc
+// hourly_usage_summary (migration 000054) -- see DeployedProductRepository's own doc
 // comment on resolveDeployedProductNodes for how a deployed product's
 // instances are resolved.
 func (s *deployedProductService) SearchDeployedProductMetrics(ctx context.Context, id string, req domain.DeployedProductMetricsRequest) (domain.DeployedProductMetricsResponse, error) {

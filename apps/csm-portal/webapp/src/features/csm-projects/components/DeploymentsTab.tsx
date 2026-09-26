@@ -41,6 +41,7 @@ import {
 import { Ban, Eye, MoreVertical, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import QueryErrorState from "@components/QueryErrorState";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useUpdateDeployment } from "@features/csm-projects/api/useUpdateDeployment";
 import { useCreateDeployment } from "@features/csm-projects/api/useCreateDeployment";
@@ -75,6 +76,7 @@ interface Feedback {
  * (string enum per PR #957; `typeKey` integer is gone).
  */
 export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.Element {
+  const { canWrite } = usePortalAccess();
   const { data, isLoading, isError, error, isFetching } = useSearchDeployments(projectId);
   const updateDeployment = useUpdateDeployment(projectId);
   const createDeployment = useCreateDeployment(projectId);
@@ -171,16 +173,18 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
       )}
 
 
-      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-        <Button
-          variant="contained"
-          size="small"
-          startIcon={<Plus size={16} />}
-          onClick={() => setCreating(true)}
-        >
-          Create deployment
-        </Button>
-      </Box>
+      {canWrite && (
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<Plus size={16} />}
+            onClick={() => setCreating(true)}
+          >
+            Create deployment
+          </Button>
+        </Box>
+      )}
 
       <Paper variant="outlined">
         <TableContainer>
@@ -277,25 +281,29 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           <Eye size={16} style={{ marginRight: 8 }} />
           View details
         </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setEditing(menuTarget);
-            closeMenu();
-          }}
-        >
-          <Pencil size={16} style={{ marginRight: 8 }} />
-          Edit details
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setDeactivating(menuTarget);
-            closeMenu();
-          }}
-          sx={{ color: "error.main" }}
-        >
-          <Ban size={16} style={{ marginRight: 8 }} />
-          Deactivate
-        </MenuItem>
+        {canWrite && (
+          <MenuItem
+            onClick={() => {
+              setEditing(menuTarget);
+              closeMenu();
+            }}
+          >
+            <Pencil size={16} style={{ marginRight: 8 }} />
+            Edit details
+          </MenuItem>
+        )}
+        {canWrite && (
+          <MenuItem
+            onClick={() => {
+              setDeactivating(menuTarget);
+              closeMenu();
+            }}
+            sx={{ color: "error.main" }}
+          >
+            <Ban size={16} style={{ marginRight: 8 }} />
+            Deactivate
+          </MenuItem>
+        )}
       </Menu>
 
       {viewing && (

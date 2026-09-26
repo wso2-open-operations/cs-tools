@@ -133,6 +133,9 @@ func TestProject_ParsesNameProjectKeyStartDateAndAccountName(t *testing.T) {
 	if proj.Account == nil || proj.Account.Name != "ACP Test Partner Account" {
 		t.Errorf("Account.Name = %v, want %q", proj.Account, "ACP Test Partner Account")
 	}
+	if proj.SfID == nil || *proj.SfID != "a0dE200000CZ9ZNIA1" {
+		t.Errorf("SfID = %v, want %q", proj.SfID, "a0dE200000CZ9ZNIA1")
+	}
 }
 
 // TestProject_ParsesNameKeyAndStartDateFromRealSearchProjectsResponse is a

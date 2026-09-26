@@ -383,6 +383,7 @@ func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Co
 	}
 
 	conversationID, _ := parsed["conversationId"].(string)
+	conversationID = dashIfSysID(conversationID)
 	userMessage, _ := parsed["message"].(string)
 
 	if conversationID != "" {
@@ -526,6 +527,7 @@ func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Co
 // is absent. Mirrors the Ballerina backend's onMessage side-channel branch.
 func (h *WebSocketHandler) handleSideChannel(ctx context.Context, conn *websocket.Conn, user *middleware.UserInfo, projectID string, activeConvID *string, msgType string, parsed map[string]any) {
 	conversationID, _ := parsed["conversationId"].(string)
+	conversationID = dashIfSysID(conversationID)
 	if conversationID == "" && activeConvID != nil && *activeConvID != "" {
 		conversationID = *activeConvID
 	}

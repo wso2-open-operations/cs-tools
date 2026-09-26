@@ -39,22 +39,38 @@ type DeployedProductRepository interface {
 	SearchDeployedProducts(ctx context.Context, req domain.SearchDeployedProductsRequest) ([]domain.DeployedProductView, int, error)
 
 	// SearchDeployedProductMetrics returns per-day CORES readings (from
-	// usage_count, migration 000054) for every deployment_node resolved to
+	// hourly_usage_summary, migration 000054) for every deployment_node resolved to
 	// the given deployed product and deployment. A NotFoundError is returned
 	// if the deployed product doesn't exist or isn't linked to deploymentID.
 	SearchDeployedProductMetrics(ctx context.Context, id, deploymentID, startDate, endDate string) (domain.DeployedProductMetricsResponse, error)
 
 	// SearchDeployedProductUsageCounts is the same resolution as
-	// SearchDeployedProductMetrics, but returns every usage_count.count_type
+	// SearchDeployedProductMetrics, but returns every hourly_usage_summary.count_type
 	// found for the resolved instances, not just CORES.
 	SearchDeployedProductUsageCounts(ctx context.Context, id, deploymentID, startDate, endDate string) (domain.DeployedProductUsageCountsResponse, error)
+
+	// SearchProjectsByProductVersion returns the deduplicated, paginated set
+	// of projects with a deployed_product on the given product+version,
+	// joining deployed_product directly to project (migration 000014's
+	// project_id FK) rather than going through deployment the way
+	// SearchDeployedProducts does -- there's no deployment-name/id to
+	// display here, only the owning project. excludeClosureStates/
+	// excludeSubscriptionTypes are the caller's fixed, non-optional
+	// exclusion policy (mandatoryExcludeClosureStates/
+	// mandatoryExcludeSubscriptionTypes in sn_deployed_product_service.go,
+	// mirrored here for parity with that data source) -- not a
+	// caller-supplied filter, so they're separate parameters rather than
+	// part of domain.SearchProjectsByProductVersionRequest. COUNT and SELECT
+	// are executed concurrently on separate pool connections, same as
+	// SearchProjects/SearchDeployedProducts.
+	SearchProjectsByProductVersion(ctx context.Context, req domain.SearchProjectsByProductVersionRequest, excludeClosureStates []string, excludeSubscriptionTypes []domain.SubscriptionType) ([]domain.EntityRef, int, error)
 }
 
 // resolveDeployedProductNodes looks up the given deployed product, confirms
 // it belongs to deploymentID, and returns the deployment_node rows
 // (id, node_id) resolved to it -- see instanceRefJoins' own doc comment in
-// instance_repo.go for why this resolution (deployment_ref cast to uuid) is
-// a best-effort join, unverified against real data.
+// instance_repo.go for how a node is matched to a deployment (by project key and
+// deployment number, only within the same project).
 func (r *deployedProductRepo) resolveDeployedProductNodes(ctx context.Context, id, deploymentID string) (domain.ReferenceTableItem, []domain.ReferenceTableItem, error) {
 	var name, number *string
 	var dpDeploymentID, versionID *string
@@ -88,11 +104,10 @@ func (r *deployedProductRepo) resolveDeployedProductNodes(ctx context.Context, i
 	rows, err := r.db.Query(ctx, `
 		SELECT dn.id, dn.node_id
 		FROM deployment_node dn
+		JOIN project proj ON proj.key = dn.project_key
+		JOIN deployment dep ON dep.number = dn.deployment_number AND dep.project_id = proj.id
 		WHERE dn.product_version_id = $1
-		AND CASE
-			WHEN dn.deployment_ref ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-			THEN dn.deployment_ref::uuid
-		END = $2::uuid`,
+		AND dep.id = $2::uuid`,
 		*versionID, deploymentID,
 	)
 	if err != nil {
@@ -137,7 +152,7 @@ func (r *deployedProductRepo) SearchDeployedProductMetrics(ctx context.Context, 
 
 	rows, err := r.db.Query(ctx, `
 		SELECT uc.counted_on::date, uc.deployment_node_id, uc.count
-		FROM usage_count uc
+		FROM hourly_usage_summary uc
 		WHERE uc.deployment_node_id = ANY($1::uuid[])
 		AND uc.count_type = 'CORES'
 		AND uc.counted_on::date BETWEEN $2::date AND $3::date
@@ -245,7 +260,7 @@ func (r *deployedProductRepo) SearchDeployedProductUsageCounts(ctx context.Conte
 
 	rows, err := r.db.Query(ctx, `
 		SELECT uc.counted_on::date, uc.count_type, uc.deployment_node_id, uc.count
-		FROM usage_count uc
+		FROM hourly_usage_summary uc
 		WHERE uc.deployment_node_id = ANY($1::uuid[])
 		AND uc.counted_on::date BETWEEN $2::date AND $3::date
 		ORDER BY uc.counted_on::date, uc.count_type`,
@@ -443,4 +458,132 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 	}
 
 	return deployedProducts, total, nil
+}
+
+// SearchProjectsByProductVersion implements DeployedProductRepository.
+// productID/productVersionID are validated as UUIDs by the caller
+// (deployedProductService.SearchProjectsByProductVersion) before reaching
+// here, and are always passed as query parameters ($1/$2 below), never
+// interpolated into the SQL string -- same discipline as every other filter
+// in this file.
+func (r *deployedProductRepo) SearchProjectsByProductVersion(ctx context.Context, req domain.SearchProjectsByProductVersionRequest, excludeClosureStates []string, excludeSubscriptionTypes []domain.SubscriptionType) ([]domain.EntityRef, int, error) {
+	filterArgs := []any{req.ProductID, req.ProductVersionID}
+	argIdx := 3
+
+	// Mandatory, unconditional (not gated on a caller-supplied slice, unlike
+	// the two exclusions below): a project whose subscription contract has
+	// ended (end_date in the past) is treated as inaccessible by the
+	// customer portal itself (isProjectSuspended in
+	// apps/customer-portal/webapp/src/utils/permission.ts, which checks
+	// end_date independently of wso2_closure_state — a project's closure
+	// state is frequently left NULL when its subscription simply expired
+	// rather than being explicitly marked Restricted/Suspended). An EOL
+	// announcement audience must not include a project the customer portal
+	// itself already blocks the customer from viewing. end_date is a plain
+	// DATE column (no time-of-day); the cutoff is the last millisecond of
+	// that day (end_date + 1 day - 1ms), not simply "the next UTC day",
+	// so this matches apps/customer-portal/webapp/src/utils/permission.ts's
+	// own isProjectContractEnded (end-of-day UTC, strictly after) and
+	// isProjectContractEnded in sn_project_service.go to the millisecond —
+	// a plain date-vs-date comparison here would exclude the project one
+	// millisecond later than both of those (only at the next day's exact
+	// midnight instead of 23:59:59.999 on end_date's own day), a real,
+	// if practically negligible, inconsistency between the ServiceNow and
+	// Postgres cohorts a reviewer flagged. Both sides of the comparison are
+	// plain "timestamp without time zone" (NOW() AT TIME ZONE 'UTC' yields
+	// the current UTC wall-clock reading in that type), so this needs no
+	// timezone-conversion assumption the way comparing a timestamptz
+	// directly against a bare "date + interval" would.
+	where := "WHERE dp.product_id = $1 AND dp.version_id = $2" +
+		" AND (proj.end_date IS NULL OR proj.end_date + INTERVAL '1 day' - INTERVAL '1 millisecond' >= (NOW() AT TIME ZONE 'UTC'))"
+
+	// Same NULL-permissive, upper-cased-vocabulary matching as
+	// ProjectRepository.SearchProjects' ExcludeClosureStates clause -- see
+	// that clause's own doc comment for why. This is the mandatory
+	// exclusion policy, not a caller-supplied filter, so excludeClosureStates
+	// is only ever the fixed mandatoryExcludeClosureStates slice.
+	if len(excludeClosureStates) > 0 {
+		upper := make([]string, len(excludeClosureStates))
+		for i, s := range excludeClosureStates {
+			upper[i] = strings.ToUpper(s)
+		}
+		where += fmt.Sprintf(" AND (proj.wso2_closure_state IS NULL OR proj.wso2_closure_state::text <> ALL($%d::text[]))", argIdx)
+		filterArgs = append(filterArgs, upper)
+		argIdx++
+	}
+
+	// Same NULL-permissive matching as ProjectRepository.SearchProjects'
+	// ExcludeSubscriptionTypes clause -- see that clause's own doc comment
+	// for why project_type.name is normalized in SQL rather than compared
+	// as-is. Likewise always the fixed mandatoryExcludeSubscriptionTypes
+	// slice, not a caller-supplied filter.
+	if len(excludeSubscriptionTypes) > 0 {
+		types := make([]string, len(excludeSubscriptionTypes))
+		for i, t := range excludeSubscriptionTypes {
+			types[i] = string(t)
+		}
+		where += fmt.Sprintf(" AND (pt.name IS NULL OR lower(replace(pt.name, ' ', '_')) <> ALL($%d::text[]))", argIdx)
+		filterArgs = append(filterArgs, types)
+		argIdx++
+	}
+
+	// DISTINCT: a project can have more than one deployed_product row
+	// matching this exact product+version (e.g. two deployments each
+	// running it), which would otherwise duplicate the project in both the
+	// count and the result.
+	countQuery := "SELECT COUNT(DISTINCT proj.id) FROM deployed_product dp" +
+		" JOIN project proj ON dp.project_id = proj.id" +
+		" LEFT JOIN project_type pt ON pt.id = proj.project_type_id " + where
+
+	dataQuery := fmt.Sprintf(
+		`SELECT DISTINCT proj.id, proj.name
+		 FROM deployed_product dp
+		 JOIN project proj ON dp.project_id = proj.id
+		 LEFT JOIN project_type pt ON pt.id = proj.project_type_id
+		 %s
+		 ORDER BY proj.name, proj.id
+		 LIMIT $%d OFFSET $%d`,
+		where, argIdx, argIdx+1,
+	)
+	dataArgs := append(append([]any{}, filterArgs...), req.Pagination.Limit, req.Pagination.Offset)
+
+	var total int
+	var projects []domain.EntityRef
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
+			return fmt.Errorf("count projects by product version: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
+		if err != nil {
+			return fmt.Errorf("query projects by product version: %w", err)
+		}
+		defer rows.Close()
+
+		result := make([]domain.EntityRef, 0, req.Pagination.Limit)
+		for rows.Next() {
+			var p domain.EntityRef
+			if err := rows.Scan(&p.ID, &p.Name); err != nil {
+				return fmt.Errorf("scan project by product version: %w", err)
+			}
+			result = append(result, p)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate projects by product version: %w", err)
+		}
+		projects = result
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return nil, 0, err
+	}
+
+	return projects, total, nil
 }

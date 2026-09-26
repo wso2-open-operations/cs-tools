@@ -45,6 +45,31 @@ type UserService interface {
 	// any particular data source -- ids are this platform's own primary
 	// keys, so an id-based lookup works the same way regardless of source.
 	GetUsersByIDs(ctx context.Context, ids []string) (domain.GetUsersByIDsResponse, error)
+	// GetUser returns one user's profile: the user row, roles, groups, and for a
+	// customer the project-contact rows with whether each grants access. A
+	// ValidationError is returned for a malformed id and a NotFoundError when no
+	// user has it.
+	GetUser(ctx context.Context, id string) (domain.UserDetail, error)
+	// CreateUser inserts a new "user" row, optionally granting the roles named
+	// in req.Roles. The acting caller is resolved from x-user-id-token, the
+	// same way GetMe resolves its own caller, and stamped as created_by on
+	// every row this writes -- an UnauthorizedError is returned when that
+	// header is missing. A ValidationError is returned for a missing/malformed
+	// email; a ConflictError when a user with that email already exists; a
+	// ServiceUnavailableError naming any requested role not seeded in the role
+	// table.
+	CreateUser(ctx context.Context, req domain.CreateUserRequest) (domain.User, error)
+}
+
+// SavedFilterViewService is the caller's own named list-filter bookmarks
+// (CSM portal saved views). Postgres-only; the caller is always the
+// authenticated user resolved from x-user-id-token — never a client-supplied
+// user id.
+type SavedFilterViewService interface {
+	List(ctx context.Context, listKey domain.SavedFilterListKey) (domain.SavedFilterViewList, error)
+	Save(ctx context.Context, req domain.SaveSavedFilterViewRequest) (domain.SavedFilterViewList, error)
+	Delete(ctx context.Context, listKey domain.SavedFilterListKey, name string) (domain.SavedFilterViewList, error)
+	Reorder(ctx context.Context, req domain.ReorderSavedFilterViewRequest) (domain.SavedFilterViewList, error)
 }
 
 // SNUserService defines the user operations backed by the ServiceNow data source.
@@ -72,12 +97,42 @@ type AccountService interface {
 	// GetAccountByID returns the account with the given UUID. A ValidationError is
 	// returned for a malformed UUID; a NotFoundError if no account matches.
 	GetAccountByID(ctx context.Context, id string) (domain.AccountDetail, error)
+	// UpdateAccountTeams sets the account's CRE and/or SRE team (Postgres data
+	// source only). A ValidationError is returned for a malformed UUID, if
+	// neither field is provided, or if a provided team ID does not reference
+	// an existing team; a NotFoundError if no account matches.
+	//
+	// This is a temporary override, not a durable value: the ServiceNow-to-
+	// Postgres sync maps u_integration_cs_team/u_sre_team into these same
+	// columns, so a value set here can be silently reverted the next time the
+	// account's ServiceNow record changes for any reason. Intentional, by
+	// product decision — ServiceNow remains authoritative.
+	UpdateAccountTeams(ctx context.Context, req domain.UpdateAccountTeamsRequest) (domain.AccountDetail, error)
 }
 
 // SalesforceEventService handles POST /salesforce/events. Account fetch goes
 // through REST sales/sales-entity-service POST /customer-search, not GraphQL.
 type SalesforceEventService interface {
 	HandleEvent(ctx context.Context, req domain.SalesforceEventRequest) error
+}
+
+// MembershipRegistrationService backs POST /users/me/memberships/register: the Customer Portal
+// calls it on every profile load, and it marks the signed-in user's still
+// un-accepted memberships as REGISTERED in Salesforce. The portal itself
+// therefore never needs Salesforce write access. Postgres-only, and gated on
+// CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED — see membership_registration_service.go.
+type MembershipRegistrationService interface {
+	// RegisterInvitedMemberships flips every INVITED / RE-INVITED membership of the
+	// caller (resolved from x-user-id-token, exactly like GetMe) to
+	// REGISTERED in Salesforce, re-ingests each one so Postgres matches, and
+	// records the REGISTRATION onboarding step per membership. A caller with
+	// no such membership — almost every call — does nothing at all.
+	//
+	// An UnauthorizedError is returned when the header is missing and a
+	// ValidationError when the token cannot be decoded. One membership
+	// failing never stops the others: an error is only returned when every
+	// membership failed, so a partial success is still a success.
+	RegisterInvitedMemberships(ctx context.Context) error
 }
 
 // EventPublishFailureService defines the operations available on the
@@ -124,31 +179,63 @@ type EventPublisherService interface {
 	Close()
 }
 
-// SLAClockService defines the operations available on the sla_clocks
-// entity — see domain.SLAClock's doc comment for what it's for.
-type SLAClockService interface {
-	// RegisterSLAClock (re)creates the clock for req.CaseID/req.ClockType. A
-	// ValidationError is returned if caseId, clockType is missing, or dueAt
-	// is not after startedAt.
-	RegisterSLAClock(ctx context.Context, req domain.RegisterSLAClockRequest) (domain.SLAClock, error)
-	// GetSLAClock returns the clock for caseID/clockType. A NotFoundError is
-	// returned if no such clock has been registered.
-	GetSLAClock(ctx context.Context, caseID, clockType string) (domain.SLAClock, error)
-	// SetSLAClockTierReached marks tier ("50"/"75"/"100") reached for
-	// caseID/clockType if it isn't already (req.Status must be
-	// domain.SLATierStatusReached), and returns the (possibly pre-existing)
-	// reached timestamp. A ValidationError is returned for an unrecognized
-	// tier or status; a NotFoundError if no such clock has been registered.
-	SetSLAClockTierReached(ctx context.Context, caseID, clockType, tier string, req domain.SetSLAClockTierRequest) (domain.SetSLAClockTierReachedResponse, error)
-	// Pause/Resume set or clear the clock's paused_at — called directly,
-	// in-process, from snCaseService's case-state handling (see
-	// sn_case_service.go's applyCaseStateSLAEffects), not exposed over HTTP:
-	// no caller outside this service needs them. Both are idempotent
-	// (pausing an already-paused clock, or resuming an already-running
-	// one, is a no-op that still returns the current row) and return a
-	// NotFoundError if no such clock has been registered.
-	Pause(ctx context.Context, caseID, clockType string) (domain.SLAClock, error)
-	Resume(ctx context.Context, caseID, clockType string) (domain.SLAClock, error)
+// SLAStatusService defines the operations available on SLA status — see
+// domain.SLAStatus's doc comment for what it's for and what it replaced.
+type SLAStatusService interface {
+	// SearchActiveSLAStatuses returns every currently-active SLA clock across
+	// every case-like work item, paginated. A ValidationError is returned for
+	// an invalid pagination limit.
+	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination) (domain.SearchSLAStatusResponse, error)
+}
+
+// OnboardingStepService records and reads the per-membership status ledger
+// of the customer onboarding flow (onboarding_step). The DATABASE step is
+// written in-process by the Salesforce membership ingest; IDENTITY, EMAIL
+// and REGISTRATION are written over HTTP by csm-notification-service and
+// the customer portal backend.
+type OnboardingStepService interface {
+	// Upsert writes the latest outcome of one step. MembershipSfID and Step
+	// come from the path; a repeat for the same pair updates the row and
+	// increments attemptCount.
+	Upsert(ctx context.Context, req domain.UpsertOnboardingStepRequest) (domain.OnboardingStep, error)
+	// GetByMembership returns every recorded step for a membership (an empty
+	// list for an unknown membership, never a 404).
+	GetByMembership(ctx context.Context, membershipSfID string) (domain.GetOnboardingStepsResponse, error)
+	// Search returns a filtered, paginated list of steps, newest first.
+	Search(ctx context.Context, req domain.SearchOnboardingStepsRequest) (domain.SearchOnboardingStepsResponse, error)
+}
+
+// ProjectMembershipWriteService owns every change to who is a contact on a
+// project: the Customer Portal (a customer admin managing their own users)
+// and the CSM Portal (an account manager doing it for them) both call these
+// same four operations, and each one writes the CSM database and Salesforce
+// together or writes neither.
+//
+// The database is the source of truth; Salesforce is kept in step rather
+// than read from as an authority. See NewProjectMembershipWriteService for
+// the ordering that makes "both or neither" hold without a distributed
+// transaction, and why the database commits last.
+//
+// Every method is restricted to internal callers (AUTH_INTERNAL_CLIENT_IDS).
+// The portal backends decide who may invite whom; this service does not.
+type ProjectMembershipWriteService interface {
+	// Invite adds a contact to a project: state INVITED (RE-INVITED when a
+	// previously deactivated membership is being brought back) in both
+	// systems, and a project_contact.invited event. A ConflictError when the
+	// address is already an active contact on the project.
+	Invite(ctx context.Context, projectID string, req domain.CreateProjectMembershipRequest) (domain.ProjectMembership, error)
+	// UpdateRoles replaces the membership's Salesforce roles, and with them
+	// its project groups. The state is untouched.
+	UpdateRoles(ctx context.Context, projectID, email string, req domain.UpdateProjectMembershipRolesRequest) (domain.ProjectMembership, error)
+	// Deactivate moves the membership to DEACTIVATED in both systems. It
+	// never deletes: DEACTIVATED is a real state in both the Salesforce
+	// picklist and project_contact_state_enum.
+	Deactivate(ctx context.Context, projectID, email string) error
+	// ResendInvitation re-publishes project_contact.invited with a resend
+	// marker so csm-notification-service bypasses its already-sent guard.
+	// Valid only while the membership is INVITED (ConflictError otherwise),
+	// and rate-limited per membership (TooManyRequestsError).
+	ResendInvitation(ctx context.Context, projectID, email string) error
 }
 
 // ScheduledTaskRunService defines the operations available on the
@@ -196,6 +283,93 @@ type AlertIncidentMappingService interface {
 	LookupAlertIncidentMappings(ctx context.Context, req domain.LookupAlertIncidentMappingsRequest) (domain.LookupAlertIncidentMappingsResponse, error)
 }
 
+// AnnouncementRequestService defines the operations available on the
+// announcement_requests entity — see domain.AnnouncementRequest's own doc
+// comment for the full state machine (draft -> pending_approval -> approved
+// -> published) and what each transition does and doesn't allow.
+type AnnouncementRequestService interface {
+	// CreateDraft creates a new request in state draft. A ValidationError is
+	// returned if kind isn't "customer"/"eol" or createdBy is missing.
+	CreateDraft(ctx context.Context, req domain.CreateAnnouncementRequestRequest) (domain.AnnouncementRequest, error)
+	// Get returns the request by id. A NotFoundError is returned if it
+	// doesn't exist.
+	Get(ctx context.Context, id string) (domain.AnnouncementRequest, error)
+	// Search returns requests matching req's optional state/createdBy
+	// filters, paginated.
+	Search(ctx context.Context, req domain.SearchAnnouncementRequestsRequest) (domain.SearchAnnouncementRequestsResponse, error)
+	// Update edits the request's own content — what actually happens
+	// (plain edit, edit-and-revert-to-draft, or edit-in-place) depends
+	// entirely on the request's current state; see the service's own
+	// implementation doc comment for the full breakdown. A ConflictError is
+	// returned if the request is published; a ValidationError if an
+	// audience change is attempted while approved (the approved snapshot
+	// is frozen — this is a rejected request shape, not a state conflict).
+	Update(ctx context.Context, id string, req domain.UpdateAnnouncementRequestRequest) (domain.AnnouncementRequest, error)
+	// RecordDryRun records that a dry run (created by the caller's own
+	// mechanism, not this service) has completed for this request. A
+	// ConflictError is returned unless the current state is draft.
+	RecordDryRun(ctx context.Context, id string, req domain.RecordAnnouncementDryRunRequest) (domain.AnnouncementRequest, error)
+	// Submit moves draft -> pending_approval, freezing req.ResolvedProjectIDs
+	// as the audience snapshot. A ConflictError is returned unless the
+	// current state is draft and a dry run has already been recorded; a
+	// ValidationError if resolvedProjectIds is empty.
+	Submit(ctx context.Context, id string, req domain.SubmitAnnouncementRequestRequest) (domain.AnnouncementRequest, error)
+	// Approve moves pending_approval -> approved. A ConflictError is
+	// returned unless the current state is pending_approval. There is no
+	// approver-role check — see the interface's own doc comment.
+	Approve(ctx context.Context, id, actorID, actorEmail string) (domain.AnnouncementRequest, error)
+	// MarkPublished moves approved -> published, storing caseIDs (the real
+	// case created for each resolved project, from the caller's own
+	// fan-out) as PublishedCaseIDs. Does not itself create any cases. A
+	// ConflictError is returned unless the current state is approved; a
+	// ValidationError if caseIDs is empty. Unlike Approve, this IS
+	// restricted: a ForbiddenError is returned unless actorID matches the
+	// request's own CreatedBy -- an approver's job is only to approve, not
+	// to also trigger the real send to customers.
+	MarkPublished(ctx context.Context, id, actorID, actorEmail string, caseIDs []string) (domain.AnnouncementRequest, error)
+	// Schedule sets or clears (nil) scheduledFor for an approved request —
+	// once set, operations/csm-scheduled-tasks' publish_scheduled_announcements
+	// sub-cron publishes it automatically once that time arrives. A
+	// ConflictError is returned unless the current state is approved; a
+	// ForbiddenError unless actorID matches the request's own CreatedBy
+	// (same creator-only restriction as MarkPublished — scheduling is
+	// choosing when Publish happens); a ValidationError if scheduledFor is
+	// non-nil and not strictly in the future.
+	Schedule(ctx context.Context, id, actorID, actorEmail string, scheduledFor *time.Time) (domain.AnnouncementRequest, error)
+	// AutoPublish runs the entire Publish fan-out in-process (create a case
+	// per unresolved project, attach the security tag, record deliveries,
+	// mark published) for one already-due scheduled request — the automatic
+	// counterpart to the webapp's own manual Publish flow, callable only by
+	// an internal service (a ForbiddenError otherwise). A ConflictError is
+	// returned if the request isn't approved, its scheduled time hasn't
+	// arrived yet, it has no resolved audience, or a pass still has
+	// outstanding case-creation/tag failures (safe to call again — it
+	// resumes from the delivery ledger exactly like a manual retry would).
+	AutoPublish(ctx context.Context, id string) (domain.AnnouncementRequest, error)
+	// AddUpdate posts a new AnnouncementRequestUpdate for a published
+	// request. Does not itself apply Content as a comment anywhere -- the
+	// caller's own fan-out does that, separately, after this call succeeds
+	// (same separation as MarkPublished). A ConflictError is returned
+	// unless the current state is published; a ForbiddenError unless
+	// actorID matches the request's own CreatedBy (same creator-only
+	// restriction as MarkPublished, for the same reason).
+	AddUpdate(ctx context.Context, id, actorID, actorEmail, content string) (domain.AnnouncementRequestUpdate, error)
+	// ListUpdates returns every update posted for id, newest first. A
+	// NotFoundError is returned if the request itself doesn't exist.
+	ListUpdates(ctx context.Context, id string) (domain.SearchAnnouncementRequestUpdatesResponse, error)
+	// RecordDeliveries upserts one Publish fan-out pass's worth of
+	// per-project outcomes for id. Same creator-only restriction as
+	// MarkPublished, and for the same reason: this is bookkeeping for the
+	// real send, which only the request's own creator can drive. A
+	// ConflictError is returned unless the current state is approved (a
+	// delivery only means anything mid-fan-out, before the request reaches
+	// published); a ValidationError if deliveries is empty.
+	RecordDeliveries(ctx context.Context, id, actorID string, deliveries []domain.RecordAnnouncementRequestDeliveryInput) (domain.SearchAnnouncementRequestDeliveriesResponse, error)
+	// ListDeliveries returns every delivery recorded for id. A NotFoundError
+	// is returned if the request itself doesn't exist.
+	ListDeliveries(ctx context.Context, id string) (domain.SearchAnnouncementRequestDeliveriesResponse, error)
+}
+
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
@@ -212,17 +386,28 @@ type ProjectService interface {
 	// indicates an infrastructure failure.
 	SearchProjects(ctx context.Context, req domain.SearchProjectsRequest) (domain.SearchProjectsResponse, error)
 	// GetProjectByID returns the enriched project detail with the linked account.
-	// A ValidationError is returned for a malformed UUID; a NotFoundError if no project matches.
+	// A ValidationError is returned for a malformed UUID; a NotFoundError if no
+	// project matches OR (Postgres data source) it exists but is outside the
+	// caller's AccessScope -- see CLAUDE.md's "Token validation and
+	// caller-scoped access" for the full rule and why existence is hidden
+	// rather than returning a 403.
 	GetProjectByID(ctx context.Context, id string) (domain.ProjectDetailsView, error)
 }
 
 // ProjectUpdateService defines the write operations available on a project.
-// All methods require the ServiceNow data source; there is no Postgres fallback.
+// Implemented by snProjectUpdateService (DataSourceServiceNow, the full
+// domain.ProjectUpdateRequest contract) and pgProjectUpdateService
+// (DataSourcePostgres/DataSourcePostgresServiceNowDualWrite -- only the
+// fields with a real Postgres column; see that type's own doc comment for
+// exactly which, and why the rest are rejected rather than silently
+// dropped).
 type ProjectUpdateService interface {
 	// UpdateProject applies the given field changes to the project identified by
-	// id. A ValidationError is returned for a malformed UUID or an empty request;
-	// a NotFoundError if no project matches; an UnauthorizedError if the caller
-	// lacks the required SN role.
+	// id. A ValidationError is returned for a malformed UUID, an empty request,
+	// or (Postgres data sources only) a field with no Postgres column; a
+	// NotFoundError if no project matches; an UnauthorizedError if the caller
+	// lacks the required SN role (ServiceNow data source) or has no resolvable
+	// identity (Postgres data sources).
 	UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error)
 }
 
@@ -238,10 +423,31 @@ type ProjectMetadataService interface {
 	GetProjectMetadata(ctx context.Context, projectID string) (domain.ProjectMetadataResponse, error)
 }
 
+// ProjectCaseStatsService is the GetProjectCaseStats slice of
+// ProjectStatsService, split out for the same reason ProjectMetadataService
+// is: it has a Postgres-backed implementation (projectCaseStatsService) as
+// well as the ServiceNow one, so it is wired and registered independently of
+// the remaining stats methods, which stay ServiceNow-only. In ServiceNow mode
+// snProjectStatsService satisfies this interface structurally, so the same
+// concrete value backs both. See ProjectCaseStatsHandler.
+type ProjectCaseStatsService interface {
+	// GetProjectCaseStats returns the case statistics for a project,
+	// optionally narrowed by case type and creator. A ValidationError is
+	// returned for a malformed UUID or an unrecognised case type; a
+	// NotFoundError if no project matches.
+	GetProjectCaseStats(ctx context.Context, projectID string, req domain.ProjectCaseStatsRequest) (domain.ProjectCaseStatsResponse, error)
+}
+
 // ProjectStatsService defines the project-scoped metadata and statistics
-// operations. GetProjectMetadata also has a Postgres-backed implementation --
-// see ProjectMetadataService. The remaining stats methods require the
-// ServiceNow data source; there is no Postgres fallback for them yet.
+// operations. Every method has both a ServiceNow implementation
+// (snProjectStatsService) and a Postgres one (projectStatsService), so all of
+// these routes are registered regardless of the data source.
+//
+// GetProjectMetadata and GetProjectCaseStats additionally have their own
+// narrower interfaces (ProjectMetadataService, ProjectCaseStatsService):
+// each was portable to Postgres before the rest of the bundle was, and the
+// Postgres projectStatsService composes them rather than reimplementing
+// either.
 type ProjectStatsService interface {
 	// GetProjectMetadata returns the reference data (choice lists, feature
 	// flags) needed to build the project's UI.
@@ -261,6 +467,45 @@ type ProjectStatsService interface {
 	GetProjectTimeCardStats(ctx context.Context, projectID, startDate, endDate string) (domain.ProjectTimeCardStatsResponse, error)
 	// GetProjectChangeRequestStats returns the project's change-request statistics.
 	GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error)
+}
+
+// ProjectConsumptionService defines the operations on a project's
+// product-consumption provisioning state — the resumable sequence that creates
+// a Choreo application for the project, subscribes it to the tracking API and
+// mints the credentials a deployment's license is built from.
+//
+// The two halves need different things, and neither is gated on DATA_SOURCE —
+// staging and production both run DATA_SOURCE=servicenow and need both.
+//
+//   - GetProjectConsumption and UpdateProjectConsumption read and write the
+//     Postgres mirror, so they need a pool. A pool enables them on either
+//     data source.
+//   - ProcessLicenseDownload needs neither. It reads status from ServiceNow
+//     through the configured Choreo subscription operation and touches
+//     Postgres only to mirror what it did, which is best-effort and skipped
+//     entirely when there is no repository.
+//
+// ServiceNow remains the source of truth for the status itself. There it lives
+// on the customer_project record, reached through the product-consumption
+// scripted REST API that the Choreo subscription operation calls directly —
+// neither this service nor the ServiceNow integration service sits in that
+// path at all.
+//
+// Every method is scoped to the caller (see AccessService): the project id
+// comes from the request path, so a caller who cannot see a project can
+// neither read its provisioning state nor drive provisioning for it.
+type ProjectConsumptionService interface {
+	// GetProjectConsumption returns the project's current provisioning state.
+	// A project that has never entered the flow reports status 1 (pending)
+	// rather than a not-found error; an unknown project ID is not found.
+	GetProjectConsumption(ctx context.Context, projectID string) (domain.ProjectConsumptionView, error)
+	// UpdateProjectConsumption records the completion of one provisioning step.
+	// The status may only move forward; a status that is not ahead of what is
+	// stored returns the stored state unchanged instead of failing.
+	UpdateProjectConsumption(ctx context.Context, projectID string, req domain.UpdateProjectConsumptionRequest) (domain.UpdateProjectConsumptionResponse, error)
+	// ProcessLicenseDownload executes the 5-step resumable provisioning sequence
+	// and issues the signed deployment license.
+	ProcessLicenseDownload(ctx context.Context, projectID, deploymentID, email string) (domain.License, error)
 }
 
 // ProjectContactService defines the operations available on project contacts.
@@ -355,12 +600,17 @@ type DeploymentService interface {
 	// project IDs, deployment type keys, and name search query. A ValidationError is
 	// returned for invalid input; any other error indicates an infrastructure failure.
 	SearchDeployments(ctx context.Context, req domain.SearchDeploymentsRequest) (domain.SearchDeploymentsResponse, error)
-	// CreateDeployment creates a new deployment in ServiceNow.
-	// Supported by the ServiceNow data source only.
+	// CreateDeployment creates a new deployment. Supported by the ServiceNow
+	// data source, and by DATA_SOURCE=postgres-servicenow-dual-write (SN-first,
+	// synchronous — see deploymentService.createDeploymentSNFirst). Not
+	// supported by plain DATA_SOURCE=postgres.
 	CreateDeployment(ctx context.Context, req domain.CreateDeploymentRequest) (domain.CreateDeploymentResponse, error)
-	// UpdateDeployment updates a deployment's name, type, description, or deactivates it.
-	// Either detail fields or Active=false must be provided, but not both.
-	// Supported by the ServiceNow data source only.
+	// UpdateDeployment updates a deployment's name, type, description, or
+	// deactivates it. Either detail fields or Active=false must be provided,
+	// but not both. Supported by the ServiceNow data source, and by
+	// DATA_SOURCE=postgres-servicenow-dual-write (Postgres-first, ServiceNow
+	// mirrored asynchronously afterward). Not supported by plain
+	// DATA_SOURCE=postgres.
 	UpdateDeployment(ctx context.Context, req domain.UpdateDeploymentRequest) (domain.UpdateDeploymentResponse, error)
 }
 
@@ -370,6 +620,12 @@ type DeployedProductService interface {
 	// optional deployment IDs. A ValidationError is returned for invalid input; any other
 	// error indicates an infrastructure failure.
 	SearchDeployedProducts(ctx context.Context, req domain.SearchDeployedProductsRequest) (domain.SearchDeployedProductsResponse, error)
+	// SearchProjectsByProductVersion returns the paginated, deduplicated set
+	// of projects running the given product version — the reverse of
+	// SearchDeployedProducts' own DeploymentIDs-scoped lookup. A
+	// ValidationError is returned for invalid input. Supported by the
+	// ServiceNow data source only.
+	SearchProjectsByProductVersion(ctx context.Context, req domain.SearchProjectsByProductVersionRequest) (domain.SearchProjectsByProductVersionResponse, error)
 	// CreateDeployedProduct creates a new deployed product in ServiceNow.
 	// Supported by the ServiceNow data source only.
 	CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error)
@@ -395,7 +651,10 @@ type CaseService interface {
 	// State defaults to open. A ValidationError is returned for invalid input.
 	CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.CreateCaseResponse, error)
 	// GetCaseByID returns the enriched case view for the given UUID. A
-	// ValidationError is returned for a malformed UUID; a NotFoundError if no case matches.
+	// ValidationError is returned for a malformed UUID; a NotFoundError if no
+	// case matches OR (Postgres data source) it exists but is outside the
+	// caller's AccessScope -- see ProjectService.GetProjectByID's identical
+	// note and CLAUDE.md for the full rule.
 	GetCaseByID(ctx context.Context, id string) (domain.CaseView, error)
 	// SearchCases returns a paginated list of cases filtered by optional project IDs,
 	// deployment IDs, deployed product IDs, state keys, severity keys, and search query.
@@ -463,6 +722,12 @@ type CaseService interface {
 	// AddCaseTag attaches a free-text label to the case identified by caseID.
 	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty label).
 	AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error)
+	// AddCaseTagAs is AddCaseTag for a caller that already knows who is
+	// acting (actorEmail) and has no live x-user-id-token to resolve it
+	// from -- see AnnouncementRequestService.AutoPublish's own doc comment
+	// for why that caller can never have one. Skips the token-based actor
+	// resolution AddCaseTag does; everything else is identical.
+	AddCaseTagAs(ctx context.Context, caseID, label, actorEmail string) (domain.Tag, error)
 	// RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
 	// A NotFoundError is returned if the tag does not exist on the case.
 	RemoveCaseTag(ctx context.Context, caseID, tagID string) error
@@ -683,6 +948,20 @@ type CommentService interface {
 	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
 	// CreateComment creates a new comment on the given reference entity.
 	CreateComment(ctx context.Context, req domain.CreateCommentRequest) (domain.CreateCommentResponse, error)
+	// UpdateComment edits an existing comment's content. Only the comment's
+	// original author or a caller holding the "admin" role may call this; see
+	// commentService.UpdateComment's own doc comment for the authorization
+	// rule. Returns a ForbiddenError if the caller may not edit this comment,
+	// a NotFoundError if it doesn't exist, and a ValidationError if it is
+	// already soft-deleted.
+	UpdateComment(ctx context.Context, req domain.UpdateCommentRequest) (domain.UpdateCommentResponse, error)
+	// DeleteComment soft-deletes a comment (content is retained but no longer
+	// generally visible -- see commentService's own visibility rule doc
+	// comment). Same author-or-admin authorization rule as UpdateComment.
+	// Returns a ConflictError if the comment is already deleted.
+	DeleteComment(ctx context.Context, id string) error
+	// GetCommentEditHistory returns a comment's prior versions, newest first.
+	GetCommentEditHistory(ctx context.Context, id string) (domain.GetCommentEditHistoryResponse, error)
 }
 
 // TaskSlaService defines the operations available on the task-slas entity.
@@ -873,10 +1152,10 @@ type ConversationService interface {
 }
 
 // GlobalService serves system-wide metadata and cross-entity search that
-// isn't scoped to any single project or case. GetSystemMetadata has a
-// Postgres-backed implementation (globalService); GlobalSearch still
-// requires the ServiceNow data source -- there is no Postgres fallback for
-// it yet.
+// isn't scoped to any single project or case. Both methods have Postgres-backed
+// implementations (globalService); GlobalSearch on that data source returns
+// only what the caller may see (AccessService), so it also needs token
+// validation to be configured.
 type GlobalService interface {
 	// GetSystemMetadata returns system-wide reference data (time zones, project types,
 	// and feedback emoji choices) used across the frontend.

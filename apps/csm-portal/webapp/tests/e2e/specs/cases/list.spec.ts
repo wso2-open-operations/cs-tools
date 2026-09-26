@@ -15,12 +15,10 @@
 // under the License.
 
 //
-// Cases list (`/cases`, `CsmIssuesView.tsx` + `CasesFilterBar.tsx`) — read-only
-// coverage of search, filters, sort, pagination, and the Saved views menu.
-// Real staging backend, no mocks; this spec creates/mutates nothing on the
-// backend. Saved views are client-side only (`localStorage`, see
-// `savedFilterViews.ts`), so the one test that exercises save/delete still
-// touches no server data and cleans up after itself.
+// Cases list (`/cases`, `CsmIssuesView.tsx` + `CasesFilterBar.tsx`) — coverage
+// of search, filters, sort, pagination, and the Saved views menu. Real staging
+// backend, no mocks. Saved views persist per user in Postgres (via the BFF);
+// the save/delete test cleans up after itself.
 //
 
 import { test, expect, withRole } from "../../fixtures/test";
@@ -159,19 +157,15 @@ test.describe("cases list — saved views", () => {
     await cases.goto();
 
     await cases.openSavedViewsMenu();
-    // Suggested views (`SUGGESTED_FILTER_VIEWS` in savedFilterViews.ts) are
-    // constants, not persisted storage, so at least one is always present —
-    // a stable assertion that doesn't depend on any prior save.
-    await expect(page.getByRole("menuitem", { name: "S0/S1 active", exact: false })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /save current view/i })).toBeVisible();
     await page.keyboard.press("Escape");
   });
 
-  test("saving and deleting a view round-trips through the (client-only) Saved views menu", async ({
+  test("saving and deleting a view round-trips through the Saved views menu", async ({
     page,
   }) => {
-    // Saved views persist to `localStorage` only (see savedFilterViews.ts) —
-    // no backend call is involved, so save/delete here mutates nothing on
-    // staging. Still clean up so re-runs don't accumulate entries.
+    // Saved views persist per user on the backend — clean up so re-runs don't
+    // accumulate entries.
     const cases = new CasesListPage(page);
     await cases.goto();
 

@@ -14,39 +14,96 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type * as React from "react";
 import SavedViewsMenu from "@features/csm-operations/components/SavedViewsMenu";
-import { createSavedFilterViewsStore } from "@features/csm-operations/utils/savedFilterViews";
+import type {
+  BeReorderSavedFilterViewPayload,
+  BeSaveSavedFilterViewPayload,
+  BeSavedFilterView,
+} from "@api/backend/types";
 
-const STORAGE_KEY = "csm.savedFilters.test.v1";
+type View = BeSavedFilterView;
+
+let views: View[] = [];
+const getMock = vi.fn();
+const patchMock = vi.fn();
+const delMock = vi.fn();
+const postMock = vi.fn();
+
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({
+    get: getMock,
+    patch: patchMock,
+    del: delMock,
+    post: postMock,
+  }),
+}));
+
+function wireApi(): void {
+  getMock.mockImplementation(async () => ({ views: [...views] }));
+  patchMock.mockImplementation(async (_path: string, body: BeSaveSavedFilterViewPayload) => {
+    const name = body.name.trim();
+    views = [{ name, qs: body.qs }, ...views.filter((v) => v.name.toLowerCase() !== name.toLowerCase())];
+    return { views: [...views] };
+  });
+  delMock.mockImplementation(async (path: string) => {
+    const name = new URL(path, "http://local").searchParams.get("name") ?? "";
+    views = views.filter((v) => v.name.toLowerCase() !== name.toLowerCase());
+    return { views: [...views] };
+  });
+  postMock.mockImplementation(async (_path: string, body: BeReorderSavedFilterViewPayload) => {
+    const i = views.findIndex((v) => v.name.toLowerCase() === body.name.toLowerCase());
+    const t =
+      body.position !== undefined
+        ? body.position
+        : body.direction === "up"
+          ? i - 1
+          : i + 1;
+    if (i >= 0 && t >= 0 && t < views.length && t !== i) {
+      const next = [...views];
+      const [item] = next.splice(i, 1);
+      next.splice(Math.min(t, next.length), 0, item);
+      views = next;
+    }
+    return { views: [...views] };
+  });
+}
 
 function renderMenu(overrides: Partial<React.ComponentProps<typeof SavedViewsMenu>> = {}) {
-  const store = createSavedFilterViewsStore(STORAGE_KEY);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onApply = vi.fn();
   const canonicalizeQs = (qs: string) => qs;
   const utils = render(
-    <SavedViewsMenu
-      currentQs="q=hello"
-      canonicalizeQs={canonicalizeQs}
-      activeCount={1}
-      hasSearch={false}
-      onApply={onApply}
-      store={store}
-      {...overrides}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <SavedViewsMenu
+        currentQs="q=hello"
+        canonicalizeQs={canonicalizeQs}
+        activeCount={1}
+        hasSearch={false}
+        onApply={onApply}
+        listKey="incidents"
+        {...overrides}
+      />
+    </QueryClientProvider>,
   );
-  return { ...utils, store, onApply };
+  return { ...utils, onApply };
 }
 
 describe("SavedViewsMenu", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    views = [];
+    getMock.mockReset();
+    patchMock.mockReset();
+    delMock.mockReset();
+    postMock.mockReset();
+    wireApi();
   });
 
-  it("saves the current view via the dialog, persisting it to the tab's store", () => {
+  it("saves the current view via the dialog", async () => {
     renderMenu();
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
@@ -56,35 +113,51 @@ describe("SavedViewsMenu", () => {
     fireEvent.change(nameField, { target: { value: "My open S1s" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
-    // The Dialog's own close transition means the "Saved views" button isn't
-    // reliably re-queryable (aria-hidden while unmounting) right after this
-    // synchronous click — assert against the store the menu itself reads
-    // from instead of reopening the menu.
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "[]")).toContainEqual({
-      name: "My open S1s",
-      qs: "q=hello",
-    });
+    await waitFor(() =>
+      expect(patchMock).toHaveBeenCalledWith("/users/me/saved-filter-views", {
+        listKey: "incidents",
+        name: "My open S1s",
+        qs: "q=hello",
+      }),
+    );
   });
 
-  it("applying a saved view calls onApply with its stored qs", () => {
-    const store = createSavedFilterViewsStore(STORAGE_KEY);
-    store.saveFilterView("Critical only", "severities=S1");
-    const onApply = vi.fn();
-    renderMenu({ store, onApply });
+  it("keeps the save dialog open when PATCH fails", async () => {
+    patchMock.mockRejectedValueOnce(new Error("save failed"));
+    renderMenu();
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /save current view/i }));
+
+    const nameField = screen.getByLabelText(/view name/i);
+    fireEvent.change(nameField, { target: { value: "My open S1s" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(screen.getByText(/couldn't save this view/i)).toBeInTheDocument());
+    expect(screen.getByLabelText(/view name/i)).toHaveValue("My open S1s");
+  });
+
+  it("applying a saved view calls onApply with its stored qs", async () => {
+    views = [{ name: "Critical only", qs: "severities=S1" }];
+    const onApply = vi.fn();
+    renderMenu({ onApply });
+
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    await waitFor(() => screen.getByRole("menuitem", { name: /critical only/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /critical only/i }));
 
     expect(onApply).toHaveBeenCalledWith("severities=S1");
   });
 
-  it("highlights the saved view matching the current qs as active", () => {
-    const store = createSavedFilterViewsStore(STORAGE_KEY);
-    store.saveFilterView("Matches current", "q=hello");
-    store.saveFilterView("Different", "q=other");
-    renderMenu({ store, currentQs: "q=hello" });
+  it("highlights the saved view matching the current qs as active", async () => {
+    views = [
+      { name: "Different", qs: "q=other" },
+      { name: "Matches current", qs: "q=hello" },
+    ];
+    renderMenu({ currentQs: "q=hello" });
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    await waitFor(() => screen.getByText("Matches current"));
     expect(screen.getByText("Matches current").closest('[role="menuitem"]')).toHaveClass(
       "Mui-selected",
     );
@@ -93,31 +166,95 @@ describe("SavedViewsMenu", () => {
     );
   });
 
-  it("reorders saved views with the up/down icon buttons", () => {
-    const store = createSavedFilterViewsStore(STORAGE_KEY);
-    store.saveFilterView("First", "q=1");
-    store.saveFilterView("Second", "q=2");
-    // Most-recently-saved first: ["Second", "First"].
-    renderMenu({ store });
+  it("reorders saved views with the arrow keys on the drag button", async () => {
+    views = [
+      { name: "Second", qs: "q=2" },
+      { name: "First", qs: "q=1" },
+    ];
+    renderMenu();
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
-    fireEvent.click(screen.getByRole("button", { name: /move saved view second down/i }));
+    await waitFor(() => screen.getByRole("button", { name: /drag to reorder saved view second/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /drag to reorder saved view second/i }), {
+      key: "ArrowDown",
+    });
 
-    // The menu itself stays open across a move (`store.moveFilterView` never
-    // closes it) — re-query it in place rather than re-clicking "Saved
-    // views" (which the modal's own aria-hidden handling would hide anyway
-    // while it's still open).
-    const items = screen
-      .getAllByRole("menuitem")
-      .filter((el) => el.textContent?.match(/First|Second/));
-    expect(items[0]).toHaveTextContent("First");
-    expect(items[1]).toHaveTextContent("Second");
+    await waitFor(() => {
+      const items = screen
+        .getAllByRole("menuitem")
+        .filter((el) => el.textContent?.match(/First|Second/));
+      expect(items[0]).toHaveTextContent("First");
+      expect(items[1]).toHaveTextContent("Second");
+    });
+  });
+
+  it("drag-drop reorders to the target index in one request", async () => {
+    views = [
+      { name: "A", qs: "a" },
+      { name: "B", qs: "b" },
+      { name: "C", qs: "c" },
+    ];
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    const handle = await screen.findByRole("button", { name: /drag to reorder saved view A/i });
+    const target = screen.getByRole("menuitem", { name: /C/ });
+    fireEvent.dragStart(handle);
+    fireEvent.dragOver(target);
+    fireEvent.drop(target);
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/users/me/saved-filter-views/reorder", {
+        listKey: "incidents",
+        name: "A",
+        position: 2,
+      }),
+    );
+  });
+
+  it("copies the list page URL for a saved view", async () => {
+    views = [{ name: "Mine", qs: "state=open" }];
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderMenu({ listKey: "cases" });
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /copy filter link for mine/i }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        `${window.location.origin}/cases?state=open`,
+      ),
+    );
+  });
+
+  it("saves a pasted filter link instead of the filters on screen", async () => {
+    renderMenu({ currentQs: "q=hello" });
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /save current view/i }));
+    fireEvent.change(screen.getByLabelText(/view name/i), { target: { value: "Shared" } });
+    fireEvent.change(screen.getByLabelText(/filter link/i), {
+      target: { value: "http://localhost:3001/operations/incidents?state=open&severity=S1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(patchMock).toHaveBeenCalledWith("/users/me/saved-filter-views", {
+        listKey: "incidents",
+        name: "Shared",
+        qs: "state=open&severity=S1",
+      }),
+    );
+  });
+
+  it("shows an error and does not save when the pasted text is not a filter", async () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /save current view/i }));
+    fireEvent.change(screen.getByLabelText(/view name/i), { target: { value: "Shared" } });
+    fireEvent.change(screen.getByLabelText(/filter link/i), { target: { value: "not a filter" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(await screen.findByText(/doesn't contain a filter/i)).toBeInTheDocument();
+    expect(patchMock).not.toHaveBeenCalled();
   });
 
   it("does not claim 'all records' in the save dialog when only a search term is active", () => {
-    // activeCount excludes search (see each tab's countActive*Filters), but a
-    // search-only view still restores that search on apply — the helper text
-    // must not tell the user it will show everything.
     renderMenu({ activeCount: 0, hasSearch: true });
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
@@ -136,17 +273,30 @@ describe("SavedViewsMenu", () => {
     expect(screen.getByText(/will show all records/i)).toBeInTheDocument();
   });
 
-  it("deletes a saved view via its delete icon button", () => {
-    const store = createSavedFilterViewsStore(STORAGE_KEY);
-    store.saveFilterView("Temp view", "q=temp");
-    renderMenu({ store });
+  it("does not describe the filters on screen once a link is pasted", () => {
+    renderMenu({ activeCount: 0, hasSearch: false });
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /save current view/i }));
+    fireEvent.change(screen.getByLabelText(/filter link/i), {
+      target: { value: "state=open" },
+    });
+
+    expect(screen.queryByText(/will show all records/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/saves the filter from the pasted link/i)).toBeInTheDocument();
+  });
+
+  it("deletes a saved view via its delete icon button", async () => {
+    views = [{ name: "Temp view", qs: "q=temp" }];
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    await waitFor(() => screen.getByRole("button", { name: /delete saved view temp view/i }));
     fireEvent.click(screen.getByRole("button", { name: /delete saved view temp view/i }));
 
-    // Same reasoning as the reorder test above — the menu stays open across
-    // a delete, so assert in place instead of reopening it.
-    expect(screen.queryByText("Temp view")).not.toBeInTheDocument();
-    expect(screen.getByText(/no saved views yet/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Temp view")).not.toBeInTheDocument();
+      expect(screen.getByText(/no saved views yet/i)).toBeInTheDocument();
+    });
   });
 });

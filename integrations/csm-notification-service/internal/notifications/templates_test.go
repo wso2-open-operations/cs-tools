@@ -258,3 +258,104 @@ func TestRenderCRApprovalRequestedEmail_MissingDetail(t *testing.T) {
 		t.Error("want the fallback context line when neither project nor team is known")
 	}
 }
+
+// TestRenderProjectContactInvitedEmail_Variants pins what distinguishes the
+// three invitation wordings — the "new" one welcomes a just-created account
+// and explains the first-sign-in email code, the "existing" one says the
+// project was added to an account the reader already has, the "reminder"
+// (a deliberate resend) just repeats the invitation — and that all
+// carry every value a reader needs (name, project, key, email, sign-in
+// link, roles) with no placeholder left unsubstituted.
+func TestRenderProjectContactInvitedEmail_Variants(t *testing.T) {
+	data := ProjectContactInvitedEmailData{
+		DisplayName: "Jane Doe",
+		Email:       "jane@acme.com",
+		ProjectName: "Acme Cloud",
+		ProjectKey:  "ACMECLOUD",
+		Roles:       []string{"Admin", "Portal user"},
+		PortalURL:   "https://support.wso2.com",
+	}
+	tests := []struct {
+		name       string
+		render     func(ProjectContactInvitedEmailData) string
+		want, deny []string
+	}{
+		{
+			name: "new account",
+			render: func(d ProjectContactInvitedEmailData) string {
+				d.AccountCreated = true
+				return RenderProjectContactInvitedNewEmail(d)
+			},
+			want: []string{"Welcome", "A WSO2 account has been created for you", "verification code"},
+			deny: []string{"You already have a WSO2 account", "If you are signing in for the first time"},
+		},
+		{
+			// Identity provisioning disabled: the email must not claim an
+			// account was created, nor that one already exists.
+			name:   "account state unknown",
+			render: RenderProjectContactInvitedNewEmail,
+			want:   []string{"Welcome", "Sign in with your email address", "If you are signing in for the first time"},
+			deny:   []string{"A WSO2 account has been created for you", "You already have a WSO2 account"},
+		},
+		{
+			name:   "existing account",
+			render: RenderProjectContactInvitedExistingEmail,
+			want:   []string{"has been added to your WSO2 Support Portal account", "You already have a WSO2 account"},
+			deny:   []string{"A WSO2 account has been created for you", "verification code"},
+		},
+		{
+			// A resend: it must claim neither that an account was just
+			// created nor that the reader already has one — they may
+			// never have seen the first invitation.
+			name: "reminder",
+			render: func(d ProjectContactInvitedEmailData) string {
+				d.AccountCreated = true
+				return RenderProjectContactInvitedReminderEmail(d)
+			},
+			want: []string{"Your invitation", "Here is your invitation to the project", "Sign in with your email address"},
+			deny: []string{"A WSO2 account has been created for you", "You already have a WSO2 account", "Welcome"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.render(data)
+			if n := strings.Count(got, "<!DOCTYPE"); n != 1 {
+				t.Errorf("rendered %d documents, want exactly 1", n)
+			}
+			for _, want := range append(tt.want, "Jane Doe", "Acme Cloud", "ACMECLOUD", "jane@acme.com", "Admin, Portal user", `href="https://support.wso2.com"`) {
+				if !strings.Contains(got, want) {
+					t.Errorf("rendered email does not contain %q", want)
+				}
+			}
+			for _, deny := range tt.deny {
+				if strings.Contains(got, deny) {
+					t.Errorf("rendered email contains %q, which belongs to the other variant", deny)
+				}
+			}
+			for _, slot := range []string{"[DISPLAY_NAME]", "[EMAIL]", "[PROJECT_NAME]", "[PROJECT_KEY]", "[ROLES]", "[PORTAL_URL]", "[LOGO_SRC]", "[BLOCK:"} {
+				if strings.Contains(got, slot) {
+					t.Errorf("placeholder %s was never substituted", slot)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderProjectContactInvitedEmail_OmitsRolesLineWhenEmpty: a
+// membership with no Salesforce roles must not render "Your role: " with
+// nothing after it.
+func TestRenderProjectContactInvitedEmail_OmitsRolesLineWhenEmpty(t *testing.T) {
+	for name, render := range map[string]func(ProjectContactInvitedEmailData) string{
+		"new":      RenderProjectContactInvitedNewEmail,
+		"existing": RenderProjectContactInvitedExistingEmail,
+		"reminder": RenderProjectContactInvitedReminderEmail,
+	} {
+		got := render(ProjectContactInvitedEmailData{DisplayName: "jane", Email: "jane@acme.com", ProjectName: "Acme Cloud", ProjectKey: "ACMECLOUD", PortalURL: "https://support.wso2.com"})
+		if strings.Contains(got, "Your role") {
+			t.Errorf("%s: rendered a roles line for a membership with no roles", name)
+		}
+		if strings.Contains(got, "[BLOCK:") {
+			t.Errorf("%s: optional-block markers leaked into the output", name)
+		}
+	}
+}

@@ -21,9 +21,12 @@
 //   - FetchIssueDetail — per-issue Status-change timeline + current Status,
 //     the latter scoped to the configured project id
 //
-// PRIVACY: these queries deliberately do NOT request titles, assignees, or
-// event actors. Labels are requested only so the ingest pipeline can derive
-// priority, and are discarded after extraction rather than persisted.
+// PRIVACY: title is requested and persisted. Body is requested only so the
+// ingest pipeline can derive the ABT team and opened-by fields from it; the
+// body itself is discarded immediately after that extraction and is never
+// persisted, logged, or returned by any API. Assignees and event actors are
+// never requested. Labels are requested only so the ingest pipeline can
+// derive priority, and are discarded after extraction rather than persisted.
 //
 // Client is defined as an interface so internal/sync and cmd/seed can be
 // tested against a stub rather than live GitHub.
@@ -33,9 +36,13 @@ import "context"
 
 // IssueNode is one issue returned by a search query.
 type IssueNode struct {
-	Number    int
-	State     string // "OPEN" | "CLOSED"
-	URL       string
+	Number int
+	State  string // "OPEN" | "CLOSED"
+	URL    string
+	Title  string
+	// Body is read transiently during ingest to derive ABT team and
+	// opened-by, then discarded. It is never persisted, logged, or returned.
+	Body      string
 	CreatedAt string
 	UpdatedAt string
 	ClosedAt  *string
@@ -85,4 +92,10 @@ type Client interface {
 	// FetchIssueDetail returns one issue's status timeline and per-project
 	// current status, or (nil, nil) if the issue does not exist.
 	FetchIssueDetail(ctx context.Context, owner, name string, number int) (*IssueDetail, error)
+
+	// RateLimitRemaining returns the GitHub API quota remaining as of the
+	// most recent SearchAll/FetchRepoIssues/FetchIssueDetail response, and
+	// when it resets (GitHub's raw ISO-8601 timestamp). ok is false until at
+	// least one such response has been received.
+	RateLimitRemaining() (remaining int, resetAt string, ok bool)
 }

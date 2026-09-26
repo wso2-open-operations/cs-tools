@@ -480,6 +480,103 @@ describe("AuthGuard bare mode", () => {
     expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
   });
 
+  // Regression test (CodeRabbit security finding, CWE-862): bare mode must
+  // not render the real <Outlet /> — and let its widgets start firing
+  // their own authenticated queries — before /users/me has confirmed this
+  // caller is actually entitled to the portal, not just signed in to
+  // Asgardeo. Same gate AuthorizedAppShell already applies to every other
+  // route, rendered here without any AppLayout chrome.
+  it("shows BareAuthLoader (not the routed page) while /users/me is still resolving, even after Asgardeo sign-in", async () => {
+    asgardeoState.isSignedIn = true;
+    currentUserState.isLoading = true;
+    let rerender!: ReturnType<typeof renderBareAuthGuard>["rerender"];
+
+    await act(async () => {
+      ({ rerender } = renderBareAuthGuard());
+    });
+    await act(async () => {
+      rerender(
+        <MemoryRouter initialEntries={["/cs-monitor-dashboard"]}>
+          <Routes>
+            <Route element={<AuthGuard bare />}>
+              <Route
+                path="cs-monitor-dashboard"
+                element={<div data-testid="bare-route-content" />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(screen.getByTestId("bare-auth-loader")).toBeInTheDocument();
+    expect(screen.queryByTestId("bare-route-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
+  });
+
+  it("shows a chrome-free not-authorized page (not the routed page) when /users/me comes back 401, even after Asgardeo sign-in", async () => {
+    asgardeoState.isSignedIn = true;
+    currentUserState.isError = true;
+    currentUserState.error = new ApiError(401, "Unauthorized");
+    let rerender!: ReturnType<typeof renderBareAuthGuard>["rerender"];
+
+    await act(async () => {
+      ({ rerender } = renderBareAuthGuard());
+    });
+    await act(async () => {
+      rerender(
+        <MemoryRouter initialEntries={["/cs-monitor-dashboard"]}>
+          <Routes>
+            <Route element={<AuthGuard bare />}>
+              <Route
+                path="cs-monitor-dashboard"
+                element={<div data-testid="bare-route-content" />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(screen.getByText("You don't have access to this portal yet")).toBeInTheDocument();
+    expect(screen.queryByTestId("bare-route-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
+  });
+
+  // Regression test (Rashmika review): an `/users/me` failure that ISN'T a
+  // confirmed 401/403 (a transient 5xx, a network blip) must not fall
+  // through to the routed outlet — entitlement is unknown, not confirmed,
+  // and this route has no one watching to notice or retry. Holds on
+  // BareAuthLoader instead, same as the still-loading state.
+  it("shows BareAuthLoader (not the routed page) when /users/me fails with a non-auth error, even after Asgardeo sign-in", async () => {
+    asgardeoState.isSignedIn = true;
+    currentUserState.isError = true;
+    currentUserState.error = new ApiError(500, "Internal Server Error");
+    let rerender!: ReturnType<typeof renderBareAuthGuard>["rerender"];
+
+    await act(async () => {
+      ({ rerender } = renderBareAuthGuard());
+    });
+    await act(async () => {
+      rerender(
+        <MemoryRouter initialEntries={["/cs-monitor-dashboard"]}>
+          <Routes>
+            <Route element={<AuthGuard bare />}>
+              <Route
+                path="cs-monitor-dashboard"
+                element={<div data-testid="bare-route-content" />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(screen.getByTestId("bare-auth-loader")).toBeInTheDocument();
+    expect(screen.queryByTestId("bare-route-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
+  });
+
   // Regression test (rksk review): a `bare` kiosk route must never follow a
   // stale POST_LOGIN_REDIRECT_KEY left in sessionStorage by an abandoned
   // sign-in elsewhere in the same browser session — it stays put and drops

@@ -17,6 +17,7 @@
 import { Box } from "@mui/material";
 import { useIssues } from "@api/hooks";
 import type { OverviewProject } from "@api/types";
+import { projectNameFor, toFilterList } from "@lib/filters";
 import { shortPriority } from "@lib/sla";
 import { acrylicSurfaceSx } from "@lib/surfaces";
 import { safeHttpUrl } from "@lib/url";
@@ -36,15 +37,24 @@ const MARKER_PCT = (1 / SCALE) * 100;
 interface ClosestToBreachProps {
   repo?: string;
   priority?: string;
+  abtTeam?: string;
   projects: OverviewProject[];
 }
 
 /** Top-9 tracked issues by budget consumed, shown only once one is AT_RISK or VIOLATED per the API's own SLA verdict. */
-export function ClosestToBreach({ repo, priority, projects }: ClosestToBreachProps) {
-  const { data: issues } = useIssues({ bucket: "tracked", order: "budget_desc", limit: 9, repo, priority });
+export function ClosestToBreach({ repo, priority, abtTeam, projects }: ClosestToBreachProps) {
+  const { data } = useIssues({
+    bucket: "tracked",
+    sort: "sla_consumption",
+    limit: 9,
+    repo: toFilterList(repo),
+    priority: toFilterList(priority),
+    abtTeam: toFilterList(abtTeam),
+  });
+  const issues = data?.issues;
 
   // Friendly project name for "owner/name", falling back to the repo's own name part.
-  const nameForRepo = (r: string | null) => projects.find((p) => p.repo === r)?.name ?? r?.split("/")[1] ?? "—";
+  const nameForRepo = (r: string | null) => projectNameFor(projects, r);
 
   const pool = (issues ?? []).filter((i) => i.sla?.pctConsumed != null);
   // Gate on the API's own verdict rather than a hardcoded 0.75 — the panel
@@ -91,7 +101,7 @@ export function ClosestToBreach({ repo, priority, projects }: ClosestToBreachPro
                     #{issue.number}
                   </Box>
                   <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--sla-fg3)" }}>
-                    {nameForRepo(issue.repo)}
+                    {issue.title ?? nameForRepo(issue.repo)}
                   </Box>
                   <Box component="span" sx={{ flexShrink: 0, borderRadius: "5px", bgcolor: "var(--sla-surface-track)", px: 0.75, py: 0.25, fontSize: 10, fontWeight: 600, lineHeight: 1, color: "var(--sla-fg2)", fontFamily: MONO }}>
                     {shortPriority(issue.priority)}

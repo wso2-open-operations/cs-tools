@@ -18,6 +18,7 @@ import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { useLocation } from "react-router";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ProductVulnerabilitiesTab from "@features/csm-security-center/components/ProductVulnerabilitiesTab";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -49,6 +50,7 @@ export default function CsmSecurityCenterPage(): JSX.Element {
   // Back button instead (via CsmIssuesView, which reads this same state) —
   // skip here to avoid a duplicate.
   const backState = useLocation().state as { from?: string } | undefined;
+  const { canWrite } = usePortalAccess();
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -81,15 +83,17 @@ export default function CsmSecurityCenterPage(): JSX.Element {
           enableColumnCustomization
           columnsViewId="security-reports"
           actions={
-            <Button
-              variant="contained"
-              color="primary"
-              size="small"
-              startIcon={<Plus size={16} />}
-              onClick={() => navigate("/security-center/reports/new")}
-            >
-              New security report
-            </Button>
+            canWrite ? (
+              <Button
+                variant="contained"
+                color="primary"
+                size="small"
+                startIcon={<Plus size={16} />}
+                onClick={() => navigate("/security-center/reports/new")}
+              >
+                New security report
+              </Button>
+            ) : undefined
           }
         />
       )}

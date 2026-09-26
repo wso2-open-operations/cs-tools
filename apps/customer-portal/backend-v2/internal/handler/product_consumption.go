@@ -39,28 +39,27 @@ const licenseProvisioningWriteDeadline = 2 * time.Minute
 // productConsumptionClient abstracts the upstream product-consumption
 // service operations used by ProductConsumptionHandler.
 type productConsumptionClient interface {
-	ProcessLicenseDownload(ctx context.Context, req productconsumption.LicenseDownloadRequest) (productconsumption.License, error)
 	ImportDeploymentUsage(ctx context.Context, email string, zipFile []byte) (productconsumption.ImportUsageResponse, error)
 }
 
-// entityProjectAccessChecker is the subset of entityProjectClient needed to
-// verify the caller has access to a project before provisioning a license.
-type entityProjectAccessChecker interface {
+// entityClient is the subset of entity client needed to verify the caller has
+// access to a project and retrieve deployment licenses from entity-service.
+type entityClient interface {
 	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
+	GetDeploymentLicense(ctx context.Context, projectID, deploymentID, email string) (entity.License, error)
 }
 
 // ProductConsumptionHandler handles HTTP requests for the product-consumption
 // feature: deployment license provisioning/download and deployment usage
-// import. Calls a separate upstream service (not entity-service) — see
-// internal/productconsumption's package doc comment.
+// import. Calls entity-service for licenses and product-consumption for usage import.
 type ProductConsumptionHandler struct {
 	productConsumption productConsumptionClient
-	entity             entityProjectAccessChecker
+	entity             entityClient
 }
 
 // NewProductConsumptionHandler creates a ProductConsumptionHandler backed by
 // the given product-consumption and entity clients.
-func NewProductConsumptionHandler(productConsumption productConsumptionClient, entityClient entityProjectAccessChecker) *ProductConsumptionHandler {
+func NewProductConsumptionHandler(productConsumption productConsumptionClient, entityClient entityClient) *ProductConsumptionHandler {
 	return &ProductConsumptionHandler{productConsumption: productConsumption, entity: entityClient}
 }
 
@@ -92,13 +91,9 @@ func (h *ProductConsumptionHandler) GetDeploymentLicense(w http.ResponseWriter, 
 		return
 	}
 
-	license, err := h.productConsumption.ProcessLicenseDownload(r.Context(), productconsumption.LicenseDownloadRequest{
-		Email:        user.Email,
-		DeploymentID: deploymentID,
-		ProjectID:    projectID,
-	})
+	license, err := h.entity.GetDeploymentLicense(r.Context(), projectID, deploymentID, user.Email)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "productconsumption ProcessLicenseDownload failed", "userID", user.UserID, "projectID", projectID, "deploymentID", deploymentID, "err", summarizeErr(err))
+		slog.ErrorContext(r.Context(), "entity GetDeploymentLicense failed", "userID", user.UserID, "projectID", projectID, "deploymentID", deploymentID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve license.")
 		return
 	}

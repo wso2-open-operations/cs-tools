@@ -149,6 +149,17 @@ func (c *Client) SearchProjectOpportunityLinks(ctx context.Context, body []byte)
 	return c.do(ctx, http.MethodPost, "/project-opportunity-links/search", body)
 }
 
+// SyncProductVulnerabilities calls POST /products/vulnerabilities/sync on the entity
+// service. This is a full-replace sync: the caller must submit the complete current set
+// of product-vulnerability records on every call, not an incremental delta — the
+// downstream ServiceNow-backed operation deletes any existing record not present in the
+// submitted set. Unlike UpdateProject, this entity-service operation accepts pure M2M
+// calls with no forwarded end-user token, so this call is expected to succeed.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SyncProductVulnerabilities(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/products/vulnerabilities/sync", body)
+}
+
 // CreateIncident calls POST /incidents on the entity service. This targets a
 // ServiceNow-backed operation that requires a forwarded end-user identity
 // token. This service is strictly M2M with no mechanism to carry one, so
@@ -191,13 +202,37 @@ func (c *Client) LookupAlertIncidentMappings(ctx context.Context, body []byte) (
 	return c.do(ctx, http.MethodPost, "/alert-incident-mappings/lookup", body)
 }
 
-// SyncProductVulnerabilities calls POST /products/vulnerabilities/sync on the entity
-// service. This is a full-replace sync: the caller must submit the complete current set
-// of product-vulnerability records on every call, not an incremental delta — the
-// downstream ServiceNow-backed operation deletes any existing record not present in the
-// submitted set. Unlike UpdateProject, this entity-service operation accepts pure M2M
-// calls with no forwarded end-user token, so this call is expected to succeed.
-// Response is returned as raw JSON; typed response structs are deferred.
-func (c *Client) SyncProductVulnerabilities(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/products/vulnerabilities/sync", body)
+// UpdateIncident calls PATCH /incidents/{id} on the entity service. Unlike
+// PatchCase, this operation has no Postgres-data-source path at all: on
+// DATA_SOURCE=postgres, entity-service's incidentService.UpdateIncident
+// unconditionally returns a 503 (not supported on this data source yet, no
+// field combination succeeds — several fields have no backing Postgres
+// column, and others would need comment-table side effects not implemented
+// there); on DATA_SOURCE=servicenow, it goes through the same M2M-fallback
+// mechanism as CreateIncident/SearchIncidents/SearchITServices above (a
+// separately-configured M2M ServiceNow credential is used when no end-user
+// identity token is forwarded, and only 401s if that fallback credential is
+// itself unconfigured in the target environment). So this call is
+// unconditionally ServiceNow-backed with no Postgres fallback path: whether
+// it succeeds depends entirely on the target environment's data source and,
+// on ServiceNow, its M2M credential configuration — not on which fields are
+// sent, unlike PatchCase's field-dependent behavior. Response is returned as
+// raw JSON; typed response structs are deferred.
+func (c *Client) UpdateIncident(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/incidents/%s", url.PathEscape(id)), body)
+}
+
+// SearchITServices calls POST /services/search on the entity service. This
+// targets a ServiceNow-backed operation with the same M2M-fallback
+// mechanism as CreateIncident/SearchIncidents above: when no end-user
+// identity token is forwarded, it uses a separately-configured M2M
+// ServiceNow credential instead of erroring, and only 401s if that fallback
+// credential is itself unconfigured in the target environment. This service
+// carries no forwarded end-user identity by design (see this file's own
+// CreateIncident doc comment), so whether this 401s depends on the target
+// environment's M2M credential configuration, not on this service's M2M-only
+// design per se. Response is returned as raw JSON; typed response structs
+// are deferred.
+func (c *Client) SearchITServices(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/services/search", body)
 }

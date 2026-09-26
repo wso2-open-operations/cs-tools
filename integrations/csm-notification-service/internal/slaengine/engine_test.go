@@ -20,79 +20,95 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
-	"time"
 
-	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 )
 
-type registerCall struct {
-	caseID, clockType string
-	startedAt, dueAt  time.Time
-	req               RegisterClockRequest
-}
-
-type tierCall struct{ caseID, clockType, tier string }
-
-// fakeEntityClock is a hand-written fake for entityClock, following this
+// fakeStatusLister is a hand-written fake for statusLister, following this
 // repo's own dispatch_test.go idiom (no mocking library).
-type fakeEntityClock struct {
-	registerCalls []registerCall
-	registerErr   error
-
-	getClockFn func(caseID, clockType string) (Clock, error)
-
-	tierCalls          []tierCall
-	tierResult         time.Time
-	tierAlreadyReached bool
-	tierErr            error
+type fakeStatusLister struct {
+	statuses []SLAStatus
+	err      error
 }
 
-func (f *fakeEntityClock) RegisterClock(_ context.Context, req RegisterClockRequest) error {
-	f.registerCalls = append(f.registerCalls, registerCall{req.CaseID, req.ClockType, req.StartedAt, req.DueAt, req})
-	return f.registerErr
+func (f *fakeStatusLister) FetchAllActiveSLAStatuses(context.Context) ([]SLAStatus, error) {
+	return f.statuses, f.err
 }
 
-func (f *fakeEntityClock) GetClock(_ context.Context, caseID, clockType string) (Clock, error) {
-	if f.getClockFn != nil {
-		return f.getClockFn(caseID, clockType)
+type tierCall struct {
+	caseID, clockType string
+	tier              int
+}
+
+// fakeTierStore is a hand-written in-memory fake for tierStore, including a
+// fake claim/release ledger for ClaimTier/ReleaseTier — forceClaimLoss lets
+// a test simulate a concurrent replica (or an earlier attempt) already
+// holding a given tier's claim, without needing a real Redis.
+type fakeTierStore struct {
+	tiers  map[string]int
+	claims map[string]bool
+
+	getErr     error
+	setErr     error
+	claimErr   error
+	releaseErr error
+
+	forceClaimLoss map[string]bool
+
+	sets         []tierCall
+	claimCalls   []tierCall
+	releaseCalls []tierCall
+}
+
+func newFakeTierStore() *fakeTierStore {
+	return &fakeTierStore{tiers: map[string]int{}, claims: map[string]bool{}, forceClaimLoss: map[string]bool{}}
+}
+
+func (f *fakeTierStore) key(caseID, clockType string) string { return caseID + "|" + clockType }
+
+func (f *fakeTierStore) claimKey(caseID, clockType string, tier int) string {
+	return f.key(caseID, clockType) + "|" + strconv.Itoa(tier)
+}
+
+func (f *fakeTierStore) GetTier(_ context.Context, caseID, clockType string) (int, bool, error) {
+	if f.getErr != nil {
+		return 0, false, f.getErr
 	}
-	return Clock{}, nil
+	tier, ok := f.tiers[f.key(caseID, clockType)]
+	return tier, ok, nil
 }
 
-func (f *fakeEntityClock) SetTierReachedIfUnset(_ context.Context, caseID, clockType, tier string) (time.Time, bool, error) {
-	f.tierCalls = append(f.tierCalls, tierCall{caseID, clockType, tier})
-	return f.tierResult, f.tierAlreadyReached, f.tierErr
+func (f *fakeTierStore) SetTier(_ context.Context, caseID, clockType string, tier int) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.tiers[f.key(caseID, clockType)] = tier
+	f.sets = append(f.sets, tierCall{caseID, clockType, tier})
+	return nil
 }
 
-type wakeEntry struct {
-	member string
-	at     time.Time
+func (f *fakeTierStore) ClaimTier(_ context.Context, caseID, clockType string, tier int) (bool, error) {
+	if f.claimErr != nil {
+		return false, f.claimErr
+	}
+	f.claimCalls = append(f.claimCalls, tierCall{caseID, clockType, tier})
+	key := f.claimKey(caseID, clockType, tier)
+	if f.forceClaimLoss[key] || f.claims[key] {
+		return false, nil
+	}
+	f.claims[key] = true
+	return true, nil
 }
 
-type fakeWakeIndex struct {
-	added   []wakeEntry
-	removed []string
-	due     []string
-
-	addErr    error
-	removeErr error
-	dueErr    error
-}
-
-func (f *fakeWakeIndex) AddWake(_ context.Context, member string, at time.Time) error {
-	f.added = append(f.added, wakeEntry{member, at})
-	return f.addErr
-}
-
-func (f *fakeWakeIndex) RemoveWake(_ context.Context, member string) error {
-	f.removed = append(f.removed, member)
-	return f.removeErr
-}
-
-func (f *fakeWakeIndex) DueMembers(_ context.Context, _ time.Time) ([]string, error) {
-	return f.due, f.dueErr
+func (f *fakeTierStore) ReleaseTier(_ context.Context, caseID, clockType string, tier int) error {
+	if f.releaseErr != nil {
+		return f.releaseErr
+	}
+	f.releaseCalls = append(f.releaseCalls, tierCall{caseID, clockType, tier})
+	delete(f.claims, f.claimKey(caseID, clockType, tier))
+	return nil
 }
 
 type publishCall struct {
@@ -113,10 +129,7 @@ type chatCall struct {
 	product, clockType, tier, caseNumber string
 }
 
-// fakeChatSender is a hand-written fake for chatSender — Tick's happy path
-// (and, since the Chat-retry fix, its alreadyReached path too) always
-// reaches Engine.sendBreachAlert, so every Tick-exercising test needs one
-// wired in even when it isn't asserting on the Chat send itself.
+// fakeChatSender is a hand-written fake for chatSender.
 type fakeChatSender struct {
 	calls []chatCall
 	err   error
@@ -132,107 +145,75 @@ type fakeLinkResolver struct{}
 
 func (fakeLinkResolver) CSMLink(caseID string) string { return "https://example.test/cases/" + caseID }
 
-func newTestEngine(entity entityClock, wake wakeIndex, pub eventPublisher) *Engine {
-	return &Engine{entity: entity, wake: wake, pub: pub, chat: &fakeChatSender{}, links: fakeLinkResolver{}, defaultChatProduct: "Test Product"}
+func newTestEngine(entity statusLister, store tierStore, pub eventPublisher) *Engine {
+	return &Engine{entity: entity, store: store, pub: pub, chat: &fakeChatSender{}, links: fakeLinkResolver{}, defaultChatProduct: "Test Product"}
 }
 
-func TestEngine_Handle_IgnoresOtherEventTypes(t *testing.T) {
-	entity := &fakeEntityClock{}
-	wake := &fakeWakeIndex{}
-	e := newTestEngine(entity, wake, &fakePublisher{})
-
-	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{}}`)}
-	if err := e.Handle(context.Background(), record); err != nil {
-		t.Fatalf("Handle() error = %v, want nil", err)
+func TestTierForStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status SLAStatus
+		want   int
+	}{
+		{"well below 50", SLAStatus{BusinessElapsedPercent: 12.5}, 0},
+		{"just under 50", SLAStatus{BusinessElapsedPercent: 49.99}, 0},
+		{"exactly 50", SLAStatus{BusinessElapsedPercent: 50}, 50},
+		{"between 50 and 75", SLAStatus{BusinessElapsedPercent: 60}, 50},
+		{"exactly 75", SLAStatus{BusinessElapsedPercent: 75}, 75},
+		{"between 75 and 100", SLAStatus{BusinessElapsedPercent: 90}, 75},
+		{"exactly 100", SLAStatus{BusinessElapsedPercent: 100}, 100},
+		{"over 100 (breached, still climbing)", SLAStatus{BusinessElapsedPercent: 260.44, HasBreached: true}, 100},
+		{"hasBreached trusted even if percent somehow under 100", SLAStatus{BusinessElapsedPercent: 42, HasBreached: true}, 100},
 	}
-	if len(entity.registerCalls) != 0 || len(wake.added) != 0 {
-		t.Errorf("expected no registration for an unrelated event type, got registerCalls=%d added=%d", len(entity.registerCalls), len(wake.added))
-	}
-}
-
-func TestEngine_Handle_RegistersClockAndSeedsWakeEntries(t *testing.T) {
-	entity := &fakeEntityClock{}
-	wake := &fakeWakeIndex{}
-	e := newTestEngine(entity, wake, &fakePublisher{})
-
-	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}}`)}
-	if err := e.Handle(context.Background(), record); err != nil {
-		t.Fatalf("Handle() error = %v, want nil", err)
-	}
-
-	if len(entity.registerCalls) != 1 {
-		t.Fatalf("expected 1 RegisterClock call, got %d", len(entity.registerCalls))
-	}
-	reg := entity.registerCalls[0]
-	if reg.caseID != "CASE-1" || reg.clockType != "response" {
-		t.Errorf("registerCall = %+v, want caseID=CASE-1 clockType=response", reg)
-	}
-	if got, want := reg.dueAt.Sub(reg.startedAt), 2*time.Hour; got != want {
-		t.Errorf("dueAt - startedAt = %v, want %v", got, want)
-	}
-
-	if len(wake.added) != 3 {
-		t.Fatalf("expected 3 wake entries (50/75/100), got %d", len(wake.added))
-	}
-	wantMembers := map[string]bool{
-		"CASE-1|response|50":  true,
-		"CASE-1|response|75":  true,
-		"CASE-1|response|100": true,
-	}
-	for _, w := range wake.added {
-		if !wantMembers[w.member] {
-			t.Errorf("unexpected wake member %q", w.member)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tierForStatus(tt.status); got != tt.want {
+				t.Errorf("tierForStatus(%+v) = %d, want %d", tt.status, got, tt.want)
+			}
+		})
 	}
 }
 
-// TestEngine_Handle_RejectsWholeRecordOnOneInvalidDuration verifies that a
-// mix of one valid and one unparsable duration fails events.Validate before
-// registerClocks ever runs — mirroring internal/events' own validRecipients
-// philosophy (one bad entry fails the whole event, dead-lettered for
-// visibility, rather than silently registering a subset).
-func TestEngine_Handle_RejectsWholeRecordOnOneInvalidDuration(t *testing.T) {
-	entity := &fakeEntityClock{}
-	wake := &fakeWakeIndex{}
-	e := newTestEngine(entity, wake, &fakePublisher{})
-
-	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"not-a-duration","resolution":"4h"}}}`)}
-	if err := e.Handle(context.Background(), record); err == nil {
-		t.Fatal("Handle() error = nil, want the whole record rejected for its one invalid duration")
-	}
-	if len(entity.registerCalls) != 0 {
-		t.Errorf("expected no clock registered when the record as a whole was rejected, got %+v", entity.registerCalls)
-	}
-}
-
-func TestEngine_Handle_PropagatesRegisterError(t *testing.T) {
-	entity := &fakeEntityClock{registerErr: errors.New("entity-service unreachable")}
-	wake := &fakeWakeIndex{}
-	e := newTestEngine(entity, wake, &fakePublisher{})
-
-	record := eventbus.Record{Value: []byte(`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}}`)}
-	if err := e.Handle(context.Background(), record); err == nil {
-		t.Fatal("Handle() error = nil, want a propagated error")
-	}
-	if len(wake.added) != 0 {
-		t.Errorf("expected no wake entries seeded after a failed RegisterClock, got %d", len(wake.added))
-	}
-}
-
-func TestEngine_Tick_FiresDueMemberAndPublishes(t *testing.T) {
-	reached := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	entity := &fakeEntityClock{tierResult: reached}
-	wake := &fakeWakeIndex{due: []string{"CASE-1|response|50"}}
+// TestEngine_Tick_SeedsBaselineWithoutAlerting verifies the flood-avoidance
+// rule this whole redesign hinges on: the first time this engine ever sees
+// a (caseID, clockType) pair, it records the clock's CURRENT tier as a
+// baseline and sends nothing — critical for the ~120,000 pre-existing
+// in-progress "sla" rows this engine sees on its very first poll after
+// deploy, most already well past 50%/75% elapsed.
+func TestEngine_Tick_SeedsBaselineWithoutAlerting(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 82}}}
+	store := newFakeTierStore()
 	pub := &fakePublisher{}
-	e := newTestEngine(entity, wake, pub)
+	e := newTestEngine(entity, store, pub)
 
-	if err := e.Tick(context.Background(), time.Now()); err != nil {
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("expected no publish on first sight, got %d", len(pub.calls))
+	}
+	if chat := e.chat.(*fakeChatSender); len(chat.calls) != 0 {
+		t.Errorf("expected no chat alert on first sight, got %+v", chat.calls)
+	}
+	if tier, ok := store.tiers["CASE-1|response"]; !ok || tier != 75 {
+		t.Errorf("expected baseline seeded at tier 75 (82%% -> below 100), got tier=%d found=%v", tier, ok)
+	}
+}
+
+// TestEngine_Tick_AlertsOnlyNewlyCrossedTier verifies the normal steady
+// -state case: a clock already seen at tier 50 that has now reached 75
+// alerts for 75 only, not 50 again.
+func TestEngine_Tick_AlertsOnlyNewlyCrossedTier(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 80, CaseNumber: "CS0001"}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 50
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err != nil {
 		t.Fatalf("Tick() error = %v, want nil", err)
 	}
 
-	if len(entity.tierCalls) != 1 || entity.tierCalls[0] != (tierCall{"CASE-1", "response", "50"}) {
-		t.Fatalf("tierCalls = %+v, want one call for CASE-1/response/50", entity.tierCalls)
-	}
 	if len(pub.calls) != 1 {
 		t.Fatalf("expected 1 publish, got %d", len(pub.calls))
 	}
@@ -250,99 +231,366 @@ func TestEngine_Tick_FiresDueMemberAndPublishes(t *testing.T) {
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
 		t.Fatalf("failed to decode payload: %v", err)
 	}
-	if payload != (events.SLATierReachedPayload{CaseID: "CASE-1", ClockType: "response", Tier: "50"}) {
-		t.Errorf("payload = %+v, want CASE-1/response/50", payload)
+	if payload != (events.SLATierReachedPayload{CaseID: "CASE-1", ClockType: "response", Tier: "75"}) {
+		t.Errorf("payload = %+v, want CASE-1/response/75", payload)
 	}
 
 	chat := e.chat.(*fakeChatSender)
-	if len(chat.calls) != 1 || chat.calls[0] != (chatCall{"Test Product", "response", "50", "CASE-1"}) {
-		t.Errorf("chat.calls = %+v, want one alert for CASE-1/response/50", chat.calls)
+	if len(chat.calls) != 1 || chat.calls[0] != (chatCall{"Test Product", "response", "75", "CS0001"}) {
+		t.Errorf("chat.calls = %+v, want one alert for CASE-1/response/75", chat.calls)
 	}
-
-	if len(wake.removed) != 1 || wake.removed[0] != "CASE-1|response|50" {
-		t.Errorf("removed = %v, want the fired member removed", wake.removed)
+	if store.tiers["CASE-1|response"] != 75 {
+		t.Errorf("cursor = %d, want advanced to 75", store.tiers["CASE-1|response"])
 	}
 }
 
-// TestEngine_Tick_SkipsPublishWhenAlreadyReached verifies the accepted
-// trade-off documented on Tick's own doc comment: when entity-service
-// reports the tier was already claimed by an earlier call — including,
-// critically, an in-process early completion on entity-service's own side
-// (e.g. a qualifying support engineer comment satisfying the response SLA,
-// or a case closing) — this engine does not publish again AND does not
-// send a Chat alert; it just drops the now-stale wake entry. The Chat
-// assertion here is the regression guard for a real bug: an earlier
-// version sent the Chat alert unconditionally on alreadyReached=true
-// (reasoning it was just retrying a failed send), which produced a false
-// "SLA at risk" alert for a response SLA a support engineer had already
-// satisfied in time. See Tick's doc comment for the full reasoning.
-func TestEngine_Tick_SkipsPublishWhenAlreadyReached(t *testing.T) {
-	reached := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	entity := &fakeEntityClock{tierResult: reached, tierAlreadyReached: true}
-	wake := &fakeWakeIndex{due: []string{"CASE-1|response|50"}}
+// TestEngine_Tick_AlertsEveryTierCrossedSinceLastPoll verifies that a clock
+// whose percentage jumped past more than one checkpoint between polls (a
+// slow ticker interval, or a burst of ServiceNow sync activity) still fires
+// an alert for each intermediate tier, not just the highest one reached —
+// in ascending order.
+func TestEngine_Tick_AlertsEveryTierCrossedSinceLastPoll(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "resolution", HasBreached: true, BusinessElapsedPercent: 140}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|resolution"] = 50
 	pub := &fakePublisher{}
-	e := newTestEngine(entity, wake, pub)
+	e := newTestEngine(entity, store, pub)
 
-	if err := e.Tick(context.Background(), time.Now()); err != nil {
+	if err := e.Tick(context.Background()); err != nil {
 		t.Fatalf("Tick() error = %v, want nil", err)
 	}
 
+	chat := e.chat.(*fakeChatSender)
+	if len(chat.calls) != 2 {
+		t.Fatalf("expected 2 chat alerts (75 then 100), got %+v", chat.calls)
+	}
+	if chat.calls[0].tier != "75" || chat.calls[1].tier != "100" {
+		t.Errorf("chat.calls = %+v, want tier order 75, 100", chat.calls)
+	}
+	if len(pub.calls) != 2 {
+		t.Errorf("expected 2 publishes, got %d", len(pub.calls))
+	}
+	if store.tiers["CASE-1|resolution"] != 100 {
+		t.Errorf("cursor = %d, want advanced to 100", store.tiers["CASE-1|resolution"])
+	}
+}
+
+func TestEngine_Tick_NoOpWhenTierUnchanged(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 55}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 50
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
 	if len(pub.calls) != 0 {
-		t.Fatalf("expected no publish when alreadyReached=true, got %d", len(pub.calls))
+		t.Errorf("expected no publish when the tier hasn't advanced, got %d", len(pub.calls))
 	}
 	if chat := e.chat.(*fakeChatSender); len(chat.calls) != 0 {
-		t.Fatalf("expected no chat alert when alreadyReached=true, got %+v", chat.calls)
-	}
-	if len(wake.removed) != 1 || wake.removed[0] != "CASE-1|response|50" {
-		t.Errorf("expected the stale wake entry cleaned up regardless, removed = %v", wake.removed)
+		t.Errorf("expected no chat alert when the tier hasn't advanced, got %+v", chat.calls)
 	}
 }
 
-func TestEngine_Tick_SkipsPausedClock(t *testing.T) {
-	pausedAt := time.Now()
-	entity := &fakeEntityClock{getClockFn: func(string, string) (Clock, error) { return Clock{PausedOn: &pausedAt}, nil }}
-	wake := &fakeWakeIndex{due: []string{"CASE-1|response|50"}}
+// TestEngine_Tick_RebaselinesOnRegressionWithoutAlerting covers an SLA
+// policy reset or a fresh tracking cycle under the same (caseID,
+// clockType) — entity-service's own live data has a small but real
+// fraction of these (about 0.5% of clocks, per a live check). The
+// percentage genuinely goes backwards; this must rebaseline quietly, not
+// treat it as some kind of error or, worse, alert on the drop.
+func TestEngine_Tick_RebaselinesOnRegressionWithoutAlerting(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 5}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 100
 	pub := &fakePublisher{}
-	e := newTestEngine(entity, wake, pub)
+	e := newTestEngine(entity, store, pub)
 
-	if err := e.Tick(context.Background(), time.Now()); err != nil {
+	if err := e.Tick(context.Background()); err != nil {
 		t.Fatalf("Tick() error = %v, want nil", err)
 	}
-	if len(entity.tierCalls) != 0 || len(pub.calls) != 0 {
-		t.Errorf("expected a paused clock to skip both the tier write and the publish, got tierCalls=%d publishes=%d", len(entity.tierCalls), len(pub.calls))
+	if len(pub.calls) != 0 {
+		t.Errorf("expected no publish on a tier regression, got %d", len(pub.calls))
 	}
-	if len(wake.removed) != 1 {
-		t.Errorf("expected the wake entry dropped for a paused clock, removed=%v", wake.removed)
+	if chat := e.chat.(*fakeChatSender); len(chat.calls) != 0 {
+		t.Errorf("expected no chat alert on a tier regression, got %+v", chat.calls)
+	}
+	if store.tiers["CASE-1|response"] != 0 {
+		t.Errorf("cursor = %d, want rebaselined to 0", store.tiers["CASE-1|response"])
 	}
 }
 
-func TestEngine_Tick_KeepsWakeEntryOnPublishFailure(t *testing.T) {
-	entity := &fakeEntityClock{}
-	wake := &fakeWakeIndex{due: []string{"CASE-1|response|50"}}
-	pub := &fakePublisher{err: errors.New("kafka unreachable")}
-	e := newTestEngine(entity, wake, pub)
+func TestEngine_Tick_SkipsPausedClockEntirely(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 80, IsPaused: true}}}
+	store := newFakeTierStore()
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
 
-	if err := e.Tick(context.Background(), time.Now()); err == nil {
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(store.sets) != 0 {
+		t.Errorf("expected a paused clock to skip the tier store entirely, got %d writes", len(store.sets))
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("expected no publish for a paused clock, got %d", len(pub.calls))
+	}
+}
+
+// TestEngine_Tick_StopsAtFirstFailedTierAndKeepsCursor verifies that a
+// publish/chat failure partway through a multi-tier crossing leaves the
+// cursor at the last SUCCESSFULLY alerted tier, not the clock's current
+// tier — so the next Tick retries exactly the remaining tiers, never
+// silently skipping or double-alerting the one that already succeeded.
+func TestEngine_Tick_StopsAtFirstFailedTierAndKeepsCursor(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", HasBreached: true, BusinessElapsedPercent: 140}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 50
+	pub := &fakePublisher{err: errors.New("event hub unreachable")}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err == nil {
 		t.Fatal("Tick() error = nil, want the publish failure propagated")
 	}
-	if len(wake.removed) != 0 {
-		t.Errorf("expected the wake entry kept for retry after a publish failure, removed=%v", wake.removed)
+	if len(pub.calls) != 1 {
+		t.Errorf("expected exactly 1 failed publish attempt (stopping before tier 100), got %d", len(pub.calls))
+	}
+	if store.tiers["CASE-1|response"] != 50 {
+		t.Errorf("cursor = %d, want left at 50 (no tier succeeded)", store.tiers["CASE-1|response"])
 	}
 }
 
-func TestEngine_Tick_DropsMalformedMember(t *testing.T) {
-	entity := &fakeEntityClock{}
-	wake := &fakeWakeIndex{due: []string{"malformed-no-pipes"}}
+func TestEngine_Tick_ChatFailurePropagatesAndKeepsCursor(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 60}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 0
 	pub := &fakePublisher{}
-	e := newTestEngine(entity, wake, pub)
+	e := newTestEngine(entity, store, pub)
+	e.chat = &fakeChatSender{err: errors.New("chat webhook unreachable")}
 
-	if err := e.Tick(context.Background(), time.Now()); err != nil {
+	if err := e.Tick(context.Background()); err == nil {
+		t.Fatal("Tick() error = nil, want the chat send failure propagated")
+	}
+	if store.tiers["CASE-1|response"] != 0 {
+		t.Errorf("cursor = %d, want left at 0 (chat send failed before it could advance)", store.tiers["CASE-1|response"])
+	}
+}
+
+// TestEngine_Tick_JoinsErrorsAcrossStatusesButProcessesBoth verifies one
+// clock's failure doesn't stop another clock in the same poll from being
+// processed.
+func TestEngine_Tick_JoinsErrorsAcrossStatusesButProcessesBoth(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{
+		{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 80},
+		{CaseID: "CASE-2", ClockType: "response", BusinessElapsedPercent: 80},
+	}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 50
+	store.tiers["CASE-2|response"] = 50
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
+	e.chat = &fakeChatSender{err: errors.New("chat webhook unreachable")}
+
+	err := e.Tick(context.Background())
+	if err == nil {
+		t.Fatal("Tick() error = nil, want both failures joined")
+	}
+	if len(pub.calls) != 2 {
+		t.Errorf("expected both clocks' publish attempted despite the shared chat failure, got %d", len(pub.calls))
+	}
+}
+
+func TestEngine_Tick_NoStatusesIsANoOp(t *testing.T) {
+	e := newTestEngine(&fakeStatusLister{}, newFakeTierStore(), &fakePublisher{})
+	if err := e.Tick(context.Background()); err != nil {
 		t.Fatalf("Tick() error = %v, want nil", err)
 	}
-	if len(entity.tierCalls) != 0 || len(pub.calls) != 0 {
-		t.Error("expected a malformed member to never reach entity/publish calls")
+}
+
+func TestEngine_Tick_PropagatesListError(t *testing.T) {
+	e := newTestEngine(&fakeStatusLister{err: errors.New("entity-service unreachable")}, newFakeTierStore(), &fakePublisher{})
+	if err := e.Tick(context.Background()); err == nil {
+		t.Fatal("Tick() error = nil, want the list failure propagated")
 	}
-	if len(wake.removed) != 1 || wake.removed[0] != "malformed-no-pipes" {
-		t.Errorf("expected the malformed member dropped, removed=%v", wake.removed)
+}
+
+// TestEngine_Tick_LosingClaimRaceDoesNotAlert simulates the exact race a
+// second concurrent replica would hit: both replicas read the same stale
+// cursor and both decide tier 75 needs alerting, but only one wins the
+// Redis SETNX claim. The losing call must not alert, must not error, and
+// must not advance the cursor itself — the winner's own SetTier call is
+// what advances it.
+func TestEngine_Tick_LosingClaimRaceDoesNotAlert(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 80}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 50
+	store.forceClaimLoss["CASE-1|response|75"] = true
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("expected no publish for a tier this call lost the claim race for, got %d", len(pub.calls))
+	}
+	if chat := e.chat.(*fakeChatSender); len(chat.calls) != 0 {
+		t.Errorf("expected no chat alert for a tier this call lost the claim race for, got %+v", chat.calls)
+	}
+	if store.tiers["CASE-1|response"] != 50 {
+		t.Errorf("cursor = %d, want left at 50 (this call never won a claim to advance past)", store.tiers["CASE-1|response"])
+	}
+}
+
+// TestEngine_Tick_FailedAlertReleasesClaimForRetry verifies that a tier
+// this call DID win the claim for, but then failed to alert, gives the
+// claim back — unlike the pre-redesign engine's own equivalent failure
+// case (which permanently lost the alert), a Redis claim is cheap to
+// release, so there's no reason to accept that loss here.
+func TestEngine_Tick_FailedAlertReleasesClaimForRetry(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 60}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 0
+	pub := &fakePublisher{err: errors.New("event hub unreachable")}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err == nil {
+		t.Fatal("Tick() error = nil, want the publish failure propagated")
+	}
+	if len(store.claimCalls) != 1 || store.claimCalls[0] != (tierCall{"CASE-1", "response", 50}) {
+		t.Fatalf("claimCalls = %+v, want one claim attempt for tier 50", store.claimCalls)
+	}
+	if len(store.releaseCalls) != 1 || store.releaseCalls[0] != (tierCall{"CASE-1", "response", 50}) {
+		t.Errorf("releaseCalls = %+v, want the failed tier's claim released", store.releaseCalls)
+	}
+	if store.claims[store.claimKey("CASE-1", "response", 50)] {
+		t.Error("expected the claim to no longer be held after release, so a later tick can retry it")
+	}
+}
+
+// TestEngine_Tick_RegressionReleasesClaimsAboveNewTier verifies the fix for
+// the edge case a plain cursor alone can't handle: an SLA policy reset (or
+// a fresh tracking cycle) drops the percentage back down after a clock
+// already reached a high tier. Without releasing the old cycle's claims,
+// the new cycle's own genuine re-crossing of the same tier numbers would
+// silently find them already claimed and never alert.
+func TestEngine_Tick_RegressionReleasesClaimsAboveNewTier(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 5}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 100
+	store.claims[store.claimKey("CASE-1", "response", 50)] = true
+	store.claims[store.claimKey("CASE-1", "response", 75)] = true
+	store.claims[store.claimKey("CASE-1", "response", 100)] = true
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	for _, tier := range []int{50, 75, 100} {
+		if store.claims[store.claimKey("CASE-1", "response", tier)] {
+			t.Errorf("expected tier %d's claim released after the regression, still held", tier)
+		}
+	}
+}
+
+// TestEngine_Tick_PropagatesEachTierStoreError pins the behavior of every
+// TierStore failure path processStatus has: a failed cursor read must skip
+// the clock (not reseed it and silently swallow a genuine crossing), and
+// every other store failure must likewise stop that clock's processing and
+// surface an error from Tick, rather than being absorbed.
+func TestEngine_Tick_PropagatesEachTierStoreError(t *testing.T) {
+	someErr := errors.New("redis unreachable")
+
+	tests := []struct {
+		name       string
+		percent    float64 // -> tier via tierForStatus
+		seedCursor bool
+		cursor     int
+		setErrFn   func(*fakeTierStore)
+	}{
+		{
+			name:     "GetTier fails",
+			percent:  60,
+			setErrFn: func(s *fakeTierStore) { s.getErr = someErr },
+		},
+		{
+			name:     "SetTier fails seeding the first-sight baseline",
+			percent:  60,
+			setErrFn: func(s *fakeTierStore) { s.setErr = someErr },
+		},
+		{
+			name:       "ReleaseTier fails cleaning up a regression",
+			percent:    5,
+			seedCursor: true,
+			cursor:     100,
+			setErrFn:   func(s *fakeTierStore) { s.releaseErr = someErr },
+		},
+		{
+			name:       "ClaimTier fails on a genuine crossing",
+			percent:    80,
+			seedCursor: true,
+			cursor:     50,
+			setErrFn:   func(s *fakeTierStore) { s.claimErr = someErr },
+		},
+		{
+			name:       "SetTier fails advancing the cursor after a successful alert",
+			percent:    80,
+			seedCursor: true,
+			cursor:     50,
+			setErrFn: func(s *fakeTierStore) {
+				// Only the *second* SetTier call in this flow (the
+				// post-alert cursor advance) should fail — the store has
+				// no earlier SetTier call to conflict with in this
+				// particular scenario, so a plain unconditional setErr is
+				// enough here.
+				s.setErr = someErr
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: tt.percent}}}
+			store := newFakeTierStore()
+			if tt.seedCursor {
+				store.tiers["CASE-1|response"] = tt.cursor
+			}
+			tt.setErrFn(store)
+			e := newTestEngine(entity, store, &fakePublisher{})
+
+			if err := e.Tick(context.Background()); err == nil {
+				t.Fatal("Tick() error = nil, want the store failure propagated")
+			}
+		})
+	}
+}
+
+// TestEngine_Tick_GetTierFailureSkipsRatherThanReseeding is the specific
+// regression guard TestEngine_Tick_PropagatesEachTierStoreError's first case
+// only pins loosely: a Redis GetTier failure must be treated as "this clock
+// couldn't be checked this poll," not conflated with GetTier's own found=false
+// result (no error, just no cursor yet). Conflating the two would silently
+// reseed the baseline on every transient Redis error and swallow whatever
+// genuine crossing that poll should have caught.
+func TestEngine_Tick_GetTierFailureSkipsRatherThanReseeding(t *testing.T) {
+	entity := &fakeStatusLister{statuses: []SLAStatus{{CaseID: "CASE-1", ClockType: "response", BusinessElapsedPercent: 80}}}
+	store := newFakeTierStore()
+	store.tiers["CASE-1|response"] = 50 // a real, already-established cursor
+	store.getErr = errors.New("redis unreachable")
+	pub := &fakePublisher{}
+	e := newTestEngine(entity, store, pub)
+
+	if err := e.Tick(context.Background()); err == nil {
+		t.Fatal("Tick() error = nil, want the GetTier failure propagated")
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("expected no publish when the cursor couldn't be read, got %d", len(pub.calls))
+	}
+	if chat := e.chat.(*fakeChatSender); len(chat.calls) != 0 {
+		t.Errorf("expected no chat alert when the cursor couldn't be read, got %+v", chat.calls)
+	}
+	if store.tiers["CASE-1|response"] != 50 {
+		t.Errorf("cursor = %d, want left untouched at 50, not reseeded to the clock's current tier", store.tiers["CASE-1|response"])
 	}
 }

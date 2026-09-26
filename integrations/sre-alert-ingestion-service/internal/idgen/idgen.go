@@ -20,11 +20,14 @@
 // Previously alert_buffer.id was left entirely to Postgres's
 // gen_random_uuid() column default (see migrations/0001_create_alert_buffer.up.sql),
 // generated only once internal/store.PostgresStore.Enqueue's INSERT
-// returned. That ordering doesn't work for the dedup tag internal/handler
-// now embeds in CreateIncidentRequest.Subject (see internal/csmclient.DedupTag):
-// the tag must already be inside the JSON payload that gets persisted, which
-// means the id it's derived from has to exist *before* the INSERT, not
-// after. Hence generating it here instead.
+// returned. That ordering doesn't work now: internal/store.Store.Enqueue
+// takes id as an explicit parameter (its own primary key, needed up front
+// to issue the INSERT at all — see that method's own doc comment), so the
+// id has to exist *before* the INSERT, not after. Hence generating it here
+// instead. (Not, as an earlier version of this comment claimed, because of
+// the dedup tag embedded in CreateIncidentRequest.Subject — that tag is
+// built from the row's alertNumber, not id; see
+// internal/csmclient.DedupTag.)
 package idgen
 
 import (

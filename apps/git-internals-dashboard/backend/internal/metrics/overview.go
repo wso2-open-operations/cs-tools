@@ -17,8 +17,10 @@
 // BuildOverview is organized section by section; the comment before each
 // section documents which filters it honors:
 //
-//	hero + spark honor repo + priority; priorities + matrix honor repo only;
-//	projects and volume ignore both filters (volume: last 12 UTC weeks).
+//	hero + spark honor repo + priority + abtTeam; priorities + matrix honor
+//	repo + abtTeam; projects honor priority + abtTeam (and still list every
+//	enabled repo); volume honors abtTeam only (last 12 UTC weeks);
+//	abtTeams and unknownStatuses ignore every filter.
 package metrics
 
 import (
@@ -36,10 +38,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// querier is the subset of *pgxpool.Pool / pgx.Tx that fetchOverviewIssues
-// and fetchEnabledRepos need. BuildOverview runs both through the same
+// querier is the subset of *pgxpool.Pool / pgx.Tx that BuildOverview's
+// per-section fetchers need. BuildOverview runs them all through the same
 // pgx.Tx so they observe one consistent enabled-repo snapshot — otherwise a
-// repo a concurrent config sync enables/disables between the two reads could
+// repo a concurrent config sync enables/disables between two reads could
 // leave allIssues referencing a repository absent from repoMap, and the
 // per-issue aggregation below would nil-dereference it.
 type querier interface {
@@ -74,6 +76,7 @@ func pLabel(priority string) string {
 type Filters struct {
 	Repo     *string `json:"repo"`
 	Priority *string `json:"priority"`
+	AbtTeam  *string `json:"abtTeam"`
 }
 
 type HeroMetric struct {
@@ -173,14 +176,15 @@ type Overview struct {
 	Priorities      []Priority      `json:"priorities"`
 	Matrix          Matrix          `json:"matrix"`
 	Volume          []Volume        `json:"volume"`
+	AbtTeams        []string        `json:"abtTeams"`
 	UnknownStatuses []UnknownStatus `json:"unknownStatuses"`
 }
 
 // UnknownStatus is one board status the recompute scheduler doesn't
 // recognize (absent from taxonomy.statuses) as of its most recent tick —
 // a loud alternative to silently pausing/accruing an unclassified status.
-// Ignores both the repo and priority filters: it's an operational
-// data-quality signal, not a per-issue metric.
+// Ignores every population filter: it's an operational data-quality
+// signal, not a per-issue metric.
 type UnknownStatus struct {
 	Status          string `json:"status"`
 	OccurrenceCount int    `json:"occurrenceCount"`
@@ -217,9 +221,11 @@ func slaStateOf(s *string) string {
 	return *s
 }
 
-// BuildOverview builds the /metrics/overview response for the given
-// optional repo ("owner/name") and priority filters.
-func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfig, repo, priority *string) (Overview, error) {
+// BuildOverview builds the /metrics/overview response, narrowed by f's
+// active population filters. Which sections honor which filter is listed
+// in this file's package comment and repeated on each section below.
+func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfig, f Filter) (Overview, error) {
+	repo, priority := f.Repo, f.Priority
 	csStatuses := taxonomy.CsStatuses(cfg)
 	isCsStatus := func(s string) bool { return slices.Contains(csStatuses, s) }
 	productSideStatuses := taxonomy.ProductSideStatuses(cfg)
@@ -231,15 +237,19 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 	}
 
 	// ── 1. All open non-terminal issues from enabled repos (narrow select) ──
-	// REPEATABLE READ, read-only: this and fetchEnabledRepos need to see the
-	// same enabled-repo snapshot (see the querier doc comment for why).
+	// REPEATABLE READ, read-only: every fetcher below needs to see the same
+	// enabled-repo snapshot (see the querier doc comment for why).
+	//
+	// The abtTeam filter is applied here, in SQL, so every section built
+	// from allIssues inherits it; repo and priority are applied in memory
+	// per section, since they scope different sections differently.
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return Overview{}, fmt.Errorf("metrics: begin overview snapshot: %w", err)
 	}
 	defer tx.Rollback(ctx) // read-only snapshot; nothing to commit
 
-	allIssues, err := fetchOverviewIssues(ctx, tx)
+	allIssues, err := fetchOverviewIssues(ctx, tx, f.AbtTeam)
 	if err != nil {
 		return Overview{}, fmt.Errorf("metrics: fetch overview issues: %w", err)
 	}
@@ -250,9 +260,14 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 	if err != nil {
 		return Overview{}, fmt.Errorf("metrics: fetch enabled repos: %w", err)
 	}
+	abtTeams, err := fetchAbtTeams(ctx, tx)
+	if err != nil {
+		return Overview{}, fmt.Errorf("metrics: fetch abt teams: %w", err)
+	}
 	budgets := cfg.Budgets // priority -> budgetHours, in config file order
 
-	// Filter scopes: hero + spark honor repo + priority; priorities + matrix honor repo only.
+	// Filter scopes: hero honors repo + priority; priorities + matrix honor
+	// repo. Both sets are already narrowed to abtTeam by allIssues.
 	matchesRepo := func(i overviewIssue) bool {
 		return repo == nil || (i.RepoOwner == repoOwner && i.RepoName == repoName)
 	}
@@ -270,27 +285,20 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 	}
 
 	// ── 2. Spark + delta (last 16 days; delta = today − yesterday) ──────────
-	violatedSparkRows, err := sparkQuery(ctx, pool, "VIOLATED", repo, priority)
+	// Honors repo + priority + abtTeam.
+	sparkRows, err := fetchSpark(ctx, tx, f, productSideStatuses)
 	if err != nil {
-		return Overview{}, fmt.Errorf("metrics: violated spark query: %w", err)
-	}
-	atRiskSparkRows, err := sparkQuery(ctx, pool, "AT_RISK", repo, priority)
-	if err != nil {
-		return Overview{}, fmt.Errorf("metrics: at_risk spark query: %w", err)
-	}
-	productSideSparkRows, err := productSideSparkQuery(ctx, pool, productSideStatuses, repo, priority)
-	if err != nil {
-		return Overview{}, fmt.Errorf("metrics: product-side spark query: %w", err)
+		return Overview{}, fmt.Errorf("metrics: spark query: %w", err)
 	}
 
-	violatedSpark := fillSpark(violatedSparkRows, 16)
-	atRiskSpark := fillSpark(atRiskSparkRows, 16)
-	productSideSpark := fillSpark(productSideSparkRows, 16)
+	violatedSpark := fillSpark(sparkRows, 16, func(r sparkAggRow) int { return r.Violated })
+	atRiskSpark := fillSpark(sparkRows, 16, func(r sparkAggRow) int { return r.AtRisk })
+	productSideSpark := fillSpark(sparkRows, 16, func(r sparkAggRow) int { return r.ProductSide })
 	violatedDelta := violatedSpark[15] - violatedSpark[14]
 	atRiskDelta := atRiskSpark[15] - atRiskSpark[14]
 	productSideDelta := productSideSpark[15] - productSideSpark[14]
 
-	// ── 3. Hero aggregation (repo + priority filtered) ───────────────────────
+	// ── 3. Hero aggregation (repo + priority + abtTeam filtered) ─────────────
 	var heroViolated, heroAtRisk, heroCs, heroProductSide int
 	heroCsByStatus := make(map[string]int, len(csStatuses))
 	for _, s := range csStatuses {
@@ -314,7 +322,7 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 		}
 	}
 
-	// ── 4. Projects (always all enabled repos; per-card counts honor priority) ─
+	// ── 4. Projects (always all enabled repos; counts honor priority + abtTeam) ─
 	repoOrder := make([]int32, 0, len(enabledRepos))
 	repoMap := make(map[int32]*Project, len(enabledRepos))
 	for _, r := range enabledRepos {
@@ -379,7 +387,7 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 		projects = append(projects, p)
 	}
 
-	// ── 5. Priorities (honors repo; always the 4 canonical tiers) ───────────
+	// ── 5. Priorities (honors repo + abtTeam; always every canonical tier) ──
 	budgetMap := make(map[string]float64, len(budgets))
 	for _, b := range budgets {
 		budgetMap[b.Priority] = b.BudgetHours
@@ -434,7 +442,11 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 	}
 	sort.SliceStable(priorities, func(i, j int) bool { return rankOf(priorities[i].Code) < rankOf(priorities[j].Code) })
 
-	// ── 6. Matrix (honors repo; all 4 tiers, independent cells) ─────────────
+	// ── 6. Matrix (honors repo + abtTeam; every tier, independent cells) ────
+	// The four cells are mutually exclusive: a CS-side issue always lands in
+	// Cs, never also in Violated/AtRisk/OnTrack, regardless of its own SLA
+	// state. Non-terminal issues in any other SLA state, including NO_SLA,
+	// count toward the row total but land in no cell.
 	matrixRows := make([]MatrixRow, 0, len(priorities))
 	for _, p := range priorities {
 		var violated, atRisk, onTrack, cs, total int
@@ -445,17 +457,15 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 			total++
 			state := slaStateOf(i.SlaState)
 			isCs := isCsStatus(statusOf(i.CurrentStatus))
-			if state == "VIOLATED" {
-				violated++
-			}
-			if state == "AT_RISK" {
-				atRisk++
-			}
-			if state == "OK" && !isCs {
-				onTrack++
-			}
-			if isCs {
+			switch {
+			case isCs:
 				cs++
+			case state == "VIOLATED":
+				violated++
+			case state == "AT_RISK":
+				atRisk++
+			case state == "OK":
+				onTrack++
 			}
 		}
 		matrixRows = append(matrixRows, MatrixRow{
@@ -477,27 +487,25 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 		grandTotal++
 		state := slaStateOf(i.SlaState)
 		isCs := isCsStatus(statusOf(i.CurrentStatus))
-		if state == "VIOLATED" {
-			matrixTotals.Violated++
-		}
-		if state == "AT_RISK" {
-			matrixTotals.AtRisk++
-		}
-		if state == "OK" && !isCs {
-			matrixTotals.OnTrack++
-		}
-		if isCs {
+		switch {
+		case isCs:
 			matrixTotals.Cs++
+		case state == "VIOLATED":
+			matrixTotals.Violated++
+		case state == "AT_RISK":
+			matrixTotals.AtRisk++
+		case state == "OK":
+			matrixTotals.OnTrack++
 		}
 	}
 
-	// ── 7. Volume (ignores both filters — 12 UTC weeks of tracked issues) ───
-	volume, err := buildVolume(ctx, pool, repoOrder, repoMap)
+	// ── 7. Volume (honors abtTeam — 12 UTC weeks of tracked issues) ─────────
+	volume, err := buildVolume(ctx, tx, repoOrder, repoMap, f.AbtTeam)
 	if err != nil {
 		return Overview{}, fmt.Errorf("metrics: build volume: %w", err)
 	}
 
-	// ── 8. Unknown statuses (ignores both filters — an operational signal) ──
+	// ── 8. Unknown statuses (ignores every filter — an operational signal) ──
 	unknownStatuses, err := fetchUnknownStatuses(ctx, pool)
 	if err != nil {
 		return Overview{}, fmt.Errorf("metrics: fetch unknown statuses: %w", err)
@@ -510,7 +518,7 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 
 	return Overview{
 		RefreshedAt: time.Now().UTC().Format(time.RFC3339),
-		Filters:     Filters{Repo: repo, Priority: priority},
+		Filters:     Filters{Repo: repo, Priority: priority, AbtTeam: f.AbtTeam},
 		Hero: Hero{
 			Violated:    HeroMetric{N: heroViolated, Delta: violatedDelta, Spark: violatedSpark},
 			AtRisk:      HeroMetric{N: heroAtRisk, Delta: atRiskDelta, Spark: atRiskSpark},
@@ -521,14 +529,15 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 		Priorities:      priorities,
 		Matrix:          Matrix{Rows: matrixRows, Totals: matrixTotals, GrandTotal: grandTotal},
 		Volume:          volume,
+		AbtTeams:        abtTeams,
 		UnknownStatuses: unknownStatuses,
 	}, nil
 }
 
 // fetchOverviewIssues returns every open, non-terminal issue from enabled
 // repos — the base row set BuildOverview's other sections filter/aggregate
-// in memory.
-func fetchOverviewIssues(ctx context.Context, q querier) ([]overviewIssue, error) {
+// in memory. A non-nil abtTeam narrows it to that team's issues.
+func fetchOverviewIssues(ctx context.Context, q querier, abtTeam *string) ([]overviewIssue, error) {
 	rows, err := q.Query(ctx, `
 		SELECT i.priority, i.current_status, r.id, r.owner, r.name, p.title, s.sla_state
 		FROM issues i
@@ -536,7 +545,8 @@ func fetchOverviewIssues(ctx context.Context, q querier) ([]overviewIssue, error
 		LEFT JOIN projects p ON p.id = r.sla_project_id
 		LEFT JOIN issue_sla s ON s.issue_id = i.id
 		WHERE i.state = 'OPEN' AND r.enabled = true AND s.sla_state IS DISTINCT FROM 'TERMINAL'
-	`)
+		  AND ($1::text IS NULL OR i.abt_team = $1)
+	`, abtTeam)
 	if err != nil {
 		return nil, err
 	}
@@ -589,82 +599,72 @@ func fetchEnabledRepos(ctx context.Context, q querier) ([]overviewRepo, error) {
 	return repos, rows.Err()
 }
 
-type sparkRow struct {
-	SnapshotDate time.Time
-	N            int
-}
-
-// sparkQuery returns the last 16 days' daily count of open issues in
-// slaState, optionally narrowed by repo/priority, for the hero sparkline.
-func sparkQuery(ctx context.Context, pool *pgxpool.Pool, slaState string, repo, priority *string) ([]sparkRow, error) {
-	sql := `
-		SELECT s.snapshot_date, COUNT(*)::int AS n
-		FROM sla_snapshots s
-		JOIN issues i ON i.id = s.issue_id
-		JOIN repositories r ON r.id = s.repository_id
-		WHERE s.sla_state = $1
-		  AND s.snapshot_date >= (now() AT TIME ZONE 'UTC')::date - 15
-		  AND i.state = 'OPEN'
-		  AND r.enabled = true
-	`
-	args := []any{slaState}
-	sql, args = appendRepoAndPriorityFilters(sql, args, repo, priority)
-	sql += ` GROUP BY s.snapshot_date ORDER BY s.snapshot_date`
-	return runSparkQuery(ctx, pool, sql, args)
-}
-
-// productSideSparkQuery mirrors sparkQuery but filters by current_status IN
-// (...) instead of sla_state. An empty PRODUCT_SIDE category (a valid
-// taxonomy.yaml edit) short-circuits to no rows rather than issuing a query
-// with an empty IN-list.
-func productSideSparkQuery(ctx context.Context, pool *pgxpool.Pool, productSideStatuses []string, repo, priority *string) ([]sparkRow, error) {
-	if len(productSideStatuses) == 0 {
-		return nil, nil
-	}
-	sql := `
-		SELECT s.snapshot_date, COUNT(*)::int AS n
-		FROM sla_snapshots s
-		JOIN issues i ON i.id = s.issue_id
-		JOIN repositories r ON r.id = s.repository_id
-		WHERE s.current_status = ANY($1)
-		  AND s.snapshot_date >= (now() AT TIME ZONE 'UTC')::date - 15
-		  AND i.state = 'OPEN'
-		  AND r.enabled = true
-	`
-	args := []any{productSideStatuses}
-	sql, args = appendRepoAndPriorityFilters(sql, args, repo, priority)
-	sql += ` GROUP BY s.snapshot_date ORDER BY s.snapshot_date`
-	return runSparkQuery(ctx, pool, sql, args)
-}
-
-// appendRepoAndPriorityFilters appends an optional "AND r.owner = ... AND
-// r.name = ..." and/or "AND s.priority = ..." clause to sql, returning the
-// extended query and its argument list.
-func appendRepoAndPriorityFilters(sql string, args []any, repo, priority *string) (string, []any) {
-	if repo != nil {
-		owner, name, _ := strings.Cut(*repo, "/")
-		args = append(args, owner, name)
-		sql += fmt.Sprintf(" AND r.owner = $%d AND r.name = $%d", len(args)-1, len(args))
-	}
-	if priority != nil {
-		args = append(args, *priority)
-		sql += fmt.Sprintf(" AND s.priority = $%d", len(args))
-	}
-	return sql, args
-}
-
-// runSparkQuery executes a sql/args pair built by sparkQuery or
-// productSideSparkQuery and scans its (date, count) rows.
-func runSparkQuery(ctx context.Context, pool *pgxpool.Pool, sql string, args []any) ([]sparkRow, error) {
-	rows, err := pool.Query(ctx, sql, args...)
+// fetchAbtTeams returns the distinct non-null ABT teams among open issues
+// in enabled repos, sorted — the option list the ABT Team filter's own
+// dropdown offers, so it stays the same whichever filters are active.
+func fetchAbtTeams(ctx context.Context, q querier) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT DISTINCT i.abt_team
+		FROM issues i
+		JOIN repositories r ON r.id = i.repository_id
+		WHERE r.enabled = true AND i.state = 'OPEN' AND i.abt_team IS NOT NULL
+		ORDER BY i.abt_team
+	`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []sparkRow
+
+	teams := make([]string, 0)
 	for rows.Next() {
-		var r sparkRow
-		if err := rows.Scan(&r.SnapshotDate, &r.N); err != nil {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		teams = append(teams, t)
+	}
+	return teams, rows.Err()
+}
+
+// sparkAggRow is one snapshot date's violated/at_risk/product_side counts.
+type sparkAggRow struct {
+	SnapshotDate time.Time
+	Violated     int
+	AtRisk       int
+	ProductSide  int
+}
+
+// fetchSpark returns the last 16 days' daily violated/at_risk/product_side
+// counts of open issues in one query, narrowed by f's active filters. An
+// empty productSideStatuses list is passed through as an empty slice —
+// "= ANY('{}')" is false for every row, so the product_side column comes
+// back 0 for every date rather than needing a separate short-circuit.
+func fetchSpark(ctx context.Context, q querier, f Filter, productSideStatuses []string) ([]sparkAggRow, error) {
+	sql := `
+		SELECT s.snapshot_date,
+		       COUNT(*) FILTER (WHERE s.sla_state = 'VIOLATED')::int    AS violated,
+		       COUNT(*) FILTER (WHERE s.sla_state = 'AT_RISK')::int     AS at_risk,
+		       COUNT(*) FILTER (WHERE s.current_status = ANY($1))::int  AS product_side
+		FROM sla_snapshots s
+		JOIN issues i ON i.id = s.issue_id
+		JOIN repositories r ON r.id = s.repository_id
+		WHERE s.snapshot_date >= (now() AT TIME ZONE 'UTC')::date - 15
+		  AND i.state = 'OPEN'
+		  AND r.enabled = true
+	`
+	args := []any{productSideStatuses}
+	sql, args = appendFilters(sql, args, f)
+	sql += ` GROUP BY s.snapshot_date ORDER BY s.snapshot_date`
+
+	rows, err := q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []sparkAggRow
+	for rows.Next() {
+		var r sparkAggRow
+		if err := rows.Scan(&r.SnapshotDate, &r.Violated, &r.AtRisk, &r.ProductSide); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -672,12 +672,37 @@ func runSparkQuery(ctx context.Context, pool *pgxpool.Pool, sql string, args []a
 	return out, rows.Err()
 }
 
+// appendFilters appends one "AND ..." clause per active field of f to sql,
+// returning the extended query and its argument list. It assumes the query
+// already aliases repositories as r, sla_snapshots as s, and issues as i:
+// priority is matched against the snapshot's own priority, ABT team against
+// the issue's current one.
+func appendFilters(sql string, args []any, f Filter) (string, []any) {
+	// placeholder appends one argument and returns its "$N" reference.
+	placeholder := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.Repo != nil {
+		owner, name, _ := strings.Cut(*f.Repo, "/")
+		sql += fmt.Sprintf(" AND r.owner = %s AND r.name = %s", placeholder(owner), placeholder(name))
+	}
+	if f.Priority != nil {
+		sql += fmt.Sprintf(" AND s.priority = %s", placeholder(*f.Priority))
+	}
+	if f.AbtTeam != nil {
+		sql += fmt.Sprintf(" AND i.abt_team = %s", placeholder(*f.AbtTeam))
+	}
+	return sql, args
+}
+
 // fillSpark builds a days-element array (oldest -> newest) for the last
-// `days` days ending today (UTC), gap-filled with zero.
-func fillSpark(rows []sparkRow, days int) []int {
+// `days` days ending today (UTC), gap-filled with zero, reading one count
+// per row through value.
+func fillSpark(rows []sparkAggRow, days int, value func(sparkAggRow) int) []int {
 	byDate := make(map[string]int, len(rows))
 	for _, r := range rows {
-		byDate[r.SnapshotDate.UTC().Format("2006-01-02")] = r.N
+		byDate[r.SnapshotDate.UTC().Format("2006-01-02")] = value(r)
 	}
 	today := time.Now().UTC()
 	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
@@ -698,8 +723,9 @@ type weekRow struct {
 
 // fetchVolumeWeeks returns per-repo, per-priority issue-creation counts,
 // bucketed by UTC week, for the last 12 weeks — buildVolume's raw input.
-func fetchVolumeWeeks(ctx context.Context, pool *pgxpool.Pool) ([]weekRow, error) {
-	rows, err := pool.Query(ctx, `
+// A non-nil abtTeam narrows it to that team's issues.
+func fetchVolumeWeeks(ctx context.Context, q querier, abtTeam *string) ([]weekRow, error) {
+	rows, err := q.Query(ctx, `
 		SELECT
 			i.repository_id,
 			date_trunc('week', i.github_created_at AT TIME ZONE 'UTC')::date AS wk,
@@ -710,9 +736,10 @@ func fetchVolumeWeeks(ctx context.Context, pool *pgxpool.Pool) ([]weekRow, error
 		WHERE i.github_created_at >= (date_trunc('week', now() AT TIME ZONE 'UTC') - INTERVAL '11 weeks') AT TIME ZONE 'UTC'
 		  AND r.enabled = true
 		  AND i.priority IS NOT NULL
+		  AND ($1::text IS NULL OR i.abt_team = $1)
 		GROUP BY i.repository_id, wk, i.priority
 		ORDER BY i.repository_id, wk
-	`)
+	`, abtTeam)
 	if err != nil {
 		return nil, err
 	}
@@ -728,11 +755,13 @@ func fetchVolumeWeeks(ctx context.Context, pool *pgxpool.Pool) ([]weekRow, error
 	return out, rows.Err()
 }
 
-// buildVolume is section 7: ignores both repo/priority filters — last 12 UTC
-// weeks (Monday-aligned) of tracked-issue creation volume, one row per
-// project in repoOrder's insertion order.
-func buildVolume(ctx context.Context, pool *pgxpool.Pool, repoOrder []int32, repoMap map[int32]*Project) ([]Volume, error) {
-	rows, err := fetchVolumeWeeks(ctx, pool)
+// buildVolume is section 7: last 12 UTC weeks (Monday-aligned) of
+// tracked-issue creation volume, one row per project in repoOrder's
+// insertion order. It honors abtTeam only — the repo and priority filters
+// scope other sections, but volume stays a per-repo comparison across every
+// tier, so narrowing it by either would defeat its purpose.
+func buildVolume(ctx context.Context, q querier, repoOrder []int32, repoMap map[int32]*Project, abtTeam *string) ([]Volume, error) {
+	rows, err := fetchVolumeWeeks(ctx, q, abtTeam)
 	if err != nil {
 		return nil, err
 	}

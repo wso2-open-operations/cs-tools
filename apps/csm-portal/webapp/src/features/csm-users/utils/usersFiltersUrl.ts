@@ -26,7 +26,6 @@ export type ActiveFilter = "all" | "active" | "inactive";
 
 export interface UsersFilters {
   search: string;
-  roleIds: string[];
   groupIds: string[];
   teamIds: string[];
   active: ActiveFilter;
@@ -34,7 +33,6 @@ export interface UsersFilters {
 
 export const DEFAULT_USERS_FILTERS: UsersFilters = {
   search: "",
-  roleIds: [],
   groupIds: [],
   teamIds: [],
   active: "all",
@@ -43,9 +41,9 @@ export const DEFAULT_USERS_FILTERS: UsersFilters = {
 const VALID_ACTIVE_VALUES: ActiveFilter[] = ["all", "active", "inactive"];
 
 /**
- * Parse a CSV of free-form ids (role keys, group ids, team keys — none of
- * them a fixed client-side enum). Empties stripped, length-capped per entry
- * to avoid pathological URL growth from a hand-edited link.
+ * Parse a CSV of free-form ids (group ids, team keys — neither a fixed
+ * client-side enum). Empties stripped, length-capped per entry to avoid
+ * pathological URL growth from a hand-edited link.
  */
 function parseIdsCsv(raw: string | null, maxEntryLen = 120): string[] {
   if (!raw) return [];
@@ -63,7 +61,6 @@ export function readUsersFiltersFromUrl(params: URLSearchParams): UsersFilters {
 
   return {
     search: params.get("search") ?? "",
-    roleIds: parseIdsCsv(params.get("roles")),
     groupIds: parseIdsCsv(params.get("groups")),
     teamIds: parseIdsCsv(params.get("teams")),
     active,
@@ -77,7 +74,6 @@ export function readUsersFiltersFromUrl(params: URLSearchParams): UsersFilters {
 export function writeUsersFiltersToUrl(f: UsersFilters): URLSearchParams {
   const out = new URLSearchParams();
   if (f.search) out.set("search", f.search);
-  if (f.roleIds.length) out.set("roles", f.roleIds.join(","));
   if (f.groupIds.length) out.set("groups", f.groupIds.join(","));
   if (f.teamIds.length) out.set("teams", f.teamIds.join(","));
   if (f.active !== "all") out.set("active", f.active);

@@ -1314,12 +1314,12 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        if isProjectSuspendedOrExpired(projectResponse.closureState, projectResponse.endDate) {
-            log:printWarn(string `User: ${userInfo.userId} attempted to create a case for suspended/expired project: ${
+        if isProjectSuspended(projectResponse.closureState) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to create a case for suspended project: ${
                     payload.projectId}!`);
             return <http:Forbidden>{
                 body: {
-                    message: "Cannot create cases for a suspended or contract-expired project."
+                    message: "Cannot create cases for a suspended project."
                 }
             };
         }

@@ -62,16 +62,10 @@ cache:
   timeseries:
     ttlSeconds: 60
     maxEntries: 100
-  titles:
-    # Issue titles are cached in memory only and never persisted.
-    ttlSeconds: 900
-    maxEntries: 5000
 
 github:
   # GraphQL request deadline for search/detail queries.
   requestTimeoutSeconds: 60
-  # Shorter deadline for the on-demand titles query.
-  titlesRequestTimeoutSeconds: 15
   # Retry attempts after the first failure, for retryable statuses only.
   maxRetries: 3
   # Base unit for exponential backoff between retries.
@@ -82,8 +76,6 @@ github:
   # Courtesy pacing between paginated GraphQL calls (secondary rate limit).
   searchPageDelayMs: 250
   detailPageDelayMs: 200
-  # Issues per batched titles GraphQL request.
-  titlesBatchSize: 100
 
 jobs:
   # Deadline for one POST /sync/runs pass. Deliberately far above the server
@@ -107,14 +99,17 @@ api:
   # desynchronises the published contract from the running service.
   issuesDefaultLimit: 200
   issuesMaxLimit: 500
-  titlesMaxIds: 200
-  titlesMaxBodyBytes: 65536
   timeseriesDefaultDays: 30
   timeseriesMinDays: 7
   timeseriesMaxDays: 365
-  # Max length of the free-text `priority` and `status` query parameters.
+  # Max length of the free-text `priority`, `status`, and `abtTeam` query
+  # parameters.
   priorityParamMaxLength: 50
   statusParamMaxLength: 50
+  abtTeamParamMaxLength: 100
+  # Max number of repeated values accepted for one of `repo`, `priority`,
+  # `abtTeam`, `status`, or `slaState` in a single /issues request.
+  filterParamMaxValues: 50
 
 securityHeaders:
   # Every key below is optional and ships commented out, same as `database:`

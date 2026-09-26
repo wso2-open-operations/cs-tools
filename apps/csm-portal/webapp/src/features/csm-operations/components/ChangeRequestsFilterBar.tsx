@@ -48,7 +48,6 @@ import {
   readChangeRequestFiltersFromUrl,
   writeChangeRequestFiltersToUrl,
 } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
-import { changeRequestsSavedViews } from "@features/csm-operations/utils/changeRequestsSavedViews";
 import SavedViewsMenu from "@features/csm-operations/components/SavedViewsMenu";
 import MultiSelectField from "@components/MultiSelectField";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
@@ -172,7 +171,7 @@ export default function ChangeRequestsFilterBar({
           activeCount={activeCount}
           hasSearch={filters.search.trim().length > 0}
           onApply={(qs) => onChange(readChangeRequestFiltersFromUrl(new URLSearchParams(qs)))}
-          store={changeRequestsSavedViews}
+          listKey="change_requests"
         />
 
         <Button

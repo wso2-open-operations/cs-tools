@@ -94,7 +94,10 @@ describe("ProjectGuard", () => {
     expect(screen.getByText(/Project Suspension Notice/i)).toBeInTheDocument();
   });
 
-  it("renders ProjectSuspendedNoticePage when project contract has ended (past endDate)", () => {
+  // A lapsed contract used to render the suspension notice, locking the customer
+  // out of the project the moment it expired. Per customer request an expired
+  // project now behaves exactly like an active one.
+  it("renders outlet when the project contract has ended (past endDate)", () => {
     mockUseGetProjectDetails.mockReturnValue({
       data: {
         id: "proj",
@@ -115,8 +118,8 @@ describe("ProjectGuard", () => {
         </ErrorPageProvider>
       </MemoryRouter>,
     );
-    expect(screen.queryByTestId("outlet")).not.toBeInTheDocument();
-    expect(screen.getByText(/Project Suspension Notice/i)).toBeInTheDocument();
+    expect(screen.getByTestId("outlet")).toBeInTheDocument();
+    expect(screen.queryByText(/Project Suspension Notice/i)).not.toBeInTheDocument();
   });
 
   it("renders outlet when endDate is in the future", () => {

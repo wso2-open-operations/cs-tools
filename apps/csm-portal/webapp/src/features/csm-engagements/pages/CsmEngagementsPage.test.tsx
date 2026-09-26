@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 // `CsmIssuesView` does all the real search/filtering work and is covered by
@@ -30,7 +30,53 @@ vi.mock("@features/csm-cases/components/CsmIssuesView", () => ({
   },
 }));
 
+// CsmEngagementsPage now reads usePortalAccess (to gate its "Create
+// engagement" button), which transitively imports the real backend
+// client/config -- mock both so this test doesn't need real window.config.
+let mockCanWrite = true;
+vi.mock("@context/current-user/usePortalAccess", () => ({
+  usePortalAccess: () => ({
+    hasAnyRole: true,
+    canEscalate: true,
+    canDownloadAttachment: true,
+    canUseOperations: true,
+    canUseTimeCardsAndUpdates: true,
+    canWrite: mockCanWrite,
+  }),
+}));
+
 import CsmEngagementsPage from "@features/csm-engagements/pages/CsmEngagementsPage";
+
+beforeEach(() => {
+  mockCanWrite = true;
+});
+
+describe("CsmEngagementsPage — Create engagement button gating", () => {
+  it("passes a Create engagement action when the caller can write", () => {
+    issuesViewSpy.mockClear();
+    render(
+      <MemoryRouter>
+        <CsmEngagementsPage />
+      </MemoryRouter>,
+    );
+
+    const props = issuesViewSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(props.actions).toBeDefined();
+  });
+
+  it("omits the Create engagement action for a caller without write access", () => {
+    mockCanWrite = false;
+    issuesViewSpy.mockClear();
+    render(
+      <MemoryRouter>
+        <CsmEngagementsPage />
+      </MemoryRouter>,
+    );
+
+    const props = issuesViewSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(props.actions).toBeUndefined();
+  });
+});
 
 // digiops-cs#2914: a dashboard widget's click-through carries its own
 // displayName as the `wt` query param (see

@@ -28,6 +28,7 @@ import (
 type entityIncidentClient interface {
 	CreateIncident(ctx context.Context, body []byte) ([]byte, error)
 	SearchIncidents(ctx context.Context, body []byte) ([]byte, error)
+	UpdateIncident(ctx context.Context, id string, body []byte) ([]byte, error)
 }
 
 // IncidentHandler handles HTTP requests for incident operations, delegating to the
@@ -44,12 +45,14 @@ func NewIncidentHandler(entity entityIncidentClient) *IncidentHandler {
 }
 
 // CreateIncident handles POST /incidents. Targets a ServiceNow-backed entity-service
-// operation that requires a forwarded end-user identity token — this service is
-// strictly M2M with no mechanism to supply one, so calls here always receive a
-// mapped 401 from upstream. Kept for API-shape completeness (see the entity-client
-// method's doc comment), not because it currently succeeds. The request body is
-// forwarded verbatim; the entity service enforces its own field validation and
-// 400s otherwise, so this handler does not re-validate that.
+// operation. This service is strictly M2M and has no mechanism to forward an
+// end-user identity token, but that operation's ServiceNow layer falls back to a
+// separately-configured M2M ServiceNow credential when no end-user token is
+// present, and only 401s if that fallback credential is itself unconfigured in
+// the target environment — so a mapped 401 here is possible, not guaranteed. A
+// live end-to-end call through this exact path against wso2sndev on 2026-09-20
+// succeeded with no 401, creating a real incident (INC0096966). See the
+// entity-client method's doc comment.
 func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
@@ -77,14 +80,56 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, result)
 }
 
+// PatchIncident handles PATCH /incidents/{id}. Unlike PATCH /cases/{id}
+// (CaseHandler.PatchCase), this operation has no Postgres-data-source path:
+// on a Postgres data source entity-service rejects it outright (503, not
+// supported on this data source yet — no field combination succeeds there
+// today); on a ServiceNow data source it goes through the same
+// M2M-credential-fallback mechanism as CreateIncident/SearchIncidents above,
+// so a mapped 401 here is possible (if that credential isn't configured in
+// the target environment) but not guaranteed. The request body is forwarded
+// verbatim; the entity service enforces its own field validation and 400s
+// otherwise, so this handler does not re-validate that.
+func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateIncident(r.Context(), id, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateIncident failed", "incidentID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update incident.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 // SearchIncidents handles POST /incidents/search. Targets the same
 // ServiceNow-backed entity-service operation family as CreateIncident above —
-// it also requires a forwarded end-user identity token that this service
-// cannot supply, so calls here always receive a mapped 401 from upstream.
-// Kept for API-shape completeness, not because it currently succeeds. The
-// request body is forwarded verbatim; the entity service enforces its own
-// field validation and 400s otherwise, so this handler does not re-validate
-// that.
+// it goes through the same M2M-credential fallback described there, so a
+// mapped 401 here is possible (if the target environment's M2M ServiceNow
+// credential isn't configured) but not guaranteed. The request body is
+// forwarded verbatim; the entity service enforces its own field validation
+// and 400s otherwise, so this handler does not re-validate that.
 func (h *IncidentHandler) SearchIncidents(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)

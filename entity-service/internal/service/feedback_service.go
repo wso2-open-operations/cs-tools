@@ -103,6 +103,43 @@ type snAggregateFeedbackResponse struct {
 	TotalRecords int                   `json:"totalRecords"`
 }
 
+// feedbackUnavailableMsg is the reason returned by every
+// unavailableFeedbackService method. It matches the 503 description the
+// OpenAPI spec documents for the feedback endpoints.
+const feedbackUnavailableMsg = "case feedback is only supported for the ServiceNow data source"
+
+// unavailableFeedbackService is the Postgres-data-source stand-in for
+// FeedbackService. Case feedback (CSAT submissions) lives only in the
+// ServiceNow backing store -- there is no feedback table anywhere in
+// migrations/ -- so every operation reports a 503 rather than the route
+// being left unregistered: an unregistered route answers 404, which the
+// OpenAPI spec does not document for these paths and which callers cannot
+// distinguish from a genuinely missing resource. Mirrors
+// unavailableTaskService (task_service.go), which exists for the identical
+// reason.
+//
+// Before this existed, routes.go simply never registered
+// POST /cases/feedback/search or /aggregate at all on this data source --
+// a silent, undocumented 404 instead of a clean, documented 503 -- found
+// live as the webapp's case Activity timeline showing "Could not load Case
+// Feedback" on every single case, every time, regardless of whether that
+// case actually has any feedback.
+type unavailableFeedbackService struct{}
+
+// NewUnavailableFeedbackService returns a FeedbackService that reports every
+// feedback operation as unavailable for the current data source.
+func NewUnavailableFeedbackService() FeedbackService { return &unavailableFeedbackService{} }
+
+// SearchFeedback implements FeedbackService.
+func (s *unavailableFeedbackService) SearchFeedback(_ context.Context, _ domain.SearchFeedbackRequest) (domain.SearchFeedbackResponse, error) {
+	return domain.SearchFeedbackResponse{}, &apierror.ServiceUnavailableError{Msg: feedbackUnavailableMsg}
+}
+
+// AggregateFeedback implements FeedbackService.
+func (s *unavailableFeedbackService) AggregateFeedback(_ context.Context, _ domain.AggregateFeedbackRequest) (domain.AggregateFeedbackResponse, error) {
+	return domain.AggregateFeedbackResponse{}, &apierror.ServiceUnavailableError{Msg: feedbackUnavailableMsg}
+}
+
 type snFeedbackService struct {
 	client *integrationservice.Client
 }

@@ -79,6 +79,15 @@ func TestDecodeFinalTimes(t *testing.T) {
 		{"unexpected object shape degrades to empty", `{"a":1}`, []string{}},
 		{"unexpected array-of-object shape degrades to empty", `[{"t":"x"}]`, []string{}},
 		{"invalid json degrades to empty", `not json`, []string{}},
+		// Shapes below are copied from staging rows synced from ServiceNow.
+		{"synced object, YYYY-MM-DD", `[{"time": "2025-06-19 11:00:00", "index": 0}]`, []string{"2025-06-19T11:00:00Z"}},
+		{"synced object, MM/DD/YYYY", `[{"time": "06/25/2025 21:30:00", "index": 0}, {"time": "06/26/2025 06:30:00", "index": 1}]`, []string{"2025-06-25T21:30:00Z", "2025-06-26T06:30:00Z"}},
+		{"ordered by index, not position", `[{"time": "2024-12-22 03:30:00", "index": 1}, {"time": "2024-12-19 20:00:00", "index": 0}]`, []string{"2024-12-19T20:00:00Z", "2024-12-22T03:30:00Z"}},
+		{"object without index keeps position", `[{"time": "2024-11-19 05:30:00", "state": "Pending"}, {"time": "2024-11-17 15:00:00", "state": "Pending"}]`, []string{"2024-11-19T05:30:00Z", "2024-11-17T15:00:00Z"}},
+		{"ServiceNow script error text is dropped", `[{"time": "Error: Missing parameters (localTime or timezone).", "index": 0}, {"time": "2025-01-02 03:04:05", "index": 1}]`, []string{"2025-01-02T03:04:05Z"}},
+		{"only error text", `[{"time": "Error in convertToUTC: \"convertFormat\" is not defined."}]`, []string{}},
+		{"string and object elements mix", `["2026-10-01T10:00:00Z", {"time": "10/02/2026 10:00:00"}]`, []string{"2026-10-01T10:00:00Z", "2026-10-02T10:00:00Z"}},
+		{"empty array", `[]`, []string{}},
 	}
 	for _, tt := range tests {
 		got := decodeFinalTimes([]byte(tt.raw))

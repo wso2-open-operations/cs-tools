@@ -15,7 +15,7 @@
 // under the License.
 
 // Package handler wires HTTP routes to the domain packages: taxonomy,
-// issues, metrics, sync, titles, and health. Every non-2xx response uses
+// issues, metrics, sync, and health. Every non-2xx response uses
 // internal/apierror's envelope, with one documented exception: GET /readyz
 // returns a status document (ready/not_ready/draining plus per-check
 // detail) on both 200 and 503 rather than collapsing into {"error":{...}}

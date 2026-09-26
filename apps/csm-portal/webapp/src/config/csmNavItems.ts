@@ -39,6 +39,7 @@ import {
   UsersRound,
 } from "@wso2/oxygen-ui-icons-react";
 import type { ComponentType } from "react";
+import type { PortalAccess } from "@context/current-user/portalAccess";
 
 /**
  * One entry in the navigation tree: either a top-level sidebar section or one
@@ -46,6 +47,8 @@ import type { ComponentType } from "react";
  * feature flags; `featureFlags.ts` resolves a {@link CsmNavNode.id} to a
  * visibility state.
  */
+import { PLG_NAV_SECTION } from "@features/plg/config/plgNavItems";
+
 export interface CsmNavNode {
   /**
    * Stable, dotted identifier: `"operations"` for a section,
@@ -57,6 +60,12 @@ export interface CsmNavNode {
   label: string;
   /** Where selecting this node navigates. May carry a `?tab=` query. */
   href: string;
+  /**
+   * The {@link PortalAccess} capability a user needs to see this node; without
+   * it the node is hidden for that user (nav entry and route), and so is
+   * everything under it. Per user, unlike the per-deployment feature flags.
+   */
+  requires?: keyof PortalAccess;
   /**
    * For sections whose tab strip lives in a query parameter rather than in
    * child routes (Operations, Security Center): the `?tab=` value that selects
@@ -114,6 +123,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "operations",
     label: "Operations",
     href: "/operations",
+    requires: "canUseOperations",
     icon: Cog,
     children: [
       {
@@ -169,6 +179,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     label: "Security Center",
     href: "/security-center",
     icon: Shield,
+    requires: "canUseSecurityCenter",
     children: [
       {
         id: "security-center.reports",
@@ -192,12 +203,14 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "updates",
     label: "Updates",
     href: "/updates",
+    requires: "canUseTimeCardsAndUpdates",
     icon: RefreshCw,
   },
   {
     id: "time-cards",
     label: "Time cards",
     href: "/time-cards",
+    requires: "canUseTimeCardsAndUpdates",
     icon: Clock,
   },
   {
@@ -333,15 +346,31 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       },
       { id: "help.dashboard", label: "Dashboard", href: "/help#dashboard" },
       { id: "help.support", label: "Support", href: "/help#support" },
-      { id: "help.operations", label: "Operations", href: "/help#operations" },
+      {
+        id: "help.operations",
+        label: "Operations",
+        href: "/help#operations",
+        requires: "canUseOperations",
+      },
       { id: "help.engagements", label: "Engagements", href: "/help#engagements" },
       {
         id: "help.security-center",
         label: "Security Center",
         href: "/help#security-center",
+        requires: "canUseSecurityCenter",
       },
-      { id: "help.updates", label: "Updates", href: "/help#updates" },
-      { id: "help.time-cards", label: "Time cards", href: "/help#time-cards" },
+      {
+        id: "help.updates",
+        label: "Updates",
+        href: "/help#updates",
+        requires: "canUseTimeCardsAndUpdates",
+      },
+      {
+        id: "help.time-cards",
+        label: "Time cards",
+        href: "/help#time-cards",
+        requires: "canUseTimeCardsAndUpdates",
+      },
       {
         id: "help.announcements",
         label: "Announcements",
@@ -356,6 +385,11 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       { id: "help.settings", label: "Settings", href: "/help#settings" },
     ],
   },
+  // PLG Customer Success Portal. Declared in
+  // features/plg/config/plgNavItems so a change to PLG's pages does not
+  // touch this file. Hide the whole section with
+  // CSM_PORTAL_FEATURE_OVERRIDES: { "plg": "hidden" }.
+  PLG_NAV_SECTION,
 ];
 
 /** The pathname part of `href`, dropping any query string or hash. */

@@ -48,22 +48,43 @@ import (
 // for the mapping, including the four ChangeRequestType values added
 // alongside this that have no ServiceNow-data-source equivalent.
 //
-// The remaining fields on the request/response contract have no real
-// column anywhere in the migrations and are always left unset rather than
-// guessed at: ConfigurationItemID and GroupID (no CMDB/group tables exist
-// at all in this schema); AssignedTeamID (work_item has no team FK either
-// -- see the "Fixing case enum-casing..." section's own AssignedTeam note);
-// ApprovedBy/ApprovedOn/LegalNextStates on domain.ChangeRequest (there is a
-// summary change_request.approval enum but no approver/date columns, and
-// LegalNextStates is a ServiceNow workflow-engine computation with nothing
-// to derive it from here).
+// CustomerGroupID is backed by change_request.customer_group_id (migration
+// 000074, a FK into "group") -- written by CreateChangeRequestFromServiceNow
+// and read back by GetChangeRequestByID as domain.ChangeRequest.CustomerGroup
+// (see changeRequestDetailJoins/changeRequestDetailColumns).
+//
+// The remaining fields on the request/response contract have no
+// established mapping and are always left unset rather than guessed at:
+// ConfigurationItemID (no CMDB table exists at all in this schema); GroupID
+// and AssignedTeamID (distinct from CustomerGroupID -- these would need
+// work_item.assignment_group_id, migration 000074, which nothing in this
+// file joins or reads yet); ApprovedBy/ApprovedOn/LegalNextStates on
+// domain.ChangeRequest (there is a summary change_request.approval enum
+// but no approver/date columns, and LegalNextStates is a ServiceNow
+// workflow-engine computation with nothing to derive it from here);
+// Environments/DeploymentProducts/Labels/Deployments (no M2M join table
+// exists for any of the four).
 //
 // CreateChangeRequest has no Postgres implementation at all: work_item.number
 // has no DB default and no backing sequence anywhere in migrations/, the
 // same blocker CaseRepository.CreateCase has -- see that method's own doc
-// comment. GetChangeRequestApprovals/DecideChangeRequestApproval also have
-// none: they need per-stage, per-approver approval records, and this schema
-// only has one summary change_request.approval column.
+// comment.
+//
+// GetChangeRequestApprovals/DecideChangeRequestApproval ARE implemented
+// against approval_stage/approval_stage_approver (migration 000087), which
+// mirror ServiceNow's generic sysapproval_group/sysapproval_approver tables
+// -- see that migration's own comment. Stage label/approverType have no
+// backing column (ServiceNow derives them from two hardcoded group sys_ids
+// that were never synced into this schema as a lookup) and are instead
+// derived positionally in buildChangeRequestApprovals; see that function's
+// own doc comment for exactly what is and isn't replicated from
+// ChangeRequestUtils.getChangeRequestApprovals.
+//
+// CreateChangeRequestFromServiceNow (below) is the exception, same as
+// CaseRepository.CreateCaseFromServiceNow/IncidentRepository.CreateIncidentFromServiceNow:
+// it backs DATA_SOURCE=postgres-servicenow-dual-write's SN-first change
+// request creation, where identity comes from ServiceNow rather than being
+// generated here.
 type ChangeRequestRepository interface {
 	// SearchChangeRequests returns a filtered, sorted, paginated slice of
 	// change requests together with the total count of matching rows
@@ -88,6 +109,79 @@ type ChangeRequestRepository interface {
 	// identified by id, using actorEmail as work_item.updated_by. Returns a
 	// NotFoundError if id does not exist.
 	PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.ChangeRequest, error)
+	// CreateChangeRequestFromServiceNow inserts a new change request row
+	// (both work_item and change_request), for
+	// DATA_SOURCE=postgres-servicenow-dual-write's SN-first change request
+	// creation (see changeRequestService.createChangeRequestSNFirst's own doc
+	// comment). Unlike CaseRepository.CreateCaseFromServiceNow, no wso2ID
+	// parameter exists here: work_item.wso2_id is only required (by the
+	// work_item_wso2_id_required_by_type CHECK constraint, migration 000016)
+	// for CASE/SERVICE_REQUEST/ANNOUNCEMENT/ENGAGEMENT/
+	// SECURITY_REPORT_ANALYSIS -- CHANGE_REQUEST is deliberately excluded
+	// from that list (the same table's own inline comment: "change_request
+	// work items have no wso2_id data"), and ServiceNow's own change-request
+	// create response (snCreateChangeRequestResponse) has no equivalent
+	// field to supply one from anyway. id/number/createdBy are exactly what
+	// ServiceNow already returned for the change request it just created.
+	// id must be a canonical UUID (sysidToUUID(sn sys_id)). Returns a
+	// ValidationError if id is not a valid UUID, if req.Type has no
+	// change_model equivalent, or if a row already exists for id/number
+	// (unique violation) -- the latter should not happen in practice since
+	// ServiceNow only just generated these, but is reported precisely
+	// rather than as an opaque infrastructure error if it ever does.
+	//
+	// change_request.state is deliberately left NULL (the column has no
+	// NOT NULL/DEFAULT, unlike incident_state_enum's NOT NULL DEFAULT
+	// 'NEW'): snCreateChangeRequestResponse carries no state field at all,
+	// so unlike req.Category/Priority/Risk/Impact (plain request-supplied
+	// values ServiceNow's create payload already forwards verbatim and this
+	// method can echo back with equal confidence), the state ServiceNow's
+	// workflow engine actually assigned after evaluating req.State (if any)
+	// is never confirmed by the response -- writing req.State straight
+	// through would risk recording a value ServiceNow silently overrode.
+	// See CreateProblemFromServiceNow's own doc comment for the contrasting
+	// case, where the response DOES return a confirmed, identity-matching
+	// state.
+	//
+	// Only fields with an unambiguous, already-established column/enum
+	// mapping are written. Deliberately NOT applied, for the same
+	// no-backing-column/no-confirmed-mapping reasons this file's own
+	// package doc comment and changeRequestWhereClause's already give:
+	// req.ConfigurationItemID (no CMDB table), req.GroupID (no
+	// assignment-group mapping established for change_request -- see this
+	// file's own package doc comment on AssignedTeamID), req.Category (four
+	// of ChangeRequestCategory's thirteen values -- RegularReleaseCloud/
+	// HotfixReleaseCloud/DevOps/CloudComputing -- have no
+	// change_request_category_enum label, and PatchChangeRequest itself
+	// does not attempt this mapping either), req.EnvironmentIDs/
+	// req.DeploymentProductIDs (no M2M join tables exist for either), and
+	// req.Comment/req.WorkNote (ServiceNow journal entries, no backing
+	// column).
+	CreateChangeRequestFromServiceNow(ctx context.Context, req domain.CreateChangeRequestRequest, id, number, createdBy string) (domain.CreateChangeRequestResponse, error)
+	// GetChangeRequestApprovals returns every approval stage for the change
+	// request identified by id (approval_stage rows with work_item_id = id,
+	// ordered by created_on ascending) together with each stage's approvers
+	// (approval_stage_approver, matched by stage_id). Stage label/approverType
+	// are derived positionally in Go from this ordering -- see
+	// buildChangeRequestApprovals' own doc comment. Returns an empty
+	// domain.ChangeRequestApprovals{} (not a NotFoundError) if id has no
+	// approval_stage rows: a change request legitimately has zero stages
+	// before ServiceNow's workflow creates its first one, and this method
+	// does not separately check work_item existence -- same "no rows is not
+	// an error" convention as SearchChangeRequests.
+	GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
+	// DecideChangeRequestApproval flips the ONE approval_stage_approver row
+	// matching work_item_id = id AND approver_user_id = approverUserID AND
+	// status = 'requested' to decision ("approved"/"rejected", validated by
+	// the caller before this is reached), stamping actorEmail as updated_by,
+	// and returns that row's id. Returns a NotFoundError if no such row
+	// exists -- covers id not existing, the caller having no approval on
+	// this change request, and the caller's approval already being decided,
+	// all in the one WHERE clause (mirrors ServiceNow's decideApproval
+	// restriction that only the caller's own PENDING approval can be acted
+	// on -- see sn_change_request_service.go's DecideChangeRequestApproval
+	// doc comment).
+	DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error)
 }
 
 type changeRequestRepo struct {
@@ -158,6 +252,15 @@ var changeRequestTypeToChangeModel = func() map[domain.ChangeRequestType]string 
 	}
 	return m
 }()
+
+// ChangeRequestTypeSupported reports whether t has a change_model label,
+// i.e. whether CreateChangeRequestFromServiceNow can persist it. Exported so
+// the service layer can reject an unsupported type before, not after, the
+// ServiceNow-first create -- see createChangeRequestSNFirst's own comment.
+func ChangeRequestTypeSupported(t domain.ChangeRequestType) bool {
+	_, ok := changeRequestTypeToChangeModel[t]
+	return ok
+}
 
 // scanChangeRequestView scans changeRequestSelectColumns into a
 // SearchChangeRequestView. Duration is never set here -- see this file's
@@ -437,46 +540,68 @@ func (r *changeRequestRepo) AggregateChangeRequests(ctx context.Context, req dom
 
 // changeRequestDetailColumns extends changeRequestSelectColumns with the
 // fields ChangeRequest carries beyond SearchChangeRequestView.
+//
+// The second block (implementation_plan through git_reference) is domain.
+// ChangeRequest's own "field-parity additions" (see that struct's doc
+// comment, Groups B/C1/C2/D) -- real change_request columns that
+// CreateChangeRequestFromServiceNow (Group B's four) already writes, or
+// that exist for a future write path (Groups C2/D, "read-through only"),
+// but that nothing read back here before this. requested_by_user_id and
+// customer_group_id are FKs (to "user"/"group" respectively), so they need
+// their own joins -- see changeRequestDetailJoins. Environments/
+// DeploymentProducts/Labels/Deployments (the four []EntityRef/[]string
+// fields in those same groups) are deliberately excluded: no M2M join
+// table for any of them exists anywhere in migrations/, so there is
+// nothing to select -- same "no real column" posture as ApprovedBy/
+// ApprovedOn/LegalNextStates already have (see this file's own package
+// doc comment).
 const changeRequestDetailColumns = `
 	wi.created_by, cr.justification, cr.impact_description, cr.service_outage_downtime,
 	cr.communication_plan, cr.rollback_process, cr.test_plan,
-	cr.is_customer_approved, cr.is_customer_reviewed`
+	cr.is_customer_approved, cr.is_customer_reviewed,
+	cr.implementation_plan, cr.priority::TEXT, cr.category::TEXT,
+	rb.id, COALESCE(rb.name, NULLIF(TRIM(CONCAT_WS(' ', rb.first_name, rb.last_name)), '')),
+	cr.affected_services, cr.affected_component, cr.rollback_duration,
+	cg.id, cg.name,
+	cr.change_request_type::TEXT, cr.likelihood::TEXT, cr.is_planning_visible_to_customers,
+	cr.customer_updated_date_confirmation::TEXT, cr.customer_updated_on,
+	cr.work_start_on, cr.work_end_on, cr.git_reference`
+
+// changeRequestDetailJoins adds the two FK joins changeRequestDetailColumns
+// needs beyond changeRequestFromJoins -- kept separate from (not folded
+// into) changeRequestFromJoins since RequestedBy/CustomerGroup are detail
+// -only fields (domain.ChangeRequest, not SearchChangeRequestView): folding
+// these into the shared joins would cost every SearchChangeRequests/
+// AggregateChangeRequests row two extra joins neither ever selects from.
+const changeRequestDetailJoins = `
+	LEFT JOIN "user" rb ON rb.id = cr.requested_by_user_id
+	LEFT JOIN "group" cg ON cg.id = cr.customer_group_id`
 
 // GetChangeRequestByID implements ChangeRequestRepository.
 func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string) (domain.ChangeRequest, error) {
-	query := "SELECT " + changeRequestSelectColumns + ", " + changeRequestDetailColumns + " " + changeRequestFromJoins + " WHERE wi.id = $1 AND wi.type = 'CHANGE_REQUEST'"
+	query := "SELECT " + changeRequestSelectColumns + ", " + changeRequestDetailColumns + " " +
+		changeRequestFromJoins + " " + changeRequestDetailJoins + " WHERE wi.id = $1 AND wi.type = 'CHANGE_REQUEST'"
 
 	var cr domain.ChangeRequest
-	var (
-		isCustomerApproved, isCustomerReviewed *bool
-	)
 	row := r.db.QueryRow(ctx, query, id)
-	// scanChangeRequestView expects exactly its own column list; the detail
-	// columns are scanned separately via a small wrapper so the two column
-	// lists stay independently maintainable.
-	view, err := scanChangeRequestViewAndDetail(row, &cr.CreatedBy, &cr.Justification, &cr.ImpactDescription,
-		&cr.ServiceOutage, &cr.CommunicationPlan, &cr.RollbackPlan, &cr.TestPlan,
-		&isCustomerApproved, &isCustomerReviewed)
+	err := scanChangeRequestViewAndDetail(row, &cr)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ChangeRequest{}, &apierror.NotFoundError{Msg: "change request not found"}
 	}
 	if err != nil {
 		return domain.ChangeRequest{}, fmt.Errorf("get change request by id: %w", err)
 	}
-	cr.SearchChangeRequestView = view
-	cr.HasCustomerApproved = isCustomerApproved != nil && *isCustomerApproved
-	cr.HasCustomerReviewed = isCustomerReviewed != nil && *isCustomerReviewed
-	// ApprovedBy/ApprovedOn/LegalNextStates/Type have no real column -- see
-	// this file's own package doc comment.
+	// ApprovedBy/ApprovedOn/LegalNextStates/Environments/DeploymentProducts/
+	// Labels/Deployments have no real column -- see this file's own package
+	// doc comment.
 	return cr, nil
 }
 
 // scanChangeRequestViewAndDetail scans changeRequestSelectColumns followed
 // by changeRequestDetailColumns's targets in the same Scan call (a single
-// row's columns must be scanned together), returning the parsed view part
-// separately from the detail-only fields the caller already holds pointers
-// to.
-func scanChangeRequestViewAndDetail(row pgx.Row, createdBy *string, justification, impactDescription, serviceOutage, communicationPlan, rollbackPlan, testPlan **string, isCustomerApproved, isCustomerReviewed **bool) (domain.SearchChangeRequestView, error) {
+// row's columns must be scanned together), populating cr directly rather
+// than returning a long list of out-params.
+func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error {
 	var v domain.SearchChangeRequestView
 	var (
 		projectID, projectName *string
@@ -491,6 +616,20 @@ func scanChangeRequestViewAndDetail(row pgx.Row, createdBy *string, justificatio
 		impact, state          *string
 		changeModel            *string
 		createdOn, updatedOn   time.Time
+
+		createdBy                                                          string
+		justification, impactDescription, serviceOutage                    *string
+		communicationPlan, rollbackPlan, testPlan                          *string
+		isCustomerApproved, isCustomerReviewed                             *bool
+		implementationPlan, priority, category                             *string
+		rbID, rbName                                                       *string
+		affectedServicesText, affectedComponentsText, rollbackDurationText *string
+		cgID, cgName                                                       *string
+		changeRequestType, likelihood                                      *string
+		isPlanningVisibleToCustomers                                       *bool
+		confirmCustomerUpdatedDate                                         *string
+		customerUpdatedOn, workStart, workEnd                              *time.Time
+		gitReference                                                       *string
 	)
 	err := row.Scan(
 		&v.ID, &v.Number, &v.Subject, &v.Description,
@@ -504,11 +643,18 @@ func scanChangeRequestViewAndDetail(row pgx.Row, createdBy *string, justificatio
 		&aeID, &aeName,
 		&startOn, &endOn, &impact, &state, &changeModel,
 		&createdOn, &updatedOn,
-		createdBy, justification, impactDescription, serviceOutage, communicationPlan, rollbackPlan, testPlan,
-		isCustomerApproved, isCustomerReviewed,
+		&createdBy, &justification, &impactDescription, &serviceOutage, &communicationPlan, &rollbackPlan, &testPlan,
+		&isCustomerApproved, &isCustomerReviewed,
+		&implementationPlan, &priority, &category,
+		&rbID, &rbName,
+		&affectedServicesText, &affectedComponentsText, &rollbackDurationText,
+		&cgID, &cgName,
+		&changeRequestType, &likelihood, &isPlanningVisibleToCustomers,
+		&confirmCustomerUpdatedDate, &customerUpdatedOn,
+		&workStart, &workEnd, &gitReference,
 	)
 	if err != nil {
-		return domain.SearchChangeRequestView{}, err
+		return err
 	}
 	if projectID != nil {
 		v.Project = domain.EntityRef{ID: *projectID, Name: stringOrEmpty(projectName)}
@@ -558,7 +704,63 @@ func scanChangeRequestViewAndDetail(row pgx.Row, createdBy *string, justificatio
 	}
 	v.CreatedOn = createdOn.UTC().Format(time.RFC3339)
 	v.UpdatedOn = updatedOn.UTC().Format(time.RFC3339)
-	return v, nil
+	cr.SearchChangeRequestView = v
+
+	cr.CreatedBy = createdBy
+	cr.Justification = justification
+	cr.ImpactDescription = impactDescription
+	cr.ServiceOutage = serviceOutage
+	cr.CommunicationPlan = communicationPlan
+	cr.RollbackPlan = rollbackPlan
+	cr.TestPlan = testPlan
+	cr.HasCustomerApproved = isCustomerApproved != nil && *isCustomerApproved
+	cr.HasCustomerReviewed = isCustomerReviewed != nil && *isCustomerReviewed
+
+	cr.ImplementationPlan = implementationPlan
+	if priority != nil {
+		lower := strings.ToLower(*priority)
+		cr.Priority = &lower
+	}
+	if category != nil {
+		lower := strings.ToLower(*category)
+		cr.Category = &lower
+	}
+	if rbID != nil {
+		cr.RequestedBy = &domain.EntityRef{ID: *rbID, Name: stringOrEmpty(rbName)}
+	}
+	cr.AffectedServicesText = affectedServicesText
+	cr.AffectedComponentsText = affectedComponentsText
+	cr.RollbackDurationText = rollbackDurationText
+	if cgID != nil {
+		cr.CustomerGroup = &domain.EntityRef{ID: *cgID, Name: stringOrEmpty(cgName)}
+	}
+	if changeRequestType != nil {
+		lower := strings.ToLower(*changeRequestType)
+		cr.ChangeRequestType = &lower
+	}
+	if likelihood != nil {
+		lower := strings.ToLower(*likelihood)
+		cr.Likelihood = &lower
+	}
+	cr.IsPlanningVisibleToCustomers = isPlanningVisibleToCustomers != nil && *isPlanningVisibleToCustomers
+	if confirmCustomerUpdatedDate != nil {
+		lower := strings.ToLower(*confirmCustomerUpdatedDate)
+		cr.ConfirmCustomerUpdatedDate = &lower
+	}
+	if customerUpdatedOn != nil {
+		s := customerUpdatedOn.UTC().Format(time.RFC3339)
+		cr.CustomerUpdatedOn = &s
+	}
+	if workStart != nil {
+		s := workStart.UTC().Format(time.RFC3339)
+		cr.WorkStart = &s
+	}
+	if workEnd != nil {
+		s := workEnd.UTC().Format(time.RFC3339)
+		cr.WorkEnd = &s
+	}
+	cr.GitReference = gitReference
+	return nil
 }
 
 // changeRequestPatchFKField maps work_item's FK constraints touched by
@@ -619,7 +821,7 @@ func (r *changeRequestRepo) PatchChangeRequest(ctx context.Context, id string, r
 	if req.AssignedEngineerID != nil {
 		addWI("assigned_to_id = $%d::uuid", *req.AssignedEngineerID)
 	}
-	// AssignedTeamID has no real column -- see this file's own package doc comment.
+	// AssignedTeamID has no wired mapping here -- see this file's own package doc comment.
 
 	wiArgs = append(wiArgs, id)
 	wiQuery := fmt.Sprintf(`UPDATE work_item SET %s WHERE id = $%d AND type = 'CHANGE_REQUEST' RETURNING id`, strings.Join(wiSets, ", "), wiIdx)
@@ -731,4 +933,360 @@ func (r *changeRequestRepo) PatchChangeRequest(ctx context.Context, id string, r
 	}
 
 	return r.GetChangeRequestByID(ctx, wiID)
+}
+
+// createChangeRequestFromServiceNowQuery inserts both halves of a change
+// request row (work_item + change_request, the same shared-primary-key
+// pattern createCaseFromServiceNowQuery/createIncidentFromServiceNowQuery
+// document) in one round trip via a CTE, using caller-supplied identity
+// (id/number/createdBy) rather than generating any of it -- see
+// CreateChangeRequestFromServiceNow's own doc comment for why, and for which
+// req fields are deliberately left unwritten. type is hardcoded to
+// 'CHANGE_REQUEST'::work_item_type_enum. change_request.state is left NULL
+// -- see CreateChangeRequestFromServiceNow's own doc comment for why, unlike
+// incident's reliance on a NOT NULL DEFAULT column.
+//
+// Column/output order matches the trailing SELECT exactly.
+const createChangeRequestFromServiceNowQuery = `
+	WITH inserted_work_item AS (
+		INSERT INTO work_item (
+			id, created_on, updated_on, created_by, updated_by,
+			number, subject, description, type, assigned_to_id
+		)
+		VALUES (
+			$1, NOW(), NOW(), $2, $2,
+			$3, $4, $5, 'CHANGE_REQUEST'::work_item_type_enum, $6::uuid
+		)
+		RETURNING id, number, subject, created_on, updated_on, created_by
+	),
+	inserted_change_request AS (
+		INSERT INTO change_request (
+			id, service_id, service_offering_id, impact, risk, priority, change_model,
+			justification, implementation_plan, risk_impact_analysis, backout_plan, test_plan,
+			start_on, end_on, requested_by_user_id, customer_group_id,
+			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration
+		)
+		VALUES (
+			$1, $7::uuid, $8::uuid, $9::change_request_impact_enum, $10::change_request_risk_enum,
+			$11::change_request_priority_enum, $12::change_request_change_model_enum,
+			$13, $14, $15, $16, $17,
+			$18::text::timestamptz, $19::text::timestamptz, $20::uuid, $21::uuid,
+			$22, $23, $24, $25
+		)
+		RETURNING id
+	)
+	SELECT iwi.id, iwi.number, iwi.subject, iwi.created_on, iwi.updated_on, iwi.created_by
+	FROM inserted_work_item iwi
+	JOIN inserted_change_request icr ON icr.id = iwi.id`
+
+// CreateChangeRequestFromServiceNow implements ChangeRequestRepository.
+func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Context, req domain.CreateChangeRequestRequest, id, number, createdBy string) (domain.CreateChangeRequestResponse, error) {
+	var changeModel *string
+	if req.Type != nil {
+		v, ok := changeRequestTypeToChangeModel[*req.Type]
+		if !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("type %q is not supported on the PostgreSQL data source", *req.Type)}
+		}
+		changeModel = &v
+	}
+
+	var impact, risk, priority *string
+	if req.Impact != nil {
+		v := strings.ToUpper(string(*req.Impact))
+		impact = &v
+	}
+	if req.Risk != nil {
+		v := strings.ToUpper(string(*req.Risk))
+		risk = &v
+	}
+	if req.Priority != nil {
+		v := strings.ToUpper(string(*req.Priority))
+		priority = &v
+	}
+
+	var (
+		outID, outNumber, outSubject, outCreatedBy string
+		outCreatedOn, outUpdatedOn                 time.Time
+	)
+	err := r.db.QueryRow(ctx, createChangeRequestFromServiceNowQuery,
+		id, createdBy,
+		number, req.Subject, req.Description, req.AssignedEngineerID,
+		req.ServiceID, req.ServiceOfferingID, impact, risk, priority, changeModel,
+		req.Justification, req.ImplementationPlan, req.RiskImpactAnalysis, req.BackoutPlan, req.TestPlan,
+		req.PlannedStartDate, req.PlannedEndDate, req.RequestedByID, req.CustomerGroupID,
+		req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
+	).Scan(&outID, &outNumber, &outSubject, &outCreatedOn, &outUpdatedOn, &outCreatedBy)
+	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505": // unique_violation on id/number -- see this method's own doc comment for why this "shouldn't" happen
+				return domain.CreateChangeRequestResponse{}, &apierror.ConflictError{Msg: "a change request already exists for this ServiceNow id/number: " + pgErr.Detail}
+			case "22P02": // invalid_text_representation -- id (or another uuid/enum-typed field) was not valid
+				return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "id is not a valid UUID: " + id}
+			case "23503": // foreign_key_violation -- one of the referenced IDs does not exist
+				return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			case "P0001": // raise_exception from integrity triggers
+				return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: pgErr.Message}
+			}
+		}
+		return domain.CreateChangeRequestResponse{}, fmt.Errorf("create change request from servicenow: %w", err)
+	}
+
+	resp := domain.CreateChangeRequestResponse{Message: "Change request created successfully."}
+	resp.ChangeRequest.ID = outID
+	resp.ChangeRequest.Number = outNumber
+	resp.ChangeRequest.CreatedOn = outCreatedOn.UTC().Format(time.RFC3339)
+	resp.ChangeRequest.CreatedBy = outCreatedBy
+	return resp, nil
+}
+
+// changeRequestApprovalStagesQuery backs GetChangeRequestApprovals' first of
+// two flat queries -- see that method's own doc comment for why this isn't
+// one three-way join. Ordered by created_on (then id as a stable tie-break
+// for rows inserted in the same instant, e.g. a backfill) since
+// buildChangeRequestApprovals' positional stage-label derivation depends
+// entirely on this ordering.
+const changeRequestApprovalStagesQuery = `
+	SELECT ast.id, g.name
+	FROM approval_stage ast
+	LEFT JOIN "group" g ON g.id = ast.assignment_group_id
+	WHERE ast.work_item_id = $1
+	ORDER BY ast.created_on ASC, ast.id ASC`
+
+// changeRequestApprovalApproversQuery backs GetChangeRequestApprovals'
+// second flat query. approver_name reuses comment_repo.go's
+// display-name COALESCE convention (resolved_name), not
+// user_repo.go's userSortColumns one, since there's no user_name fallback
+// need here -- an approver with no resolvable name still reads as "" rather
+// than falling back to a login handle. Filtered by work_item_id (denormalized
+// onto approval_stage_approver, migration 000087's own comment on why)
+// rather than joining through approval_stage, same reasoning as that
+// column's own comment.
+const changeRequestApprovalApproversQuery = `
+	SELECT asa.id, asa.stage_id,
+	       COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), '') AS approver_name,
+	       asa.status, asa.updated_on
+	FROM approval_stage_approver asa
+	LEFT JOIN "user" u ON u.id = asa.approver_user_id
+	WHERE asa.work_item_id = $1
+	ORDER BY asa.created_on ASC, asa.id ASC`
+
+// changeRequestApprovalStageRow is one row of changeRequestApprovalStagesQuery.
+type changeRequestApprovalStageRow struct {
+	id                  string
+	assignmentGroupName *string
+}
+
+// changeRequestApprovalApproverRow is one row of
+// changeRequestApprovalApproversQuery. rawStatus/stageID are nullable
+// pointers because both approval_stage_approver.status and .stage_id are
+// (migration 000087's own comment on nullable FKs throughout, plus status
+// having no NOT NULL/DEFAULT).
+type changeRequestApprovalApproverRow struct {
+	id           string
+	stageID      *string
+	approverName string
+	rawStatus    *string
+	updatedOn    time.Time
+}
+
+// GetChangeRequestApprovals implements ChangeRequestRepository.
+func (r *changeRequestRepo) GetChangeRequestApprovals(ctx context.Context, id string) (domain.ChangeRequestApprovals, error) {
+	stageRows, err := r.db.Query(ctx, changeRequestApprovalStagesQuery, id)
+	if err != nil {
+		return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: query stages: %w", err)
+	}
+	var stages []changeRequestApprovalStageRow
+	for stageRows.Next() {
+		var st changeRequestApprovalStageRow
+		if err := stageRows.Scan(&st.id, &st.assignmentGroupName); err != nil {
+			stageRows.Close()
+			return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: scan stage: %w", err)
+		}
+		stages = append(stages, st)
+	}
+	stageRows.Close()
+	if err := stageRows.Err(); err != nil {
+		return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: stages: %w", err)
+	}
+
+	approverRows, err := r.db.Query(ctx, changeRequestApprovalApproversQuery, id)
+	if err != nil {
+		return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: query approvers: %w", err)
+	}
+	var approvers []changeRequestApprovalApproverRow
+	for approverRows.Next() {
+		var ap changeRequestApprovalApproverRow
+		if err := approverRows.Scan(&ap.id, &ap.stageID, &ap.approverName, &ap.rawStatus, &ap.updatedOn); err != nil {
+			approverRows.Close()
+			return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: scan approver: %w", err)
+		}
+		approvers = append(approvers, ap)
+	}
+	approverRows.Close()
+	if err := approverRows.Err(); err != nil {
+		return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: approvers: %w", err)
+	}
+
+	return buildChangeRequestApprovals(stages, approvers), nil
+}
+
+// changeRequestApprovalStagePosition maps a stage's zero-based position
+// (ordered by approval_stage.created_on) to its label and approver type.
+// This is the POSITIONAL-ONLY subset of ChangeRequestUtils.
+// getChangeRequestApprovals' real ServiceNow logic: the real script include
+// primarily keys stage label/approverType off two hardcoded ServiceNow
+// group sys_ids (falling back to this same ordinal scheme only when a
+// stage's group matches neither), but those sys_ids are ServiceNow-internal
+// values that were never synced into this schema as a lookup anywhere --
+// there is no group.sn_sys_id-shaped column, or equivalent, to match
+// against. Replicating the fallback ordinal scheme unconditionally (0 =
+// Assess, 1 = Authorize, 2+ = Customer Approval) is therefore the closest
+// available approximation, not a full reimplementation.
+func changeRequestApprovalStagePosition(pos int) (string, domain.ChangeRequestApproverType) {
+	switch pos {
+	case 0:
+		return "Assess", domain.ChangeRequestApproverTypeStaticGroup
+	case 1:
+		return "Authorize", domain.ChangeRequestApproverTypeStaticGroup
+	default:
+		return "Customer Approval", domain.ChangeRequestApproverTypeDynamicContact
+	}
+}
+
+// changeRequestApprovalStatusByRaw normalizes approval_stage_approver.status
+// (a ServiceNow sysapproval_approver.state passthrough -- migration 000087's
+// own comment) to the UPPER_SNAKE_CASE values domain.ChangeRequestApprover.
+// Status already carries for the ServiceNow data source (see
+// snChangeRequestService.GetChangeRequestApprovals, which passes ServiceNow's
+// own already-uppercase values straight through) -- this is the Postgres
+// equivalent of that pass-through, applied to SN's raw lowercase state
+// strings instead.
+var changeRequestApprovalStatusByRaw = map[string]string{
+	"requested":    "REQUESTED",
+	"approved":     "APPROVED",
+	"rejected":     "REJECTED",
+	"not_required": "NOT_REQUIRED",
+	"cancelled":    "CANCELLED",
+	"no_consensus": "NO_CONSENSUS",
+}
+
+// normalizeChangeRequestApprovalStatus applies changeRequestApprovalStatusByRaw,
+// falling back to an uppercased passthrough for any value outside that set
+// (so an as-yet-unseen ServiceNow state string still reads sensibly instead
+// of silently vanishing -- domain.ChangeRequestApprover.Status is
+// deliberately an open string, not a closed enum, for exactly this reason)
+// and "UNKNOWN" only for a nil/empty raw value.
+func normalizeChangeRequestApprovalStatus(raw *string) string {
+	if raw == nil || *raw == "" {
+		return "UNKNOWN"
+	}
+	if v, ok := changeRequestApprovalStatusByRaw[*raw]; ok {
+		return v
+	}
+	return strings.ToUpper(*raw)
+}
+
+// buildChangeRequestApprovals assembles the nested domain.ChangeRequestApprovals
+// shape from the two flat result sets GetChangeRequestApprovals queries
+// separately (a single three-way join fanned out across stage and approver
+// would need de-duplicating stage columns per approver row in Go anyway, so
+// two flat queries scan more simply for no real cost -- this table is
+// per-change-request, never more than a handful of rows).
+//
+// Approvers whose stage_id is NULL (the schema allows it -- migration
+// 000087's own comment on nullable FKs throughout) are dropped: they have
+// no stage to attach to, and ChangeRequestApprovals' response shape has no
+// stage-less bucket to put them in.
+func buildChangeRequestApprovals(stages []changeRequestApprovalStageRow, approvers []changeRequestApprovalApproverRow) domain.ChangeRequestApprovals {
+	approversByStage := make(map[string][]changeRequestApprovalApproverRow, len(stages))
+	for _, ap := range approvers {
+		if ap.stageID == nil {
+			continue
+		}
+		approversByStage[*ap.stageID] = append(approversByStage[*ap.stageID], ap)
+	}
+
+	result := make([]domain.ChangeRequestApproval, 0, len(stages))
+	for pos, st := range stages {
+		label, approverType := changeRequestApprovalStagePosition(pos)
+
+		stageApprovers := approversByStage[st.id]
+		domainApprovers := make([]domain.ChangeRequestApprover, 0, len(stageApprovers))
+		sawApproved, sawRejected := false, false
+		for _, ap := range stageApprovers {
+			status := normalizeChangeRequestApprovalStatus(ap.rawStatus)
+			switch status {
+			case "APPROVED":
+				sawApproved = true
+			case "REJECTED":
+				sawRejected = true
+			}
+
+			// RespondedOn has no dedicated column. approval_stage_approver.
+			// updated_on changes whenever DecideChangeRequestApproval (below)
+			// or csm-sync-service's own mapper moves status away from
+			// "requested", so it doubles as the response timestamp once a
+			// decision exists -- left nil while still REQUESTED (updated_on
+			// is just the row's sync/insert watermark then) or UNKNOWN
+			// (nothing meaningful to date).
+			var respondedOn *string
+			if status != "REQUESTED" && status != "UNKNOWN" {
+				s := ap.updatedOn.UTC().Format(time.RFC3339)
+				respondedOn = &s
+			}
+
+			domainApprovers = append(domainApprovers, domain.ChangeRequestApprover{
+				ID:          ap.id,
+				Name:        ap.approverName,
+				Status:      status,
+				RespondedOn: respondedOn,
+			})
+		}
+
+		// First-responder-wins over the stage's approvers, mirroring
+		// ChangeRequestUtils._deriveStageStatus (see approval_stage.raw_status'
+		// own migration comment) -- a single REJECTED beats any number of
+		// APPROVED, and a single APPROVED (once nobody has rejected) is
+		// enough to resolve the stage; anything else leaves it PENDING.
+		stageStatus := domain.ChangeRequestApprovalStatusPending
+		if sawRejected {
+			stageStatus = domain.ChangeRequestApprovalStatusRejected
+		} else if sawApproved {
+			stageStatus = domain.ChangeRequestApprovalStatusApproved
+		}
+
+		result = append(result, domain.ChangeRequestApproval{
+			Stage:        label,
+			ApproverType: approverType,
+			ApproverName: stringOrEmpty(st.assignmentGroupName),
+			Status:       stageStatus,
+			Approvers:    domainApprovers,
+		})
+	}
+
+	return domain.ChangeRequestApprovals{Approvals: result}
+}
+
+// decideChangeRequestApprovalQuery backs DecideChangeRequestApproval. The
+// WHERE clause's status = 'requested' is the entire enforcement of "only the
+// caller's own PENDING approval can be decided" -- see that method's own
+// doc comment.
+const decideChangeRequestApprovalQuery = `
+	UPDATE approval_stage_approver
+	SET status = $3, updated_on = NOW(), updated_by = $4
+	WHERE work_item_id = $1 AND approver_user_id = $2 AND status = 'requested'
+	RETURNING id`
+
+// DecideChangeRequestApproval implements ChangeRequestRepository.
+func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error) {
+	var approvalID string
+	err := r.db.QueryRow(ctx, decideChangeRequestApprovalQuery, id, approverUserID, decision, actorEmail).Scan(&approvalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", &apierror.NotFoundError{Msg: "no pending approval found for this change request and caller"}
+	}
+	if err != nil {
+		return "", fmt.Errorf("decide change request approval: %w", err)
+	}
+	return approvalID, nil
 }

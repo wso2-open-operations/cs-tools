@@ -48,6 +48,7 @@ export const ApiQueryKeys = {
   DEPLOYMENT_ATTACHMENTS: "deployment-attachments",
   PRODUCTS: "products",
   PRODUCT_VERSIONS_SEARCH: "product-versions-search",
+  PROJECTS_BY_PRODUCT_VERSION: "projects-by-product-version",
   DEPLOYMENT_PRODUCTS: "deployment-products",
   TIME_TRACKING_STATS: "time-tracking-stats",
   RECOMMENDED_UPDATE_LEVELS: "recommended-update-levels",
@@ -115,6 +116,12 @@ export const ApiQueryKeys = {
   CSM_KB_ARTICLES: "csm-kb-articles",
   CSM_KB_ARTICLE_DETAIL: "csm-kb-article-detail",
   CSM_ANNOUNCEMENTS: "csm-announcements",
+  CSM_ANNOUNCEMENT_REGISTRY: "csm-announcement-registry",
+  CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS: "csm-announcement-excluded-project-keys",
+  ANNOUNCEMENT_REQUEST_DETAIL: "announcement-request-detail",
+  ANNOUNCEMENT_REQUESTS_SEARCH: "announcement-requests-search",
+  ANNOUNCEMENT_REQUEST_UPDATES: "announcement-request-updates",
+  ANNOUNCEMENT_REQUEST_DELIVERIES: "announcement-request-deliveries",
   CSM_CASE_COUNTS: "csm-case-counts",
   CSM_DASHBOARD_WIDGET_DATA: "csm-dashboard-widget-data",
   CSM_DASHBOARD_LIST: "csm-dashboard-list",
@@ -151,6 +158,7 @@ export const ApiQueryKeys = {
   CSM_ADMIN_TEAM_DETAIL: "csm-admin-team-detail",
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
   CSM_GITHUB_ISSUE_REPO_OPTIONS: "csm-github-issue-repo-options",
+  SAVED_FILTER_VIEWS: "saved-filter-views",
 } as const;
 
 // Constants for API-related mutation keys.

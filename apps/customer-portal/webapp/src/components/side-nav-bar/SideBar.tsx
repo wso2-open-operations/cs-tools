@@ -62,6 +62,7 @@ export default function SideBar({
   const usageMetricsEnabled =
     portalMetadata?.featureFlags?.usageMetricsEnabled === true;
 
+
   const projectTypeLabel =
     selectedProject?.type?.label ?? projectDetails?.type?.label;
   const isProjectTypeResolved =
@@ -101,6 +102,8 @@ export default function SideBar({
       items = items.filter((item: AppShellNavItem) => item.id !== "updates");
     }
 
+    // Feature flags alone, as before RBAC: the security_admin permission had
+    // no holder, so including it hid Security Center from everyone.
     if (
       !permissions.hasSecurityReportAnalysis &&
       !permissions.hasComponentAnalysis

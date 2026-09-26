@@ -148,6 +148,10 @@ csm-integration-service/
 - `PATCH /projects/{id}` — update project closure-state fields (ACP automation; currently always 401s, see Overview above)
 - `PATCH /cases/{id}` — update a case's state, severity, or workState (succeeds on a Postgres data source; other fields 400 there, and every field 401s on a ServiceNow data source — see Overview above)
 - `POST /cases/{id}/comments` — add a comment to a case (currently always 401s, see Overview above)
+- `POST /incidents` — create an incident (ServiceNow data source; a 401 is possible if the target environment's M2M ServiceNow credential isn't configured, but this is not unconditional — see `CLAUDE.md`)
+- `PATCH /incidents/{id}` — update an incident, e.g. push a work note. Unconditionally ServiceNow-backed with no Postgres fallback (unlike `PATCH /cases/{id}`): 503 on a Postgres data source, same conditional-401 behavior as `POST /incidents` on a ServiceNow one — see `CLAUDE.md`
+- `POST /incidents/search` — search incidents (same conditional-401 behavior as `POST /incidents`, see `CLAUDE.md`)
+- `POST /services/search` — search CMDB IT services (same conditional-401 behavior as `POST /incidents`, see `CLAUDE.md`)
 - `POST /vulnerabilities/sync` — full-replace sync of product-vulnerability records (submit the complete current set on every call, not a delta)
 - `GET /opportunities/{id}` — get an opportunity by ID (ServiceNow data source only)
 - `POST /opportunities/search` — search opportunities (ServiceNow data source only)

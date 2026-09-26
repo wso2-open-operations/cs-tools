@@ -40,6 +40,7 @@ type snITService struct {
 	Class                 *string           `json:"class"`
 	BusinessCriticality   *snITServiceLabel `json:"businessCriticality"`
 	ServiceClassification *snITServiceLabel `json:"serviceClassification"`
+	SupportGroup          *snITServiceLabel `json:"supportGroup"`
 }
 
 type snITServiceLabel struct {
@@ -107,6 +108,12 @@ func (s *snITServiceService) SearchITServices(ctx context.Context, req domain.Se
 		if svc.ServiceClassification != nil {
 			if sc, ok := snServiceClassificationLabelToEnum[svc.ServiceClassification.Label]; ok {
 				item.ServiceClassification = &sc
+			}
+		}
+		if svc.SupportGroup != nil {
+			item.SupportGroup = &domain.EntityRef{
+				ID:   sysidToUUID(svc.SupportGroup.ID),
+				Name: svc.SupportGroup.Label,
 			}
 		}
 		services = append(services, item)

@@ -183,6 +183,18 @@ export type CaseType = (typeof CaseType)[keyof typeof CaseType];
 // Maximum allowed attachment file size in bytes.
 export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
+// Deliberately stricter than the BE's own request-body cap for
+// POST /cases/{id}/comments (backend-v2's generic `readJSONBody` helper,
+// capped at the blanket `maxRequestBodyBytes = 1 << 20`, i.e. 1 MiB — this was
+// NOT raised for comments). Comments carry inline images as base64 data URIs,
+// so the body can get large fast; this FE-only ceiling nudges users toward
+// attachments well before they'd hit the BE's 413, and matches the same 1 MiB
+// guard applied to the CSM portal webapp for consistency across both portals.
+export const MAX_COMMENT_BODY_BYTES = 1 * 1024 * 1024;
+// Reserve headroom for the JSON envelope ({ type, content }) + string escaping
+// so the FE blocks before the BE rejects with 413.
+export const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
+
 // Maximum allowed embedded image size in bytes (10MB for base64 images in rich text).
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 

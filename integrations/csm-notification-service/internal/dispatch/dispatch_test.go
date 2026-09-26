@@ -32,6 +32,7 @@ import (
 )
 
 type sentEmail struct {
+	from     string
 	to       []string
 	bcc      []string
 	subject  string
@@ -49,14 +50,31 @@ type mockEmailSender struct {
 	// other test here, which drives Handle sequentially.
 	mu    sync.Mutex
 	calls []sentEmail
+	// block, when non-nil, holds every send open until it is closed, so a
+	// test can have a second Handle call arrive mid-send.
+	block chan struct{}
+	// onSend, when set, runs as the send completes -- a seam for a test
+	// that needs something to happen between the e-mail going out and the
+	// step being recorded.
+	onSend func()
 }
 
 func (m *mockEmailSender) FromAddress() string { return "noreply@wso2.com" }
 
 func (m *mockEmailSender) SendEmail(ctx context.Context, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error {
+	return m.SendEmailFrom(ctx, "", to, cc, bcc, replyTo, subject, htmlBody, attachments)
+}
+
+func (m *mockEmailSender) SendEmailFrom(ctx context.Context, from string, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error {
+	if m.block != nil {
+		<-m.block
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, sentEmail{to: to, bcc: bcc, subject: subject, htmlBody: htmlBody})
+	m.calls = append(m.calls, sentEmail{from: from, to: to, bcc: bcc, subject: subject, htmlBody: htmlBody})
+	if m.onSend != nil {
+		m.onSend()
+	}
 	if m.errFor != nil {
 		return m.errFor(to)
 	}
@@ -1309,25 +1327,20 @@ func TestDispatcher_Handle_CaseCreated_EmailSendingDisabled(t *testing.T) {
 	}
 }
 
-// TestDispatcher_Handle_IgnoresSLAEventTypes verifies that
-// sla.clock.register/sla.tier_reached records — consumed by
-// internal/slaengine's own consumer group, which shares this topic — are a
-// silent no-op here, not an error. Erroring would burn this consumer's
-// retries and dead-letter an event that was never broken.
-func TestDispatcher_Handle_IgnoresSLAEventTypes(t *testing.T) {
+// TestDispatcher_Handle_IgnoresSLATierReached verifies that a
+// sla.tier_reached record — published by internal/slaengine's own poller,
+// which this dispatcher's consumers still get a full copy of via the shared
+// topic — is a silent no-op here, not an error. Erroring would burn this
+// consumer's retries and dead-letter an event that was never broken.
+func TestDispatcher_Handle_IgnoresSLATierReached(t *testing.T) {
 	mock := &mockEmailSender{}
 	chat := &mockGoogleChatSender{}
 	call := &mockCallSender{}
 	d := newTestDispatcher(mock, chat, call)
 
-	records := []string{
-		`{"type":"sla.clock.register","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseTitle":"Something broke","durations":{"response":"2h"}}}`,
-		`{"type":"sla.tier_reached","entityId":"CASE-1","payload":{"caseId":"CASE-1","clockType":"response","tier":"50"}}`,
-	}
-	for _, r := range records {
-		if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(r)}); err != nil {
-			t.Errorf("Handle(%s) error = %v, want nil", r, err)
-		}
+	record := `{"type":"sla.tier_reached","entityId":"CASE-1","payload":{"caseId":"CASE-1","clockType":"response","tier":"50"}}`
+	if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(record)}); err != nil {
+		t.Errorf("Handle(%s) error = %v, want nil", record, err)
 	}
 	if len(mock.calls) != 0 || len(chat.calls) != 0 || len(call.calls) != 0 {
 		t.Errorf("expected no notification sent, got email=%d chat=%d call=%d", len(mock.calls), len(chat.calls), len(call.calls))
@@ -1539,6 +1552,10 @@ type blockingEmailSender struct {
 }
 
 func (s *blockingEmailSender) FromAddress() string { return "noreply@wso2.com" }
+
+func (s *blockingEmailSender) SendEmailFrom(ctx context.Context, from string, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error {
+	return s.SendEmail(ctx, to, cc, bcc, replyTo, subject, htmlBody, attachments)
+}
 
 func (s *blockingEmailSender) SendEmail(ctx context.Context, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error {
 	atomic.AddInt32(&s.calls, 1)

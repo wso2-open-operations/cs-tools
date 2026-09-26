@@ -48,6 +48,7 @@ type snInvoice struct {
 	InvoiceOriginalDueDate *string          `json:"invoiceOriginalDueDate"`
 	Opportunity            *snCaseEntityRef `json:"opportunity"`
 	Classification         *string          `json:"classification"`
+	SfID                   *string          `json:"sfId"`
 }
 
 // snInvoiceSearchPayload is the Choreo POST /invoices/search request body.
@@ -112,6 +113,7 @@ func snInvoiceToDomain(i snInvoice) (domain.Invoice, error) {
 		InvoiceOriginalDueDate: invoiceOriginalDueDate,
 		Opportunity:            snEntityRefFromCaseRef(i.Opportunity),
 		Classification:         i.Classification,
+		SfID:                   i.SfID,
 	}, nil
 }
 

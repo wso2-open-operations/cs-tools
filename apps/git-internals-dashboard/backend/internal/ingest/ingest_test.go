@@ -293,12 +293,87 @@ func TestIngestIssueDoesNotSynthesizeLeadingEventWhenTimelineEmpty(t *testing.T)
 	}
 }
 
+// TestIngestIssuePersistsTitleAndBodyMetadataAndClearsOnReingest verifies
+// that title/abt_team/opened_by are written from the node's title and body
+// on first ingest, and that a re-ingest whose body no longer carries the
+// ABT Team / Opened by lines clears those two columns back to NULL while
+// still picking up the updated title.
+func TestIngestIssuePersistsTitleAndBodyMetadataAndClearsOnReingest(t *testing.T) {
+	pool := testPool(t)
+	ictx := setupIngestFixture(t, pool)
+	ctx := context.Background()
+
+	base := Pair{
+		Node: github.IssueNode{
+			Number:    42,
+			State:     "OPEN",
+			URL:       "https://github.com/test-owner/test-repo-ingest/issues/42",
+			CreatedAt: "2026-01-01T00:00:00.000Z",
+			UpdatedAt: "2026-01-10T12:00:00.000Z",
+			ClosedAt:  nil,
+			Labels:    []string{"Priority/Critical(P1)"},
+			Title:     "Login page throws 500",
+			Body: "Product : wso2is-5.11.0\n" +
+				"ABT Team : Atlas\n" +
+				"Opened by : xxx@wso2.com\n",
+		},
+		Detail: github.IssueDetail{
+			Number:          42,
+			Events:          []github.StatusEvent{},
+			ProjectStatuses: []github.ProjectStatus{},
+		},
+	}
+
+	result, err := IngestIssue(ctx, pool, base, ictx)
+	if err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+
+	var title, abtTeam, openedBy *string
+	if err := pool.QueryRow(ctx, `SELECT title, abt_team, opened_by FROM issues WHERE id = $1`, result.IssueID).Scan(&title, &abtTeam, &openedBy); err != nil {
+		t.Fatalf("query issue: %v", err)
+	}
+	if title == nil || *title != "Login page throws 500" {
+		t.Errorf("expected title %q, got %v", "Login page throws 500", title)
+	}
+	if abtTeam == nil || *abtTeam != "Atlas" {
+		t.Errorf("expected abt_team %q, got %v", "Atlas", abtTeam)
+	}
+	if openedBy == nil || *openedBy != "xxx@wso2.com" {
+		t.Errorf("expected opened_by %q, got %v", "xxx@wso2.com", openedBy)
+	}
+
+	// Re-ingest with an updated title and a body that no longer carries the
+	// ABT Team / Opened by lines.
+	updated := base
+	updated.Node.Title = "Login page throws 500 (updated)"
+	updated.Node.Body = "Product : wso2is-5.11.0\n"
+
+	if _, err := IngestIssue(ctx, pool, updated, ictx); err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+
+	if err := pool.QueryRow(ctx, `SELECT title, abt_team, opened_by FROM issues WHERE id = $1`, result.IssueID).Scan(&title, &abtTeam, &openedBy); err != nil {
+		t.Fatalf("query issue after re-ingest: %v", err)
+	}
+	if title == nil || *title != "Login page throws 500 (updated)" {
+		t.Errorf("expected updated title %q, got %v", "Login page throws 500 (updated)", title)
+	}
+	if abtTeam != nil {
+		t.Errorf("expected abt_team NULL after re-ingest, got %v", *abtTeam)
+	}
+	if openedBy != nil {
+		t.Errorf("expected opened_by NULL after re-ingest, got %v", *openedBy)
+	}
+}
+
 // TestDedupeKeyDoesNotCollideAcrossFieldBoundaries guards against the "|"
-// join delimiter letting a status name shift a field boundary: previously,
-// {prev: "a|b", status: "c"} and {prev: "a", status: "b|c"} produced the
-// identical joined string (and therefore key) for the same repo/timestamp,
-// which would make the ON CONFLICT clause silently drop one of two distinct
-// status transitions.
+// join delimiter letting a status name shift a field boundary: a plain
+// "|"-join of {prev: "a|b", status: "c"} and {prev: "a", status: "b|c"}
+// would produce the identical joined string (and therefore key) for the same
+// repo/timestamp, silently dropping one of two distinct status transitions
+// via ON CONFLICT — dedupeKey's length-prefixing of each field is what
+// prevents that collision.
 func TestDedupeKeyDoesNotCollideAcrossFieldBoundaries(t *testing.T) {
 	k1 := dedupeKey("acme", "widgets", 42, "PVT_1", "2026-01-01T00:00:00Z", strp("a|b"), strp("c"))
 	k2 := dedupeKey("acme", "widgets", 42, "PVT_1", "2026-01-01T00:00:00Z", strp("a"), strp("b|c"))

@@ -20,13 +20,15 @@ import {
   ArrowLeft,
   Eye,
   FileText,
+  GitBranch,
   GitPullRequest,
   Link as LinkIcon,
+  Megaphone,
   MessageSquarePlus,
   Paperclip,
-  Megaphone,
   Pencil,
   UserCog,
+  Wrench,
 } from "@wso2/oxygen-ui-icons-react";
 import {
   type JSX,
@@ -40,8 +42,10 @@ import { useLocation } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { BackendApiError } from "@api/backend/client";
 import ExportPdfButton from "@components/ExportPdfButton";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
@@ -51,10 +55,15 @@ import {
   useGetCsmIncidentComments,
   usePostCsmIncidentComment,
 } from "@features/csm-operations/api/useCsmIncidentComments";
+import {
+  useDeleteComment,
+  usePatchComment,
+} from "@features/csm-cases/api/useCsmCaseComments";
 import { useGetCsmIncidentActivities } from "@features/csm-operations/api/useCsmIncidentActivities";
 import EditIncidentDialog from "@features/csm-operations/components/EditIncidentDialog";
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import IncidentActionBar from "@features/csm-operations/components/IncidentActionBar";
+import IncidentCreateMenu from "@features/csm-operations/components/IncidentCreateMenu";
 import IncidentResolutionDialog from "@features/csm-operations/components/IncidentResolutionDialog";
 import HandoffToSpecialistDialog from "@features/csm-operations/components/HandoffToSpecialistDialog";
 import SpecialistHandoffBadge from "@features/csm-operations/components/SpecialistHandoffBadge";
@@ -96,6 +105,8 @@ import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContex
 import { useReportCaseTabMeta } from "@features/case-tabs/hooks/useReportCaseTabMeta";
 import { useReportCaseTabDraft } from "@features/case-tabs/hooks/useReportCaseTabDraft";
 import type { CreateChangeRequestFromIncidentNavState } from "@features/csm-operations/utils/changeRequests";
+import type { CreateIncidentFromIncidentNavState } from "@features/csm-operations/utils/incidents";
+import type { CreateProblemFromIncidentNavState } from "@features/csm-operations/utils/problems";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations/incidents";
 
@@ -233,12 +244,34 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // uses for its own watch list.
   const { user: currentUser } = useCurrentUser();
   const currentUserEmail = useIdTokenClaims()?.email;
+  // UX only — the backend 403s attachment downloads the same regardless of
+  // this flag, so hiding the control here is never the enforcement.
+  const { canDownloadAttachment } = usePortalAccess();
 
   const {
     data: comments,
     isLoading: isCommentsLoading,
     isError: isCommentsError,
   } = useGetCsmIncidentComments(id);
+  const patchComment = usePatchComment();
+  const deleteComment = useDeleteComment();
+  const onEditComment = useCallback(
+    (commentId: string, content: string) =>
+      patchComment.mutateAsync({
+        commentId,
+        content,
+        invalidateQueryKey: [ApiQueryKeys.INCIDENT_COMMENTS, id],
+      }),
+    [patchComment, id],
+  );
+  const onDeleteComment = useCallback(
+    (commentId: string) =>
+      deleteComment.mutateAsync({
+        commentId,
+        invalidateQueryKey: [ApiQueryKeys.INCIDENT_COMMENTS, id],
+      }),
+    [deleteComment, id],
+  );
   const {
     data: activityAudit,
     isLoading: isActivityLoading,
@@ -607,52 +640,87 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               >
                 Escalate to specialist team
               </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<Megaphone size={14} />}
-                onClick={() =>
-                  navigate("/operations/outages/new", {
-                    state: {
-                      from: `/operations/incidents/${incident.id}`,
-                      incidentId: incident.id,
-                      configurationItemId: incident.configurationItem?.id,
-                    },
-                  })
-                }
-              >
-                Create outage
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<GitPullRequest size={14} />}
-                // Pre-selects this incident as the intended parent on the
-                // change-request create form — mirrors the service request's
-                // own "Create change request…" action (`CsmCaseDetailPage`'s
-                // `create_change_request` handler). Unlike that entry point,
-                // submitting with this pre-fill in place is gated on the
-                // create form itself (`isIncidentParentSelected`) until the
-                // backend accepts a change request linked directly to an
-                // incident — see `CreateChangeRequestFromIncidentNavState`'s
-                // doc comment. Offered unconditionally (no state gate) so the
-                // form is reachable regardless of the incident's own state;
-                // the gate lives entirely on the submit side.
-                onClick={() =>
-                  navigate("/operations/change-requests/new", {
-                    // `incident.id` is only nullable in the shared BeIncident
-                    // type for a bare search-result row; this is a loaded
-                    // detail record, always carrying a real id.
-                    state: {
-                      incidentId: incident.id as string,
-                      incidentNumber: incident.number ?? undefined,
-                      incidentSubject: incident.subject ?? undefined,
-                    } satisfies CreateChangeRequestFromIncidentNavState,
-                  })
-                }
-              >
-                Create change request
-              </Button>
+              <IncidentCreateMenu
+                items={[
+                  {
+                    key: "outage",
+                    label: "Create outage",
+                    icon: <Megaphone size={16} />,
+                    onSelect: () =>
+                      navigate("/operations/outages/new", {
+                        state: {
+                          from: `/operations/incidents/${incident.id}`,
+                          incidentId: incident.id,
+                          configurationItemId: incident.configurationItem?.id,
+                        },
+                      }),
+                  },
+                  {
+                    key: "change_request",
+                    label: "Create change request",
+                    icon: <GitPullRequest size={16} />,
+                    // Pre-selects this incident as the intended parent on the
+                    // change-request create form — mirrors the service
+                    // request's own "Create change request…" action
+                    // (`CsmCaseDetailPage`'s `create_change_request`
+                    // handler). Unlike that entry point, submitting with this
+                    // pre-fill in place is gated on the create form itself
+                    // (`isIncidentParentSelected`) until the backend accepts
+                    // a change request linked directly to an incident — see
+                    // `CreateChangeRequestFromIncidentNavState`'s doc
+                    // comment. Offered unconditionally (no state gate) so the
+                    // form is reachable regardless of the incident's own
+                    // state; the gate lives entirely on the submit side.
+                    onSelect: () =>
+                      navigate("/operations/change-requests/new", {
+                        // `incident.id` is only nullable in the shared
+                        // BeIncident type for a bare search-result row; this
+                        // is a loaded detail record, always carrying a real
+                        // id.
+                        state: {
+                          incidentId: incident.id as string,
+                          incidentNumber: incident.number ?? undefined,
+                          incidentSubject: incident.subject ?? undefined,
+                        } satisfies CreateChangeRequestFromIncidentNavState,
+                      }),
+                  },
+                  {
+                    key: "problem",
+                    label: "Create problem",
+                    icon: <Wrench size={16} />,
+                    // Pre-selects this incident as the new problem's primary
+                    // incident — see `CreateProblemFromIncidentNavState`'s
+                    // doc comment. Unlike change request, this link is fully
+                    // supported on create (`primaryIncidentId`), no gate.
+                    onSelect: () =>
+                      navigate("/operations/problems/new", {
+                        state: {
+                          from: `/operations/incidents/${incident.id}`,
+                          incidentId: incident.id as string,
+                          incidentNumber: incident.number ?? undefined,
+                          incidentSubject: incident.subject ?? undefined,
+                        } satisfies CreateProblemFromIncidentNavState,
+                      }),
+                  },
+                  {
+                    key: "child_incident",
+                    label: "Create child incident",
+                    icon: <GitBranch size={16} />,
+                    // Pre-selects this incident as the new incident's generic
+                    // parent — see `CreateIncidentFromIncidentNavState`'s doc
+                    // comment.
+                    onSelect: () =>
+                      navigate("/operations/incidents/new", {
+                        state: {
+                          from: `/operations/incidents/${incident.id}`,
+                          incidentId: incident.id as string,
+                          incidentNumber: incident.number ?? undefined,
+                          subject: incident.subject ?? undefined,
+                        } satisfies CreateIncidentFromIncidentNavState,
+                      }),
+                  },
+                ]}
+              />
               <Button
                 variant="outlined"
                 size="small"
@@ -792,12 +860,16 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             comments={comments ?? []}
             audit={activityAudit ?? []}
             attachments={attachmentList}
-            onDownloadAttachment={onDownloadAttachment}
+            onDownloadAttachment={
+              canDownloadAttachment ? onDownloadAttachment : undefined
+            }
             preview={{
               onGetPreviewContent: getAttachmentPreviewContent,
               previewTarget,
               onPreviewTargetChange: setPreviewTarget,
             }}
+            onEditComment={onEditComment}
+            onDeleteComment={onDeleteComment}
           />
         </Card>
       )}
@@ -939,7 +1011,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                 : null
             }
             onUpload={onUploadAttachment}
-            onDownload={onDownloadAttachment}
+            onDownload={
+              canDownloadAttachment ? onDownloadAttachment : undefined
+            }
             preview={{
               onGetPreviewContent: getAttachmentPreviewContent,
               previewTarget,

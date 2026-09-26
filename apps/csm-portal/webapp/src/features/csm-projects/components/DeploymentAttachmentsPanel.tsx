@@ -32,6 +32,7 @@ import {
 import { Download, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import AttachmentsField from "@components/attachments/AttachmentsField";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
   type EncodedAttachment,
@@ -71,6 +72,7 @@ function formatUploadedOn(iso: string): string {
 export default function DeploymentAttachmentsPanel({
   deploymentId,
 }: DeploymentAttachmentsPanelProps): JSX.Element {
+  const { canWrite } = usePortalAccess();
   const { data, isLoading, isError, error } = useSearchDeploymentAttachments(deploymentId);
   const createAttachment = useCreateDeploymentAttachment();
   const updateAttachment = useUpdateDeploymentAttachment();
@@ -201,28 +203,30 @@ export default function DeploymentAttachmentsPanel({
         Attachments
       </Typography>
 
-      <Box sx={{ px: 1, display: "flex", flexDirection: "column", gap: 1 }}>
-        <AttachmentsField
-          attachments={pending}
-          onChange={setPending}
-          onError={(message) => setFeedback({ message, severity: "error" })}
-          maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
-          disabled={uploading}
-        />
-        {pending.length > 0 && (
-          <Box>
-            <Button
-              size="small"
-              variant="contained"
-              onClick={() => void handleUploadPending()}
-              disabled={uploading}
-              startIcon={uploading ? <CircularProgress size={14} color="inherit" /> : undefined}
-            >
-              {uploading ? "Uploading…" : `Upload ${pending.length} file(s)`}
-            </Button>
-          </Box>
-        )}
-      </Box>
+      {canWrite && (
+        <Box sx={{ px: 1, display: "flex", flexDirection: "column", gap: 1 }}>
+          <AttachmentsField
+            attachments={pending}
+            onChange={setPending}
+            onError={(message) => setFeedback({ message, severity: "error" })}
+            maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
+            disabled={uploading}
+          />
+          {pending.length > 0 && (
+            <Box>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => void handleUploadPending()}
+                disabled={uploading}
+                startIcon={uploading ? <CircularProgress size={14} color="inherit" /> : undefined}
+              >
+                {uploading ? "Uploading…" : `Upload ${pending.length} file(s)`}
+              </Button>
+            </Box>
+          )}
+        </Box>
+      )}
 
       {isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
@@ -276,20 +280,24 @@ export default function DeploymentAttachmentsPanel({
                 )}
               </Box>
               <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
-                <Tooltip title="Edit">
-                  <IconButton size="small" aria-label={`Edit ${a.name}`} onClick={() => openEdit(a)}>
-                    <Pencil size={14} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Delete">
-                  <IconButton
-                    size="small"
-                    aria-label={`Delete ${a.name}`}
-                    onClick={() => setDeleting(a)}
-                  >
-                    <Trash2 size={14} />
-                  </IconButton>
-                </Tooltip>
+                {canWrite && (
+                  <Tooltip title="Edit">
+                    <IconButton size="small" aria-label={`Edit ${a.name}`} onClick={() => openEdit(a)}>
+                      <Pencil size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {canWrite && (
+                  <Tooltip title="Delete">
+                    <IconButton
+                      size="small"
+                      aria-label={`Delete ${a.name}`}
+                      onClick={() => setDeleting(a)}
+                    >
+                      <Trash2 size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
                 <Tooltip title="Download">
                   <IconButton
                     size="small"

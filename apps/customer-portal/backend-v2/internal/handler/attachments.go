@@ -58,7 +58,7 @@ func (h *AttachmentHandler) CreateAttachment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	body, ok := readJSONBody(w, r)
+	body, ok := readJSONBodyWithLimit(w, r, maxAttachmentBodyBytes)
 	if !ok {
 		return
 	}

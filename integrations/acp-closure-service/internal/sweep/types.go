@@ -47,6 +47,17 @@ type project struct {
 	// was caught). Trust the wire over the spec if they disagree again.
 	ProjectKey string             `json:"key"`
 	Account    *projectAccountRef `json:"account"`
+	// SfID is the project's Salesforce record ID (e.g. "a0dE200000E7CxNIAV"),
+	// confirmed present on a real GetProject response. Used to render the
+	// internal notice's "Project Name" field as a hyperlink to
+	// https://wso2.my.salesforce.com/{SfID} — Salesforce's generic
+	// record-redirect URL, which resolves to the record regardless of
+	// object type — confirmed against a real reference email
+	// (local-docs/actual_0_days_invoice_email.html), where every internal
+	// notice's Project Name value links exactly that way. Nullable: a
+	// project genuinely without a synced Salesforce record has no value
+	// here, and the notice then falls back to plain (unlinked) text.
+	SfID *string `json:"sfId"`
 	// StartDate is nil only when genuinely absent on the wire — mirrors
 	// EndDate's existing nullable-pointer convention.
 	StartDate *time.Time `json:"startDate"`
@@ -63,17 +74,30 @@ type project struct {
 	// that this can progress past "Suspended" to "Closed" via a process
 	// outside this component — suspend()'s guard treats any non-"Open"
 	// value as already handled, not just an exact "Suspended" match.
-	EndDateClosureState    *string         `json:"endDateClosureState"`
-	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
+	EndDateClosureState *string `json:"endDateClosureState"`
+	// InvoiceDueDateClosureState is the invoice cascade's own per-dimension
+	// state, mirroring EndDateClosureState exactly but for the invoice
+	// closure reason — suspendInvoice() writes/reads this, never
+	// EndDateClosureState.
+	InvoiceDueDateClosureState *string         `json:"invoiceDueDateClosureState"`
+	SuspensionProcessState     json.RawMessage `json:"suspensionProcessState"`
 }
 
 // projectAccountRef is the nested account reference on both GetProject's and
 // SearchProjects's response shapes. id and name are used (name for the
 // notice subject line); the upstream shape carries more (activationDate,
-// tier, region, ...) that this component doesn't need.
+// tier, region, ...) that this component doesn't need — except IsPartner
+// (Phase 2), confirmed present here via direct Postman testing. Nullable:
+// absent on any account this field predates, per the same "ServiceNow can
+// omit any of these" convention Opportunity/Invoice document explicitly.
+// hasPrimaryPartner is deliberately NOT here — confirmed via Postman that
+// it's only present on GetAccount's full response, not this shortened
+// summary, so resolving it needs a separate GetAccount call (see
+// resolveHasPrimaryPartner).
 type projectAccountRef struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	IsPartner *bool  `json:"isPartner"`
 }
 
 // accountID returns the project's account ID, or "" if the project
@@ -128,11 +152,86 @@ type personRefDTO struct {
 // TechnicalOwner and RenewalAccountManager are confirmed present on the real
 // response (verified directly against the live API) alongside
 // AccountManager; all three now feed the notice-content redesign's
-// Recipients (see sweep.go's resolveAccountContacts).
+// Recipients (see sweep.go's resolveAccountContacts). HasPrimaryPartner
+// (Phase 2) is confirmed present here via direct Postman testing — nullable,
+// per the same absent-field convention as IsPartner above.
 type accountDTO struct {
 	AccountManager        *personRefDTO `json:"accountManager"`
 	TechnicalOwner        *personRefDTO `json:"technicalOwner"`
 	RenewalAccountManager *personRefDTO `json:"renewalAccountManager"`
+	HasPrimaryPartner     *bool         `json:"hasPrimaryPartner"`
+}
+
+// entityRefDTO mirrors csm-integration-service's EntityRef shape — a
+// minimal {id, name} reference to another entity, used on Opportunity
+// (account), Invoice (opportunity), and ProjectOpportunityLink (project,
+// opportunity).
+type entityRefDTO struct {
+	ID   string  `json:"id"`
+	Name *string `json:"name"`
+}
+
+// opportunityDTO mirrors csm-integration-service's Opportunity schema.
+// Sourced from ServiceNow's Salesforce-sync data; every field but ID is
+// nullable — confirmed via real search results that EulaVersion (the text
+// field) is null even on normal, active opportunities where
+// EulaVersionDecimal is populated fine. EulaVersion is still what the
+// legacy eligibility check (non-null, not "Customer contract") reads —
+// EulaVersionDecimal is what DecideInvoice's actual math needs.
+type opportunityDTO struct {
+	ID                 string        `json:"id"`
+	Name               *string       `json:"name"`
+	Account            *entityRefDTO `json:"account"`
+	EulaVersion        *string       `json:"eulaVersion"`
+	EulaVersionDecimal *string       `json:"eulaVersionDecimal"`
+}
+
+type searchOpportunitiesResponse struct {
+	Opportunities []opportunityDTO `json:"opportunities"`
+	Total         int              `json:"total"`
+	Limit         int              `json:"limit"`
+	Offset        int              `json:"offset"`
+	HasMore       bool             `json:"hasMore"`
+}
+
+// invoiceDTO mirrors csm-integration-service's Invoice schema. Every field
+// but ID is nullable. InvoicedDueDate/InvoiceDate are date-only strings
+// ("2026-09-01"), not full timestamps like project.StartDate/EndDate —
+// parse with parseInvoiceDate, not time.Parse(time.RFC3339, ...).
+type invoiceDTO struct {
+	ID               string        `json:"id"`
+	Name             *string       `json:"name"`
+	InvoicedAmount   *string       `json:"invoicedAmount"`
+	InvoiceDate      *string       `json:"invoiceDate"`
+	InvoicedPaidDate *string       `json:"invoicedPaidDate"`
+	InvoicedDueDate  *string       `json:"invoicedDueDate"`
+	Opportunity      *entityRefDTO `json:"opportunity"`
+	Classification   *string       `json:"classification"`
+}
+
+type searchInvoicesResponse struct {
+	Invoices []invoiceDTO `json:"invoices"`
+	Total    int          `json:"total"`
+	Limit    int          `json:"limit"`
+	Offset   int          `json:"offset"`
+	HasMore  bool         `json:"hasMore"`
+}
+
+// projectOpportunityLinkDTO mirrors csm-integration-service's
+// ProjectOpportunityLink schema — one row per project/opportunity pair, a
+// project can link to more than one opportunity.
+type projectOpportunityLinkDTO struct {
+	ID          string        `json:"id"`
+	Project     *entityRefDTO `json:"project"`
+	Opportunity *entityRefDTO `json:"opportunity"`
+}
+
+type searchProjectOpportunityLinksResponse struct {
+	Links   []projectOpportunityLinkDTO `json:"links"`
+	Total   int                         `json:"total"`
+	Limit   int                         `json:"limit"`
+	Offset  int                         `json:"offset"`
+	HasMore bool                        `json:"hasMore"`
 }
 
 // entityReader is the minimal read surface processProject needs. Satisfied
@@ -141,6 +240,11 @@ type entityReader interface {
 	SearchAccountContacts(ctx context.Context, accountID string, body []byte) ([]byte, error)
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
 	GetAccount(ctx context.Context, id string) ([]byte, error)
+	// SearchProjectOpportunityLinks/SearchInvoices/GetOpportunity back
+	// resolveDueInvoice (Phase 2's invoice-based closure).
+	SearchProjectOpportunityLinks(ctx context.Context, body []byte) ([]byte, error)
+	SearchInvoices(ctx context.Context, body []byte) ([]byte, error)
+	GetOpportunity(ctx context.Context, id string) ([]byte, error)
 }
 
 // sweepReader is everything Run needs: entityReader plus SearchProjects and
@@ -171,6 +275,24 @@ type searchProjectsRequest struct {
 	ClosureStatus string     `json:"closureStatus"`
 	SortBy        string     `json:"sortBy"`
 	SortOrder     string     `json:"sortOrder"`
+}
+
+// searchProjectOpportunityLinksRequest mirrors the fields of
+// csm-integration-service's SearchProjectOpportunityLinksRequest this
+// component uses — used by fetchAllProjectOpportunityLinks to page through
+// every link for a project rather than reading only the first page.
+type searchProjectOpportunityLinksRequest struct {
+	Pagination pagination `json:"pagination"`
+	ProjectID  string     `json:"projectId"`
+}
+
+// searchInvoicesRequest mirrors the fields of csm-integration-service's
+// SearchInvoicesRequest this component uses — used by
+// fetchAllInvoicesForOpportunity to page through every invoice for an
+// opportunity rather than reading only the first page.
+type searchInvoicesRequest struct {
+	Pagination    pagination `json:"pagination"`
+	OpportunityID string     `json:"opportunityId"`
 }
 
 // Result summarizes one full Run: how many projects were evaluated, how

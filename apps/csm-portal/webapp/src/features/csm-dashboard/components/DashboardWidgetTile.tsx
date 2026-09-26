@@ -47,6 +47,10 @@ import {
   resolveCurrentUserPlaceholder,
 } from "@features/csm-dashboard/utils/currentUserFilterPlaceholder";
 import { resolveWidgetText } from "@features/csm-dashboard/utils/widgetTextPlaceholder";
+import {
+  denseWidgetIconSx,
+  denseWidgetLabelSx,
+} from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
 
@@ -184,6 +188,17 @@ interface DashboardWidgetTileProps {
    * widget or another — was previously expanded), or `null` to collapse
    * (clicking the already-expanded slice again). */
   onExpandChange?: (slice: PieSliceResult | null) => void;
+  /** Set by `DashboardWidgetGrid` when this tile's own section is "dense"
+   * (see `isDenseSection`) — every widget in it is `shape: "count"`, so the
+   * whole section renders through the denser `auto-fill` grid track list
+   * instead of the `gridWidth`-proportional one (see `denseWidgetGridSx`).
+   * Only the `shape === "count"` branch below reads this: it tightens that
+   * branch's own padding/icon/number sizing (all `xl`-breakpoint-gated, so
+   * it only actually shrinks anything on a wide-enough screen) to fit
+   * meaningfully more tiles per row/column at that density. A no-op for
+   * every other shape, and a no-op for shape "count" below `xl` — this
+   * never changes what a laptop-width viewer sees. */
+  dense?: boolean;
 }
 
 /**
@@ -239,6 +254,7 @@ function DashboardWidgetTile({
   inlineLabels,
   expandedSlice = null,
   onExpandChange,
+  dense = false,
 }: DashboardWidgetTileProps): JSX.Element {
   const theme = useTheme();
   const navigate = useNavigate();
@@ -269,11 +285,12 @@ function DashboardWidgetTile({
   // pattern, just tracked per-widget here instead of per-section.
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | undefined>(undefined);
   // A `shape: "list"` renderer with its own "Customise columns" button
-  // (today, only `CaseWidgetList`) hands it up here via
-  // `onColumnCustomizerChange` instead of rendering it in its own row, so it
-  // can sit right next to `refreshButton` below — reported live as reading
-  // like two unrelated controls when split across two separate rows. `null`
-  // for every other resourceType, which never calls this back.
+  // (`CaseWidgetList`, or `GenericColumnList` for a `columns`-configured
+  // widget) hands it up here via `onColumnCustomizerChange` instead of
+  // rendering it in its own row, so it can sit right next to
+  // `refreshButton` below — reported live as reading like two unrelated
+  // controls when split across two separate rows. `null` for every other
+  // resourceType, which never calls this back.
   const [inlineColumnCustomizer, setInlineColumnCustomizer] = useState<ReactNode>(null);
   // Re-renders exactly when the "Last refreshed …" text below would next
   // change (adaptive shared scheduler — see RelativeTime.tsx), without
@@ -648,6 +665,8 @@ function DashboardWidgetTile({
                   isLoading={false}
                   resourceType={resourceType}
                   columns={columns ?? []}
+                  widgetId={widgetId}
+                  onColumnCustomizerChange={setInlineColumnCustomizer}
                 />
               ) : (
                 <ListRenderer
@@ -673,6 +692,7 @@ function DashboardWidgetTile({
                     // (teamFilterPlaceholder.ts's fail-open), returning
                     // every team's cases instead of the viewer's own.
                     filters: resolvePlaceholders(filters),
+                    resourceType,
                     currentUserId,
                   })}
                   size="small"
@@ -839,7 +859,7 @@ function DashboardWidgetTile({
       <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
         <Box
           sx={{
-            p: 0.75,
+            p: dense ? { xs: 0.75, xl: 0.5 } : 0.75,
             mt: 0.25,
             borderRadius: "50%",
             bgcolor: alpha(theme.palette[config.iconColor].light, 0.1),
@@ -848,12 +868,42 @@ function DashboardWidgetTile({
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
+            // The icon prop itself (`size`) can't take a responsive object
+            // the way `sx` can, so the `xl`-only shrink is `denseWidgetIconSx`
+            // (a CSS transform), not a conditional `size` value — keeping the
+            // rendered SVG's own intrinsic size at a constant 16 (below)
+            // avoids the icon looking blurry/off-center from being scaled
+            // down and back up as the viewport crosses the breakpoint.
+            ...denseWidgetIconSx(dense),
           }}
         >
           <Icon size={16} />
         </Box>
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography variant="caption" color="text.secondary" noWrap>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            // Dense (count-only-section) tiles wrap the label to (at most)
+            // two lines instead of single-line ellipsis truncation — at the
+            // `168px`-and-up dense tile widths (see `denseWidgetGridSx`), a
+            // long label like "FDE - InProgress Engagement Case" was
+            // truncating mid-word (e.g. "FDE - InProgress Engagem…"),
+            // dropping information a viewer could otherwise just read.
+            // `-webkit-line-clamp` (widely supported despite the vendor
+            // prefix — it's the only cross-browser way to cap wrapped text
+            // at N lines with a trailing ellipsis) still falls back to an
+            // ellipsis if the label genuinely doesn't fit in two lines, so
+            // this never regresses to unbounded height. Non-dense tiles (and
+            // dense tiles below the `xl` breakpoint the rest of `dense`
+            // styling is gated on) keep the original single-line `noWrap`
+            // behavior unchanged — this only turns on where the layout is
+            // actually tight enough to truncate mid-word in the first place.
+            // See `denseWidgetLabelSx`'s own doc comment for why the
+            // `noWrap`-equivalent behavior below `xl` is reproduced by hand
+            // there instead of relying on the (non-responsive) `noWrap` prop.
+            noWrap={!dense}
+            sx={denseWidgetLabelSx(dense)}
+          >
             {resolvedDisplayName}
           </Typography>
           <Typography
@@ -862,7 +912,14 @@ function DashboardWidgetTile({
               mt: 0.5,
               lineHeight: 1.1,
               fontWeight: 400,
-              fontSize: "3.25rem",
+              // Dense (count-only-section) tiles at `xl` shrink the big
+              // number considerably — that's the single biggest per-tile
+              // height lever this component has, since the label above and
+              // the icon beside it are already small. Untouched below `xl`
+              // and for any non-dense tile, so a laptop-width viewer (or a
+              // count tile that isn't part of an all-count section) sees
+              // this exact size unchanged.
+              fontSize: dense ? { xs: "3.25rem", xl: "2rem" } : "3.25rem",
               overflow: "hidden",
               textOverflow: "ellipsis",
             }}
@@ -886,7 +943,7 @@ function DashboardWidgetTile({
       variant="outlined"
       sx={{
         position: "relative",
-        p: 1.75,
+        p: dense ? { xs: 1.75, xl: 1 } : 1.75,
         height: "100%",
         ...cardRefreshRevealSx,
       }}

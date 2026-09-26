@@ -85,6 +85,18 @@ type ConflictError struct {
 // Error implements the error interface.
 func (e *ConflictError) Error() string { return e.Msg }
 
+// TooManyRequestsError signals that the caller is repeating an operation
+// faster than its own cooldown allows and should be reported as HTTP 429. It
+// is a caller-pacing decision this service makes deliberately (e.g. the
+// invitation-resend cooldown), never a downstream rate limit passed through,
+// so Msg is safe to return: it is meant to tell the caller how long to wait.
+type TooManyRequestsError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *TooManyRequestsError) Error() string { return e.Msg }
+
 // DownstreamError signals that a downstream dependency rejected the request
 // with a status this service does not map to a more specific code, but that it
 // supplied a reason worth returning. It is reported as HTTP 500 — the status is

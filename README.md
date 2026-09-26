@@ -15,9 +15,10 @@ cs-tools/
 │   └── customer-portal/     # Customer Portal (Ballerina backend + React webapp + React microapp)
 ├── entity-service/          # Shared entity service
 └── integrations/
-    ├── acp-closure-service/     # Go CLI: Account Closure Process, Phase 1 (subscription end-date closure)
-    ├── csm-integration-service/ # Go M2M service for third-party account/project search
-    └── customer-service/        # Customer operations related integration Ballerina service
+    ├── acp-closure-service/         # Go CLI: Account Closure Process, Phase 1 (subscription end-date closure)
+    ├── csm-integration-service/     # Go M2M service for third-party account/project search
+    ├── customer-service/            # Customer operations related integration Ballerina service
+    └── sre-alert-ingestion-service/ # Go service: buffers/retries/escalates monitoring alerts into CSM incidents
 ```
 
 ## Components
@@ -86,6 +87,19 @@ A Go REST service that exposes customer data to third-party (M2M) consumers, bac
 | Upstream | Entity Service (OAuth2 client credentials) |
 
 See the [CSM Integration Service README](./integrations/csm-integration-service/README.md) for full setup and usage documentation.
+
+### SRE Alert Ingestion Service (`integrations/sre-alert-ingestion-service/`)
+
+A Go service that ingests alerts from external monitoring/alerting tools and turns each into a platform incident via the CSM Integration Service. Every accepted alert is durably buffered in its own dedicated Postgres database before any delivery attempt, retried with backoff on failure, and escalated via Twilio/Google Chat/email if delivery keeps failing — so this service is never a single point of failure on the platform's own availability. Deployed with no gateway/ingress auth layer in front of it, so it authenticates every inbound request itself via HTTP Basic Auth.
+
+| Layer | Technology |
+|-------|------------|
+| Language | Go |
+| Framework | `net/http` (standard library) |
+| Database | PostgreSQL (dedicated, never CSM's own database) |
+| Upstream | CSM Integration Service (OAuth2 client credentials) |
+
+See the [SRE Alert Ingestion Service README](./integrations/sre-alert-ingestion-service/README.md) for full setup and usage documentation.
 
 ## GitHub Actions
 

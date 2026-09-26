@@ -18,10 +18,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -33,6 +38,18 @@ type DeploymentRepository interface {
 	// views together with the total count of matching rows before pagination.
 	// COUNT and SELECT are executed concurrently on separate pool connections.
 	SearchDeployments(ctx context.Context, req domain.SearchDeploymentsRequest) ([]domain.DeploymentView, int, error)
+	// CreateDeploymentFromServiceNow inserts a deployment row using identity
+	// (id/number) ServiceNow has already assigned -- see
+	// deploymentService.createDeploymentSNFirst's own doc comment for why:
+	// deployment.number is NOT NULL UNIQUE and Postgres has no generator for
+	// it, the same unresolved problem case.number had before
+	// CreateCaseFromServiceNow.
+	CreateDeploymentFromServiceNow(ctx context.Context, req domain.CreateDeploymentRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployment, error)
+	// UpdateDeploymentFields applies a Postgres-side update for the same
+	// field group UpdateDeploymentRequest itself enforces (detail fields XOR
+	// Active=false) -- called on the DUAL_WRITE data source's Postgres-first
+	// leg; the ServiceNow mirror runs separately and asynchronously.
+	UpdateDeploymentFields(ctx context.Context, req domain.UpdateDeploymentRequest, updatedBy string) (domain.UpdatedDeployment, error)
 }
 
 type deploymentRepo struct {
@@ -57,7 +74,16 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 	// EntityRef, so switching the join to LEFT instead isn't a safe
 	// alternative -- that would need a response-contract change (a nullable
 	// Project field) and nullable scan handling, not just a query fix.
-	where := "WHERE d.project_id IS NOT NULL"
+	// is_active = TRUE: "deleting" a deployment (PATCH .../deployments/{id}
+	// {"active": false}) deactivates it, it is never actually removed --
+	// see UpdateDeploymentFields. SearchDeploymentsRequest has no
+	// include-inactive filter in its wire contract at all (nor does the
+	// ServiceNow-backed search expose one), so a deactivated deployment must
+	// simply stop appearing here, permanently, the same as ServiceNow's own
+	// listing already does for a deactivated record. Without this, "delete"
+	// silently updated is_active in Postgres but the deployment kept
+	// appearing in every search result exactly as before.
+	where := "WHERE d.project_id IS NOT NULL AND d.is_active = TRUE"
 
 	if len(req.ProjectIDs) > 0 {
 		// Cast the parameter to uuid[] so the column stays uncast and idx_deployments_project_id is usable.
@@ -134,15 +160,33 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 		result := make([]domain.DeploymentView, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var d domain.DeploymentView
+			var deploymentType *string
 			var creatorID, creatorName *string
 			if err := rows.Scan(
-				&d.ID, &d.Number, &d.Name, &d.Type, &d.Description,
+				&d.ID, &d.Number, &d.Name, &deploymentType, &d.Description,
 				&d.CreatedOn, &d.UpdatedOn,
 				&creatorID, &creatorName,
 				&d.Project.ID, &d.Project.Name,
 			); err != nil {
 				return fmt.Errorf("scan deployment: %w", err)
 			}
+			// deployment.type (migration 000013) has no NOT NULL constraint --
+			// 38 of 2859 rows are NULL on staging, checked live -- but
+			// DeploymentView.Type is a required (non-pointer) field on the
+			// wire, matching the OpenAPI contract every consumer already
+			// expects. Same "keep the wire type required, fix the scan side
+			// only" precedent as CaseView.InternalID (see this file's own
+			// history for why a pointer wire type isn't the answer here
+			// either): default to "" rather than crashing the whole search.
+			//
+			// ToLower: deployment_type_enum's Postgres labels are UPPER_SNAKE
+			// ("STAGING"), but domain.DeploymentType's canonical form is
+			// lowercase (domain/entity.go's DeploymentTypeStaging = "staging"
+			// etc.) -- without this, every DeploymentView.Type read back from
+			// Postgres carried the wrong case, which backend-v2's
+			// deploymentTypeRef (keyed lowercase) would silently fail to
+			// resolve to a numeric id for.
+			d.Type = domain.DeploymentType(strings.ToLower(stringOrEmpty(deploymentType)))
 			if creatorID != nil {
 				name := ""
 				if creatorName != nil {
@@ -164,4 +208,95 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 	}
 
 	return deployments, total, nil
+}
+
+const createDeploymentFromServiceNowQuery = `
+	INSERT INTO deployment (
+		id, created_on, updated_on, created_by, updated_by,
+		number, name, description, type, is_active, project_id
+	)
+	VALUES (
+		$1, $2, $2, $3, $3,
+		$4, $5, NULLIF($6, ''), $7::deployment_type_enum, TRUE, $8
+	)
+	RETURNING id, created_on, created_by`
+
+// CreateDeploymentFromServiceNow implements DeploymentRepository.
+func (r *deploymentRepo) CreateDeploymentFromServiceNow(ctx context.Context, req domain.CreateDeploymentRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployment, error) {
+	// deployment_type_enum's Postgres labels are UPPER_SNAKE ("STAGING"), but
+	// domain.DeploymentType's canonical form is lowercase ("staging",
+	// domain/entity.go's DeploymentTypeStaging etc.) -- ToUpper before the
+	// cast, same convention case_repo.go's own inserts follow for every
+	// domain enum they write (e.g. strings.ToUpper(string(req.IssueType))).
+	var deploymentType string
+	if req.Type != nil {
+		deploymentType = strings.ToUpper(string(*req.Type))
+	}
+
+	var created domain.CreatedDeployment
+	err := r.db.QueryRow(ctx, createDeploymentFromServiceNowQuery,
+		id, createdOn, createdBy,
+		number, req.Name, req.Description, deploymentType, req.ProjectID,
+	).Scan(&created.ID, &created.CreatedOn, &created.CreatedBy)
+	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505": // unique_violation -- number or id already exists
+				return domain.CreatedDeployment{}, &apierror.ValidationError{Msg: "a deployment with this identity already exists"}
+			case "23503": // foreign_key_violation -- project_id does not exist
+				return domain.CreatedDeployment{}, &apierror.ValidationError{Msg: "projectId does not exist"}
+			}
+		}
+		return domain.CreatedDeployment{}, fmt.Errorf("create deployment from servicenow: %w", err)
+	}
+	return created, nil
+}
+
+const updateDeploymentFieldsQuery = `
+	UPDATE deployment SET
+		updated_on = NOW(), updated_by = $2,
+		name = COALESCE($3, name),
+		type = COALESCE($4::deployment_type_enum, type),
+		description = CASE WHEN $5 THEN $6 ELSE description END,
+		is_active = COALESCE($7, is_active)
+	WHERE id = $1
+	RETURNING id, updated_on, updated_by`
+
+// UpdateDeploymentFields implements DeploymentRepository.
+//
+// req.Description is **string -- nil means "not provided" (COALESCE keeps
+// the existing value via the CASE below, matching every other field here),
+// a non-nil pointer to nil means "clear it" ($6 bound as NULL with
+// descriptionProvided true), and a pointer to a value means "set it". A
+// plain COALESCE($6, description) cannot distinguish "not provided" from
+// "explicitly clear" -- the CASE/boolean-flag pair is what does.
+func (r *deploymentRepo) UpdateDeploymentFields(ctx context.Context, req domain.UpdateDeploymentRequest, updatedBy string) (domain.UpdatedDeployment, error) {
+	// See CreateDeploymentFromServiceNow's identical comment: deployment_type_enum
+	// is UPPER_SNAKE in Postgres, domain.DeploymentType is lowercase.
+	var deploymentType *string
+	if req.Type != nil {
+		t := strings.ToUpper(string(*req.Type))
+		deploymentType = &t
+	}
+
+	descriptionProvided := req.Description != nil
+	var description *string
+	if descriptionProvided {
+		description = *req.Description
+	}
+
+	var updated domain.UpdatedDeployment
+	err := r.db.QueryRow(ctx, updateDeploymentFieldsQuery,
+		req.ID, updatedBy,
+		req.Name, deploymentType,
+		descriptionProvided, description,
+		req.Active,
+	).Scan(&updated.ID, &updated.UpdatedOn, &updated.UpdatedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.UpdatedDeployment{}, &apierror.NotFoundError{Msg: "deployment not found"}
+	}
+	if err != nil {
+		return domain.UpdatedDeployment{}, fmt.Errorf("update deployment fields: %w", err)
+	}
+	return updated, nil
 }

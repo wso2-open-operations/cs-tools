@@ -29,6 +29,7 @@ import {
   visibleNavChildren,
   visibleNavSections,
 } from "@config/featureFlags";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 /** Tooltip for a disabled WIP item. Includes the label so the collapsed rail
@@ -111,6 +112,7 @@ export default function CsmSideBar({
   onSelect,
   onToggleExpand,
 }: CsmSideBarProps): JSX.Element {
+  const access = usePortalAccess();
   const location = useLocation();
   const navigate = useNavTransition();
   const activeItem = pickActiveId(location.pathname);
@@ -185,7 +187,7 @@ export default function CsmSideBar({
         <Sidebar.Category>
           {/* `hidden` sections are filtered out entirely; `wip` ones stay
               rendered but disabled below. */}
-          {visibleNavSections().map((item) => {
+          {visibleNavSections(access).map((item) => {
             const itemContent = (
               <Sidebar.Item id={item.id}>
                 <Sidebar.ItemIcon>
@@ -233,7 +235,7 @@ export default function CsmSideBar({
             // children (below) navigate. A section whose config has hidden
             // every one of its children falls through to the plain flat item
             // instead of rendering an entry with nothing to expand.
-            const children = isSubmenuSection(item) ? visibleNavChildren(item) : [];
+            const children = isSubmenuSection(item) ? visibleNavChildren(item, access) : [];
             if (children.length > 0) {
               return (
                 <Sidebar.Item id={item.id} key={item.id}>

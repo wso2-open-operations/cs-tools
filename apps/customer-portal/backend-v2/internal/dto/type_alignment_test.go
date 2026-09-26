@@ -110,9 +110,12 @@ func TestCrStateRef_KnownAndUnknownValues(t *testing.T) {
 // previously decoded straight into entity.SearchConversationsRequest, whose
 // field names never matched the frontend's body at all).
 func TestBuildEntitySearchConversationsRequest_ScopesProjectAndTranslatesStateKeys(t *testing.T) {
-	got := BuildEntitySearchConversationsRequest("proj-3", ConversationSearchRequest{
+	got, err := BuildEntitySearchConversationsRequest("proj-3", ConversationSearchRequest{
 		Filters: ConversationSearchFilters{StateKeys: []int{2}, CreatedByMe: true}, // ACTIVE
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(got.Filters.ProjectIDs) != 1 || got.Filters.ProjectIDs[0] != "proj-3" {
 		t.Fatalf("ProjectIDs = %v, want [proj-3]", got.Filters.ProjectIDs)
 	}

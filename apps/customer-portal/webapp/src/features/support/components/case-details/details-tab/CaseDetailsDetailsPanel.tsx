@@ -59,7 +59,7 @@ import CaseEscalationLevelsCard from "@case-details-details/CaseEscalationLevels
 import ApiErrorState from "@components/error/ApiErrorState";
 import {
   formatValue,
-  formatUtcToLocal,
+  formatUtcToLocalNoTimezone,
   formatDateOnly,
   getAssignedEngineerLabel,
   getStatusColor,
@@ -576,7 +576,7 @@ export default function CaseDetailsDetailsPanel({
                   aria-hidden
                 />
                 <Typography {...valueSx}>
-                  {formatUtcToLocal(data?.closedOn)}
+                  {formatUtcToLocalNoTimezone(data?.closedOn)}
                 </Typography>
               </Stack>
             </Box>
@@ -633,7 +633,7 @@ export default function CaseDetailsDetailsPanel({
             )}
             <Divider sx={{ my: 0.5 }} />
             <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-              Submitted by {feedback.createdBy} on {formatUtcToLocal(feedback.createdOn)}
+              Submitted by {feedback.createdBy} on {formatUtcToLocalNoTimezone(feedback.createdOn)}
             </Typography>
           </Stack>
         </CaseDetailsCard>

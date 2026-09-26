@@ -19,10 +19,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
-const { postMock, getBlobMock, sftpgoFlag } = vi.hoisted(() => ({
+const { postMock, getBlobMock, sftpgoFlag, userRoles } = vi.hoisted(() => ({
   postMock: vi.fn(),
   getBlobMock: vi.fn(),
   sftpgoFlag: { enabled: false },
+  // Defaults to a role that can download attachments, so the existing
+  // resolution tests below exercise the real fetch/data-URL path; the
+  // permission tests further down override this per-case.
+  userRoles: { value: ["cs_engineer"] as string[] },
 }));
 
 vi.mock("@api/backend/client", () => ({
@@ -31,7 +35,10 @@ vi.mock("@api/backend/client", () => ({
 
 vi.mock("@context/current-user/CurrentUserContext", () => ({
   useCurrentUser: () => ({
-    user: { sftpgoAttachmentStorageEnabled: sftpgoFlag.enabled },
+    user: {
+      sftpgoAttachmentStorageEnabled: sftpgoFlag.enabled,
+      roles: userRoles.value,
+    },
     isLoading: false,
     isError: false,
   }),
@@ -56,6 +63,7 @@ describe("useResolvedInlineImageHtml", () => {
     postMock.mockReset();
     getBlobMock.mockReset();
     sftpgoFlag.enabled = false;
+    userRoles.value = ["cs_engineer"];
   });
 
   it("flag off: resolves via GET /attachments/{id}/content into a data: URL", async () => {
@@ -106,5 +114,35 @@ describe("useResolvedInlineImageHtml", () => {
     expect(postMock).not.toHaveBeenCalled();
     expect(getBlobMock).not.toHaveBeenCalled();
     expect(result.current.isLoading).toBe(false);
+  });
+
+  it("without the attachment-download role, never fetches and shows a permission placeholder", async () => {
+    userRoles.value = ["viewer"];
+
+    const { result } = renderHook(() => useResolvedInlineImageHtml(HTML), {
+      wrapper,
+    });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(postMock).not.toHaveBeenCalled();
+    expect(getBlobMock).not.toHaveBeenCalled();
+    expect(result.current.resolvedHtml).not.toContain("<img");
+    expect(result.current.resolvedHtml).toContain('data-unresolved-reason="permission"');
+    expect(result.current.resolvedHtml).toContain(
+      "You don't have permission to view this image",
+    );
+  });
+
+  it("the attachment-downloader role alone is enough to resolve images", async () => {
+    userRoles.value = ["attachment_downloader"];
+    getBlobMock.mockResolvedValue(new Blob(["fake"], { type: "image/png" }));
+
+    const { result } = renderHook(() => useResolvedInlineImageHtml(HTML), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(getBlobMock).toHaveBeenCalledTimes(1);
+    expect(result.current.resolvedHtml).toContain("data:image/png;base64,");
   });
 });

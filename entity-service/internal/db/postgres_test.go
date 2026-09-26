@@ -22,19 +22,38 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
-func TestNewPoolIfNeeded_ServiceNowSkipsPool(t *testing.T) {
+// TestNewPoolIfNeeded_ServiceNowWithNoDBUserSkipsPool covers the one case
+// NewPoolIfNeeded must still skip: a local SN-mode setup with no Postgres
+// provisioned at all (DB credentials absent) starts without a reachable database,
+// regardless of DataSource.
+func TestNewPoolIfNeeded_ServiceNowWithNoDBUserSkipsPool(t *testing.T) {
 	pool, err := NewPoolIfNeeded(&config.Config{
 		DataSource: config.DataSourceServiceNow,
-		DBHost:     "db-that-must-not-be-dialed.example",
-		DBPort:     "5432",
-		DBUser:     "user",
-		DBPassword: "password",
-		DBName:     "db",
 	})
 	if err != nil {
 		t.Fatalf("NewPoolIfNeeded() = %v, want nil", err)
 	}
 	if pool != nil {
-		t.Fatal("NewPoolIfNeeded() returned a pool for DATA_SOURCE=servicenow")
+		t.Fatal("NewPoolIfNeeded() returned a pool with no DB credentials configured")
+	}
+}
+
+// TestNewPoolIfNeeded_ServiceNowWithDBUserAttemptsPool is the regression
+// test for the actual bug: gating purely on DataSource left every
+// Postgres-only side table (alert_incident_mapping et al.) 404ing in any
+// SN-mode deployment that DID have Postgres configured. Confirms the gate
+// is DB credentials, not DataSource — a real connection attempt fires (and fails,
+// since this host doesn't exist) rather than short-circuiting to (nil, nil).
+func TestNewPoolIfNeeded_ServiceNowWithDBUserAttemptsPool(t *testing.T) {
+	_, err := NewPoolIfNeeded(&config.Config{
+		DataSource: config.DataSourceServiceNow,
+		DBHost:     "db-that-does-not-exist.invalid",
+		DBPort:     "5432",
+		DBUser:     "user",
+		DBPassword: "password",
+		DBName:     "db",
+	})
+	if err == nil {
+		t.Fatal("NewPoolIfNeeded() = nil error, want a dial failure — pool creation was not attempted")
 	}
 }

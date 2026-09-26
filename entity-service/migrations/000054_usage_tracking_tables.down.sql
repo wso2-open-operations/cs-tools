@@ -17,10 +17,9 @@
 -- Children before the dimension they reference; the enum last, once the only
 -- column using it is gone. Indexes go with their tables.
 DROP TABLE IF EXISTS product_usage_map;
-DROP TABLE IF EXISTS project_daily_summary;
-DROP TABLE IF EXISTS monthly_usage_count;
+DROP TABLE IF EXISTS monthly_usage_summary;
 DROP TABLE IF EXISTS daily_usage_summary;
-DROP TABLE IF EXISTS usage_count;
+DROP TABLE IF EXISTS hourly_usage_summary;
 DROP TABLE IF EXISTS deployment_information;
 DROP TABLE IF EXISTS deployment_node;
 

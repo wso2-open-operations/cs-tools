@@ -19,9 +19,7 @@
 CREATE TABLE IF NOT EXISTS work_item_activity (
     id UUID PRIMARY KEY,
     created_on TIMESTAMPTZ NOT NULL,
-    updated_on TIMESTAMPTZ NOT NULL,
     created_by VARCHAR(255) NOT NULL,
-    updated_by VARCHAR(255) NOT NULL,
     work_item_id UUID NOT NULL REFERENCES work_item(id) ON DELETE CASCADE,
     field_name VARCHAR(255),
     old_value VARCHAR(255),

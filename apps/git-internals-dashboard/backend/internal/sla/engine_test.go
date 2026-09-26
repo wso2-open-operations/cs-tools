@@ -411,11 +411,11 @@ func TestWithCurrentStatusBoundaryIgnoresFutureDatedLastEvent(t *testing.T) {
 
 // TestWithCurrentStatusBoundaryFutureLastEventAgreeingWithCurrentStatusStillGetsBoundary
 // covers the agreement-case variant: the (unfiltered) last event is
-// future-dated and its status equals currentStatus. Before the fix, matching
-// on the unfiltered last event short-circuited to "no boundary needed",
-// silently losing the pause at currentStatusAt once ComputeSla dropped the
-// future event on its own filter. The boundary must instead be derived from
-// currentStatusAt.
+// future-dated and its status equals currentStatus. Matching on that
+// unfiltered last event would short-circuit to "no boundary needed",
+// silently losing the pause at currentStatusAt once ComputeSla drops the
+// future event on its own filter, so the boundary must instead be derived
+// from currentStatusAt.
 func TestWithCurrentStatusBoundaryFutureLastEventAgreeingWithCurrentStatusStillGetsBoundary(t *testing.T) {
 	now := at(10)
 	events := []StatusEvent{

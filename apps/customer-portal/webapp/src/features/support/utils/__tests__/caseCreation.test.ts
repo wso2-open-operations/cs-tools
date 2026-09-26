@@ -27,6 +27,8 @@ import {
   isUnknownPlaceholderProductLabel,
   getBaseDeploymentOptions,
   formatChatHistoryForClassification,
+  isDeploymentDropdownEmpty,
+  isProductDropdownEmpty,
 } from "@features/support/utils/caseCreation";
 import { ChatSender } from "@features/support/types/conversations";
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
@@ -452,6 +454,44 @@ describe("caseCreation utils", () => {
 
     it("returns empty array for undefined", () => {
       expect(getBaseDeploymentOptions(undefined)).toEqual([]);
+    });
+  });
+
+  describe("isDeploymentDropdownEmpty", () => {
+    it("is true when loaded, disabled=false, and there are zero options", () => {
+      expect(isDeploymentDropdownEmpty([], false, false)).toBe(true);
+    });
+
+    it("is false while still loading", () => {
+      expect(isDeploymentDropdownEmpty([], true, false)).toBe(false);
+    });
+
+    it("is false when options are present", () => {
+      expect(isDeploymentDropdownEmpty(["Production"], false, false)).toBe(
+        false,
+      );
+    });
+
+    it("is false when the field is intentionally disabled", () => {
+      expect(isDeploymentDropdownEmpty([], false, true)).toBe(false);
+    });
+  });
+
+  describe("isProductDropdownEmpty", () => {
+    it("is true when not disabled, not loading, and there are no product options", () => {
+      expect(isProductDropdownEmpty(false, false, false)).toBe(true);
+    });
+
+    it("is false while still loading", () => {
+      expect(isProductDropdownEmpty(false, false, true)).toBe(false);
+    });
+
+    it("is false when the dropdown is disabled (e.g. no deployment selected yet)", () => {
+      expect(isProductDropdownEmpty(false, true, false)).toBe(false);
+    });
+
+    it("is false when product options are present", () => {
+      expect(isProductDropdownEmpty(true, false, false)).toBe(false);
     });
   });
 });

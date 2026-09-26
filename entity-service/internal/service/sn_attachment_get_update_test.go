@@ -66,7 +66,7 @@ func TestSNCaseService_GetAttachmentByID_HappyPath(t *testing.T) {
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 
 	got, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), attachmentUUID)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestSNCaseService_GetAttachmentByID_RejectsUnparseableCreatedOn(t *testing.
 		_, _ = w.Write([]byte(`{"id":"` + testAttachmentSysid + `","createdOn":"2026-01-01T00:00:00Z"}`))
 	})
 
-	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 
 	_, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), sysidToUUID(testAttachmentSysid))
 	if err == nil {
@@ -129,7 +129,7 @@ func TestSNCaseService_GetAttachment_NotFound(t *testing.T) {
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 
 	_, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), sysidToUUID(testAttachmentSysid))
 	var notFound *apierror.NotFoundError
@@ -144,7 +144,7 @@ func TestSNCaseService_GetAttachment_RejectsInvalidUUID(t *testing.T) {
 	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("unexpected call to backing service for an invalid attachment id")
 	}))
-	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 
 	_, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), "not-a-uuid")
 	var ve *apierror.ValidationError
@@ -182,7 +182,7 @@ func TestSNCaseService_UpdateAttachment_HappyPath(t *testing.T) {
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 
 	req := domain.UpdateAttachmentRequest{
 		AttachmentID:  attachmentUUID,
@@ -290,7 +290,7 @@ func TestSNCaseService_UpdateAttachment_DescriptionThreeStates(t *testing.T) {
 			})
 
 			client := newTestSNClient(t, mux)
-			svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+			svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 
 			if _, err := svc.UpdateAttachment(contextWithUserIDToken("token"), tc.req); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -319,7 +319,7 @@ func TestSNCaseService_UpdateAttachment_ValidationErrors(t *testing.T) {
 	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("unexpected call to backing service for an invalid request")
 	}))
-	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 
 	cases := []struct {
 		name string

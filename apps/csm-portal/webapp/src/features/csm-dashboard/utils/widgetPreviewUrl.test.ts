@@ -34,6 +34,7 @@ describe("widgetPreviewUrl", () => {
       widgetId: "my_critical_open",
       displayName: "My Critical & High Cases",
       filters: { severities: ["critical", "high"], states: ["open"] },
+      resourceType: "case",
     });
 
     expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
@@ -56,6 +57,7 @@ describe("widgetPreviewUrl", () => {
       widgetId: "feedback_rating_distribution",
       displayName: "Rating Distribution",
       filters: { rating: 5 },
+      resourceType: "case_feedback",
     });
 
     const params = new URLSearchParams(href.split("?")[1]);
@@ -71,6 +73,7 @@ describe("widgetPreviewUrl", () => {
       widgetId: "my_cases",
       displayName: "My Cases",
       filters: { assignedUserIds: [CURRENT_USER_ID] },
+      resourceType: "case",
       currentUserId: CURRENT_USER_ID,
     });
 
@@ -85,6 +88,7 @@ describe("widgetPreviewUrl", () => {
       widgetId: "my_cases",
       displayName: "My Cases",
       filters: { assignedUserIds: [CURRENT_USER_ID], severities: ["critical"] },
+      resourceType: "case",
       currentUserId: CURRENT_USER_ID,
     });
 
@@ -121,6 +125,7 @@ describe("widgetPreviewUrl", () => {
           { field: "state", op: "in", values: ["open"] },
         ],
       },
+      resourceType: "case",
     });
 
     const params = new URLSearchParams(href.split("?")[1]);
@@ -138,6 +143,7 @@ describe("widgetPreviewUrl", () => {
       filters: {
         filters: [{ field: "assignedUserId", op: "in", values: [CURRENT_USER_ID] }],
       },
+      resourceType: "case",
       currentUserId: CURRENT_USER_ID,
     });
 
@@ -157,6 +163,7 @@ describe("widgetPreviewUrl", () => {
           { field: "severity", op: "in", values: ["critical"] },
         ],
       },
+      resourceType: "case",
       currentUserId: CURRENT_USER_ID,
     });
 
@@ -190,6 +197,7 @@ describe("widget preview URL — filter op round-trip", () => {
       widgetId: "w1",
       displayName: "W",
       filters: { filters },
+      resourceType: "case",
     });
     const qs = href.split("?")[1] ?? "";
     return parseWidgetPreviewFilters(new URLSearchParams(qs));
@@ -213,6 +221,7 @@ describe("widget preview URL — filter op round-trip", () => {
       widgetId: "w1",
       displayName: "W",
       filters: { filters: [{ field: "state", op: "in", values: ["open"] }] },
+      resourceType: "case",
     });
     expect(href).toContain("state=open");
     expect(href).not.toContain("~");
@@ -250,6 +259,7 @@ describe("widget preview URL — anyOf round-trip", () => {
       widgetId: "w1",
       displayName: "WOW P0/P1",
       filters: { severities: ["critical"], anyOf },
+      resourceType: "case",
     });
 
     const searchParams = new URLSearchParams(href.split("?")[1]);
@@ -267,6 +277,7 @@ describe("widget preview URL — anyOf round-trip", () => {
         filters: [{ field: "state", op: "in", values: ["open"] }],
         anyOf,
       },
+      resourceType: "case",
     });
 
     const searchParams = new URLSearchParams(href.split("?")[1]);
@@ -283,6 +294,7 @@ describe("widget preview URL — anyOf round-trip", () => {
       filters: {
         anyOf: [{ filters: [{ field: "assignedUserId", op: "in", values: [CURRENT_USER_ID] }] }],
       },
+      resourceType: "case",
       currentUserId: CURRENT_USER_ID,
     });
 
@@ -398,5 +410,68 @@ describe("appendWidgetTitleParam / readWidgetTitleParam", () => {
   it("readWidgetTitleParam returns undefined when the param is absent or empty", () => {
     expect(readWidgetTitleParam(new URLSearchParams("states=open"))).toBeUndefined();
     expect(readWidgetTitleParam(new URLSearchParams(`${WIDGET_TITLE_PARAM}=`))).toBeUndefined();
+  });
+});
+
+/**
+ * Regression: a `change_request` groupBy-by-state pie slice's "View more"
+ * link (e.g. the SRE ABT dashboard's "CRs by State" widget) merges a bucket
+ * query `{ states: [key] }` under the widget's own base query, which already
+ * carries `assignmentGroupId` inside a `filters` array
+ * (`{ filters: [{field: "assignmentGroupId", op: "in", values: [...]}] }`).
+ * That `filters` array structurally matches `isCaseFieldFilterArray`
+ * (`{field, op, values}[]`) even though `change_request` isn't a case-DSL
+ * resourceType, and `states` is a genuine SIBLING field, never a member of
+ * that array (the entity-service's `SearchChangeRequestsFilters.States` is a
+ * plural top-level field, not something `ChangeRequestFieldFilter` accepts).
+ * Before this fix, `buildWidgetPreviewHref` set the whole-URL `_cf=1` marker
+ * purely off that structural match, and `parseWidgetPreviewFilters` then
+ * folded EVERY param (including the sibling `states`) into the reconstructed
+ * `filters` array — producing `{filters: [{field: "assignmentGroupId", ...},
+ * {field: "states", op: "in", values: ["scheduled"]}]}`, which the
+ * entity-service rejects with a 400 ("filters: unsupported field: states").
+ * Live-reproduced against the production API before this fix landed.
+ */
+describe("widget preview URL — non-case resourceType's own filters array (change_request)", () => {
+  it("keeps a sibling top-level field (states) out of change_request's own filters array", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "change-requests",
+      widgetId: "sre_breakdown_team_cr",
+      displayName: "CRs by State",
+      filters: {
+        states: ["scheduled"],
+        filters: [
+          { field: "assignmentGroupId", op: "in", values: ["43a1b721-4774-07d0-5878-b2c4116d43a1"] },
+        ],
+      },
+      resourceType: "change_request",
+    });
+
+    // Never the whole-URL case-DSL marker for a non-case resourceType.
+    const params = new URLSearchParams(href.split("?")[1]);
+    expect(params.get("_cf")).toBeNull();
+
+    const { filters } = parseWidgetPreviewFilters(params);
+    expect(filters.states).toEqual(["scheduled"]);
+    expect(filters.filters).toEqual([
+      { field: "assignmentGroupId", op: "in", values: ["43a1b721-4774-07d0-5878-b2c4116d43a1"] },
+    ]);
+  });
+
+  it("still round-trips a non-'in' op inside a non-case resourceType's own filters array", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "change-requests",
+      widgetId: "w1",
+      displayName: "W",
+      filters: {
+        states: ["scheduled"],
+        filters: [{ field: "approval", op: "eq", values: ["approved"] }],
+      },
+      resourceType: "change_request",
+    });
+
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
+    expect(filters.states).toEqual(["scheduled"]);
+    expect(filters.filters).toEqual([{ field: "approval", op: "eq", values: ["approved"] }]);
   });
 });

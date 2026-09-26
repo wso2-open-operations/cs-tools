@@ -74,7 +74,7 @@ describe("useWallboardTileData", () => {
     expect(result.current.linkHref).toBeTruthy();
   });
 
-  it("keeps state 'value' with the last good total through a failed background refetch, not 'error'", async () => {
+  it("keeps state 'value' with the last good total AND its link through a failed background refetch, not 'error'", async () => {
     postMock.mockResolvedValueOnce({ total: 7, incidents: [], limit: 1, offset: 0, hasMore: false });
     const { result } = renderHook(() => useWallboardTileData(baseInput), {
       wrapper: ({ children }) => {
@@ -89,6 +89,11 @@ describe("useWallboardTileData", () => {
     // derivation, which is already exercised — the cached total stays.
     expect(result.current.state).toBe("value");
     expect(result.current.total).toBe(7);
+    // Regression test (CodeRabbit): `linkable` must key off the derived
+    // `state`, not `isError` directly — a tile still showing a real, cached
+    // number during a transient refetch failure must stay clickable, not
+    // silently lose its link the moment any background fetch errors.
+    expect(result.current.linkHref).toBeTruthy();
   });
 
   it("reports state 'error' only when the fetch fails with nothing cached", async () => {

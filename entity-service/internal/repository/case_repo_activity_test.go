@@ -29,9 +29,13 @@ func TestCaseActivityFieldChangeLabel(t *testing.T) {
 		want      string
 	}{
 		{"severity", "Severity"},
-		{"assigned_to_id", "Assigned To Id"},
 		{"state", "State"},
 		{"", ""},
+		// Overrides: the generic space-separated-title-case rendering reads
+		// badly for these ("Assigned To Id", "Acknowledged By User Id").
+		{"assigned_to_id", "Assigned to"},
+		{"acknowledged_by_user_id", "Acknowledged by"},
+		{"parent_id", "Parent case"},
 	}
 	for _, tt := range tests {
 		if got := caseActivityFieldChangeLabel(tt.fieldName); got != tt.want {

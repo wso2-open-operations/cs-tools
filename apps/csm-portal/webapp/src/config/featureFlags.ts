@@ -43,6 +43,7 @@ import {
   navNodeForPath,
 } from "@config/csmNavItems";
 import type { ComponentType } from "react";
+import type { PortalAccess } from "@context/current-user/portalAccess";
 
 /**
  * How a page behaves in this deployment.
@@ -173,43 +174,72 @@ export function resetFeatureStatesForTests(): void {
   cachedStates = undefined;
 }
 
+let cachedRequirements: Map<string, keyof PortalAccess> | undefined;
+
+/**
+ * The {@link CsmNavNode.requires} capability that applies to each node — its
+ * own, or the nearest ancestor's, so a restricted section restricts its tabs.
+ */
+function requirements(): Map<string, keyof PortalAccess> {
+  if (!cachedRequirements) {
+    const map = new Map<string, keyof PortalAccess>();
+    const walk = (nodes: readonly CsmNavNode[], inherited?: keyof PortalAccess): void => {
+      for (const node of nodes) {
+        const need = node.requires ?? inherited;
+        if (need) map.set(node.id, need);
+        if (node.children?.length) walk(node.children, need);
+      }
+    };
+    walk(CSM_NAV_ITEMS);
+    cachedRequirements = map;
+  }
+  return cachedRequirements;
+}
+
 /**
  * Effective state of a page. An id that is not in the nav tree resolves to
  * `enabled`: unknown means unrestricted, never accidentally blocked.
+ *
+ * When `access` is given, a page needing a capability the user lacks resolves
+ * to `hidden` for them, whatever the deployment's flags say. Omit it for the
+ * deployment-wide state.
  */
-export function featureState(id: string): FeatureState {
-  return states().get(id) ?? "enabled";
+export function featureState(id: string, access?: PortalAccess): FeatureState {
+  const state = states().get(id) ?? "enabled";
+  if (state === "hidden" || !access) return state;
+  const need = requirements().get(id);
+  return need && !access[need] ? "hidden" : state;
 }
 
 /** True when the page should appear in navigation at all (enabled or WIP). */
-export function isFeatureVisible(id: string): boolean {
-  return featureState(id) !== "hidden";
+export function isFeatureVisible(id: string, access?: PortalAccess): boolean {
+  return featureState(id, access) !== "hidden";
 }
 
 /** True when the page is usable, as opposed to hidden or advertised-but-WIP. */
-export function isFeatureEnabled(id: string): boolean {
-  return featureState(id) === "enabled";
+export function isFeatureEnabled(id: string, access?: PortalAccess): boolean {
+  return featureState(id, access) === "enabled";
 }
 
 /** Effective state of whichever page owns `pathname`. */
-export function featureStateForPath(pathname: string): FeatureState {
+export function featureStateForPath(pathname: string, access?: PortalAccess): FeatureState {
   const node = navNodeForPath(pathname);
-  return node ? featureState(node.id) : "enabled";
+  return node ? featureState(node.id, access) : "enabled";
 }
 
 /** Top-level sections that should render in the sidebar. */
-export function visibleNavSections(): typeof CSM_NAV_ITEMS {
-  return CSM_NAV_ITEMS.filter((section) => isFeatureVisible(section.id));
+export function visibleNavSections(access?: PortalAccess): typeof CSM_NAV_ITEMS {
+  return CSM_NAV_ITEMS.filter((section) => isFeatureVisible(section.id, access));
 }
 
 /** A node's tabs that should render in its tab strip. */
-export function visibleNavChildren(node: CsmNavNode): CsmNavNode[] {
-  return (node.children ?? []).filter((child) => isFeatureVisible(child.id));
+export function visibleNavChildren(node: CsmNavNode, access?: PortalAccess): CsmNavNode[] {
+  return (node.children ?? []).filter((child) => isFeatureVisible(child.id, access));
 }
 
 /** A node's tabs that are actually usable. */
-export function enabledNavChildren(node: CsmNavNode): CsmNavNode[] {
-  return (node.children ?? []).filter((child) => isFeatureEnabled(child.id));
+export function enabledNavChildren(node: CsmNavNode, access?: PortalAccess): CsmNavNode[] {
+  return (node.children ?? []).filter((child) => isFeatureEnabled(child.id, access));
 }
 
 /** A page the Quick-nav palette can offer as a destination. */
@@ -231,8 +261,9 @@ export interface NavigableNavNode {
 function navigableDescendants(
   node: CsmNavNode,
   icon: ComponentType<{ size?: number | string }>,
+  access?: PortalAccess,
 ): NavigableNavNode[] {
-  return enabledNavChildren(node).flatMap((child) => {
+  return enabledNavChildren(node, access).flatMap((child) => {
     const self: NavigableNavNode = {
       id: child.id,
       label: child.label,
@@ -240,7 +271,7 @@ function navigableDescendants(
       href: child.href,
       icon: child.icon ?? icon,
     };
-    return [self, ...navigableDescendants(child, self.icon)];
+    return [self, ...navigableDescendants(child, self.icon, access)];
   });
 }
 
@@ -250,16 +281,16 @@ function navigableDescendants(
  * carry its label as a sublabel so "Users" reads as "Users / User management"
  * rather than as a bare word.
  */
-export function navigableNavNodes(): NavigableNavNode[] {
+export function navigableNavNodes(access?: PortalAccess): NavigableNavNode[] {
   return CSM_NAV_ITEMS.flatMap((section) => {
-    if (!isFeatureEnabled(section.id)) return [];
+    if (!isFeatureEnabled(section.id, access)) return [];
     const self: NavigableNavNode = {
       id: section.id,
       label: section.label,
       href: section.href,
       icon: section.icon,
     };
-    return [self, ...navigableDescendants(section, section.icon)];
+    return [self, ...navigableDescendants(section, section.icon, access)];
   });
 }
 
@@ -269,6 +300,6 @@ export function navigableNavNodes(): NavigableNavNode[] {
  * callers must handle that rather than redirect into a page that is itself
  * hidden, which would bounce the router between two hidden paths forever.
  */
-export function firstEnabledDestination(): string | undefined {
-  return navigableNavNodes()[0]?.href;
+export function firstEnabledDestination(access?: PortalAccess): string | undefined {
+  return navigableNavNodes(access)[0]?.href;
 }

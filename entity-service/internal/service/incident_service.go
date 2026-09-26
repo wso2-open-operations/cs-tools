@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -186,11 +187,46 @@ func parseIncidentFieldFiltersPostgres(f domain.SearchIncidentsFilters, now time
 
 type incidentService struct {
 	repo repository.IncidentRepository
+	// snMirror is nil in every mode except DATA_SOURCE=postgres-servicenow-dual-write
+	// (config.DataSourcePostgresServiceNowDualWrite) -- see
+	// NewIncidentServiceWithSNMirror's own doc comment. When set, CreateIncident
+	// delegates to createIncidentSNFirst instead of the plain Postgres path's
+	// ServiceUnavailableError below, mirroring caseService's identical
+	// snMirror-gated branch for CreateCase.
+	snMirror IncidentService
+	// eventPublisher is nil in every mode except
+	// DATA_SOURCE=postgres-servicenow-dual-write. createIncidentSNFirst
+	// publishes incident.created itself, after CreateIncidentFromServiceNow
+	// succeeds -- the mirror IncidentService above is always constructed
+	// with its own publisher=nil in this mode, specifically so it never
+	// publishes prematurely (before the Postgres insert this mode's reads
+	// actually depend on has even been attempted). See
+	// publishIncidentCreatedEvent's doc comment for the full reasoning.
+	eventPublisher EventPublisherService
 }
 
 // NewIncidentService constructs an IncidentService backed by Postgres.
 func NewIncidentService(repo repository.IncidentRepository) IncidentService {
 	return &incidentService{repo: repo}
+}
+
+// NewIncidentServiceWithSNMirror is NewIncidentService plus the wiring
+// DATA_SOURCE=postgres-servicenow-dual-write needs for incident CREATE: a
+// synchronous, ServiceNow-first creation path -- see createIncidentSNFirst's
+// own doc comment for the full reasoning (identical to
+// caseService.createCaseSNFirst's: a Postgres-first async create could leave
+// a permanent orphan). Unlike case, this mode has no incident UPDATE mirror
+// at all yet -- UpdateIncident stays exactly as unsupported here as it is in
+// every other mode (see UpdateIncident's own doc comment); only CREATE is in
+// scope for this pilot extension.
+//
+// mirror is the ServiceNow-backed IncidentService (from
+// NewServiceNowIncidentService) whose CreateIncident performs the real
+// ServiceNow POST, including its own side effects (publishIncidentCreated).
+// It is never made the active IncidentService here -- reads always stay on
+// Postgres in this mode.
+func NewIncidentServiceWithSNMirror(repo repository.IncidentRepository, mirror IncidentService, eventPublisher EventPublisherService) IncidentService {
+	return &incidentService{repo: repo, snMirror: mirror, eventPublisher: eventPublisher}
 }
 
 // SearchIncidents implements IncidentService.
@@ -265,13 +301,89 @@ func (s *incidentService) SearchIncidentActivities(ctx context.Context, req doma
 	}, nil
 }
 
-// CreateIncident is not supported for the PostgreSQL data source: like
-// CaseRepository.CreateCase, work_item.number has no DB default and no
-// backing sequence anywhere in migrations/.
-func (s *incidentService) CreateIncident(_ context.Context, _ domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
+// CreateIncident implements IncidentService.
+//
+// Under DATA_SOURCE=postgres-servicenow-dual-write (snMirror != nil), this
+// delegates to createIncidentSNFirst instead of the plain Postgres path's
+// ServiceUnavailableError below -- see that method's own doc comment.
+func (s *incidentService) CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
+	if s.snMirror != nil {
+		// ConfigurationItemID/AssignmentGroupID have no backing column on
+		// this data source at all (unlike Subcategory/AssignedEngineerID/
+		// WatchList/AdditionalComments/WorkNotes, which are accepted but
+		// silently not persisted -- a separate, tracked follow-up per
+		// CodeRabbit's finding on PR #1922). Rejecting these two explicitly
+		// is strictly better than the alternative: ServiceNow would already
+		// have accepted and stored them by the time Postgres is ever
+		// touched, so silently dropping them here would mean the caller's
+		// request appears to succeed while quietly losing data they
+		// explicitly asked to set.
+		if req.ConfigurationItemID != nil {
+			return domain.CreateIncidentResponse{}, &apierror.ValidationError{Msg: "configurationItemId is not supported for this data source"}
+		}
+		if req.AssignmentGroupID != nil {
+			return domain.CreateIncidentResponse{}, &apierror.ValidationError{Msg: "assignmentGroupId is not supported for this data source"}
+		}
+		return s.createIncidentSNFirst(ctx, req)
+	}
+	// CreateIncident is not supported for the plain PostgreSQL data source:
+	// like CaseRepository.CreateCase, work_item.number has no DB default and
+	// no backing sequence anywhere in migrations/.
 	return domain.CreateIncidentResponse{}, &apierror.ServiceUnavailableError{
 		Msg: "creating an incident is not available on this data source: work_item.number has no generation strategy defined here",
 	}
+}
+
+// createIncidentSNFirst implements CreateIncident's
+// DATA_SOURCE=postgres-servicenow-dual-write path: ServiceNow-FIRST and
+// SYNCHRONOUS, exactly mirroring caseService.createCaseSNFirst's reasoning
+// -- see that method's own doc comment for why CREATE must be ServiceNow
+// -first rather than Postgres-first-and-async: a Postgres row with no
+// ServiceNow counterpart would be a PERMANENT orphan (ServiceNow is still
+// the real backing store this platform proxies most writes onto), while an
+// async-after-commit UPDATE has no equivalent failure mode.
+//
+// This call is made exactly once: no internal retry. If ServiceNow's HTTP
+// response is lost after it actually created the record server-side, an
+// internal retry here would create a second, duplicate ServiceNow record --
+// worse than a request that surfaces the error and lets the caller decide
+// whether to retry. Retry policy is the caller's responsibility.
+//
+// On success, id/number/createdBy come from ServiceNow's own response and
+// are used AS-IS for the Postgres insert
+// (IncidentRepository.CreateIncidentFromServiceNow) rather than generated --
+// see that method's own doc comment for why there is no wso2ID parameter
+// here, unlike case's equivalent. This is also what makes incident creation
+// possible on Postgres at all in this mode, for the same reason case's own
+// pilot did: IncidentRepository's own doc comment explains why plain
+// CreateIncident can't generate work_item.number itself.
+func (s *incidentService) createIncidentSNFirst(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
+	snResp, err := s.snMirror.CreateIncident(ctx, req)
+	if err != nil {
+		// ServiceNow never accepted the incident -- nothing is written to
+		// Postgres at all, by construction (s.repo.CreateIncidentFromServiceNow
+		// is simply never called on this path). No orphan gets created.
+		return domain.CreateIncidentResponse{}, err
+	}
+
+	resp, err := s.repo.CreateIncidentFromServiceNow(ctx, req, snResp.Incident.ID, snResp.Incident.Number, snResp.Incident.CreatedBy)
+	if err != nil {
+		// ServiceNow already has the incident at this point -- this is now
+		// real drift (ServiceNow has it, Postgres doesn't) needing operator
+		// attention, not a safely-rejected request. Logged loudly rather
+		// than only returned, same convention as
+		// caseService.createCaseSNFirst's identical failure shape.
+		slog.ErrorContext(ctx, "sn create incident: ServiceNow incident created but the Postgres insert failed",
+			"incidentId", snResp.Incident.ID, "snNumber", snResp.Incident.Number, "error", err)
+		return domain.CreateIncidentResponse{}, err
+	}
+	// Only now -- Postgres has confirmed the row this mode's reads actually
+	// depend on -- is it safe to publish. See publishIncidentCreatedEvent's
+	// doc comment for why this can't just be snIncidentService's own
+	// automatic publish (that fires right after the ServiceNow POST, before
+	// this Postgres insert was even attempted).
+	publishIncidentCreatedEvent(ctx, s.eventPublisher, req, resp.Incident.ID)
+	return resp, nil
 }
 
 // UpdateIncident is not supported for the PostgreSQL data source: several

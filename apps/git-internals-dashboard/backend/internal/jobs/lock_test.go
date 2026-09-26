@@ -196,8 +196,8 @@ func TestLockDropsConnectionWhenUnlockFails(t *testing.T) {
 
 	lock.release()
 
-	// Without the fix, l.conn still points at the now-closed connection and
-	// getConn never reconnects (it only dials when l.conn == nil), so this
+	// If release() left l.conn pointing at the closed connection, getConn
+	// would never reconnect (it only dials when l.conn == nil), so this
 	// second acquire on the SAME instance would fail forever.
 	acquired2, err := lock.acquire(context.Background())
 	if err != nil || !acquired2 {

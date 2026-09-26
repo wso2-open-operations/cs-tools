@@ -23,7 +23,6 @@ import {
   getProjectSeverityPolicy,
   shouldHideOnboardingData,
   shouldForceSeverityS4,
-  isProjectContractEnded,
   isProjectSuspended,
 } from "@utils/permission";
 
@@ -225,47 +224,6 @@ describe("shouldHideOnboardingData", () => {
   });
 });
 
-describe("isProjectContractEnded", () => {
-  it("returns false when endDate is null, undefined, or empty", () => {
-    expect(isProjectContractEnded(null)).toBe(false);
-    expect(isProjectContractEnded(undefined)).toBe(false);
-    expect(isProjectContractEnded("   ")).toBe(false);
-  });
-
-  it("returns true when endDate (YYYY-MM-DD) is in the past", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectContractEnded("2026-04-26", now)).toBe(true);
-    expect(isProjectContractEnded("2026-09-08", now)).toBe(true);
-  });
-
-  it("returns false when endDate is today (contract still active until end of day)", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectContractEnded("2026-09-09", now)).toBe(false);
-  });
-
-  it("returns false when endDate is in the future", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectContractEnded("2026-12-31", now)).toBe(false);
-    expect(isProjectContractEnded("2027-01-01", now)).toBe(false);
-  });
-
-  it("handles ISO date strings correctly", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectContractEnded("2026-04-26T23:59:59.000Z", now)).toBe(true);
-    expect(isProjectContractEnded("2026-10-01T00:00:00.000Z", now)).toBe(false);
-    expect(isProjectContractEnded("2026-09-09T00:00:00.000Z", now)).toBe(true);
-    expect(isProjectContractEnded("2026-09-09T18:00:00.000Z", now)).toBe(false);
-  });
-
-  it("returns false for invalid date strings and calendar-invalid dates", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectContractEnded("not-a-date")).toBe(false);
-    expect(isProjectContractEnded("2026-02-30", now)).toBe(false);
-    expect(isProjectContractEnded("2026-02-29", now)).toBe(false);
-    expect(isProjectContractEnded("2024-02-29", now)).toBe(true);
-  });
-});
-
 describe("isProjectSuspended", () => {
   it("returns true when closureState is Suspended (case-insensitive)", () => {
     expect(isProjectSuspended("Suspended")).toBe(true);
@@ -273,20 +231,20 @@ describe("isProjectSuspended", () => {
     expect(isProjectSuspended(" SUSPENDED ")).toBe(true);
   });
 
-  it("returns true when closureState is not suspended but contract has ended", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectSuspended("Open", "2026-04-26", now)).toBe(true);
-    expect(isProjectSuspended(null, "2026-04-26", now)).toBe(true);
+  // A lapsed contract used to count as suspended, which locked customers out of
+  // the project the moment it expired. Per customer request it no longer does.
+  it("returns false for a project whose contract has ended", () => {
+    expect(isProjectSuspended("Open")).toBe(false);
+    expect(isProjectSuspended(null)).toBe(false);
   });
 
-  it("returns false when closureState is Open and contract is active", () => {
-    const now = new Date("2026-09-09T12:00:00.000Z");
-    expect(isProjectSuspended("Open", "2026-12-31", now)).toBe(false);
+  it("returns false when closureState is Open", () => {
+    expect(isProjectSuspended("Open")).toBe(false);
   });
 
-  it("returns false when closureState is empty and endDate is not set", () => {
-    expect(isProjectSuspended(null, null)).toBe(false);
-    expect(isProjectSuspended(undefined, undefined)).toBe(false);
+  it("returns false when closureState is absent", () => {
+    expect(isProjectSuspended(null)).toBe(false);
+    expect(isProjectSuspended(undefined)).toBe(false);
   });
 });
 

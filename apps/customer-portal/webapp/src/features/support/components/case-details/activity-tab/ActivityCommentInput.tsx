@@ -23,7 +23,7 @@ import {
   colors,
 } from "@wso2/oxygen-ui";
 import { ArrowUp } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { usePostComment } from "@features/support/api/usePostComment";
 import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { useAsgardeo } from "@asgardeo/react";
@@ -34,11 +34,16 @@ import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDia
 import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
-import { CommentType } from "@features/support/constants/supportConstants";
+import {
+  CommentType,
+  MAX_COMMENT_BODY_BYTES,
+  MAX_COMMENT_CONTENT_BYTES,
+} from "@features/support/constants/supportConstants";
 import {
   ERROR_UNSUPPORTED_TYPE,
   ERROR_SIZE_EXCEEDED,
 } from "@constants/common";
+import { formatBytes } from "@features/project-details/utils/projectDetails";
 
 /**
  * Input row with rich-text editor and send button.
@@ -78,6 +83,16 @@ export default function ActivityCommentInput({
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
   const isCaseClosed = caseStatus?.toLowerCase() === "closed";
+
+  // UTF-8 byte size of the comment body. The BE caps the whole request body, so
+  // mirror it here to fail fast with a clear message instead of a 413.
+  const bodyBytes = useMemo(() => new TextEncoder().encode(value).length, [value]);
+  const overSizeLimit = bodyBytes > MAX_COMMENT_CONTENT_BYTES;
+  const sizeError = overSizeLimit
+    ? `Comment is too large (${formatBytes(bodyBytes)}). Maximum is ${formatBytes(
+        MAX_COMMENT_BODY_BYTES,
+      )} — upload large images as attachments instead of embedding them inline.`
+    : null;
 
   if (isCaseClosed) return null;
 
@@ -174,6 +189,12 @@ export default function ActivityCommentInput({
     const hasText = hasSubmittableEditorContent(currentValue);
     const hasAttachments = currentAttachments.length > 0;
     if ((!hasText && !hasAttachments) || isDisabled) return;
+    // Attachment-only sends have no comment body to weigh, so the size guard
+    // only applies when there's text destined for the comment endpoint.
+    if (hasText && overSizeLimit) {
+      showError(sizeError as string);
+      return;
+    }
 
     // Snapshot attachments before posting
     const attachmentsSnapshot = [...currentAttachments];
@@ -265,12 +286,19 @@ export default function ActivityCommentInput({
               )
             }
             overlayElement={
-              <Tooltip title="Send comment">
+              <Tooltip
+                title={
+                  overSizeLimit && hasSubmittableEditorContent(value)
+                    ? sizeError
+                    : "Send comment"
+                }
+              >
                 <span>
                   <IconButton
                     disabled={
                       (!hasSubmittableEditorContent(value) &&
                         attachments.length === 0) ||
+                      (overSizeLimit && hasSubmittableEditorContent(value)) ||
                       isDisabled
                     }
                     onClick={handleSend}

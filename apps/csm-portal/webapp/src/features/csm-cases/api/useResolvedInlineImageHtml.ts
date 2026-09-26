@@ -20,6 +20,7 @@ import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { BeAttachmentShareResponse } from "@api/backend/types";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   extractIixAttachmentIds,
   replaceInlineImageSrcs,
@@ -75,6 +76,11 @@ function blobToDataUrl(blob: Blob): Promise<string | null> {
  *    for each referenced attachment and uses its `shareUrl` directly as the
  *    `<img>` src.
  *
+ * A caller without the `attachment_downloader`/`cs_engineer`/`admin` role
+ * (see `usePortalAccess`'s `canDownloadAttachment`) never issues either
+ * request — the backend would 403 both anyway — and every referenced image is
+ * replaced with a "no permission" placeholder instead of a blank `<img>`.
+ *
  * @param html - Sanitized HTML that may contain `.iix` `<img>` src references.
  */
 export function useResolvedInlineImageHtml(html: string): {
@@ -83,6 +89,7 @@ export function useResolvedInlineImageHtml(html: string): {
 } {
   const api = useBackendApi();
   const { user } = useCurrentUser();
+  const { canDownloadAttachment } = usePortalAccess();
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
   const attachmentIds = useMemo(() => extractIixAttachmentIds(html), [html]);
 
@@ -119,7 +126,9 @@ export function useResolvedInlineImageHtml(html: string): {
         if (!mimeType) return null;
         return blobToDataUrl(blob);
       },
-      enabled: !!id,
+      // Skipping the request entirely (rather than letting it 403) avoids a
+      // wasted round trip and an error the caller has no way to act on.
+      enabled: !!id && canDownloadAttachment,
       // The default (non-SFTPGo) path resolves immutable attachment content,
       // so it's cached indefinitely. The SFTPGo share path resolves to a
       // URL that itself expires — see INLINE_IMAGE_SHARE_STALE_TIME_MS.
@@ -128,10 +137,15 @@ export function useResolvedInlineImageHtml(html: string): {
     })),
   });
 
-  const isLoading = queries.some((q) => q.isLoading);
+  const isLoading = canDownloadAttachment && queries.some((q) => q.isLoading);
 
   const dataUrls = new Map<string, string>();
+  const deniedIds = new Set<string>();
   attachmentIds.forEach((id, i) => {
+    if (!canDownloadAttachment) {
+      deniedIds.add(id);
+      return;
+    }
     const result = queries[i]?.data;
     if (result) dataUrls.set(id, result);
   });
@@ -144,9 +158,9 @@ export function useResolvedInlineImageHtml(html: string): {
     .join(",");
 
   const resolvedHtml = useMemo(
-    () => replaceInlineImageSrcs(html, dataUrls),
+    () => replaceInlineImageSrcs(html, dataUrls, deniedIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [html, dataUrlsKey],
+    [html, dataUrlsKey, canDownloadAttachment],
   );
 
   return { resolvedHtml, isLoading: attachmentIds.length > 0 && isLoading };

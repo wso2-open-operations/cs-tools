@@ -26,7 +26,6 @@ describe("usersFiltersUrl", () => {
   it("round-trips a fully populated filter set through the URL", () => {
     const filters: UsersFilters = {
       search: "jane",
-      roleIds: ["agent", "admin"],
       groupIds: ["11111111-1111-1111-1111-111111111111"],
       teamIds: ["alpha"],
       active: "active",

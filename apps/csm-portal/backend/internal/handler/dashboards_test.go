@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
 // testDashboardsConfigJSON is a small, entirely dummy 2-dashboard fixture —
@@ -169,7 +170,7 @@ const currentUserPlaceholder = "__current_user__"
 
 func TestGetDashboards(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := httptest.NewRequest(http.MethodGet, "/dashboards", nil)
 		w := httptest.NewRecorder()
 		h.GetDashboards(w, r)
@@ -179,7 +180,7 @@ func TestGetDashboards(t *testing.T) {
 	})
 
 	t.Run("returns all dashboards in registry order with correct isDefault", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(httptest.NewRequest(http.MethodGet, "/dashboards", nil))
 		w := httptest.NewRecorder()
 		h.GetDashboards(w, r)
@@ -250,6 +251,133 @@ func TestGetDashboards(t *testing.T) {
 	})
 }
 
+// withRestrictedDashboard temporarily swaps the active registry for one that
+// also carries a dashboard.Dashboard.Restricted dashboard alongside the two
+// from testDashboardsConfigJSON, and restores the original registry when the
+// test ends — every other test in this file (including the exact-count
+// assertions in TestGetDashboards/TestAllDashboardsHaveWidgets) must keep
+// seeing exactly the shared two-dashboard fixture.
+func withRestrictedDashboard(t *testing.T) {
+	t.Helper()
+	previous := dashboard.Active()
+	t.Cleanup(func() { dashboard.SetActive(previous) })
+
+	restricted := dashboard.Dashboard{
+		ID:          "restricted-dashboard",
+		DisplayName: "Restricted Dashboard",
+		Restricted:  true,
+		Widgets: []dashboard.WidgetTemplate{{
+			ID:           "restricted-widget",
+			DisplayName:  "Restricted Widget",
+			ResourceType: dashboard.ResourceCase,
+			Shape:        dashboard.ShapeCount,
+			GridWidth:    4,
+			Query:        map[string]any{},
+		}},
+	}
+	dashboards := append(append([]dashboard.Dashboard(nil), dashboard.All()...), restricted)
+	dashboard.SetActive(dashboard.NewStaticRegistry(dashboards))
+}
+
+// userWithRoles is withUser, but for a caller whose token carries the given
+// roles instead of the default testUser's none — needed to exercise
+// PermViewAllDashboards, which testUser (no roles at all) never satisfies.
+func userWithRoles(r *http.Request, roles []string) *http.Request {
+	user := &middleware.UserInfo{Email: testUser.Email, UserID: testUser.UserID, Roles: roles}
+	return r.WithContext(middleware.WithUserInfo(r.Context(), user))
+}
+
+func TestGetDashboards_Restricted(t *testing.T) {
+	withRestrictedDashboard(t)
+
+	t.Run("a caller without a cs-engineer/admin role never sees the restricted dashboard", func(t *testing.T) {
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
+		r := withUser(httptest.NewRequest(http.MethodGet, "/dashboards", nil))
+		w := httptest.NewRecorder()
+		h.GetDashboards(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		var results []dashboardListItemView
+		if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
+			t.Fatalf("decode response body: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("len(results) = %d, want 2 (the restricted dashboard must be filtered out)", len(results))
+		}
+		for _, res := range results {
+			if res.ID == "restricted-dashboard" {
+				t.Error("restricted-dashboard appeared in the list for a caller with no roles")
+			}
+		}
+	})
+
+	for _, role := range []string{"test-cs-engineer", "test-admin"} {
+		t.Run("a "+role+" sees every dashboard, including the restricted one", func(t *testing.T) {
+			h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
+			r := userWithRoles(httptest.NewRequest(http.MethodGet, "/dashboards", nil), []string{role})
+			w := httptest.NewRecorder()
+			h.GetDashboards(w, r)
+
+			assertStatus(t, w, http.StatusOK)
+			var results []dashboardListItemView
+			if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if len(results) != 3 {
+				t.Fatalf("len(results) = %d, want 3 (including restricted-dashboard)", len(results))
+			}
+			found := false
+			for _, res := range results {
+				if res.ID == "restricted-dashboard" {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("restricted-dashboard did not appear in the list")
+			}
+		})
+	}
+}
+
+func TestGetDashboardDetail_Restricted(t *testing.T) {
+	withRestrictedDashboard(t)
+
+	t.Run("a caller without a cs-engineer/admin role gets 403, not the dashboard", func(t *testing.T) {
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
+		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/restricted-dashboard", nil), "restricted-dashboard"))
+		w := httptest.NewRecorder()
+		h.GetDashboardDetail(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		assertErrorMessage(t, w, ErrMsgForbidden)
+	})
+
+	t.Run("an unrestricted dashboard is still reachable by a caller with no roles", func(t *testing.T) {
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
+		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-dashboard", nil), "sample-dashboard"))
+		w := httptest.NewRecorder()
+		h.GetDashboardDetail(w, r)
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	for _, role := range []string{"test-cs-engineer", "test-admin"} {
+		t.Run("a "+role+" can open the restricted dashboard", func(t *testing.T) {
+			h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
+			r := userWithRoles(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/restricted-dashboard", nil), "restricted-dashboard"), []string{role})
+			w := httptest.NewRecorder()
+			h.GetDashboardDetail(w, r)
+			assertStatus(t, w, http.StatusOK)
+
+			var got dashboardDetailView
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if got.ID != "restricted-dashboard" {
+				t.Errorf("ID = %q, want restricted-dashboard", got.ID)
+			}
+		})
+	}
+}
+
 // TestAllDashboardsHaveWidgets is the "no more mock/empty placeholders"
 // guarantee: every dashboard in the registry now has real widgets.
 func TestAllDashboardsHaveWidgets(t *testing.T) {
@@ -265,7 +393,7 @@ func TestAllDashboardsHaveWidgets(t *testing.T) {
 
 func TestGetDashboardDetail(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-dashboard", nil), "sample-dashboard")
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -275,7 +403,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("unknown dashboard id returns 404", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/bogus", nil), "bogus"))
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -284,7 +412,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("sample-dashboard returns metadata and its four widgets", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-dashboard", nil), "sample-dashboard"))
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -448,7 +576,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("sample-team-dashboard has resource-type-diverse widgets (case, incident, change_request)", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-team-dashboard", nil), "sample-team-dashboard"))
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -507,7 +635,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("sample-dashboard's product_vulnerability widget has a scalar string filter", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-dashboard", nil), "sample-dashboard"))
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -548,7 +676,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("sample-team-dashboard's pie widget resolves description, slices, and per-slice current-user placeholders", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-team-dashboard", nil), "sample-team-dashboard"))
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -639,7 +767,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("sample-team-dashboard's escalated-incidents widget carries its configured section, unset for widgets with no section", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/sample-team-dashboard", nil), "sample-team-dashboard"))
 		w := httptest.NewRecorder()
 		h.GetDashboardDetail(w, r)
@@ -672,7 +800,7 @@ func TestGetDashboardDetail(t *testing.T) {
 	})
 
 	t.Run("every dashboard in the registry now has at least one widget", func(t *testing.T) {
-		h := NewDashboardHandler()
+		h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 		for _, d := range dashboard.All() {
 			r := withUser(withDashboardID(httptest.NewRequest(http.MethodGet, "/dashboards/"+d.ID, nil), d.ID))
 			w := httptest.NewRecorder()

@@ -16,7 +16,7 @@
 
 import { Box, Button, Card, IconButton, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ArrowRight, X } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import type { BeDashboardWidgetColumn, BeWidgetResourceType } from "@api/backend/types";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -92,6 +92,15 @@ export default function WidgetInlineDrilldownPanel({
   const ListRenderer = WIDGET_LIST_RENDERERS[resourceType];
   const hasColumns = Boolean(columns && columns.length > 0);
   const resolvedDisplayName = resolveWidgetText(displayName, selectedTeamLabel) ?? displayName;
+  // Mirrors `DashboardWidgetTile`'s own `inlineColumnCustomizer` state: a
+  // list renderer with its own "Customise columns" button (`CaseWidgetList`,
+  // or `GenericColumnList` for a `columns`-configured widget) hands it up
+  // here via `onColumnCustomizerChange` instead of rendering it inline, so it
+  // can sit in this panel's own header row next to the close button — this
+  // panel previously never rendered one at all, unlike the "list"-shape tile
+  // this same rendering machinery already supports. `null` for every other
+  // resourceType, which never calls this back.
+  const [inlineColumnCustomizer, setInlineColumnCustomizer] = useState<ReactNode>(null);
 
   // Same placeholder-resolution pipeline `DashboardWidgetTile` applies to
   // every filter object it builds a request/href from (see that
@@ -109,19 +118,16 @@ export default function WidgetInlineDrilldownPanel({
 
   const mergedFilters = mergeWidgetFilters(filters, slice.query);
   const listLimitValue = listLimit ?? 4;
-  const { data, isLoading, isError } = useWidgetData(
+  const { data, isLoading, isError } = useWidgetData({
     widgetId,
     resourceType,
-    mergedFilters,
-    "list",
-    listLimitValue,
-    0,
-    true,
+    filters: mergedFilters,
+    shape: "list",
+    listLimit: listLimitValue,
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
-    undefined,
     currentUserId,
-  );
+  });
   const total = data?.total ?? 0;
 
   if (!config) {
@@ -156,16 +162,19 @@ export default function WidgetInlineDrilldownPanel({
         <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
           {resolvedDisplayName} — {slice.label}
         </Typography>
-        <Tooltip title="Close">
-          <IconButton
-            size="small"
-            aria-label={`Close ${resolvedDisplayName} — ${slice.label}`}
-            onClick={onClose}
-            sx={{ color: "text.secondary", flexShrink: 0 }}
-          >
-            <X size={16} />
-          </IconButton>
-        </Tooltip>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
+          {inlineColumnCustomizer}
+          <Tooltip title="Close">
+            <IconButton
+              size="small"
+              aria-label={`Close ${resolvedDisplayName} — ${slice.label}`}
+              onClick={onClose}
+              sx={{ color: "text.secondary" }}
+            >
+              <X size={16} />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
       {isLoading ? (
         <Skeleton variant="rounded" height={28 * listLimitValue + 40} />
@@ -181,9 +190,16 @@ export default function WidgetInlineDrilldownPanel({
               isLoading={false}
               resourceType={resourceType}
               columns={columns ?? []}
+              widgetId={widgetId}
+              onColumnCustomizerChange={setInlineColumnCustomizer}
             />
           ) : (
-            <ListRenderer items={data?.items ?? []} isLoading={false} resourceType={resourceType} />
+            <ListRenderer
+              items={data?.items ?? []}
+              isLoading={false}
+              resourceType={resourceType}
+              onColumnCustomizerChange={setInlineColumnCustomizer}
+            />
           )}
           {total > listLimitValue && (
             <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
@@ -194,6 +210,7 @@ export default function WidgetInlineDrilldownPanel({
                   widgetId,
                   displayName: resolvedDisplayName,
                   filters: resolvePlaceholders(mergedFilters),
+                  resourceType,
                   currentUserId,
                 })}
                 size="small"

@@ -16,6 +16,7 @@
 
 import {
   Box,
+  Button,
   Checkbox,
   FormControl,
   IconButton,
@@ -38,7 +39,7 @@ import {
   Typography,
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
+import { Plus, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
@@ -46,12 +47,12 @@ import UserRefLink from "@components/UserRefLink";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useSearchGroups } from "@api/useSearchGroups";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
-import { useSearchRoles } from "@features/csm-admin/api/useSearchRoles";
 import { useSearchTeams } from "@features/csm-admin/api/useSearchTeams";
-import ResponsiveRoleChips from "@components/ResponsiveRoleChips";
 import RefreshButton from "@components/RefreshButton";
+import AddUserDialog from "@features/csm-users/components/AddUserDialog";
 import type { SearchUsersRequest } from "@features/csm-users/types/csmUsers";
 import {
   readUsersFiltersFromUrl,
@@ -60,14 +61,14 @@ import {
 } from "@features/csm-users/utils/usersFiltersUrl";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import type { BeGroup } from "@api/backend/types";
-import { displayUserTimezone } from "@utils/userDirectoryDisplay";
+import { displayUserTimezone, displayUserType } from "@utils/userDirectoryDisplay";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
 const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
 /**
- * The users list, with filters reflected in the URL (`search`, `roles`,
- * `groups`, `teams`, `active`) so a filtered link is shareable and survives a
+ * The users list, with filters reflected in the URL (`search`, `groups`,
+ * `teams`, `active`) so a filtered link is shareable and survives a
  * reload — the same `read*FiltersFromUrl` / `write*FiltersToUrl` convention
  * the cases list uses (`casesFiltersUrl.ts`). The free-text key is `search`,
  * not `q`: both this list and the cases list originally wrote it as `?q=`,
@@ -75,8 +76,13 @@ const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
  * a one-shot deep link and pops open pre-filled with whatever's there) — keep
  * it `search` in any future change here, or that collision comes back.
  * Deliberately no project/account filter: "who is on this project" is
- * answered by the project-contacts search instead. Role, group and team
- * filters combine (AND together server-side).
+ * answered by the project-contacts search instead. Group and team filters
+ * combine (AND together server-side).
+ *
+ * No role filter or column: the table shows each user's `userType`
+ * (Internal / External (customer)) instead — their platform-permission
+ * roles are a detail for their own profile page (`UserProfilePage.tsx`), not
+ * this list.
  */
 export default function CsmUsersPage(): JSX.Element {
   const navigate = useNavTransition();
@@ -93,6 +99,8 @@ export default function CsmUsersPage(): JSX.Element {
   const backState = location.state as { from?: string } | undefined;
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => readUsersFiltersFromUrl(searchParams), [searchParams]);
+  const { canCreateUser } = usePortalAccess();
+  const [addUserOpen, setAddUserOpen] = useState(false);
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -104,18 +112,12 @@ export default function CsmUsersPage(): JSX.Element {
 
   const debouncedSearch = useDebouncedValue(filters.search, 300);
 
-  // Role/team catalogues are small and curated, so one full-catalogue page is
+  // Team catalogue is small and curated, so one full-catalogue page is
   // enough to populate the picker (unlike groups, a live, potentially large
   // query against the backing data source — see the async group picker
   // below).
-  const { data: rolesData } = useSearchRoles({ pagination: { limit: BE_MAX_PAGE_LIMIT } });
   const { data: teamsData } = useSearchTeams({ pagination: { limit: BE_MAX_PAGE_LIMIT } });
-  const roles = useMemo(() => rolesData?.roles ?? [], [rolesData]);
   const teams = useMemo(() => teamsData?.teams ?? [], [teamsData]);
-  const roleNameById = useMemo(
-    () => new Map(roles.map((r) => [r.id, r.name])),
-    [roles],
-  );
   const teamNameById = useMemo(
     () => new Map(teams.map((t) => [t.id, t.name])),
     [teams],
@@ -126,7 +128,6 @@ export default function CsmUsersPage(): JSX.Element {
       pagination: { limit: rowsPerPage, offset: page * rowsPerPage },
       filters: {
         ...(debouncedSearch.trim() && { searchQuery: debouncedSearch.trim() }),
-        ...(filters.roleIds.length > 0 && { roleIds: filters.roleIds }),
         ...(filters.groupIds.length > 0 && { groupIds: filters.groupIds }),
         ...(filters.teamIds.length > 0 && { teamIds: filters.teamIds }),
         ...(filters.active !== "all" && { active: filters.active === "active" }),
@@ -148,11 +149,6 @@ export default function CsmUsersPage(): JSX.Element {
     setPage(0);
   };
 
-  const handleRoleChange = (e: SelectChangeEvent<string[]>) => {
-    const value = e.target.value;
-    setFilters({ ...filters, roleIds: typeof value === "string" ? value.split(",") : value });
-  };
-
   const handleTeamChange = (e: SelectChangeEvent<string[]>) => {
     const value = e.target.value;
     setFilters({ ...filters, teamIds: typeof value === "string" ? value.split(",") : value });
@@ -169,15 +165,26 @@ export default function CsmUsersPage(): JSX.Element {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Typography variant="body2" color="text.secondary">
-          Search across username and email (case-insensitive). Filter by role, group, team and
-          status.
+          Search across username and email (case-insensitive). Filter by group, team and status.
         </Typography>
-        <RefreshButton
-          onRefresh={() => void refetch()}
-          isFetching={isFetching}
-          updatedAt={dataUpdatedAt}
-          label="Refresh users"
-        />
+        <Stack direction="row" spacing={1} alignItems="center">
+          {canCreateUser && (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<Plus size={16} />}
+              onClick={() => setAddUserOpen(true)}
+            >
+              Add user
+            </Button>
+          )}
+          <RefreshButton
+            onRefresh={() => void refetch()}
+            isFetching={isFetching}
+            updatedAt={dataUpdatedAt}
+            label="Refresh users"
+          />
+        </Stack>
       </Box>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap" }}>
@@ -190,70 +197,6 @@ export default function CsmUsersPage(): JSX.Element {
           slotProps={{ htmlInput: { "aria-label": "Search users by username or email" } }}
           sx={{ minWidth: 280, flex: 1 }}
         />
-
-        <FormControl size="small" sx={{ width: 200, flexShrink: 0 }}>
-          <InputLabel
-            id="user-roles-label"
-            shrink={filters.roleIds.length > 0}
-            sx={{ top: "0px !important" }}
-          >
-            Roles
-          </InputLabel>
-          <Select
-            labelId="user-roles-label"
-            multiple
-            notched={filters.roleIds.length > 0}
-            value={filters.roleIds}
-            onChange={handleRoleChange}
-            input={
-              <OutlinedInput
-                label="Roles"
-                endAdornment={
-                  filters.roleIds.length > 0 ? (
-                    <InputAdornment position="end" sx={{ mr: 1.5 }}>
-                      <IconButton
-                        size="small"
-                        aria-label="Clear roles filter"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFilters({ ...filters, roleIds: [] });
-                        }}
-                      >
-                        <X size={14} />
-                      </IconButton>
-                    </InputAdornment>
-                  ) : undefined
-                }
-              />
-            }
-            MenuProps={{
-              anchorOrigin: { vertical: "bottom", horizontal: "left" },
-              transformOrigin: { vertical: "top", horizontal: "left" },
-              slotProps: { paper: { sx: { maxHeight: 320 } } },
-            }}
-            renderValue={(selected) => {
-              const label = (selected as string[])
-                .map((id) => roleNameById.get(id) ?? id)
-                .join(", ");
-              return <Box component="span" title={label}>{label}</Box>;
-            }}
-            sx={{
-              "& .MuiSelect-select": {
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              },
-            }}
-          >
-            {roles.map((role) => (
-              <MenuItem key={role.id} value={role.id}>
-                <Checkbox checked={filters.roleIds.includes(role.id)} />
-                <ListItemText primary={role.name} />
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
 
         <Box sx={{ minWidth: 240, flex: 1 }}>
           <AsyncEntityMultiSelect<BeGroup>
@@ -369,7 +312,7 @@ export default function CsmUsersPage(): JSX.Element {
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell sx={{ width: "32%" }}>User</TableCell>
-                <TableCell sx={{ width: "44%" }}>Roles</TableCell>
+                <TableCell sx={{ width: "44%" }}>Type</TableCell>
                 <TableCell sx={{ width: "12%" }}>Status</TableCell>
                 <TableCell sx={{ width: "12%" }}>Timezone</TableCell>
               </TableRow>
@@ -382,7 +325,7 @@ export default function CsmUsersPage(): JSX.Element {
                       <Skeleton variant="rounded" width="65%" height={18} />
                       <Skeleton variant="rounded" width="85%" height={14} sx={{ mt: 0.75 }} />
                     </TableCell>
-                    <TableCell><Skeleton variant="rounded" width={64} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width={72} height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={64} height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width="55%" height={18} /></TableCell>
                   </TableRow>
@@ -470,18 +413,7 @@ export default function CsmUsersPage(): JSX.Element {
                           </Typography>
                         )}
                       </TableCell>
-                      <TableCell>
-                        {u.roles && u.roles.length > 0 ? (
-                          <ResponsiveRoleChips
-                            roleIds={u.roles}
-                            roleNameById={roleNameById}
-                            userLabel={u.name || u.userName}
-                            onViewAll={goToProfile}
-                          />
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
+                      <TableCell>{displayUserType(u.userType)}</TableCell>
                       <TableCell>
                         {u.lockedOut ? (
                           <Stack direction="row" spacing={0.75} alignItems="center">
@@ -537,6 +469,10 @@ export default function CsmUsersPage(): JSX.Element {
           showLastButton
         />
       </Box>
+
+      {canCreateUser && (
+        <AddUserDialog open={addUserOpen} onClose={() => setAddUserOpen(false)} />
+      )}
     </Box>
   );
 }

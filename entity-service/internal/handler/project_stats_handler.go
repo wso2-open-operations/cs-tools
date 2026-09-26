@@ -21,14 +21,16 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// ProjectStatsHandler handles HTTP requests for project-scoped statistics,
-// backed by the ServiceNow data source only. GET /projects/{id}/metadata
-// (also a ProjectStatsService method) is handled separately by
-// ProjectMetadataHandler, which does have a Postgres-backed implementation.
+// ProjectStatsHandler handles HTTP requests for project-scoped statistics.
+// Both data sources back it: ServiceNow through snProjectStatsService,
+// Postgres through projectStatsService. GET /projects/{id}/metadata and
+// GET /projects/{id}/cases/stats are also ProjectStatsService methods but
+// are handled separately, by ProjectMetadataHandler and
+// ProjectCaseStatsHandler -- each was portable to Postgres before the rest of
+// the bundle was, and kept its own handler.
 type ProjectStatsHandler struct {
 	svc service.ProjectStatsService
 }
@@ -41,21 +43,6 @@ func NewProjectStatsHandler(svc service.ProjectStatsService) *ProjectStatsHandle
 // GetProjectStats handles GET /projects/{id}/stats.
 func (h *ProjectStatsHandler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.GetProjectStats(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// GetProjectCaseStats handles GET /projects/{id}/cases/stats.
-func (h *ProjectStatsHandler) GetProjectCaseStats(w http.ResponseWriter, r *http.Request) {
-	req := domain.ProjectCaseStatsRequest{
-		CaseTypes: r.URL.Query()["caseTypes"],
-		CreatedBy: r.URL.Query().Get("createdBy"),
-	}
-	resp, err := h.svc.GetProjectCaseStats(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

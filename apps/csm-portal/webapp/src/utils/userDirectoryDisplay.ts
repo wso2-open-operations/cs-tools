@@ -19,3 +19,24 @@ export function displayUserTimezone(timezone: string | null | undefined): string
   const value = timezone?.trim();
   return !value || /^-*none-*$/i.test(value) ? "—" : value;
 }
+
+/**
+ * Human label for a user's `userType`. The two backing data sources disagree
+ * on the external-user label (postgres emits `customer`, ServiceNow emits
+ * `external` — see `csmUsers.ts`'s own `UserType` doc comment), so both map
+ * to the same "External (customer)" label here rather than asking every
+ * caller to know about the discrepancy.
+ */
+export function displayUserType(userType: string | null | undefined): string {
+  switch (userType) {
+    case "internal":
+      return "Internal";
+    case "customer":
+    case "external":
+      return "External (customer)";
+    case "system":
+      return "System";
+    default:
+      return "—";
+  }
+}

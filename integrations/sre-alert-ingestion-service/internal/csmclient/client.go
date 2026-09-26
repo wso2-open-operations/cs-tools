@@ -108,6 +108,12 @@ func newClient(cfg Config, allowInsecureLoopback bool) *Client {
 		Timeout:   tokenFetchTimeout,
 		Transport: &httpsOnlyTransport{allowInsecureLoopback: allowInsecureLoopback},
 	}
+	// A 307/308 on the token endpoint would resend the replayable
+	// client-credentials POST (ClientID/ClientSecret in the form body) to
+	// wherever it redirects to; refuse to follow.
+	tokenHTTPClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTPClient)
 	httpClient := cc.Client(tokenCtx)
 	httpClient.Timeout = 25 * time.Second

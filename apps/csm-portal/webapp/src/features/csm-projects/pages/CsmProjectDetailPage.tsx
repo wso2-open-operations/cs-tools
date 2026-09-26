@@ -30,6 +30,7 @@ import { ArrowLeft, ChevronDown, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import UserRefLink from "@components/UserRefLink";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadata";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
@@ -149,6 +150,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavTransition();
   const location = useLocation();
+  const { canWrite } = usePortalAccess();
   // Prefer wherever the caller came from (e.g. a case's Overview panel) over
   // the hardcoded projects list, so Back returns to that page instead of
   // skipping past it — same convention as CsmCaseDetailPage's own back path.
@@ -246,66 +248,70 @@ export default function CsmProjectDetailPage(): JSX.Element {
         {/* File any issue type already scoped to this project — every create
             form below locks the project field, so it can't be filed against
             the wrong one. */}
-        <Button
-          variant="contained"
-          className="csm-print-hide"
-          startIcon={<Plus size={16} />}
-          endIcon={<ChevronDown size={16} />}
-          onClick={(e: MouseEvent<HTMLElement>) => setCreateMenuAnchor(e.currentTarget)}
-          sx={{ flexShrink: 0 }}
-        >
-          Create
-        </Button>
-        <Menu
-          anchorEl={createMenuAnchor}
-          open={!!createMenuAnchor}
-          onClose={() => setCreateMenuAnchor(null)}
-        >
-          <MenuItem
-            onClick={() => {
-              setCreateMenuAnchor(null);
-              navigate(`/cases/new?projectId=${encodeURIComponent(p.id)}`, {
-                state: { from: projectPath },
-              });
-            }}
-          >
-            Create case
-          </MenuItem>
-          {p.subscriptionType === "managed_cloud_subscription" && !hasNoSrReadAccess && (
-            <MenuItem
-              onClick={() => {
-                setCreateMenuAnchor(null);
-                navigate(
-                  `/operations/service-requests/new?projectId=${encodeURIComponent(p.id)}`,
-                  { state: { from: projectPath } },
-                );
-              }}
+        {canWrite && (
+          <>
+            <Button
+              variant="contained"
+              className="csm-print-hide"
+              startIcon={<Plus size={16} />}
+              endIcon={<ChevronDown size={16} />}
+              onClick={(e: MouseEvent<HTMLElement>) => setCreateMenuAnchor(e.currentTarget)}
+              sx={{ flexShrink: 0 }}
             >
-              Create service request
-            </MenuItem>
-          )}
-          <MenuItem
-            onClick={() => {
-              setCreateMenuAnchor(null);
-              navigate(`/engagements/new?projectId=${encodeURIComponent(p.id)}`, {
-                state: { from: projectPath },
-              });
-            }}
-          >
-            Create engagement
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setCreateMenuAnchor(null);
-              navigate(
-                `/security-center/reports/new?projectId=${encodeURIComponent(p.id)}`,
-                { state: { from: projectPath } },
-              );
-            }}
-          >
-            Create security report
-          </MenuItem>
-        </Menu>
+              Create
+            </Button>
+            <Menu
+              anchorEl={createMenuAnchor}
+              open={!!createMenuAnchor}
+              onClose={() => setCreateMenuAnchor(null)}
+            >
+              <MenuItem
+                onClick={() => {
+                  setCreateMenuAnchor(null);
+                  navigate(`/cases/new?projectId=${encodeURIComponent(p.id)}`, {
+                    state: { from: projectPath },
+                  });
+                }}
+              >
+                Create case
+              </MenuItem>
+              {p.subscriptionType === "managed_cloud_subscription" && !hasNoSrReadAccess && (
+                <MenuItem
+                  onClick={() => {
+                    setCreateMenuAnchor(null);
+                    navigate(
+                      `/operations/service-requests/new?projectId=${encodeURIComponent(p.id)}`,
+                      { state: { from: projectPath } },
+                    );
+                  }}
+                >
+                  Create service request
+                </MenuItem>
+              )}
+              <MenuItem
+                onClick={() => {
+                  setCreateMenuAnchor(null);
+                  navigate(`/engagements/new?projectId=${encodeURIComponent(p.id)}`, {
+                    state: { from: projectPath },
+                  });
+                }}
+              >
+                Create engagement
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  setCreateMenuAnchor(null);
+                  navigate(
+                    `/security-center/reports/new?projectId=${encodeURIComponent(p.id)}`,
+                    { state: { from: projectPath } },
+                  );
+                }}
+              >
+                Create security report
+              </MenuItem>
+            </Menu>
+          </>
+        )}
       </Box>
 
       <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>

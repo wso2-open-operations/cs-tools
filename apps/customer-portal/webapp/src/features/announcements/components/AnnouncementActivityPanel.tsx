@@ -198,6 +198,33 @@ export default function AnnouncementActivityPanel({
                       borderRadius: 1,
                       display: "block",
                     },
+                    // Mirrors ChatMessageCard's own table styling so a table
+                    // in an announcement's origin comment renders the same
+                    // way one already does in a support-case comment,
+                    // instead of the unstyled, borderless default a bare
+                    // `<table>` gets here.
+                    "& table": {
+                      width: "100%",
+                      minWidth: 420,
+                      borderCollapse: "collapse",
+                      mb: 1,
+                    },
+                    "& tr": {
+                      borderBottom: "1px solid",
+                      borderColor: "divider",
+                    },
+                    "& th": {
+                      textAlign: "left",
+                      p: 1,
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      color: "text.secondary",
+                    },
+                    "& td": {
+                      p: 1,
+                      fontSize: "0.8125rem",
+                      verticalAlign: "top",
+                    },
                   }}
                   // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
                   dangerouslySetInnerHTML={{

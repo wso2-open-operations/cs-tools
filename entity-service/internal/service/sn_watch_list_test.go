@@ -108,7 +108,7 @@ func TestSNCaseService_CreateCase_WatchListResolvedToEmails(t *testing.T) {
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 
 	req := domain.CreateCaseRequest{
 		Type:                  "engagement",
@@ -211,7 +211,7 @@ func TestSNCaseService_CreateCase_WatchListEmailsForwarded(t *testing.T) {
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 
 	req := domain.CreateCaseRequest{
 		Type:                  "engagement",
@@ -252,7 +252,7 @@ func TestSNCaseService_UpdateCase_WatchListResolvedToEmails(t *testing.T) {
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 
 	watchList := []string{testIncidentWatcherUUID1, testIncidentWatcherUUID2}
 	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
@@ -289,7 +289,7 @@ func TestSNCaseService_UpdateCase_WatchListEmailsForwarded(t *testing.T) {
 		}`))
 	})
 
-	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 
 	watchList := []string{testWatcherEmail1, testWatcherEmail2}
 	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
@@ -414,7 +414,7 @@ func TestSNCaseService_UpdateCase_WatchListAbsentVsEmpty(t *testing.T) {
 				}`))
 			})
 
-			svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+			svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 			if _, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -513,7 +513,7 @@ func TestSNCaseService_UpdateCase_EmptyWatchListFieldAccounting(t *testing.T) {
 				}`))
 			})
 
-			svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, noopSLAClockService{}, nil, "", nil)
+			svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil)
 			_, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req)
 			if tt.wantErr {
 				if _, ok := err.(*apierror.ValidationError); !ok {
@@ -539,7 +539,7 @@ func TestWatchListResolution_UnknownUserID(t *testing.T) {
 	})
 	client := newTestSNClient(t, mux)
 
-	caseSvc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	caseSvc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 	incidentSvc := NewServiceNowIncidentService(client, nil)
 	unknown := []string{testIncidentWatcherUUID1, testUnknownWatcherUUID}
 

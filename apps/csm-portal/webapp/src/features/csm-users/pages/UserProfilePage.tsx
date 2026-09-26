@@ -132,7 +132,7 @@ interface ProjectAccessStatus {
 
 /**
  * A project row's access status, folding case-access and registration state
- * into the single "Access" column a support engineer scans: a project that
+ * into the single "Access" column a CS engineer scans: a project that
  * doesn't grant case access is the fundamental failure ("No access", with the
  * reason called out inline); one that grants access but hasn't completed
  * registration yet reads "Invited" rather than "Has access", since the

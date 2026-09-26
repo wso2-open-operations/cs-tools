@@ -62,6 +62,11 @@ interface AbtDashboardHeaderProps {
  * team) is selected. The picker's "All ABTs" entry (`ALL_TEAMS_SENTINEL`)
  * scopes to every team in the CURRENT dashboard's own family, not every
  * team in the registry — see `selectedTeamId`'s own doc comment above.
+ * The dashboard switcher itself is hidden when `dashboardList` has one entry
+ * or fewer — a caller with only one dashboard available (e.g. every
+ * portal role but CS engineer/admin, once the restricted ones are
+ * filtered server-side) has nothing to switch between, so the control would
+ * only ever show its own single option.
  */
 export default function AbtDashboardHeader({
   dashboardKey,
@@ -93,20 +98,22 @@ export default function AbtDashboardHeader({
         </Typography>
       </Box>
       <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <Select
-            value={dashboardKey}
-            onChange={(e) => onDashboardChange(e.target.value as DashboardKey)}
-            displayEmpty
-            aria-label="Select dashboard"
-          >
-            {dashboardList.map((o) => (
-              <MenuItem key={o.id} value={o.id}>
-                {o.displayName}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        {dashboardList.length > 1 && (
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={dashboardKey}
+              onChange={(e) => onDashboardChange(e.target.value as DashboardKey)}
+              displayEmpty
+              aria-label="Select dashboard"
+            >
+              {dashboardList.map((o) => (
+                <MenuItem key={o.id} value={o.id}>
+                  {o.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
         {isTeamBased && (
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <Select

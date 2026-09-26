@@ -1,6 +1,6 @@
 BINARY := server
 
-.PHONY: all run vet test build clean migrate migrate-down seed
+.PHONY: all run vet test build clean migrate migrate-down seed backfill-meta
 
 all: build
 
@@ -34,3 +34,8 @@ migrate-down:
 # Runs cmd/seed — synthetic fixtures unless GITHUB_TOKEN is set.
 seed:
 	go run ./cmd/seed
+
+# Runs cmd/backfill-meta — one-time backfill of title/abt_team/opened_by for
+# issues rows that predate this feature. Requires GITHUB_TOKEN.
+backfill-meta:
+	go run ./cmd/backfill-meta

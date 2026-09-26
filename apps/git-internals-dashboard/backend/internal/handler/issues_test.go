@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,6 +68,16 @@ var handlerTestConfig = &config.AppConfig{
 
 // --- Validation tests (no DB) ---
 
+// repeatedParam builds a query string with n repeated occurrences of
+// name=v0, name=v1, ... — for exercising the FilterParamMaxValues cap.
+func repeatedParam(name string, n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("%s=v%d", name, i)
+	}
+	return strings.Join(parts, "&")
+}
+
 // TestListIssuesValidation400s verifies every malformed query parameter
 // ListIssues accepts (bad repo/state/slaState/q/limit/bucket/order/priority)
 // is rejected with 400 validation_failed rather than reaching the DB.
@@ -83,9 +94,16 @@ func TestListIssuesValidation400s(t *testing.T) {
 		{"bad q (not numeric)", "q=abc"},
 		{"limit too low", "limit=0"},
 		{"limit too high", "limit=501"},
+		{"offset negative", "offset=-1"},
+		{"offset not numeric", "offset=abc"},
 		{"bad bucket", "bucket=nonexistent"},
-		{"bad order", "order=nonexistent"},
+		{"bad sort", "sort=nonexistent"},
+		{"sort=age no longer accepted", "sort=age"},
+		{"bad order", "order=sideways"},
 		{"priority too long", "priority=" + strings.Repeat("x", 51)},
+		{"abtTeam too long", "abtTeam=" + strings.Repeat("x", 101)},
+		{"status exceeds filterParamMaxValues", repeatedParam("status", 51)},
+		{"one of several status values invalid", "status=WOC&status=" + strings.Repeat("x", 51)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,7 +167,11 @@ type issueFixture struct {
 	slaState      string
 	budgetHours   *float64
 	pctConsumed   *float64
+	createdAt     time.Time // zero value defaults to seedIssuesFixture's `base`
 	updatedAt     time.Time
+	title         *string
+	abtTeam       *string
+	openedBy      *string
 }
 
 // strp returns a pointer to s, for building literal *string fixture fields.
@@ -188,22 +210,30 @@ func seedIssuesFixture(t *testing.T, pool *pgxpool.Pool) (repoID int32) {
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fixtures := []issueFixture{
-		{number: 101, priority: strp("Critical(P1)"), currentStatus: strp("In Progress"), state: "OPEN", slaState: "VIOLATED", budgetHours: f64p(24), pctConsumed: f64p(1.5), updatedAt: base.Add(5 * time.Hour)},
-		{number: 102, priority: strp("High(P2)"), currentStatus: strp("WOC"), state: "OPEN", slaState: "AT_RISK", budgetHours: f64p(24), pctConsumed: f64p(0.8), updatedAt: base.Add(4 * time.Hour)},
-		{number: 103, priority: strp("Medium(P3)"), currentStatus: strp("Open"), state: "OPEN", slaState: "OK", budgetHours: f64p(48), pctConsumed: f64p(0.2), updatedAt: base.Add(3 * time.Hour)},
-		{number: 104, priority: nil, currentStatus: strp("In Progress"), state: "OPEN", slaState: "NO_SLA", updatedAt: base.Add(2 * time.Hour)},
+		// createdAt deliberately doesn't track pctConsumed's or updatedAt's own
+		// ranking among these five (101-104,107 are the base-scope set), so a
+		// sort=created test can't pass by accident of sharing another field's
+		// order: oldest -> newest is 103, 107, 104, 101, 102.
+		{number: 101, priority: strp("Critical(P1)"), currentStatus: strp("In Progress"), state: "OPEN", slaState: "VIOLATED", budgetHours: f64p(24), pctConsumed: f64p(1.5), createdAt: base.Add(-1 * time.Hour), updatedAt: base.Add(5 * time.Hour), title: strp("Critical bug in auth"), abtTeam: strp("Atlas"), openedBy: strp("jane@wso2.com")},
+		{number: 102, priority: strp("High(P2)"), currentStatus: strp("WOC"), state: "OPEN", slaState: "AT_RISK", budgetHours: f64p(24), pctConsumed: f64p(0.8), createdAt: base, updatedAt: base.Add(4 * time.Hour), abtTeam: strp("Atlas")},
+		{number: 103, priority: strp("Medium(P3)"), currentStatus: strp("Open"), state: "OPEN", slaState: "OK", budgetHours: f64p(48), pctConsumed: f64p(0.2), createdAt: base.Add(-4 * time.Hour), updatedAt: base.Add(3 * time.Hour)},
+		{number: 104, priority: nil, currentStatus: strp("In Progress"), state: "OPEN", slaState: "NO_SLA", createdAt: base.Add(-2 * time.Hour), updatedAt: base.Add(2 * time.Hour)},
 		{number: 105, priority: strp("Critical(P1)"), currentStatus: strp("Resolved"), state: "OPEN", slaState: "TERMINAL", updatedAt: base.Add(1 * time.Hour)},
 		{number: 106, priority: strp("Medium(P3)"), currentStatus: strp("Resolved"), state: "CLOSED", slaState: "TERMINAL", updatedAt: base},
-		{number: 107, priority: strp("High(P2)"), currentStatus: strp("Pending Patch Queue"), state: "OPEN", slaState: "NO_SLA", updatedAt: base.Add(6 * time.Hour)},
+		{number: 107, priority: strp("High(P2)"), currentStatus: strp("Pending Patch Queue"), state: "OPEN", slaState: "NO_SLA", createdAt: base.Add(-3 * time.Hour), updatedAt: base.Add(6 * time.Hour), abtTeam: strp("Nova")},
 		{number: 108, priority: strp("Critical(P1)"), currentStatus: strp("In Progress"), state: "CLOSED", slaState: "OK", budgetHours: f64p(24), pctConsumed: f64p(0.1), updatedAt: base.Add(7 * time.Hour)},
 	}
 
 	for _, f := range fixtures {
+		createdAt := base
+		if !f.createdAt.IsZero() {
+			createdAt = f.createdAt
+		}
 		var issueID int32
 		if err := pool.QueryRow(ctx, `
-			INSERT INTO issues (repository_id, github_number, state, html_url, priority, current_status, github_created_at, github_updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id
-		`, repoID, f.number, f.state, "https://github.com/test-owner/test-issues/issues/"+strconv.Itoa(f.number), f.priority, f.currentStatus, base, f.updatedAt).Scan(&issueID); err != nil {
+			INSERT INTO issues (repository_id, github_number, state, html_url, priority, current_status, github_created_at, github_updated_at, title, abt_team, opened_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
+		`, repoID, f.number, f.state, "https://github.com/test-owner/test-issues/issues/"+strconv.Itoa(f.number), f.priority, f.currentStatus, createdAt, f.updatedAt, f.title, f.abtTeam, f.openedBy).Scan(&issueID); err != nil {
 			t.Fatalf("insert issue %d: %v", f.number, err)
 		}
 		if _, err := pool.Exec(ctx, `
@@ -217,18 +247,69 @@ func seedIssuesFixture(t *testing.T, pool *pgxpool.Pool) (repoID int32) {
 	return repoID
 }
 
-// decodeIssueList asserts rec is a 200 and decodes its body as a ListIssues
-// response.
-func decodeIssueList(t *testing.T, rec *httptest.ResponseRecorder) []issueWire {
+// seedSecondRepoIssue inserts a second project+repository ("test-owner/
+// test-issues-2") with a single open, non-terminal issue (number 201), for
+// tests that need to prove a `repo` filter ORs across repositories.
+func seedSecondRepoIssue(t *testing.T, pool *pgxpool.Pool) (repoID int32) {
+	t.Helper()
+	ctx := context.Background()
+
+	var projectID int32
+	if err := pool.QueryRow(ctx, `INSERT INTO projects (github_project_id, title, enabled) VALUES ($1,$2,true) RETURNING id`,
+		"PVT_handler_test_2", "Handler Test 2").Scan(&projectID); err != nil {
+		t.Fatalf("create second project: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO repositories (owner, name, issue_query, sla_project_id, enabled)
+		VALUES ($1,$2,$3,$4,true) RETURNING id
+	`, "test-owner", "test-issues-2", `label:"Origin/CS"`, projectID).Scan(&repoID); err != nil {
+		t.Fatalf("create second repository: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		pool.Exec(bg, `DELETE FROM issue_sla WHERE issue_id IN (SELECT id FROM issues WHERE repository_id = $1)`, repoID)
+		pool.Exec(bg, `DELETE FROM issues WHERE repository_id = $1`, repoID)
+		pool.Exec(bg, `DELETE FROM repositories WHERE id = $1`, repoID)
+		pool.Exec(bg, `DELETE FROM projects WHERE id = $1`, projectID)
+	})
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var issueID int32
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issues (repository_id, github_number, state, html_url, priority, current_status, github_created_at, github_updated_at)
+		VALUES ($1,201,'OPEN',$2,'Critical(P1)','Open',$3,$3) RETURNING id
+	`, repoID, "https://github.com/test-owner/test-issues-2/issues/201", base).Scan(&issueID); err != nil {
+		t.Fatalf("insert second repo issue: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO issue_sla (issue_id, priority, budget_hours, consumed_hours, remaining_hours, pct_consumed, sla_state, sla_running, computed_at, computed_through)
+		VALUES ($1,'Critical(P1)',24,0,24,0.1,'OK',false,$2,$2)
+	`, issueID, base); err != nil {
+		t.Fatalf("insert second repo issue_sla: %v", err)
+	}
+
+	return repoID
+}
+
+// decodeIssueListEnvelope asserts rec is a 200 and decodes its body as a
+// ListIssues response envelope ({issues, total, limit, offset, hasMore}).
+func decodeIssueListEnvelope(t *testing.T, rec *httptest.ResponseRecorder) issueListWire {
 	t.Helper()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
-	var result []issueWire
+	var result issueListWire
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	return result
+}
+
+// decodeIssueList is decodeIssueListEnvelope for callers that only care
+// about the issues themselves, not total/limit/offset/hasMore.
+func decodeIssueList(t *testing.T, rec *httptest.ResponseRecorder) []issueWire {
+	t.Helper()
+	return decodeIssueListEnvelope(t, rec).Issues
 }
 
 // numbersOf extracts each issue's GitHub number, in response order.
@@ -347,9 +428,9 @@ func TestListIssuesBucketProductSideIncludesAllProductSideStatuses(t *testing.T)
 
 // TestListIssuesBucketProductSideNarrowedByStatusParam verifies
 // bucket=product_side combined with an explicit status param narrows to
-// just that status instead of ignoring it (regression: the product_side
-// branch previously always overwrote status with the full PRODUCT_SIDE set,
-// dropping any equality filter the caller requested).
+// just that status: the bucket's PRODUCT_SIDE status set and the explicit
+// status list are separate AND-ed conditions, so the list narrows whatever
+// the bucket already allows.
 func TestListIssuesBucketProductSideNarrowedByStatusParam(t *testing.T) {
 	pool := testPool(t)
 	seedIssuesFixture(t, pool)
@@ -453,6 +534,242 @@ func TestListIssuesPriorityFilter(t *testing.T) {
 	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{102, 107})
 }
 
+// TestListIssuesAbtTeamFilter verifies the abtTeam param narrows results to
+// issues with that exact ABT team.
+func TestListIssuesAbtTeamFilter(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&abtTeam=Atlas", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{101, 102})
+}
+
+// TestListIssuesAbtTeamFilterNarrowedByBucket verifies the abtTeam param
+// combines with bucket rather than being overridden by it: bucket=cs alone
+// returns both 102 and 107 (both CS-side), but adding abtTeam=Atlas narrows
+// to just 102 since 107's ABT team is Nova.
+func TestListIssuesAbtTeamFilterNarrowedByBucket(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&bucket=cs", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{102, 107})
+
+	req = httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&abtTeam=Atlas&bucket=cs", nil)
+	rec = httptest.NewRecorder()
+	h.ListIssues(rec, req)
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{102})
+}
+
+// TestListIssuesRepoFilterOrsMultipleValues verifies repeated `repo` values
+// are OR-ed together: issues from either named repository are returned.
+func TestListIssuesRepoFilterOrsMultipleValues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	seedSecondRepoIssue(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&repo=test-owner/test-issues-2", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{101, 102, 103, 104, 107, 201})
+}
+
+// TestListIssuesPriorityFilterOrsMultipleValues verifies repeated `priority`
+// values are OR-ed together.
+func TestListIssuesPriorityFilterOrsMultipleValues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&priority=Critical(P1)&priority=High(P2)", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	// 101 (Critical(P1)), 102 and 107 (High(P2)); 105 is Critical(P1) but TERMINAL.
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{101, 102, 107})
+}
+
+// TestListIssuesAbtTeamFilterOrsMultipleValues verifies repeated `abtTeam`
+// values are OR-ed together.
+func TestListIssuesAbtTeamFilterOrsMultipleValues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&abtTeam=Atlas&abtTeam=Nova", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{101, 102, 107})
+}
+
+// TestListIssuesStatusFilterOrsMultipleValues verifies repeated `status`
+// values are OR-ed together.
+func TestListIssuesStatusFilterOrsMultipleValues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&status=WOC&status=Pending+Patch+Queue", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{102, 107})
+}
+
+// TestListIssuesSlaStateFilterOrsMultipleValues verifies repeated `slaState`
+// values are OR-ed together.
+func TestListIssuesSlaStateFilterOrsMultipleValues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&slaState=VIOLATED&slaState=AT_RISK", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{101, 102})
+}
+
+// TestListIssuesTwoMultiValueParamsAreAndedTogether verifies two different
+// multi-value parameters are AND-ed: a status in {WOC, Pending Patch Queue}
+// narrowed further to abtTeam=Atlas drops 107 (Nova) and keeps only 102.
+func TestListIssuesTwoMultiValueParamsAreAndedTogether(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&status=WOC&status=Pending+Patch+Queue&abtTeam=Atlas", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{102})
+}
+
+// TestListIssuesBucketAndedWithExplicitRepoFilter verifies a bucket combines
+// with an explicit filter list rather than being replaced by it.
+func TestListIssuesBucketAndedWithExplicitRepoFilter(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	seedSecondRepoIssue(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?bucket=on_track&repo=test-owner/test-issues", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	// bucket=on_track alone would also include 201 (test-issues-2, OK,
+	// Open); the repo filter narrows it away.
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{103})
+}
+
+// TestListIssuesPriorityNoneMatchesUnprioritizedIssues verifies
+// priority=__none__ matches only issues with a nil priority.
+func TestListIssuesPriorityNoneMatchesUnprioritizedIssues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&priority=__none__", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{104})
+}
+
+// TestListIssuesPriorityNoneCombinedWithRealPriority verifies __none__ ORs
+// with a real priority value in the same list, same as any other value.
+func TestListIssuesPriorityNoneCombinedWithRealPriority(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&priority=__none__&priority=High(P2)", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{102, 104, 107})
+}
+
+// TestListIssuesSlaStateNoSlaMatchesIssueWithoutSlaRow verifies
+// slaState=NO_SLA matches an issue that has no issue_sla row at all, via
+// COALESCE(s.sla_state, 'NO_SLA').
+func TestListIssuesSlaStateNoSlaMatchesIssueWithoutSlaRow(t *testing.T) {
+	pool := testPool(t)
+	repoID := seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO issues (repository_id, github_number, state, html_url, current_status, github_created_at, github_updated_at)
+		VALUES ($1,999,'OPEN',$2,'Open',$3,$3)
+	`, repoID, "https://github.com/test-owner/test-issues/issues/999", base); err != nil {
+		t.Fatalf("insert issue without an issue_sla row: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&slaState=NO_SLA", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{104, 107, 999})
+}
+
+// TestListIssuesWireIncludesTitleAbtTeamOpenedBy verifies title/abtTeam/
+// openedBy round-trip onto the wire: present when set on the row, null when
+// not.
+func TestListIssuesWireIncludesTitleAbtTeamOpenedBy(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	issues := decodeIssueList(t, rec)
+	byNumber := make(map[int]issueWire, len(issues))
+	for _, iss := range issues {
+		byNumber[iss.Number] = iss
+	}
+
+	with, ok := byNumber[101]
+	if !ok {
+		t.Fatalf("expected issue 101 in response, got %v", numbersOf(issues))
+	}
+	if with.Title == nil || *with.Title != "Critical bug in auth" {
+		t.Errorf("expected title=%q, got %v", "Critical bug in auth", with.Title)
+	}
+	if with.AbtTeam == nil || *with.AbtTeam != "Atlas" {
+		t.Errorf("expected abtTeam=%q, got %v", "Atlas", with.AbtTeam)
+	}
+	if with.OpenedBy == nil || *with.OpenedBy != "jane@wso2.com" {
+		t.Errorf("expected openedBy=%q, got %v", "jane@wso2.com", with.OpenedBy)
+	}
+
+	without, ok := byNumber[103]
+	if !ok {
+		t.Fatalf("expected issue 103 in response, got %v", numbersOf(issues))
+	}
+	if without.Title != nil {
+		t.Errorf("expected title=nil, got %v", *without.Title)
+	}
+	if without.AbtTeam != nil {
+		t.Errorf("expected abtTeam=nil, got %v", *without.AbtTeam)
+	}
+	if without.OpenedBy != nil {
+		t.Errorf("expected openedBy=nil, got %v", *without.OpenedBy)
+	}
+}
+
 // TestListIssuesQNumberFilter verifies q= filters to the issue whose GitHub
 // number matches the query string.
 func TestListIssuesQNumberFilter(t *testing.T) {
@@ -467,14 +784,14 @@ func TestListIssuesQNumberFilter(t *testing.T) {
 	assertSameSet(t, numbersOf(decodeIssueList(t, rec)), []int{103})
 }
 
-// TestListIssuesOrderBudgetDescNullsLast verifies order=budget_desc sorts by
-// pct_consumed descending, with null-budget issues sorted last.
-func TestListIssuesOrderBudgetDescNullsLast(t *testing.T) {
+// TestListIssuesSortSLAConsumptionNullsLast verifies sort=sla_consumption
+// sorts by pct_consumed descending, with null-budget issues sorted last.
+func TestListIssuesSortSLAConsumptionNullsLast(t *testing.T) {
 	pool := testPool(t)
 	seedIssuesFixture(t, pool)
 	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
 
-	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&order=budget_desc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=sla_consumption", nil)
 	rec := httptest.NewRecorder()
 	h.ListIssues(rec, req)
 
@@ -485,9 +802,9 @@ func TestListIssuesOrderBudgetDescNullsLast(t *testing.T) {
 	}
 }
 
-// TestListIssuesOrderUpdatedDescIsDefault verifies the default (no order
-// param) sort is githubUpdatedAt descending.
-func TestListIssuesOrderUpdatedDescIsDefault(t *testing.T) {
+// TestListIssuesSortDefaultsToSLAConsumption verifies the default (no sort
+// param) is the same ordering as an explicit sort=sla_consumption.
+func TestListIssuesSortDefaultsToSLAConsumption(t *testing.T) {
 	pool := testPool(t)
 	seedIssuesFixture(t, pool)
 	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
@@ -497,9 +814,184 @@ func TestListIssuesOrderUpdatedDescIsDefault(t *testing.T) {
 	h.ListIssues(rec, req)
 
 	got := numbersOf(decodeIssueList(t, rec))
-	want := []int{107, 101, 102, 103, 104} // descending githubUpdatedAt among the base-scope set
+	if len(got) != 5 || got[0] != 101 || got[1] != 102 || got[2] != 103 {
+		t.Fatalf("expected [101 102 103 <104,107 in any order>], got %v", got)
+	}
+}
+
+// TestListIssuesSortSLAConsumptionAscendingNullsLast verifies
+// sort=sla_consumption&order=asc sorts lowest-consumed first, with null
+// values still sorted last rather than first.
+func TestListIssuesSortSLAConsumptionAscendingNullsLast(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=sla_consumption&order=asc", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	got := numbersOf(decodeIssueList(t, rec))
+	// 103 (0.2) < 102 (0.8) < 101 (1.5) < {104, 107} (null, order unspecified between them)
+	if len(got) != 5 || got[0] != 103 || got[1] != 102 || got[2] != 101 {
+		t.Fatalf("expected [103 102 101 <104,107 in any order>], got %v", got)
+	}
+}
+
+// TestListIssuesSortCreatedDescending verifies sort=created (default order,
+// descending) orders newest githubCreatedAt first.
+func TestListIssuesSortCreatedDescending(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=created", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	got := numbersOf(decodeIssueList(t, rec))
+	want := []int{102, 101, 104, 107, 103} // newest -> oldest githubCreatedAt among the base-scope set
 	if !sliceEqual(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+// TestListIssuesSortCreatedAscending verifies sort=created&order=asc orders
+// oldest githubCreatedAt first, independent of pct_consumed's and
+// githubUpdatedAt's own ranking among the same issues.
+func TestListIssuesSortCreatedAscending(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=created&order=asc", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	got := numbersOf(decodeIssueList(t, rec))
+	want := []int{103, 107, 104, 101, 102} // oldest -> newest githubCreatedAt among the base-scope set
+	if !sliceEqual(got, want) {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+// TestListIssuesSortUpdatedDescending verifies sort=updated (default order,
+// descending) orders most-recently-updated first.
+func TestListIssuesSortUpdatedDescending(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=updated", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	got := numbersOf(decodeIssueList(t, rec))
+	want := []int{107, 101, 102, 103, 104} // most- -> least-recently-updated among the base-scope set
+	if !sliceEqual(got, want) {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+// TestListIssuesSortUpdatedAscending verifies sort=updated&order=asc orders
+// least-recently-updated first.
+func TestListIssuesSortUpdatedAscending(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=updated&order=asc", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	got := numbersOf(decodeIssueList(t, rec))
+	want := []int{104, 103, 102, 101, 107} // least- -> most-recently-updated among the base-scope set
+	if !sliceEqual(got, want) {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+// TestListIssuesSortStablePagingAcrossTiedValues verifies limit=1 paging
+// through every offset reproduces the same order a single unpaged request
+// returns, including across the tied (both-NULL) pct_consumed values of 104
+// and 107 — proving the i.id ASC tie-breaker makes paging deterministic.
+func TestListIssuesSortStablePagingAcrossTiedValues(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	fullReq := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=sla_consumption&limit=10", nil)
+	fullRec := httptest.NewRecorder()
+	h.ListIssues(fullRec, fullReq)
+	want := numbersOf(decodeIssueList(t, fullRec))
+
+	got := make([]int, 0, len(want))
+	for offset := 0; offset < len(want); offset++ {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/issues?repo=test-owner/test-issues&sort=sla_consumption&limit=1&offset=%d", offset), nil)
+		rec := httptest.NewRecorder()
+		h.ListIssues(rec, req)
+		page := numbersOf(decodeIssueList(t, rec))
+		if len(page) != 1 {
+			t.Fatalf("offset %d: expected 1 issue, got %v", offset, page)
+		}
+		got = append(got, page[0])
+	}
+	if !sliceEqual(got, want) {
+		t.Errorf("paging through tied sort values wasn't stable: want %v, got %v", want, got)
+	}
+}
+
+// TestListIssuesOffsetWindowsThroughSortOrder verifies limit+offset page
+// through the same sort=sla_consumption ordering already proven above,
+// rather than returning an arbitrary/unstable subset.
+func TestListIssuesOffsetWindowsThroughSortOrder(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&sort=sla_consumption&limit=2&offset=2", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+
+	env := decodeIssueListEnvelope(t, rec)
+	// Full sla_consumption order is [101 102 103 <104,107>]; offset=2,limit=2
+	// lands on index 2 (103) and index 3 (104 or 107, whichever sorts there).
+	if len(env.Issues) != 2 || env.Issues[0].Number != 103 {
+		t.Fatalf("expected page [103 <104 or 107>], got %v", numbersOf(env.Issues))
+	}
+	if env.Total != 5 {
+		t.Errorf("expected total=5, got %d", env.Total)
+	}
+	if env.Limit != 2 || env.Offset != 2 {
+		t.Errorf("expected limit=2 offset=2 echoed back, got limit=%d offset=%d", env.Limit, env.Offset)
+	}
+	if !env.HasMore {
+		t.Error("expected hasMore=true (2 more issues follow this page)")
+	}
+}
+
+// TestListIssuesHasMoreFalseOnLastPage verifies hasMore is false once
+// offset+len(issues) reaches total, including when offset lands past the
+// end (empty page).
+func TestListIssuesHasMoreFalseOnLastPage(t *testing.T) {
+	pool := testPool(t)
+	seedIssuesFixture(t, pool)
+	h := NewIssuesHandler(pool, handlerTestConfig, appconfig.Default().API)
+
+	req := httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&limit=10&offset=0", nil)
+	rec := httptest.NewRecorder()
+	h.ListIssues(rec, req)
+	env := decodeIssueListEnvelope(t, rec)
+	if len(env.Issues) != 5 || env.Total != 5 || env.HasMore {
+		t.Fatalf("expected all 5 issues on one page with hasMore=false, got %d issues total=%d hasMore=%v", len(env.Issues), env.Total, env.HasMore)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/issues?repo=test-owner/test-issues&limit=10&offset=50", nil)
+	rec = httptest.NewRecorder()
+	h.ListIssues(rec, req)
+	env = decodeIssueListEnvelope(t, rec)
+	if len(env.Issues) != 0 || env.Total != 5 || env.HasMore {
+		t.Fatalf("expected an empty page past the end with hasMore=false, got %d issues total=%d hasMore=%v", len(env.Issues), env.Total, env.HasMore)
 	}
 }
 

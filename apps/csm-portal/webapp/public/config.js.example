@@ -101,4 +101,10 @@ window.config = {
   // CSM_PORTAL_MOBILE_APP_ANDROID_STORE_URL: "https://play.google.com/store/apps/details?id=com.example.app",
   // Also show the banner on tablets, not just phones (default false).
   // CSM_PORTAL_MOBILE_APP_INCLUDE_TABLETS: false,
+
+  // Project key an announcement's "Send test" dry run creates its one real
+  // test case in (mirrors the ServiceNow flow's own hardcoded
+  // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when
+  // unset -- override only if this environment needs a different sandbox project.
+  // CSM_PORTAL_ANNOUNCEMENT_TEST_PROJECT_KEY: "DCPSUB",
 };

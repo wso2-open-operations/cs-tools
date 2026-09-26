@@ -16,8 +16,11 @@
 
 import type { BasicInformationSectionProps } from "@features/support/types/supportComponents";
 import {
+  Alert,
   Box,
+  Button,
   Chip,
+  Divider,
   FormControl,
   Grid,
   MenuItem,
@@ -27,12 +30,22 @@ import {
   Typography,
   TextField,
 } from "@wso2/oxygen-ui";
-import { Sparkles } from "@wso2/oxygen-ui-icons-react";
+import { Plus, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type UIEvent } from "react";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/common";
+import {
+  isDeploymentDropdownEmpty,
+  isProductDropdownEmpty,
+} from "@features/support/utils/caseCreation";
 import { paginatedSelectMenuListProps } from "@utils/common";
 import { isCloudSupportProject } from "@utils/permission";
+
+// Sentinel values for the "add new" row appended to each dropdown's menu, so
+// it stays reachable while the menu is open instead of living in a button
+// below the field (which the open menu's overlay would otherwise cover).
+const ADD_NEW_DEPLOYMENT_OPTION = "__add_new_deployment__";
+const ADD_NEW_PRODUCT_OPTION = "__add_new_product__";
 
 /**
  * Renders the Basic Information section used during case creation.
@@ -64,6 +77,8 @@ export function BasicInformationSection({
   hasMoreProducts = false,
   isFetchingMoreProducts = false,
   projectTypeLabel,
+  onAddDeployment,
+  onAddProduct,
   children,
 }: BasicInformationSectionProps & { projectTypeLabel?: string | null }): JSX.Element {
   const handleDeploymentsMenuScroll = (e: UIEvent<HTMLElement>) => {
@@ -115,15 +130,23 @@ export function BasicInformationSection({
   const hasEffectiveProductOptions = useProductOptionList
     ? hasProductRows
     : productOptionsLegacy.length > 0;
-  const showNoProductsHint =
-    !hasEffectiveProductOptions &&
-    !isProductDropdownDisabled &&
-    !isProductLoading;
+  const showNoProductsHint = isProductDropdownEmpty(
+    hasEffectiveProductOptions,
+    isProductDropdownDisabled,
+    isProductLoading,
+  );
 
-  const showNoDeploymentsHint =
-    !isDeploymentLoading &&
-    deploymentOptions.length === 0 &&
-    !isDeploymentDisabled;
+  const showNoDeploymentsHint = isDeploymentDropdownEmpty(
+    deploymentOptions,
+    isDeploymentLoading,
+    isDeploymentDisabled,
+  );
+
+  // Only swap in the richer empty-state + CTA when the caller wired up the
+  // corresponding "add" action; otherwise fall back to the legacy disabled
+  // placeholder so other consumers of this section are unaffected.
+  const showNoDeploymentsEmptyState = showNoDeploymentsHint && !!onAddDeployment;
+  const showNoProductsEmptyState = showNoProductsHint && !!onAddProduct;
 
   const deploymentMenuListProps = paginatedSelectMenuListProps(
     onLoadMoreDeployments && hasMoreDeployments
@@ -190,7 +213,7 @@ export function BasicInformationSection({
                 height={40}
                 sx={{ maxWidth: "100%" }}
               />
-            ) : (
+            ) : showNoDeploymentsEmptyState ? null : (
               <FormControl
                 fullWidth
                 size="small"
@@ -198,7 +221,13 @@ export function BasicInformationSection({
               >
                 <Select
                   value={deployment}
-                  onChange={(e) => setDeployment(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value === ADD_NEW_DEPLOYMENT_OPTION) {
+                      onAddDeployment?.();
+                      return;
+                    }
+                    setDeployment(e.target.value);
+                  }}
                   displayEmpty
                   renderValue={(value) => {
                     if (value === "") {
@@ -231,8 +260,43 @@ export function BasicInformationSection({
                       deploymentOptions.length > 0,
                     )}
                   />
+                  {onAddDeployment && [
+                    <Divider key="add-deployment-divider" sx={{ my: 0.5 }} />,
+                    <MenuItem
+                      key="add-deployment"
+                      value={ADD_NEW_DEPLOYMENT_OPTION}
+                      sx={{ color: "primary.main", py: 0.5, minHeight: "auto" }}
+                    >
+                      <Plus size={14} aria-hidden style={{ marginRight: 8 }} />
+                      Add Deployment
+                    </MenuItem>,
+                  ]}
                 </Select>
               </FormControl>
+            )}
+            {showNoDeploymentsEmptyState && (
+              <Alert
+                severity="warning"
+                sx={{ mt: 1 }}
+                action={
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<Plus size={16} aria-hidden />}
+                    onClick={onAddDeployment}
+                  >
+                    Add Deployment
+                  </Button>
+                }
+              >
+                <Typography variant="body2">
+                  No deployments configured for this project. Add a
+                  deployment to continue creating your case.
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  This information helps us provide you with better support.
+                </Typography>
+              </Alert>
             )}
           </Grid>
         )}
@@ -259,7 +323,7 @@ export function BasicInformationSection({
           </Box>
           {isProductLoading ? (
             <Skeleton variant="rounded" height={40} sx={{ maxWidth: "100%" }} />
-          ) : (
+          ) : showNoProductsEmptyState ? null : (
             <FormControl
               fullWidth
               size="small"
@@ -267,7 +331,13 @@ export function BasicInformationSection({
             >
               <Select
                 value={product}
-                onChange={(e) => setProduct(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === ADD_NEW_PRODUCT_OPTION) {
+                    onAddProduct?.();
+                    return;
+                  }
+                  setProduct(e.target.value);
+                }}
                 displayEmpty
                 renderValue={(value) => {
                   if (value === "") {
@@ -321,8 +391,43 @@ export function BasicInformationSection({
                       : productOptionsLegacy.length > 0),
                   )}
                 />
+                {onAddProduct && !isProductDropdownDisabled && [
+                  <Divider key="add-product-divider" sx={{ my: 0.5 }} />,
+                  <MenuItem
+                    key="add-product"
+                    value={ADD_NEW_PRODUCT_OPTION}
+                    sx={{ color: "primary.main", py: 0.5, minHeight: "auto" }}
+                  >
+                    <Plus size={14} aria-hidden style={{ marginRight: 8 }} />
+                    Add Product
+                  </MenuItem>,
+                ]}
               </Select>
             </FormControl>
+          )}
+          {showNoProductsEmptyState && (
+            <Alert
+              severity="warning"
+              sx={{ mt: 1 }}
+              action={
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<Plus size={16} aria-hidden />}
+                  onClick={onAddProduct}
+                >
+                  Add Product
+                </Button>
+              }
+            >
+              <Typography variant="body2">
+                No products found for this deployment. Add a product to
+                proceed.
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                This information helps us provide you with better support.
+              </Typography>
+            </Alert>
           )}
         </Grid>
         {children && (

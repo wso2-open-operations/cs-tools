@@ -130,7 +130,7 @@ func TestAuth_RequiredClaims(t *testing.T) {
 // ----- user info injection -----
 
 func TestAuth_UserInfoInjection(t *testing.T) {
-	t.Run("injects email, userid and groups from token into context", func(t *testing.T) {
+	t.Run("injects email, userid and roles from token into context", func(t *testing.T) {
 		var captured *middleware.UserInfo
 		capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			captured = middleware.UserInfoFromContext(r.Context())
@@ -141,7 +141,7 @@ func TestAuth_UserInfoInjection(t *testing.T) {
 		r.Header.Set("x-jwt-assertion", makeTestJWT(map[string]any{
 			"email":  "agent@wso2.com",
 			"userid": "uid-456",
-			"groups": []string{"csm-agents", "csm-admins"},
+			"roles":  []string{"test-viewer", "test-admin"},
 		}))
 		w := httptest.NewRecorder()
 		middleware.Auth(testConfig())(capture).ServeHTTP(w, r)
@@ -155,10 +155,65 @@ func TestAuth_UserInfoInjection(t *testing.T) {
 		if captured.UserID != "uid-456" {
 			t.Errorf("userID = %q, want uid-456", captured.UserID)
 		}
-		if len(captured.Groups) != 2 {
-			t.Errorf("groups = %v, want 2 entries", captured.Groups)
+		if len(captured.Roles) != 2 {
+			t.Errorf("roles = %v, want 2 entries", captured.Roles)
 		}
 	})
+}
+
+func TestAuth_RolesClaimShapes(t *testing.T) {
+	tests := []struct {
+		name      string
+		roles     any
+		omit      bool
+		wantRoles []string
+		wantOK    bool
+	}{
+		{name: "one role arrives as a bare string", roles: "test-viewer", wantRoles: []string{"test-viewer"}, wantOK: true},
+		{name: "several roles arrive as an array", roles: []string{"test-viewer", "test-escalator"}, wantRoles: []string{"test-viewer", "test-escalator"}, wantOK: true},
+		{name: "a one-element array", roles: []string{"test-admin"}, wantRoles: []string{"test-admin"}, wantOK: true},
+		{name: "an empty string is no role", roles: "", wantRoles: nil, wantOK: true},
+		{name: "an empty array is no role", roles: []string{}, wantRoles: []string{}, wantOK: true},
+		{name: "null is no role", roles: nil, wantRoles: nil, wantOK: true},
+		{name: "claim absent", omit: true, wantRoles: nil, wantOK: true},
+		{name: "a number is rejected", roles: 7, wantOK: false},
+		{name: "an array holding a non-string is rejected", roles: []any{"ok", 3}, wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := map[string]any{"email": "user@example.com", "userid": "uid-1"}
+			if !tc.omit {
+				claims["roles"] = tc.roles
+			}
+			var captured *middleware.UserInfo
+			capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				captured = middleware.UserInfoFromContext(r.Context())
+				w.WriteHeader(http.StatusOK)
+			})
+			r := httptest.NewRequest(http.MethodGet, "/cases", nil)
+			r.Header.Set("x-jwt-assertion", makeTestJWT(claims))
+			w := httptest.NewRecorder()
+			middleware.Auth(testConfig())(capture).ServeHTTP(w, r)
+
+			if !tc.wantOK {
+				if w.Code != http.StatusUnauthorized || captured != nil {
+					t.Errorf("status = %d, captured = %v, want 401 and no user", w.Code, captured)
+				}
+				return
+			}
+			if w.Code != http.StatusOK || captured == nil {
+				t.Fatalf("status = %d, captured = %v, want 200 and a user", w.Code, captured)
+			}
+			if len(captured.Roles) != len(tc.wantRoles) {
+				t.Fatalf("roles = %v, want %v", captured.Roles, tc.wantRoles)
+			}
+			for i := range tc.wantRoles {
+				if captured.Roles[i] != tc.wantRoles[i] {
+					t.Errorf("roles = %v, want %v", captured.Roles, tc.wantRoles)
+				}
+			}
+		})
+	}
 }
 
 // ----- security headers -----

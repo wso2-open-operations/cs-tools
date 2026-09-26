@@ -23,13 +23,41 @@ import (
 )
 
 type mockEntityReader struct {
-	searchAccountContactsFn func(ctx context.Context, accountID string, body []byte) ([]byte, error)
-	searchProjectContactsFn func(ctx context.Context, projectID string, body []byte) ([]byte, error)
-	searchProjectsFn        func(ctx context.Context, body []byte) ([]byte, error)
-	searchProjectsCalls     [][]byte
-	getProjectFn            func(ctx context.Context, id string) ([]byte, error)
-	getAccountFn            func(ctx context.Context, id string) ([]byte, error)
-	getAccountCalls         []string
+	searchAccountContactsFn         func(ctx context.Context, accountID string, body []byte) ([]byte, error)
+	searchProjectContactsFn         func(ctx context.Context, projectID string, body []byte) ([]byte, error)
+	searchProjectsFn                func(ctx context.Context, body []byte) ([]byte, error)
+	searchProjectsCalls             [][]byte
+	getProjectFn                    func(ctx context.Context, id string) ([]byte, error)
+	getAccountFn                    func(ctx context.Context, id string) ([]byte, error)
+	getAccountCalls                 []string
+	searchProjectOpportunityLinksFn func(ctx context.Context, body []byte) ([]byte, error)
+	searchInvoicesFn                func(ctx context.Context, body []byte) ([]byte, error)
+	searchInvoicesCalls             [][]byte
+	getOpportunityFn                func(ctx context.Context, id string) ([]byte, error)
+	getOpportunityCalls             []string
+}
+
+func (m *mockEntityReader) SearchProjectOpportunityLinks(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchProjectOpportunityLinksFn != nil {
+		return m.searchProjectOpportunityLinksFn(ctx, body)
+	}
+	return []byte(`{"links":[]}`), nil
+}
+
+func (m *mockEntityReader) SearchInvoices(ctx context.Context, body []byte) ([]byte, error) {
+	m.searchInvoicesCalls = append(m.searchInvoicesCalls, body)
+	if m.searchInvoicesFn != nil {
+		return m.searchInvoicesFn(ctx, body)
+	}
+	return []byte(`{"invoices":[]}`), nil
+}
+
+func (m *mockEntityReader) GetOpportunity(ctx context.Context, id string) ([]byte, error) {
+	m.getOpportunityCalls = append(m.getOpportunityCalls, id)
+	if m.getOpportunityFn != nil {
+		return m.getOpportunityFn(ctx, id)
+	}
+	return []byte(`{}`), nil
 }
 
 func (m *mockEntityReader) GetAccount(ctx context.Context, id string) ([]byte, error) {

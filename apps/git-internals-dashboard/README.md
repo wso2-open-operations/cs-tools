@@ -28,7 +28,7 @@ This setup gives a single, always-current view of SLA health without manually cr
 - **Background Recompute**
   A scheduler periodically recomputes SLA state so the dashboard reflects elapsed time even between syncs, coordinated across replicas with a database advisory lock.
 - **Privacy-Conscious by Design**
-  Issue titles, labels, assignees, and other identifying details are never persisted — see [Privacy](#privacy) below.
+  Only title, ABT team, and a `@wso2.com` opened-by address are persisted from an issue's body — see [Privacy](#privacy) below; nothing else is.
 - **Identity Integration**
   The webapp authenticates via an OIDC-compatible identity provider (Asgardeo).
 
@@ -52,7 +52,7 @@ Browser (webapp SPA)
 API gateway   ← JWT validation, rate limiting, CORS all live HERE
   ▼
 backend (Go, authless) ──► Postgres
-                      ──► GitHub GraphQL API (sync, seed, on-demand titles)
+                      ──► GitHub GraphQL API (sync, seed, backfill)
 ```
 
 - The backend trusts the upstream gateway completely — it parses no auth token and has no auth
@@ -97,10 +97,10 @@ backend (Go, authless) ──► Postgres
 
 ## Privacy
 
-No issue title, label, assignee, opener, or status-event actor is ever persisted to the database
-or returned by any endpoint except `POST /issues/titles`, which fetches titles live from GitHub
-on demand and caches them in memory only (never written to Postgres, never sent anywhere else).
-Labels are read transiently during ingest solely to derive an issue's priority, then discarded.
+Persisted: issue title, ABT team, and opened-by (only a `@wso2.com` address), as approved by
+Security. The issue body is read transiently during ingest solely to derive ABT team and
+opened-by, then discarded. Labels are read transiently to derive priority, then discarded.
+Assignees and status-event actors are never fetched or stored.
 
 ## Reporting Issues
 

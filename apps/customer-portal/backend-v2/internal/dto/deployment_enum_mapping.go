@@ -34,6 +34,20 @@ var deploymentTypeIDs = map[string]int{
 	"primary_production": 6,
 }
 
+// deploymentTypeIDStrings is deploymentTypeIDs with its values stringified --
+// normalizeChoices (case_enum_mapping.go) takes a map[string]string, matching
+// every other domainToID table it's called with (caseStateIDs,
+// caseSeverityIDs, ...); deploymentTypeIDs stays map[string]int since
+// deploymentTypeIDToEnum's reverse lookup and deploymentTypeIDToEnumPtr both
+// need the numeric form.
+var deploymentTypeIDStrings = func() map[string]string {
+	m := make(map[string]string, len(deploymentTypeIDs))
+	for enum, id := range deploymentTypeIDs {
+		m[enum] = strconv.Itoa(id)
+	}
+	return m
+}()
+
 var deploymentTypeIDToEnum = func() map[int]string {
 	m := make(map[int]string, len(deploymentTypeIDs))
 	for enum, id := range deploymentTypeIDs {
@@ -68,6 +82,25 @@ func deploymentTypeRef(enum string) *IDLabelRef {
 		id = strconv.Itoa(key)
 	}
 	return &IDLabelRef{ID: id, Label: label}
+}
+
+// normalizeDeploymentTypeChoices is normalizeCaseSeverityChoices for
+// deployment types (see case_enum_mapping.go's normalizeChoices) --
+// deployment_type_enum's Postgres labels ("DEVELOPMENT", "PRIMARY_PRODUCTION",
+// etc.) are just the UPPER_SNAKE form of deploymentTypeIDs' own keys, so no
+// enum-to-domain table is needed, same as case state.
+//
+// Without this, GET /projects/{id}/filters returned deploymentTypes.id as
+// the raw Postgres label whenever entity-service ran in Postgres/dual-write
+// mode, instead of the numeric ServiceNow-style id EditDeploymentModal.tsx's
+// Number(form.typeKey) expects. Number("DEVELOPMENT") is NaN, and NaN is
+// never equal to itself in JS, so the modal's "did the type actually change"
+// check (newTypeKey !== originalTypeKey) was always true -- every save
+// (even ones that didn't touch type) sent body.typeKey = NaN, which
+// JSON.stringify turns into null, tripping the handler's
+// "provide either detail fields or active, not both" guard.
+func normalizeDeploymentTypeChoices(items []ReferenceItem) []ReferenceItem {
+	return normalizeChoices(items, nil, deploymentTypeIDStrings, deploymentTypeLabels)
 }
 
 // deploymentTypeIDToEnumPtr translates a frontend-supplied numeric

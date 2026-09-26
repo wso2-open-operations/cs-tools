@@ -173,3 +173,32 @@ func (s *snCommentSearchService) CreateComment(ctx context.Context, req domain.C
 		},
 	}, nil
 }
+
+// commentEditDeleteUnsupportedOnSNMsg is returned by every method below --
+// ServiceNow's own sys_journal_field is append-only (confirmed separately:
+// stock ServiceNow does not let an agent edit or delete a journal entry
+// either), so edit/soft-delete is a net-new CSM Portal capability that only
+// the Postgres data source implements. This is not a temporary gap to fill
+// in later; there is no ServiceNow-side operation to back it with -- same
+// "genuinely unsupported by this data source" posture (503, not 400) as
+// unavailableTaskService/unavailableFeedbackService and
+// SyncProductVulnerabilities elsewhere in this codebase.
+const commentEditDeleteUnsupportedOnSNMsg = "editing or deleting a comment is not supported by the ServiceNow data source"
+
+// UpdateComment implements CommentService. Always rejected -- see
+// commentEditDeleteUnsupportedOnSNMsg.
+func (s *snCommentSearchService) UpdateComment(_ context.Context, _ domain.UpdateCommentRequest) (domain.UpdateCommentResponse, error) {
+	return domain.UpdateCommentResponse{}, &apierror.ServiceUnavailableError{Msg: commentEditDeleteUnsupportedOnSNMsg}
+}
+
+// DeleteComment implements CommentService. Always rejected -- see
+// commentEditDeleteUnsupportedOnSNMsg.
+func (s *snCommentSearchService) DeleteComment(_ context.Context, _ string) error {
+	return &apierror.ServiceUnavailableError{Msg: commentEditDeleteUnsupportedOnSNMsg}
+}
+
+// GetCommentEditHistory implements CommentService. Always rejected -- see
+// commentEditDeleteUnsupportedOnSNMsg.
+func (s *snCommentSearchService) GetCommentEditHistory(_ context.Context, _ string) (domain.GetCommentEditHistoryResponse, error) {
+	return domain.GetCommentEditHistoryResponse{}, &apierror.ServiceUnavailableError{Msg: commentEditDeleteUnsupportedOnSNMsg}
+}

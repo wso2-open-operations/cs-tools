@@ -220,6 +220,13 @@ export type Message = {
   feedbackTags?: string[];
   isLoading?: boolean;
   isError?: boolean;
+  /**
+   * Set when THIS message arrived over the websocket announcing a token/usage
+   * limit. Drives the "request a token limit increase" CTA. Never set on
+   * messages rebuilt from REST history, so resuming an old chat does not
+   * resurrect the CTA for a limit that has since been raised.
+   */
+  isTokenLimitNotice?: boolean;
   slotState?: SlotState;
   recommendations?: Recommendation[];
   thinkingSteps?: string[];

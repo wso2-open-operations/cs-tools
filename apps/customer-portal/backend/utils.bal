@@ -18,7 +18,6 @@ import customer_portal.types;
 
 import ballerina/http;
 import ballerina/log;
-import ballerina/time;
 
 configurable int stateIdOpen = 1;
 configurable types:FeatureFlags featureFlags = {
@@ -1486,50 +1485,17 @@ public isolated function mapDeployedProductMetricsUsageCounts(
     };
 }
 
-# Check if the project contract has ended based on its end date.
+# Check if the project is suspended.
 #
-# + endDate - End date of the project (YYYY-MM-DD or ISO string)
-# + return - True if the contract end date has passed, false otherwise
-public isolated function isProjectContractEnded(string? endDate) returns boolean {
-    if endDate is () {
-        return false;
-    }
-    string trimmed = endDate.trim();
-    if trimmed.length() < 10 {
-        return false;
-    }
-    string endDatePart = trimmed.substring(0, 10);
-    string[] parts = re `-`.split(endDatePart);
-    if parts.length() != 3 {
-        return false;
-    }
-    int|error year = int:fromString(parts[0]);
-    int|error month = int:fromString(parts[1]);
-    int|error day = int:fromString(parts[2]);
-    if year is error || month is error || day is error {
-        return false;
-    }
-    time:Error? validationErr = time:dateValidate({year, month, day});
-    if validationErr is time:Error {
-        return false;
-    }
-    // End date is considered inclusive through the end of the specified day (UTC).
-    // The contract has ended if current UTC date is strictly greater than the end date.
-    string currentDatePart = time:utcToString(time:utcNow()).substring(0, 10);
-    return currentDatePart > endDatePart;
-}
-
-# Check if the project is suspended or its contract has ended.
+# A passed end date deliberately does not count. Contract expiry used to be
+# treated as suspension here, which refused case creation the moment a contract
+# lapsed; per customer request an expired project keeps working and only an
+# explicit suspended closure state restricts it.
 #
 # + closureState - Closure state of the project
-# + endDate - End date of the project
-# + return - True if the project is suspended or expired, false otherwise
-public isolated function isProjectSuspendedOrExpired(string? closureState, string? endDate) returns boolean {
-    if closureState is string && closureState.trim().toLowerAscii() == "suspended" {
-        return true;
-    }
-    return isProjectContractEnded(endDate);
-}
+# + return - True if the project is suspended, false otherwise
+public isolated function isProjectSuspended(string? closureState) returns boolean =>
+    closureState is string && closureState.trim().toLowerAscii() == "suspended";
 
 # Check whether a case is closed.
 #

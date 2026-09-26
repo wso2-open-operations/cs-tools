@@ -31,12 +31,45 @@ import (
 type callRequestService struct {
 	repo     repository.CallRequestRepository
 	userRepo repository.UserRepository
+	// snWriteback/snMirror back CreateCallRequest's best-effort, asynchronous
+	// ServiceNow mirror write under DATA_SOURCE=postgres-servicenow-dual-write
+	// -- both nil in every other mode. Set only via
+	// NewCallRequestServiceWithSNWriteback.
+	//
+	// UpdateCallRequest is deliberately NOT mirrored here (see that method's
+	// own doc comment): unlike case/change_request/incident (whose CREATE is
+	// ServiceNow-first under this data source, so their Postgres id IS the
+	// real ServiceNow sys_id round-tripped through sysidToUUID),
+	// CreateCallRequest is Postgres-first -- customer_call.id is a plain
+	// Postgres-generated UUID with no ServiceNow counterpart recorded
+	// anywhere (no column on customer_call holds one -- see migration
+	// 000072). uuidToSysid(that id) would not resolve to any real ServiceNow
+	// record, so a mirrored UpdateCallRequest would either 404 against
+	// ServiceNow every single time (if the CREATE mirror never landed, or
+	// landed under a different, SN-generated id) or -- far worse -- collide
+	// with an unrelated ServiceNow record if the fabricated sys_id happened
+	// to match one. Neither outcome is acceptable, and there is no id
+	// mapping to close this gap with today.
+	snWriteback *SNWritebackDispatcher
+	snMirror    CallRequestService
 }
 
 // NewCallRequestService constructs a CallRequestService backed by Postgres
 // (customer_call, migration 000072).
 func NewCallRequestService(repo repository.CallRequestRepository, userRepo repository.UserRepository) CallRequestService {
 	return &callRequestService{repo: repo, userRepo: userRepo}
+}
+
+// NewCallRequestServiceWithSNWriteback is NewCallRequestService plus the
+// wiring DATA_SOURCE=postgres-servicenow-dual-write needs: CreateCallRequest
+// dispatches a best-effort, asynchronous ServiceNow mirror write onto mirror
+// after the Postgres write commits -- see CreateCallRequest's own doc
+// comment, and callRequestService's own doc comment on why UpdateCallRequest
+// is not mirrored. A separate constructor rather than extending
+// NewCallRequestService's own signature, same reasoning as
+// NewCaseServiceWithSNWriteback's own doc comment.
+func NewCallRequestServiceWithSNWriteback(repo repository.CallRequestRepository, userRepo repository.UserRepository, dispatcher *SNWritebackDispatcher, mirror CallRequestService) CallRequestService {
+	return &callRequestService{repo: repo, userRepo: userRepo, snWriteback: dispatcher, snMirror: mirror}
 }
 
 // callerEmail resolves the caller's email from their x-user-id-token -- the
@@ -82,7 +115,30 @@ func (s *callRequestService) CreateCallRequest(ctx context.Context, req domain.C
 	if err != nil {
 		return domain.CreateCallRequestResponse{}, err
 	}
-	return s.repo.CreateCallRequest(ctx, req, user.ID, email)
+	resp, err := s.repo.CreateCallRequest(ctx, req, user.ID, email)
+	if err != nil {
+		return domain.CreateCallRequestResponse{}, err
+	}
+
+	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
+	// only (snWriteback/snMirror are both nil otherwise -- see
+	// callRequestService's own doc comment). Postgres has already committed
+	// by this point; the ServiceNow-side id this mirror creates is
+	// deliberately discarded (never written back onto the Postgres row) --
+	// see callRequestService's own doc comment for why UpdateCallRequest
+	// cannot use it later anyway.
+	if s.snWriteback != nil {
+		mirrorReq := req
+		s.snWriteback.Dispatch(ctx, "call_request", resp.CallRequest.ID, "create",
+			map[string]any{"caseId": req.CaseID, "reason": req.Reason, "utcTimes": req.UTCTimes, "durationInMinutes": req.DurationMinutes},
+			func(writeCtx context.Context) error {
+				_, err := s.snMirror.CreateCallRequest(writeCtx, mirrorReq)
+				return err
+			},
+		)
+	}
+
+	return resp, nil
 }
 
 // SearchCallRequests implements CallRequestService.

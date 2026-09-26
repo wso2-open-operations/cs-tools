@@ -64,6 +64,9 @@ func TestSNOpportunityService_GetOpportunityByID_MissingKeysDoNotPanic(t *testin
 	if got.EulaVersion != nil || got.EulaVersionDecimal != nil {
 		t.Errorf("EulaVersion/EulaVersionDecimal = %v/%v, want nil/nil", got.EulaVersion, got.EulaVersionDecimal)
 	}
+	if got.Stage != nil {
+		t.Errorf("Stage = %v, want nil", got.Stage)
+	}
 }
 
 // TestSNOpportunityService_GetOpportunityByID_FullRow verifies a fully-populated row maps
@@ -78,7 +81,8 @@ func TestSNOpportunityService_GetOpportunityByID_FullRow(t *testing.T) {
 			"name": "Acme Renewal",
 			"account": {"id": "` + testAccountSysid + `", "name": "Acme"},
 			"eulaVersion": "v2",
-			"eulaVersionDecimal": "2.0"
+			"eulaVersionDecimal": "2.0",
+			"stage": "50 - Closed Won"
 		}`))
 	})
 
@@ -97,6 +101,9 @@ func TestSNOpportunityService_GetOpportunityByID_FullRow(t *testing.T) {
 	}
 	if got.Account == nil || got.Account.ID != sysidToUUID(testAccountSysid) {
 		t.Errorf("Account = %v, want id %q", got.Account, sysidToUUID(testAccountSysid))
+	}
+	if got.Stage == nil || *got.Stage != "50 - Closed Won" {
+		t.Errorf("Stage = %v, want \"50 - Closed Won\"", got.Stage)
 	}
 }
 
@@ -127,6 +134,9 @@ func TestSNInvoiceService_GetInvoiceByID_MissingKeysDoNotPanic(t *testing.T) {
 	if got.Opportunity != nil {
 		t.Errorf("Opportunity = %v, want nil", got.Opportunity)
 	}
+	if got.SfID != nil {
+		t.Errorf("SfID = %v, want nil", got.SfID)
+	}
 }
 
 // TestSNInvoiceService_GetInvoiceByID_DatesParse verifies the four date-only fields
@@ -144,7 +154,8 @@ func TestSNInvoiceService_GetInvoiceByID_DatesParse(t *testing.T) {
 			"invoicedPaidDate": "2026-02-01",
 			"invoicedDueDate": "2026-02-15",
 			"invoiceOriginalDueDate": "2026-02-01",
-			"classification": "CL"
+			"classification": "CL",
+			"sfId": "a0IE200000ArqsLMAR"
 		}`))
 	})
 
@@ -163,6 +174,9 @@ func TestSNInvoiceService_GetInvoiceByID_DatesParse(t *testing.T) {
 	}
 	if got.Classification == nil || *got.Classification != "CL" {
 		t.Errorf("Classification = %v, want \"CL\"", got.Classification)
+	}
+	if got.SfID == nil || *got.SfID != "a0IE200000ArqsLMAR" {
+		t.Errorf("SfID = %v, want \"a0IE200000ArqsLMAR\"", got.SfID)
 	}
 }
 

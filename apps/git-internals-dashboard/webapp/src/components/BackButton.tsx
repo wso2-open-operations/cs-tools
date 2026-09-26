@@ -16,17 +16,22 @@
 
 import { Button } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router";
+import { NO_PRIORITY_VALUE } from "@lib/filters";
 
-// Only the global dashboard filters survive the trip back; list-scoped params
-// (bucket, status, q) are dropped so they can't leak into later drills.
+// Only the global dashboard filters survive the trip back; list-scoped
+// params (the five /issues filter keys, bucket, status, q) are dropped so
+// they can't leak into later drills. The dashboard's own filters are
+// single-valued, so a key only carries back when /issues has it narrowed to
+// exactly one value, and that value isn't the "no priority" sentinel (the
+// dashboard's priority filter has no equivalent for "no priority").
 export function BackButton() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
 
   const next = new URLSearchParams();
-  for (const key of ["repo", "priority"] as const) {
-    const v = params.get(key);
-    if (v) next.set(key, v);
+  for (const key of ["repo", "priority", "abtTeam"] as const) {
+    const values = params.getAll(key);
+    if (values.length === 1 && values[0] !== NO_PRIORITY_VALUE) next.set(key, values[0]);
   }
   const search = next.toString();
 

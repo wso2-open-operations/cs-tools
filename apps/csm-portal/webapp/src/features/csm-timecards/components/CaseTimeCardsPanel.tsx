@@ -51,12 +51,14 @@ import RefreshButton from "@components/RefreshButton";
 
 interface CaseTimeCardsPanelProps {
   caseId: string;
-  /** Opens the log-time dialog (owned by the page so the action bar can trigger it). */
-  onLogTime: () => void;
+  /** Opens the log-time dialog (owned by the page so the action bar can trigger it).
+   * Omitted for a caller without write access, which hides the "Log time" button. */
+  onLogTime?: () => void;
   /** Opens the edit dialog for one of this panel's own cards (owned by the
    * page, same as `onLogTime` — both open the same `LogTimeCardDialog`
-   * instance, just in different modes). */
-  onEditTimeCard: (card: CsmTimeCard) => void;
+   * instance, just in different modes). Omitted for a caller without write
+   * access, which hides the per-card edit and delete actions. */
+  onEditTimeCard?: (card: CsmTimeCard) => void;
 }
 
 // Every column is left-aligned for a consistent scan line down the table,
@@ -134,15 +136,17 @@ export default function CaseTimeCardsPanel({
             updatedAt={dataUpdatedAt}
             label="Refresh time cards"
           />
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Plus size={14} />}
-            onClick={onLogTime}
-            sx={{ textTransform: "none" }}
-          >
-            Log time
-          </Button>
+          {onLogTime && (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Plus size={14} />}
+              onClick={onLogTime}
+              sx={{ textTransform: "none" }}
+            >
+              Log time
+            </Button>
+          )}
         </Box>
       </Box>
 
@@ -308,7 +312,7 @@ export default function CaseTimeCardsPanel({
                       flexWrap: "wrap",
                     }}
                   >
-                    {canEdit && (
+                    {canEdit && onEditTimeCard && (
                       <>
                         <Tooltip title="Edit">
                           <IconButton

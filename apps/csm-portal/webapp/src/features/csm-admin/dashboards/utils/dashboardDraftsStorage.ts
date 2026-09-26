@@ -192,8 +192,8 @@ export function deleteDashboardDraft(id: string): void {
 }
 
 /** Reactive list of every locally saved draft — updates across components
- * and browser tabs. Mirrors `useSavedFilterViews`'s own storage-event
- * idiom (see `savedFilterViews.ts`). */
+ * and browser tabs. Mirrors `useSavedFilterViews`'s former storage-event
+ * idiom. */
 export function useDashboardDrafts(): DashboardDraft[] {
   const [drafts, setDrafts] = useState<DashboardDraft[]>(() => listDashboardDrafts());
   useEffect(() => {

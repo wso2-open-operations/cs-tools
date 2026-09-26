@@ -25,11 +25,10 @@ import (
 
 // TTLCache is a minimal in-process TTL cache with a max-entry bound (evicts
 // the oldest-inserted entry first once at capacity). Process-local by
-// design: correct for the values cached here
-// (overview/timeseries responses, issue titles) where a few seconds/minutes
-// of staleness or a cache miss on the "wrong" replica is harmless — never
-// used for anything requiring cross-replica consistency (see internal/jobs
-// for that guarantee).
+// design: correct for the values cached here (overview/timeseries responses)
+// where a few seconds/minutes of staleness or a cache miss on the "wrong"
+// replica is harmless — never used for anything requiring cross-replica
+// consistency (see internal/jobs for that guarantee).
 type TTLCache[K comparable, V any] struct {
 	mu         sync.Mutex
 	ttl        time.Duration

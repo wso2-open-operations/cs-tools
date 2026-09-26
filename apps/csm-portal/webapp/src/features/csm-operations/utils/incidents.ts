@@ -128,6 +128,26 @@ export function incidentPriorityColor(priority?: string | null): ChipColor {
 }
 
 /**
+ * Router state carried from an incident's own "Create child incident…"
+ * action (`CsmIncidentDetailPage`) to `/operations/incidents/new`, mirroring
+ * `CreateIncidentFromCaseNavState` — seeds the new incident's dedicated
+ * `parentIncidentId` (ServiceNow's own incident-to-incident "major incident"
+ * link, distinct from the generic `parentId` used for case/CR/problem
+ * parents) with this incident's id. Every field is just a starting value the
+ * form leaves editable.
+ */
+export interface CreateIncidentFromIncidentNavState {
+  incidentId: string;
+  incidentNumber?: string;
+  subject?: string;
+  /** Same `{ from }` convention as every other create page (see this app's
+   * "Page conventions: Back navigation" doc) — the source incident's own
+   * path, so Back/Cancel and the newly created incident's own Back button
+   * return there instead of falling back to the generic incidents list. */
+  from?: string;
+}
+
+/**
  * Filters for the incidents list. The backend's `IncidentSearchPayload.filters`
  * only has flat named keys for `searchQuery`, `priorities`, `parentIds`, and
  * `number` (see openapi.yaml); `slaViolated`, `createdOn` (date range), and

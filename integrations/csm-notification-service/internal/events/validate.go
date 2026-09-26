@@ -185,42 +185,6 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if p.CallTo != "" && !e164Pattern.MatchString(p.CallTo) {
 			return fmt.Errorf("events: %s callTo %q is not a valid E.164 phone number", t, p.CallTo)
 		}
-	case TypeSLAClockRegister:
-		var p SLAClockRegisterPayload
-		if err := decodeStrict(raw, &p); err != nil {
-			return err
-		}
-		if p.CaseID == "" || len(p.Durations) == 0 || p.CaseTitle == "" {
-			return fmt.Errorf("events: missing required field for %s", t)
-		}
-		for clockType, dur := range p.Durations {
-			if clockType == "" || dur == "" {
-				return fmt.Errorf("events: %s durations must have non-empty clock types and values", t)
-			}
-			// A duration time.ParseDuration can't parse would otherwise only
-			// surface deep inside slaengine's own registration loop, which
-			// logs and skips that one clockType rather than failing the
-			// whole record — for a payload whose durations are ALL
-			// unparsable, that means the record is silently marked handled
-			// with no clock ever registered and no retry/DLQ visibility.
-			// Rejecting it here instead makes it retried and dead-lettered
-			// like any other malformed record.
-			if d, err := time.ParseDuration(dur); err != nil || d <= 0 {
-				return fmt.Errorf("events: %s duration %q for clock type %q is not a valid positive duration", t, dur, clockType)
-			}
-		}
-		// Each AvoidWeekendDueDate entry must name a clock type Durations
-		// actually has an entry for — same "one bad entry fails the whole
-		// event" posture validRecipients uses, rather than silently
-		// ignoring a typo'd/stale clock-type name.
-		for _, clockType := range p.AvoidWeekendDueDate {
-			if _, ok := p.Durations[clockType]; !ok {
-				return fmt.Errorf("events: %s avoidWeekendDueDate entry %q does not match any durations clock type", t, clockType)
-			}
-		}
-		if p.CaseID != entityID {
-			return fmt.Errorf("events: payload caseId %q does not match entityId %q", p.CaseID, entityID)
-		}
 	case TypeSLATierReached:
 		var p SLATierReachedPayload
 		if err := decodeStrict(raw, &p); err != nil {
@@ -289,6 +253,30 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		}
 		if !validRecipients(p.Recipients) {
 			return fmt.Errorf("events: invalid recipients for %s", t)
+		}
+	case TypeProjectContactInvited:
+		var p ProjectContactInvitedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		// Only the two values no step can proceed without are required:
+		// MembershipSfID keys every onboarding-step write, and Email is
+		// both the Asgardeo userName and the invitation's recipient.
+		// GivenName/FamilyName are optional (Salesforce doesn't require a
+		// first name; dispatch falls back to the email's local part), and
+		// ProjectName/ProjectKey/Roles/Type are display-only, and
+		// IsResend is a marker dispatch acts on, valid either way —
+		// an absent one is simply a first invitation.
+		if p.MembershipSfID == "" || !emailPattern.MatchString(p.Email) {
+			return fmt.Errorf("events: missing or invalid required field for %s", t)
+		}
+		if p.MembershipSfID != entityID {
+			return fmt.Errorf("events: payload membershipSfId %q does not match entityId %q", p.MembershipSfID, entityID)
+		}
+		if p.EventModifiedOn != "" {
+			if _, err := time.Parse(time.RFC3339Nano, p.EventModifiedOn); err != nil {
+				return fmt.Errorf("events: eventModifiedOn %q is not RFC 3339: %w", p.EventModifiedOn, err)
+			}
 		}
 	default:
 		return fmt.Errorf("events: unknown event type %q", t)

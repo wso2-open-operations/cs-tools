@@ -3,7 +3,7 @@ module github.com/wso2-open-operations/cs-tools/integrations/sre-alert-ingestion
 go 1.26.0
 
 require (
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.27.0
 )

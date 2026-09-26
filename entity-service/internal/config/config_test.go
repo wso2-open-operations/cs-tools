@@ -31,6 +31,12 @@ func baseValidConfig() Config {
 		// Config would be.
 		ServerPort: "8080",
 		HealthPort: "8081",
+		// Token validation is always on (no config flag disables it), so
+		// these three are as mandatory to a valid Config as the DB settings
+		// above — see TestConfig_Validate_Auth for the dedicated tests.
+		AuthIssuer:             "https://api.asgardeo.io/t/x/oauth2/token",
+		AuthJWKSURL:            "https://api.asgardeo.io/t/x/oauth2/jwks",
+		AuthUserTokenAudiences: []string{"spa"},
 	}
 }
 
@@ -145,6 +151,76 @@ func TestConfig_Validate_InvalidDataSource(t *testing.T) {
 	}
 }
 
+// baseValidPostgresServiceNowDualWriteConfig returns a minimally valid Config
+// for DATA_SOURCE=postgres-servicenow-dual-write: both a full database (reads
+// and writes are always Postgres-authoritative in this mode) AND full
+// ServiceNow integration service credentials (the best-effort mirror write
+// goes there) are required.
+func baseValidPostgresServiceNowDualWriteConfig() Config {
+	c := baseValidConfig()
+	c.DataSource = DataSourcePostgresServiceNowDualWrite
+	c.ServiceNowIntegrationServiceBaseURL = "https://example.com"
+	c.ServiceNowIntegrationServiceTokenURL = "https://example.com/token"
+	c.ServiceNowIntegrationServiceClientID = "client-id"
+	c.ServiceNowIntegrationServiceClientSecret = "client-secret"
+	return c
+}
+
+func TestConfig_Validate_PostgresServiceNowDualWriteIsValid(t *testing.T) {
+	c := baseValidPostgresServiceNowDualWriteConfig()
+	if err := c.Validate(); err != nil {
+		t.Fatalf("unexpected error for a fully configured postgres-servicenow-dual-write source: %v", err)
+	}
+}
+
+// TestConfig_Validate_PostgresServiceNowDualWriteRequiresDBFields guards the
+// "Postgres is authoritative" half of the new mode: unlike plain
+// DATA_SOURCE=servicenow, the DB cannot be dropped here.
+func TestConfig_Validate_PostgresServiceNowDualWriteRequiresDBFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(c *Config)
+	}{
+		{"missing DBUser", func(c *Config) { c.DBUser = "" }},
+		{"missing DBPassword", func(c *Config) { c.DBPassword = "" }},
+		{"missing DBName", func(c *Config) { c.DBName = "" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidPostgresServiceNowDualWriteConfig()
+			tt.mutate(&c)
+			if err := c.Validate(); err == nil {
+				t.Errorf("Validate() = nil, want an error when %s", tt.name)
+			}
+		})
+	}
+}
+
+// TestConfig_Validate_PostgresServiceNowDualWriteRequiresIntegrationServiceFields
+// guards the "ServiceNow mirror write" half: unlike plain
+// DATA_SOURCE=postgres, the SN integration service credentials cannot be
+// dropped here — Dispatch has nowhere to send the mirror write without them.
+func TestConfig_Validate_PostgresServiceNowDualWriteRequiresIntegrationServiceFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(c *Config)
+	}{
+		{"missing base URL", func(c *Config) { c.ServiceNowIntegrationServiceBaseURL = "" }},
+		{"missing token URL", func(c *Config) { c.ServiceNowIntegrationServiceTokenURL = "" }},
+		{"missing client ID", func(c *Config) { c.ServiceNowIntegrationServiceClientID = "" }},
+		{"missing client secret", func(c *Config) { c.ServiceNowIntegrationServiceClientSecret = "" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidPostgresServiceNowDualWriteConfig()
+			tt.mutate(&c)
+			if err := c.Validate(); err == nil {
+				t.Errorf("Validate() = nil, want an error when %s", tt.name)
+			}
+		})
+	}
+}
+
 func TestConfig_Validate_RequiresDBFields(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -166,15 +242,7 @@ func TestConfig_Validate_RequiresDBFields(t *testing.T) {
 }
 
 func TestConfig_Validate_ServiceNowDoesNotRequireDBFields(t *testing.T) {
-	c := Config{
-		DataSource:                               DataSourceServiceNow,
-		ServiceNowIntegrationServiceBaseURL:      "https://example.com",
-		ServiceNowIntegrationServiceTokenURL:     "https://example.com/token",
-		ServiceNowIntegrationServiceClientID:     "client-id",
-		ServiceNowIntegrationServiceClientSecret: "client-secret",
-		ServerPort:                               "8080",
-		HealthPort:                               "8081",
-	}
+	c := baseValidServiceNowConfig()
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want nil when DATA_SOURCE=servicenow has no DB credentials", err)
 	}
@@ -257,6 +325,11 @@ func baseValidServiceNowConfig() Config {
 		// which a zero-value Config would be.
 		ServerPort: "8080",
 		HealthPort: "8081",
+		// Token validation is always on regardless of DataSource — see
+		// baseValidConfig's own comment.
+		AuthIssuer:             "https://api.asgardeo.io/t/x/oauth2/token",
+		AuthJWKSURL:            "https://api.asgardeo.io/t/x/oauth2/jwks",
+		AuthUserTokenAudiences: []string{"spa"},
 	}
 }
 
@@ -277,7 +350,7 @@ func TestConfig_Validate_ServiceNowDatabaseIsOptional(t *testing.T) {
 
 // TestConfig_Validate_ServiceNowAcceptsAFullDatabase covers the other valid
 // servicenow shape — a database IS configured, so event_publish_failures and
-// sla_clocks stay available.
+// sla-status stay available.
 func TestConfig_Validate_ServiceNowAcceptsAFullDatabase(t *testing.T) {
 	c := baseValidServiceNowConfig()
 	c.DBUser, c.DBPassword, c.DBName = "user", "password", "db"
@@ -348,5 +421,110 @@ func TestConfig_Validate_PostgresStillRequiresDatabase(t *testing.T) {
 	c := Config{DataSource: DataSourcePostgres}
 	if err := c.Validate(); err == nil {
 		t.Error("Validate() = nil, want an error for postgres with no database configured")
+	}
+}
+
+func TestParseInternalClientIDs(t *testing.T) {
+	got := ParseInternalClientIDs(" csm-portal , csm-integration ,")
+	if len(got) != 2 || !got["csm-portal"] || !got["csm-integration"] {
+		t.Fatalf("got %v", got)
+	}
+	if got := ParseInternalClientIDs(""); len(got) != 0 {
+		t.Fatalf("empty must be a valid empty set, got %v", got)
+	}
+	// A client id absent from the set is simply not internal -- there is no
+	// error case here (unlike the old clientId=role grammar): any non-empty,
+	// trimmed entry is a valid client id.
+	if got := ParseInternalClientIDs("a,,b"); len(got) != 2 || !got["a"] || !got["b"] {
+		t.Errorf("blank entries between commas should just be skipped, got %v", got)
+	}
+}
+
+// TestLoad_CSMMigrationPortalWritesEnabled pins the kill switch's parsing:
+// only the exact string "true" turns the portal membership writes on, so a
+// typo, a "1", or a "TRUE" leaves them off rather than half-enabling a write
+// path that touches Salesforce.
+func TestLoad_CSMMigrationPortalWritesEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"true": true, "TRUE": false, "True": false, "1": false, "yes": false, "": false, " true ": false,
+	} {
+		t.Setenv("CSM_MIGRATION_PORTAL_WRITES_ENABLED", value)
+		if got := Load().CSMMigrationPortalWritesEnabled; got != want {
+			t.Errorf("CSM_MIGRATION_PORTAL_WRITES_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}
+
+// TestLoad_CSMMigrationMembershipRegistrationEnabled pins the same parse for
+// the registration kill switch. It gates POST /users/me/memberships/register,
+// which clears a contact's Salesforce lockout and flips the membership to
+// REGISTERED, so a "TRUE" or a "1" must leave the route unregistered rather
+// than half-enabling a path that writes to Salesforce.
+func TestLoad_CSMMigrationMembershipRegistrationEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"true": true, "TRUE": false, "True": false, "1": false, "yes": false, "": false, " true ": false,
+	} {
+		t.Setenv("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED", value)
+		if got := Load().CSMMigrationMembershipRegistrationEnabled; got != want {
+			t.Errorf("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}
+
+// TestConfig_HasPortalMembershipWrites covers the whole gate, not just the
+// flag: the writes are a Postgres transaction whose other half is a
+// Salesforce call, so both the data source and a complete
+// sales-entity-service connection are part of it.
+func TestConfig_HasPortalMembershipWrites(t *testing.T) {
+	complete := func() Config {
+		c := baseValidConfig()
+		c.DataSource = DataSourcePostgres
+		c.SalesEntityBaseURL = "https://example.invalid"
+		c.SalesEntityTokenURL = "https://example.invalid/oauth2/token"
+		c.SalesEntityClientID = "id"
+		c.SalesEntityClientSecret = "secret"
+		c.CSMMigrationPortalWritesEnabled = true
+		return c
+	}
+	if c := complete(); !c.HasPortalMembershipWrites() {
+		t.Error("a complete configuration with the flag on must enable the writes")
+	}
+	for name, mod := range map[string]func(*Config){
+		"flag off":               func(c *Config) { c.CSMMigrationPortalWritesEnabled = false },
+		"servicenow data source": func(c *Config) { c.DataSource = DataSourceServiceNow },
+		"dual-write data source": func(c *Config) { c.DataSource = DataSourcePostgresServiceNowDualWrite },
+		"no sales entity base":   func(c *Config) { c.SalesEntityBaseURL = "" },
+		"no sales entity secret": func(c *Config) { c.SalesEntityClientSecret = "" },
+		"no sales entity at all": func(c *Config) {
+			c.SalesEntityBaseURL, c.SalesEntityTokenURL, c.SalesEntityClientID, c.SalesEntityClientSecret = "", "", "", ""
+		},
+		"no sales entity client": func(c *Config) { c.SalesEntityClientID = "" },
+		"no sales entity token":  func(c *Config) { c.SalesEntityTokenURL = "" },
+	} {
+		c := complete()
+		mod(&c)
+		if c.HasPortalMembershipWrites() {
+			t.Errorf("%s: the writes must stay off", name)
+		}
+	}
+}
+
+// TestConfig_Validate_Auth locks in that token validation has no off switch:
+// AuthIssuer/AuthJWKSURL/AuthUserTokenAudiences are as mandatory to a valid
+// Config as the DB settings baseValidConfig() already supplies.
+func TestConfig_Validate_Auth(t *testing.T) {
+	if c := baseValidConfig(); c.Validate() != nil {
+		t.Fatalf("complete auth config rejected: %v", c.Validate())
+	}
+	for name, mod := range map[string]func(*Config){
+		"missing issuer":    func(c *Config) { c.AuthIssuer = "" },
+		"missing JWKS URL":  func(c *Config) { c.AuthJWKSURL = "" },
+		"missing audiences": func(c *Config) { c.AuthUserTokenAudiences = nil },
+	} {
+		c := baseValidConfig()
+		mod(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: want a startup error", name)
+		}
 	}
 }

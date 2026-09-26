@@ -29,6 +29,7 @@ import {
 import { useLocation, useSearchParams } from "react-router";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
 import {
   getColumnPreferencesUserKey,
@@ -397,6 +398,7 @@ export default function CsmIssuesView({
   const api = useBackendApi();
   const currentUserEmail = useIdTokenClaims()?.email;
   const currentUserId = useCurrentUser().user?.id;
+  const { canWrite } = usePortalAccess();
   const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
     "cases",
     getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
@@ -608,14 +610,16 @@ export default function CsmIssuesView({
             updatedAt={dataUpdatedAt}
             label={`Refresh ${entityNoun}`}
           />
-          <FilteredCsvExportButton<CsmCaseRow>
-            entityName={entityNoun.replace(/\s+/g, "-")}
-            entityNounPlural={entityNoun}
-            header={exportHeader}
-            toRow={caseToCsvRow}
-            fetchPage={fetchCasesExportPage}
-            disabled={isError || total === 0}
-          />
+          {canWrite && (
+            <FilteredCsvExportButton<CsmCaseRow>
+              entityName={entityNoun.replace(/\s+/g, "-")}
+              entityNounPlural={entityNoun}
+              header={exportHeader}
+              toRow={caseToCsvRow}
+              fetchPage={fetchCasesExportPage}
+              disabled={isError || total === 0}
+            />
+          )}
           {actions}
         </Box>
       </Box>

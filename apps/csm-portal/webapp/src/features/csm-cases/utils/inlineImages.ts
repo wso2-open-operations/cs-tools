@@ -69,13 +69,38 @@ export function extractIixAttachmentIds(html: string): string[] {
 }
 
 /**
+ * A styled inline placeholder for a `.iix` reference that couldn't be
+ * resolved into an image, explaining why in place of a blank/broken `<img>`.
+ * Plain inline styles (no CSS class) since this is injected into raw HTML
+ * with no app stylesheet guaranteed to apply to it; `color:inherit` and a
+ * `currentColor` border piggyback on the surrounding text color so it reads
+ * correctly in both light and dark mode without hardcoding either.
+ */
+function unresolvedImagePlaceholder(reason: "permission" | "error"): string {
+  const label =
+    reason === "permission"
+      ? "You don't have permission to view this image"
+      : "Image unavailable";
+  return (
+    `<span data-unresolved-reason="${reason}" title="${label}" ` +
+    `style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;` +
+    `border:1px dashed currentColor;border-radius:4px;opacity:0.7;` +
+    `font-size:0.85em;color:inherit;">${label}</span>`
+  );
+}
+
+/**
  * Replaces every `.iix` `<img>` src in `html` with its resolved data URL from
- * `dataUrls`. A `.iix` reference with no matching entry is stripped (rather
- * than left pointing at an auth-gated URL the browser cannot fetch).
+ * `dataUrls`. A `.iix` reference in `deniedIds` is replaced with a
+ * "no permission" placeholder; any other unresolved reference (not yet
+ * loaded, unsupported type, a non-permission failure) gets a generic
+ * "unavailable" placeholder — never left pointing at an auth-gated URL the
+ * browser cannot fetch, and never silently blank.
  */
 export function replaceInlineImageSrcs(
   html: string,
   dataUrls: Map<string, string>,
+  deniedIds?: Set<string>,
 ): string {
   return html.replace(
     IMG_TAG_SRC,
@@ -84,10 +109,12 @@ export function replaceInlineImageSrcs(
       if (!src.includes(".iix")) return fullMatch;
       const refId = extractInlineImageRefId(src);
       const dataUrl = dataUrls.get(refId);
-      const quote = doubleSrc !== undefined ? '"' : singleSrc !== undefined ? "'" : '"';
       if (!dataUrl) {
-        return `<img${before} src=${quote}${quote} data-unresolved="true"${after}>`;
+        return unresolvedImagePlaceholder(
+          deniedIds?.has(refId) ? "permission" : "error",
+        );
       }
+      const quote = doubleSrc !== undefined ? '"' : singleSrc !== undefined ? "'" : '"';
       return `<img${before} src=${quote}${dataUrl}${quote}${after}>`;
     },
   );

@@ -41,9 +41,9 @@ const viteConfig = defineConfig({
     rollupOptions: {
       output: {
         // Split the largest third-party dependencies out of the single
-        // main chunk (was 2.3MB) so a change to app code
-        // doesn't force re-downloading these on every deploy, and the
-        // browser can cache/parallelize them separately.
+        // main chunk so a change to app code doesn't force re-downloading
+        // these on every deploy, and the browser can cache/parallelize them
+        // separately.
         manualChunks: {
           recharts: ["recharts"],
           asgardeo: ["@asgardeo/react", "@asgardeo/react-router"],

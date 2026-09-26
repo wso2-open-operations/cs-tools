@@ -333,7 +333,7 @@ export default function GetHelpDropdown(): JSX.Element {
   if (
     !isProjectsListBusy &&
     (isProjectRestricted(projectDetails?.closureState) ||
-      isProjectSuspended(projectDetails?.closureState, projectDetails?.endDate))
+      isProjectSuspended(projectDetails?.closureState))
   ) {
     return <></>;
   }

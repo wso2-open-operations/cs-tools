@@ -96,7 +96,6 @@ func TestMapCaseDetails_TrimsFieldsWithNoConsumer(t *testing.T) {
 		FixEta:                &now,
 		ResolutionNotes:       strPtr("Some internal resolution notes"),
 		LinkedServiceRequests: []entity.LinkedServiceRequestRef{{ID: "lsr-1", Number: "SR1001", Name: "Service Req"}},
-		Tags:                  []entity.Tag{{Label: "tag-1", Color: strPtr("#ff0000")}},
 		AssignedEngineer:      &entity.AssignedEngineerRef{ID: "eng-1", Name: "Engineer", Email: strPtr("engineer@example.com")},
 	}))
 	if err != nil {
@@ -107,13 +106,31 @@ func TestMapCaseDetails_TrimsFieldsWithNoConsumer(t *testing.T) {
 		t.Fatalf("result is not valid JSON: %v", err)
 	}
 
+	// tags used to be on this denylist too, purely because nothing mapped it
+	// yet, not because it's internal — a tag (e.g. "Security Announcement",
+	// attached to every case a security announcement creates) is written
+	// specifically to be customer-visible. See TestMapCaseDetails_ExposesTags.
 	for _, k := range []string{
 		"acknowledgedBy", "engagementPaymentType", "bestCaseFixEta", "mostLikelyFixEta", "worstCaseFixEta",
-		"workState", "resolutionCode", "cause", "fixEta", "linkedServiceRequests", "tags", "resolutionNotes", "engineerEmail",
+		"workState", "resolutionCode", "cause", "fixEta", "linkedServiceRequests", "resolutionNotes", "engineerEmail",
 	} {
 		if _, present := got[k]; present {
 			t.Errorf("%q leaked into the customer-facing case response", k)
 		}
+	}
+}
+
+// TestMapCaseDetails_ExposesTags confirms a case's tags (e.g. the mandatory
+// "Security Announcement" label a security announcement's cases carry) reach
+// the customer-facing response — see this file's own TrimsFieldsWithNoConsumer
+// test, which used to (accidentally) exclude "tags" for lack of a mapping,
+// not because it's internal.
+func TestMapCaseDetails_ExposesTags(t *testing.T) {
+	got := MapCaseDetails(entity.CaseView{
+		Tags: []entity.Tag{{ID: "tag-1", Label: "Security Announcement", Color: strPtr("#ff0000")}},
+	})
+	if len(got.Tags) != 1 || got.Tags[0].Label != "Security Announcement" {
+		t.Fatalf("expected the case's own tags to be exposed, got %+v", got.Tags)
 	}
 }
 

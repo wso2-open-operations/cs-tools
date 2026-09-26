@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,6 +162,21 @@ func parseSNDateTime(ctx context.Context, callSite, field, value string) (time.T
 	return time.Time{}, err
 }
 
+// isProjectContractEnded reports whether endDate's day has fully elapsed as
+// of now — mirroring apps/customer-portal/webapp/src/utils/permission.ts's
+// isProjectContractEnded exactly (end-of-day UTC comparison, strictly after),
+// so a project the customer portal itself treats as contract-ended is
+// treated the same way here. endDate is nil when the backing data source has
+// no end date recorded, in which case the contract is never considered
+// ended.
+func isProjectContractEnded(endDate *time.Time, now time.Time) bool {
+	if endDate == nil {
+		return false
+	}
+	endOfDay := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 23, 59, 59, 999000000, time.UTC)
+	return now.After(endOfDay)
+}
+
 type snProjectService struct {
 	client     *integrationservice.Client
 	pgFallback ProjectService
@@ -195,6 +211,124 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
+	if len(req.ExcludeClosureStates) == 0 && len(req.ExcludeSubscriptionTypes) == 0 && len(req.ExcludeProjectKeys) == 0 {
+		views, total, err := s.fetchProjectsPage(ctx, req, accountSysid, token, req.Pagination.Limit, req.Pagination.Offset)
+		if err != nil {
+			return domain.SearchProjectsResponse{}, err
+		}
+		return domain.SearchProjectsResponse{
+			Projects: views,
+			Total:    total,
+			Limit:    req.Pagination.Limit,
+			Offset:   req.Pagination.Offset,
+			HasMore:  req.Pagination.Offset+len(views) < total,
+		}, nil
+	}
+
+	// ServiceNow's projects/search endpoint has no filter parameter for
+	// excluding a set of closure states, subscription types, or project keys
+	// (unlike ClosureStatus's own single-value include filter above), so this
+	// pages through every match with a bounded loop, filters in Go, then
+	// applies the caller's requested offset/limit over the filtered result.
+	filtered, err := s.fetchAllProjectsFiltered(ctx, req, accountSysid, token)
+	if err != nil {
+		return domain.SearchProjectsResponse{}, err
+	}
+
+	total := len(filtered)
+	start := req.Pagination.Offset
+	if start > total {
+		start = total
+	}
+	end := start + req.Pagination.Limit
+	if end > total {
+		end = total
+	}
+
+	return domain.SearchProjectsResponse{
+		Projects: filtered[start:end],
+		Total:    total,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+		HasMore:  end < total,
+	}, nil
+}
+
+// maxExcludeFilterPages bounds fetchAllProjectsFiltered's paging loop against
+// a wrong/always-true upstream hasMore signal, mirroring the same safety-bound
+// convention the webapp's own paged-query hooks use.
+const maxExcludeFilterPages = 200
+
+// snExcludeFilterPageSize is the page size fetchAllProjectsFiltered uses
+// internally, independent of the caller's own requested limit — that limit
+// applies to the filtered result, not to how many rows are fetched from
+// ServiceNow per round trip. Capped at maxLimit (50): that's the backing data
+// source's own hard ceiling per page (see maxLimit's doc comment in
+// user_service.go), not just this service's own default.
+const snExcludeFilterPageSize = maxLimit
+
+// fetchAllProjectsFiltered pages through every ServiceNow match for req
+// (ignoring req.Pagination — the caller applies that to the returned slice)
+// and returns the subset that matches none of ExcludeClosureStates,
+// ExcludeSubscriptionTypes, or ExcludeProjectKeys.
+func (s *snProjectService) fetchAllProjectsFiltered(ctx context.Context, req domain.SearchProjectsRequest, accountSysid, token string) ([]domain.ProjectView, error) {
+	excludeClosure := make(map[string]struct{}, len(req.ExcludeClosureStates))
+	for _, v := range req.ExcludeClosureStates {
+		excludeClosure[v] = struct{}{}
+	}
+	excludeType := make(map[domain.SubscriptionType]struct{}, len(req.ExcludeSubscriptionTypes))
+	for _, v := range req.ExcludeSubscriptionTypes {
+		excludeType[v] = struct{}{}
+	}
+	excludeKey := make(map[string]struct{}, len(req.ExcludeProjectKeys))
+	for _, v := range req.ExcludeProjectKeys {
+		excludeKey[v] = struct{}{}
+	}
+
+	var filtered []domain.ProjectView
+	offset := 0
+	for page := 0; page < maxExcludeFilterPages; page++ {
+		views, total, err := s.fetchProjectsPage(ctx, req, accountSysid, token, snExcludeFilterPageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range views {
+			if v.ClosureState != nil {
+				if _, excluded := excludeClosure[*v.ClosureState]; excluded {
+					continue
+				}
+			}
+			if _, excluded := excludeType[v.SubscriptionType]; excluded {
+				continue
+			}
+			if _, excluded := excludeKey[v.Key]; excluded {
+				continue
+			}
+			filtered = append(filtered, v)
+		}
+		offset += len(views)
+		if offset >= total || len(views) == 0 {
+			return filtered, nil
+		}
+	}
+	// The loop above ran out of pages before exhausting every upstream match
+	// (offset never reached total). Returning `filtered` here would silently
+	// report a truncated slice as the complete, authoritative result — the
+	// caller derives Total and HasMore directly from its length, so a caller
+	// resolving an announcement audience could under-count real recipients
+	// and never know. Fail loudly instead of guessing.
+	return nil, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf(
+		"too many matching projects to apply excludeClosureStates/excludeSubscriptionTypes/excludeProjectKeys safely (exceeded %d upstream pages of %d) — narrow the search with an additional filter",
+		maxExcludeFilterPages, snExcludeFilterPageSize,
+	)}
+}
+
+// fetchProjectsPage calls ServiceNow's projects/search endpoint for one page
+// and maps the response to domain.ProjectView, returning the page alongside
+// ServiceNow's own reported total match count. limit/offset are passed
+// separately from req.Pagination so fetchAllProjectsFiltered can page with its
+// own internal page size independent of the caller's requested window.
+func (s *snProjectService) fetchProjectsPage(ctx context.Context, req domain.SearchProjectsRequest, accountSysid, token string, limit, offset int) ([]domain.ProjectView, int, error) {
 	payload := snSearchProjectsPayload{
 		Filters: snProjectFilters{
 			SearchQuery:      req.SearchQuery,
@@ -208,33 +342,34 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 			ArrTodayGte:      req.ArrTodayGte,
 			SubRegion:        req.SubRegion,
 		},
-		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+		Pagination: snProjectPagination{Limit: limit, Offset: offset},
 	}
 	raw, err := s.client.Post(ctx, "/projects/search", token, payload)
 	if err != nil {
-		return domain.SearchProjectsResponse{}, err
+		return nil, 0, err
 	}
 
 	var snResp snProjectsResponse
 	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: parse response: %w", err)
+		return nil, 0, fmt.Errorf("sn projects: parse response: %w", err)
 	}
 
 	views := make([]domain.ProjectView, 0, len(snResp.Projects))
 	for _, p := range snResp.Projects {
 		createdOn, err := time.Parse(snCreatedOnLayout, p.CreatedOn)
 		if err != nil {
-			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: parse createdOn %q: %w", p.CreatedOn, err)
+			return nil, 0, fmt.Errorf("sn projects: parse createdOn %q: %w", p.CreatedOn, err)
 		}
-		subType, err := snTypeNameToSubscriptionType(p.Type.Name)
-		if err != nil {
-			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: project %q: %w", p.ID, err)
+		subType, knownType := snTypeNameToSubscriptionType(p.Type.Name)
+		if !knownType {
+			slog.WarnContext(ctx, "sn projects: unrecognized subscription type from ServiceNow",
+				"projectID", p.ID, "typeName", p.Type.Name)
 		}
 		var startDate *time.Time
 		if p.StartDate != nil && *p.StartDate != "" {
 			parsed, err := time.Parse(snDateLayout, *p.StartDate)
 			if err != nil {
-				return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: parse startDate %q: %w", *p.StartDate, err)
+				return nil, 0, fmt.Errorf("sn projects: parse startDate %q: %w", *p.StartDate, err)
 			}
 			startDate = &parsed
 		}
@@ -242,7 +377,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 		if p.EndDate != "" {
 			parsed, err := time.Parse(snDateLayout, p.EndDate)
 			if err != nil {
-				return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: parse endDate %q: %w", p.EndDate, err)
+				return nil, 0, fmt.Errorf("sn projects: parse endDate %q: %w", p.EndDate, err)
 			}
 			endDate = &parsed
 		}
@@ -288,14 +423,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 		})
 	}
 
-	total := snResp.TotalRecords
-	return domain.SearchProjectsResponse{
-		Projects: views,
-		Total:    total,
-		Limit:    req.Pagination.Limit,
-		Offset:   req.Pagination.Offset,
-		HasMore:  req.Pagination.Offset+len(views) < total,
-	}, nil
+	return views, snResp.TotalRecords, nil
 }
 
 // snProjectDetailsResponse mirrors the Choreo GET /projects/{id} response.
@@ -399,9 +527,10 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 		return domain.ProjectDetailsView{}, err
 	}
 
-	subType, err := snTypeNameToSubscriptionType(sn.Type.Name)
-	if err != nil {
-		return domain.ProjectDetailsView{}, fmt.Errorf("sn projects: project %q: %w", sn.ID, err)
+	subType, knownType := snTypeNameToSubscriptionType(sn.Type.Name)
+	if !knownType {
+		slog.WarnContext(ctx, "sn projects: unrecognized subscription type from ServiceNow",
+			"projectID", sn.ID, "typeName", sn.Type.Name)
 	}
 
 	activationDate, err := optionalSNProjectDate("account activationDate", sn.Account.ActivationDate)
@@ -626,6 +755,36 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 			return &apierror.ValidationError{Msg: "endDateTo must be a valid date (yyyy-MM-dd)"}
 		}
 	}
+	for _, s := range req.ExcludeClosureStates {
+		if _, ok := validClosureStatuses[s]; !ok {
+			return &apierror.ValidationError{Msg: "excludeClosureStates must each be one of: Open, Suspended, Restricted"}
+		}
+	}
+	for _, t := range req.ExcludeSubscriptionTypes {
+		if _, ok := validSubscriptionTypes[t]; !ok {
+			return &apierror.ValidationError{Msg: "excludeSubscriptionTypes contains invalid value: " + string(t)}
+		}
+	}
+	for _, k := range req.ExcludeProjectKeys {
+		// Unlike ExcludeClosureStates/ExcludeSubscriptionTypes, project keys
+		// have no fixed enum to validate against — only reject the input
+		// shapes that could never be a real key and would otherwise silently
+		// match nothing: empty (or, if a project's own Key were ever empty,
+		// match every such project), and leading/trailing whitespace (the
+		// exclusion check below matches the raw value exactly against a
+		// project's own Key, so " APEXIA " would never match the real
+		// "APEXIA" -- silently leaving that project eligible instead of
+		// excluded, exactly the misconfiguration this endpoint exists to
+		// prevent). Rejecting loudly here, rather than trimming and
+		// accepting it, surfaces a bad CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS
+		// entry at request time instead of as a silent no-op exclusion.
+		if strings.TrimSpace(k) == "" {
+			return &apierror.ValidationError{Msg: "excludeProjectKeys must not contain empty values"}
+		}
+		if k != strings.TrimSpace(k) {
+			return &apierror.ValidationError{Msg: "excludeProjectKeys must not contain leading or trailing whitespace: " + strconv.Quote(k)}
+		}
+	}
 	return nil
 }
 
@@ -642,15 +801,26 @@ var validSubscriptionTypes = map[domain.SubscriptionType]struct{}{
 	domain.SubscriptionTypeProfessionalServices:     {},
 }
 
-// snTypeNameToSubscriptionType converts a SN project type name (e.g. "Cloud Support")
-// to the domain SubscriptionType enum (e.g. "cloud_support"). Returns an error
-// if the converted value is not a known enum value.
-func snTypeNameToSubscriptionType(name string) (domain.SubscriptionType, error) {
+// snTypeNameToSubscriptionType converts a SN project type name (e.g. "Cloud
+// Support") to the domain SubscriptionType enum (e.g. "cloud_support").
+//
+// Never fails: an unrecognized name (blank, a legacy/typo'd label, or a type
+// ServiceNow has added since validSubscriptionTypes was last updated) still
+// returns a best-effort derived value instead of erroring. This used to
+// return an error, which every caller propagated straight up as an opaque
+// 500 -- harmless while the only callers were single-project lookups, but
+// fetchEligibleProjectIDs (SearchProjectsByProductVersion's mandatory
+// audience-exclusion check) now calls this once per project across the
+// *entire* platform with no scoping filter at all, so a single project
+// anywhere with an unrecognized type took down every caller's product-
+// version audience resolution -- reported live as "Couldn't resolve the
+// audience. Try again." The second return value reports whether the name
+// matched a known enum member, so a caller that wants to know can log the
+// mismatch without failing the request; every current caller here does.
+func snTypeNameToSubscriptionType(name string) (domain.SubscriptionType, bool) {
 	st := domain.SubscriptionType(strings.ToLower(strings.ReplaceAll(name, " ", "_")))
-	if _, ok := validSubscriptionTypes[st]; !ok {
-		return "", fmt.Errorf("unknown subscription type %q from ServiceNow", name)
-	}
-	return st, nil
+	_, known := validSubscriptionTypes[st]
+	return st, known
 }
 
 // snContactSearchPayload is the Choreo POST /{resource}/{id}/contacts/search request
@@ -740,12 +910,17 @@ func (s *snProjectContactService) SearchProjectContacts(ctx context.Context, pro
 			name = strPtr(c.Name)
 		}
 		contacts = append(contacts, domain.ProjectContact{
-			ID:                     contactID,
-			Name:                   name,
-			Email:                  c.Email,
-			RegistrationState:      c.RegistrationState,
-			NotificationsEnabled:   c.NotificationsEnabled,
-			Roles:                  c.Roles,
+			ID:                   contactID,
+			Name:                 name,
+			Email:                c.Email,
+			RegistrationState:    c.RegistrationState,
+			NotificationsEnabled: c.NotificationsEnabled,
+			Roles:                c.Roles,
+			// ServiceNow has no notion of the account-level role set at all
+			// (it is derived from the Postgres membership tables), so this
+			// data source answers with an empty list rather than a null --
+			// absent, not unknown.
+			AccountRoles:           []string{},
 			CustomerContactPresent: c.CustomerContactPresent,
 			GrantsCaseAccess:       c.GrantsCaseAccess,
 		})

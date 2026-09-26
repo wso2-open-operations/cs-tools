@@ -30,9 +30,22 @@ import type { JSX } from "react";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import { useSearchProblems } from "@features/csm-operations/api/useSearchProblems";
 
+const savedViewsState = vi.hoisted(() => ({
+  views: [] as { name: string; qs: string }[],
+}));
+
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {},
   useBackendApi: () => ({ post: vi.fn() }),
+}));
+vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
+  useSavedFilterViews: () => ({
+    views: savedViewsState.views,
+    isLoading: false,
+    saveFilterView: vi.fn(),
+    deleteFilterView: vi.fn(),
+    moveFilterView: vi.fn(),
+  }),
 }));
 
 vi.mock("@features/csm-operations/api/useSearchProblems", () => ({
@@ -92,7 +105,8 @@ function renderTab(initialEntry = "/operations?tab=problems") {
 
 beforeEach(() => {
   mockedUseSearch.mockReset();
-  window.localStorage.clear();
+  window.localStorage?.clear();
+  savedViewsState.views = [];
   mockResult({});
 });
 
@@ -128,10 +142,7 @@ describe("ProblemsTab — Saved views", () => {
   });
 
   it("applying a saved problems view updates the URL", () => {
-    window.localStorage.setItem(
-      "csm.savedFilters.problems.v1",
-      JSON.stringify([{ name: "New problems", qs: "probStates=NEW" }]),
-    );
+    savedViewsState.views = [{ name: "New problems", qs: "probStates=NEW" }];
     renderTab();
 
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));

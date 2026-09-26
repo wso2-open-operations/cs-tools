@@ -42,7 +42,12 @@ type httpsOnlyTransport struct {
 func (t *httpsOnlyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil || req.URL.Scheme != "https" {
 		if !(t.allowInsecureLoopback && isLoopback(req.URL)) {
-			return nil, fmt.Errorf("notifications: refusing non-HTTPS endpoint %s", req.URL.Redacted())
+			// No URL in this error, not even via req.URL.Redacted(): Redacted
+			// only masks userinfo (user:pass@host), not query parameters --
+			// and the Google Chat webhook URL this transport also guards
+			// carries its secret key/token there. A URL is not needed to
+			// diagnose "which channel refused a non-HTTPS endpoint" anyway.
+			return nil, fmt.Errorf("notifications: refusing non-HTTPS endpoint")
 		}
 	}
 	base := t.base

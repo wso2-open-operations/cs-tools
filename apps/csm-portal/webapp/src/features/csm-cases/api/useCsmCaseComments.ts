@@ -18,6 +18,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryKey,
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
@@ -27,6 +28,7 @@ import type {
   BeComment,
   BeCaseCommentCreatePayload,
   BeCaseCommentSearchPayload,
+  BeCommentPatchPayload,
   BeCommentSearchResponse,
 } from "@api/backend/types";
 import {
@@ -132,6 +134,90 @@ export function usePostCsmCaseComment(): UseMutationResult<
       // per post, but the entry renders correctly.
       void queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, variables.caseId],
+      });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Edit / soft-delete — generic across case/change-request/incident comments
+// ---------------------------------------------------------------------------
+//
+// `PATCH /comments/{id}` and `DELETE /comments/{id}` are keyed purely by the
+// comment's own id, not by which aggregate (case/change request/incident) it
+// belongs to — one route pair serves all three. These two hooks live here
+// (alongside the case-comment query/create hooks, and the `CsmCaseComment`
+// type/`uiCommentFromBe` mapper they already share) rather than being
+// duplicated per aggregate; `useCsmChangeRequestComments.ts`/
+// `useCsmIncidentComments.ts` import them directly instead of redefining
+// their own. Each caller supplies its own `invalidateQueryKey` (that
+// aggregate's own comments list query key) since only the caller knows which
+// list the edited/deleted comment belongs to.
+
+export interface PatchCommentInput {
+  commentId: string;
+  /** New plain-text/rich-text body — same shape `usePostCsmCaseComment`
+   * already sends on create. */
+  content: string;
+  /** Query key to invalidate on success — that aggregate's own comments list
+   * (e.g. `[ApiQueryKeys.CSM_CASE_COMMENTS, caseId]`). */
+  invalidateQueryKey: QueryKey;
+}
+
+/** Edit a comment's content via `PATCH /comments/{id}`. Server-side: only the
+ * comment's own author or a caller holding the `admin` role may do this; a
+ * prior edit's body is preserved server-side for audit. */
+export function usePatchComment(): UseMutationResult<
+  CsmCaseComment,
+  Error,
+  PatchCommentInput
+> {
+  const api = useBackendApi();
+  const queryClient = useQueryClient();
+
+  return useMutation<CsmCaseComment, Error, PatchCommentInput>({
+    mutationFn: async (input): Promise<CsmCaseComment> => {
+      const payload: BeCommentPatchPayload = { content: input.content };
+      // PATCH /comments/{id} returns { message, comment }, not a bare
+      // comment — the BFF forwards the entity service's response unchanged.
+      const updated = await api.patch<
+        BeCommentPatchPayload,
+        { message: string; comment: BeComment }
+      >(`/comments/${encodeURIComponent(input.commentId)}`, payload);
+      return uiCommentFromBe(updated.comment, { context: "case" });
+    },
+    onSuccess: (_updated, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: variables.invalidateQueryKey,
+      });
+    },
+  });
+}
+
+export interface DeleteCommentInput {
+  commentId: string;
+  /** Query key to invalidate on success — see {@link PatchCommentInput}. */
+  invalidateQueryKey: QueryKey;
+}
+
+/** Soft-delete a comment via `DELETE /comments/{id}` (204 on success; the
+ * real content is never destroyed server-side). Server-side: only the
+ * comment's own author or a caller holding the `admin` role may do this. */
+export function useDeleteComment(): UseMutationResult<
+  void,
+  Error,
+  DeleteCommentInput
+> {
+  const api = useBackendApi();
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, DeleteCommentInput>({
+    mutationFn: async (input): Promise<void> => {
+      await api.del<null>(`/comments/${encodeURIComponent(input.commentId)}`);
+    },
+    onSuccess: (_void, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: variables.invalidateQueryKey,
       });
     },
   });

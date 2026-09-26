@@ -21,6 +21,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -73,6 +74,46 @@ func (s *accountService) GetAccountByID(ctx context.Context, id string) (domain.
 	return accountRowToDetail(row), nil
 }
 
+// UpdateAccountTeams implements AccountService.
+func (s *accountService) UpdateAccountTeams(ctx context.Context, req domain.UpdateAccountTeamsRequest) (domain.AccountDetail, error) {
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.AccountDetail{}, err
+	}
+	if req.CreTeamID == nil && req.SreTeamID == nil {
+		return domain.AccountDetail{}, &apierror.ValidationError{Msg: "at least one of creTeamId or sreTeamId must be provided"}
+	}
+	ids := []string{}
+	if req.CreTeamID != nil {
+		ids = append(ids, *req.CreTeamID)
+	}
+	if req.SreTeamID != nil {
+		ids = append(ids, *req.SreTeamID)
+	}
+	if err := validateUUIDs("creTeamId/sreTeamId", ids); err != nil {
+		return domain.AccountDetail{}, err
+	}
+
+	row, err := s.repo.UpdateAccountTeams(ctx, req.ID, req.CreTeamID, req.SreTeamID)
+	if err != nil {
+		return domain.AccountDetail{}, err
+	}
+	return accountRowToDetail(row), nil
+}
+
+// accountTeamRef builds an EntityRef from a joined "group" id/name pair,
+// returning nil when the id is absent (no team linked) -- same nil
+// convention as accountPersonRef, just for a group rather than a user.
+func accountTeamRef(id, name *string) *domain.EntityRef {
+	if id == nil || *id == "" {
+		return nil
+	}
+	var teamName string
+	if name != nil {
+		teamName = *name
+	}
+	return &domain.EntityRef{ID: *id, Name: teamName}
+}
+
 // accountPersonRef builds a PersonRef from a joined person id/name/email triple,
 // returning nil when the id is absent (no owner/manager linked).
 func accountPersonRef(id, name, email *string) *domain.PersonRef {
@@ -99,20 +140,22 @@ func boolOrFalse(b *bool) bool {
 }
 
 // accountRowCommonFields maps the fields shared between the search view and
-// the account detail response. SupportTier, ArrToday, RenewalAccountManager,
-// CreTeam, and SreTeam are not available in the Postgres schema and are
-// always nil.
-func accountRowCommonFields(row repository.AccountRow) (classification string, technicalOwner, accountManager *domain.PersonRef) {
+// the account detail response. SupportTier and ArrToday are not available
+// in the Postgres schema and are always nil.
+func accountRowCommonFields(row repository.AccountRow) (classification string, technicalOwner, accountManager, renewalAccountManager *domain.PersonRef, creTeam, sreTeam *domain.EntityRef) {
 	if row.Classification != nil {
 		classification = *row.Classification
 	}
 	technicalOwner = accountPersonRef(row.TechnicalOwnerID, row.TechnicalOwnerName, row.TechnicalOwnerEmail)
 	accountManager = accountPersonRef(row.AccountManagerID, row.AccountManagerName, row.AccountManagerEmail)
+	renewalAccountManager = accountPersonRef(row.RenewalAccountManagerID, row.RenewalAccountManagerName, row.RenewalAccountManagerEmail)
+	creTeam = accountTeamRef(row.CreTeamID, row.CreTeamName)
+	sreTeam = accountTeamRef(row.SreTeamID, row.SreTeamName)
 	return
 }
 
 func accountRowToView(row repository.AccountRow) domain.AccountView {
-	classification, technicalOwner, accountManager := accountRowCommonFields(row)
+	classification, technicalOwner, accountManager, renewalAccountManager, creTeam, sreTeam := accountRowCommonFields(row)
 	createdBy := row.CreatedBy
 
 	return domain.AccountView{
@@ -126,9 +169,9 @@ func accountRowToView(row repository.AccountRow) domain.AccountView {
 		ArrToday:              nil,
 		TechnicalOwner:        technicalOwner,
 		AccountManager:        accountManager,
-		RenewalAccountManager: nil,
-		CreTeam:               nil,
-		SreTeam:               nil,
+		RenewalAccountManager: renewalAccountManager,
+		CreTeam:               creTeam,
+		SreTeam:               sreTeam,
 		ActivationDate:        dateOnlyOrNil(row.ActivationDate),
 		DeactivationDate:      dateOnlyOrNil(row.DeactivationDate),
 		HasAgent:              boolOrFalse(row.HasAgent),
@@ -140,7 +183,7 @@ func accountRowToView(row repository.AccountRow) domain.AccountView {
 }
 
 func accountRowToDetail(row repository.AccountRow) domain.AccountDetail {
-	classification, technicalOwner, accountManager := accountRowCommonFields(row)
+	classification, technicalOwner, accountManager, renewalAccountManager, creTeam, sreTeam := accountRowCommonFields(row)
 	createdBy := row.CreatedBy
 
 	return domain.AccountDetail{
@@ -154,9 +197,9 @@ func accountRowToDetail(row repository.AccountRow) domain.AccountDetail {
 		ArrToday:              nil,
 		TechnicalOwner:        technicalOwner,
 		AccountManager:        accountManager,
-		RenewalAccountManager: nil,
-		CreTeam:               nil,
-		SreTeam:               nil,
+		RenewalAccountManager: renewalAccountManager,
+		CreTeam:               creTeam,
+		SreTeam:               sreTeam,
 		ActivationDate:        dateOnlyOrNil(row.ActivationDate),
 		DeactivationDate:      dateOnlyOrNil(row.DeactivationDate),
 		HasAgent:              boolOrFalse(row.HasAgent),

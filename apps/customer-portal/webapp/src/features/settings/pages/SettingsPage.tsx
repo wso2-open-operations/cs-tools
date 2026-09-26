@@ -19,6 +19,7 @@ import { useParams } from "react-router";
 import { useState, useMemo, useEffect, type JSX } from "react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useCustomerPermissions from "@hooks/useCustomerPermissions";
 import TabBar from "@components/tab-bar/TabBar";
 import SettingsAiAssistant from "@features/settings/components/SettingsAiAssistant";
 import SettingsDisplay from "@features/settings/components/SettingsDisplay";
@@ -55,6 +56,14 @@ export default function SettingsPage(): JSX.Element {
     () => (userDetails?.roles ?? []).includes(SETTINGS_CUSTOMER_ADMIN_ROLE),
     [userDetails?.roles],
   );
+
+  // The AI Assistant settings save through PATCH /projects/{id}, which the
+  // backend gates on projects:update. Deriving the UI from the same permission
+  // keeps the two from disagreeing: previously the toggle was enabled for any
+  // customer_admin, who is read-only on Projects, so saving returned 403. If
+  // that is the wrong policy, change the matrix rather than this call site.
+  const { can } = useCustomerPermissions();
+  const canUpdateProject = can("projects", "update");
 
   const isRestricted = isProjectRestricted(projectDetails?.closureState);
 
@@ -121,7 +130,7 @@ export default function SettingsPage(): JSX.Element {
         />
       )}
       {displayTab === SettingsPageTabId.AI && (
-        <SettingsAiAssistant projectId={projectId} canEdit={isCustomerAdmin} />
+        <SettingsAiAssistant projectId={projectId} canEdit={canUpdateProject} />
       )}
       {displayTab === SettingsPageTabId.REGISTRY_TOKENS && (
         <SettingsRegistryTokens

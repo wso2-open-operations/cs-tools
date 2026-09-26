@@ -36,6 +36,13 @@ import (
 // maxRequestBodyBytes caps request bodies accepted by search/create/update endpoints.
 const maxRequestBodyBytes = 1 << 20 // 1 MiB
 
+// maxAttachmentBodyBytes caps attachment-create bodies at 15 MiB. The webapp
+// base64-encodes the file client-side before embedding it in the JSON body:
+// entity-service enforces a 10 MB decoded-file limit, and base64 inflates
+// that to ~13.3 MB of encoded data, so the blanket 1 MiB maxRequestBodyBytes
+// leaves no headroom for the JSON envelope around it.
+const maxAttachmentBodyBytes = 15 << 20 // 15 MiB
+
 // maxZipUploadBytes caps the raw (non-JSON) binary body accepted by
 // POST /deployment-usages.
 const maxZipUploadBytes = 25 << 20 // 25 MiB
@@ -243,7 +250,14 @@ func summarizeErr(err error) string {
 // validates it is well-formed JSON. Writes the appropriate error response and
 // returns ok=false if the body is too large, unreadable, or invalid JSON.
 func readJSONBody(w http.ResponseWriter, r *http.Request) (body []byte, ok bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	return readJSONBodyWithLimit(w, r, maxRequestBodyBytes)
+}
+
+// readJSONBodyWithLimit is readJSONBody with an overridable size cap, for
+// endpoints (attachment create) whose JSON body legitimately exceeds
+// maxRequestBodyBytes — see maxAttachmentBodyBytes.
+func readJSONBodyWithLimit(w http.ResponseWriter, r *http.Request, maxBytes int64) (body []byte, ok bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, isTooLarge := err.(*http.MaxBytesError); isTooLarge {
@@ -257,7 +271,7 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) (body []byte, ok bool)
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return nil, false
 	}
-	return body, true
+	return normalizeBodyIDs(body), true
 }
 
 // readBinaryBody caps r.Body at maxBytes and reads it fully, for endpoints

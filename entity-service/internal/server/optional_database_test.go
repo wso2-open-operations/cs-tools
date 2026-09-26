@@ -28,7 +28,7 @@ import (
 // A DATA_SOURCE=servicenow deployment may legitimately have no database at
 // all: every entity read and write goes to the SN integration service, and
 // nothing in that path touches Postgres. The two Postgres-only feature sets
-// (event_publish_failures, sla_clocks) are the exception, and they are
+// (event_publish_failures, sla-status) are the exception, and they are
 // skipped rather than allowed to panic on a nil pool.
 //
 // These tests exist because a nil *pgxpool.Pool does not fail at construction
@@ -38,13 +38,15 @@ import (
 // calls them.
 func newDBLessServiceNowRouter(t *testing.T) http.Handler {
 	t.Helper()
-	router, _ := NewRouter(nil, &config.Config{
+	cfg := &config.Config{
 		DataSource:                               config.DataSourceServiceNow,
 		ServiceNowIntegrationServiceBaseURL:      "https://example.invalid",
 		ServiceNowIntegrationServiceTokenURL:     "https://example.invalid/oauth2/token",
 		ServiceNowIntegrationServiceClientID:     "test-client",
 		ServiceNowIntegrationServiceClientSecret: "test-secret",
-	})
+	}
+	withTestAuth(t, cfg)
+	router, _ := NewRouter(nil, cfg)
 	return router
 }
 
@@ -84,6 +86,10 @@ func TestPostgresOnlyRoutesAreUnregisteredWithoutADatabase(t *testing.T) {
 		{"update scheduled task attempt", http.MethodPatch, "/scheduled-tasks/attempts/some-id", `{}`},
 		{"list scheduled task runs", http.MethodGet, "/scheduled-tasks/attempts", ""},
 		{"delete scheduled task runs", http.MethodDelete, "/scheduled-tasks/attempts?resolvedBefore=2026-01-01T00:00:00Z", ""},
+		{"list saved filter views", http.MethodGet, "/users/me/saved-filter-views?listKey=cases", ""},
+		{"save saved filter views", http.MethodPatch, "/users/me/saved-filter-views", `{}`},
+		{"unsupported put saved filter views", http.MethodPut, "/users/me/saved-filter-views", `{}`},
+		{"delete saved filter views", http.MethodDelete, "/users/me/saved-filter-views?listKey=cases&name=Mine", ""},
 	}
 
 	for _, tt := range tests {

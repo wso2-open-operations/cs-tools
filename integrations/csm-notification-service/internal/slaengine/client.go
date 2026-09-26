@@ -14,16 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package slaengine is the SLA timer engine: it registers a per-case SLA
-// clock on entity-service when it sees an events.TypeSLAClockRegister
-// record, tracks 50%/75%/100% elapsed via a Redis wake index (see redis.go),
-// and publishes events.TypeSLATierReached when a ticker finds a due entry
-// (see engine.go). Ported from a standalone POC
-// (internal/services/slatimerengine there), adapted to this repo's actual
-// architecture: durable clock state lives in entity-service (a new
-// sla_clocks table/API, this package's own HTTP client below) rather than a
-// Postgres connection this service would own directly — this service has no
-// database of its own, by design (see this package's own CLAUDE.md section).
+// Package slaengine is the SLA breach-alerting engine: it periodically polls
+// entity-service's GET /sla-status — which reads live from the "sla" table
+// ServiceNow's own SLA engine populates via sync, not a value this service
+// computes — diffs each clock's businessElapsedPercent against the last
+// tier this engine alerted for (tracked in Redis, see redis.go), and sends
+// a Google Chat breach alert plus events.TypeSLATierReached the first time a
+// 50%/75%/100% checkpoint is crossed (see engine.go). Replaces an earlier
+// design that hand-registered a durable clock per case on a now-removed
+// entity-service "sla_clocks" table (a stand-in built before the real,
+// ServiceNow-synced "sla" table existed) and scheduled wake-ups off a
+// locally-computed due date — see entity-service's own CLAUDE.md ("SLA
+// status") for the full history. This service still has no database of its
+// own, by design (see this package's own CLAUDE.md section) — Redis here
+// holds only the small "last alerted tier per clock" cursor, not the SLA
+// data itself.
 package slaengine
 
 import (
@@ -34,17 +39,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/oauthhttp"
 )
-
-// tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
-// Overridden in tests to keep them fast.
-var tokenFetchTimeout = 10 * time.Second
 
 // EntityConfig holds the configuration for the entity-service client below.
 // BaseURL/Scopes are this client's own SLA_ENTITY_* env vars; TokenURL/
@@ -62,9 +63,11 @@ type EntityConfig struct {
 	Scopes       []string
 }
 
-// EntityClient is a narrow HTTP client for entity-service's sla_clocks
-// endpoints — the entity-service half of this engine's durable state.
-// Mirrors internal/entity.CustomerEntityClient's do()/OAuth2 shape exactly.
+// EntityClient is a narrow HTTP client for entity-service's GET /sla-status
+// endpoint — the only entity-service call this engine makes; unlike the
+// design it replaced, there's no register/get/patch trio to maintain since
+// this service no longer owns any SLA state of its own. Mirrors
+// internal/entity.CustomerEntityClient's do()/OAuth2 shape exactly.
 type EntityClient struct {
 	http    *http.Client
 	baseURL string
@@ -75,17 +78,12 @@ type EntityClient struct {
 // endpoint — a missing/invalid configuration only surfaces as an error the
 // first time a method below is called.
 func NewEntityClient(cfg EntityConfig) *EntityClient {
-	cc := clientcredentials.Config{
+	httpClient := oauthhttp.NewClient(oauthhttp.Config{
+		TokenURL:     cfg.TokenURL,
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
-		TokenURL:     cfg.TokenURL,
 		Scopes:       cfg.Scopes,
-	}
-
-	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
-		&http.Client{Timeout: tokenFetchTimeout})
-	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
+	})
 
 	return &EntityClient{
 		http:    httpClient,
@@ -127,118 +125,70 @@ func (c *EntityClient) do(ctx context.Context, method, path string, body []byte)
 	return respBody, nil
 }
 
-// Clock is the subset of entity-service's SLAClock response this engine
-// needs: PausedOn is checked by Tick before firing a tier (see engine.go);
-// nothing here reads the reached_*_at fields since SetTierReachedIfUnset's
-// own response already reports what's needed after a write. Field names
-// match entity-service's own response naming (timestamps use the "On"
-// suffix there, not "At"). The eight display fields below are populated
-// once at registration time (see RegisterClockRequest) and read back here
-// so Engine.sendBreachAlert can build a Google Chat card from this one
-// GetClock call, with no second lookup — this service has no other way to
-// reach case data.
-type Clock struct {
-	PausedOn   *time.Time `json:"pausedOn"`
-	StartedOn  time.Time  `json:"startedOn"`
-	CaseNumber string     `json:"caseNumber"`
-	WSO2CaseID string     `json:"wso2CaseId"`
-	CaseTitle  string     `json:"caseTitle"`
-	CaseType   string     `json:"caseType"`
-	Product    string     `json:"product"`
-	Team       string     `json:"team"`
-	Priority   string     `json:"priority"`
-	State      string     `json:"state"`
+// SLAStatus mirrors entity-service's domain.SLAStatus — one case-like work
+// item's current standing against one SLA policy target (response/
+// workaround/resolution), read live from entity-service's own "sla" table.
+// Field names/JSON tags match entity-service's response exactly.
+type SLAStatus struct {
+	CaseID                 string     `json:"caseId"`
+	ClockType              string     `json:"clockType"`
+	BusinessElapsedPercent float64    `json:"businessElapsedPercent"`
+	HasBreached            bool       `json:"hasBreached"`
+	IsPaused               bool       `json:"isPaused"`
+	StartedOn              *time.Time `json:"startedOn"`
+	CaseNumber             string     `json:"caseNumber,omitempty"`
+	WSO2CaseID             string     `json:"wso2CaseId,omitempty"`
+	CaseTitle              string     `json:"caseTitle,omitempty"`
+	CaseType               string     `json:"caseType,omitempty"`
+	Product                string     `json:"product,omitempty"`
+	Team                   string     `json:"team,omitempty"`
+	Priority               string     `json:"priority,omitempty"`
+	State                  string     `json:"state,omitempty"`
 }
 
-// RegisterClockRequest is RegisterClock's request — a struct rather than a
-// growing positional-argument list, since registration now carries display
-// data (see Clock's own doc comment) alongside the scheduling fields.
-type RegisterClockRequest struct {
-	CaseID    string
-	ClockType string
-	StartedAt time.Time
-	DueAt     time.Time
-	// The seven fields below are optional display data — see Clock's own
-	// doc comment for what they're for.
-	CaseNumber string
-	WSO2CaseID string
-	CaseTitle  string
-	CaseType   string
-	Product    string
-	Team       string
-	Priority   string
-	State      string
+// searchSLAStatusResponse mirrors entity-service's domain.SearchSLAStatusResponse.
+type searchSLAStatusResponse struct {
+	Statuses []SLAStatus `json:"statuses"`
+	Total    int         `json:"total"`
+	Limit    int         `json:"limit"`
+	Offset   int         `json:"offset"`
 }
 
-// RegisterClock calls POST /cases/{caseId}/sla-clocks.
-func (c *EntityClient) RegisterClock(ctx context.Context, req RegisterClockRequest) error {
-	body, err := json.Marshal(struct {
-		ClockType  string    `json:"clockType"`
-		StartedAt  time.Time `json:"startedAt"`
-		DueAt      time.Time `json:"dueAt"`
-		CaseNumber string    `json:"caseNumber,omitempty"`
-		WSO2CaseID string    `json:"wso2CaseId,omitempty"`
-		CaseTitle  string    `json:"caseTitle,omitempty"`
-		CaseType   string    `json:"caseType,omitempty"`
-		Product    string    `json:"product,omitempty"`
-		Team       string    `json:"team,omitempty"`
-		Priority   string    `json:"priority,omitempty"`
-		State      string    `json:"state,omitempty"`
-	}{
-		ClockType: req.ClockType, StartedAt: req.StartedAt, DueAt: req.DueAt,
-		CaseNumber: req.CaseNumber, WSO2CaseID: req.WSO2CaseID, CaseTitle: req.CaseTitle,
-		CaseType: req.CaseType, Product: req.Product, Team: req.Team, Priority: req.Priority,
-		State: req.State,
-	})
-	if err != nil {
-		return fmt.Errorf("slaengine: encode RegisterClock request: %w", err)
-	}
-	_, err = c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(req.CaseID)+"/sla-clocks", body)
-	return err
-}
+// listPageSize is the page size this client requests per GET /sla-status
+// call — entity-service's own maxSLAStatusLimit (2000), so a full poll of
+// today's ~5,500 active clocks takes about three round trips rather than
+// the generic endpoint's would-be hundred-plus.
+const listPageSize = 2000
 
-// GetClock calls GET /cases/{caseId}/sla-clocks/{clockType}.
-func (c *EntityClient) GetClock(ctx context.Context, caseID, clockType string) (Clock, error) {
-	path := "/cases/" + url.PathEscape(caseID) + "/sla-clocks/" + url.PathEscape(clockType)
+// ListActiveSLAStatuses calls GET /sla-status?limit=&offset=.
+func (c *EntityClient) ListActiveSLAStatuses(ctx context.Context, limit, offset int) (searchSLAStatusResponse, error) {
+	path := "/sla-status?limit=" + url.QueryEscape(strconv.Itoa(limit)) + "&offset=" + url.QueryEscape(strconv.Itoa(offset))
 	respBody, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return Clock{}, err
+		return searchSLAStatusResponse{}, err
 	}
-	var clock Clock
-	if err := json.Unmarshal(respBody, &clock); err != nil {
-		return Clock{}, fmt.Errorf("slaengine: decode GetClock response: %w", err)
+	var resp searchSLAStatusResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return searchSLAStatusResponse{}, fmt.Errorf("slaengine: decode ListActiveSLAStatuses response: %w", err)
 	}
-	return clock, nil
+	return resp, nil
 }
 
-// SetTierReachedIfUnset calls
-// PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier} with
-// {"status": "reached"} and returns the (possibly pre-existing) reached
-// timestamp, plus alreadyReached: whether this call is the one that just
-// recorded the tier (false) or it was already recorded by an earlier call
-// (true). Callers MUST gate any reaction to the tier being reached (e.g.
-// publishing a notification) on alreadyReached being false — see
-// entity-service's own doc comment on this field for why: the underlying
-// database write already atomically decides which caller "really" set it,
-// even when two callers race for the same tier at the same time.
-func (c *EntityClient) SetTierReachedIfUnset(ctx context.Context, caseID, clockType, tier string) (reachedAt time.Time, alreadyReached bool, err error) {
-	body, err := json.Marshal(struct {
-		Status string `json:"status"`
-	}{Status: "reached"})
-	if err != nil {
-		return time.Time{}, false, fmt.Errorf("slaengine: encode SetTierReachedIfUnset request: %w", err)
+// FetchAllActiveSLAStatuses pages through every currently-active SLA clock
+// across every case-like work item, via repeated ListActiveSLAStatuses
+// calls — Engine.Tick's one entry point into entity-service per poll.
+func (c *EntityClient) FetchAllActiveSLAStatuses(ctx context.Context) ([]SLAStatus, error) {
+	var all []SLAStatus
+	offset := 0
+	for {
+		page, err := c.ListActiveSLAStatuses(ctx, listPageSize, offset)
+		if err != nil {
+			return nil, fmt.Errorf("slaengine: fetch active sla statuses at offset %d: %w", offset, err)
+		}
+		all = append(all, page.Statuses...)
+		offset += len(page.Statuses)
+		if len(page.Statuses) < listPageSize || offset >= page.Total {
+			return all, nil
+		}
 	}
-	path := "/cases/" + url.PathEscape(caseID) + "/sla-clocks/" + url.PathEscape(clockType) + "/tiers/" + url.PathEscape(tier)
-	respBody, err := c.do(ctx, http.MethodPatch, path, body)
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	var parsed struct {
-		ReachedOn      time.Time `json:"reachedOn"`
-		AlreadyReached bool      `json:"alreadyReached"`
-	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return time.Time{}, false, fmt.Errorf("slaengine: decode SetTierReachedIfUnset response: %w", err)
-	}
-	return parsed.ReachedOn, parsed.AlreadyReached, nil
 }

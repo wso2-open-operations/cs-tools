@@ -62,6 +62,25 @@ func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(account)
 }
 
+// PatchAccountTeams handles PATCH /accounts/{id}, setting the account's CRE
+// and/or SRE team (Postgres data source only; no equivalent exists on
+// SNAccountHandler). Accepts creTeamId, sreTeamId, or both; at least one is
+// required.
+func (h *AccountHandler) PatchAccountTeams(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateAccountTeamsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	account, err := h.svc.UpdateAccountTeams(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(account)
+}
+
 // SNAccountHandler handles HTTP requests for account operations backed by ServiceNow.
 type SNAccountHandler struct {
 	svc service.SNAccountService

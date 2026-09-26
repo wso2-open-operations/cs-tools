@@ -57,7 +57,7 @@ func TestSNDeployedProductService_SearchDeployedProducts_MapsCategoryFromReferen
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	resp, err := svc.SearchDeployedProducts(contextWithUserIDToken("token"), domain.SearchDeployedProductsRequest{
 		Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -93,7 +93,7 @@ func TestSNDeployedProductService_SearchDeployedProducts_NilCategoryStaysNil(t *
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	resp, err := svc.SearchDeployedProducts(contextWithUserIDToken("token"), domain.SearchDeployedProductsRequest{
 		Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -139,7 +139,7 @@ func TestSNDeployedProductService_SearchDeployedProducts_CoresTPSNumericAndUpdat
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	resp, err := svc.SearchDeployedProducts(contextWithUserIDToken("token"), domain.SearchDeployedProductsRequest{
 		Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -193,7 +193,7 @@ func TestSNDeployedProductService_SearchDeployedProducts_NilUpdatesStaysNil(t *t
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	resp, err := svc.SearchDeployedProducts(contextWithUserIDToken("token"), domain.SearchDeployedProductsRequest{
 		Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -223,7 +223,7 @@ func TestSNDeployedProductService_SearchDeployedProducts_ForwardsProductCategori
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	deploymentUUID := sysidToUUID(testDeployedProductDeploySysid)
 	_, err := svc.SearchDeployedProducts(contextWithUserIDToken("token"), domain.SearchDeployedProductsRequest{
@@ -266,7 +266,7 @@ func TestSNDeployedProductService_SearchDeployedProducts_NilProductCategoriesOmi
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	_, err := svc.SearchDeployedProducts(contextWithUserIDToken("token"), domain.SearchDeployedProductsRequest{
 		Pagination: domain.Pagination{Limit: 20, Offset: 0},
@@ -315,7 +315,7 @@ func TestSNDeployedProductService_UpdateDeployedProduct_UpdatesRoundTrip(t *test
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	req := domain.UpdateDeployedProductRequest{
 		ID: productUUID,
@@ -370,7 +370,7 @@ func TestSNDeployedProductService_UpdateDeployedProduct_UpdatesAloneSatisfiesDet
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	req := domain.UpdateDeployedProductRequest{
 		ID:      productUUID,
@@ -406,7 +406,7 @@ func TestSNDeployedProductService_UpdateDeployedProduct_EmptyUpdatesArrayClearsH
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowDeployedProductService(client)
+	svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 	req := domain.UpdateDeployedProductRequest{
 		ID:      productUUID,
@@ -470,7 +470,7 @@ func TestSNDeployedProductService_UpdateDeployedProduct_ValidatesUpdateEntries(t
 					},
 				})
 			}))
-			svc := NewServiceNowDeployedProductService(client)
+			svc := NewServiceNowDeployedProductService(client, nil, nil)
 
 			req := domain.UpdateDeployedProductRequest{ID: productUUID, Updates: tc.updates}
 			_, err := svc.UpdateDeployedProduct(contextWithUserIDToken("token"), req)

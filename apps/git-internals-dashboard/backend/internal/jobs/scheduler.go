@@ -98,13 +98,9 @@ func RunTickOnce(ctx context.Context, pool *pgxpool.Pool, runtime *ingest.Runtim
 		// pipelines them into one round trip — but a pipeline terminated by a
 		// single Sync (what pool.SendBatch sends) runs as ONE implicit
 		// transaction server-side: a genuine SQL error anywhere in the page
-		// rolls back every statement in it, unlike the old one-exec-per-issue
-		// loop where each statement committed on its own (verified
-		// empirically: a batch with a constraint-violating second statement
-		// left zero rows from the first). This is fine here — every
+		// rolls back every statement in it. This is fine here — every
 		// statement is idempotent and a failed page is retried wholesale on
-		// the next tick — but it is a real behavior change: same SQL, same
-		// conflict clauses, different transaction semantics.
+		// the next tick.
 		batch := &pgx.Batch{}
 		for _, issue := range page {
 			currentStatus := runtime.Normalize(issue.CurrentStatus)

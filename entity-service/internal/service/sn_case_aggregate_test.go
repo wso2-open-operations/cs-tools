@@ -62,7 +62,7 @@ func TestSNCaseService_AggregateCases_CallsAggregateEndpointAndMapsResponse(t *t
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	req := domain.AggregateCasesRequest{
@@ -136,7 +136,7 @@ func TestSNCaseService_AggregateCases_RejectsBadFilterFieldAndCombo(t *testing.T
 	})
 
 	client := newTestSNClient(t, mux)
-	svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	t.Run("bad field name", func(t *testing.T) {

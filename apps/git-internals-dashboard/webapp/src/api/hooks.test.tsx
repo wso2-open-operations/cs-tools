@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useIssueTitles, useOverview, useTaxonomy } from "./hooks";
+import { useOverview, useTaxonomy } from "./hooks";
 
 /** Wraps a hook under test in its own fresh QueryClient. */
 function wrapper({ children }: { children: ReactNode }) {
@@ -56,60 +56,21 @@ describe("api hooks", () => {
     expect(url).toBe("https://backend.example.test/taxonomy");
   });
 
-  it("useIssueTitles posts the requested ids and returns the title map", async () => {
+  it("useOverview requests /metrics/overview with the given filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ titles: { "1": "Fix the widget", "2": null } }), {
+      new Response(JSON.stringify({ refreshedAt: "2026-01-01T00:00:00Z" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const { result } = renderHook(() => useIssueTitles([2, 1]), { wrapper });
+    const { result } = renderHook(() => useOverview({ abtTeam: "Atlas" }), { wrapper });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual({ "1": "Fix the widget", "2": null });
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://backend.example.test/issues/titles");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ ids: [2, 1] });
-  });
-
-  it("useIssueTitles never fetches when given an empty id list", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { result } = renderHook(() => useIssueTitles([]), { wrapper });
-
-    // enabled: false — the query should settle immediately without fetching.
-    await waitFor(() => expect(result.current.isPending).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("useIssueTitles's query key is stable across id order (same cache entry)", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ titles: { "1": "A", "2": "B" } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    // A single shared QueryClient across both renders below, so the second
-    // render can observe whether it hit the first render's cache entry.
-    const localWrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    );
-
-    const first = renderHook(() => useIssueTitles([1, 2]), { wrapper: localWrapper });
-    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
-
-    const second = renderHook(() => useIssueTitles([2, 1]), { wrapper: localWrapper });
-    await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
-
-    // Same sorted key => same cache entry => fetch only happened once.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("https://backend.example.test/metrics/overview?abtTeam=Atlas");
   });
 
   it("useOverview keeps the previous filter's data on screen while the new filter's fetch is pending", async () => {
@@ -129,7 +90,7 @@ describe("api hooks", () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
 
-    const { result, rerender } = renderHook(({ repo }: { repo: string }) => useOverview(repo), {
+    const { result, rerender } = renderHook(({ repo }: { repo: string }) => useOverview({ repo }), {
       wrapper: localWrapper,
       initialProps: { repo: "a" },
     });

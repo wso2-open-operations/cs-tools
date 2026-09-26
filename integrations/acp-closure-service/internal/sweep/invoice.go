@@ -37,7 +37,7 @@ type dueInvoice struct {
 	// regardless of any grace period.
 	DueDate time.Time
 	// SuspendDate is the actual date the invoice cascade suspends on —
-	// closure.invoiceSuspendDate's result, which can be later than DueDate
+	// closure.InvoiceSuspendDate's result, which can be later than DueDate
 	// under the EULA-3.3-style 60-day grace period. Equals DueDate when no
 	// grace period applies. Only the customer-facing suspended (0-day)
 	// body's prose references this — the internal body and the "Due Date:"

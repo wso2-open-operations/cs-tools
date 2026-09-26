@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -262,3 +263,147 @@ func (c *Client) searchFirstIncident(ctx context.Context, req SearchIncidentsReq
 	}
 	return result, true, nil
 }
+
+// SearchITServicesFilters is the filter subset of entity-service's own
+// SearchITServicesFilters this service sends: just free-text SearchQuery —
+// the alert's raw, human-readable Service label (see
+// internal/handler.AlertRequest.Service and internal/worker.resolveServiceID).
+type SearchITServicesFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchITServicesRequest is the request body for csm-integration-service's
+// POST /services/search — a thin proxy of entity-service's own
+// SearchITServicesRequest, proxied as-is (field names/JSON tags copied
+// verbatim), matching SearchIncidentsRequest's convention above.
+type SearchITServicesRequest struct {
+	Filters    *SearchITServicesFilters `json:"filters,omitempty"`
+	Pagination Pagination               `json:"pagination"`
+}
+
+// ITService is the subset of entity-service's own ITService this service
+// actually reads out of a search hit — enough to resolve a raw Service label
+// to a CMDB service UUID. Name is kept for logging/debugging only.
+type ITService struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
+// searchITServicesResponse is the response body for POST /services/search,
+// decoded tolerantly (unknown fields ignored), matching
+// searchIncidentsResponse's convention above.
+type searchITServicesResponse struct {
+	Services []ITService `json:"services"`
+	Total    int         `json:"total"`
+	Offset   int         `json:"offset"`
+	Limit    int         `json:"limit"`
+}
+
+// SearchServices calls POST /services/search on csm-integration-service with
+// searchQuery=label and Pagination{Limit: 1, Offset: 0}.
+//
+// This is the live half of internal/handler.MapToIncident's hybrid
+// service-UUID resolution: the static SRE_ALERT_SERVICE_MAP lookup runs
+// synchronously in the request path; when that has no entry for a label,
+// internal/worker calls this method instead, at delivery-attempt time —
+// never inline before the 202 response (see MapToIncident's doc comment for
+// why that split exists, and internal/worker.resolveServiceID for the
+// caching/fallback logic built on top of this method).
+//
+// entity-service's own SearchITServices does NOT do an exact match on
+// name — its Postgres-backed implementation is `name ILIKE '%<query>%'`, a
+// case-insensitive substring match, ordered by created_on, not by match
+// quality (see entity-service/internal/repository/it_service_repo.go). A
+// bare "first result" read (the original, incorrect version of this method)
+// could therefore return an unrelated service whose name merely contains
+// label as a substring, and — worse — since results are ordered by creation
+// time rather than relevance, a real exact match is not guaranteed to be
+// the first page's first row at all. So this method pages through every
+// result itself and only ever returns a service whose Name matches label
+// case-insensitively (folded via strings.EqualFold) and whose ID is
+// non-empty — the one true "the same match a human typing this label into
+// CMDB search and picking the exact-name result would have gotten",
+// independent of entity-service's own ordering. servicesSearchPageSize
+// bounds each page; servicesSearchMaxPages bounds the total pages walked
+// (a defensive cap — a legitimately large CMDB shouldn't need anywhere
+// near this many exact-name collisions on one label, and this must never
+// become an unbounded loop against a live service).
+//
+// Returns the (possibly empty) slice of matches and a nil error on a normal
+// 2xx response — an empty slice means either a confirmed zero-result search
+// or a confirmed zero-*exact-match* search (both are the same "no match"
+// outcome from the caller's point of view), not an error; the caller
+// (internal/worker.resolveServiceID) decides what "no match" means (its
+// unknown-service fallback). A non-nil error here is always a
+// transient/transport-level failure (a non-2xx response, or the request
+// never completing) — the caller folds that into the exact same
+// retryable-delivery-failure path a CreateIncident error takes, never
+// translating it into a "no match" outcome itself.
+//
+// Like CreateIncident and the searches above, this endpoint's underlying
+// ServiceNow operation has a documented M2M-credential fallback on the
+// csm-integration-service side (see that service's CLAUDE.md), so a 401 is
+// possible but not unconditional — treated as retryable regardless, same as
+// every other error from this call.
+func (c *Client) SearchServices(ctx context.Context, label string) ([]ITService, error) {
+	offset := 0
+	for page := 0; page < servicesSearchMaxPages; page++ {
+		req := SearchITServicesRequest{
+			Filters:    &SearchITServicesFilters{SearchQuery: label},
+			Pagination: Pagination{Limit: servicesSearchPageSize, Offset: offset},
+		}
+
+		body, err := json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("csmclient: marshal SearchITServicesRequest: %w", err)
+		}
+
+		respBody, err := c.do(ctx, http.MethodPost, "/services/search", body)
+		if err != nil {
+			return nil, err
+		}
+
+		var resp searchITServicesResponse
+		if err := json.Unmarshal(respBody, &resp); err != nil {
+			return nil, fmt.Errorf("csmclient: decode SearchITServices response: %w", err)
+		}
+
+		for _, svc := range resp.Services {
+			if svc.ID != "" && strings.EqualFold(svc.Name, label) {
+				return []ITService{svc}, nil
+			}
+		}
+
+		offset += len(resp.Services)
+		// Stop once offset has caught up with the server's own reported
+		// Total — deliberately not also keying off "this page came back
+		// short:" Postgres LIMIT/OFFSET (entity-service's own backing
+		// query) always returns a full page unless it's genuinely the last
+		// one, but trusting that as a second, independent stop condition
+		// only adds a way for the two signals to disagree; Total alone is
+		// the authoritative one. An empty page with offset still short of
+		// Total (a buggy/inconsistent server response) does not infinite
+		// loop — it just stops making progress, and servicesSearchMaxPages
+		// is the backstop that ends the loop regardless.
+		if offset >= resp.Total {
+			return nil, nil
+		}
+	}
+
+	// servicesSearchMaxPages exhausted without a short/complete page ever
+	// being seen — treat as no match rather than looping further; see this
+	// const's own doc comment for why this is a defensive cap, not an
+	// expected outcome.
+	return nil, nil
+}
+
+// servicesSearchPageSize is the page size SearchServices requests per call
+// to POST /services/search while walking for an exact-name match.
+const servicesSearchPageSize = 50
+
+// servicesSearchMaxPages bounds how many pages SearchServices will walk
+// before giving up and treating the search as a no-match — a defensive cap
+// against ever looping unbounded against a live service, not a value this
+// service expects to actually hit in practice (see SearchServices' own doc
+// comment).
+const servicesSearchMaxPages = 20

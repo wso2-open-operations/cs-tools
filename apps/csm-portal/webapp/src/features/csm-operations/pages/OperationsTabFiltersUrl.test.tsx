@@ -39,6 +39,15 @@ vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {},
   useBackendApi: () => ({ post: vi.fn() }),
 }));
+vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
+  useSavedFilterViews: () => ({
+    views: [],
+    isLoading: false,
+    saveFilterView: vi.fn(),
+    deleteFilterView: vi.fn(),
+    moveFilterView: vi.fn(),
+  }),
+}));
 // Both tabs now render a FilteredCsvExportButton, which reads these two
 // contexts — not under test here, so they're stubbed the same way
 // CreateChangeRequestPage's own tests stub the error banner.

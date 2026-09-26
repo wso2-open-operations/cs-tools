@@ -22,7 +22,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -171,7 +170,7 @@ func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	body, ok := readJSONBody(w, r)
+	body, ok := readJSONBodyWithLimit(w, r, maxAttachmentBodyBytes)
 	if !ok {
 		return
 	}
@@ -253,9 +252,9 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isProjectSuspendedOrExpired(project) {
-		slog.WarnContext(r.Context(), "attempted to create case for suspended or expired project", "userID", user.UserID, "projectID", req.ProjectID)
-		writeError(w, http.StatusForbidden, "Cannot create cases for a suspended or contract-expired project.")
+	if isProjectSuspended(project) {
+		slog.WarnContext(r.Context(), "attempted to create case for suspended project", "userID", user.UserID, "projectID", req.ProjectID)
+		writeError(w, http.StatusForbidden, "Cannot create cases for a suspended project.")
 		return
 	}
 
@@ -601,16 +600,14 @@ func (h *CaseHandler) SearchCaseEscalations(w http.ResponseWriter, r *http.Reque
 	writeJSONValue(w, http.StatusOK, dto.MapEscalationSearchResponse(result))
 }
 
-// isProjectSuspendedOrExpired checks if a project is suspended or its contract has ended.
-func isProjectSuspendedOrExpired(project entity.ProjectDetailsView) bool {
-	if project.ClosureState != nil && strings.EqualFold(strings.TrimSpace(*project.ClosureState), "suspended") {
-		return true
-	}
-	if !project.EndDate.IsZero() {
-		todayUTC := time.Now().UTC().Format("2006-01-02")
-		endDateUTC := project.EndDate.UTC().Format("2006-01-02")
-		return todayUTC > endDateUTC
-	}
-	return false
+// isProjectSuspended reports whether the project is in a suspended closure state.
+//
+// A passed end date deliberately does not count. Contract expiry used to be
+// treated as suspension here, which refused case creation the moment a contract
+// lapsed; per customer request an expired project keeps working and only an
+// explicit suspended closure state restricts it.
+func isProjectSuspended(project entity.ProjectDetailsView) bool {
+	return project.ClosureState != nil &&
+		strings.EqualFold(strings.TrimSpace(*project.ClosureState), "suspended")
 }
 

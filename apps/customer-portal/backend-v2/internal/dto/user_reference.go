@@ -56,3 +56,40 @@ func userRefDisplayName(u *entity.UserReference) string {
 	}
 	return strings.TrimSpace(u.Name)
 }
+
+// systemAuthorLabel is what the old customer-portal backend's entity-service
+// literally sent as the string createdBy for automation/integration-authored
+// activity (an activity with no real, resolvable author) before it switched to
+// a per-field UserReference object. Case activities keep that same label so
+// existing consumers (and any UI branching on it) don't regress.
+const systemAuthorLabel = "system"
+
+// userRefDisplayNameOrSystem is userRefDisplayName with a fallback: when the
+// reference does not resolve to anyone (missing entirely, or present but with
+// neither a name nor an email), or when it resolves to the platform's own
+// automation account, it returns the "system" sentinel instead of an empty
+// string.
+//
+// An empty createdBy is indistinguishable from a genuinely unknown author, so
+// downstream consumers rendered "Unknown" for what used to render as "System".
+// A resolved-but-nameless real account (email set, name blank) is left to
+// userRefDisplayName's existing empty-string behavior — it is a person, not an
+// automation actor, even though we cannot label them.
+//
+// The automation account has no real user record to resolve against, so the
+// upstream data source reuses the "system" literal in the identity's email
+// slot as the only signal that the actor is its own automation rather than an
+// unresolvable person. That literal is the one confirmed shape; this check
+// does not generalize to other unresolved-author patterns.
+func userRefDisplayNameOrSystem(u *entity.UserReference) string {
+	if u == nil {
+		return systemAuthorLabel
+	}
+	if strings.TrimSpace(u.Name) == "" && strings.TrimSpace(u.Email) == "" {
+		return systemAuthorLabel
+	}
+	if strings.EqualFold(strings.TrimSpace(u.Email), systemAuthorLabel) {
+		return systemAuthorLabel
+	}
+	return userRefDisplayName(u)
+}

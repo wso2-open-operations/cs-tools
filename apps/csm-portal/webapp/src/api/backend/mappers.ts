@@ -202,6 +202,9 @@ export function uiCommentFromBe(
     authorRole: role,
     createdAt: comment.createdOn,
     internal: WORK_NOTE_TYPES.has(ty),
+    isEdited: !!comment.lastEditedOn,
+    lastEditedOn: comment.lastEditedOn,
+    isDeleted: !!comment.isDeleted,
   };
 }
 

@@ -117,6 +117,7 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		ue  *apierror.UnauthorizedError
 		fe  *apierror.ForbiddenError
 		ce  *apierror.ConflictError
+		tme *apierror.TooManyRequestsError
 		de  *apierror.DownstreamError
 	)
 	switch {
@@ -144,6 +145,12 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		// 409 – request conflicts with the current state of the resource; message is safe to return.
 		log.Printf("Conflict: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ce.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusConflict, ce.Msg)
+
+	case errors.As(err, &tme):
+		// 429 – the caller is repeating an operation inside its own cooldown;
+		// the message names the wait, so it is safe (and useful) to return.
+		log.Printf("Too many requests: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(tme.Msg)) // #nosec G706 -- path and message sanitized
+		apierror.WriteJSON(w, http.StatusTooManyRequests, tme.Msg)
 
 	case errors.As(err, &de):
 		// 500 – a downstream dependency rejected the request with a status we do

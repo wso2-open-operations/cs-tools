@@ -18,9 +18,9 @@
 // same (node, detail) pairs as internal/github so main.go has one ingestion
 // path regardless of data source.
 //
-// PRIVACY: fixtures contain no titles, assignees, or actors — matching what
-// the real GitHub path returns. At runtime the title proxy returns null for
-// these issue numbers, so the UI shows "#<number>" only.
+// PRIVACY: fixtures include a title and, for most scenarios, an automated
+// metadata footer, matching what real search results provide. Assignees and
+// event actors are never included.
 package main
 
 import (
@@ -49,6 +49,17 @@ type scenario struct {
 	transitions      []transition
 	currentStatus    *string
 	currentStatusAgo *float64
+	title            string // human-readable synthetic title, always set
+	body             string // automated-footer body; "" means no footer at all (title-only issue)
+}
+
+// footer renders the automated metadata block a real GitHub issue's body
+// gets appended with, in the "Key : value" shape ExtractIssueMeta parses.
+func footer(product, wso2CaseID, caseNumber, abtTeam, openedBy string) string {
+	return fmt.Sprintf(
+		"Product : %s\nUpdate level : undefined\nWSO2 case id : %s\nCase number : %s\nPublic Git Issue : undefined\nABT Team : %s\nOpened by : %s\n",
+		product, wso2CaseID, caseNumber, abtTeam, openedBy,
+	)
 }
 
 // Expected outcomes (evaluated at "now"):
@@ -62,38 +73,56 @@ var scenarios = []scenario{
 	{ // P1, ~120h product-side => VIOLATED, still running
 		priority: strp("Critical(P1)"), state: "OPEN",
 		transitions: []transition{{"Open", 120}, {"In Progress", 100}, {"WOW", 50}},
+		title:       "P1 violated: WOW-stalled critical bug",
+		body:        footer("wso2is-5.11.0", "EXAMPLECASE-001", "CS0000001", "Atlas", "cs.engineer1@wso2.com"),
 	},
 	{ // P2, ~20h accrued then paused on WOC => AT_RISK
 		priority: strp("High(P2)"), state: "OPEN",
 		transitions: []transition{{"Open", 25}, {"In Progress", 20}, {"WOC", 5}},
+		title:       "P2 at-risk: accrued then paused on WOC",
+		body:        footer("wso2am-4.2.0", "EXAMPLECASE-002", "CS0000002", "Orion", "cs.engineer2@wso2.com"),
 	},
 	{ // P3, business-hours accrual of 48h budget => OK, paused
 		priority: strp("Medium(P3)"), state: "OPEN",
 		transitions: []transition{{"Open", 60}, {"In Progress", 40}, {"WOC", 10}},
+		title:       "P3 on-track: business-hours accrual, paused",
+		body:        footer("wso2is-5.11.0", "EXAMPLECASE-003", "CS0000003", "Nova", "cs.engineer3@wso2.com"),
 	},
 	{ // P4 has no SLA => NO_SLA (kept indefinitely)
 		priority: strp("Low(P4)"), state: "OPEN",
 		transitions: []transition{{"Open", 20}, {"In Progress", 3}},
+		title:       "P4 no-SLA: kept indefinitely",
+		body:        "", // predates the automated footer: title present, ABT team and opened-by both null
 	},
 	{ // P1 currently Resolved => TERMINAL, excluded from alerts
 		priority: strp("Critical(P1)"), state: "OPEN",
 		transitions: []transition{{"Open", 200}, {"In Progress", 150}, {"Resolved", 2}},
+		title:       "P1 terminal: resolved and excluded from alerts",
+		body:        footer("wso2am-4.2.0", "EXAMPLECASE-004", "CS0000004", "Atlas", "cs.engineer2@wso2.com"),
 	},
 	{ // No priority label => NO_SLA, never alerted
 		priority: nil, state: "OPEN",
 		transitions: []transition{{"Open", 48}, {"In Progress", 10}},
+		title:       "No-priority issue: never alerted",
+		body:        footer("wso2is-5.11.0", "EXAMPLECASE-005", "CS0000005", "undefined", "undefined"), // placeholder values => ABT team and opened-by both null
 	},
 	{ // P2 pause+resume; 4h + 24h = ~28h => VIOLATED, running
 		priority: strp("High(P2)"), state: "OPEN",
 		transitions: []transition{{"Open", 40}, {"WOC", 36}, {"In Progress", 24}},
+		title:       "P2 violated: pause and resume across WOC",
+		body:        footer("wso2am-4.2.0", "EXAMPLECASE-006", "CS0000006", "Orion", "cs.engineer1@wso2.com"),
 	},
 	{ // P3 closed + Resolved => TERMINAL
 		priority: strp("Medium(P3)"), state: "CLOSED",
 		transitions: []transition{{"Open", 300}, {"In Progress", 250}, {"Resolved", 240}},
+		title:       "P3 terminal: closed and resolved",
+		body:        footer("wso2is-5.11.0", "EXAMPLECASE-007", "CS0000007", "Nova", "cs.engineer2@wso2.com"),
 	},
 	{ // P2, empty timeline, current status set ~30h ago (empty-timeline path) => VIOLATED, running
 		priority: strp("High(P2)"), state: "OPEN",
 		transitions: nil, currentStatus: strp("Open"), currentStatusAgo: f64p(30),
+		title: "P2 violated: empty-timeline current-status path",
+		body:  footer("wso2am-4.2.0", "EXAMPLECASE-008", "CS0000008", "Atlas", "cs.engineer3@wso2.com"),
 	},
 }
 
@@ -171,6 +200,8 @@ func syntheticRepoIssues(now time.Time, repo config.RepoEntry, repoIndex int) []
 			Number:    number,
 			State:     s.state,
 			URL:       fmt.Sprintf("https://github.com/%s/%s/issues/%d", repo.Owner, repo.Name, number),
+			Title:     s.title,
+			Body:      s.body,
 			CreatedAt: createdAt,
 			UpdatedAt: currentStatusTs,
 			ClosedAt:  closedAt,

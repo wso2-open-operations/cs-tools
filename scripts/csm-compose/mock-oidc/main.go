@@ -97,12 +97,40 @@ func main() {
 	})
 
 	slog.Info("mock-oidc: listening", "port", port, "issuer", issuer)
-	log.Fatal(http.ListenAndServe(":"+port, logRequests(mux)))
+	log.Fatal(http.ListenAndServe(":"+port, logRequests(corsMiddleware(mux))))
 }
 
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slog.Info("mock-oidc: request", "method", r.Method, "path", r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// corsMiddleware allows the webapps under local dev (e.g. http://localhost:3000
+// and http://localhost:3001) to call this provider's token/userinfo/jwks/
+// discovery endpoints directly via browser fetch(), which authorization-code
+// +PKCE SPA clients (@asgardeo/react) do for the token exchange. This is a
+// throwaway local-dev-only server serving multiple different webapp origins
+// on the same host, so it echoes back whatever Origin the browser sent rather
+// than a single fixed origin.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			// The SDK's browser fetch() calls use credentials: "include", which
+			// the browser refuses to complete unless the response explicitly
+			// opts in (a wildcard Allow-Origin would not satisfy that case
+			// either, which is why this echoes the origin above instead of "*").
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -116,7 +144,7 @@ func envOrDefault(key, def string) string {
 
 func (s *server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	doc := map[string]any{
-		"issuer":                                s.issuer,
+		"issuer":                                s.issuer + "/oauth2/token",
 		"authorization_endpoint":                s.issuer + "/oauth2/authorize",
 		"token_endpoint":                        s.issuer + "/oauth2/token",
 		"userinfo_endpoint":                     s.issuer + "/oauth2/userinfo",
@@ -284,12 +312,21 @@ func (s *server) handleToken(w http.ResponseWriter, r *http.Request) {
 		clientID = req.clientID
 
 	case "client_credentials":
-		clientID = r.FormValue("client_id")
+		// RFC 6749 §2.3.1 clients (golang.org/x/oauth2/clientcredentials among
+		// them) send client_id/client_secret via HTTP Basic auth, not the form
+		// body -- prefer that over the form value, which a client only sends
+		// when it authenticates that way instead.
+		if basicID, _, ok := r.BasicAuth(); ok {
+			clientID = basicID
+		} else {
+			clientID = r.FormValue("client_id")
+		}
 		claims = map[string]any{
-			"sub":    clientID,
-			"userid": clientID,
-			"groups": []string{"m2m"},
-			"roles":  []string{"m2m"},
+			"sub":       clientID,
+			"userid":    clientID,
+			"client_id": clientID,
+			"groups":    []string{"m2m"},
+			"roles":     []string{"m2m"},
 		}
 
 	default:
@@ -346,7 +383,7 @@ func (s *server) signJWT(customClaims map[string]any, audience string, ttl time.
 	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": kid}
 	now := time.Now()
 	claims := map[string]any{
-		"iss": s.issuer,
+		"iss": s.issuer + "/oauth2/token",
 		"aud": audience,
 		"iat": now.Unix(),
 		"exp": now.Add(ttl).Unix(),

@@ -17,8 +17,9 @@
 import type { SemanticRole } from "@components/SemanticChip";
 import type { BeConversationState } from "@api/backend/types";
 
-/** All 5 raw backend conversation states, for the filter multi-select. */
+/** All 6 raw backend conversation states, for the filter multi-select. */
 export const ALL_CONVERSATION_STATES: BeConversationState[] = [
+  "OPEN",
   "ACTIVE",
   "RESOLVED",
   "CONVERTED",
@@ -29,6 +30,7 @@ export const ALL_CONVERSATION_STATES: BeConversationState[] = [
 /** Human-readable label for each raw backend state — used by the filter
  * multi-select, where every state must be individually pickable. */
 export const CONVERSATION_STATE_LABEL: Record<BeConversationState, string> = {
+  OPEN: "Open",
   ACTIVE: "Active",
   RESOLVED: "Resolved",
   CONVERTED: "Converted",
@@ -37,24 +39,28 @@ export const CONVERSATION_STATE_LABEL: Record<BeConversationState, string> = {
 };
 
 /**
- * The 3 chip groups a raw state collapses into for display (table rows,
- * preview drawer, detail page): `ACTIVE` stays on its own; `CONVERTED` — a
- * chat that became a real case — is its own positive/success group, distinct
- * from the "closed" bucket even though `CLOSED` is one of the raw values; the
- * remaining terminal-but-not-converted states (`RESOLVED`, `ABANDONED`,
- * `CLOSED`) collapse into one neutral "Closed" group, mirroring how
- * `announcementStateRole` (see `csm-announcements/utils/announcementState.ts`)
- * paints a lifecycle's closed/inactive state `default` (grey), not `success`
- * — unlike the case-state palette, where `closed` is green because a closed
- * case is a completed positive outcome. Here `CONVERTED` is the positive
- * outcome instead, so "Closed" stays neutral.
+ * The 4 chip groups a raw state collapses into for display (table rows,
+ * preview drawer, detail page): `OPEN` — a new, unclaimed chat that hasn't
+ * been picked up yet — is its own group, distinct from `ACTIVE` (already
+ * being worked); `CONVERTED` — a chat that became a real case — is its own
+ * positive/success group, distinct from the "closed" bucket even though
+ * `CLOSED` is one of the raw values; the remaining terminal-but-not-converted
+ * states (`RESOLVED`, `ABANDONED`, `CLOSED`) collapse into one neutral
+ * "Closed" group, mirroring how `announcementStateRole` (see
+ * `csm-announcements/utils/announcementState.ts`) paints a lifecycle's
+ * closed/inactive state `default` (grey), not `success` — unlike the
+ * case-state palette, where `closed` is green because a closed case is a
+ * completed positive outcome. Here `CONVERTED` is the positive outcome
+ * instead, so "Closed" stays neutral.
  */
-export type ConversationStateGroup = "active" | "converted" | "closed";
+export type ConversationStateGroup = "open" | "active" | "converted" | "closed";
 
 export function conversationStateGroup(
   state: BeConversationState,
 ): ConversationStateGroup {
   switch (state) {
+    case "OPEN":
+      return "open";
     case "ACTIVE":
       return "active";
     case "CONVERTED":
@@ -68,6 +74,12 @@ export function conversationStateGroup(
 }
 
 const GROUP_META: Record<ConversationStateGroup, { label: string; role: SemanticRole }> = {
+  // "warning" (amber) reads as "new / needs pickup" — visually distinct from
+  // active's "info" (blue), converted's "success" (green), and closed's
+  // "default" (grey); SemanticChip has no unused neutral-highlight role, so
+  // this is the only remaining semantic that doesn't collide with an
+  // existing group.
+  open: { label: "Open", role: "warning" },
   active: { label: "Active", role: "info" },
   converted: { label: "Converted", role: "success" },
   closed: { label: "Closed", role: "default" },

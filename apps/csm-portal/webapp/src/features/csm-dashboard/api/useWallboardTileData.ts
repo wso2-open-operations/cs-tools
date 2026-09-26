@@ -55,8 +55,11 @@ export interface WallboardTileData {
   state: WallboardTileState;
   /** The resource-tab URL to wrap the tile in as a link, or `undefined`
    * when it shouldn't be a link right now — no href builder for this
-   * resourceType, or the tile is loading / errored / awaiting the current
-   * user (so a skeleton or dash is never a click target). */
+   * resourceType, the tile is loading / awaiting the current user, or it's
+   * showing the dash (error with nothing cached) state (so a skeleton or
+   * dash is never a click target). Still set when `state` is `"value"`
+   * even during a background-refetch error — a tile showing a real, if
+   * stale, cached number stays clickable. */
   linkHref: string | undefined;
 }
 
@@ -107,13 +110,14 @@ export function useWallboardTileData({
   const state: WallboardTileState =
     isLoading || awaitingCurrentUser ? "loading" : isError && !data ? "error" : "value";
 
-  // A disabled query (`enabled: !awaitingCurrentUser`) reports `isLoading`
-  // false in TanStack Query v5 — that flag is "actively fetching", not
-  // "deferred, never fetched" — so `awaitingCurrentUser` has to be checked
-  // here too, or a still-loading tile whose filters carry the unresolved
-  // `__current_user__` placeholder could get wrapped in a link built from
-  // it.
-  const linkable = !!href && !isLoading && !isError && !awaitingCurrentUser;
+  // Gate on the derived `state`, not the raw `isLoading`/`isError`/
+  // `awaitingCurrentUser` flags directly: `state === "value"` already means
+  // "not loading, not awaiting the current user, and either no error or an
+  // error with cached data to show" — checking `isError` here directly
+  // would strip the link the moment a background refetch fails, even
+  // though the tile is still showing a real (if stale) number and stayed
+  // linkable a moment ago.
+  const linkable = !!href && state === "value";
 
   return {
     total: data?.total ?? 0,

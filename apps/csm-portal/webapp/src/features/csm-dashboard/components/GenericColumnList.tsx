@@ -16,7 +16,7 @@
 
 import { IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { Eye } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import type {
   BeCallRequestView,
@@ -29,6 +29,13 @@ import type {
   BeWidgetResourceType,
 } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import {
+  getColumnPreferencesUserKey,
+  useColumnPreferences,
+} from "@hooks/useColumnPreferences";
+import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import DashboardMiniTable from "@features/csm-dashboard/components/DashboardMiniTable";
 import { formatColumnValue, resolveColumnPath } from "@features/csm-dashboard/utils/resolveWidgetColumn";
@@ -52,6 +59,24 @@ export interface GenericColumnListProps {
   isLoading: boolean;
   resourceType: BeWidgetResourceType;
   columns: BeDashboardWidgetColumn[];
+  /** This widget's own id — folded into the persisted column-preferences
+   * `viewId` (see `useColumnPreferences`) so two different `columns`-
+   * configured widgets (even of the same `resourceType`) never share, or
+   * collide on, one saved show/hide/reorder layout. Optional only so
+   * existing call sites/tests that don't care about persistence (and never
+   * pass `onColumnCustomizerChange`) keep compiling; every real caller in
+   * this app supplies it. */
+  widgetId?: string;
+  /** Same "hand the button up to the caller" contract
+   * `WidgetListRendererProps.onColumnCustomizerChange` uses (see
+   * `widgetListConfig.tsx`) — lets `DashboardWidgetTile`/
+   * `WidgetInlineDrilldownPanel` render this list's own "Customise columns"
+   * button next to their existing header controls instead of this
+   * component growing a toolbar row of its own. Omitted (no current caller
+   * does) means no customizer renders at all for this list — the column set
+   * still respects any previously-saved preference, it just can't be
+   * changed without one. */
+  onColumnCustomizerChange?: (node: ReactNode | null) => void;
 }
 
 /** Raw item shape a `columns`-configured widget's own `/search` response
@@ -90,19 +115,90 @@ export default function GenericColumnList({
   isLoading,
   resourceType,
   columns,
+  widgetId,
+  onColumnCustomizerChange,
 }: GenericColumnListProps): JSX.Element {
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   const location = useLocation();
   const navigate = useNavTransition();
   const dashboardReturnState = { from: `${location.pathname}${location.search}` };
   const [previewItem, setPreviewItem] = useState<WidgetItem | null>(null);
+  const currentUserId = useCurrentUser().user?.id;
+  const currentUserEmail = useIdTokenClaims()?.email;
+
+  // Every configured column is shown by default (no `columns` entry is
+  // "optional" the way `CaseWidgetList`'s hardcoded product/type/severity/…
+  // set is) — this only lets a viewer show/hide/reorder among the SAME set
+  // the widget's own config already defines, never invents a column beyond
+  // it. `path` is this widget's own stable, unique-per-column id (already
+  // used as the cell's own React key below).
+  const columnOptions = useMemo(
+    () => columns.map((c) => ({ id: c.path, label: c.label })),
+    [columns],
+  );
+  const defaultVisibleIds = useMemo(() => columns.map((c) => c.path), [columns]);
+  const columnPrefs = useColumnPreferences({
+    // Falls back to the bare resourceType when no `widgetId` is supplied
+    // (see that prop's own doc comment) — every real caller passes one, so
+    // this fallback only matters for a caller/test that doesn't care about
+    // per-widget disambiguation in the first place.
+    viewId: `dashboard-generic-list:${widgetId ?? resourceType}`,
+    userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    columns: columnOptions,
+    defaultVisibleIds,
+  });
+  // Re-derive the full `BeDashboardWidgetColumn` (format included) for each
+  // visible id, in the user's own chosen order — `columnPrefs` only ever
+  // hands back the `{id, label}` shape `useColumnPreferences` was given, not
+  // this widget's own `format`, so it's looked back up here rather than lost.
+  const columnsById = useMemo(() => new Map(columns.map((c) => [c.path, c])), [columns]);
+  const visibleColumns = useMemo(
+    () =>
+      columnPrefs.visibleColumns
+        .map((c) => columnsById.get(c.id))
+        .filter((c): c is BeDashboardWidgetColumn => !!c),
+    [columnPrefs.visibleColumns, columnsById],
+  );
+
+  const columnCustomizerButton = (
+    <ColumnCustomizerButton
+      allColumns={columnPrefs.allColumns}
+      isVisible={columnPrefs.isVisible}
+      onToggle={columnPrefs.toggleColumn}
+      onMove={columnPrefs.moveColumn}
+      onReorder={columnPrefs.reorderColumn}
+      onReset={columnPrefs.resetToDefault}
+      label="Customise columns"
+    />
+  );
+
+  // Same "hand it up, clear it on unmount" contract `CaseWidgetList` uses
+  // (see `widgetListConfig.tsx`) — re-fires exactly when the button's own
+  // inputs change.
+  useEffect(() => {
+    if (!onColumnCustomizerChange) return;
+    onColumnCustomizerChange(columnCustomizerButton);
+    return () => onColumnCustomizerChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fires exactly when the button's own inputs change, per the comment above.
+  }, [
+    onColumnCustomizerChange,
+    columnPrefs.allColumns,
+    columnPrefs.isVisible,
+    columnPrefs.toggleColumn,
+    columnPrefs.moveColumn,
+    columnPrefs.reorderColumn,
+    columnPrefs.resetToDefault,
+  ]);
 
   return (
     <>
       <DashboardMiniTable
         isLoading={isLoading}
         emptyMessage="No records match this widget's filters."
-        columns={[{ label: "Preview", width: "auto" }, ...columns.map((c) => ({ label: c.label }))]}
+        columns={[
+          { label: "Preview", width: "auto" },
+          ...visibleColumns.map((c) => ({ label: c.label })),
+        ]}
         rows={items.map((item, i) => {
           const id = typeof item.id === "string" ? item.id : undefined;
           const href = config?.detailHref?.(item);
@@ -123,7 +219,7 @@ export default function GenericColumnList({
                   <Eye size={16} />
                 </IconButton>
               </Tooltip>,
-              ...columns.map((c) => (
+              ...visibleColumns.map((c) => (
                 <Typography key={c.path} variant="body2" noWrap>
                   {formatColumnValue(resolveColumnPath(item, c.path), c.format)}
                 </Typography>

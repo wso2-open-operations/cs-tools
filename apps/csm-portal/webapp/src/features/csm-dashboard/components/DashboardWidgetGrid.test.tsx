@@ -42,7 +42,7 @@ vi.mock("@config/apiConfig", () => ({
 // per-test via `beforeEach` so one test's captures can't leak into another.
 let capturedTileProps: Record<
   string,
-  { filters: unknown; onExpandChange: unknown; renderCount: number }
+  { filters: unknown; onExpandChange: unknown; renderCount: number; dense?: boolean }
 > = {};
 
 // Stubs the real tile out entirely — this test is only about
@@ -61,17 +61,20 @@ vi.mock("@features/csm-dashboard/components/DashboardWidgetTile", () => ({
     expandedSlice,
     onExpandChange,
     filters,
+    dense,
   }: {
     widgetId: string;
     hideRefreshButton?: boolean;
     expandedSlice?: PieSliceResult | null;
     onExpandChange?: (slice: PieSliceResult | null) => void;
     filters?: unknown;
+    dense?: boolean;
   }) => {
     const previous = capturedTileProps[widgetId];
     capturedTileProps[widgetId] = {
       filters,
       onExpandChange,
+      dense,
       renderCount: (previous?.renderCount ?? 0) + 1,
     };
     return (
@@ -342,5 +345,44 @@ describe("DashboardWidgetGrid", () => {
 
     expect(capturedTileProps.widget_a.filters).not.toBe(beforeFilters);
     expect(capturedTileProps.widget_a.filters).toEqual({ status: "closed" });
+  });
+
+  // See `isDenseSection`/`denseWidgetGridSx` in `dashboardWidgetGridLayout.ts`
+  // — the single-screen cs-overview layout: a section made up ENTIRELY of
+  // `shape: "count"` widgets renders through the denser `auto-fill` grid and
+  // tells each of its own tiles `dense`, so more of them fit per row/column
+  // without any widget's own config changing.
+  describe("dense sections (all-count-shape sections render through the denser grid)", () => {
+    it("passes dense=true to every tile in a section made up entirely of shape:'count' widgets", () => {
+      renderGrid([
+        makeWidget({ widgetId: "count_a", section: "CRE" }),
+        makeWidget({ widgetId: "count_b", section: "CRE" }),
+      ]);
+
+      expect(capturedTileProps.count_a.dense).toBe(true);
+      expect(capturedTileProps.count_b.dense).toBe(true);
+    });
+
+    it("does not mark a section dense when even one widget in it isn't shape:'count'", () => {
+      renderGrid([
+        makeWidget({ widgetId: "count_c", section: "Mixed" }),
+        makeWidget({ widgetId: "bar_a", section: "Mixed", shape: "bar", slices: [] }),
+      ]);
+
+      expect(capturedTileProps.count_c.dense).toBeFalsy();
+      expect(capturedTileProps.bar_a.dense).toBeFalsy();
+    });
+
+    it("scopes density to the individual section — a dense all-count section and a non-dense mixed section on the same dashboard don't affect each other", () => {
+      renderGrid([
+        makeWidget({ widgetId: "dense_widget", section: "CRE" }),
+        makeWidget({ widgetId: "mixed_count", section: "Mixed" }),
+        makeWidget({ widgetId: "mixed_bar", section: "Mixed", shape: "bar", slices: [] }),
+      ]);
+
+      expect(capturedTileProps.dense_widget.dense).toBe(true);
+      expect(capturedTileProps.mixed_count.dense).toBeFalsy();
+      expect(capturedTileProps.mixed_bar.dense).toBeFalsy();
+    });
   });
 });

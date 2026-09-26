@@ -18,6 +18,7 @@ package entity
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 )
@@ -127,5 +128,34 @@ func (c *Client) GetProjectTimeCardStats(ctx context.Context, id, startDate, end
 func (c *Client) GetProjectChangeRequestStats(ctx context.Context, id string) (ProjectChangeRequestStatsResponse, error) {
 	var out ProjectChangeRequestStatsResponse
 	err := c.getJSON(ctx, fmt.Sprintf("/projects/%s/change-requests/stats", url.PathEscape(id)), &out)
+	return out, err
+}
+
+// License represents the deployment license returned by entity-service.
+//
+// SubscriptionData is carried verbatim rather than modelled as a struct.
+// ServiceNow signs an HMAC over the canonicalised subscription data, and the
+// customer's product recomputes that canonical string from the licence it
+// receives — so a field dropped anywhere along the way breaks verification.
+// One of the signed fields, usageDataPublishingUrl, is also the address the
+// product publishes its usage to. See domain.License in entity-service for the
+// full reasoning; the Ballerina implementation achieves the same with an open
+// record.
+type License struct {
+	SubscriptionData json.RawMessage `json:"subscriptionData"`
+	Signature        string          `json:"signature"`
+}
+
+// DeploymentLicenseRequest is the body for
+// POST /projects/{id}/deployments/{deploymentId}/license.
+type DeploymentLicenseRequest struct {
+	Email string `json:"email"`
+}
+
+// GetDeploymentLicense calls POST /projects/{projectId}/deployments/{deploymentId}/license.
+func (c *Client) GetDeploymentLicense(ctx context.Context, projectID, deploymentID, email string) (License, error) {
+	var out License
+	path := fmt.Sprintf("/projects/%s/deployments/%s/license", url.PathEscape(projectID), url.PathEscape(deploymentID))
+	err := c.postJSON(ctx, path, DeploymentLicenseRequest{Email: email}, &out)
 	return out, err
 }

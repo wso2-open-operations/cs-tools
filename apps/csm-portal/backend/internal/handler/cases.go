@@ -121,11 +121,41 @@ type CaseHandler struct {
 	// CreateCaseComment's behavior completely unchanged from before this
 	// feature existed.
 	inlineImages *InlineImageProcessor
+	// engineering, when non-nil, files GitHub issues from a case instead of
+	// the entity service — see WithEngineeringClient.
+	engineering engineeringGitIssueClient
+	// access backs the security-report type check in SearchCases -- see
+	// WithAccessGuard. nil fails that check closed (denied), never open:
+	// unlike UsersHandler's own optional use of this field (a display-only
+	// enrichment, harmless if skipped), this one gates real access to data.
+	access *AccessGuard
 }
 
 // NewCaseHandler creates a CaseHandler backed by the given entity client.
 func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 	return &CaseHandler{entity: entity}
+}
+
+// WithAccessGuard wires the same guard that authorises every route into this
+// handler, so SearchCases can additionally require PermViewSecurityCenter for
+// a security_report_analysis-typed request — a restriction PermView alone
+// (the route-level permission it already carries, shared with every other
+// case-type view) cannot express. Returns h for chaining at the construction
+// site.
+//
+// GetCase deliberately gets no equivalent check: CaseView.type is only
+// populated for ServiceNow cases (null on Postgres — see entity-service's own
+// openapi.yaml), so there is no reliable way to tell a security-report case
+// apart from any other by inspecting its GetCase response alone, and a
+// broken check would be worse than none. A caller who already knows a
+// security-report case's id (from before this restriction, or by guessing)
+// can still fetch it directly by id; the real access boundary this change
+// adds is discovery via search, not a hard per-case-type ACL. Closing this
+// fully would need entity-service to resolve and enforce it (it has reliable
+// type data either data source), not this BFF layer.
+func (h *CaseHandler) WithAccessGuard(g *AccessGuard) *CaseHandler {
+	h.access = g
+	return h
 }
 
 // WithInlineImageProcessor enables server-side inline-image extraction on
@@ -612,6 +642,68 @@ func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
+// securityReportCaseType is the one case type value Security Center is
+// restricted to — see caseSearchTargetsSecurityReports's own doc comment.
+const securityReportCaseType = "security_report_analysis"
+
+// caseFieldFilterFragment is the subset of CaseFieldFilter (entity-service's
+// openapi.yaml) this handler needs to read out of an otherwise-opaque,
+// forwarded-verbatim request body: which field a predicate names and what
+// values it matches. Untyped fields (op, and every other CaseFieldFilter
+// property) are simply not decoded.
+type caseFieldFilterFragment struct {
+	Field  string   `json:"field"`
+	Values []string `json:"values"`
+}
+
+// caseSearchTargetsSecurityReports reports whether body's type filter --
+// either the top-level filters.filters array or any filters.anyOf branch --
+// includes securityReportCaseType. Best-effort JSON inspection, not a full
+// parse of the generic filter grammar (entity-service's own CaseFieldFilter):
+// a body this can't make sense of is treated as not targeting it, since a
+// genuinely malformed request is rejected by entity-service's own validation
+// regardless of what this check decides. This only catches requests that
+// explicitly ask for this type, the same way Security Center's own
+// caseTypes-locked search does (CsmIssuesView, webapp) -- a hypothetical
+// unfiltered "every case type" search that happens to also return
+// security-report rows is a known, narrower gap, not handled here.
+func caseSearchTargetsSecurityReports(body []byte) bool {
+	var req struct {
+		Filters struct {
+			Filters []caseFieldFilterFragment `json:"filters"`
+			AnyOf   []struct {
+				Filters []caseFieldFilterFragment `json:"filters"`
+			} `json:"anyOf"`
+		} `json:"filters"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	if filtersNameSecurityReportType(req.Filters.Filters) {
+		return true
+	}
+	for _, branch := range req.Filters.AnyOf {
+		if filtersNameSecurityReportType(branch.Filters) {
+			return true
+		}
+	}
+	return false
+}
+
+func filtersNameSecurityReportType(filters []caseFieldFilterFragment) bool {
+	for _, f := range filters {
+		if f.Field != "type" {
+			continue
+		}
+		for _, v := range f.Values {
+			if v == securityReportCaseType {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // SearchCases handles POST /cases/search.
 // Project IDs and other filters are accepted directly in the request body.
 func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +726,11 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 
 	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if caseSearchTargetsSecurityReports(body) && !(h.access != nil && h.access.Permits(PermViewSecurityCenter, user.Roles)) {
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
@@ -1246,6 +1343,9 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		State              *string `json:"state"`
 		WorkState          *string `json:"workState"`
 		AutocloseHoldUntil *string `json:"autocloseHoldUntil"`
+		BestCaseFixEta     *string `json:"bestCaseFixEta"`
+		MostLikelyFixEta   *string `json:"mostLikelyFixEta"`
+		WorstCaseFixEta    *string `json:"worstCaseFixEta"`
 	}
 	patchErr := json.Unmarshal(body, &patch)
 	if patchErr == nil && (patch.State != nil || patch.WorkState != nil) {
@@ -1306,6 +1406,32 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// A fix-ETA update has no trail of its own on the case unless the caller also
+	// sets addPublicComment, which posts a separate customer-visible comment
+	// entirely inside the entity service. Record an internal work note here too,
+	// independent of that flag, so CS engineers can see from the case's own
+	// history that a fix-ETA change happened at all. Sourced from the PATCH
+	// response (the values the entity service actually committed), not the
+	// request, since that's the correct source of truth regardless of backing
+	// data source. Best-effort and fire-and-forget, same reasoning as the
+	// autoclose-hold note above: the PATCH already succeeded, so this secondary
+	// write must not delay the response or fail the request if it errors, and
+	// context.WithoutCancel keeps the request-scoped values the entity client
+	// needs while detaching from the request's own cancellation.
+	if patchErr == nil && (patch.BestCaseFixEta != nil || patch.MostLikelyFixEta != nil || patch.WorstCaseFixEta != nil) {
+		fieldsPatched := fixEtaFieldsPatched{
+			best:       patch.BestCaseFixEta != nil,
+			mostLikely: patch.MostLikelyFixEta != nil,
+			worst:      patch.WorstCaseFixEta != nil,
+		}
+		detached := context.WithoutCancel(r.Context())
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, 15*time.Second)
+			defer cancel()
+			h.recordFixEtaWorkNote(ctx, user, caseID, result, fieldsPatched)
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -1343,6 +1469,67 @@ func (h *CaseHandler) recordAutocloseHoldWorkNote(ctx context.Context, user *mid
 
 	if _, err := h.entity.CreateCaseComment(ctx, caseID, body); err != nil {
 		slog.WarnContext(ctx, "failed to record autoclose hold work note", "userID", user.UserID, "caseID", caseID, "err", err)
+	}
+}
+
+// fixEtaFieldsPatched records which of the three fix-ETA fields were present
+// on the incoming PATCH request, so recordFixEtaWorkNote can mention only
+// fields that were actually part of this PATCH — the PATCH response's "case"
+// object generally carries the full case, including fix-ETA values untouched
+// by this request, so gating on the response alone would misattribute them.
+type fixEtaFieldsPatched struct {
+	best       bool
+	mostLikely bool
+	worst      bool
+}
+
+// recordFixEtaWorkNote adds an internal work note documenting a fix-ETA
+// update, giving CS engineers a trail of the change on the case itself even
+// when the caller didn't also request a customer-visible comment. Only
+// fields present on the incoming request (fieldsPatched) are mentioned, but
+// their values are read from the PATCH response rather than the request body
+// so the note reflects what was actually committed upstream. Best-effort:
+// failures are logged, never surfaced to the caller, since the primary PATCH
+// already succeeded by the time this runs.
+func (h *CaseHandler) recordFixEtaWorkNote(ctx context.Context, user *middleware.UserInfo, caseID string, result []byte, fieldsPatched fixEtaFieldsPatched) {
+	var response struct {
+		Case struct {
+			BestCaseFixEta   string `json:"bestCaseFixEta"`
+			MostLikelyFixEta string `json:"mostLikelyFixEta"`
+			WorstCaseFixEta  string `json:"worstCaseFixEta"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(result, &response); err != nil {
+		slog.ErrorContext(ctx, "failed to parse PATCH response for fix ETA work note", "userID", user.UserID, "caseID", caseID, "err", err)
+		return
+	}
+
+	var parts []string
+	if fieldsPatched.best {
+		parts = append(parts, "Best case: "+response.Case.BestCaseFixEta)
+	}
+	if fieldsPatched.mostLikely {
+		parts = append(parts, "Most likely: "+response.Case.MostLikelyFixEta)
+	}
+	if fieldsPatched.worst {
+		parts = append(parts, "Worst case: "+response.Case.WorstCaseFixEta)
+	}
+	if len(parts) == 0 {
+		return
+	}
+	note := "Fix ETA updated — " + strings.Join(parts, ", ")
+
+	body, err := json.Marshal(map[string]string{
+		"type":    "work_note",
+		"content": note,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build fix ETA work note body", "userID", user.UserID, "caseID", caseID, "err", err)
+		return
+	}
+
+	if _, err := h.entity.CreateCaseComment(ctx, caseID, body); err != nil {
+		slog.WarnContext(ctx, "failed to record fix ETA work note", "userID", user.UserID, "caseID", caseID, "err", err)
 	}
 }
 
@@ -1695,6 +1882,11 @@ func (h *CaseHandler) CreateCaseGithubIssue(w http.ResponseWriter, r *http.Reque
 
 	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if h.engineering != nil {
+		h.createGitHubIssueViaEngineering(w, r, user, caseID, body)
 		return
 	}
 

@@ -23,7 +23,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
 const (
@@ -34,15 +33,16 @@ const (
 
 // New creates an http.Server listening on addr with production-safe timeouts
 // and the full middleware/router chain wired up via NewRouter. Also returns
-// NewRouter's constructed EventPublisherService (nil if not configured) so
-// cmd/api/main.go can close it gracefully on shutdown.
-func New(addr string, db *pgxpool.Pool, cfg *config.Config) (*http.Server, service.EventPublisherService) {
-	handler, eventPublisher := NewRouter(db, cfg)
+// NewRouter's shutdown function, which closes every Kafka producer it built
+// (the shared-topic publisher and the onboarding-topic one), so
+// cmd/api/main.go can release them gracefully on shutdown. Never nil.
+func New(addr string, db *pgxpool.Pool, cfg *config.Config) (*http.Server, func()) {
+	handler, closePublishers := NewRouter(db, cfg)
 	return &http.Server{
 		Addr:         addr,
 		Handler:      handler,
 		ReadTimeout:  serverReadTimeout,
 		WriteTimeout: serverWriteTimeout,
 		IdleTimeout:  serverIdleTimeout,
-	}, eventPublisher
+	}, closePublishers
 }

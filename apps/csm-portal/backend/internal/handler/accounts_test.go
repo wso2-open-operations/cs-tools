@@ -294,3 +294,115 @@ func TestSearchAccountContacts(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateAccountTeams(t *testing.T) {
+	const accountID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/accounts/"+accountID, strings.NewReader(`{"creTeamId":null}`))
+		r.SetPathValue("id", accountID)
+		w := httptest.NewRecorder()
+		h.UpdateAccountTeams(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty account ID", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/accounts/", strings.NewReader(`{"creTeamId":null}`)))
+		w := httptest.NewRecorder()
+		h.UpdateAccountTeams(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID account ID", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/accounts/acc-42", strings.NewReader(`{"creTeamId":null}`)))
+		r.SetPathValue("id", "acc-42")
+		w := httptest.NewRecorder()
+		h.UpdateAccountTeams(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/accounts/"+accountID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", accountID)
+		w := httptest.NewRecorder()
+		h.UpdateAccountTeams(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/accounts/"+accountID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", accountID)
+		w := httptest.NewRecorder()
+		h.UpdateAccountTeams(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body verbatim and returns upstream response", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		reqBody := `{"creTeamId":"22222222-2222-2222-2222-222222222222","sreTeamId":null}`
+		client := &mockEntityAccountClient{
+			updateAccountTeamsFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedID = id
+				capturedBody = body
+				return []byte(`{"id":"` + accountID + `","creTeamId":"22222222-2222-2222-2222-222222222222","sreTeamId":null}`), nil
+			},
+		}
+		h := NewAccountHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/accounts/"+accountID, strings.NewReader(reqBody)))
+		r.SetPathValue("id", accountID)
+		w := httptest.NewRecorder()
+		h.UpdateAccountTeams(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != accountID {
+			t.Errorf("accountID = %q, want %q", capturedID, accountID)
+		}
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["id"] != accountID {
+			t.Errorf("response id = %v, want %s", resp["id"], accountID)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to update account teams.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityAccountClient{
+					updateAccountTeamsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewAccountHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/accounts/"+accountID, strings.NewReader(`{"creTeamId":null}`)))
+				r.SetPathValue("id", accountID)
+				w := httptest.NewRecorder()
+				h.UpdateAccountTeams(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

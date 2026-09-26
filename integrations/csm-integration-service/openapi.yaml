@@ -3,11 +3,10 @@ info:
   title: CSM Integration Service API
   version: 1.0.0
   description: >
-    Project/account search and their Contacts sub-resource, a subset of case
-    operations, incident creation and search, and alert-incident mapping
-    create/lookup, for third-party (M2M) consumers. Fronted by Choreo's API
-    Manager gateway (subscription + client credentials) — this service
-    performs no inbound auth of its own.
+    Project/account search and their Contacts sub-resource, incident
+    creation, and alert-incident mapping create/lookup, for third-party
+    (M2M) consumers. Fronted by Choreo's API Manager gateway (subscription +
+    client credentials) — this service performs no inbound auth of its own.
 security:
   - oauth2ClientCredentials: []
 servers:
@@ -746,16 +745,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /vulnerabilities/sync:
+    post:
+      summary: Full-replace sync of product-vulnerability records.
+      description: >
+        This is a full-replace sync, not an incremental delta: the caller must
+        submit the complete current set of product-vulnerability records on
+        every call. The entity service's downstream ServiceNow-backed operation
+        deletes any existing record not present in the submitted set. The
+        request body is forwarded to the entity service verbatim.
+      operationId: syncProductVulnerabilities
+      requestBody:
+        description: Complete current set of product-vulnerability records.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVulnerabilitySyncPayload'
+      responses:
+        "201":
+          description: The sync was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVulnerabilitySyncResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents:
     post:
       summary: Create an incident.
       description: >
         ServiceNow-backed. The request body is forwarded to the entity service
-        verbatim. This operation requires a forwarded end-user identity token
-        on the entity-service side; this service is strictly M2M with no
-        mechanism to supply one, so every call here currently receives a
-        mapped 401. Kept for API-shape completeness, not because it currently
-        succeeds.
+        verbatim. This service is strictly M2M with no mechanism to forward an
+        end-user identity token, but the entity-service operation falls back
+        to a separately-configured M2M ServiceNow credential when no end-user
+        token is present, and only returns 401 if that fallback credential is
+        itself unconfigured in the target environment. A 401 is therefore a
+        possible response, not a guaranteed one.
       operationId: createIncident
       requestBody:
         description: Incident details.
@@ -778,7 +827,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, for this operation, given this service's M2M-only design)
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
           content:
             application/json:
               schema:
@@ -808,15 +857,105 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents/{id}:
+    patch:
+      summary: Update an incident (e.g. push a work note or additional comment).
+      description: >
+        Unlike PATCH /cases/{id}, this operation has no Postgres-data-source
+        path at all: on a Postgres data source, entity-service rejects every
+        call outright (503, not supported on this data source yet — several
+        fields have no backing column, and others would need comment-table
+        side effects not implemented there). On a ServiceNow data source, it
+        goes through the same M2M-fallback mechanism as POST /incidents and
+        POST /incidents/search above: this service is strictly M2M with no
+        mechanism to forward an end-user identity token, but the
+        entity-service operation falls back to a separately-configured M2M
+        ServiceNow credential when no end-user token is present, and only
+        returns 401 if that fallback credential is itself unconfigured in the
+        target environment. So this call is unconditionally ServiceNow-backed
+        with no Postgres fallback — whether it succeeds depends on the target
+        environment's data source and, on ServiceNow, its M2M credential
+        configuration, not on which fields are sent (contrast PATCH
+        /cases/{id}, whose Postgres path narrows to specific fields instead
+        of failing outright). The request body is forwarded to the entity
+        service verbatim; it enforces its own field validation and 400s
+        otherwise, so this service does not re-validate that.
+      operationId: patchIncident
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Incident fields to update (e.g. workNotes, additionalComments).
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentUpdateRequest'
+      responses:
+        "200":
+          description: The incident was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (entity-service is running a Postgres data source, which does not support this operation yet)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents/search:
     post:
       summary: Search incidents.
       description: >
-        ServiceNow-backed, same as POST /incidents. This operation requires a
-        forwarded end-user identity token on the entity-service side; this
-        service is strictly M2M with no mechanism to supply one, so every
-        call here currently receives a mapped 401. Kept for API-shape
-        completeness, not because it currently succeeds.
+        ServiceNow-backed, same as POST /incidents. This service is strictly
+        M2M with no mechanism to forward an end-user identity token, but the
+        entity-service operation falls back to a separately-configured M2M
+        ServiceNow credential when no end-user token is present, and only
+        returns 401 if that fallback credential is itself unconfigured in the
+        target environment. A 401 is therefore a possible response, not a
+        guaranteed one.
       operationId: searchIncidents
       requestBody:
         description: Incident search payload.
@@ -839,7 +978,71 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always, for this operation, given this service's M2M-only design)
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /services/search:
+    post:
+      summary: Search CMDB IT services.
+      description: >
+        ServiceNow-backed, same M2M-fallback mechanism as POST /incidents and
+        POST /incidents/search above (confirmed to use the identical code
+        path). This service is strictly M2M with no mechanism to forward an
+        end-user identity token, but the entity-service operation falls back
+        to a separately-configured M2M ServiceNow credential when no
+        end-user token is present, and only returns 401 if that fallback
+        credential is itself unconfigured in the target environment. A 401
+        is therefore a possible response, not a guaranteed one.
+      operationId: searchITServices
+      requestBody:
+        description: Service search payload.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchITServicesRequest'
+      responses:
+        "200":
+          description: Services matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchITServicesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
           content:
             application/json:
               schema:
@@ -955,55 +1158,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized (Choreo gateway rejected an unauthenticated M2M caller; not expected from the entity service itself for this operation)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /vulnerabilities/sync:
-    post:
-      summary: Full-replace sync of product-vulnerability records.
-      description: >
-        This is a full-replace sync, not an incremental delta: the caller must
-        submit the complete current set of product-vulnerability records on
-        every call. The entity service's downstream ServiceNow-backed operation
-        deletes any existing record not present in the submitted set. The
-        request body is forwarded to the entity service verbatim.
-      operationId: syncProductVulnerabilities
-      requestBody:
-        description: Complete current set of product-vulnerability records.
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProductVulnerabilitySyncPayload'
-      responses:
-        "201":
-          description: The sync was applied.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProductVulnerabilitySyncResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized (upstream reported an authorization failure)
           content:
             application/json:
               schema:
@@ -1399,6 +1553,18 @@ components:
         comment:
           $ref: '#/components/schemas/CaseCommentCreateResult'
 
+    ProductVulnerabilitySyncPayload:
+      type: array
+      description: >
+        The complete current set of product-vulnerability records. Any record
+        omitted from this array is treated as removed by the downstream sync.
+      items:
+        type: object
+        additionalProperties: true
+        description: >
+          Opaque per-record payload passed through to the entity service
+          as-is — its shape is not defined or validated by this layer.
+
     EntityRef:
       type: object
       description: A minimal reference to another entity — id plus a display name.
@@ -1512,6 +1678,10 @@ components:
           type: string
           nullable: true
           description: Short classification code (e.g. "CL").
+        sfId:
+          type: string
+          nullable: true
+          description: Salesforce record ID linked to this invoice, if any.
 
     SearchInvoicesResponse:
       type: object
@@ -1577,6 +1747,19 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    ProductVulnerabilitySyncResponse:
+      type: object
+      description: >
+        Fields may be partial or omitted depending on the entity service's
+        response for a given sync.
+      properties:
+        insertedRecords:
+          type: integer
+        updatedRecords:
+          type: integer
+        deletedRecords:
+          type: integer
 
     CreateIncidentRequest:
       type: object
@@ -1674,6 +1857,53 @@ components:
               format: date-time
             createdBy:
               type: string
+
+    IncidentUpdateRequest:
+      type: object
+      description: >
+        Incident fields to update — a thin proxy of entity-service's own
+        UpdateIncidentRequest, forwarded verbatim. All fields are optional,
+        but entity-service requires at least one. Not enumerated exhaustively
+        here (e.g. priority/state/resolutionCode key values); see
+        entity-service's own domain.UpdateIncidentRequest for the complete,
+        authoritative field set.
+      properties:
+        subject:
+          type: string
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        additionalComments:
+          type: string
+        workNotes:
+          type: string
+        watchList:
+          type: array
+          items:
+            type: string
+
+    IncidentUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        incident:
+          type: object
+          description: >
+            The full updated incident representation (entity-service's own
+            IncidentView), not enumerated exhaustively here.
 
     SearchIncidentsRequest:
       type: object
@@ -1782,6 +2012,56 @@ components:
         offset:
           type: integer
 
+    SearchITServicesRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Free-text search query, matched against the CMDB service's name.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ITService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        class:
+          type: string
+        businessCriticality:
+          type: string
+          enum:
+            - most_critical
+            - somewhat_critical
+            - less_critical
+            - not_critical
+        serviceClassification:
+          type: string
+          enum:
+            - business_service
+            - technology_management_service
+            - application_service
+
+    SearchITServicesResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ITService'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
     CreateAlertIncidentMappingRequest:
       type: object
       required:
@@ -1840,7 +2120,7 @@ components:
           type: string
         incidentNumber:
           type: string
-        createdAt:
+        createdOn:
           type: string
           format: date-time
 
@@ -1851,28 +2131,3 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AlertIncidentMappingView'
-
-    ProductVulnerabilitySyncPayload:
-      type: array
-      description: >
-        The complete current set of product-vulnerability records. Any record
-        omitted from this array is treated as removed by the downstream sync.
-      items:
-        type: object
-        additionalProperties: true
-        description: >
-          Opaque per-record payload passed through to the entity service
-          as-is — its shape is not defined or validated by this layer.
-
-    ProductVulnerabilitySyncResponse:
-      type: object
-      description: >
-        Fields may be partial or omitted depending on the entity service's
-        response for a given sync.
-      properties:
-        insertedRecords:
-          type: integer
-        updatedRecords:
-          type: integer
-        deletedRecords:
-          type: integer

@@ -201,6 +201,19 @@ export interface CsmCaseComment {
    * the real creator's role isn't known on the frontend, so nothing should be
    * claimed about it. */
   synthetic?: boolean;
+  /** True once this comment has been edited at least once. Derived from
+   * `BeComment.lastEditedOn` being present — see {@link lastEditedOn} for the
+   * actual timestamp used in the "(edited)" marker. */
+  isEdited?: boolean;
+  /** ISO timestamp of the comment's most recent edit, when {@link isEdited}
+   * is true. */
+  lastEditedOn?: string;
+  /** True once this comment has been soft-deleted (`BeComment.isDeleted`).
+   * `content`/`bodyHtml` still carries whatever the backend returned for this
+   * caller — an admin sees the real text, anyone else who can still see the
+   * row at all sees the literal "[deleted]". Render a "deleted" visual
+   * treatment on top; never redact/branch on the text client-side. */
+  isDeleted?: boolean;
 }
 
 export interface CaseAttachment {

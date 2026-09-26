@@ -38,7 +38,6 @@ import {
   readProblemFiltersFromUrl,
   writeProblemFiltersToUrl,
 } from "@features/csm-operations/utils/problemsFiltersUrl";
-import { problemsSavedViews } from "@features/csm-operations/utils/problemsSavedViews";
 import SavedViewsMenu from "@features/csm-operations/components/SavedViewsMenu";
 import MultiSelectField from "@components/MultiSelectField";
 
@@ -135,7 +134,7 @@ export default function ProblemsFilterBar({
           activeCount={activeCount}
           hasSearch={filters.search.trim().length > 0}
           onApply={(qs) => onChange(readProblemFiltersFromUrl(new URLSearchParams(qs)))}
-          store={problemsSavedViews}
+          listKey="problems"
         />
 
         <Button

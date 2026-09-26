@@ -105,7 +105,6 @@ func Validate(cfg *Config) error {
 	for name, entry := range map[string]CacheEntry{
 		"overview":   cfg.Cache.Overview,
 		"timeseries": cfg.Cache.Timeseries,
-		"titles":     cfg.Cache.Titles,
 	} {
 		positive(fmt.Sprintf("cache.%s.ttlSeconds", name), entry.TTLSeconds)
 		if entry.MaxEntries < 1 {
@@ -117,12 +116,10 @@ func Validate(cfg *Config) error {
 		add("github.maxRetries: must not be negative")
 	}
 	positive("github.requestTimeoutSeconds", cfg.GitHub.RequestTimeoutSeconds)
-	positive("github.titlesRequestTimeoutSeconds", cfg.GitHub.TitlesRequestTimeoutSeconds)
 	positive("github.retryBackoffUnitSeconds", cfg.GitHub.RetryBackoffUnitSeconds)
 	positive("github.retryAfterCapSeconds", cfg.GitHub.RetryAfterCapSeconds)
 	positive("github.searchPageDelayMs", cfg.GitHub.SearchPageDelayMs)
 	positive("github.detailPageDelayMs", cfg.GitHub.DetailPageDelayMs)
-	positive("github.titlesBatchSize", cfg.GitHub.TitlesBatchSize)
 
 	if cfg.Jobs.RecomputePageSize < 1 {
 		add("jobs.recomputePageSize: must be at least 1")
@@ -136,13 +133,13 @@ func Validate(cfg *Config) error {
 
 	positive("api.issuesDefaultLimit", cfg.API.IssuesDefaultLimit)
 	positive("api.issuesMaxLimit", cfg.API.IssuesMaxLimit)
-	positive("api.titlesMaxIds", cfg.API.TitlesMaxIDs)
-	positive("api.titlesMaxBodyBytes", cfg.API.TitlesMaxBodyBytes)
 	positive("api.timeseriesDefaultDays", cfg.API.TimeseriesDefaultDays)
 	positive("api.timeseriesMinDays", cfg.API.TimeseriesMinDays)
 	positive("api.timeseriesMaxDays", cfg.API.TimeseriesMaxDays)
 	positive("api.priorityParamMaxLength", cfg.API.PriorityParamMaxLength)
 	positive("api.statusParamMaxLength", cfg.API.StatusParamMaxLength)
+	positive("api.abtTeamParamMaxLength", cfg.API.AbtTeamParamMaxLength)
+	positive("api.filterParamMaxValues", cfg.API.FilterParamMaxValues)
 	if cfg.API.IssuesDefaultLimit > cfg.API.IssuesMaxLimit {
 		add("api.issuesDefaultLimit: must not exceed api.issuesMaxLimit")
 	}

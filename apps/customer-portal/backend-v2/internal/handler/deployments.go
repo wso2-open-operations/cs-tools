@@ -209,15 +209,19 @@ func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Reque
 }
 
 // deploymentScopeCheckPageLimit is the page size used when confirming a
-// deployment belongs to a project. entity-service caps a search limit at 100,
-// so asking for more would simply be clamped.
-const deploymentScopeCheckPageLimit = 100
+// deployment belongs to a project. entity-service's SearchDeployments caps a
+// search limit at 50 (the shared normalizePagination's maxLimit, not the 100
+// this constant assumed until a live request 400'd with "limit cannot exceed
+// 50") -- asking for more is rejected outright, not clamped.
+const deploymentScopeCheckPageLimit = 50
 
 // deploymentScopeCheckMaxPages bounds that walk. A project with more than
 // 10,000 deployments does not exist in practice, and an unbounded loop driven
 // by an upstream total is a denial-of-service waiting to happen — a wrong or
-// hostile Total would otherwise keep this handler paging indefinitely.
-const deploymentScopeCheckMaxPages = 100
+// hostile Total would otherwise keep this handler paging indefinitely. Kept
+// at 200 (not the previous 100) so halving the page size still covers the
+// same ~10,000-deployment bound.
+const deploymentScopeCheckMaxPages = 200
 
 // deploymentBelongsToProject reports whether deploymentID is one of projectID's
 // deployments, as seen by the calling user.

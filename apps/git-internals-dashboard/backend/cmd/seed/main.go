@@ -18,11 +18,11 @@
 // GitHub data (if GITHUB_TOKEN is set) or synthetic fixtures (if not). Run
 // via `make seed`.
 //
-// PRIVACY: persists no titles, assignees, openers, labels, or actors.
+// PRIVACY: persists the issue title, ABT team, and a @wso2.com opened-by
+// address. Assignees, labels, and other actors are not persisted.
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/appconfig"
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/cliutil"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/db"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/github"
@@ -52,11 +53,30 @@ const progressInterval = 25
 
 var interIssueDelay = 150 * time.Millisecond // courtesy gap for the secondary rate limiter; overridable by tests
 
+// rateLimitSuffix returns ", quota: N remaining (resets HH:MM:SS)" for a
+// progress log line, or "" when client is nil (synthetic fixtures — no
+// GitHub calls happen) or no response has reported a quota yet. GitHub's
+// resetAt is trimmed to time-of-day since it's always today or minutes away.
+func rateLimitSuffix(client github.Client) string {
+	if client == nil {
+		return ""
+	}
+	remaining, resetAt, ok := client.RateLimitRemaining()
+	if !ok {
+		return ""
+	}
+	resetLabel := resetAt
+	if t, err := time.Parse(time.RFC3339, resetAt); err == nil {
+		resetLabel = t.Local().Format("15:04:05")
+	}
+	return fmt.Sprintf(", quota: %d remaining (resets %s)", remaining, resetLabel)
+}
+
 // main runs one idempotent seed pass: reset, config sync, then ingest every
 // configured repo's issues (real GitHub data if GITHUB_TOKEN is set,
 // synthetic fixtures otherwise), backfilling daily sla_snapshots as it goes.
 func main() {
-	loadDotEnv(".env")
+	cliutil.LoadDotEnv(".env")
 
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	strictTaxonomy := strings.TrimSpace(os.Getenv("SEED_STRICT_TAXONOMY")) == "1"
@@ -78,7 +98,7 @@ func main() {
 	}
 	runtime := ingest.BuildRuntimeConfig(app)
 
-	pool, err := db.NewPoolWithConfig(ctx, mustEnv("DATABASE_URL"), appCfg.Database)
+	pool, err := db.NewPoolWithConfig(ctx, cliutil.MustEnv("DATABASE_URL"), appCfg.Database)
 	if err != nil {
 		fatal("failed to connect to postgres", err)
 	}
@@ -129,7 +149,7 @@ func main() {
 		if err != nil {
 			fatal(fmt.Sprintf("failed to gather issues for %s/%s", r.Owner, r.Name), err)
 		}
-		fmt.Printf("[seed]   %s/%s: %d issues (gathered in %s)\n", r.Owner, r.Name, len(pairs), time.Since(gatherStart).Round(time.Second))
+		fmt.Printf("[seed]   %s/%s: %d issues (gathered in %s%s)\n", r.Owner, r.Name, len(pairs), time.Since(gatherStart).Round(time.Second), rateLimitSuffix(client))
 
 		source := "synthetic"
 		if token != "" {
@@ -165,7 +185,7 @@ func main() {
 			}
 
 			if (i+1)%progressInterval == 0 || i+1 == len(pairs) {
-				fmt.Printf("[seed]     ingested %d/%d issues (%s elapsed)\n", i+1, len(pairs), time.Since(ingestStart).Round(time.Second))
+				fmt.Printf("[seed]     ingested %d/%d issues (%s elapsed%s)\n", i+1, len(pairs), time.Since(ingestStart).Round(time.Second), rateLimitSuffix(client))
 			}
 		}
 
@@ -231,7 +251,7 @@ func gatherRepoIssues(ctx context.Context, client github.Client, now time.Time, 
 			out = append(out, ingest.Pair{Node: node, Detail: *detail})
 		}
 		if (i+1)%progressInterval == 0 || i+1 == len(nodes) {
-			fmt.Printf("[seed]     fetched %d/%d issue details (%s elapsed)\n", i+1, len(nodes), time.Since(fetchStart).Round(time.Second))
+			fmt.Printf("[seed]     fetched %d/%d issue details (%s elapsed%s)\n", i+1, len(nodes), time.Since(fetchStart).Round(time.Second), rateLimitSuffix(client))
 		}
 		select {
 		case <-ctx.Done():
@@ -254,49 +274,10 @@ func endOfUTCDay(t time.Time) time.Time {
 	return time.Date(u.Year(), u.Month(), u.Day(), 23, 59, 59, 999_000_000, time.UTC)
 }
 
-// mustEnv returns the environment variable key's value, or calls fatal if it
-// is unset/empty.
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		fatal("required environment variable is not set", fmt.Errorf("%s", key))
-	}
-	return v
-}
-
 // fatal logs msg and err to stderr and exits the process with status 1.
 func fatal(msg string, err error) {
 	fmt.Fprintf(os.Stderr, "[seed] FAILED: %s: %v\n", msg, err)
 	os.Exit(1)
-}
-
-// loadDotEnv reads a .env file and sets any unset environment variables from
-// it. Silently ignored if the file does not exist.
-func loadDotEnv(path string) {
-	f, err := os.Open(path) // #nosec G304 -- path is always the hardcoded literal ".env" at the only call site
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && ((v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'')) {
-			v = v[1 : len(v)-1]
-		}
-		if os.Getenv(k) == "" {
-			_ = os.Setenv(k, v)
-		}
-	}
 }
 
 // writeSnapshots reconstructs one issue's daily sla_snapshots rows by

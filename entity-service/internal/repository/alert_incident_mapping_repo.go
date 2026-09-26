@@ -55,7 +55,7 @@ func NewAlertIncidentMappingRepository(db *pgxpool.Pool) AlertIncidentMappingRep
 // alertIncidentMappingColumns is the column list shared by every query that
 // returns a full row, kept in one place so the various methods below can't
 // drift out of sync with scanAlertIncidentMapping's field order.
-const alertIncidentMappingColumns = `id, alert_number, source, unique_identifier, service, metric_name, alert_status, incident_id, incident_number, created_at`
+const alertIncidentMappingColumns = `id, alert_number, source, unique_identifier, service, metric_name, alert_status, incident_id, incident_number, created_on`
 
 func scanAlertIncidentMapping(row pgx.Row) (domain.AlertIncidentMappingView, error) {
 	var m domain.AlertIncidentMappingView
@@ -98,7 +98,7 @@ func (r *alertIncidentMappingRepo) Lookup(ctx context.Context, source, uniqueIde
 	query := `SELECT ` + alertIncidentMappingColumns + `
 		FROM alert_incident_mapping
 		WHERE source = $1 AND unique_identifier = $2
-		ORDER BY created_at DESC`
+		ORDER BY created_on DESC`
 
 	rows, err := r.db.Query(ctx, query, source, uniqueIdentifier)
 	if err != nil {

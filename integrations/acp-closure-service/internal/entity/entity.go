@@ -81,3 +81,40 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
 }
+
+// SearchOpportunities calls POST /opportunities/search — Phase 2
+// (invoice-based closure). Confirmed read-only, no forwarded end-user
+// identity required, so this M2M-only client can call it directly (unlike
+// e.g. UpdateProject on the entity-service side; csm-integration-service's
+// own CLAUDE.md documents this distinction). Response is returned as raw
+// JSON; typed response structs are deferred to the caller.
+func (c *Client) SearchOpportunities(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/opportunities/search", body)
+}
+
+// GetOpportunity calls GET /opportunities/{id}. Response is returned as raw
+// JSON; typed response structs are deferred to the caller.
+func (c *Client) GetOpportunity(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/opportunities/%s", url.PathEscape(id)), nil)
+}
+
+// SearchInvoices calls POST /invoices/search. Response is returned as raw
+// JSON; typed response structs are deferred to the caller.
+func (c *Client) SearchInvoices(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/invoices/search", body)
+}
+
+// GetInvoice calls GET /invoices/{id}. Response is returned as raw JSON;
+// typed response structs are deferred to the caller.
+func (c *Client) GetInvoice(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/invoices/%s", url.PathEscape(id)), nil)
+}
+
+// SearchProjectOpportunityLinks calls POST /project-opportunity-links/search.
+// No by-id fetch exists for this resource — a project can link to more than
+// one opportunity, so the underlying data has no single-record shape.
+// Response is returned as raw JSON; typed response structs are deferred to
+// the caller.
+func (c *Client) SearchProjectOpportunityLinks(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/project-opportunity-links/search", body)
+}

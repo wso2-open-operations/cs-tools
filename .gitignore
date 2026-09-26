@@ -43,3 +43,9 @@ local-docs/
 .agents/
 skills-lock.json
 apps/customer-portal/CLAUDE.md
+
+# PLG runtime config — a file mount in a real deployment, never committed.
+apps/csm-portal/backend/plg-source-map.json
+
+# PLG's own documentation, kept locally rather than pushed.
+apps/csm-portal/plg-docs/

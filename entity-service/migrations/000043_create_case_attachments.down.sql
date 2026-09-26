@@ -14,4 +14,4 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
-DROP TABLE IF EXISTS case_attachments;
+DROP TABLE IF EXISTS case_attachment;

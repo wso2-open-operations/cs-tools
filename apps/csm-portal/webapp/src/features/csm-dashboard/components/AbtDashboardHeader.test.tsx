@@ -49,6 +49,23 @@ describe("AbtDashboardHeader", () => {
     postMock.mockReset();
   });
 
+  it("hides the dashboard switcher when only one dashboard is available", () => {
+    renderWithClient(
+      <AbtDashboardHeader
+        dashboardKey="agents_pilot"
+        onDashboardChange={vi.fn()}
+        dashboardList={[DASHBOARD_LIST[0]]}
+        selectedTeamId={undefined}
+        onTeamChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Select dashboard")).not.toBeInTheDocument();
+    // Still shows the current dashboard's name as plain text, just no
+    // switcher control alongside it.
+    expect(screen.getByText("Engineer overview")).toBeInTheDocument();
+  });
+
   it("shows no team selector for a non-team-based dashboard", () => {
     renderWithClient(
       <AbtDashboardHeader

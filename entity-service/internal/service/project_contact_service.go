@@ -46,9 +46,13 @@ func projectContactRowToDomain(row repository.ProjectContactRow) domain.ProjectC
 		// flags read as false only when explicitly set).
 		NotificationsEnabled: true,
 		Roles:                row.Roles,
+		AccountRoles:         row.AccountRoles,
 	}
 	if pc.Roles == nil {
 		pc.Roles = []string{}
+	}
+	if pc.AccountRoles == nil {
+		pc.AccountRoles = []string{}
 	}
 	if row.ResolvedName != nil && *row.ResolvedName != "" {
 		name := *row.ResolvedName

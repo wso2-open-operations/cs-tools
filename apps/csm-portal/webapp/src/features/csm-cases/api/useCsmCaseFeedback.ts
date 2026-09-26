@@ -49,8 +49,9 @@ function feedbackEntryFromBe(f: BeCaseFeedback): CaseFeedbackEntry {
 /**
  * Loads any Case Feedback survey submissions for a single case, for the case
  * detail page's activity feed. Case Feedback is a CSAT survey submitted by
- * the customer, typically only once a case is closed — an open case will
- * almost always resolve to an empty list, which is expected, not an error.
+ * the customer only once a case is closed — the survey doesn't exist yet for
+ * an open case, so the query is disabled until `isClosed` is true rather than
+ * firing early and relying on the response resolving to an empty list.
  *
  * Reuses `WIDGET_RESOURCE_CONFIG.case_feedback`'s endpoint rather than
  * hardcoding the path, so this stays in sync with that config's own source
@@ -58,6 +59,7 @@ function feedbackEntryFromBe(f: BeCaseFeedback): CaseFeedbackEntry {
  */
 export function useGetCsmCaseFeedback(
   caseId: string | undefined,
+  isClosed: boolean,
 ): UseQueryResult<CaseFeedbackEntry[], Error> {
   const api = useBackendApi();
 
@@ -77,7 +79,7 @@ export function useGetCsmCaseFeedback(
       >(WIDGET_RESOURCE_CONFIG.case_feedback.searchEndpoint, payload);
       return (response.results ?? []).map(feedbackEntryFromBe);
     },
-    enabled: !!caseId,
+    enabled: !!caseId && isClosed,
     staleTime: 10_000,
   });
 }

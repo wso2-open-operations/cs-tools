@@ -43,7 +43,7 @@ function ProjectGuardContent(): JSX.Element {
 
   const hasError = !isLoading && Boolean(error);
   const isSuspended =
-    !isLoading && isProjectSuspended(data?.closureState, data?.endDate);
+    !isLoading && isProjectSuspended(data?.closureState);
 
   const isErrorPageDisplayed = hasError || isSuspended;
 

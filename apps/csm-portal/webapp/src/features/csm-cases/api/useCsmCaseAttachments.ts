@@ -22,9 +22,10 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { ApiQueryKeys } from "@constants/apiConstants";
+import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
+  BeAttachment,
   BeAttachmentConfirmResponse,
   BeAttachmentCreatePayload,
   BeAttachmentCreateResponse,
@@ -46,12 +47,13 @@ import {
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
 
-/**
- * Page size used by the attachments list. A single wide page is enough for the
- * case-detail view. If a case ever exceeds this, switch to an explicit
- * pagination wrapper rather than chasing pages.
- */
-const ATTACHMENTS_PAGE_LIMIT = 50;
+/** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
+const ATTACHMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on how many pages a single entity's attachment list can page
+ * through — 200 pages * BE_MAX_PAGE_LIMIT is far beyond any real case, this
+ * only guards against an unbounded loop if the BE's `hasMore` were ever
+ * wrong. Same convention as `useGetCsmCaseComments`'s `MAX_COMMENT_PAGES`. */
+const MAX_ATTACHMENT_PAGES = 200;
 
 /**
  * Max upload size in bytes. The BE caps the decoded file at 10 MB (the
@@ -75,9 +77,17 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 /**
- * Load all attachments on a reference entity. Calls `POST /attachments/search`
- * scoped to `referenceType` (defaults to `"case"` for existing call sites) with
- * a single wide page.
+ * Load *every* attachment on a reference entity. Calls `POST /attachments/search`
+ * scoped to `referenceType` (defaults to `"case"` for existing call sites),
+ * paging through `ATTACHMENTS_PAGE_LIMIT`-sized requests until the BE reports
+ * no more (`hasMore`) — a single wide page used to silently drop everything
+ * past the first `ATTACHMENTS_PAGE_LIMIT` for a case with more attachments
+ * than that. Same paged-loop shape as `useGetCsmCaseComments`/
+ * `useGetCsmCaseActivities`: the case-detail page's activity timeline
+ * (`CaseActivitiesFeed`) renders every attachment inline alongside comments
+ * and audit entries, so the full list — not just a count — has to be eagerly
+ * available wherever this hook is used, not just once the Attachments tab is
+ * opened.
  */
 export function useGetCsmCaseAttachments(
   caseId: string | undefined,
@@ -90,16 +100,24 @@ export function useGetCsmCaseAttachments(
     queryFn: async (): Promise<CaseAttachment[]> => {
       if (!caseId) return [];
 
-      const payload: BeAttachmentSearchPayload = {
-        referenceId: caseId,
-        referenceType,
-        pagination: { offset: 0, limit: ATTACHMENTS_PAGE_LIMIT },
-      };
-      const response = await api.post<
-        BeAttachmentSearchPayload,
-        BeAttachmentSearchResponse
-      >("/attachments/search", payload);
-      return response.attachments.map(uiAttachmentFromBe);
+      const allAttachments: BeAttachment[] = [];
+      let offset = 0;
+      for (let page = 0; page < MAX_ATTACHMENT_PAGES; page += 1) {
+        const payload: BeAttachmentSearchPayload = {
+          referenceId: caseId,
+          referenceType,
+          pagination: { offset, limit: ATTACHMENTS_PAGE_LIMIT },
+        };
+        const response = await api.post<
+          BeAttachmentSearchPayload,
+          BeAttachmentSearchResponse
+        >("/attachments/search", payload);
+        const rows = response.attachments ?? [];
+        allAttachments.push(...rows);
+        if (!response.hasMore || rows.length === 0) break;
+        offset += rows.length;
+      }
+      return allAttachments.map(uiAttachmentFromBe);
     },
     enabled: !!caseId,
     staleTime: 10_000,

@@ -18,14 +18,14 @@ CREATE TABLE IF NOT EXISTS sla_clocks (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   case_id        TEXT NOT NULL,
   clock_type     TEXT NOT NULL,
-  started_at     TIMESTAMPTZ NOT NULL,
-  due_at         TIMESTAMPTZ NOT NULL,
-  paused_at      TIMESTAMPTZ,
-  reached_50_at  TIMESTAMPTZ,
-  reached_75_at  TIMESTAMPTZ,
-  reached_100_at TIMESTAMPTZ,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_on     TIMESTAMPTZ NOT NULL,
+  due_on         TIMESTAMPTZ NOT NULL,
+  paused_on      TIMESTAMPTZ,
+  reached_50_on  TIMESTAMPTZ,
+  reached_75_on  TIMESTAMPTZ,
+  reached_100_on TIMESTAMPTZ,
+  created_on     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_on     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (case_id, clock_type)
 );
 

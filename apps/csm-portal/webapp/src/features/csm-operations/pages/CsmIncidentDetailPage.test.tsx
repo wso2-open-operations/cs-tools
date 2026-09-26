@@ -97,7 +97,17 @@ vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
 // props the page hands it and gives a test two buttons to fire `onReplace`
 // with, so these tests assert what the *page* does with the finished list.
 vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
-  AttachmentsWidget: () => null,
+  // A probe, not a stub: whether the page hands this a real onDownload or
+  // leaves it undefined is exactly what regressed once before (the page
+  // gated its inline CaseActivitiesFeed download button on
+  // canDownloadAttachment but passed this one through unconditionally) — see
+  // "gates AttachmentsWidget's onDownload the same way as the feed's" below.
+  AttachmentsWidget: ({ onDownload }: { onDownload?: (a: unknown) => void }) => (
+    <div
+      data-testid="attachments-widget"
+      data-can-download={onDownload ? "true" : "false"}
+    />
+  ),
   WatchersWidget: ({
     entityKind,
     watchers,
@@ -292,6 +302,20 @@ describe("CsmIncidentDetailPage — tabs", () => {
     expect(screen.getByRole("tab", { name: /related/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /watchers/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /attachments/i })).toBeInTheDocument();
+  });
+
+  it("gates AttachmentsWidget's onDownload the same way as the feed's, not unconditionally", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+    goToTab(/attachments/i);
+    // The mocked current user carries no roles, so canDownloadAttachment is
+    // false — the page must pass onDownload as undefined, not the real
+    // callback, or the widget's Download button stays clickable for a caller
+    // with no attachment-download access.
+    expect(screen.getByTestId("attachments-widget")).toHaveAttribute(
+      "data-can-download",
+      "false",
+    );
   });
 
   it("switches to the Details tab and shows classification fields", () => {
@@ -595,7 +619,8 @@ describe("CsmIncidentDetailPage — Create change request entry point", () => {
     mockQueryResult({ data: BASE_INCIDENT });
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /create change request/i }));
 
     expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/new", {
       state: {

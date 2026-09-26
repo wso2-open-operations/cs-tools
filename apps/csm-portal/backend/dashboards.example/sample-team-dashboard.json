@@ -4,6 +4,7 @@
   "type": "cre",
   "targetTeam": "sample-team",
   "isTeamBased": true,
+  "restricted": true,
   "widgets": [
     {
       "id": "team-open-cases",

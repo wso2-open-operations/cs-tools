@@ -90,36 +90,29 @@ func (r rawCacheEntry) resolve(d CacheEntry) CacheEntry {
 type rawCache struct {
 	Overview   rawCacheEntry `yaml:"overview"`
 	Timeseries rawCacheEntry `yaml:"timeseries"`
-	Titles     rawCacheEntry `yaml:"titles"`
 }
 
 func (r rawCache) resolve(d Cache) Cache {
 	return Cache{
 		Overview:   r.Overview.resolve(d.Overview),
 		Timeseries: r.Timeseries.resolve(d.Timeseries),
-		Titles:     r.Titles.resolve(d.Titles),
 	}
 }
 
 // rawGitHub mirrors GitHub with optional fields.
 type rawGitHub struct {
-	RequestTimeoutSeconds       *int `yaml:"requestTimeoutSeconds"`
-	TitlesRequestTimeoutSeconds *int `yaml:"titlesRequestTimeoutSeconds"`
-	MaxRetries                  *int `yaml:"maxRetries"`
-	RetryBackoffUnitSeconds     *int `yaml:"retryBackoffUnitSeconds"`
-	RetryAfterCapSeconds        *int `yaml:"retryAfterCapSeconds"`
-	SearchPageDelayMs           *int `yaml:"searchPageDelayMs"`
-	DetailPageDelayMs           *int `yaml:"detailPageDelayMs"`
-	TitlesBatchSize             *int `yaml:"titlesBatchSize"`
+	RequestTimeoutSeconds   *int `yaml:"requestTimeoutSeconds"`
+	MaxRetries              *int `yaml:"maxRetries"`
+	RetryBackoffUnitSeconds *int `yaml:"retryBackoffUnitSeconds"`
+	RetryAfterCapSeconds    *int `yaml:"retryAfterCapSeconds"`
+	SearchPageDelayMs       *int `yaml:"searchPageDelayMs"`
+	DetailPageDelayMs       *int `yaml:"detailPageDelayMs"`
 }
 
 func (r rawGitHub) resolve(d GitHub) GitHub {
 	g := d
 	if r.RequestTimeoutSeconds != nil {
 		g.RequestTimeoutSeconds = *r.RequestTimeoutSeconds
-	}
-	if r.TitlesRequestTimeoutSeconds != nil {
-		g.TitlesRequestTimeoutSeconds = *r.TitlesRequestTimeoutSeconds
 	}
 	if r.MaxRetries != nil {
 		g.MaxRetries = *r.MaxRetries
@@ -135,9 +128,6 @@ func (r rawGitHub) resolve(d GitHub) GitHub {
 	}
 	if r.DetailPageDelayMs != nil {
 		g.DetailPageDelayMs = *r.DetailPageDelayMs
-	}
-	if r.TitlesBatchSize != nil {
-		g.TitlesBatchSize = *r.TitlesBatchSize
 	}
 	return g
 }
@@ -180,13 +170,13 @@ func (r rawSeed) resolve(d Seed) Seed {
 type rawAPI struct {
 	IssuesDefaultLimit     *int `yaml:"issuesDefaultLimit"`
 	IssuesMaxLimit         *int `yaml:"issuesMaxLimit"`
-	TitlesMaxIDs           *int `yaml:"titlesMaxIds"`
-	TitlesMaxBodyBytes     *int `yaml:"titlesMaxBodyBytes"`
 	TimeseriesDefaultDays  *int `yaml:"timeseriesDefaultDays"`
 	TimeseriesMinDays      *int `yaml:"timeseriesMinDays"`
 	TimeseriesMaxDays      *int `yaml:"timeseriesMaxDays"`
 	PriorityParamMaxLength *int `yaml:"priorityParamMaxLength"`
 	StatusParamMaxLength   *int `yaml:"statusParamMaxLength"`
+	AbtTeamParamMaxLength  *int `yaml:"abtTeamParamMaxLength"`
+	FilterParamMaxValues   *int `yaml:"filterParamMaxValues"`
 }
 
 func (r rawAPI) resolve(d API) API {
@@ -196,12 +186,6 @@ func (r rawAPI) resolve(d API) API {
 	}
 	if r.IssuesMaxLimit != nil {
 		a.IssuesMaxLimit = *r.IssuesMaxLimit
-	}
-	if r.TitlesMaxIDs != nil {
-		a.TitlesMaxIDs = *r.TitlesMaxIDs
-	}
-	if r.TitlesMaxBodyBytes != nil {
-		a.TitlesMaxBodyBytes = *r.TitlesMaxBodyBytes
 	}
 	if r.TimeseriesDefaultDays != nil {
 		a.TimeseriesDefaultDays = *r.TimeseriesDefaultDays
@@ -217,6 +201,12 @@ func (r rawAPI) resolve(d API) API {
 	}
 	if r.StatusParamMaxLength != nil {
 		a.StatusParamMaxLength = *r.StatusParamMaxLength
+	}
+	if r.AbtTeamParamMaxLength != nil {
+		a.AbtTeamParamMaxLength = *r.AbtTeamParamMaxLength
+	}
+	if r.FilterParamMaxValues != nil {
+		a.FilterParamMaxValues = *r.FilterParamMaxValues
 	}
 	return a
 }

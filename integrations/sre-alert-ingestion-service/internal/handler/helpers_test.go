@@ -19,9 +19,20 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/integrations/sre-alert-ingestion-service/internal/middleware"
 )
+
+// withAuthenticatedUsername returns a shallow copy of r whose context carries
+// username as the identity middleware.BasicAuth would have authenticated the
+// request as — used by handler-level unit tests, which construct requests
+// directly rather than routing them through the real BasicAuth middleware.
+func withAuthenticatedUsername(r *http.Request, username string) *http.Request {
+	return r.WithContext(middleware.WithAuthenticatedUsername(r.Context(), username))
+}
 
 // assertStatus fails if the recorded status code differs from want.
 func assertStatus(t *testing.T, w *httptest.ResponseRecorder, want int) {

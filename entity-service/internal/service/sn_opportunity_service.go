@@ -42,6 +42,7 @@ type snOpportunity struct {
 	Account            *snCaseEntityRef `json:"account"`
 	EulaVersion        *string          `json:"eulaVersion"`
 	EulaVersionDecimal *string          `json:"eulaVersionDecimal"`
+	Stage              *string          `json:"stage"`
 }
 
 // snOpportunitySearchPayload is the Choreo POST /opportunities/search request body.
@@ -82,6 +83,7 @@ func snOpportunityToDomain(o snOpportunity) domain.Opportunity {
 		Account:            snEntityRefFromCaseRef(o.Account),
 		EulaVersion:        o.EulaVersion,
 		EulaVersionDecimal: o.EulaVersionDecimal,
+		Stage:              o.Stage,
 	}
 }
 

@@ -454,6 +454,74 @@ func TestSNIncidentService_SearchIncidents_MadeSlaInvalidValue(t *testing.T) {
 	}
 }
 
+// TestSNIncidentService_SearchIncidents_IncidentStateKeysPassedThrough
+// verifies the generic filters array's incidentStateKeys predicate reaches
+// the outgoing payload under the exact wire name Ballerina accepts, as a
+// sibling to (and independent of) the "state" filter -- see
+// domain.SearchIncidentsFilters Filters "incidentStateKeys" doc comment for
+// why the two are kept distinct.
+func TestSNIncidentService_SearchIncidents_IncidentStateKeysPassedThrough(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/search", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"incidents": [], "totalRecords": 0, "offset": 0, "limit": 20}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client, nil)
+
+	req := domain.SearchIncidentsRequest{
+		Filters: domain.SearchIncidentsFilters{
+			Filters: []domain.IncidentFieldFilter{
+				{Field: "incidentStateKeys", Op: "in", Values: []string{"1", "6"}},
+			},
+		},
+	}
+	if _, err := svc.SearchIncidents(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotFilters, ok := gotBody["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected filters object in payload, got %+v", gotBody["filters"])
+	}
+
+	gotStateKeys, ok := gotFilters["incidentStateKeys"].([]any)
+	if !ok || len(gotStateKeys) != 2 || gotStateKeys[0] != float64(1) || gotStateKeys[1] != float64(6) {
+		t.Fatalf("filters.incidentStateKeys: got %v, want [1, 6]", gotFilters["incidentStateKeys"])
+	}
+	if _, present := gotFilters["stateKeys"]; present {
+		t.Fatalf("filters.stateKeys: got present with value %v, want omitted since it was not requested", gotFilters["stateKeys"])
+	}
+}
+
+// TestSNIncidentService_SearchIncidents_IncidentStateKeysInvalidValue
+// verifies a non-integer incidentStateKeys filter value is rejected with a
+// clean validation error before any SN call.
+func TestSNIncidentService_SearchIncidents_IncidentStateKeysInvalidValue(t *testing.T) {
+	// client is intentionally nil: validation must fail before touching it.
+	svc := NewServiceNowIncidentService(nil, nil)
+
+	req := domain.SearchIncidentsRequest{
+		Filters: domain.SearchIncidentsFilters{
+			Filters: []domain.IncidentFieldFilter{
+				{Field: "incidentStateKeys", Op: "in", Values: []string{"NEW"}},
+			},
+		},
+	}
+	_, err := svc.SearchIncidents(contextWithUserIDToken("token"), req)
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
 // TestSNIncidentService_SearchIncidents_InvalidStateValue verifies an
 // unrecognized state filter value is rejected with a clean validation error
 // before any SN call.

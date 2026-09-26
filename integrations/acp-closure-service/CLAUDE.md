@@ -70,6 +70,129 @@ hands parsed data to `recipients.AccountManagerEmail`). Keep new decision
 logic in the pure packages and I/O in `sweep` — this split is what makes the
 decision logic cheaply testable without mocks.
 
+## Cross-cascade ordering and the in-memory "already closed" gate
+
+`processProject` (`sweep.go`) evaluates both closure reasons —
+`buildSubscriptionCascade` and `buildInvoiceCascade` — *before* acting on
+either, collecting a `cascadeDecision{decision, act}` for each one that
+fires, then sorts them by `decision.DaysRemaining` ascending (most overdue
+first) and executes them one at a time. This mirrors legacy's own two-phase
+shape exactly: `ACPMainProcess.js`'s `calculateProjectSuspension` computes a
+`Decision` for every reason first, sorts `sorted_by_days_left` ascending,
+and only then does `actionHandler` act on them in that order.
+
+This isn't just about which email goes out first — it's what makes the
+"already closed" gate correct at all. Legacy's `checkForOpenProject` reads
+the project's single shared `u_wso2_closure_state` field before every
+`actionSendEmailNotification` call, so when the more-urgent reason suspends
+a project partway through a run, the next (less-urgent) reason sees that
+and skips its own notification (`IGNORED`) — legacy only ever sends one
+cascade's notice per run, even when multiple reasons fire at once.
+
+`processProject` reproduces that with an **in-memory** `alreadyClosed bool`
+that starts from `proj.ClosureState` (closed from a *previous* run) and
+flips to `true` the instant a cascade's own `decision.ShouldSuspend` is
+true (closed *by this run*) — never a live API re-fetch between cascades.
+This went through two wrong versions before landing here, both caught via
+real live tests against the dedicated test project, worth recording so the
+reasoning isn't re-litigated:
+
+1. **Fixed order, stale snapshot.** The very first version ran
+   subscription-then-invoice unconditionally, gated only by
+   `proj.ClosureState` fetched once at the top of the run — a snapshot that
+   could never reflect a same-run suspend from the other cascade. A live
+   test where a project qualified for both reasons at once sent two
+   separate "Project Suspension Notice" emails (same subject, genuinely
+   different bodies) plus two byte-for-byte-identical no-business-contact
+   nudge emails — nothing legacy would ever produce.
+2. **Dynamic order, live re-fetch.** The next version fixed the ordering
+   (sort by `DaysRemaining`, matching legacy) and added a `GetProject`
+   re-fetch of `closureState` right before the second cascade acts, trying
+   to reproduce legacy's live DB read. This is *wrong for this backend*: a
+   second live test showed the re-fetch, issued mere seconds after the
+   first cascade's `suspend()` PATCH, still read the pre-suspend value —
+   the same read-after-write staleness this backend has shown
+   repeatedly throughout this project (see "Known discrepancies" and prior
+   handoffs — never trust a PATCH's own success response, or even one GET
+   right after it, as proof a write is live). Both cascades notified anyway,
+   identical symptom to version 1.
+
+The in-memory `alreadyClosed` tracking sidesteps the staleness problem
+entirely rather than racing it: `decision.ShouldSuspend` is computed
+locally in this same process, not read back from an API that might not
+have caught up yet, so there is nothing to be stale. If you're ever tempted
+to add a live re-check back here for extra safety, don't — this has been
+tried twice and failed both times for the same underlying reason.
+
+Suspend itself is **not** affected by any of this: `suspend`/`suspendInvoice`
+guard on their own per-dimension field (`EndDateClosureState`/
+`InvoiceDueDateClosureState`), fetched once from `proj` — these are
+genuinely independent per-reason dimensions, so one cascade's suspend can
+never be mistaken for the other's. Only the shared, rolled-up notify gate
+needed the same-run tracking.
+
+## isPartner does not gate the invoice cascade on its own
+
+`buildInvoiceCascade` (`invoice_orchestrate.go`) does **not** check
+`isPartner` before fetching invoice/account data, and does not disable the
+cascade on `isPartner` alone. Legacy's `calculateEventTypeFromDate`
+(`ACPMainProcess.js`) checks `hasPrimaryPartner` **first, unconditionally**
+— a project whose account has *both* `isPartner=true` and
+`hasPrimaryPartner=true` still fires, via the grace-period (`parterLed`)
+path — and only disables the cascade via `isPartner` once `hasPrimaryPartner`
+is confirmed false. Legacy also fetches due invoices unconditionally
+regardless of `isPartner` at all (`ACPInvoiceUtils.fetchDueInvoicesByProject`
+takes no `isPartner` parameter). The gate actually applied is
+`isPartner && !hasPrimaryPartner`, checked only after both facts are known —
+not `isPartner` alone, checked first.
+
+A prior version of this function got this wrong: it gated on `isPartner`
+alone as an early return, before `hasPrimaryPartner` was ever fetched. That
+silently disabled the `isPartner=true`/`hasPrimaryPartner=true` combination
+entirely — a real behavioral gap versus legacy, not a documented
+simplification, caught by `/code-review`'s Spec axis rather than by any live
+test (this combination didn't show up in the projects tested against). If
+you're tempted to reintroduce an early `isPartner` check for efficiency
+(skip fetching invoice data for obviously-disabled accounts), don't — there
+is no way to know the cascade is actually disabled without `hasPrimaryPartner`,
+which requires the same `GetAccount` call regardless.
+
+## Invoice-side searches must paginate
+
+`fetchAllProjectOpportunityLinks`/`fetchAllInvoicesForOpportunity`
+(`invoice_resolve.go`) page through `/project-opportunity-links/search` and
+`/invoices/search` exactly like `Run` already does for `/projects/search` —
+`pagination.limit`/`offset` on the request, looping until `hasMore` is false
+or a page comes back empty. `resolveDueInvoice` originally sent neither
+search with a `pagination` field at all and never checked the response's
+`hasMore` (CodeRabbit, PR #1933) — a project or opportunity with more rows
+than a single page would silently have the rest ignored, up to and including
+a genuinely more-overdue eligible invoice sitting on a page 2 that was never
+fetched. Both response schemas carry `total`/`limit`/`offset`/`hasMore`
+identically to `ProjectSearchResponse`, so there was no API-shape reason for
+the gap — just an oversight when this file was first written.
+
+## An invoice-cascade build failure doesn't block the subscription cascade
+
+`processProject`'s two build steps are treated differently on error
+(CodeRabbit, PR #1933). A `buildSubscriptionCascade` error still aborts the
+whole call immediately — its only failure mode is a corrupt
+`suspensionProcessState` (pure parsing, no I/O), which is genuinely unsafe
+to decide *anything* from, including whether the invoice cascade's own
+section of that same JSON blob can be trusted. A `buildInvoiceCascade`
+error — far more likely to be a transient upstream failure
+(`SearchProjectOpportunityLinks`/`SearchInvoices`/`GetOpportunity`) or one
+malformed ServiceNow-synced row (bad date, bad EULA-version string) rather
+than a genuinely corrupt project — is logged and does **not** stop the
+already-built subscription cascade from executing, since it doesn't depend
+on invoice data at all. The invoice error is still returned once the
+execution loop finishes (deferred, not swallowed), so `Run` still counts the
+project as failed — but only after the subscription cascade got its fair
+shot at a real, time-sensitive day-0 suspend that has nothing to do with
+invoices. Before this fix, a single bad invoice row could silently block a
+project's subscription-based suspend on every sweep until the invoice-side
+issue was fixed.
+
 ## Dry-run is an injection choice, not a branch
 
 `DRY_RUN` never appears as an `if` inside `processProject` or `Run`. Both
@@ -105,6 +228,38 @@ invocation — it returns after evaluating the one fetched project, before the
 loop's `offset := 0` line. This is what backs safe testing against a single
 dedicated project without risk of touching every open project in an
 environment.
+
+## No runs on weekends
+
+No emails may go out on Saturday or Sunday (business requirement). `main`
+checks `isWeekend(time.Now())` right after the startup log line and exits 0
+before building any client — no reads, no writes, no sends. "Weekend" is
+judged in UTC+05:30 (`operationsZone`), not Choreo's UTC clock; a fixed
+offset rather than a named zone, so the container needs no tzdata. This
+applies to every run, including `TEST_PROJECT_ID`-scoped ones — there's no
+override flag.
+
+The whole run is skipped, deliberately, rather than running and only
+holding back the sends:
+
+- **Skipping the run loses nothing.** Notice windows and suspension are
+  threshold-based (`daysRemaining <= window`, see `closure.Decide`), so
+  Monday's run sends whatever came due over the weekend. The windows are at
+  least 7 days apart, so a two-day gap can never skip past a whole window.
+  The trade-off, accepted explicitly: a day 0 that lands on a weekend
+  suspends on Monday, so the customer gets up to two extra days.
+- **Holding back only the sends would break the cascade.** A Saturday
+  day-0 run would still suspend the project, and Monday's run would then
+  seed `alreadyClosed` from the now-closed project and skip its suspension
+  notice for good (see "Cross-cascade ordering" above). Suspending on
+  schedule while emailing later would need the notify/suspend coupling
+  reworked. Don't attempt it without revisiting this.
+
+The Choreo cron should also be set to weekdays only (`30 9 * * 1-5`, i.e.
+09:30 Mon–Fri — Choreo evaluates this component's cron in UTC+05:30, which
+is why the original daily `30 9 */1 * *` fired at 09:30 local, not UTC) so
+weekend invocations don't happen at all. This
+guard is defence in depth for a manual trigger or a mis-edited cron.
 
 ## EXCLUDED_PROJECT_IDS — deliberate exclusion, not a bug workaround
 
@@ -224,6 +379,42 @@ isn't lost or re-litigated:
   ultimately integrates with. Don't re-add logging to this type without
   confirming that direction has changed.
 
+## Project Name links to Salesforce (internal notices only)
+
+Confirmed via a real reference email
+(`local-docs/actual_0_days_invoice_email.html`): every internal notice's
+"Project Name" field value is a hyperlink to
+`https://wso2.my.salesforce.com/{sfId}` — Salesforce's generic
+record-redirect URL, which resolves to the record regardless of object
+type. This was missing entirely from the initial port (the field just
+rendered as plain bold text) until caught against the real reference.
+
+- `project.SfID` (`types.go`, tagged `json:"sfId"`) carries the project's
+  Salesforce ID from the wire, confirmed present on `GetProject`.
+- `notify.Notice.ProjectSfID` carries it from `sweep.baseNotice` through to
+  `EmailNotifier.Send`.
+- `notify.projectNameFieldRowHTML` (`email_notifier.go`) is the one field
+  row that ever gets linked — every other field (Project Key, Invoice Id,
+  Opportunity, Due Date, ...) always stays `fieldRowHTML`'s plain bolded
+  text, matching the real reference (only Project Name links there).
+  Falls back to `fieldRowHTML`'s plain rendering when `ProjectSfID` is
+  empty — a project genuinely without a Salesforce ID on file.
+- **Customer-facing notices never get this link** — confirmed absent from
+  the real customer-facing reference email (customers have no Salesforce
+  access). Structurally guaranteed here too: customer notices render via
+  `renderEmailHTML`/`plainTextToHTML`, which never touches `fieldRowHTML`
+  or `projectNameFieldRowHTML` at all — there's no shared code path that
+  could accidentally leak the link onto a customer copy.
+
+**Not yet implemented**: the real reference email also has a second,
+separate "Open in Salesforce" button near the invoice-details box, linking
+to what appears to be the *invoice's own* Salesforce ID (a different ID
+prefix than the project's). Deliberately not added — `invoiceDTO`
+(`types.go`) has no sfId-equivalent field, and none is documented in
+`csm-integration-service`'s `openapi.yaml` either. Needs confirming via a
+real `SearchInvoices`/`GetInvoice` Postman response before implementing;
+don't guess a field name.
+
 ## suspensionProcessState's real shape
 
 Free-form JSON written by an existing, live ServiceNow suspension flow —
@@ -340,6 +531,20 @@ plain authenticated HTTP call.
   notice) all populated internal recipients go in `to`. This is a design
   decision made in this codebase, not something Rashmika's API dictates —
   reconsider if it turns out wrong in practice.
+- **`StandingCC` (`STANDING_CC_RECIPIENTS`) cc's a fixed address list on
+  every notice**, uniformly — internal, customer-facing, and the
+  no-business-contact nudge alike, subscription and invoice cascades alike,
+  added in `Send` right after `recipientsToToCC` and before filtering. This
+  was a real gap in the initial port, caught late: every real legacy
+  reference email this project has (both internal and customer-facing) cc's
+  `customer-lifecycle-notification@wso2.com` and `billing@wso2.com`, and
+  this component never sent to either until this field existed. Deliberately
+  env-configurable rather than a hardcoded constant like `wso2LogoURL` —
+  these are real production distribution lists, and staging/dev must leave
+  this empty for the same reason `EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS`
+  defaults false: real people/teams must not receive test traffic. Entries
+  still pass through `filterRecipients` like any other recipient — this is
+  additive cc, not a bypass of the WSO2-only staging safeguard.
 - **The WSO2-only staging safeguard is a hard requirement from Rashmika's
   team**, not a suggestion: "make sure emails aren't being sent in staging
   environment for any non-wso2 emails." `EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS`

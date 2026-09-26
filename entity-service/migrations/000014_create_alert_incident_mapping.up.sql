@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS alert_incident_mapping (
   alert_status      TEXT NOT NULL,
   incident_id       TEXT NOT NULL,
   incident_number   TEXT,
-  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_on        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Correlation lookup: given the alert source and its correlation key

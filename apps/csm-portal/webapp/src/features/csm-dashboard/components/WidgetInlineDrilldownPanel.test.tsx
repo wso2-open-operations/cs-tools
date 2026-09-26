@@ -260,6 +260,73 @@ describe("WidgetInlineDrilldownPanel", () => {
     expect(screen.getByText("Open Cases — Castor — S1 · Critical")).toBeInTheDocument();
   });
 
+  it("renders a 'Customise columns' button in its own header next to Close, for a case-shaped slice", async () => {
+    postMock.mockResolvedValue({
+      total: 1,
+      cases: [{ id: "1", number: "CS-1", subject: "Disk full", state: "open" }],
+      limit: 4,
+      offset: 0,
+      hasMore: false,
+    });
+    window.localStorage.clear();
+
+    renderPanel(
+      <WidgetInlineDrilldownPanel
+        widgetId="cases_by_severity"
+        displayName="Cases by severity"
+        resourceType="case"
+        filters={{}}
+        slice={CRITICAL_SLICE}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("CS-1")).toBeInTheDocument());
+    expect(
+      screen.getByRole("button", { name: /customise columns/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a 'Customise columns' button for a columns-configured (GenericColumnList) slice too", async () => {
+    postMock.mockResolvedValue({
+      total: 1,
+      incidents: [{ id: "inc-1", number: "INC0000001", subject: "Down", state: "new" }],
+      limit: 4,
+      offset: 0,
+      hasMore: false,
+    });
+    window.localStorage.clear();
+
+    renderPanel(
+      <WidgetInlineDrilldownPanel
+        widgetId="incidents_by_priority"
+        displayName="Incidents by priority"
+        resourceType="incident"
+        filters={{}}
+        slice={CRITICAL_SLICE}
+        columns={[
+          { path: "number", label: "Number" },
+          { path: "subject", label: "Subject" },
+        ]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Down")).toBeInTheDocument());
+    const customizerButton = screen.getByRole("button", { name: /customise columns/i });
+    expect(customizerButton).toBeInTheDocument();
+
+    fireEvent.click(customizerButton);
+    expect(screen.getAllByText("Subject")).toHaveLength(2); // header cell + popover row
+    fireEvent.click(screen.getAllByText("Subject")[1]);
+    expect(screen.getAllByText("Subject")).toHaveLength(1); // popover row only -- header cell gone
+
+    const key = Object.keys(window.localStorage).find((k) =>
+      k.includes("dashboard-generic-list:incidents_by_priority"),
+    );
+    expect(key).toBeDefined();
+  });
+
   it("renders an unsupported-widget message instead of crashing for an unrecognized resourceType", () => {
     renderPanel(
       <WidgetInlineDrilldownPanel

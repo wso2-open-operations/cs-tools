@@ -170,19 +170,16 @@ export default function ChatMessageBubble({
     : message.text;
 
   /**
-   * Token-limit signal that warrants offering a "request an increase" CTA.
-   * The limit is often delivered as a normal assistant notice (e.g. "you've
-   * reached your session token limit"), not an error bubble — so we detect it
-   * on regular messages too. The narrower pattern (no bare credit/billing/quota)
-   * avoids false positives on normal messages that merely mention those words.
+   * Offer "request an increase" only for a limit hit in THIS session.
+   * The flag is stamped when the message arrives over the websocket
+   * (see isTokenLimitNoticeText); matching the text here instead would also
+   * match history replayed over REST on resume, leaving the CTA on an old
+   * notice long after the limit had been raised.
    */
-  const isTokenLimitNotice =
-    !!message.text && /token limit|usage limit|rate limit/i.test(message.text);
   const showTokenRequestCta =
     !!onRequestTokenIncrease &&
     !message.isStreaming &&
-    ((message.isError && isUsageLimitError) ||
-      (!message.isError && isTokenLimitNotice));
+    !!message.isTokenLimitNotice;
 
   /** Until the final assistant message, hide thumbs and timestamp only (header stays). */
   const hideFeedbackRow =

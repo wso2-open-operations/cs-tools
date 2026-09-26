@@ -24,7 +24,10 @@ CREATE TABLE repositories (
   UNIQUE (owner, name)
 );
 
--- PRIVACY: no title, no labels, no assignees, no opened_by. Ever.
+-- The only issue-body-derived columns persisted are title, abt_team, and
+-- opened_by, the last restricted to a @wso2.com address by the CHECK below.
+-- Nothing else from the issue body — no labels, no assignees — is ever
+-- persisted.
 CREATE TABLE issues (
   id                 serial PRIMARY KEY,
   repository_id      integer NOT NULL REFERENCES repositories(id),
@@ -32,6 +35,9 @@ CREATE TABLE issues (
   github_node_id     text,
   state              issue_state NOT NULL,
   html_url           text,
+  title              text,
+  abt_team           text,
+  opened_by          text,
   priority           text,          -- derived from Priority/* label at ingest; raw labels discarded
   current_status     text,
   current_status_at  timestamptz,
@@ -40,7 +46,9 @@ CREATE TABLE issues (
   github_updated_at  timestamptz,
   first_seen_at      timestamptz NOT NULL DEFAULT now(),
   last_synced_at     timestamptz,
-  UNIQUE (repository_id, github_number)
+  UNIQUE (repository_id, github_number),
+  CONSTRAINT issues_opened_by_wso2_chk
+    CHECK (opened_by IS NULL OR opened_by ~ '^[a-z0-9._%+-]+@wso2\.com$')
 );
 CREATE INDEX issues_github_node_id_idx  ON issues (github_node_id);
 CREATE INDEX issues_state_idx           ON issues (state);
@@ -48,6 +56,8 @@ CREATE INDEX issues_repo_state_idx      ON issues (repository_id, state);
 CREATE INDEX issues_priority_idx        ON issues (priority);
 CREATE INDEX issues_current_status_idx  ON issues (current_status);
 CREATE INDEX issues_github_created_idx  ON issues (github_created_at);
+CREATE INDEX issues_github_updated_idx  ON issues (github_updated_at);
+CREATE INDEX issues_abt_team_idx        ON issues (abt_team);
 
 -- PRIVACY: no actor, no raw payload.
 CREATE TABLE issue_status_events (
@@ -73,6 +83,11 @@ CREATE TABLE issue_sla (
   pct_consumed      double precision,
   sla_state         text,
   sla_running       boolean,
+  -- A sticky "was this ever violated" signal, independent of sla_state
+  -- (which reports TERMINAL once an issue resolves, masking a real past
+  -- VIOLATED). Every write path ORs its new value in rather than
+  -- overwriting, so it can only ever go false -> true.
+  breached_ever     boolean NOT NULL DEFAULT false,
   computed_at       timestamptz NOT NULL,
   computed_through  timestamptz NOT NULL
 );
@@ -108,4 +123,17 @@ CREATE TABLE sync_runs (
   status            text,
   issues_processed  integer DEFAULT 0,
   error             text
+);
+
+-- Statuses seen on a board that taxonomy.statuses doesn't recognize (a
+-- renamed or newly added column) — surfaced via GET /metrics/overview so
+-- they get noticed and classified instead of silently pausing or accruing
+-- the SLA clock unnoticed. Replaced wholesale each recompute tick (see
+-- internal/jobs.RunTickOnce), not accumulated: a status that's since been
+-- added to the taxonomy disappears from here.
+CREATE TABLE unknown_statuses (
+  status            text PRIMARY KEY,
+  occurrence_count  integer NOT NULL,
+  first_seen_at     timestamptz NOT NULL DEFAULT now(),
+  last_seen_at      timestamptz NOT NULL DEFAULT now()
 );

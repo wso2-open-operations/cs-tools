@@ -59,6 +59,7 @@ func main() {
 	isEmailSendEnabled := envBool("IS_EMAIL_SEND_ENABLED", false)
 	testProjectID := os.Getenv("TEST_PROJECT_ID")
 	excludedProjectIDs := parseExcludedProjectIDs(os.Getenv("EXCLUDED_PROJECT_IDS"))
+	standingCC := parseCommaSeparatedList(os.Getenv("STANDING_CC_RECIPIENTS"))
 	runID := newRunID()
 
 	slog.Info("acp-closure-service starting",
@@ -67,7 +68,13 @@ func main() {
 		"isEmailSendEnabled", isEmailSendEnabled,
 		"testProjectID", testProjectID,
 		"excludedProjectIDs", sortedKeys(excludedProjectIDs),
+		"standingCC", standingCC,
 	)
+
+	if isWeekend(time.Now()) {
+		slog.Info("weekend: skipping run, no notices sent and no projects suspended", "runID", runID)
+		os.Exit(0)
+	}
 
 	entityClient := entity.NewClient(entity.Config{
 		BaseURL:      mustEnv("CSM_INTEGRATION_BASE_URL"),
@@ -99,6 +106,7 @@ func main() {
 			Sender:                 emailClient,
 			Logger:                 slog.Default(),
 			AllowNonWSO2Recipients: envBool("EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS", false),
+			StandingCC:             standingCC,
 		}
 	}
 
@@ -122,6 +130,29 @@ func main() {
 	}
 
 	os.Exit(exitCode(len(result.Failures)))
+}
+
+// operationsZone is the timezone "weekend" is judged in: UTC+05:30, the CS
+// team's local time (Sri Lanka has no DST, so a fixed offset is exact and
+// needs no tzdata in the container). Choreo's clock is UTC, and for five and
+// a half hours around every midnight the UTC day differs from the local one.
+var operationsZone = time.FixedZone("UTC+05:30", 5*60*60+30*60)
+
+// isWeekend reports whether now falls on a Saturday or Sunday in
+// operationsZone. No emails go out on weekends, so the whole run is skipped
+// — not just the sends. Skipping only the sends would break the notice
+// cascade: a day-0 suspend on Saturday would flip the project to closed, and
+// Monday's run would then treat its suspension notice as already handled
+// and never send it. Skipping the run is safe instead because notice windows
+// and suspension are threshold-based (days remaining <= window), so Monday's
+// run picks up everything that came due over the weekend — a weekend day 0
+// suspends on Monday.
+func isWeekend(now time.Time) bool {
+	switch now.In(operationsZone).Weekday() {
+	case time.Saturday, time.Sunday:
+		return true
+	}
+	return false
 }
 
 // exitCode reports the process exit status for a completed sweep. A
@@ -182,6 +213,26 @@ func parseExcludedProjectIDs(v string) map[string]bool {
 		ids[id] = true
 	}
 	return ids
+}
+
+// parseCommaSeparatedList parses STANDING_CC_RECIPIENTS: a comma-separated
+// list of email addresses always cc'd on every notice (see
+// notify.EmailNotifier.StandingCC's own doc comment for why this is
+// deliberately env-configurable rather than a hardcoded constant — staging
+// must not cc real production distribution lists). Same
+// trim-and-drop-empty convention as parseExcludedProjectIDs, but returns an
+// ordered slice rather than a set, since order and duplicates are
+// meaningful for a recipient list.
+func parseCommaSeparatedList(v string) []string {
+	var out []string
+	for raw := range strings.SplitSeq(v, ",") {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // sortedKeys returns m's keys in sorted order, for stable, readable log

@@ -39,6 +39,15 @@ vi.mock("@config/apiConfig", () => ({
 vi.mock("@features/csm-dashboard/api/useTeams", () => ({
   useTeams: vi.fn(),
 }));
+vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
+  useSavedFilterViews: () => ({
+    views: [],
+    isLoading: false,
+    saveFilterView: vi.fn(),
+    deleteFilterView: vi.fn(),
+    moveFilterView: vi.fn(),
+  }),
+}));
 const mockedUseTeams = vi.mocked(useTeams);
 
 beforeEach(() => {

@@ -122,6 +122,29 @@ func TestParseIncidentFieldFilters_MadeSla(t *testing.T) {
 	}
 }
 
+func TestParseIncidentFieldFilters_IncidentStateKeys(t *testing.T) {
+	parsed, err := ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
+		{Field: "incidentStateKeys", Op: "in", Values: []string{"1", "6"}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"1", "6"}
+	if len(parsed.IncidentStateKeys) != len(want) {
+		t.Fatalf("IncidentStateKeys = %v, want %v", parsed.IncidentStateKeys, want)
+	}
+	for i, v := range want {
+		if parsed.IncidentStateKeys[i] != v {
+			t.Errorf("IncidentStateKeys[%d] = %q, want %q", i, parsed.IncidentStateKeys[i], v)
+		}
+	}
+
+	// StateKeys itself must not be set by an incidentStateKeys filter.
+	if parsed.StateKeys != nil {
+		t.Fatalf("StateKeys = %v, want nil (incidentStateKeys must not leak into state)", parsed.StateKeys)
+	}
+}
+
 func TestParseIncidentFieldFilters_ProductName(t *testing.T) {
 	parsed, err := ParseIncidentFieldFilters([]domain.IncidentFieldFilter{
 		{Field: "productName", Op: "in", Values: []string{"API Manager", "Choreo"}},
@@ -205,6 +228,18 @@ func TestParseIncidentFieldFilters_Rejections(t *testing.T) {
 		{
 			name:    "madeSla with more than one value",
 			filters: []domain.IncidentFieldFilter{{Field: "madeSla", Op: "eq", Values: []string{"true", "false"}}},
+		},
+		{
+			name:    "incidentStateKeys with unsupported op",
+			filters: []domain.IncidentFieldFilter{{Field: "incidentStateKeys", Op: "eq", Values: []string{"1"}}},
+		},
+		{
+			name:    "incidentStateKeys with non-integer value",
+			filters: []domain.IncidentFieldFilter{{Field: "incidentStateKeys", Op: "in", Values: []string{"NEW"}}},
+		},
+		{
+			name:    "incidentStateKeys with empty values",
+			filters: []domain.IncidentFieldFilter{{Field: "incidentStateKeys", Op: "in", Values: []string{}}},
 		},
 		{
 			name:    "productName with unsupported op",

@@ -20,7 +20,7 @@ PGHOST="${DB_HOST:-localhost}" PGPORT="${DB_PORT:-5432}" \
 PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD" \
 PGDATABASE="$DB_NAME" PGSSLMODE="$DB_SSLMODE" \
 psql -f migrations/0001_create_alert_buffer.up.sql
-go run ./cmd/server/main.go
+go run ./cmd/server
 ```
 
 (the server itself reads `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`/
@@ -51,7 +51,7 @@ Server starts at `http://localhost:8080`.
     PagerDuty, etc.) gets its own username/password pair, configured via
     `SRE_ALERT_AUTH_USERS` as comma-separated `username:bcryptHash` entries
     — passwords are never stored in plaintext, only their bcrypt hash. Use
-    `cmd/gen-basic-auth-hash` to generate the hash for a new password. This
+    `go run ./cmd/server gen-basic-auth-hash` to generate the hash for a new password. This
     variable is required; the service refuses to start without it, and
     fails fast on any malformed entry. `GET /health` is deliberately
     exempt, so liveness/readiness probes don't need credentials.
@@ -84,6 +84,23 @@ csm-integration-service  ---->  entity-service  ---->  platform incident store
 Persist-then-attempt, not attempt-then-persist: nothing is lost even if this
 process crashes between accepting a request and its first delivery attempt.
 
+## `CSM_INTEGRATION_BASE_URL` can point at `csm-integration-service` or `entity-service` directly
+
+`internal/csmclient` always calls the same relative paths — `POST /incidents`,
+`POST /incidents/search`, `PATCH /incidents/{id}`, `POST /services/search`,
+`POST /alert-incident-mappings`, `POST /alert-incident-mappings/lookup` — and
+`csm-integration-service` proxies every one of them at that identical
+relative path against `entity-service`, which exposes the same paths itself.
+So whether a given deployment of this service reaches `entity-service`
+directly (e.g. both components in the same Choreo organization) or goes
+through `csm-integration-service` (e.g. this service is deployed outside
+that organization, where `entity-service` isn't directly reachable) is purely
+a matter of which `CSM_INTEGRATION_BASE_URL`/OAuth2 client credentials it's
+configured with — no code in this service branches on which target it's
+talking to, and none should be added; if a future path ever needs one target
+but not the other, that's a reason to revisit this, not to special-case it
+here.
+
 ## Prerequisites
 
 - Go `1.26+` — [install](https://go.dev/doc/install)
@@ -108,7 +125,9 @@ Copy `.env.example` to `.env` and fill in the values:
 | `CSM_INTEGRATION_CLIENT_SECRET` | OAuth2 client secret |
 | `CSM_INTEGRATION_SCOPES` | Comma-separated OAuth2 scopes |
 | `SRE_ALERT_CALLER_ID` | A real, provisioned platform user id — see "Known limitations" |
-| `SRE_ALERT_AUTH_USERS` | Required. Comma-separated `username:bcryptHash` pairs for inbound HTTP Basic Auth on `POST /alerts` — generate a hash with `cmd/gen-basic-auth-hash` |
+| `SRE_ALERT_SERVICE_MAP` | Optional JSON object, `{"<label>":"<CMDB service UUID>", ...}` — the static half of service-UUID resolution, see "Service-UUID resolution" below |
+| `SRE_ALERT_UNKNOWN_SERVICE_ID` | Required. CMDB "Unclassified" service UUID, used when a label has no static-map entry and a live search finds no match — see "Service-UUID resolution" below |
+| `SRE_ALERT_AUTH_USERS` | Required. Comma-separated `username:bcryptHash` pairs for inbound HTTP Basic Auth on `POST /alerts` — generate a hash with `go run ./cmd/server gen-basic-auth-hash` |
 | `SRE_ALERT_MAX_RETRIES` | Retryable-failure count before escalation (default `3`) |
 | `SRE_ALERT_POLL_INTERVAL_SECONDS` | How often the worker scans the buffer (default `15`) |
 | `SRE_ALERT_GROUP_WINDOW_MINUTES` | How far back the incident-grouping search looks for an attachable incident (default `15`) |
@@ -159,7 +178,7 @@ for consistency rather than re-evaluated independently.
 |---|---|
 | `id` | UUID primary key, generated **client-side** by `internal/idgen` before the row is persisted (not by the column's `gen_random_uuid()` default — see "Duplicate-incident dedup" below for why) — returned to the caller as the buffered alert's id |
 | `received_at` | When the alert was accepted |
-| `payload` | The already-mapped `CreateIncidentRequest` JSON (not the raw inbound alert) — see `internal/handler.MapToIncident`. Its `Subject` is tagged with this row's own `id` (`internal/csmclient.DedupTag`) |
+| `payload` | The already-mapped `CreateIncidentRequest` JSON (not the raw inbound alert) — see `internal/handler.MapToIncident`. Its `Subject` is tagged with this row's own `alertNumber`, not `id` (`internal/csmclient.DedupTag`) |
 | `status` | `pending` \| `delivered` \| `escalated` \| `failed` |
 | `retry_count` | Number of failed, retryable delivery attempts so far |
 | `last_attempt_at` | Timestamp of the most recent delivery attempt |
@@ -212,6 +231,11 @@ to `SERVICE_INTERRUPTION` (`internal/severity.MapCategory`).
 - `POST /alerts/adapters/grafana` — accepts a Grafana native alert-webhook
   payload; only `state == "alerting"` creates a buffered alert, any other
   state returns `200` with a small acknowledgment body
+- `POST /alerts/adapters/choreodp` — accepts an internal alert-forwarder's
+  native alert payload; `severity`/`impact`/`urgency` are raw integers
+  (1=High, 2=Medium, 3=Low), and `impact`/`urgency` are passed straight
+  through as an override of the created incident's Impact/Urgency — see
+  "Impact/Urgency override" below
 
 Every adapter route translates its vendor's own native payload into
 `AlertRequest`, then reuses the exact same validation/buffering/worker/
@@ -257,6 +281,25 @@ file; this section is a summary, not a restatement of every line.
   `tags.service` is passed through as free text (unlike the prior pipeline,
   which only honored it when it equaled `"CHOREO"` — a routing rule tied to
   that system's own lookup table, with no equivalent here).
+- **Internal alert-forwarder** (`adapter_choreodp.go`): `severity`,
+  `impact`, and `urgency` are raw integers (1=High, 2=Medium, 3=Low), not
+  this service's string vocabulary. `severity` → `critical`/`major`/`minor`;
+  any other value → `"warning"` (fails safe, not open — see
+  `choreoDPSeverityTable`). `impact`/`urgency` map onto `HIGH`/`MEDIUM`/`LOW`
+  and are set directly on `AlertRequest.impact`/`urgency` — see
+  "Impact/Urgency override" below. `source` (unlike every other adapter) is
+  taken straight from the payload's own `source` field, not a fixed literal.
+
+## Impact/Urgency override
+
+`AlertRequest.impact`/`urgency` are an additive, optional override of this
+service's usual `severity.MapImpactUrgency(req.Severity)` derivation
+(`internal/handler.MapToIncident`) — set only by `adapter_choreodp.go` today,
+since it's the only source with its own authoritative impact/urgency signal.
+Every other caller (generic `/alerts`, the four other adapters) never sets
+these, so `MapToIncident`'s output is unchanged for them: nil means "derive
+from Severity as before." Values must be `HIGH`/`MEDIUM`/`LOW`, matching
+`csmclient.CreateIncidentRequest.Impact`/`.Urgency`'s own vocabulary.
 
 ## Retry / escalation behavior
 
@@ -295,15 +338,17 @@ lost (timeout, connection reset, etc.). Retrying blindly in that situation
 risks creating a second, duplicate incident for the same alert. This
 service guards against that in two parts:
 
-1. **Every incident's `Subject` is tagged with its buffer row's own id.**
-   `internal/idgen` generates `alert_buffer.id` client-side, *before* the
-   row is persisted (not via the column's `gen_random_uuid()` default), so
-   `internal/handler.MapToIncident` can embed it as a dedup tag —
-   `internal/csmclient.DedupTag(id)`, format `"[alert:<row-id>]"` — as the
-   leading text of `CreateIncidentRequest.Subject`. This is fully within
-   this service's own control, unlike `AlertRequest.UniqueIdentifier`
-   (vendor-supplied and optional), and guaranteed unique per buffered
-   alert.
+1. **Every incident's `Subject` is tagged with its buffer row's own
+   `alertNumber`, not its `id`.** `internal/store.Store.Enqueue` generates
+   `alertNumber` (this service's own Postgres sequence) as part of the same
+   INSERT that persists the row, and `internal/handler.MapToIncident`
+   embeds it as a dedup tag — `internal/csmclient.DedupTag(alertNumber)`,
+   format `"[alert:<alert-number>]"` — as the leading text of
+   `CreateIncidentRequest.Subject`. This is fully within this service's own
+   control, unlike `AlertRequest.UniqueIdentifier` (vendor-supplied and
+   optional), and guaranteed unique per buffered alert. (`internal/idgen`
+   generates `id` client-side for a different reason — see its own doc
+   comment — not for this dedup tag.)
 2. **Before any *retry* (never the first attempt — nothing could exist yet
    on attempt 1), the worker searches for that tag first.**
    `internal/worker.attempt` calls
@@ -365,6 +410,16 @@ records a best-effort `CreateAlertIncidentMapping` call — a CSM-side audit
 trail of which alerts fed which incident, kept for visibility even though
 the grouping *decision* itself no longer reads it back.
 
+A group-attach also pushes a best-effort work note onto the incident itself
+via `csmclient.Client.UpdateIncident` (`PATCH /incidents/{id}` on
+`csm-integration-service`), summarizing the new alert (alert number, when it
+was received, and whatever `internal/handler.buildWorkNotes`/the alert's own
+description already captured) — so an engineer looking at the incident sees
+"this condition fired again" history, not silence. Same failure-tolerance
+contract as `CreateAlertIncidentMapping`: a failed push is logged and does
+not block `MarkDelivered` or the mapping call — the primary goal (this alert
+is attached to the right incident) is already achieved by the time it runs.
+
 This design mirrors, in spirit, a ServiceNow prod flow ("Create Incident
 from Alert") found during design — a hash + time-window match — but is not
 a port of it: that flow's referenced hash column doesn't actually exist on
@@ -376,6 +431,34 @@ the SN flow (permanently disabled) or a Postgres-side mapping table (a
 dependency this service exists specifically to avoid), this mechanism has
 no dependency beyond the same `POST /incidents/search` call the dedup
 mechanism above already makes.
+
+## Service-UUID resolution
+
+`CreateIncidentRequest.ServiceID` must be a CMDB service UUID, but
+`AlertRequest.Service` is a human-readable label (a vendor's own field, e.g.
+Azure's `monitoringService`, or a fixed literal like `"Site24x7
+Monitoring"`) — never a UUID itself. Resolving one to the other is a
+two-step, hybrid design, split across the request path and the worker for
+the same "persist before any delivery attempt" reason described above:
+
+1. **Static map, synchronous, in the request path.** `SRE_ALERT_SERVICE_MAP`
+   (an exact-match label → UUID JSON object) is checked by
+   `internal/handler.MapToIncident` before an alert is ever buffered — pure
+   in-process map lookup, no I/O, safe on the fast path. A match resolves
+   `ServiceID` immediately; a miss buffers `ServiceID` as
+   `csmclient.UnresolvedServiceIDSentinel` (the empty string) instead, with
+   the raw label preserved separately in the row's payload.
+2. **Live search, at delivery-attempt time, in the worker.**
+   `internal/worker.resolveServiceID` runs immediately before
+   `CreateIncident`, only for a row still carrying the sentinel: an
+   in-memory, TTL-bounded cache (`internal/worker.serviceCache`, 15 minutes)
+   is checked first, then a live `POST /services/search` call
+   (`csmclient.Client.SearchServices`, exact-match, limit 1) against
+   `csm-integration-service`. A match is cached and used; a confirmed
+   zero-result search falls back to `SRE_ALERT_UNKNOWN_SERVICE_ID`; a
+   transient error from the search itself is treated exactly like any other
+   retryable `CreateIncident` failure, never silently bucketed as
+   "unknown."
 
 ## Known limitations
 

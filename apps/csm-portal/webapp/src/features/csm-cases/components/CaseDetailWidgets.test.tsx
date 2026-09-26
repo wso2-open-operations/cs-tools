@@ -695,6 +695,70 @@ describe("AttachmentsWidget — preview affordance", () => {
       screen.getByRole("button", { name: `Download ${ZIP_ATTACHMENT.filename}` }),
     ).toBeInTheDocument();
   });
+
+  it("without onDownload, Download stays visible but disabled with a permission tooltip", async () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness attachments={[IMAGE_ATTACHMENT]} />,
+    );
+    const button = screen.getByRole("button", {
+      name: `Download ${IMAGE_ATTACHMENT.filename}`,
+    });
+    expect(button).toBeDisabled();
+    fireEvent.mouseOver(button);
+    expect(
+      await screen.findByText(
+        "You don't have permission to download attachments.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("AttachmentsWidget — Download all", () => {
+  const ONE_ATTACHMENT: CaseAttachment = {
+    id: "att-1",
+    filename: "screenshot.png",
+    size: 2048,
+    contentType: "image/png",
+    uploadedBy: "Jane Doe",
+    uploadedAt: "2026-01-01T00:00:00Z",
+  };
+
+  it("is enabled and calls onDownloadAll when supplied", () => {
+    const onDownloadAll = vi.fn();
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[ONE_ATTACHMENT]}
+        onDownloadAll={onDownloadAll}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Download all" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(onDownloadAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("without onDownloadAll, stays visible but disabled with a permission tooltip", async () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness attachments={[ONE_ATTACHMENT]} />,
+    );
+    const button = screen.getByRole("button", { name: "Download all" });
+    expect(button).toBeDisabled();
+    fireEvent.mouseOver(button);
+    expect(
+      await screen.findByText(
+        "You don't have permission to download attachments.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("stays disabled with no attachments even when onDownloadAll is supplied", () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness attachments={[]} onDownloadAll={vi.fn()} />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Download all" }),
+    ).toBeDisabled();
+  });
 });
 
 describe("AttachmentsWidget — upload progress", () => {

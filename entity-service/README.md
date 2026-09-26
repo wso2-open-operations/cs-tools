@@ -29,7 +29,7 @@ entity-service/
 │   │   ├── interfaces.go        # CaseRepository and CaseService interfaces
 │   │   ├── entity_service.go    # Business logic — pagination, validation
 │   │   ├── event_publisher_service.go # EventPublisherService.Publish — builds the envelope, publishes it, records a failure if Event Hub doesn't ack (wired in via routes.go; called from snCaseService.CreateCase and snIncidentService.CreateIncident)
-│   │   └── sla_clock_service.go # SLAClockService — register/get/mark-tier-reached for a case's SLA clocks
+│   │   └── sla_status_service.go # SLAStatusService — lists currently-active SLA clocks, read live from the "sla" table
 │   ├── repository/
 │   │   ├── entity_repo.go       # SQL queries against the "case" table
 │   │   └── tx.go                # Transaction helper
@@ -189,57 +189,105 @@ rather than async.
 | `EVENT_HUB_CONNECTION_STRING` | The namespace's Shared Access Policy connection string — must be namespace-scoped (no `EntityPath`), not scoped to a single Event Hub (required once `EVENT_HUB_BROKER` is set) |
 | `EVENT_HUB_TOPIC` | Event Hub (Kafka topic) name, e.g. `case-events` — must match `csm-notification-service`'s own `EVENT_HUB_TOPIC` (required once `EVENT_HUB_BROKER` is set) |
 | `EVENT_PUBLISHING_ENABLED` | Set to `true` to actually publish. Defaults to `false` — safe by default even with Event Hub fully configured (optional) |
-| `SUPPORT_ENGINEER_ROLE` | ServiceNow role name whose presence on a case comment's author completes the case's "response" SLA clock — see "SLA clocks" below. No default; unset means that specific completion path never fires (optional) |
+| `AUTH_ISSUER` / `AUTH_JWKS_URL` | Asgardeo issuer and JWKS URL for validating the `x-user-id-token` user ID token -- always on, there is no flag to disable it. Required; the JWKS must load at startup or the process exits. A present-but-invalid `x-user-id-token` is a 401 on every route. `x-jwt-assertion` (the client-credentials assertion) is decoded only, never verified against these -- see entity-service's `CLAUDE.md` ("Token validation and caller-scoped access") for why |
+| `AUTH_USER_TOKEN_AUDIENCES` | Comma-separated client ids an ID token's `aud` must contain to count as a user token; required |
+| `AUTH_CLOCK_SKEW` | Leeway for `exp` (default `30s`) |
+| `AUTH_INTERNAL_CLIENT_IDS` | Comma-separated Asgardeo application client ids trusted with unconditional full access to every project and case (checked against a client-credentials `x-jwt-assertion` token), regardless of any `x-user-id-token` the same request also carries. A caller not in this list is resolved purely from its `x-user-id-token` instead. Which real client ids go here is a deployment decision, but a service that calls the scoped endpoints directly with only a client-credentials token gets a 401 unless it is listed (optional) |
 | `CUSTOMER_ROLES` | Comma-separated ServiceNow role names whose presence on a case comment's author marks it a customer reply — see "Customer reply state transition" below. No default; unset means that path never fires (optional) |
 
-### SLA clocks
+### Product-consumption provisioning state
 
-`sla_clocks` (migration `000042`, display columns added in `000046`) durably tracks per-case SLA
-timers — `caseId`/`clockType`, `startedAt`/`dueAt`, up to three tier-crossing timestamps
-(`reached50At`/`reached75At`/`reached100At`), `pausedAt`, and eight display-only fields (case
-number/WSO2 case id/title/type/product/team/priority/state, a point-in-time snapshot from
-registration). Has no ServiceNow equivalent — always backed by Postgres regardless of
-`DATA_SOURCE`, same as `event_publish_failures`. `clockType` is a caller-defined string, not a
-fixed enum, but only three are actually used: `response`, `workaround`, `resolution`.
+Where a project has got to in the product-consumption provisioning flow — the Choreo application
+created for it, that application's OAuth2 credentials, and the two subscription secret keys a
+deployment's license is built from — is stored on the **`project` table**, mirroring the ServiceNow
+`customer_project` record field for field (`choreo_application_status`, `choreo_application_id`,
+`product_consumption_client_id`, `product_consumption_client_secret`, and `product_consumption_primary_secret_key`/`product_consumption_secondary_secret_key` from migration
+`000075`). Exposed at `GET /projects/{id}/consumption` and `PATCH /projects/{id}/consumption`.
 
-Durations come from WSO2's own [support policy](https://wso2.com/licenses/support-policy/6.0)
-(Enterprise plan), keyed by the case's severity — see `internal/service/sla_policy.go`. Every
-case gets a `response` clock; `LOW` severity gets only that one (no fixed
-Workaround/Resolution SLA, "best efforts"). `sn_case_service.go`'s `CreateCase` publishes
-`sla.clock.register` (consumed by `csm-notification-service`'s SLA timer engine,
-`internal/slaengine`, which registers the clock via `POST /cases/{caseId}/sla-clocks` and starts
-tracking 50/75/100% elapsed) unconditionally — independent of whether the case has any watchers
-to email.
+These two routes are gated on a database being configured, **not** on the data source: the flow
+mirrors its state into Postgres alongside ServiceNow, and the deployments that need it run
+`DATA_SOURCE=servicenow`, so gating on the data source would disable the feature exactly where it
+is used. ServiceNow remains the source of truth for the status itself, read through the Choreo
+subscription operation (`internal/choreosubscription`); Postgres is written alongside and any
+divergence is logged.
 
-Pause/resume/completion are direct, in-process calls from `sn_case_service.go` to
-`SLAClockService` — no Event Hub round trip:
+`POST /projects/{id}/deployments/{deploymentId}/license` is registered **independently of the
+database**. Issuing a licence reads status from ServiceNow and runs through the Choreo operation;
+Postgres is touched only to mirror state, which is best-effort and skipped entirely when there is
+no repository. It needs the operation's own configuration instead — see the deployment-licence
+variables below.
 
-- A case state change to `Awaiting Info`/`Solution Proposed` pauses `workaround`+`resolution`;
-  any other state resumes both.
-- The case closing completes `resolution` (claims all three tiers via
-  `SetSLAClockTierReached`) and pauses `workaround` — `workaround` has no completion trigger
-  wired up yet (see the `// TODO` in `applyCaseStateSLAEffects`).
-- A customer-visible comment (not a work note) from a user holding the `SUPPORT_ENGINEER_ROLE`
-  role (looked up via `SNUserService.SearchUsers`, filtered by the comment author's email)
-  completes `response`.
+The status is a step number, and it only ever moves forward: `1` pending, `2` application created,
+`3` subscribed, `4` credentials generated, `5` secret keys generated. The flow is resumable by
+design — a caller reads the current status and runs only the steps above it — so a write whose
+status is not ahead of what is stored is a no-op that returns the stored state, not an error. This
+matters: applying an out-of-order write would re-run a side-effecting step and create a **second**
+Choreo application for a customer who already has one.
 
-`csm-notification-service`'s SLA timer engine reads a clock back via
-`GET /cases/{caseId}/sla-clocks/{clockType}` to check `pausedOn` before firing a tier, and
-records a crossed tier idempotently via `PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier}`
-with `{"status": "reached"}` — the same endpoint "complete early" reuses to pre-claim all three
-tiers at once, which is what suppresses a later spurious breach alert for an already-satisfied
-clock. On a genuine breach it sends a Google Chat card directly (not routed through this
-service).
+All three routes are scoped to the caller. The project id comes from the request path, so a caller
+who cannot see a project can neither read its provisioning state nor drive provisioning for it; the
+refusal is a 404, never a 403, so a project's existence is not revealed either.
+
+Credentials are never returned by either endpoint — the read reports only
+`hasConsumerSecret`/`hasSecretKeys`. They are stored as supplied, which is how the ServiceNow sync
+already writes these same columns; the observed values there are plain 64-character keys and short
+client secrets, not ciphertext.
+
+This service deliberately does not encrypt its own writes. Doing so alone would put two formats in
+one column that cannot be told apart on read — a hex key is also valid base64, so no heuristic
+recovers which writer produced a given value — and a row written here would stop matching the
+ServiceNow record the project row mirrors, where `ProductConsumptionUtils.updateProject` assigns
+each value straight from its payload.
+
+It would also have to be undone before licence issuance could move here: ServiceNow signs a licence
+by reading these four values back in the clear (`_getDeployment`), and refuses to sign unless every
+one is present.
+
+Encrypting these at rest is worth doing, but it has to happen across every writer including the
+sync, which is a platform change rather than this service's to make. These routes need no
+configuration of their own beyond `DB_*`.
+
+**License issuance still runs in ServiceNow.** This service drives the five-step provisioning
+sequence through the Choreo subscription operation and returns the licence ServiceNow issues; the
+signed payload is passed through byte for byte, never reshaped, because the customer's product
+verifies an HMAC computed over it and a dropped field breaks that verification.
+
+Moving issuance out of ServiceNow is not in scope here. It is gated on a licence-format transition
+plan, since changing the payload changes the signature and invalidates every licence a deployed
+customer product already holds.
+
+### SLA status
+
+`GET /sla-status` reads SLA state live from the `sla` table (migration `000052`), which
+ServiceNow's own SLA engine populates via sync — real `businessElapsedPercent`/`hasBreached`/
+`stage` per `(work_item, sla_policy)`. Has no ServiceNow equivalent of its own — always backed
+by Postgres regardless of `DATA_SOURCE`, same as `event_publish_failures`. `clockType` is
+`response`/`workaround`/`resolution`, lower-cased from `sla_policy.target`.
+
+Returns every currently-active clock across every case-like work item in one paginated list
+(default limit `500`, max `2000` — much higher than this service's other paginated endpoints,
+since the one real caller is `csm-notification-service` polling periodically, not a UI list).
+There is no registration step and nothing for this service to schedule or track in-process any
+more: the synced `sla` row already reflects pauses, completions, and breaches, because
+ServiceNow's own SLA engine reacted to those events on its own side. This replaces an earlier
+`sla_clocks` design (a hand-registered clock per case, using a hardcoded severity->duration
+guess) that existed before the `sla` table did — see `CLAUDE.md`'s "SLA status" section for
+the full history.
+
+`csm-notification-service`'s SLA engine polls `GET /sla-status` periodically and diffs
+`businessElapsedPercent` against what it already alerted on itself (its own Redis state, not
+anything this service tracks), sending a Google Chat card directly on a newly-crossed tier —
+not routed through this service.
 
 ### Customer reply state transition
 
 When a customer-visible comment (not a work note) from a user holding one of the `CUSTOMER_ROLES`
-roles (looked up the same way as `SUPPORT_ENGINEER_ROLE`, via `SNUserService.SearchUsers` filtered
-by the comment author's email) arrives while the case is `Awaiting Info`/`Solution Proposed`,
-`sn_case_service.go`'s `applyCustomerReplyStateTransition` moves it back to `Waiting on WSO2` — a
-customer reply means it's WSO2's turn to act again. Implemented as a plain in-process call to this
-service's own `UpdateCase`, not a separate ServiceNow PATCH — so it gets `case.status_changed`
-publishing and the SLA pause/resume side effects above for free, with no duplicated logic.
+roles (looked up via `SNUserService.SearchUsers`, filtered by the comment author's email) arrives
+while the case is `Awaiting Info`/`Solution Proposed`, `sn_case_service.go`'s
+`applyCustomerReplyStateTransition` moves it back to `Waiting on WSO2` — a customer reply means
+it's WSO2's turn to act again. Implemented as a plain in-process call to this service's own
+`UpdateCase`, not a separate ServiceNow PATCH — so it gets `case.status_changed` publishing for
+free, with no duplicated logic.
 
 ### Scheduled task runs
 

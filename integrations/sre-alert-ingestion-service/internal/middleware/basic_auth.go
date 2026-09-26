@@ -17,6 +17,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,38 @@ const basicAuthRealm = "sre-alert-ingestion-service"
 // is only ever compared against itself's own hash, which always matches, so
 // this never grants access.
 const dummyAuthPassword = "sre-alert-ingestion-service-dummy-password-for-timing-parity" // #nosec G101 -- not a credential, see doc comment above
+
+// authenticatedUsernameKey is the unexported context key BasicAuth stores
+// the successfully-authenticated username under, following this package's
+// existing context-key convention (see correlation.go's correlationIDKey) —
+// an unexported empty-struct type so no other package can accidentally
+// collide with or forge this key.
+type authenticatedUsernameKey struct{}
+
+// AuthenticatedUsernameFromContext returns the username BasicAuth
+// authenticated this request as, and true, or ("", false) if BasicAuth never
+// ran against ctx (or the request was rejected before reaching the wrapped
+// handler). Handlers behind this middleware use this to cross-check the
+// identity they authenticated as against a claimed value in the request
+// itself (e.g. AlertRequest.Source) — see internal/handler.AlertHandler's
+// requireAuthenticatedSource for why that check exists: HTTP Basic Auth on
+// its own only proves *who* is calling, not that the caller is entitled to
+// claim any particular Source.
+func AuthenticatedUsernameFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(authenticatedUsernameKey{}).(string)
+	return v, ok
+}
+
+// WithAuthenticatedUsername returns a copy of ctx carrying username as the
+// authenticated identity, retrievable via AuthenticatedUsernameFromContext —
+// the same context key BasicAuth itself sets on a successful auth. This
+// exists for handler-level unit tests (see internal/handler's alerts_test.go
+// and adapter_*_test.go) that construct *http.Request values directly rather
+// than routing them through the real BasicAuth middleware, mirroring
+// WithCorrelationID's identical role for CorrelationID in this same package.
+func WithAuthenticatedUsername(ctx context.Context, username string) context.Context {
+	return context.WithValue(ctx, authenticatedUsernameKey{}, username)
+}
 
 // BasicAuthUsers is the parsed, ready-to-check form of SRE_ALERT_AUTH_USERS:
 // username -> bcrypt hash of that username's password.
@@ -155,7 +188,8 @@ func BasicAuth(users BasicAuthUsers) func(http.Handler) http.Handler {
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), authenticatedUsernameKey{}, username)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

@@ -94,17 +94,17 @@ func MapProjectFilterOptions(m entity.ProjectMetadataResponse) ProjectFilterOpti
 	}
 
 	return ProjectFilterOptions{
-		CaseStates:                  mapChoiceListItems(m.CaseStates),
-		Severities:                  mapChoiceListItems(m.Severities),
-		IssueTypes:                  mapChoiceListItems(m.IssueTypes),
-		DeploymentTypes:             mapChoiceListItems(m.DeploymentTypes),
+		CaseStates:                  normalizeCaseStateChoices(mapChoiceListItems(m.CaseStates)),
+		Severities:                  normalizeCaseSeverityChoices(mapChoiceListItems(m.Severities)),
+		IssueTypes:                  normalizeCaseIssueTypeChoices(mapChoiceListItems(m.IssueTypes)),
+		DeploymentTypes:             normalizeDeploymentTypeChoices(mapChoiceListItems(m.DeploymentTypes)),
 		CallRequestStates:           mapChoiceListItems(m.CallRequestStates),
 		ChangeRequestStates:         changeRequestStates,
 		ChangeRequestImpacts:        mapChoiceListItems(m.ChangeRequestImpacts),
 		ConversationStates:          mapChoiceListItems(m.ConversationStates),
 		CaseTypes:                   mapReferenceTableItems(m.CaseTypes),
 		TimeCardStates:              mapChoiceListItems(m.TimeCardStates),
-		EngagementTypes:             mapChoiceListItems(m.EngagementTypes),
+		EngagementTypes:             normalizeCaseEngagementTypeChoices(mapChoiceListItems(m.EngagementTypes)),
 		EngagementPaymentTypes:      mapChoiceListItems(m.EngagementPaymentTypes),
 		SeverityBasedAllocationTime: m.SeverityBasedAllocationTime,
 	}
@@ -136,7 +136,7 @@ type ProjectFeatures struct {
 // ProjectMetadataResponse.
 func MapProjectFeatures(m entity.ProjectMetadataResponse) ProjectFeatures {
 	return ProjectFeatures{
-		AcceptedSeverityValues:         mapChoiceListItems(m.Features.AcceptedSeverityValues),
+		AcceptedSeverityValues:         normalizeCaseSeverityChoices(mapChoiceListItems(m.Features.AcceptedSeverityValues)),
 		HasServiceRequestWriteAccess:   m.Features.HasServiceRequestWriteAccess,
 		HasServiceRequestReadAccess:    m.Features.HasServiceRequestReadAccess,
 		HasSraWriteAccess:              m.Features.HasSraWriteAccess,
@@ -278,7 +278,7 @@ type CasesTrend struct {
 func mapCasesTrend(trends []entity.CasesTrend) []CasesTrend {
 	out := make([]CasesTrend, 0, len(trends))
 	for _, t := range trends {
-		out = append(out, CasesTrend{Period: t.Period, Severities: mapChoiceListItems(t.Severities)})
+		out = append(out, CasesTrend{Period: t.Period, Severities: normalizeCaseSeverityChoices(mapChoiceListItems(t.Severities))})
 	}
 	return out
 }
@@ -312,9 +312,9 @@ func MapProjectCaseStats(r entity.ProjectCaseStatsResponse) ProjectCaseStats {
 		AverageResponseTime:            r.AverageResponseTime,
 		ResolvedCases:                  mapResolvedCountBreakdown(r.ResolvedCount),
 		ChangeRate:                     CaseStatsChangeRate(r.ChangeRate),
-		StateCount:                     mapChoiceListItems(r.StateCount),
-		SeverityCount:                  mapChoiceListItems(r.SeverityCount),
-		OutstandingSeverityCount:       mapChoiceListItems(r.OutstandingSeverityCount),
+		StateCount:                     normalizeCaseStateChoices(mapChoiceListItems(r.StateCount)),
+		SeverityCount:                  normalizeCaseSeverityChoices(mapChoiceListItems(r.SeverityCount)),
+		OutstandingSeverityCount:       normalizeCaseSeverityChoices(mapChoiceListItems(r.OutstandingSeverityCount)),
 		CaseTypeCount:                  mapReferenceTableItems(r.CaseTypeCount),
 		CasesTrend:                     mapCasesTrend(r.CasesTrend),
 		EngagementTypeCount:            mapChoiceListItems(r.EngagementTypeCount),

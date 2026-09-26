@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -33,6 +34,7 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { usePostProblem } from "@features/csm-operations/api/usePostProblem";
 import { useSearchCasesForSelect } from "@features/csm-operations/api/useSearchCasesForSelect";
 import { useSearchIncidentsForSelect } from "@features/csm-operations/api/useSearchIncidentsForSelect";
+import type { CreateProblemFromIncidentNavState } from "@features/csm-operations/utils/problems";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import type {
   BeCaseSearchView,
@@ -111,15 +113,48 @@ export default function CreateProblemPage(): JSX.Element {
   // pages), so Back/Cancel return there instead of the hardcoded problems
   // tab, and the newly created problem's own Back button (reading this same
   // convention) returns there too.
-  const backState = useLocation().state as { from?: string } | undefined;
+  const location = useLocation();
+  const backState = location.state as { from?: string } | undefined;
   const backTarget = backState?.from ?? OPERATIONS_PROBLEMS_PATH;
 
-  const [subject, setSubject] = useState("");
+  // Set when opened from an incident's own "Create problem" action, which
+  // navigates here with router state so the incident's id carries over as
+  // the new problem's `primaryIncidentId` without a query-string round trip.
+  // See CsmIncidentDetailPage.tsx's Create menu. Discriminated by `incidentId`
+  // rather than trusting the cast shape alone — a plain `{ from: ... }`
+  // navigation (opened from the Problems list, not an incident) is still a
+  // truthy object, so an unchecked cast would render the "Opened from an
+  // incident…" notice/prefill even when there's no incident at all.
+  const rawIncidentState = location.state as
+    | CreateProblemFromIncidentNavState
+    | { from?: string }
+    | undefined;
+  const originIncidentState =
+    rawIncidentState && "incidentId" in rawIncidentState
+      ? rawIncidentState
+      : undefined;
+
+  const [subject, setSubject] = useState(
+    originIncidentState?.incidentSubject
+      ? `Problem from incident ${originIncidentState.incidentNumber ?? originIncidentState.incidentId}: ${originIncidentState.incidentSubject}`
+      : "",
+  );
   const [category, setCategory] = useState<string>(UNSET);
   const [subcategory, setSubcategory] = useState<string>(UNSET);
   const [originCaseId, setOriginCaseId] = useState("");
-  const [primaryIncidentId, setPrimaryIncidentId] = useState("");
+  const [primaryIncidentId, setPrimaryIncidentId] = useState(
+    originIncidentState?.incidentId ?? "",
+  );
   const [touched, setTouched] = useState(false);
+
+  // Display label for a pre-filled `primaryIncidentId` above until a fresh
+  // search for the same id resolves one from the backend (see
+  // AsyncEntitySelect's `knownLabel`).
+  const primaryIncidentKnownLabel = originIncidentState
+    ? ([originIncidentState.incidentNumber, originIncidentState.incidentSubject]
+        .filter(Boolean)
+        .join(" — ") || originIncidentState.incidentId)
+    : undefined;
 
   const subcategoryOptions = category
     ? (PROBLEM_SUBCATEGORY_OPTIONS_BY_CATEGORY[category] ?? [])
@@ -180,6 +215,13 @@ export default function CreateProblemPage(): JSX.Element {
       <Typography variant="h5" sx={{ mb: 2 }}>
         New problem
       </Typography>
+
+      {originIncidentState && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Opened from {originIncidentState.incidentNumber ?? "an incident"} — it's pre-filled
+          below as the primary incident.
+        </Alert>
+      )}
 
       <Card variant="outlined" sx={{ p: 3 }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -287,6 +329,7 @@ export default function CreateProblemPage(): JSX.Element {
                 // have an id (server-populated), so this is never null here.
                 getId={(i) => i.id!}
                 getLabel={incidentSearchLabel}
+                knownLabel={primaryIncidentKnownLabel}
               />
             </Box>
           </Box>

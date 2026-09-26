@@ -98,7 +98,7 @@ func seedCatalogueRegistry(t *testing.T, hotReload bool) string {
 }
 
 func TestGetFilterPresets(t *testing.T) {
-	h := NewDashboardHandler()
+	h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 
 	t.Run("unauthenticated", func(t *testing.T) {
 		w := httptest.NewRecorder()
@@ -165,7 +165,7 @@ func TestGetFilterPresets(t *testing.T) {
 }
 
 func TestGetSharedSections(t *testing.T) {
-	h := NewDashboardHandler()
+	h := NewDashboardHandler(NewAccessGuard(testAccessConfig()))
 
 	t.Run("unauthenticated", func(t *testing.T) {
 		w := httptest.NewRecorder()

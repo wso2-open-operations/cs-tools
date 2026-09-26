@@ -47,6 +47,23 @@ vi.mock("@features/csm-projects/components/WorkItemsTab", () => ({
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: vi.fn(), get: vi.fn(() => Promise.resolve(null)) }),
 }));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
+// This page now reads usePortalAccess (to gate the "Create" split-button),
+// which transitively imports the real backend client/config -- mocked
+// above. Default to full write access; the gating test below overrides it.
+let mockCanWrite = true;
+vi.mock("@context/current-user/usePortalAccess", () => ({
+  usePortalAccess: () => ({
+    hasAnyRole: true,
+    canEscalate: true,
+    canDownloadAttachment: true,
+    canUseOperations: true,
+    canUseTimeCardsAndUpdates: true,
+    canWrite: mockCanWrite,
+  }),
+}));
 
 import CsmProjectDetailPage from "@features/csm-projects/pages/CsmProjectDetailPage";
 
@@ -109,6 +126,7 @@ function renderPage(initialEntry = "/customers/projects/proj-1") {
 
 describe("CsmProjectDetailPage — tab state", () => {
   beforeEach(() => {
+    mockCanWrite = true;
     mockUseGetProject.mockReturnValue({
       data: PROJECT,
       isLoading: false,
@@ -163,6 +181,12 @@ describe("CsmProjectDetailPage — tab state", () => {
         from: "/customers/projects/proj-1?tab=workItems&subTab=engagements",
       }),
     );
+  });
+
+  it("hides the Create split-button entirely for a caller without write access", () => {
+    mockCanWrite = false;
+    renderPage();
+    expect(screen.queryByRole("button", { name: /create/i })).not.toBeInTheDocument();
   });
 });
 

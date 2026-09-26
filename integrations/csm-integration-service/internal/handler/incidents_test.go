@@ -103,6 +103,118 @@ func TestCreateIncident(t *testing.T) {
 	})
 }
 
+func TestPatchIncident(t *testing.T) {
+	const incidentID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("rejects empty incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/", strings.NewReader(`{"workNotes":"note"}`))
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID incident ID", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/incident-42", strings.NewReader(`{"workNotes":"note"}`))
+		r.SetPathValue("id", "incident-42")
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`not-json`))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty body", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, nil)
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body verbatim and returns upstream response", func(t *testing.T) {
+		var capturedIncidentID string
+		var capturedBody []byte
+		reqBody := `{"workNotes":"Investigating now."}`
+		client := &mockEntityIncidentClient{
+			updateIncidentFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedIncidentID = id
+				capturedBody = body
+				return []byte(`{"message":"Incident updated successfully","incident":{"id":"` + incidentID + `","workNotes":"Investigating now."}}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(reqBody))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedIncidentID != incidentID {
+			t.Errorf("incidentID = %q, want %q", capturedIncidentID, incidentID)
+		}
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream body = %q, want verbatim %q", string(capturedBody), reqBody)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "Incident updated successfully" {
+			t.Errorf("message = %v, want %v", resp["message"], "Incident updated successfully")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update incident.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityIncidentClient{
+					updateIncidentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewIncidentHandler(client)
+				r := httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(`{"workNotes":"note"}`))
+				r.SetPathValue("id", incidentID)
+				w := httptest.NewRecorder()
+				h.PatchIncident(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchIncidents(t *testing.T) {
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewIncidentHandler(&mockEntityIncidentClient{})

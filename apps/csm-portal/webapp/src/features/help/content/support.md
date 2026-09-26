@@ -142,6 +142,11 @@ Comments in the timeline are color/role-tagged (Customer, WSO2, System, AI Agent
 scan who said what at a glance, and each has a permalink (click the timestamp) for referencing
 a specific comment.
 
+A comment's own author, or an admin, can **edit** or **delete** it from the **⋮** menu on that
+comment. Editing shows an "(edited)" marker afterward; deleting is a soft, audited removal, not
+a hard delete — the customer never sees a deleted comment at all, and it's shown to other
+internal users as removed. Only an admin can still read a deleted comment's original text.
+
 Moving a case to **Awaiting info** or **Solution proposed** while it has no public comment yet
 (only internal notes, or none at all) shows a confirm dialog first — the customer would
 otherwise see the case pause on them, or a solution appear, with no explanation of why or

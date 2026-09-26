@@ -194,15 +194,19 @@ func TestPatchDeployment_RefusalsAreIndistinguishable(t *testing.T) {
 // deployment beyond the first page must still be found, or a project with many
 // deployments would start refusing legitimate updates.
 func TestPatchDeployment_FindsDeploymentOnALaterPage(t *testing.T) {
-	ids := make([]string, 0, 250)
-	for i := range 249 {
+	// Sized off the real constant (not a hardcoded page size) so this stays
+	// correct if deploymentScopeCheckPageLimit ever changes again: two full
+	// pages of filler ids, then the target as the sole entry on page three.
+	filler := 2 * deploymentScopeCheckPageLimit
+	ids := make([]string, 0, filler+1)
+	for i := range filler {
 		ids = append(ids, uuidForIndex(i))
 	}
-	ids = append(ids, scopeDeploymentID) // last of 250, well past page one
+	ids = append(ids, scopeDeploymentID) // well past page one
 
 	fake := &scopeFakeEntity{
 		byProject: map[string][]string{scopeProjectID: ids},
-		pageLimit: 100,
+		pageLimit: deploymentScopeCheckPageLimit,
 	}
 
 	w := httptest.NewRecorder()
@@ -213,7 +217,7 @@ func TestPatchDeployment_FindsDeploymentOnALaterPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
 	}
 	if fake.searchCalls != 3 {
-		t.Errorf("searchCalls = %d, want 3 pages of 100", fake.searchCalls)
+		t.Errorf("searchCalls = %d, want 3 pages of %d", fake.searchCalls, deploymentScopeCheckPageLimit)
 	}
 }
 

@@ -29,7 +29,12 @@ export interface AsyncEntitySelectProps<T> {
   placeholder?: string;
   /** Selected entity id ("" when none). */
   value: string;
-  onChange: (next: string) => void;
+  /** Called with the selected entity id, plus (when available) the full
+   * matching item `T` from the current search results — e.g. so a caller can
+   * read a field off the selected entity beyond just its id/label. `item` is
+   * `undefined` when cleared, or when the selection was seeded from `value`/
+   * `knownLabel` rather than a live search result. */
+  onChange: (next: string, item?: T) => void;
   disabled?: boolean;
   helperText?: string;
   /** Type-ahead search hook — disabled externally while the dropdown is
@@ -137,7 +142,8 @@ export default function AsyncEntitySelect<T>({
       isOptionEqualToValue={(opt, val) => opt.id === val.id}
       onChange={(_event, next) => {
         setPicked(next);
-        onChange(next ? next.id : "");
+        const matched = next ? items.find((item) => getId(item) === next.id) : undefined;
+        onChange(next ? next.id : "", matched);
       }}
       onInputChange={(_event, val, reason) => {
         if (reason === "input") setSearchTerm(val);

@@ -33,9 +33,9 @@ import (
 type EventPublishFailureRepository interface {
 	// Create inserts a new unresolved failure row.
 	Create(ctx context.Context, req domain.CreateEventPublishFailureRequest) (domain.EventPublishFailure, error)
-	// MarkResolved sets id's resolved_at, and returns the updated row.
+	// MarkResolved sets id's resolved_on, and returns the updated row.
 	// Idempotent: calling it again on an already-resolved row is a no-op
-	// success that preserves the original resolved_at (there is no
+	// success that preserves the original resolved_on (there is no
 	// meaningful "unresolve" — a caller retrying its own HTTP call is not a
 	// race against a different caller the way event_outbox's Claim was).
 	// Returns a *apierror.NotFoundError if id does not exist.
@@ -58,7 +58,7 @@ func NewEventPublishFailureRepository(db *pgxpool.Pool) EventPublishFailureRepos
 // eventPublishFailureColumns is the column list shared by every query that
 // returns a full row, kept in one place so Create/MarkResolved/Search can't
 // drift out of sync with scanEventPublishFailure's field order.
-const eventPublishFailureColumns = `id, event_type, entity_id, payload, error, created_at, resolved_at`
+const eventPublishFailureColumns = `id, event_type, entity_id, payload, error, created_on, resolved_on`
 
 func scanEventPublishFailure(row pgx.Row) (domain.EventPublishFailure, error) {
 	var f domain.EventPublishFailure
@@ -89,7 +89,7 @@ func (r *eventPublishFailureRepo) Create(ctx context.Context, req domain.CreateE
 func (r *eventPublishFailureRepo) MarkResolved(ctx context.Context, id string) (domain.EventPublishFailure, error) {
 	query := `
 		UPDATE event_publish_failures
-		SET resolved_at = COALESCE(resolved_at, NOW())
+		SET resolved_on = COALESCE(resolved_on, NOW())
 		WHERE id = $1
 		RETURNING ` + eventPublishFailureColumns
 
@@ -109,9 +109,9 @@ func (r *eventPublishFailureRepo) Search(ctx context.Context, req domain.SearchE
 	args := []any{req.Pagination.Limit, req.Pagination.Offset}
 	if req.Filters.Resolved != nil {
 		if *req.Filters.Resolved {
-			whereClause = "WHERE resolved_at IS NOT NULL"
+			whereClause = "WHERE resolved_on IS NOT NULL"
 		} else {
-			whereClause = "WHERE resolved_at IS NULL"
+			whereClause = "WHERE resolved_on IS NULL"
 		}
 	}
 
@@ -120,7 +120,7 @@ func (r *eventPublishFailureRepo) Search(ctx context.Context, req domain.SearchE
 		SELECT ` + eventPublishFailureColumns + `
 		FROM event_publish_failures
 		` + whereClause + `
-		ORDER BY created_at DESC, id
+		ORDER BY created_on DESC, id
 		LIMIT $1 OFFSET $2`
 
 	var total int

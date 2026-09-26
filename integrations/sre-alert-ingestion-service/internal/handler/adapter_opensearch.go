@@ -109,6 +109,10 @@ func (h *AlertHandler) CreateAlertFromOpenSearch(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if !h.requireAuthenticatedSource(w, r, req.Source) {
+		return
+	}
+
 	id, alertNumber, err := h.enqueueAlert(r.Context(), req)
 	h.writeEnqueueResult(w, r, id, alertNumber, err)
 }

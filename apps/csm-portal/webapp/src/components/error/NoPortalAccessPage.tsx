@@ -25,7 +25,8 @@ interface NoPortalAccessPageProps {
 
 /**
  * Shown in place of the whole app shell when `GET /users/me` comes back
- * 401/403 and stays that way even after `useAuthApiClient`'s own
+ * 401/403, or succeeds but the user holds no portal role (empty `roles`), and
+ * the 401/403 case stays that way even after `useAuthApiClient`'s own
  * recover-or-redirect-to-sign-in chain has had its chance — see
  * `AuthGuard.tsx`'s `AuthorizedAppShell`. Deliberately not framed as an
  * "error" (no illustration, no logout link): the copy is a plain,

@@ -20,37 +20,57 @@ repos:
 taxonomy:
   statuses:
     # Product Team Side — accrues SLA
-    - { name: "Open",                  category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 10 }
-    - { name: "In Progress",           category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 20 }
-    - { name: "WOW",                   category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 30 }
-    - { name: "Reopened",              category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 40 }
-    - { name: "Waiting-on-PC",         category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 41 }
-    - { name: "POC Pending",           category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 42 }
-    - { name: "Requests",              category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 43 }
-    - { name: "Todo",                  category: PRODUCT_SIDE, accruesSla: true,  isTerminal: false, sortOrder: 44 }
+    - { name: "Open",                              category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 10 }
+    - { name: "In Progress",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 20 }
+    - { name: "WOW",                               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 30 }
+    - { name: "Reopened",                          category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 40 }
+    - { name: "Waiting-on-PC",                     category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 50 }
+    - { name: "POC Pending",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 60 }
+    - { name: "Requests",                          category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 70 }
+    - { name: "Todo",                              category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 80 }
+    - { name: "Proactive Pending",                 category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 90 }
+    - { name: "Doc Pending",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 100 }
+    - { name: "Approved / Not Started",            category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 110 }
+    - { name: "Pending Approval",                  category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 120 }
+    - { name: "Backlog",                           category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 130 }
+    - { name: "Ready",                             category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 140 }
+    - { name: "Approved / U2",                     category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 150 }
+    - { name: "U2 Pipeline",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 160 }
+    - { name: "Trasnferred to Dev Team",           category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 170 }
+    - { name: "PR Sent / In Review",               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 180 }
+    - { name: "Fix Deployed to Dev",               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 190 }
+    - { name: "Fix Deployed to Stage",             category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 200 }
+    - { name: "Fix Deployed to Prod",              category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 210 }
+    - { name: "Waiting-on-release",                category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 220 }
+    - { name: "Only-Pending-Forward-Port",         category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 230 }
+    - { name: "Waiting on Product RR Team",        category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 240 }
+    - { name: "OVERDUE",                           category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 250 }
+    - { name: "Untriaged",                         category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 260 }
+    - { name: "Trasnsferred to SRE",               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 270 }
+    - { name: "Waiting on SRE",                    category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 280 }
+    - { name: "Approved / Future Roadmap",         category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 290 }
+    - { name: "Under Discussion (features)",       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 300 }
+    - { name: "ETA Shared",                        category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 310 }
     # CS Team Side — pauses (no accrual)
-    - { name: "WOC",                   category: CS_SIDE,      accruesSla: false, isTerminal: false, sortOrder: 50 }
-    - { name: "Pending Patch Queue",   category: CS_SIDE,      accruesSla: false, isTerminal: false, sortOrder: 60 }
+    - { name: "WOC",                               category: CS_SIDE,      accruesSla: false,  isTerminal: false,  sortOrder: 320 }
+    - { name: "Pending Patch Queue",               category: CS_SIDE,      accruesSla: false,  isTerminal: false,  sortOrder: 330 }
+    - { name: "Waiting for Customer Confirmation", category: CS_SIDE,      accruesSla: false,  isTerminal: false,  sortOrder: 340 }
     # Other — pauses
-    - { name: "Added to Update Queue", category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 70 }
-    - { name: "ETA Shared",            category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 80 }
-    - { name: "Proactive Pending",     category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 90 }
-    - { name: "On Hold",               category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 100 }
+    - { name: "Added to Update Queue",             category: OTHER,        accruesSla: false,  isTerminal: false,  sortOrder: 350 }
+    - { name: "On Hold",                           category: OTHER,        accruesSla: false,  isTerminal: false,  sortOrder: 360 }
     # Other + terminal — pauses, excluded from alerts
-    - { name: "Resolved",              category: OTHER,        accruesSla: false, isTerminal: true,  sortOrder: 110 }
-    - { name: "Duplicate",             category: OTHER,        accruesSla: false, isTerminal: true,  sortOrder: 120 }
+    - { name: "Resolved",                          category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 370 }
+    - { name: "Duplicate",                         category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 380 }
+    - { name: "Done",                              category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 390 }
+    - { name: "Closed",                            category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 400 }
+    - { name: "Rejected",                          category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 410 }
     # Transient empty status (item briefly removed from board) — pauses
-    - { name: "",                      category: TRANSIENT,    accruesSla: false, isTerminal: false, sortOrder: 999 }
-    # Real-board statuses discovered in the real-data validation round.
-    # Decision A: the three "confirm with board owner" rows keep provisional
-    # OTHER/pause behavior (today's effective behavior). Data-only to change.
-    - { name: "Done",                  category: OTHER,        accruesSla: false, isTerminal: true,  sortOrder: 130 }
-    - { name: "Doc Pending",           category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 140 } # confirm with board owner
-    - { name: "Approved / Not Started", category: OTHER,       accruesSla: false, isTerminal: false, sortOrder: 150 } # confirm with board owner
-    - { name: "Pending Approval",      category: OTHER,        accruesSla: false, isTerminal: false, sortOrder: 160 } # confirm with board owner
+    - { name: "",                                  category: TRANSIENT,    accruesSla: false,  isTerminal: false,  sortOrder: 999 }
   aliases:
-    - { alias: "Re-Opened", canonical: "Reopened" }
-    - { alias: "On-Hold",   canonical: "On Hold" }
+    - { alias: "Re-Opened",            canonical: "Reopened" }
+    - { alias: "On-Hold",              canonical: "On Hold" }
+    - { alias: "Approved/Not started", canonical: "Approved / Not Started" }
+    - { alias: "Waiting on CS Team",   canonical: "WOC" }
 
 # Budgets in coverage-clock hours (time accrues only inside the coverage window).
 # A 12x5 "business day" is the 12-hour 09:00–21:00 IST window, so

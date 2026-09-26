@@ -28,14 +28,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/appconfig"
 )
 
-// graphQLPath is a var (not const) so titles_test.go can point FetchTitles
-// at an httptest server; production code never reassigns it.
-var graphQLPath = "https://api.github.com/graphql"
+const graphQLPath = "https://api.github.com/graphql"
 
 // Overridable only by tests, so retry/pagination pacing tests don't take
 // real wall-clock seconds; production code never reassigns these and always
@@ -62,13 +61,46 @@ func Apply(cfg appconfig.GitHub) {
 	searchPageDelay = time.Duration(cfg.SearchPageDelayMs) * time.Millisecond
 	detailPageDelay = time.Duration(cfg.DetailPageDelayMs) * time.Millisecond
 	gqlRetryAfterCap = time.Duration(cfg.RetryAfterCapSeconds) * time.Second
-	titlesTimeout = time.Duration(cfg.TitlesRequestTimeoutSeconds) * time.Second
 }
 
 type httpClient struct {
 	token    string
 	endpoint string
 	hc       *http.Client
+
+	// rateLimitMu guards rateLimit, the most recently observed
+	// rateLimit{remaining, resetAt} from any query that requested it (search,
+	// detail). Read by RateLimitRemaining, e.g. for seed's progress logging.
+	rateLimitMu sync.Mutex
+	rateLimit   *rateLimitInfo
+}
+
+// rateLimitInfo is a snapshot of GitHub's GraphQL rateLimit object as of the
+// most recent request that requested it.
+type rateLimitInfo struct {
+	remaining int
+	resetAt   string // GitHub's raw ISO-8601 timestamp, e.g. "2026-09-21T15:00:00Z"
+}
+
+// recordRateLimit stores the most recently observed rateLimit snapshot,
+// overwriting whatever was there — callers only ever care about the latest.
+func (c *httpClient) recordRateLimit(info rateLimitInfo) {
+	c.rateLimitMu.Lock()
+	defer c.rateLimitMu.Unlock()
+	c.rateLimit = &info
+}
+
+// RateLimitRemaining returns the GitHub API quota remaining as of the most
+// recent search/detail response, and when it resets. ok is false until at
+// least one such response has been received (e.g. before the first request,
+// or when running against synthetic fixtures with no client at all).
+func (c *httpClient) RateLimitRemaining() (remaining int, resetAt string, ok bool) {
+	c.rateLimitMu.Lock()
+	defer c.rateLimitMu.Unlock()
+	if c.rateLimit == nil {
+		return 0, "", false
+	}
+	return c.rateLimit.remaining, c.rateLimit.resetAt, true
 }
 
 // NewClient returns a Client that talks to the real GitHub GraphQL API using
@@ -213,6 +245,8 @@ query ($q: String!, $after: String) {
         number
         state
         url
+        title
+        body
         createdAt
         updatedAt
         closedAt
@@ -220,7 +254,7 @@ query ($q: String!, $after: String) {
       }
     }
   }
-  rateLimit { remaining }
+  rateLimit { remaining resetAt }
 }`
 
 type searchData struct {
@@ -234,6 +268,8 @@ type searchData struct {
 			Number    *int    `json:"number"`
 			State     string  `json:"state"`
 			URL       string  `json:"url"`
+			Title     string  `json:"title"`
+			Body      string  `json:"body"`
 			CreatedAt string  `json:"createdAt"`
 			UpdatedAt string  `json:"updatedAt"`
 			ClosedAt  *string `json:"closedAt"`
@@ -244,6 +280,14 @@ type searchData struct {
 			} `json:"labels"`
 		} `json:"nodes"`
 	} `json:"search"`
+	RateLimit rateLimitData `json:"rateLimit"`
+}
+
+// rateLimitData mirrors GraphQL's rateLimit { remaining resetAt } shape,
+// present on both searchData and detailData.
+type rateLimitData struct {
+	Remaining int    `json:"remaining"`
+	ResetAt   string `json:"resetAt"`
 }
 
 // SearchAll runs q against GitHub's issue search, paginating until
@@ -261,6 +305,7 @@ func (c *httpClient) SearchAll(ctx context.Context, q string) ([]IssueNode, erro
 		if err != nil {
 			return nil, err
 		}
+		c.recordRateLimit(rateLimitInfo{remaining: data.RateLimit.Remaining, resetAt: data.RateLimit.ResetAt})
 		issueCount = data.Search.IssueCount
 		for _, n := range data.Search.Nodes {
 			if n.Number == nil {
@@ -274,6 +319,8 @@ func (c *httpClient) SearchAll(ctx context.Context, q string) ([]IssueNode, erro
 				Number:    *n.Number,
 				State:     n.State,
 				URL:       n.URL,
+				Title:     n.Title,
+				Body:      n.Body,
 				CreatedAt: n.CreatedAt,
 				UpdatedAt: n.UpdatedAt,
 				ClosedAt:  n.ClosedAt,
@@ -312,11 +359,32 @@ func buildRepoIssueQueries(owner, name, issueQuery string, closedLookbackDays in
 // closed within closedLookbackDays, deduplicated by issue number (open wins
 // if both appear).
 func (c *httpClient) FetchRepoIssues(ctx context.Context, owner, name, issueQuery string, closedLookbackDays int) ([]IssueNode, error) {
-	openQ, closedQ := buildRepoIssueQueries(owner, name, issueQuery, closedLookbackDays, time.Now())
+	return c.fetchRepoIssuesAt(ctx, owner, name, issueQuery, closedLookbackDays, time.Now())
+}
+
+// fetchRepoIssuesAt is FetchRepoIssues with an injectable now, so the
+// closed-query truncation fallback can be tested without depending on the
+// wall clock.
+func (c *httpClient) fetchRepoIssuesAt(ctx context.Context, owner, name, issueQuery string, closedLookbackDays int, now time.Time) ([]IssueNode, error) {
+	openQ, closedQ := buildRepoIssueQueries(owner, name, issueQuery, closedLookbackDays, now)
 
 	closed, err := c.SearchAll(ctx, closedQ)
 	if err != nil {
-		return nil, err
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.Kind != errKindTruncated {
+			return nil, err
+		}
+		// More than 1,000 issues closed within the lookback window — GitHub
+		// Search can't return them from one unbounded closed:>=since query
+		// (its 1,000-result cap applies per query, not per repo). Fall back
+		// to bisecting the window into closed:X..Y ranges narrow enough for
+		// each one to fit under the cap.
+		base := fmt.Sprintf("repo:%s/%s is:issue %s is:closed", owner, name, issueQuery)
+		since := now.Add(-time.Duration(closedLookbackDays) * 24 * time.Hour)
+		closed, err = c.searchAllRangeSplit(ctx, base, "closed", since, now)
+		if err != nil {
+			return nil, err
+		}
 	}
 	open, err := c.SearchAll(ctx, openQ)
 	if err != nil {
@@ -335,6 +403,40 @@ func (c *httpClient) FetchRepoIssues(ctx context.Context, owner, name, issueQuer
 		out = append(out, issue)
 	}
 	return out, nil
+}
+
+// searchAllRangeSplit runs base bounded by field:since..until (whole UTC
+// days, inclusive) via SearchAll, recursively bisecting the date range
+// whenever a window still exceeds GitHub Search's 1,000-result cap — so the
+// full result set stays retrievable no matter how many issues fall in
+// [since, until]. Only reached as a fallback once an unbounded query has
+// already proven truncated; base must not itself contain a field: qualifier.
+func (c *httpClient) searchAllRangeSplit(ctx context.Context, base, field string, since, until time.Time) ([]IssueNode, error) {
+	since, until = since.UTC().Truncate(24*time.Hour), until.UTC().Truncate(24*time.Hour)
+	q := fmt.Sprintf("%s %s:%s..%s sort:updated-desc", base, field, since.Format("2006-01-02"), until.Format("2006-01-02"))
+	issues, err := c.SearchAll(ctx, q)
+	if err == nil {
+		return issues, nil
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Kind != errKindTruncated || !since.Before(until) {
+		// Not a truncation, or the window is already a single day — a single
+		// day matching more than 1,000 issues can't be split further, so
+		// this surfaces the same truncation error the caller already knows
+		// how to classify.
+		return nil, err
+	}
+	days := int(until.Sub(since).Hours() / 24)
+	mid := since.AddDate(0, 0, days/2)
+	left, err := c.searchAllRangeSplit(ctx, base, field, since, mid)
+	if err != nil {
+		return nil, err
+	}
+	right, err := c.searchAllRangeSplit(ctx, base, field, mid.AddDate(0, 0, 1), until)
+	if err != nil {
+		return nil, err
+	}
+	return append(left, right...), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -374,10 +476,11 @@ query ($owner: String!, $name: String!, $number: Int!, $tlCursor: String, $piCur
       }
     }
   }
-  rateLimit { remaining }
+  rateLimit { remaining resetAt }
 }`
 
 type detailData struct {
+	RateLimit  rateLimitData `json:"rateLimit"`
 	Repository *struct {
 		Issue *struct {
 			Number        int `json:"number"`
@@ -434,6 +537,7 @@ func (c *httpClient) FetchIssueDetail(ctx context.Context, owner, name string, n
 		if err != nil {
 			return nil, err
 		}
+		c.recordRateLimit(rateLimitInfo{remaining: data.RateLimit.Remaining, resetAt: data.RateLimit.ResetAt})
 		if data.Repository == nil || data.Repository.Issue == nil {
 			return nil, nil
 		}

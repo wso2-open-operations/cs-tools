@@ -301,6 +301,8 @@ export type CaseDetails = AuditMetadata & {
   watchList?: Array<{ id?: string; userName?: string; name?: string; email?: string }> | null;
   escalationLevel?: EscalationLevel | null;
   isEscalated?: boolean | null;
+  /** Free-text labels attached to the case, e.g. "Security Announcement". */
+  tags?: Array<{ id: string; label: string; color?: string | null }>;
 };
 
 // Item type for a single case comment.

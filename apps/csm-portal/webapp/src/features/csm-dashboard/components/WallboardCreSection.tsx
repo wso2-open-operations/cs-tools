@@ -59,12 +59,18 @@ export default function WallboardCreSection({
     }
     byName.set(w.displayName, w);
   }
+  // Built from `byName`'s own deduplicated values, not the raw `widgets`
+  // array: when two widgets alias to the same primary-slot name, the one
+  // that lost the slot above must not fall through and render a second
+  // time as a secondary tile — it's already showing, under the winning
+  // widget's own displayName, in the primary grid.
+  const uniqueWidgets = [...byName.values()];
   const primary = CRE_PRIMARY_ORDER.map((name) => byName.get(name)).filter(
     (w): w is BeDashboardWidget => w !== undefined,
   );
   const primaryIds = new Set(primary.map((w) => w.widgetId));
   const secondary = sortByFixedOrder(
-    widgets.filter((w) => !primaryIds.has(w.widgetId)),
+    uniqueWidgets.filter((w) => !primaryIds.has(w.widgetId)),
     CRE_SECONDARY_ORDER,
   );
 

@@ -67,12 +67,30 @@ paths:
       summary: Filterable issue list.
       operationId: getIssues
       parameters:
-        - $ref: '#/components/parameters/RepoParam'
+        - name: repo
+          in: query
+          description: '"owner/name". Repeatable; values are OR-ed together.'
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 50
+            items:
+              type: string
+              pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
         - name: priority
           in: query
+          description: >-
+            Repeatable; values are OR-ed together. The sentinel value
+            __none__ matches an issue with no priority (i.priority IS NULL).
+          style: form
+          explode: true
           schema:
-            type: string
-            maxLength: 50
+            type: array
+            maxItems: 50
+            items:
+              type: string
+              maxLength: 50
         - name: state
           in: query
           schema:
@@ -80,13 +98,38 @@ paths:
             enum: [OPEN, CLOSED]
         - name: slaState
           in: query
+          description: >-
+            Repeatable; values are OR-ed together. NO_SLA also matches an
+            issue with no issue_sla row.
+          style: form
+          explode: true
           schema:
-            $ref: '#/components/schemas/SlaState'
+            type: array
+            maxItems: 50
+            items:
+              $ref: '#/components/schemas/SlaState'
         - name: status
           in: query
+          description: Repeatable; values are OR-ed together.
+          style: form
+          explode: true
           schema:
-            type: string
-            maxLength: 50
+            type: array
+            maxItems: 50
+            items:
+              type: string
+              maxLength: 50
+        - name: abtTeam
+          in: query
+          description: Repeatable; values are OR-ed together.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 50
+            items:
+              type: string
+              maxLength: 100
         - name: q
           in: query
           description: Issue number.
@@ -100,26 +143,48 @@ paths:
             minimum: 1
             maximum: 500
             default: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
         - name: bucket
           in: query
+          description: >-
+            Defines a scope; every filter above is AND-ed on top of it
+            (slaState replaces the base scope's implicit "not TERMINAL" rule
+            instead of AND-ing with it, unless the bucket already picked its
+            own SLA state).
           schema:
             type: string
             enum: [all, violated, at_risk, on_track, cs, product_side, tracked, untracked, attention]
-        - name: order
+        - name: sort
           in: query
+          description: >-
+            Whitelisted server-side sort column. sla_consumption (default)
+            orders by issue_sla.pct_consumed; created and updated order by
+            githubCreatedAt/githubUpdatedAt. Every column sorts NULLS LAST in
+            both directions, with issues.id ascending as a deterministic
+            tie-breaker.
           schema:
             type: string
-            enum: [budget_desc, updated_desc]
-            default: updated_desc
+            enum: [sla_consumption, created, updated]
+            default: sla_consumption
+        - name: order
+          in: query
+          description: Sort direction for the `sort` column.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
       responses:
         "200":
           description: Ok
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Issue'
+                $ref: '#/components/schemas/IssueList'
         "400":
           $ref: '#/components/responses/BadRequest'
         "500":
@@ -149,45 +214,6 @@ paths:
         "500":
           $ref: '#/components/responses/InternalServerError'
 
-  /issues/titles:
-    post:
-      summary: >
-        On-demand title resolution. Fetched live from GitHub, cached in
-        memory only (15 min) — titles are never persisted (PRIVACY).
-      operationId: postIssueTitles
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [ids]
-              properties:
-                ids:
-                  type: array
-                  minItems: 1
-                  maxItems: 200
-                  items:
-                    type: integer
-                    minimum: 1
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  titles:
-                    type: object
-                    additionalProperties:
-                      type: string
-                      nullable: true
-        "400":
-          $ref: '#/components/responses/BadRequest'
-        "500":
-          $ref: '#/components/responses/InternalServerError'
-
   /metrics/overview:
     get:
       summary: Dashboard hero counts, per-project/priority breakdowns, 12-week volume.
@@ -199,6 +225,7 @@ paths:
           schema:
             type: string
             maxLength: 50
+        - $ref: '#/components/parameters/AbtTeamParam'
       responses:
         "200":
           description: Ok
@@ -236,6 +263,7 @@ paths:
             type: string
             enum: [violated, at_risk, total]
             default: violated
+        - $ref: '#/components/parameters/AbtTeamParam'
       responses:
         "200":
           description: Ok
@@ -299,6 +327,13 @@ components:
       schema:
         type: string
         pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+
+    AbtTeamParam:
+      name: abtTeam
+      in: query
+      schema:
+        type: string
+        maxLength: 100
 
   responses:
     BadRequest:
@@ -444,6 +479,15 @@ components:
         currentStatus:
           type: string
           nullable: true
+        title:
+          type: string
+          nullable: true
+        abtTeam:
+          type: string
+          nullable: true
+        openedBy:
+          type: string
+          nullable: true
         githubCreatedAt:
           type: string
           format: date-time
@@ -454,6 +498,24 @@ components:
           nullable: true
         sla:
           $ref: '#/components/schemas/IssueSla'
+
+    IssueList:
+      type: object
+      properties:
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        total:
+          type: integer
+          description: Total issues matching the filters, independent of limit/offset.
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+          description: 'True when offset + issues.length < total.'
 
     IssueEvent:
       type: object
@@ -482,6 +544,23 @@ components:
 
     Overview:
       type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            repo:
+              type: string
+              nullable: true
+            priority:
+              type: string
+              nullable: true
+            abtTeam:
+              type: string
+              nullable: true
+        abtTeams:
+          type: array
+          items:
+            type: string
 
     Timeseries:
       type: object

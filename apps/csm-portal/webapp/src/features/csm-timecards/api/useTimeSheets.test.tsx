@@ -93,6 +93,7 @@ function mockApi(page: BeSearchTimeCardsResponse): { api: BackendApi; post: Retu
     get: vi.fn(),
     post: post as unknown as BackendApi["post"],
     patch: vi.fn(),
+    put: vi.fn(),
     postEmpty: vi.fn(),
     del: vi.fn(),
     getBlob: vi.fn(),

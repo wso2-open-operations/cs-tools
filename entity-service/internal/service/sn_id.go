@@ -18,6 +18,7 @@ package service
 
 import (
 	"fmt"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -94,6 +95,26 @@ func uuidsToSysids(uuids []string) []string {
 	out := make([]string, len(uuids))
 	for i, u := range uuids {
 		out[i] = uuidToSysid(u)
+	}
+	return out
+}
+
+// snIncidentStateKeysFromStrings converts parsedIncidentFilters.
+// IncidentStateKeys (already validated as non-negative integers by
+// parseIncidentFilterNonNegativeIntString in incident_filters.go) into the
+// raw ServiceNow numeric keys snIncidentFilters.IncidentStateKeys expects.
+// This is the one place that conversion happens -- incident_filters.go's
+// parsedIncidentFilters stays data-source-agnostic and never commits to
+// Go's int type for a ServiceNow-only raw value. The strconv.Atoi error is
+// ignored: every value has already been validated at parse time.
+func snIncidentStateKeysFromStrings(keys []string) []int {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]int, len(keys))
+	for i, k := range keys {
+		n, _ := strconv.Atoi(k)
+		out[i] = n
 	}
 	return out
 }

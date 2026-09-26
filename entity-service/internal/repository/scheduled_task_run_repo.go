@@ -117,7 +117,7 @@ func NewScheduledTaskRunRepository(db *pgxpool.Pool) ScheduledTaskRunRepository 
 // scheduledTaskRunColumns is the column list shared by every query that
 // returns a full row, kept in one place so the various methods below can't
 // drift out of sync with scanScheduledTaskRun's field order.
-const scheduledTaskRunColumns = `id, task_name, period_key, attempt_count, last_error, next_retry_at, first_attempted_at, last_attempted_at, succeeded_at, superseded_at`
+const scheduledTaskRunColumns = `id, task_name, period_key, attempt_count, last_error, next_retry_on, first_attempted_on, last_attempted_on, succeeded_on, superseded_on`
 
 func scanScheduledTaskRun(row pgx.Row) (domain.ScheduledTaskRun, error) {
 	var run domain.ScheduledTaskRun
@@ -172,14 +172,14 @@ func (r *scheduledTaskRunRepo) Attempt(ctx context.Context, req domain.ClaimSche
 		// concurrent Attempt for the exact same period — see the
 		// ON CONFLICT DO NOTHING below.
 		if _, err := tx.Exec(ctx,
-			`UPDATE scheduled_task_run SET superseded_at = NOW(), updated_at = NOW()
-			 WHERE task_name = $1 AND succeeded_at IS NULL AND superseded_at IS NULL`,
+			`UPDATE scheduled_task_run SET superseded_on = NOW(), updated_on = NOW()
+			 WHERE task_name = $1 AND succeeded_on IS NULL AND superseded_on IS NULL`,
 			req.TaskName); err != nil {
 			return domain.ScheduledTaskRun{}, false, fmt.Errorf("attempt scheduled_task_run: supersede: %w", err)
 		}
 
 		inserted, insertErr := scanScheduledTaskRun(tx.QueryRow(ctx,
-			`INSERT INTO scheduled_task_run (task_name, period_key, attempt_count, first_attempted_at, last_attempted_at)
+			`INSERT INTO scheduled_task_run (task_name, period_key, attempt_count, first_attempted_on, last_attempted_on)
 			 VALUES ($1, $2, 1, NOW(), NOW())
 			 ON CONFLICT (task_name, period_key) DO NOTHING
 			 RETURNING `+scheduledTaskRunColumns,
@@ -218,7 +218,7 @@ func (r *scheduledTaskRunRepo) Attempt(ctx context.Context, req domain.ClaimSche
 
 		run, err = scanScheduledTaskRun(tx.QueryRow(ctx,
 			`UPDATE scheduled_task_run
-			 SET attempt_count = attempt_count + 1, next_retry_at = NULL, last_attempted_at = NOW(), updated_at = NOW()
+			 SET attempt_count = attempt_count + 1, next_retry_on = NULL, last_attempted_on = NOW(), updated_on = NOW()
 			 WHERE id = $1
 			 RETURNING `+scheduledTaskRunColumns,
 			existing.ID))
@@ -238,8 +238,8 @@ func (r *scheduledTaskRunRepo) Attempt(ctx context.Context, req domain.ClaimSche
 func (r *scheduledTaskRunRepo) Complete(ctx context.Context, id string, attemptCount int) (domain.ScheduledTaskRun, error) {
 	run, err := scanScheduledTaskRun(r.db.QueryRow(ctx,
 		`UPDATE scheduled_task_run
-		 SET succeeded_at = NOW(), next_retry_at = NULL, last_error = NULL, updated_at = NOW()
-		 WHERE id = $1 AND attempt_count = $2 AND succeeded_at IS NULL AND superseded_at IS NULL
+		 SET succeeded_on = NOW(), next_retry_on = NULL, last_error = NULL, updated_on = NOW()
+		 WHERE id = $1 AND attempt_count = $2 AND succeeded_on IS NULL AND superseded_on IS NULL
 		 RETURNING `+scheduledTaskRunColumns, id, attemptCount))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -254,8 +254,8 @@ func (r *scheduledTaskRunRepo) Complete(ctx context.Context, id string, attemptC
 func (r *scheduledTaskRunRepo) Fail(ctx context.Context, id string, attemptCount int, errMsg string, nextRetryOn time.Time) (domain.ScheduledTaskRun, error) {
 	run, err := scanScheduledTaskRun(r.db.QueryRow(ctx,
 		`UPDATE scheduled_task_run
-		 SET last_error = $3, next_retry_at = $4, updated_at = NOW()
-		 WHERE id = $1 AND attempt_count = $2 AND succeeded_at IS NULL AND superseded_at IS NULL
+		 SET last_error = $3, next_retry_on = $4, updated_on = NOW()
+		 WHERE id = $1 AND attempt_count = $2 AND succeeded_on IS NULL AND superseded_on IS NULL
 		 RETURNING `+scheduledTaskRunColumns, id, attemptCount, errMsg, nextRetryOn))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -271,13 +271,13 @@ func (r *scheduledTaskRunRepo) List(ctx context.Context, statusFilter string) ([
 	query := `SELECT ` + scheduledTaskRunColumns + ` FROM scheduled_task_run`
 	switch statusFilter {
 	case "":
-		query += ` ORDER BY created_at DESC`
+		query += ` ORDER BY created_on DESC`
 	case "failed":
-		query += ` WHERE succeeded_at IS NULL AND superseded_at IS NULL AND next_retry_at IS NOT NULL ORDER BY next_retry_at`
+		query += ` WHERE succeeded_on IS NULL AND superseded_on IS NULL AND next_retry_on IS NOT NULL ORDER BY next_retry_on`
 	case "succeeded":
-		query += ` WHERE succeeded_at IS NOT NULL ORDER BY succeeded_at DESC`
+		query += ` WHERE succeeded_on IS NOT NULL ORDER BY succeeded_on DESC`
 	case "superseded":
-		query += ` WHERE superseded_at IS NOT NULL ORDER BY superseded_at DESC`
+		query += ` WHERE superseded_on IS NOT NULL ORDER BY superseded_on DESC`
 	default:
 		// The service layer validates statusFilter before this is ever
 		// called; reaching here means a caller inside this package skipped
@@ -309,8 +309,8 @@ func (r *scheduledTaskRunRepo) List(ctx context.Context, statusFilter string) ([
 func (r *scheduledTaskRunRepo) DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (int, error) {
 	tag, err := r.db.Exec(ctx,
 		`DELETE FROM scheduled_task_run
-		 WHERE (succeeded_at IS NOT NULL AND succeeded_at < $1)
-		    OR (superseded_at IS NOT NULL AND superseded_at < $1)`,
+		 WHERE (succeeded_on IS NOT NULL AND succeeded_on < $1)
+		    OR (superseded_on IS NOT NULL AND superseded_on < $1)`,
 		cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("delete scheduled_task_run: %w", err)

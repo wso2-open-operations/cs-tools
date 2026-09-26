@@ -135,7 +135,16 @@ export default function AsyncProjectMultiSelect({
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.name}
       isOptionEqualToValue={(opt, val) => opt.id === val.id}
-      slotProps={{ listbox: { onScroll: handleListboxScroll } }}
+      // Fixed max-height (rather than relying on the default 40vh popper
+      // sizing) so the listbox is reliably scrollable as soon as the first
+      // page of results loads, on any screen size. Without this, a tall or
+      // otherwise short-content viewport can let the default sizing fit the
+      // whole first PROJECT_PAGE_SIZE page (10 rows) with room to spare --
+      // nothing overflows, so onScroll's near-the-bottom check
+      // (handleListboxScroll) never fires and fetchNextPage never runs,
+      // making the picker look hard-capped at 10 projects even though the
+      // pagination itself supports the full catalogue.
+      slotProps={{ listbox: { onScroll: handleListboxScroll, style: { maxHeight: 280 } } }}
       onChange={(_event, next) => {
         setPickedNames((prev) => {
           const m = new Map(prev);

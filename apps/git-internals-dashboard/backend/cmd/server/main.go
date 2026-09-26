@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"log/slog"
@@ -31,6 +30,7 @@ import (
 	"time"
 
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/appconfig"
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/cliutil"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/db"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/github"
@@ -43,7 +43,7 @@ import (
 // main wires up config, the DB pool, config→DB sync, the job lock/recompute
 // scheduler, and the HTTP handler chain, then serves until a signal arrives.
 func main() {
-	loadDotEnv(".env")
+	cliutil.LoadDotEnv(".env")
 	configureLogger()
 
 	appCfg, err := appconfig.Load()
@@ -72,7 +72,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	databaseURL := mustEnv("DATABASE_URL")
+	databaseURL := cliutil.MustEnv("DATABASE_URL")
 	pool, err := db.NewPoolWithConfig(ctx, databaseURL, appCfg.Database)
 	if err != nil {
 		slog.Error("failed to connect to postgres", "err", err)
@@ -112,7 +112,6 @@ func main() {
 	taxonomyHandler := handler.NewTaxonomyHandler(slaCfg)
 	issuesHandler := handler.NewIssuesHandler(pool, slaCfg, appCfg.API)
 	metricsHandler := handler.NewMetricsHandler(pool, slaCfg, appCfg.Cache, appCfg.API)
-	titlesHandler := handler.NewTitlesHandler(pool, githubToken, appCfg.Cache.Titles, appCfg.GitHub.TitlesBatchSize, appCfg.API)
 	syncHandler := handler.NewSyncHandler(pool, slaCfg, lock, runtime, githubToken,
 		time.Duration(appCfg.Jobs.SyncRunDeadlineMinutes)*time.Minute)
 
@@ -122,7 +121,6 @@ func main() {
 	mux.HandleFunc("GET /taxonomy", taxonomyHandler.GetTaxonomy)
 	mux.HandleFunc("GET /issues", issuesHandler.ListIssues)
 	mux.HandleFunc("GET /issues/{id}", issuesHandler.GetIssue)
-	mux.HandleFunc("POST /issues/titles", titlesHandler.PostTitles)
 	mux.HandleFunc("GET /metrics/overview", metricsHandler.GetOverview)
 	mux.HandleFunc("GET /metrics/timeseries", metricsHandler.GetTimeseries)
 	mux.HandleFunc("POST /sync/runs", syncHandler.PostSyncRuns)
@@ -208,53 +206,6 @@ func configureLogger() {
 		}
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
-}
-
-// loadDotEnv reads a .env file and sets any unset environment variables from
-// it. Silently ignored if the file does not exist; logs a warning for any
-// other error.
-func loadDotEnv(path string) {
-	f, err := os.Open(path) // #nosec G304 -- path is always the hardcoded literal ".env" at the only call site
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("loadDotEnv: failed to open .env file", "err", err)
-		}
-		return
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && ((v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'')) {
-			v = v[1 : len(v)-1]
-		}
-		if os.Getenv(k) == "" {
-			_ = os.Setenv(k, v)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		slog.Warn("loadDotEnv: error reading .env file", "err", err)
-	}
-}
-
-// mustEnv returns the value of the given required environment variable,
-// exiting the process with a logged error if it is unset.
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		slog.Error("required environment variable is not set", "key", key)
-		os.Exit(1)
-	}
-	return v
 }
 
 // splitComma splits s on commas into trimmed, non-empty entries, or nil for

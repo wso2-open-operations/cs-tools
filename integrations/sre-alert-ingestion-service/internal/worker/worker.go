@@ -74,6 +74,16 @@ type IncidentCreator interface {
 	// grouping *decision* itself (tryGroup, above) no longer depends on
 	// this being readable. See tryGroup and attempt's post-create call.
 	CreateAlertIncidentMapping(ctx context.Context, req csmclient.CreateAlertIncidentMappingRequest) (*csmclient.AlertIncidentMappingView, error)
+	// SearchServices looks up a CMDB service UUID by exact-match label. See
+	// resolveServiceID for when and why this is called, and
+	// csmclient.Client.SearchServices's own doc comment for the full
+	// contract (an empty, error-free result is a confirmed zero-result
+	// search, not a failure).
+	SearchServices(ctx context.Context, label string) ([]csmclient.ITService, error)
+	// UpdateIncident pushes workNotes onto an already-existing incident. See
+	// pushGroupAttachWorkNote's doc comment for when and why this is called,
+	// and its best-effort, non-blocking contract.
+	UpdateIncident(ctx context.Context, incidentID, workNotes string) error
 }
 
 // Escalator is the subset of internal/notifications.TwilioClient the worker
@@ -104,6 +114,22 @@ type Config struct {
 	// flow design this mirrors in spirit (see csmclient.GroupTag's doc
 	// comment for what was and wasn't actually portable from it).
 	GroupWindow time.Duration
+	// UnknownServiceID is the operator-configured CMDB "Unclassified"/
+	// catch-all service UUID (SRE_ALERT_UNKNOWN_SERVICE_ID) resolveServiceID
+	// falls back to when a live /services/search for a row's raw Service
+	// label returns a confirmed zero-result match. Required, non-empty
+	// config — mustEnv'd at startup in cmd/server/main.go, matching
+	// SRE_ALERT_CALLER_ID's precedent (see AlertHandler.callerID's doc
+	// comment): a deployment that never expects an unmapped service can
+	// still set SRE_ALERT_SERVICE_MAP to cover every label it sends, making
+	// this purely a safety net, not an operational burden.
+	UnknownServiceID string
+	// ServiceCacheTTL bounds how long a successful resolveServiceID result
+	// is reused before the next alert for the same label triggers a fresh
+	// /services/search call. Defaults to 15 minutes if <= 0. See
+	// serviceCache's doc comment for why only a successful resolution is
+	// ever cached.
+	ServiceCacheTTL time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -119,6 +145,9 @@ func (c Config) withDefaults() Config {
 	if c.GroupWindow <= 0 {
 		c.GroupWindow = 15 * time.Minute
 	}
+	if c.ServiceCacheTTL <= 0 {
+		c.ServiceCacheTTL = 15 * time.Minute
+	}
 	return c
 }
 
@@ -130,16 +159,21 @@ type Worker struct {
 	cfg    Config
 	// now is overridden in tests for deterministic backoff-due checks.
 	now func() time.Time
+	// svcCache is resolveServiceID's label->UUID cache. See serviceCache's
+	// own doc comment.
+	svcCache *serviceCache
 }
 
 // New constructs a Worker. store, csm, and twilio must be non-nil.
 func New(s Store, csm IncidentCreator, twilio Escalator, cfg Config) *Worker {
+	cfg = cfg.withDefaults()
 	return &Worker{
-		store:  s,
-		csm:    csm,
-		twilio: twilio,
-		cfg:    cfg.withDefaults(),
-		now:    time.Now,
+		store:    s,
+		csm:      csm,
+		twilio:   twilio,
+		cfg:      cfg,
+		now:      time.Now,
+		svcCache: newServiceCache(cfg.ServiceCacheTTL),
 	}
 }
 
@@ -224,6 +258,29 @@ func (w *Worker) attempt(ctx context.Context, row store.AlertRecord) {
 			// problem distinct from CSM's availability, and should still
 			// eventually reach the normal retry-budget/escalation path
 			// rather than loop indefinitely.
+			//
+			// That budget check has to happen HERE, not by falling through
+			// to the normal path below: this branch always returns, so
+			// nothing past it (including the nextRetryCount check further
+			// down) ever runs for this row. Without this, a row stuck here
+			// retries MarkDelivered forever and never escalates, contrary
+			// to the comment above -- CreateIncident is never called again
+			// for a row with IncidentID already set, so it can't reach the
+			// budget check any other way.
+			if row.RetryCount+1 >= w.cfg.MaxRetries {
+				slog.WarnContext(attemptCtx, "worker: retry budget exhausted retrying MarkDelivered for an already-recorded incident, escalating", "id", row.ID, "alertNumber", row.AlertNumber, "incidentID", row.IncidentID, "retryCount", row.RetryCount+1, "maxRetries", w.cfg.MaxRetries, "err", merr)
+				message := fmt.Sprintf(
+					"SRE alert ingestion service: alert %s (id %s) has incident %s created, but this service could not mark it delivered after %d attempts. Last error: %s",
+					row.AlertNumber, row.ID, row.IncidentID, row.RetryCount+1, truncate(merr.Error(), 200),
+				)
+				if terr := w.twilio.Escalate(ctx, message); terr != nil {
+					slog.ErrorContext(attemptCtx, "worker: twilio escalation call failed", "id", row.ID, "err", terr)
+				}
+				if eerr := w.store.MarkEscalated(ctx, row.ID, merr.Error()); eerr != nil {
+					slog.ErrorContext(attemptCtx, "worker: MarkEscalated (post-MarkDelivered-retry) failed", "id", row.ID, "err", eerr)
+				}
+				return
+			}
 			if aerr := w.store.MarkAttemptFailed(ctx, row.ID, fmt.Sprintf("incident %s already recorded but retrying MarkDelivered failed: %v", row.IncidentID, merr)); aerr != nil {
 				slog.ErrorContext(attemptCtx, "worker: MarkAttemptFailed (post-MarkDelivered-retry) also failed", "id", row.ID, "err", aerr)
 			}
@@ -290,6 +347,26 @@ func (w *Worker) attempt(ctx context.Context, row store.AlertRecord) {
 		}
 	}
 
+	// Live service-UUID resolution: only for a row whose stored ServiceID is
+	// still the sentinel internal/handler.MapToIncident writes when its
+	// static SRE_ALERT_SERVICE_MAP lookup had no entry for this alert's raw
+	// Service label at buffering time (see that function's doc comment for
+	// the full hybrid-resolution design). A row with a real, statically- or
+	// previously-resolved ServiceID skips this entirely — req.ServiceID is
+	// mutated in place here, in this function's own local copy of
+	// bp.CreateIncidentRequest, never written back to the buffered row (see
+	// resolveServiceID's doc comment for why re-resolving on every attempt
+	// is fine, even desirable).
+	if req.ServiceID == csmclient.UnresolvedServiceIDSentinel {
+		resolvedID, rerr := w.resolveServiceID(attemptCtx, row, bp)
+		if rerr != nil {
+			slog.WarnContext(attemptCtx, "worker: service resolution failed, treating as a retryable delivery failure", "id", row.ID, "alertNumber", row.AlertNumber, "service", bp.Service, "err", rerr)
+			w.handleDeliveryFailure(ctx, attemptCtx, row, rerr)
+			return
+		}
+		req.ServiceID = resolvedID
+	}
+
 	result, err := w.csm.CreateIncident(attemptCtx, req)
 	if err == nil {
 		// Durably record the incident id BEFORE attempting MarkDelivered,
@@ -334,6 +411,21 @@ func (w *Worker) attempt(ctx context.Context, row store.AlertRecord) {
 		return
 	}
 
+	w.handleDeliveryFailure(ctx, attemptCtx, row, err)
+}
+
+// handleDeliveryFailure applies the non-retryable/retry/escalate
+// classification and resulting store transition for a failed delivery
+// attempt — err is either a CreateIncident error, or a service-resolution
+// error from resolveServiceID (see attempt's call sites). Both are folded
+// into this exact same path deliberately: a resolution failure is, from the
+// worker's perspective, just another reason this attempt couldn't reach a
+// successful CreateIncident call, and gets exactly the same
+// retry-budget/escalation treatment. ctx is the caller's own (unmodified)
+// context, used for store/escalator calls; attemptCtx carries this
+// attempt's own correlation ID, used only for logging — see attempt's doc
+// comment for why the two are kept distinct.
+func (w *Worker) handleDeliveryFailure(ctx, attemptCtx context.Context, row store.AlertRecord, err error) {
 	if !isRetryable(err) {
 		slog.ErrorContext(attemptCtx, "worker: non-retryable error, marking failed", "id", row.ID, "alertNumber", row.AlertNumber, "err", err)
 		if merr := w.store.MarkFailed(ctx, row.ID, err.Error()); merr != nil {
@@ -444,8 +536,121 @@ func (w *Worker) tryGroup(ctx context.Context, row store.AlertRecord, bp alertpa
 	}
 
 	slog.InfoContext(ctx, "worker: grouping alert onto an earlier alert's still-open incident within the group window", "id", row.ID, "alertNumber", row.AlertNumber, "incidentID", existing.IncidentID, "incidentNumber", existing.IncidentNumber, "groupWindow", w.cfg.GroupWindow.String())
+	w.pushGroupAttachWorkNote(ctx, row, bp, existing.IncidentID)
 	w.recordMapping(ctx, row, bp, existing.IncidentID, existing.IncidentNumber)
 	return existing.IncidentID, existing.IncidentNumber, true
+}
+
+// buildGroupAttachWorkNotes composes the work note pushGroupAttachWorkNote
+// pushes onto an already-existing incident when row/bp — a new alert — is
+// found (via tryGroup) to report the same condition: so an engineer looking
+// at the incident sees "this condition fired again" history, not silence.
+//
+// Reuses bp.CreateIncidentRequest.WorkNotes/AdditionalComments — exactly
+// what internal/handler.buildWorkNotes and this alert's own Description
+// already produced when this row was buffered — rather than re-deriving the
+// same source/severity/metric/environment/identifier fields a second time;
+// only the leading line (row.AlertNumber, row.ReceivedAt — neither available
+// to buildWorkNotes, which only ever sees the inbound AlertRequest) is new
+// here. The leading line alone means this never returns "" in practice —
+// pushGroupAttachWorkNote still guards on an empty result defensively,
+// treating it the same as any other "nothing worth pushing" case rather than
+// assuming this function can never produce one.
+func buildGroupAttachWorkNotes(row store.AlertRecord, bp alertpayload.Payload) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "This condition fired again — alert %s (received %s).\n", row.AlertNumber, row.ReceivedAt.UTC().Format(time.RFC3339))
+	if bp.CreateIncidentRequest.WorkNotes != nil && *bp.CreateIncidentRequest.WorkNotes != "" {
+		b.WriteString(*bp.CreateIncidentRequest.WorkNotes)
+		b.WriteString("\n")
+	}
+	if bp.CreateIncidentRequest.AdditionalComments != nil && *bp.CreateIncidentRequest.AdditionalComments != "" {
+		fmt.Fprintf(&b, "Description: %s\n", *bp.CreateIncidentRequest.AdditionalComments)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// pushGroupAttachWorkNote calls csmclient.UpdateIncident to push a work note
+// summarizing row/bp onto incidentID — the incident tryGroup just attached
+// this alert to, instead of creating a new one. Without this, that attach
+// was silent: csmclient.CreateAlertIncidentMapping (see recordMapping below)
+// records the relationship in this service's own Postgres, but nothing ever
+// showed up on the incident itself for an engineer to see.
+//
+// Best-effort and non-blocking by design, matching recordMapping's own exact
+// philosophy immediately below (see that method's doc comment): every call
+// site treats a failure here purely as a logged warning, never as a reason
+// to fail the overall delivery or hold back Store.MarkDelivered — the
+// primary goal (this alert is attached to the right incident) is already
+// achieved by the time this is called. A missed work note just means an
+// engineer sees one fewer line of history on the incident, not a
+// correctness bug.
+func (w *Worker) pushGroupAttachWorkNote(ctx context.Context, row store.AlertRecord, bp alertpayload.Payload, incidentID string) {
+	notes := buildGroupAttachWorkNotes(row, bp)
+	if notes == "" {
+		return
+	}
+	if err := w.csm.UpdateIncident(ctx, incidentID, notes); err != nil {
+		slog.WarnContext(ctx, "worker: failed to push work note onto the incident this alert attached to (best-effort, non-blocking — attach already succeeded)", "id", row.ID, "alertNumber", row.AlertNumber, "incidentID", incidentID, "err", err)
+	}
+}
+
+// resolveServiceID resolves the CMDB service UUID for a row whose stored
+// CreateIncidentRequest.ServiceID is still
+// csmclient.UnresolvedServiceIDSentinel — i.e. internal/handler.MapToIncident's
+// static SRE_ALERT_SERVICE_MAP lookup had no entry for this alert's raw
+// Service label at buffering time. Called once per delivery attempt,
+// immediately before CreateIncident (see attempt), never inline in the
+// request path — this is the live half of this service's hybrid
+// service-UUID resolution design, deliberately kept off the fast path that
+// runs before the 202 response (see MapToIncident's doc comment).
+//
+// Resolution order:
+//  1. w.svcCache — a prior successful resolution for this exact label,
+//     still within its TTL. No network call.
+//  2. w.csm.SearchServices — a live exact-match query against
+//     csm-integration-service's POST /services/search proxy. On a match, the
+//     result is cached (see serviceCache's doc comment for why only a
+//     success is ever cached) and returned.
+//  3. A confirmed zero-result search (SearchServices returns an empty
+//     slice, no error) falls back to w.cfg.UnknownServiceID
+//     (SRE_ALERT_UNKNOWN_SERVICE_ID) — logged, not cached, and not treated
+//     as an error: it is CSM's own signal that this label genuinely has no
+//     matching CMDB service today, and the unknown-service fallback exists
+//     precisely so that alert still gets an incident rather than being
+//     stuck unresolved forever.
+//
+// A transient error from the search call itself (non-2xx, timeout, etc.) is
+// returned to the caller as-is, NOT translated into the unknown-service
+// fallback: attempt folds it into the exact same retryable-delivery-failure
+// path (handleDeliveryFailure) a CreateIncident error takes, so a search
+// hiccup gets retried like any other CSM-side-unavailability signal instead
+// of silently bucketing a possibly-resolvable label as "unknown" — see
+// csmclient.Client.SearchServices's own doc comment for the same contract
+// from the client's side.
+func (w *Worker) resolveServiceID(ctx context.Context, row store.AlertRecord, bp alertpayload.Payload) (string, error) {
+	label := bp.Service
+
+	if id, ok := w.svcCache.get(label, w.now()); ok {
+		return id, nil
+	}
+
+	results, err := w.csm.SearchServices(ctx, label)
+	if err != nil {
+		return "", err
+	}
+
+	if len(results) == 0 {
+		slog.InfoContext(ctx, "worker: no CMDB service matched alert's service label, using unknown-service fallback", "id", row.ID, "alertNumber", row.AlertNumber, "service", label, "unknownServiceID", w.cfg.UnknownServiceID)
+		return w.cfg.UnknownServiceID, nil
+	}
+
+	// Limit:1 on the request (see csmclient.Client.SearchServices) already
+	// bounds this to at most one result — results[0] is simply "the match,"
+	// not a "first of several" choice made here.
+	resolved := results[0].ID
+	slog.InfoContext(ctx, "worker: resolved service label to a CMDB service via live search, caching for reuse", "id", row.ID, "alertNumber", row.AlertNumber, "service", label, "serviceID", resolved, "cacheTTL", w.cfg.ServiceCacheTTL.String())
+	w.svcCache.set(label, resolved, w.now())
+	return resolved, nil
 }
 
 // recordMapping calls csmclient.CreateAlertIncidentMapping to record row

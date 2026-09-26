@@ -89,7 +89,9 @@ From the detail page a CS engineer can:
   change's lifecycle and have no manual UI action in the backing system
   either. Category is also not editable — the backing change-request form
   has no real category control either, so this portal doesn't invent one.
-- Add comments (public or internal) and upload/download attachments.
+- Add comments (public or internal) and upload/download attachments. A comment's own author,
+  or an admin, can edit or delete it from the **⋮** menu on that comment — deleting is a soft,
+  audited removal (an admin can still read the original text; nobody else can).
 
 ## Incidents
 
@@ -100,6 +102,14 @@ plus a CSV export of the filtered results. Each row links to a detail page.
 Like Change requests, this tab has its own **Saved views** button for
 naming and reapplying a filter combination — scoped to this tab, on this
 device/browser.
+
+A **Create incident** button (or a case's own **Create incident from case…**
+action) opens a form for Caller, Service, and a classification (category,
+subcategory, contact type, impact, urgency — Priority is computed live from
+impact × urgency and not itself editable). **Assignment group** is not a
+manual pick here: it's shown read-only, auto-filled from the selected
+Service's ServiceNow support group, and blank with a hint if that service
+has none set in ServiceNow.
 
 The detail page shows:
 
@@ -144,7 +154,9 @@ From the detail page a CS engineer can:
   updates** / **Unfollow incident updates** button on the Watchers tab also
   lets you add or remove yourself with one click.
 - Add comments (public or internal) and upload/download attachments, with
-  inline preview for supported attachment types.
+  inline preview for supported attachment types. A comment's own author, or an admin, can
+  edit or delete it from the **⋮** menu on that comment — deleting is a soft, audited removal
+  (an admin can still read the original text; nobody else can).
 
 Work notes on an incident often reference the alert or smart alert that
 triggered it. Those references render as an inline **View alert** / **View

@@ -15,25 +15,17 @@
 // under the License.
 
 import { useState } from "react";
-import { Box, Skeleton } from "@mui/material";
+import { Box } from "@mui/material";
 import { useIssue } from "@api/hooks";
 import type { IssueRow, SlaState } from "@api/types";
 import { ErrorState } from "@components/ErrorState";
+import { RelativeTime } from "@components/RelativeTime";
 import { errorMessage } from "@lib/apiError";
-import { gridTemplate } from "@lib/grid";
+import { gridTemplate, type IssueRowVariant } from "@lib/grid";
 import { fmtAge, fmtDateTime, shortPriority, SLA_STATE_LABEL, SLA_STATE_COLOR } from "@lib/sla";
 import { safeHttpUrl } from "@lib/url";
 
 const MONO = "var(--font-mono)";
-
-// Deterministic per-issue pseudo-random skeleton width (30%-85%), so a row's
-// placeholder doesn't jitter width across re-renders while other rows'
-// titles resolve, but still varies row-to-row like real title lengths do.
-function skeletonWidthPct(id: number): number {
-  const frac = Math.sin(id * 12.9898) * 43758.5453;
-  const unit = frac - Math.floor(frac);
-  return 30 + unit * 55;
-}
 
 const STATE_BG: Record<SlaState, string> = {
   NO_SLA: "var(--sla-no-sla-tint)",
@@ -45,11 +37,7 @@ const STATE_BG: Record<SlaState, string> = {
 
 interface IssueTimelineRowProps {
   issue: IssueRow;
-  /** Runtime-resolved title; null = unresolvable (show number only). */
-  title?: string | null;
-  /** True while the batch title request for this list is in flight. */
-  titleLoading?: boolean;
-  showSlaState?: boolean;
+  variant?: IssueRowVariant;
   projectName?: string; // friendly name; falls back to repo short name
   isCsStatus: (status: string | null | undefined) => boolean;
 }
@@ -57,16 +45,14 @@ interface IssueTimelineRowProps {
 /** One issue's row in a list, expandable to its status-event timeline. */
 export function IssueTimelineRow({
   issue,
-  title = null,
-  titleLoading = false,
-  showSlaState = false,
+  variant = "compact",
   projectName,
   isCsStatus,
 }: IssueTimelineRowProps) {
   const [open, setOpen] = useState(false);
   const { data: detail, isError, error, refetch } = useIssue(issue.id, open);
 
-  const cols = gridTemplate(showSlaState);
+  const cols = gridTemplate(variant);
   const cs = isCsStatus(issue.currentStatus);
   const state = (issue.sla?.slaState ?? "NO_SLA") as SlaState;
   const stateColor = SLA_STATE_COLOR[state];
@@ -112,11 +98,9 @@ export function IssueTimelineRow({
             <Box component="span" sx={{ flexShrink: 0, fontWeight: 600, lineHeight: 1, color: "var(--sla-primary)", fontFamily: MONO, fontSize: 12.5 }}>
               #{issue.number}
             </Box>
-            {titleLoading ? (
-              <Skeleton variant="text" sx={{ height: 14, width: `${skeletonWidthPct(issue.id)}%`, maxWidth: 420 }} />
-            ) : title ? (
+            {issue.title ? (
               <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>
-                {title}
+                {issue.title}
               </Box>
             ) : null}
           </Box>
@@ -124,6 +108,17 @@ export function IssueTimelineRow({
 
         {/* Project */}
         <Box component="span" sx={{ fontSize: 12.5, color: "var(--sla-fg2)" }}>{project}</Box>
+
+        {/* Opened by (issues view only) */}
+        {variant === "full" && (
+          <Box
+            component="span"
+            title={issue.openedBy ?? undefined}
+            sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--sla-fg2)" }}
+          >
+            {issue.openedBy ?? "—"}
+          </Box>
+        )}
 
         {/* Pri */}
         <Box component="span" sx={{ fontSize: 11, fontWeight: 600, color: "var(--sla-fg2)", fontFamily: MONO }}>
@@ -149,7 +144,7 @@ export function IssueTimelineRow({
         </span>
 
         {/* SLA state (issues view only) */}
-        {showSlaState && (
+        {variant === "full" && (
           <span>
             <Box component="span" sx={{ borderRadius: "6px", px: 1.25, py: "3px", fontSize: 11.5, fontWeight: 600, bgcolor: STATE_BG[state], color: stateColor }}>
               {SLA_STATE_LABEL[state]}
@@ -167,10 +162,21 @@ export function IssueTimelineRow({
           </Box>
         </Box>
 
-        {/* Age */}
-        <Box component="span" sx={{ textAlign: "right", fontSize: 12, color: "var(--sla-fg3)", fontFamily: MONO }}>
-          {fmtAge(issue.githubCreatedAt)}
-        </Box>
+        {/* Age (compact) / Created + Updated (full) */}
+        {variant === "full" ? (
+          <>
+            <Box component="span" sx={{ textAlign: "right", fontSize: 12, color: "var(--sla-fg3)", fontFamily: MONO }}>
+              <RelativeTime iso={issue.githubCreatedAt} />
+            </Box>
+            <Box component="span" sx={{ textAlign: "right", fontSize: 12, color: "var(--sla-fg3)", fontFamily: MONO }}>
+              <RelativeTime iso={issue.githubUpdatedAt} />
+            </Box>
+          </>
+        ) : (
+          <Box component="span" sx={{ textAlign: "right", fontSize: 12, color: "var(--sla-fg3)", fontFamily: MONO }}>
+            {fmtAge(issue.githubCreatedAt)}
+          </Box>
+        )}
       </Box>
 
       {open && (

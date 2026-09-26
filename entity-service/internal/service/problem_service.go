@@ -18,9 +18,11 @@ package service
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -71,11 +73,35 @@ func parseProblemFieldFiltersPostgres(filters []domain.ProblemFieldFilter) (stat
 
 type problemService struct {
 	repo repository.ProblemRepository
+	// snMirror is nil in every mode except DATA_SOURCE=postgres-servicenow-dual-write
+	// (config.DataSourcePostgresServiceNowDualWrite) -- see
+	// NewProblemServiceWithSNMirror's own doc comment. When set,
+	// CreateProblem delegates to createProblemSNFirst instead of the plain
+	// Postgres path's ServiceUnavailableError below, mirroring
+	// incidentService's identical snMirror-gated branch for CreateIncident.
+	snMirror ProblemService
 }
 
 // NewProblemService constructs a ProblemService backed by Postgres.
 func NewProblemService(repo repository.ProblemRepository) ProblemService {
 	return &problemService{repo: repo}
+}
+
+// NewProblemServiceWithSNMirror is NewProblemService plus the wiring
+// DATA_SOURCE=postgres-servicenow-dual-write needs for problem CREATE: a
+// synchronous, ServiceNow-first creation path -- see
+// createProblemSNFirst's own doc comment for the full reasoning (identical
+// to incidentService.createIncidentSNFirst's: a Postgres-first async create
+// could leave a permanent orphan). This mode has no problem UPDATE mirror --
+// UpdateProblem stays exactly as unsupported here as it is in every other
+// mode; only CREATE is in scope for this pilot extension.
+//
+// mirror is the ServiceNow-backed ProblemService (from
+// NewServiceNowProblemService) whose CreateProblem performs the real
+// ServiceNow POST. It is never made the active ProblemService here -- reads
+// always stay on Postgres in this mode.
+func NewProblemServiceWithSNMirror(repo repository.ProblemRepository, mirror ProblemService) ProblemService {
+	return &problemService{repo: repo, snMirror: mirror}
 }
 
 // SearchProblems implements ProblemService.
@@ -123,13 +149,90 @@ func (s *problemService) GetProblem(ctx context.Context, id string) (domain.Prob
 	return s.repo.GetProblem(ctx, id)
 }
 
-// CreateProblem is not supported for the PostgreSQL data source: like
-// CaseRepository.CreateCase, work_item.number has no DB default and no
-// backing sequence anywhere in migrations/.
-func (s *problemService) CreateProblem(_ context.Context, _ domain.CreateProblemRequest) (domain.ProblemDetail, error) {
+// CreateProblem implements ProblemService.
+//
+// Under DATA_SOURCE=postgres-servicenow-dual-write (snMirror != nil), this
+// delegates to createProblemSNFirst instead of the plain Postgres path's
+// ServiceUnavailableError below -- see that method's own doc comment.
+func (s *problemService) CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
+	if s.snMirror != nil {
+		return s.createProblemSNFirst(ctx, req)
+	}
+	// CreateProblem is not supported for the plain PostgreSQL data source:
+	// like CaseRepository.CreateCase, work_item.number has no DB default and
+	// no backing sequence anywhere in migrations/.
 	return domain.ProblemDetail{}, &apierror.ServiceUnavailableError{
 		Msg: "creating a problem is not available on this data source: work_item.number has no generation strategy defined here",
 	}
+}
+
+// createProblemSNFirst implements CreateProblem's
+// DATA_SOURCE=postgres-servicenow-dual-write path: ServiceNow-FIRST and
+// SYNCHRONOUS, exactly mirroring incidentService.createIncidentSNFirst's
+// reasoning -- see that method's own doc comment for why CREATE must be
+// ServiceNow-first rather than Postgres-first-and-async.
+//
+// The ServiceNow call is made exactly once, with no internal retry: retrying
+// here risks creating a second, duplicate ServiceNow record if ServiceNow's
+// create actually succeeded but the HTTP response back to entity-service was
+// lost (timeout/network blip) -- entity-service has no way to distinguish
+// that from a real failure, and retry policy for that case belongs to the
+// caller, not this layer.
+//
+// On success, id/number come from ServiceNow's own response and are used
+// AS-IS for the Postgres insert
+// (ProblemRepository.CreateProblemFromServiceNow) rather than generated.
+// Unlike case/incident/change_request, createdBy is NOT taken from
+// ServiceNow's response: ServiceNow's problem create endpoint
+// (snProblemDetailResponse) returns no createdBy/createdOn field at all.
+// Instead, createdBy is resolved from the requesting user's own JWT email
+// claim -- the same middleware.UserIDTokenFromContext + emailFromJWT chain
+// caseService.CreateCase already uses when req.CreatedBy is empty -- since
+// the calling user's identity is the only real signal for who actually
+// created the problem. An UnauthorizedError/ValidationError from that
+// resolution is returned before ever calling ServiceNow, since without a
+// createdBy there would be nothing valid to insert even if ServiceNow
+// accepted the create.
+func (s *problemService) createProblemSNFirst(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.ProblemDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+	createdBy, err := emailFromJWT(token)
+	if err != nil {
+		return domain.ProblemDetail{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+	}
+
+	snResp, err := s.snMirror.CreateProblem(ctx, req)
+	if err != nil {
+		// ServiceNow never accepted the problem -- nothing is written to
+		// Postgres at all, by construction
+		// (s.repo.CreateProblemFromServiceNow is simply never called on
+		// this path). No orphan gets created.
+		return domain.ProblemDetail{}, err
+	}
+
+	id := ""
+	if snResp.ID != nil {
+		id = *snResp.ID
+	}
+	number := ""
+	if snResp.Number != nil {
+		number = *snResp.Number
+	}
+
+	resp, err := s.repo.CreateProblemFromServiceNow(ctx, req, id, number, createdBy, snResp.State)
+	if err != nil {
+		// ServiceNow already has the problem at this point -- this is now
+		// real drift (ServiceNow has it, Postgres doesn't) needing operator
+		// attention, not a safely-rejected request. Logged loudly rather
+		// than only returned, same convention as
+		// incidentService.createIncidentSNFirst's identical failure shape.
+		slog.ErrorContext(ctx, "sn create problem: ServiceNow problem created but the Postgres insert failed",
+			"problemId", id, "snNumber", number, "error", err)
+		return domain.ProblemDetail{}, err
+	}
+	return resp, nil
 }
 
 // UpdateProblem is not supported for the PostgreSQL data source: Transition

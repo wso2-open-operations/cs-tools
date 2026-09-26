@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Box, Skeleton, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import { Clock, Plane, Server, ShieldAlert, Users } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, type JSX, type ReactNode } from "react";
 import type { BeDashboardWidget } from "@api/backend/types";
 import { useDashboard } from "@features/csm-dashboard/api/useDashboard";
 import { groupWidgetsBySection, type WidgetGroup } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
@@ -80,9 +80,18 @@ function WallboardPageFrame({
   sx,
 }: {
   children: ReactNode;
-  sx?: Record<string, unknown>;
+  sx?: SxProps<Theme>;
 }): JSX.Element {
-  return <Box sx={{ bgcolor: "#0f1420", minHeight: "100dvh", p: 2, ...sx }}>{children}</Box>;
+  // Array composition, not object spread: `sx` accepts MUI's callback form
+  // (`(theme) => ({...})`), which an object spread would silently break.
+  // MUI's own array syntax merges each entry (skipping falsy ones) in order,
+  // so the caller's `sx` always overrides these defaults exactly like the
+  // spread did.
+  return (
+    <Box sx={[{ bgcolor: "#0f1420", minHeight: "100dvh", p: 2 }, ...(Array.isArray(sx) ? sx : [sx])]}>
+      {children}
+    </Box>
+  );
 }
 
 function LoadingSkeleton(): JSX.Element {
@@ -205,9 +214,19 @@ export default function WallboardDashboard({
   // in this grid, so it's filtered out below. That's intentional, but warn
   // in dev builds so a future config change that adds one doesn't just make
   // it silently disappear from this view with no trace.
-  const droppedShapes = (data?.widgets ?? [])
-    .filter((w) => w.shape !== "count")
-    .map((w) => `"${w.displayName}" (${w.shape})`);
+  // Memoized so the effect below only re-warns when the actual set of
+  // dropped widgets changes, not on every 60s poll re-render — `data`
+  // itself stays referentially stable across a refetch that returns
+  // identical content (see `lastUpdated`'s own comment above on React
+  // Query's structural sharing), so this recomputes only when `data.widgets`
+  // genuinely changes.
+  const droppedShapes = useMemo(
+    () =>
+      (data?.widgets ?? [])
+        .filter((w) => w.shape !== "count")
+        .map((w) => `"${w.displayName}" (${w.shape})`),
+    [data?.widgets],
+  );
   useEffect(() => {
     if (import.meta.env.DEV && droppedShapes.length > 0) {
       console.warn(
@@ -215,10 +234,7 @@ export default function WallboardDashboard({
           `are not shown on the monitor dashboard: ${droppedShapes.join(", ")}`,
       );
     }
-    // Re-warn only when the set of dropped widgets actually changes, not on
-    // every 60s poll re-render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardId, droppedShapes.join("|")]);
+  }, [dashboardId, droppedShapes]);
 
   // Only fall back to the error / loading screens when there is nothing
   // cached to render. React Query keeps the last successful `data` through

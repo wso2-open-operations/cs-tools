@@ -37,6 +37,34 @@ export interface BeErrorPayload {
   message?: string;
 }
 
+/** CSM list that owns a saved filter view. Isolated so views never leak across lists. */
+export type BeSavedFilterListKey = "cases" | "incidents" | "change_requests" | "problems";
+
+/** Named bookmark of a list URL query string. `qs` is opaque. */
+export interface BeSavedFilterView {
+  name: string;
+  qs: string;
+}
+
+export interface BeSavedFilterViewList {
+  views: BeSavedFilterView[];
+}
+
+export interface BeSaveSavedFilterViewPayload {
+  listKey: BeSavedFilterListKey;
+  name: string;
+  qs: string;
+}
+
+export interface BeReorderSavedFilterViewPayload {
+  listKey: BeSavedFilterListKey;
+  name: string;
+  /** One-slot move. Omit when `position` is set. */
+  direction?: "up" | "down";
+  /** 0-based target index. Wins over `direction` when both are set. */
+  position?: number;
+}
+
 export interface BeSearchResponseBase {
   total: number;
   limit: number;
@@ -1278,17 +1306,35 @@ export interface BeComment {
   id: string;
   /** Parent reference id — the case id or conversation id per the endpoint. */
   referenceId?: string;
-  /** Rich-text HTML (case comment) or Markdown (Novera chat) body. */
+  /** Rich-text HTML (case comment) or Markdown (Novera chat) body. Once
+   * `isDeleted` is true, this is the literal string `"[deleted]"` for a
+   * non-admin internal caller, or the real (never-destroyed) content for an
+   * admin — the frontend renders whatever is given here, no client-side
+   * redaction. */
   content: string;
   /** Normalized comment type; `string` (not the enum) to tolerate new values. */
   type: string;
   createdOn: string;
   createdBy: BeUserReference | null;
+  /** ISO timestamp of the comment's most recent edit. Present once a comment
+   * has been edited at least once via `PATCH /comments/{id}`; absent on a
+   * never-edited comment. */
+  lastEditedOn?: string;
+  /** True once the comment has been soft-deleted via `DELETE /comments/{id}`.
+   * A customer-role caller never receives a soft-deleted row at all, so this
+   * only ever appears for an internal caller. `omitempty` on the wire — absent
+   * or false on a never-deleted comment. */
+  isDeleted?: boolean;
 }
 
 export interface BeCommentSearchResponse extends BeSearchResponseBase {
   /** Optional: the backend may omit the array on an empty result. */
   comments?: BeComment[];
+}
+
+/** Body of `PATCH /comments/{id}`. */
+export interface BeCommentPatchPayload {
+  content: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1328,6 +1374,7 @@ export interface BeCaseUpdateRequestTemplates {
 // ---------------------------------------------------------------------------
 
 export type BeConversationState =
+  | "OPEN"
   | "ACTIVE"
   | "RESOLVED"
   | "CONVERTED"
@@ -1653,6 +1700,18 @@ export interface BeUser {
   updatedAt?: string;
 }
 
+/**
+ * `POST /users` request body. At least one of firstName/lastName is
+ * required. `roles` is accepted by the backend but not currently sent by the
+ * webapp — there is no Asgardeo-backed way to browse/assign roles at
+ * account-creation time yet.
+ */
+export interface BeCreateUserPayload {
+  firstName?: string;
+  lastName?: string;
+  email: string;
+}
+
 export interface BeUserSearchFilters {
   /** Case-insensitive match against username and email. */
   searchQuery?: string;
@@ -1739,6 +1798,8 @@ export interface BeProject {
   sfId?: string;
   name?: string;
   projectKey?: string;
+  /** The project's short key, e.g. "WSO2-1000" (ServiceNow/entity-service field name: `key`). */
+  key?: string;
   subscriptionType?: BeSubscriptionType;
   /** Whether this project is eligible to raise service requests, as
    *  precomputed by the backing data source. Distinct from
@@ -1746,6 +1807,8 @@ export interface BeProject {
    *  viewer-permission flag rather than a project eligibility flag — gate SR
    *  creation on both. */
   hasSr?: boolean;
+  /** "Open" | "Suspended" | "Restricted" (ServiceNow data source only). */
+  closureState?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   createdAt?: string;
@@ -1757,6 +1820,12 @@ export interface BeProjectSearchPayload {
   searchQuery?: string;
   /** Filter to projects belonging to this account (ServiceNow data source only). */
   accountId?: string;
+  /** Excludes projects whose closure state is any of the given values, e.g.
+   *  ["Restricted", "Suspended"] (ServiceNow data source only). */
+  excludeClosureStates?: string[];
+  /** Excludes projects whose subscription type is any of the given values
+   *  (ServiceNow data source only). */
+  excludeSubscriptionTypes?: BeSubscriptionType[];
 }
 
 export interface BeProjectSearchResponse extends BeSearchResponseBase {
@@ -1990,6 +2059,24 @@ export interface BeProductVersionSearchPayload {
 
 export interface BeProductVersionSearchResponse extends BeSearchResponseBase {
   productVersions: BeProductVersion[];
+}
+
+/**
+ * `POST /deployed-products/projects/search` — resolves which projects are
+ * running a given product version, for the EOL/product-version announcement
+ * flow's audience. The result already excludes Restricted/Suspended projects
+ * and Cloud Support/Cloud Evaluation Support subscriptions unconditionally
+ * (see entity-service's own doc comment on this endpoint) — there is
+ * deliberately no exclude filter on this payload for the caller to set.
+ */
+export interface BeProjectsByProductVersionSearchPayload {
+  pagination?: BePagination;
+  productId: string;
+  productVersionId: string;
+}
+
+export interface BeProjectsByProductVersionSearchResponse extends BeSearchResponseBase {
+  projects: BeEntityRef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2270,6 +2357,17 @@ export interface BeGithubIssueRepoOption {
  */
 export interface BeMetadataResponse {
   githubIssueRepoOptions: BeGithubIssueRepoOption[];
+}
+
+/**
+ * `GET /announcements/audience/excluded-project-keys` response: the
+ * read-only, backend-configured denylist of project keys that never receive
+ * an "All customer projects" customer announcement (see
+ * CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS). Never null, even when nothing is
+ * configured — always a real (possibly empty) array.
+ */
+export interface BeExcludedProjectKeysResponse {
+  excludedProjectKeys: string[];
 }
 
 /** `POST /cases/{id}/call-requests/search` request body. */
@@ -2753,6 +2851,7 @@ export interface BeItService {
   class?: string | null;
   businessCriticality?: string | null;
   serviceClassification?: string | null;
+  supportGroup?: BeEntityRef | null;
 }
 
 export interface BeItServiceSearchPayload {
@@ -3105,6 +3204,11 @@ export interface BeCreateIncidentPayload {
   additionalComments?: string;
   workNotes?: string;
   parentId?: string;
+  /** Links this incident to another incident as its parent (ServiceNow's
+   * dedicated `parent_incident` self-reference on the Incident table) —
+   * distinct from the generic `parentId` above, which links to a case,
+   * change request, or problem instead. */
+  parentIncidentId?: string;
   changeRequestId?: string;
   problemId?: string;
   causedById?: string;

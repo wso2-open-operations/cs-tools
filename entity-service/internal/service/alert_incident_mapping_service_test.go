@@ -81,6 +81,10 @@ func TestAlertIncidentMappingService_CreateAlertIncidentMapping_RejectsMissingFi
 		{"missing source", domain.CreateAlertIncidentMappingRequest{AlertNumber: "ALT-1", AlertStatus: "firing", IncidentID: "inc-1"}},
 		{"missing alertStatus", domain.CreateAlertIncidentMappingRequest{AlertNumber: "ALT-1", Source: "datadog", IncidentID: "inc-1"}},
 		{"missing incidentId", domain.CreateAlertIncidentMappingRequest{AlertNumber: "ALT-1", Source: "datadog", AlertStatus: "firing"}},
+		{"whitespace-only alertNumber", domain.CreateAlertIncidentMappingRequest{AlertNumber: "   ", Source: "datadog", AlertStatus: "firing", IncidentID: "inc-1"}},
+		{"whitespace-only source", domain.CreateAlertIncidentMappingRequest{AlertNumber: "ALT-1", Source: "  \t", AlertStatus: "firing", IncidentID: "inc-1"}},
+		{"whitespace-only alertStatus", domain.CreateAlertIncidentMappingRequest{AlertNumber: "ALT-1", Source: "datadog", AlertStatus: " ", IncidentID: "inc-1"}},
+		{"whitespace-only incidentId", domain.CreateAlertIncidentMappingRequest{AlertNumber: "ALT-1", Source: "datadog", AlertStatus: "firing", IncidentID: "\n"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

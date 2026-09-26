@@ -70,6 +70,14 @@ declare global {
       CSM_PORTAL_MOBILE_APP_IOS_STORE_URL?: string;
       CSM_PORTAL_MOBILE_APP_ANDROID_STORE_URL?: string;
       CSM_PORTAL_MOBILE_APP_INCLUDE_TABLETS?: boolean;
+      /**
+       * Project key an announcement's "Send test" dry run creates its one
+       * real test case in (mirrors the ServiceNow flow's hardcoded
+       * `Project Key = DCPSUB` dry-run scoping). Optional — see
+       * announcementDryRunConfig.ts's DRY_RUN_TEST_PROJECT_KEY, which
+       * defaults to "DCPSUB" when this is unset.
+       */
+      CSM_PORTAL_ANNOUNCEMENT_TEST_PROJECT_KEY?: string;
     };
   }
 }

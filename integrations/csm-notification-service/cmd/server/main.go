@@ -40,6 +40,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/slaengine"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/timecardengine"
 )
@@ -179,6 +180,28 @@ func main() {
 	crDLQProducer := eventbus.NewProducer(crDLQCfg)
 	defer crDLQProducer.Close()
 
+	// The onboarding events ride their own topic too, for the same reason
+	// the change-request notices do: a separate consumer group isolates
+	// processing, only a separate topic isolates volume. An invitation
+	// backlog must never sit behind a flood of case events, and the
+	// onboarding dead-letter queue is watched on its own rather than mixed
+	// into the case one. entity-service publishes project_contact.invited
+	// here (PROJECT_EVENT_HUB_TOPIC there); every other type stays where
+	// it is.
+	projectCfg := eventbus.Config{
+		Broker:           eventBusCfg.Broker,
+		ConnectionString: eventBusCfg.ConnectionString,
+		Topic:            envOrDefault("PROJECT_EVENT_HUB_TOPIC", "project-events"),
+	}
+	projectDLQCfg := eventbus.Config{
+		Broker:           eventBusCfg.Broker,
+		ConnectionString: eventBusCfg.ConnectionString,
+		Topic:            envOrDefault("PROJECT_EVENT_HUB_DLQ_TOPIC", "project-events-dlq"),
+	}
+
+	projectDLQProducer := eventbus.NewProducer(projectDLQCfg)
+	defer projectDLQProducer.Close()
+
 	consumerGroup := envOrDefault("EVENT_HUB_CONSUMER_GROUP", "csm-notification-service")
 	dlqConsumerGroup := envOrDefault("EVENT_HUB_DLQ_CONSUMER_GROUP", "csm-notification-service-dlq")
 	mainConsumerCount := envInt("MAIN_CONSUMER_COUNT", 1)
@@ -187,6 +210,10 @@ func main() {
 	crDLQConsumerGroup := envOrDefault("CR_DLQ_CONSUMER_GROUP", "csm-notification-service-cr-dlq")
 	crConsumerCount := envInt("CR_CONSUMER_COUNT", 1)
 	crDLQConsumerCount := envInt("CR_DLQ_CONSUMER_COUNT", 1)
+	projectConsumerGroup := envOrDefault("PROJECT_CONSUMER_GROUP", "csm-notification-service-project")
+	projectDLQConsumerGroup := envOrDefault("PROJECT_DLQ_CONSUMER_GROUP", "csm-notification-service-project-dlq")
+	projectConsumerCount := envInt("PROJECT_CONSUMER_COUNT", 1)
+	projectDLQConsumerCount := envInt("PROJECT_DLQ_CONSUMER_COUNT", 1)
 
 	// EMAIL_DEBUG_MODE redirects the four case.* types' actual email delivery
 	// to EMAIL_DEBUG_RECIPIENTS instead of each event's real resolved
@@ -208,7 +235,7 @@ func main() {
 	// CALL_SENDING_ENABLED below. Meant for temporarily silencing email
 	// while investigating a delivery issue without also having to stop
 	// exercising the rest of the pipeline (link resolution, Chat, Twilio).
-	emailSendingEnabled := os.Getenv("EMAIL_SENDING_ENABLED") != "false"
+	emailSendingEnabled := envBool("EMAIL_SENDING_ENABLED", true)
 	// A customer-audience notice puts the recipients in BCC and uses the from
 	// address as the only To, so an unset EMAIL_FROM_ADDRESS submits [""] to
 	// the email service rather than failing here. Required whenever sending is
@@ -226,7 +253,7 @@ func main() {
 	// call specifically — doesn't affect the Google Chat alert. Unlike
 	// EMAIL_DEBUG_MODE above, calls have no debug-recipient equivalent, so
 	// this keeps the simpler disable-entirely (log-only) shape.
-	callSendingEnabled := os.Getenv("CALL_SENDING_ENABLED") != "false"
+	callSendingEnabled := envBool("CALL_SENDING_ENABLED", true)
 	if !callSendingEnabled {
 		slog.Warn("CALL_SENDING_ENABLED=false; incident.created calls will be logged, not placed")
 	}
@@ -239,7 +266,8 @@ func main() {
 	defaultChatProduct := os.Getenv("DEFAULT_CHAT_PRODUCT")
 	defaultOnCallNumber := os.Getenv("INCIDENT_DEFAULT_CALL_TO")
 
-	dispatcher := dispatch.NewDispatcher(emailClient, googleChatClient, twilioClient, linkResolver, emailSendingEnabled, emailDebugMode, emailDebugRecipients, callSendingEnabled, defaultChatProduct, defaultOnCallNumber)
+	dispatcher := dispatch.NewDispatcher(emailClient, googleChatClient, twilioClient, linkResolver, emailSendingEnabled, emailDebugMode, emailDebugRecipients, callSendingEnabled, defaultChatProduct, defaultOnCallNumber).
+		WithOnboarding(loadOnboardingConfig(customerEntityClient, emailClient))
 
 	// The main consumer's OnExhausted: publish the exhausted record to the
 	// dead-letter topic instead of just logging and dropping it. The DLQ's
@@ -262,6 +290,16 @@ func main() {
 		slog.WarnContext(ctx, "eventbus: handler exhausted retries, publishing to dead-letter topic",
 			append(attrs, deadLetterErrAttrs(handleErr)...)...)
 		return crDLQProducer.Publish(ctx, record.Key, record.Value)
+	}
+
+	// Same again for the onboarding consumer: a stuck invitation cannot
+	// fill the case or change-request DLQ, and the reverse.
+	projectToDeadLetter := func(ctx context.Context, record eventbus.Record, handleErr error) error {
+		attrs := []any{"topic", record.Topic, "partition", record.Partition,
+			"offset", record.Offset, "dlqTopic", projectDLQCfg.Topic}
+		slog.WarnContext(ctx, "eventbus: handler exhausted retries, publishing to dead-letter topic",
+			append(attrs, deadLetterErrAttrs(handleErr)...)...)
+		return projectDLQProducer.Publish(ctx, record.Key, record.Value)
 	}
 
 	mux := http.NewServeMux()
@@ -311,12 +349,23 @@ func main() {
 	// that is all their topic carries.
 	crConsumers := startConsumers(ctx, "cr", crCfg, crConsumerGroup, crConsumerCount, dispatcher.Handle, crToDeadLetter)
 	crDLQConsumers := startConsumers(ctx, "cr-dlq", crDLQCfg, crDLQConsumerGroup, crDLQConsumerCount, dispatcher.Handle, nil)
+	// And the same for project_contact.invited: the one dispatcher routes
+	// on the envelope's Type already, and these two only ever receive the
+	// onboarding events since that is all their topic carries.
+	projectConsumers := startConsumers(ctx, "project", projectCfg, projectConsumerGroup, projectConsumerCount, dispatcher.Handle, projectToDeadLetter)
+	projectDLQConsumers := startConsumers(ctx, "project-dlq", projectDLQCfg, projectDLQConsumerGroup, projectDLQConsumerCount, dispatcher.Handle, nil)
 
-	// The SLA timer engine is optional per deployment, gated on REDIS_ADDR or
-	// REDIS_URL being set — unset means this engine neither consumes
-	// sla.clock.register nor ticks, matching the "unset means don't run"
-	// convention used elsewhere in this repo's own services for an optional
-	// capability (e.g. apps/csm-portal/backend's EVENT_HUB_BROKER gate).
+	// The SLA breach-alerting engine is optional per deployment, gated on
+	// REDIS_ADDR or REDIS_URL being set — unset means this engine never
+	// polls, matching the "unset means don't run" convention used elsewhere
+	// in this repo's own services for an optional capability (e.g.
+	// apps/csm-portal/backend's EVENT_HUB_BROKER gate). Unlike the design
+	// this replaced, it is no longer a Kafka consumer at all — see
+	// internal/slaengine's own CLAUDE.md section ("SLA breach alerting")
+	// for the full redesign: it polls entity-service's GET /sla-status
+	// (backed by the real, ServiceNow-synced "sla" table, not a value this
+	// service used to compute itself) on a plain ticker instead.
+	//
 	// REDIS_URL (a rediss://:<password>@<host>:<port> connection string,
 	// parsed via redis.ParseURL) is how a managed Redis with TLS — Azure
 	// Managed Redis, Azure Cache for Redis — gets configured: the "rediss"
@@ -334,11 +383,10 @@ func main() {
 	// to follow MOVED/ASK redirects, which nothing here constructs. Confirm
 	// the target Redis resource's clustering policy is Enterprise/
 	// non-clustered before pointing REDIS_URL at it; OSS Cluster policy will
-	// fail unpredictably (WakeIndex's ZSET operations landing on the wrong
+	// fail unpredictably (TierStore's key operations landing on the wrong
 	// shard) rather than at this construction site.
 	var redisClient *redis.Client
 	var slaProducer *eventbus.Producer
-	var slaConsumers []*eventbus.Consumer
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -374,9 +422,7 @@ func main() {
 		// warns-and-degrades on a missing config), mustEnv is used for all
 		// four values here: once REDIS_ADDR opts into this engine, every one
 		// of them is required for it to do anything at all — a missing
-		// credential would otherwise silently fail every entity-service call
-		// this engine makes, with each sla.clock.register record retried and
-		// dead-lettered for a reason invisible from the DLQ topic alone.
+		// credential would otherwise silently fail every poll.
 		slaEntityClient := slaengine.NewEntityClient(slaengine.EntityConfig{
 			BaseURL:      mustEnv("CUSTOMER_ENTITY_BASE_URL"),
 			TokenURL:     mustEnv("OAUTH2_TOKEN_URL"),
@@ -392,13 +438,18 @@ func main() {
 		// exists.
 		slaProducer = eventbus.NewProducer(eventBusCfg)
 
-		slaEngine := slaengine.NewEngine(slaEntityClient, slaengine.NewWakeIndex(redisClient), slaProducer, googleChatClient, linkResolver, defaultChatProduct)
+		slaEngine := slaengine.NewEngine(slaEntityClient, slaengine.NewTierStore(redisClient), slaProducer, googleChatClient, linkResolver, defaultChatProduct)
 
-		slaConsumerGroup := envOrDefault("SLA_CONSUMER_GROUP", "csm-notification-service-sla")
-		slaConsumerCount := envInt("SLA_CONSUMER_COUNT", 1)
-		slaConsumers = startConsumers(ctx, "sla", eventBusCfg, slaConsumerGroup, slaConsumerCount, slaEngine.Handle, toDeadLetter)
-
-		tickInterval := envDuration("SLA_TICK_INTERVAL", 15*time.Second)
+		// SLA_TICK_INTERVAL defaults far above the old wake-index engine's
+		// 15s: that interval made sense for firing a precomputed due date
+		// close to when it actually elapsed, but this engine now polls
+		// entity-service directly every tick (paginating through every
+		// active clock, ~5,500 as of this redesign) and only needs to
+		// notice a newly-crossed 50/75/100% checkpoint, not a specific
+		// instant — most active "sla" rows don't change more than a few
+		// times a day. 5 minutes balances alert latency against load on
+		// entity-service and Redis.
+		tickInterval := envDuration("SLA_TICK_INTERVAL", 5*time.Minute)
 		go slaEngine.RunTicker(ctx, tickInterval)
 	}
 
@@ -430,7 +481,10 @@ func main() {
 	for _, c := range crDLQConsumers {
 		c.Close()
 	}
-	for _, c := range slaConsumers {
+	for _, c := range projectConsumers {
+		c.Close()
+	}
+	for _, c := range projectDLQConsumers {
 		c.Close()
 	}
 	for _, c := range timeCardConsumers {
@@ -452,6 +506,69 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("CSM Notification Service stopped")
+}
+
+// loadOnboardingConfig wires the project_contact.invited handler (the
+// customer onboarding flow's identity + invitation-email steps — see
+// dispatch.OnboardingConfig). Both steps are behind their own opt-in flag,
+// CSM_MIGRATION_ONBOARD_IDENTITY_ENABLED / CSM_MIGRATION_ONBOARD_EMAIL_ENABLED (`== "true"`, default
+// off — the opt-in convention EMAIL_DEBUG_MODE uses, since shipping this
+// dark is the point), so a deployment without them records both steps as
+// SKIPPED on entity-service's ledger and does nothing else.
+//
+// The SCIM operations service client authenticates with the same shared
+// OAUTH2_* app as the email and entity clients above (the deployment it
+// points at goes through the same gateway app, scoped via SCIM_SCOPES) —
+// mirroring apps/csm-portal/backend's own SCIM client — so only
+// SCIM_BASE_URL/SCIM_SCOPES are its own. os.Getenv, not mustEnv, like every
+// other optional client here; a missing SCIM_BASE_URL with the identity
+// flag on is warned about at startup rather than discovered on the first
+// invitation.
+//
+// The invitation goes out through its own notifications.EmailClient —
+// same email service and credentials as emailClient, but bound to
+// ONBOARD_EMAIL_FROM (falling back to EMAIL_FROM_ADDRESS), since
+// EmailClient fixes its From at construction and the invitation may need a
+// different sender than the case.* emails. Step recording reuses
+// customerEntityClient (entity.CustomerEntityClient.RecordOnboardingStep)
+// — the same entity-service, same shared app; entity-service additionally
+// requires this service's OAuth2 client id to be in its
+// AUTH_INTERNAL_CLIENT_IDS for that endpoint.
+func loadOnboardingConfig(steps *entity.CustomerEntityClient, emailClient *notifications.EmailClient) dispatch.OnboardingConfig {
+	// CSM_MIGRATION_* flags are opt-in: off unless exactly "true".
+	identityEnabled := envBool("CSM_MIGRATION_ONBOARD_IDENTITY_ENABLED", false)
+	emailEnabled := envBool("CSM_MIGRATION_ONBOARD_EMAIL_ENABLED", false)
+
+	scimBaseURL := os.Getenv("SCIM_BASE_URL")
+	if identityEnabled && scimBaseURL == "" {
+		slog.Warn("CSM_MIGRATION_ONBOARD_IDENTITY_ENABLED=true but SCIM_BASE_URL is not set; project_contact.invited identity steps will fail until it is configured")
+	}
+	scimClient := scim.NewClient(scim.Config{
+		BaseURL:      scimBaseURL,
+		TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+		ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+		ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
+	})
+
+	// The invitation reuses the main email client (same grant, same token
+	// cache) and only overrides the sender when ONBOARD_EMAIL_FROM is set.
+	emailFrom := strings.TrimSpace(os.Getenv("ONBOARD_EMAIL_FROM"))
+
+	portalURL := strings.TrimRight(envOrDefault("ONBOARD_PORTAL_URL", "https://support.wso2.com"), "/")
+
+	if identityEnabled || emailEnabled {
+		slog.Info("customer onboarding steps enabled for project_contact.invited", "identity", identityEnabled, "email", emailEnabled, "portalUrl", portalURL)
+	}
+	return dispatch.OnboardingConfig{
+		Identity:        scimClient,
+		Email:           emailClient,
+		Steps:           steps,
+		IdentityEnabled: identityEnabled,
+		EmailEnabled:    emailEnabled,
+		PortalURL:       portalURL,
+		EmailFrom:       emailFrom,
+	}
 }
 
 // startConsumers starts count independent eventbus.Consumer instances, all
@@ -492,6 +609,22 @@ func mustEnv(key string) string {
 		os.Exit(1)
 	}
 	return v
+}
+
+// envBool reads a boolean flag with its default spelled out at the call
+// site. Only the literal strings "true" and "false" (after trimming) change
+// the value; anything else, including unset, yields def. Killswitches such
+// as EMAIL_SENDING_ENABLED default to true; every CSM_MIGRATION_* flag
+// defaults to false and is turned on deliberately at cutover.
+func envBool(key string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return def
+	}
 }
 
 func envOrDefault(key, def string) string {

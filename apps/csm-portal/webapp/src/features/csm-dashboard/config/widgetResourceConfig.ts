@@ -495,6 +495,12 @@ function caseFamilyBuildHref(
       widgetId: ctx?.widgetId ?? "",
       displayName: ctx?.displayName ?? "",
       filters,
+      // Only ever called for the case-family resourceTypes (case,
+      // service_request, security_report_analysis, engagement — see this
+      // function's own doc comment); any one of them picks the same
+      // case-DSL encoding, so the literal here doesn't need to match the
+      // caller's own exact resourceType.
+      resourceType: "case",
     });
   }
   return fallback();
@@ -854,6 +860,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
         widgetId: ctx?.widgetId ?? "",
         displayName: ctx?.displayName ?? "",
         filters,
+        resourceType: "incident_task",
       }),
     icon: CheckSquare,
     iconColor: "warning",
@@ -1079,6 +1086,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
         widgetId: ctx?.widgetId ?? "",
         displayName: ctx?.displayName ?? "",
         filters,
+        resourceType: "case_feedback",
       }),
     icon: Star,
     iconColor: "warning",

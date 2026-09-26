@@ -34,6 +34,15 @@ const useTeamsMock = vi.fn(() => ({
 vi.mock("@features/csm-dashboard/api/useTeams", () => ({
   useTeams: () => useTeamsMock(),
 }));
+vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
+  useSavedFilterViews: () => ({
+    views: [],
+    isLoading: false,
+    saveFilterView: vi.fn(),
+    deleteFilterView: vi.fn(),
+    moveFilterView: vi.fn(),
+  }),
+}));
 
 function renderFilterBar(
   overrides: Partial<React.ComponentProps<typeof ProblemsFilterBar>> = {},

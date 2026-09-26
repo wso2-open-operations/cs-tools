@@ -258,6 +258,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /alerts/adapters/choreodp:
+    post:
+      summary: Submit an internal alert-forwarder's native alert payload.
+      description: >
+        Translates this source's own native alert body into this service's
+        generic AlertRequest, then reuses the exact same
+        validation/buffering/worker/grouping/dedup/escalation path as
+        POST /alerts. Unlike every other adapter, this source's own
+        severity/impact/urgency are raw integers (1=High, 2=Medium, 3=Low,
+        ServiceNow's own convention); impact/urgency are mapped directly onto
+        AlertRequest.impact/urgency, an additive override that bypasses this
+        service's usual severity-derived Impact/Urgency mapping for this
+        alert. "status" is ignored entirely — this source always sends "New".
+      operationId: createAlertFromChoreoDP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChoreoDPAlertPayload'
+      responses:
+        "202":
+          description: Alert accepted and durably buffered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertAcceptedResponse'
+        "400":
+          description: BadRequest — malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden — payload "source" does not match the authenticated Basic Auth identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     basicAuth:
@@ -315,6 +367,19 @@ components:
           description: The source tool's own identifier for this alert, if any.
         description:
           type: string
+        impact:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+          description: >
+            Optional, additive override of the created incident's Impact,
+            bypassing this service's usual severity-derived mapping for this
+            one field. Every generic /alerts caller and every pre-existing
+            vendor adapter leaves this unset; only a source with its own
+            authoritative impact signal (e.g. the choreodp adapter) sets it.
+        urgency:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+          description: Same override mechanism as impact, for Urgency.
 
     AlertAcceptedResponse:
       type: object
@@ -430,3 +495,45 @@ components:
             severity:
               type: string
               description: One of "1".."4", or any other/missing value (maps to "ok").
+
+    ChoreoDPAlertPayload:
+      type: object
+      description: >
+        An internal alert-forwarder's own native alert body. Unlike every
+        other adapter payload, severity/impact/urgency are raw integers
+        (ServiceNow's own convention: 1=High, 2=Medium, 3=Low), not this
+        service's string vocabulary. "status" is always "New" and carries no
+        information this service uses.
+      properties:
+        status:
+          type: string
+          description: Always "New"; not used by this adapter.
+        severity:
+          type: integer
+          description: One of 1 (High), 2 (Medium), 3 (Low), or any other value (maps to "warning").
+        impact:
+          type: integer
+          description: >
+            One of 1 (High), 2 (Medium), 3 (Low), mapped onto
+            AlertRequest.impact. Any other value leaves impact unset.
+        urgency:
+          type: integer
+          description: Same convention as impact, mapped onto AlertRequest.urgency.
+        service:
+          type: string
+        metric_name:
+          type: string
+        description:
+          type: string
+          description: Raw HTML, passed through as-is.
+        category:
+          type: string
+        environment:
+          type: string
+        source:
+          type: string
+          description: >
+            Mapped directly to AlertRequest.source (unlike every other
+            adapter, which uses a fixed literal) — also the identity
+            requireAuthenticatedSource matches against the inbound Basic Auth
+            credential.

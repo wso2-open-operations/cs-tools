@@ -23,6 +23,29 @@ Defined once in `vite.config.ts`, mirrored in `tsconfig.app.json`. Use them inst
 
 A handful of narrower aliases (`@case-details*`, `@time-tracking`, `@deployments`, `@update-cards`) point at specific component subfolders inside individual features — a one-off pattern from a couple of features, not something to replicate for new ones.
 
+## Frontend permission gating — an exception, not the norm
+
+The standing project rule (see `src/App.tsx`'s own comment on the role/group/team member routes) is
+to **show the action and let the backend reject it, never gate in the frontend** — `usePortalAccess()`
+exists mainly so controls the caller definitely cannot use don't clutter the UI, not as the real
+security boundary; the backend's `403` is that. The Dashboard Builder route (`DashboardBuilderRouteGuard`,
+`dashboardBuilderAccess.ts`) was the one deliberate exception, reasoned there as "this feature has
+no backend of its own to enforce it."
+
+**Add User** (`CsmUsersPage.tsx`'s "Add user" button, `AddUserDialog.tsx`) is a second deliberate
+exception, gated on `usePortalAccess().canCreateUser` (`portalAccess.ts`) — `admin` only, unlike
+every other flag on `PortalAccess`, which `cs_engineer` also holds. Here the backend genuinely
+does enforce it (`POST /users` requires `PermAdmin` — see `apps/csm-portal/backend`'s own `CLAUDE.md`),
+so this isn't the same "no backend to fall back on" situation Dashboard Builder was — it's client-side
+gating on top of a real server-side gate, by explicit choice rather than by the show-and-let-it-reject
+default. If a future admin-only action is added, default to the show-and-reject norm unless there's a
+specific reason (as here) to also hide it.
+
+`AddUserDialog.tsx` deliberately has no role picker: the backend's `POST /users` accepts an optional
+`roles` array end-to-end (entity-service → `apps/csm-portal/backend` → here), but there is no
+Asgardeo-backed way to browse/assign roles at account-creation time yet, so the field is simply
+omitted from the form for now rather than half-built.
+
 ## Code organization
 
 Feature-based: each `src/features/<name>/` folder owns its own `api/` (React Query hooks), `components/`, `pages/`, `types/`, `utils/`. Tests are colocated as `<File>.test.tsx` next to the file under test, not in a separate `__tests__` tree.

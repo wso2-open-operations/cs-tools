@@ -39,6 +39,14 @@ func (rw *recoveryWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Unwrap lets http.NewResponseController see through this wrapper to the
+// underlying ResponseWriter -- see responseWriter.Unwrap (logger.go) for why
+// this is needed on every layer between a handler's http.ResponseWriter and
+// the real, deadline-capable one from net/http.
+func (rw *recoveryWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // Recovery is an HTTP middleware that catches any panic in a downstream handler,
 // logs it, and writes a JSON 500 response so the server goroutine keeps running.
 // If the handler already started writing a response before panicking, the error

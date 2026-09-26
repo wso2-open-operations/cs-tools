@@ -25,6 +25,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/acp-closure-service/internal/closure"
@@ -33,30 +35,150 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/acp-closure-service/internal/suspensionstate"
 )
 
-// processProject evaluates and, if anything is due, acts on a single
-// project. Notify happens before suspend is ever attempted, and an error
-// from notify returns immediately — this ordering, not a separate flag, is
-// what guarantees suspend never proceeds after a failed notify (the day-0
-// "email first, stop on failure" contract).
+// cascadeDecision pairs a closure reason's confirmed-firing closure.Decision
+// (its DaysRemaining — negative once overdue, mirroring legacy's
+// days_left — decides the run's processing order; its ShouldSuspend decides
+// whether this cascade closes the project) with the deferred action that
+// carries it out. processProject collects one of these per closure reason
+// that fires this run, then sorts and executes them — see processProject's
+// own doc comment for why this two-phase "decide everything, then act in
+// urgency order" shape matters, not just single-reason correctness.
+type cascadeDecision struct {
+	decision closure.Decision
+	act      func(ctx context.Context, alreadyClosed bool) error
+}
+
+// processProject evaluates every closure reason this team handles —
+// subscription end-date and invoice-based, each entirely independent (its
+// own suspensionProcessState track, its own closure-state dimension) — and
+// acts on whichever ones are due, in the same priority order legacy uses:
+// ACPMainProcess.js's calculateProjectSuspension computes a Decision for
+// every reason first, sorts them by days_left ascending (most overdue
+// first), and only then does actionHandler act on them in that order, one
+// at a time. This matters beyond ordering: legacy's checkForOpenProject
+// gates every notify action on the project's closure status, so once the
+// first (most urgent) reason's suspend fires within a run, every later
+// reason sees the project already closed and skips its own notification.
+//
+// alreadyClosed tracks that in memory as cascades execute, seeded from
+// proj.ClosureState (closed from a *previous* run) and updated to true the
+// instant a cascade's own decision.ShouldSuspend is true (closed *by this
+// run*, whether the suspend PATCH that just fired or an idempotent repeat
+// of one already applied). This is deliberately NOT a live re-fetch of the
+// project between cascades — an earlier version of this function tried
+// exactly that (GetProject right before the second cascade acts) and it
+// failed in a real live test: the project's rolled-up closureState is not
+// read-after-write consistent here (the same stale-read behavior this
+// backend has shown throughout this project, per prior handoffs — a GET
+// moments after a PATCH cannot be trusted to reflect it), so the re-fetch
+// kept observing the pre-suspend value and both cascades notified anyway.
+// Tracking the fact in memory — something this process already knows with
+// certainty, since decision.ShouldSuspend is computed locally, not read
+// back from the API — sidesteps that entirely.
+//
+// A failure *acting* on one cascade (in the execution loop below) returns
+// immediately without attempting the next — matching how a failure partway
+// through one cascade's own notify/suspend sequence already behaves, rather
+// than silently swallowing it to try the remaining cascade anyway.
+//
+// Building the invoice cascade is treated differently (CodeRabbit, PR
+// #1933): a failure there — a transient SearchProjectOpportunityLinks/
+// SearchInvoices/GetOpportunity error, a malformed date or EULA-version
+// field on one ServiceNow-synced row — is logged and does not stop the
+// subscription cascade, which was already built successfully and doesn't
+// depend on invoice data at all, from being executed. The invoice error is
+// still returned once the loop finishes, so Run still counts this project
+// as failed — it's deferred, not swallowed. Building the subscription
+// cascade doesn't get this same treatment: its only possible failure is a
+// corrupt suspensionProcessState (pure parsing, no I/O), which is a
+// genuinely unsafe state to decide *anything* from — including whether the
+// invoice cascade's own section of that same JSON blob can be trusted — so
+// that one still aborts immediately.
 func processProject(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, now time.Time, proj project) error {
+	var cascades []cascadeDecision
+
+	subCascade, err := buildSubscriptionCascade(reader, updater, ntf, proj, now)
+	if err != nil {
+		return err
+	}
+	if subCascade != nil {
+		cascades = append(cascades, *subCascade)
+	}
+
+	invoiceCascade, invoiceErr := buildInvoiceCascade(ctx, reader, updater, ntf, proj, now)
+	if invoiceErr != nil {
+		slog.ErrorContext(ctx, "invoice cascade evaluation failed; still running the subscription cascade",
+			"projectID", proj.ID, "err", invoiceErr)
+	} else if invoiceCascade != nil {
+		cascades = append(cascades, *invoiceCascade)
+	}
+
+	// Most-overdue-first, matching legacy's sorted_by_days_left ascending
+	// sort. Stable so an exact days_left tie keeps subscription ahead of
+	// invoice — the order they were appended above, mirroring legacy's own
+	// pre-sort array order ([based_on_subscription_end_date,
+	// based_on_due_invoices, based_on_compliance]).
+	sort.SliceStable(cascades, func(i, j int) bool {
+		return cascades[i].decision.DaysRemaining < cascades[j].decision.DaysRemaining
+	})
+
+	alreadyClosed := proj.ClosureState != nil && *proj.ClosureState != "Open"
+	for _, c := range cascades {
+		if err := c.act(ctx, alreadyClosed); err != nil {
+			return err
+		}
+		if c.decision.ShouldSuspend {
+			alreadyClosed = true
+		}
+	}
+
+	return invoiceErr
+}
+
+// buildSubscriptionCascade evaluates the subscription end-date closure
+// reason and, if it fires, returns a cascadeDecision ready to be ordered
+// against any other firing reason. Returns (nil, nil) when there's no end
+// date at all, or the decision simply doesn't fire yet.
+func buildSubscriptionCascade(reader entityReader, updater projectUpdater, ntf notifier, proj project, now time.Time) (*cascadeDecision, error) {
 	if proj.EndDate == nil {
-		return nil
+		return nil, nil
 	}
 
 	lastWindow, err := suspensionstate.LastNoticeWindow(proj.SuspensionProcessState)
 	if err != nil {
-		return fmt.Errorf("sweep: parse suspensionProcessState for project %s: %w", proj.ID, err)
+		return nil, fmt.Errorf("sweep: parse suspensionProcessState for project %s: %w", proj.ID, err)
 	}
 
 	decision := closure.Decide(now, *proj.EndDate, lastWindow)
 	if !decision.Fires {
-		return nil
+		return nil, nil
 	}
 
+	return &cascadeDecision{
+		decision: decision,
+		act: func(ctx context.Context, alreadyClosed bool) error {
+			return actSubscription(ctx, reader, updater, ntf, proj, decision, alreadyClosed)
+		},
+	}, nil
+}
+
+// actSubscription carries out the subscription end-date cascade's actions
+// for a project decision already confirmed to fire — notify (gated on
+// alreadyClosed, which reflects every higher-priority cascade's own
+// decision.ShouldSuspend so far this run — see processProject) then
+// suspend. Notify happens before suspend is ever attempted, and an error
+// from notify returns immediately — this ordering, not a separate flag, is
+// what guarantees suspend never proceeds after a failed notify (the day-0
+// "email first, stop on failure" contract).
+func actSubscription(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, alreadyClosed bool) error {
 	if decision.ShouldNotify {
-		delivered, err := notifyForWindow(ctx, reader, ntf, proj, decision.Window)
-		if err != nil {
-			return fmt.Errorf("sweep: notify project %s: %w", proj.ID, err)
+		delivered := false
+		var err error
+		if !alreadyClosed {
+			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window, internalNoticeBody, customerNoticeSubject, customerNoticeBody)
+			if err != nil {
+				return fmt.Errorf("sweep: notify project %s: %w", proj.ID, err)
+			}
 		}
 		if err := recordNoticeSent(ctx, updater, proj, decision.Window, delivered); err != nil {
 			return fmt.Errorf("sweep: record notice for project %s: %w", proj.ID, err)
@@ -254,6 +376,13 @@ func timeValue(t *time.Time) time.Time {
 	return *t
 }
 
+func stringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func accountName(proj project) string {
 	if proj.Account == nil {
 		return ""
@@ -290,7 +419,24 @@ func accountName(proj project) string {
 // when part of it silently wasn't (e.g. a customer notice filtered out by
 // EmailNotifier's WSO2-only staging safeguard, even though the internal
 // notice sent fine).
-func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, proj project, window closure.NoticeWindow) (bool, error) {
+// internalBodyBuilder/customerSubjectBuilder/customerBodyBuilder let
+// notifyForWindow serve both the subscription end-date cascade and the
+// invoice cascade — the send/recipient-resolution logic below is identical
+// for both, only the notice content differs. internalNoticeBody/
+// customerNoticeSubject/customerNoticeBody (subscription) and
+// internalInvoiceNoticeBody/customerInvoiceNoticeSubject/
+// customerInvoiceNoticeBody (invoice, the last two adapted via a closure
+// to capture the resolved invoice) satisfy these.
+type internalBodyBuilder func(window closure.NoticeWindow, proj project, accountOwnerName string) string
+type customerSubjectBuilder func(window closure.NoticeWindow, projectName string) string
+type customerBodyBuilder func(window closure.NoticeWindow, proj project) string
+
+func notifyForWindow(
+	ctx context.Context, reader entityReader, ntf notifier, proj project, window closure.NoticeWindow,
+	buildInternalBody internalBodyBuilder,
+	buildCustomerSubject customerSubjectBuilder,
+	buildCustomerBody customerBodyBuilder,
+) (bool, error) {
 	contacts, err := resolveAccountContacts(ctx, reader, proj.accountID())
 	if err != nil {
 		return false, fmt.Errorf("resolve account contacts: %w", err)
@@ -304,7 +450,7 @@ func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, pro
 
 	internalNotice := baseNotice(proj, window)
 	internalNotice.Subject = internalNoticeSubject(window, proj.Name, accountName(proj))
-	internalNotice.Body = internalNoticeBody(window, proj, contacts.AccountOwner.Name)
+	internalNotice.Body = buildInternalBody(window, proj, contacts.AccountOwner.Name)
 	internalNotice.Recipients = internalRecipients
 
 	if !needsCustomerAudience(window) {
@@ -328,8 +474,8 @@ func notifyForWindow(ctx context.Context, reader entityReader, ntf notifier, pro
 
 	if !resolution.NeedsAMNudge {
 		customerNotice := baseNotice(proj, window)
-		customerNotice.Subject = customerNoticeSubject(window, proj.Name)
-		customerNotice.Body = customerNoticeBody(window, proj)
+		customerNotice.Subject = buildCustomerSubject(window, proj.Name)
+		customerNotice.Body = buildCustomerBody(window, proj)
 		customerNotice.Recipients = internalRecipients
 		customerNotice.Recipients.Customer = resolution.CustomerContact
 		customerNotice.ResolvedVia = resolution.ResolvedVia
@@ -360,6 +506,7 @@ func baseNotice(proj project, window closure.NoticeWindow) notify.Notice {
 		ProjectID:   proj.ID,
 		ProjectName: proj.Name,
 		ProjectKey:  proj.ProjectKey,
+		ProjectSfID: stringValue(proj.SfID),
 		StartDate:   timeValue(proj.StartDate),
 		EndDate:     timeValue(proj.EndDate),
 		Window:      window,

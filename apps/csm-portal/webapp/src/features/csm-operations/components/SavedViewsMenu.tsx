@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Button,
   Dialog,
   DialogActions,
@@ -28,17 +29,20 @@ import {
   Menu,
   MenuItem,
   TextField,
+  Tooltip,
 } from "@wso2/oxygen-ui";
 import {
   Bookmark,
   BookmarkPlus,
   Check,
   ChevronDown,
-  ChevronUp,
+  Copy,
+  Menu as DragMenu,
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
-import type { SavedFilterViewsStore } from "@features/csm-operations/utils/savedFilterViews";
+import { useEffect, useState, type DragEvent, type JSX, type KeyboardEvent } from "react";
+import { useSavedFilterViews, type SavedFilterListKey } from "@features/saved-filter-views/useSavedFilterViews";
+import { qsFromPastedFilter, shareUrl } from "@features/saved-filter-views/shareLink";
 
 interface SavedViewsMenuProps {
   /** This tab's own serialized-filters query string right now (no leading
@@ -65,20 +69,15 @@ interface SavedViewsMenuProps {
    * filter shape and feeds it through the same `onChange` the filter bar
    * already has. */
   onApply: (qs: string) => void;
-  /** The tab-scoped saved-views store (its own `localStorage` key) — see
-   * `changeRequestsSavedViews.ts` / `incidentsSavedViews.ts` /
-   * `problemsSavedViews.ts`. */
-  store: SavedFilterViewsStore;
+  /** Which CSM list this menu persists views for. */
+  listKey: SavedFilterListKey;
 }
 
 /**
- * "Saved views" button + menu shared by the Change Requests, Incidents, and
- * Problems filter bars — a named, reusable filter set for high-volume
- * triage, same UI shape as the Cases list's own saved-views block
- * (`CasesFilterBar.tsx`, search for "Saved views") for consistency. Each
- * caller supplies its own tab-scoped `store` so views never leak across
- * tabs (or into/out of the separate Cases list feature, which keeps its own
- * inline implementation untouched).
+ * "Saved views" button + menu shared by the Cases, Change Requests,
+ * Incidents, and Problems filter bars — a named, reusable filter set for
+ * high-volume triage. Each caller supplies its own `listKey` so views never
+ * leak across lists.
  */
 export default function SavedViewsMenu({
   currentQs,
@@ -86,14 +85,35 @@ export default function SavedViewsMenu({
   activeCount,
   hasSearch,
   onApply,
-  store,
+  listKey,
 }: SavedViewsMenuProps): JSX.Element {
-  const savedViews = store.useSavedFilterViews();
+  const {
+    views: savedViews,
+    saveFilterView,
+    deleteFilterView,
+    moveFilterView,
+    reorderFilterView,
+    isSaving,
+    saveError,
+    resetSaveError,
+  } = useSavedFilterViews(listKey);
   const currentCanonical = canonicalizeQs(currentQs);
   const isActiveView = (qs: string): boolean => canonicalizeQs(qs) === currentCanonical;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [newViewName, setNewViewName] = useState("");
+  const [pastedLink, setPastedLink] = useState("");
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [copiedName, setCopiedName] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [draggedName, setDraggedName] = useState<string | null>(null);
+  const [dragOverName, setDragOverName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!copiedName) return;
+    const timer = setTimeout(() => setCopiedName(null), 1500);
+    return () => clearTimeout(timer);
+  }, [copiedName]);
 
   const applyView = (qs: string): void => {
     setAnchor(null);
@@ -102,10 +122,86 @@ export default function SavedViewsMenu({
 
   const handleSaveView = (): void => {
     if (!newViewName.trim()) return;
-    store.saveFilterView(newViewName, currentQs);
-    setNewViewName("");
-    setSaveDialogOpen(false);
-    setAnchor(null);
+    const pasted = pastedLink.trim();
+    let qs = currentQs;
+    if (pasted) {
+      const parsed = qsFromPastedFilter(pasted, listKey);
+      if (!parsed.ok) {
+        setPasteError(parsed.error);
+        return;
+      }
+      qs = parsed.qs;
+    }
+    void (async () => {
+      try {
+        await saveFilterView(newViewName, qs);
+        setNewViewName("");
+        setPastedLink("");
+        setPasteError(null);
+        setSaveDialogOpen(false);
+        setAnchor(null);
+      } catch {
+        // Keep the dialog and name so the caller can retry after saveError.
+      }
+    })();
+  };
+
+  const copyLink = (name: string, qs: string): void => {
+    const url = shareUrl(listKey, qs);
+    if (!navigator.clipboard?.writeText) {
+      setCopiedName(null);
+      setCopyError(name);
+      return;
+    }
+    navigator.clipboard.writeText(url).then(
+      () => {
+        setCopyError(null);
+        setCopiedName(name);
+      },
+      () => {
+        setCopiedName(null);
+        setCopyError(name);
+      },
+    );
+  };
+
+  const handleDragStart = (e: DragEvent<HTMLElement>, name: string): void => {
+    setDraggedName(name);
+    if (!e.dataTransfer) return;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", name);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLElement>, name: string): void => {
+    e.preventDefault();
+    if (name !== dragOverName) setDragOverName(name);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLElement>, targetName: string): void => {
+    e.preventDefault();
+    if (draggedName && draggedName !== targetName) {
+      const targetIndex = savedViews.findIndex((v) => v.name === targetName);
+      if (targetIndex !== -1) void reorderFilterView(draggedName, targetIndex);
+    }
+    setDraggedName(null);
+    setDragOverName(null);
+  };
+
+  const handleDragEnd = (): void => {
+    setDraggedName(null);
+    setDragOverName(null);
+  };
+
+  const handleHandleKeyDown = (e: KeyboardEvent<HTMLElement>, name: string, index: number): void => {
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (index > 0) void moveFilterView(name, "up");
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (index < savedViews.length - 1) void moveFilterView(name, "down");
+    }
   };
 
   return (
@@ -131,6 +227,8 @@ export default function SavedViewsMenu({
         <MenuItem
           onClick={() => {
             setAnchor(null);
+            resetSaveError();
+            setPasteError(null);
             setSaveDialogOpen(true);
           }}
         >
@@ -154,41 +252,76 @@ export default function SavedViewsMenu({
               key={`saved-${v.name}`}
               selected={isActiveView(v.qs)}
               onClick={() => applyView(v.qs)}
+              onDragOver={(e) => handleDragOver(e, v.name)}
+              onDrop={(e) => handleDrop(e, v.name)}
+              sx={{
+                outline:
+                  dragOverName === v.name && draggedName !== v.name
+                    ? "2px solid"
+                    : "2px solid transparent",
+                outlineColor:
+                  dragOverName === v.name && draggedName !== v.name
+                    ? "primary.main"
+                    : "transparent",
+                outlineOffset: -2,
+              }}
             >
               <ListItemIcon>{isActiveView(v.qs) ? <Check size={16} /> : null}</ListItemIcon>
               <ListItemText primary={v.name} />
-              <IconButton
-                size="small"
-                edge="end"
-                aria-label={`Move saved view ${v.name} up`}
-                disabled={i === 0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  store.moveFilterView(v.name, "up");
-                }}
-                sx={{ ml: 1 }}
+              <Tooltip
+                title={
+                  copyError === v.name
+                    ? "Couldn't copy link"
+                    : copiedName === v.name
+                      ? "Copied!"
+                      : "Copy filter link"
+                }
               >
-                <ChevronUp size={15} />
-              </IconButton>
-              <IconButton
-                size="small"
-                edge="end"
-                aria-label={`Move saved view ${v.name} down`}
-                disabled={i === savedViews.length - 1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  store.moveFilterView(v.name, "down");
-                }}
-              >
-                <ChevronDown size={15} />
-              </IconButton>
+                <IconButton
+                  size="small"
+                  edge="end"
+                  aria-label={
+                    copyError === v.name
+                      ? `Couldn't copy filter link for ${v.name}`
+                      : copiedName === v.name
+                        ? `Copied filter link for ${v.name}`
+                        : `Copy filter link for ${v.name}`
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copyLink(v.name, v.qs);
+                  }}
+                  sx={{ ml: 1 }}
+                >
+                  {copiedName === v.name ? <Check size={15} /> : <Copy size={15} />}
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Drag to reorder">
+                <IconButton
+                  size="small"
+                  edge="end"
+                  draggable
+                  aria-label={`Drag to reorder saved view ${v.name}`}
+                  onDragStart={(e) => handleDragStart(e, v.name)}
+                  onDragEnd={handleDragEnd}
+                  onKeyDown={(e) => handleHandleKeyDown(e, v.name, i)}
+                  onClick={(e) => e.stopPropagation()}
+                  sx={{
+                    cursor: "grab",
+                    opacity: draggedName === v.name ? 0.4 : 1,
+                    "&:active": { cursor: "grabbing" },
+                  }}
+                >
+                  <DragMenu size={15} />
+                </IconButton>
+              </Tooltip>
               <IconButton
                 size="small"
                 edge="end"
                 aria-label={`Delete saved view ${v.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  store.deleteFilterView(v.name);
+                  deleteFilterView(v.name);
                 }}
               >
                 <Trash2 size={15} />
@@ -206,6 +339,11 @@ export default function SavedViewsMenu({
       >
         <DialogTitle>Save current view</DialogTitle>
         <DialogContent>
+          {saveError ? (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              Couldn&apos;t save this view. Try again.
+            </Alert>
+          ) : null}
           <TextField
             autoFocus
             fullWidth
@@ -214,7 +352,10 @@ export default function SavedViewsMenu({
             label="View name"
             placeholder="e.g. My open records"
             value={newViewName}
-            onChange={(e) => setNewViewName(e.target.value)}
+            onChange={(e) => {
+              resetSaveError();
+              setNewViewName(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -222,19 +363,38 @@ export default function SavedViewsMenu({
               }
             }}
             helperText={
-              activeCount === 0 && !hasSearch
-                ? "Tip: no filters are active — this view will show all records."
-                : `Captures the ${activeCount} active filter${activeCount === 1 ? "" : "s"}${
-                    hasSearch ? " and the current search" : ""
-                  }.`
+              pastedLink.trim()
+                ? "Saves the filter from the pasted link, not the filters on screen."
+                : activeCount === 0 && !hasSearch
+                  ? "Tip: no filters are active — this view will show all records."
+                  : `Captures the ${activeCount} active filter${activeCount === 1 ? "" : "s"}${
+                      hasSearch ? " and the current search" : ""
+                    }.`
             }
+          />
+          <TextField
+            fullWidth
+            size="small"
+            margin="dense"
+            label="Filter link"
+            placeholder="Paste a filter link"
+            value={pastedLink}
+            error={Boolean(pasteError)}
+            helperText={
+              pasteError ??
+              "Optional. Paste a copied filter link to save that filter instead of the one on screen."
+            }
+            onChange={(e) => {
+              setPasteError(null);
+              setPastedLink(e.target.value);
+            }}
           />
         </DialogContent>
         <DialogActions>
           <Button color="inherit" onClick={() => setSaveDialogOpen(false)}>
             Cancel
           </Button>
-          <Button variant="contained" onClick={handleSaveView} disabled={!newViewName.trim()}>
+          <Button variant="contained" onClick={handleSaveView} disabled={!newViewName.trim() || isSaving}>
             Save
           </Button>
         </DialogActions>

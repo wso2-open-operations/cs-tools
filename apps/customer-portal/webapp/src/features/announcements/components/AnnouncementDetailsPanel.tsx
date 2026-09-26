@@ -17,6 +17,7 @@
 import {
   Box,
   Button,
+  Chip,
   Paper,
   Skeleton,
   Stack,
@@ -25,7 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { ArrowLeft, Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
-import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
+import { INLINE_COMMENT_HTML_PURIFY } from "@features/support/utils/support";
 import type { JSX } from "react";
 import CaseDetailsActionRow from "@features/support/components/case-details/header/CaseDetailsActionRow";
 import {
@@ -115,6 +116,12 @@ export default function AnnouncementDetailsPanel({
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
   const updatedOnLabel = formatAnnouncementDateDisplay(data.updatedOn);
+  // Matches the CSM portal's own SECURITY_ANNOUNCEMENT_TAG_LABEL constant --
+  // the two apps have no shared code to import it from, so it's duplicated
+  // here as a literal, same as every other cross-app label match in this file.
+  const isSecurityAnnouncement = (data.tags ?? []).some(
+    (t) => t.label.toLowerCase() === "security announcement",
+  );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -202,13 +209,14 @@ export default function AnnouncementDetailsPanel({
           </Box>
         )}
 
-        <Typography
-          variant="h6"
-          color="text.primary"
-          sx={{ mb: 1, fontWeight: 500 }}
-        >
-          {data.title || "--"}
-        </Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+          <Typography variant="h6" color="text.primary" sx={{ fontWeight: 500 }}>
+            {data.title || "--"}
+          </Typography>
+          {isSecurityAnnouncement && (
+            <Chip size="small" color="warning" label="Security" sx={{ flexShrink: 0 }} />
+          )}
+        </Box>
 
         <Stack
           direction="row"
@@ -294,7 +302,13 @@ export default function AnnouncementDetailsPanel({
                 }}
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
                 dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(normalizedHtml, DESCRIPTION_PURIFY_CONFIG),
+                  // DESCRIPTION_PURIFY_CONFIG (case/change-request descriptions)
+                  // forbids tables and code blocks -- wrong policy for an
+                  // announcement, whose description legitimately carries
+                  // things like an EOL product-version table. Use the same
+                  // permissive (default-policy) sanitizer this feature's own
+                  // AnnouncementActivityPanel already uses for comments.
+                  __html: DOMPurify.sanitize(normalizedHtml, INLINE_COMMENT_HTML_PURIFY),
                 }}
               />
             );

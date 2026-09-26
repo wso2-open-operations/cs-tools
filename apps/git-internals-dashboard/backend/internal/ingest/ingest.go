@@ -120,14 +120,17 @@ type normalizedEvent struct {
 }
 
 // IngestIssue is the transport-agnostic write path for one GitHub issue:
-// priority extraction, scoped current status, alias normalization, a
-// guarded leading "derived" event, event insert with dedupe, issue upsert,
-// boundary reconciliation, computeSla, and the issue_sla upsert.
+// priority extraction, title/ABT-team/opened-by extraction, scoped current
+// status, alias normalization, a guarded leading "derived" event, event
+// insert with dedupe, issue upsert, boundary reconciliation, computeSla, and
+// the issue_sla upsert.
 func IngestIssue(ctx context.Context, pool *pgxpool.Pool, pair Pair, ictx Context) (Result, error) {
 	node, detail := pair.Node, pair.Detail
 	normalize := ictx.Runtime.Normalize
 
 	priority := extractPriority(node.Labels)
+	title := normalizeTitle(node.Title)
+	meta := ExtractIssueMeta(node.Body) // node.Body is discarded after this line — never logged, persisted elsewhere, or returned
 
 	// Current status scoped to THIS repo's configured project.
 	var scoped *github.ProjectStatus
@@ -269,16 +272,16 @@ func IngestIssue(ctx context.Context, pool *pgxpool.Pool, pair Pair, ictx Contex
 		INSERT INTO issues (
 			repository_id, github_number, state, html_url, priority,
 			current_status, current_status_at, github_created_at, github_closed_at,
-			github_updated_at, last_synced_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			github_updated_at, last_synced_at, title, abt_team, opened_by
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (repository_id, github_number) DO UPDATE SET
 			state = $3, html_url = $4, priority = $5, current_status = $6,
 			current_status_at = $7, github_created_at = $8, github_closed_at = $9,
-			github_updated_at = $10, last_synced_at = $11
+			github_updated_at = $10, last_synced_at = $11, title = $12, abt_team = $13, opened_by = $14
 		RETURNING id
 	`, ictx.RepositoryID, node.Number, node.State, node.URL, priority,
 		currentStatus, currentStatusAt, githubCreatedAt, githubClosedAt,
-		githubUpdatedAt, ictx.Now).Scan(&issueID)
+		githubUpdatedAt, ictx.Now, title, meta.ABTTeam, meta.OpenedBy).Scan(&issueID)
 	if err != nil {
 		return Result{}, fmt.Errorf("ingest: upsert issue: %w", err)
 	}

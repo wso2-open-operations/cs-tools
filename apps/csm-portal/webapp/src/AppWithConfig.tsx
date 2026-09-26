@@ -94,7 +94,10 @@ export default function AppWithConfig(): JSX.Element {
       clientId={authConfig.clientId}
       afterSignInUrl={authConfig.signInRedirectURL}
       afterSignOutUrl={authConfig.signOutRedirectURL}
-      scopes={["openid", "email", "groups", "profile"]}
+      // `roles` is what makes the IdP put the user's roles claim in the token; the
+      // backend authorises every request from it (see the backend README's
+      // "Access control"), so without this scope a user holds no portal role.
+      scopes={["openid", "email", "groups", "profile", "roles"]}
       preferences={{
         theme: {
           inheritFromBranding: false,

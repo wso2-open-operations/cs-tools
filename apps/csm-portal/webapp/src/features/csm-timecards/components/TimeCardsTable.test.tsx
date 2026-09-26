@@ -39,6 +39,7 @@ vi.mock("@api/backend/client", () => ({
     get: getMock,
     post: postMock,
     patch: vi.fn(),
+    put: vi.fn(),
     postEmpty: vi.fn(),
     del: vi.fn(),
     getBlob: vi.fn(),

@@ -15,7 +15,7 @@
 // under the License.
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { DeploymentAttachment } from "@features/csm-projects/types/csmProjects";
@@ -59,6 +59,23 @@ vi.mock("@api/backend/client", () => ({
   },
   useBackendApi: () => ({}),
 }));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
+// This panel now reads usePortalAccess (to gate upload/edit/delete), which
+// transitively imports the real backend client/config -- mocked above.
+// Default to full write access; the gating test below overrides it.
+let mockCanWrite = true;
+vi.mock("@context/current-user/usePortalAccess", () => ({
+  usePortalAccess: () => ({
+    hasAnyRole: true,
+    canEscalate: true,
+    canDownloadAttachment: true,
+    canUseOperations: true,
+    canUseTimeCardsAndUpdates: true,
+    canWrite: mockCanWrite,
+  }),
+}));
 
 import DeploymentAttachmentsPanel from "@features/csm-projects/components/DeploymentAttachmentsPanel";
 
@@ -84,6 +101,21 @@ function mockList(overrides: Partial<UseQueryResult<DeploymentAttachment[], Erro
 }
 
 describe("DeploymentAttachmentsPanel", () => {
+  beforeEach(() => {
+    mockCanWrite = true;
+  });
+
+  it("hides upload, edit, and delete controls for a caller without write access", () => {
+    mockCanWrite = false;
+    mockList({ data: [ATTACHMENT] });
+    render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);
+
+    expect(screen.queryByRole("button", { name: /edit runbook\.pdf/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete runbook\.pdf/i })).not.toBeInTheDocument();
+    // Download stays available -- it's a read action, not gated by canWrite.
+    expect(screen.getByRole("button", { name: /download runbook\.pdf/i })).toBeInTheDocument();
+  });
+
   it("shows an empty state when there are no attachments", () => {
     mockList({ data: [] });
     render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);

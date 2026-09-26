@@ -14,6 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { BeWidgetResourceType } from "@api/backend/types";
+import { usesCaseFieldFilterDsl } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
+
 /** Marker param set only when the filters object being encoded/decoded uses
  * the case-search generic field/op/values DSL (see
  * `isCaseFieldFilterArray`) — so `parseWidgetPreviewFilters` knows to
@@ -29,6 +32,41 @@ const CASE_FILTER_MARKER = "_cf";
  * this is the one deliberate exception to this file's "no opaque JSON blob"
  * approach, scoped to just this one nested construct. */
 const ANY_OF_PARAM = "_anyOf";
+
+/**
+ * Param-name prefix for an entry of a NON-case resourceType's own bespoke
+ * `filters` array (e.g. `change_request`'s `assignmentGroupId`/`approval`,
+ * `incident`/`problem`'s own generic field filters — see
+ * `GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES` in `useWidgetGroupByData.ts`).
+ * `isCaseFieldFilterArray` only checks the array's *shape*
+ * (`{field, op, values}[]`), which these bespoke arrays share structurally
+ * with the real case-search DSL despite being a completely different,
+ * resourceType-specific contract — one that critically can have SIBLING
+ * named fields alongside it on the same filters object (e.g.
+ * `change_request`'s own top-level `states`, a plural array field that is
+ * NOT part of its `filters` array at all — `ChangeRequestFieldFilter`'s own
+ * allowed field set excludes `state`/`states` entirely).
+ *
+ * `CASE_FILTER_MARKER` is a single, whole-URL flag: once set,
+ * `parseWidgetPreviewFilters` folds EVERY non-reserved param into the
+ * reconstructed `filters` array, which is only correct when every one of
+ * those params really did come from that array — true for an actual
+ * case-family resourceType (`usesCaseFieldFilterDsl`), but not for
+ * `change_request`/`incident`/`problem`, whose sibling named fields would
+ * otherwise get silently swept into the array too (reported live: a
+ * `change_request` groupBy-by-state pie slice's "View more" link carried
+ * `assignmentGroupId=...&states=scheduled&_cf=1`, and decoding folded
+ * `states` into the array as `{field: "states", op: "in", values:
+ * ["scheduled"]}` — a shape the entity-service's `SearchChangeRequestsFilters`
+ * rejects with a 400, since `states` is a sibling of `filters`, never a
+ * member of it).
+ *
+ * Each entry of a non-case resourceType's own `filters` array is instead
+ * tagged with this prefix (`_f.<field>` or `_f.<field>~<op>`) so it can be
+ * told apart from a sibling flat field on decode without a whole-URL flag —
+ * `CASE_FILTER_MARKER` is reserved for the real case-DSL resourceTypes only.
+ */
+const NESTED_FILTER_PARAM_PREFIX = "_f.";
 
 const RESERVED_PARAMS = new Set(["w", "n", CASE_FILTER_MARKER, ANY_OF_PARAM]);
 
@@ -171,6 +209,14 @@ export function buildWidgetPreviewHref(params: {
   widgetId: string;
   displayName: string;
   filters: Record<string, unknown>;
+  /** Which resourceType `filters` belongs to — decides whether a nested
+   * `filters` array is the real case-search DSL (`CASE_FILTER_MARKER`,
+   * one flag for the whole URL) or a non-case resourceType's own bespoke
+   * array that can have sibling named fields alongside it
+   * (`NESTED_FILTER_PARAM_PREFIX`, tagged per entry). See
+   * `NESTED_FILTER_PARAM_PREFIX`'s own doc comment for why this can't be
+   * inferred from the array's shape alone. */
+  resourceType: BeWidgetResourceType;
   /** The signed-in user's own id, so it can be masked rather than embedded
    * verbatim in the URL. Omit if not yet known — the filter value(s) are
    * then left as-is rather than masked. */
@@ -179,6 +225,7 @@ export function buildWidgetPreviewHref(params: {
   const q = new URLSearchParams();
   q.set("w", params.widgetId);
   q.set("n", params.displayName);
+  const isCaseDslResourceType = usesCaseFieldFilterDsl(params.resourceType);
   let usesCaseFieldFilterShape = false;
   for (const [key, value] of Object.entries(params.filters)) {
     if (RESERVED_PARAMS.has(key)) continue;
@@ -188,7 +235,17 @@ export function buildWidgetPreviewHref(params: {
       // — flatten each entry to its own readable `field=values` query param
       // (e.g. `severity=critical,high`), matching the flat encoding below,
       // instead of surfacing one opaque JSON blob.
-      usesCaseFieldFilterShape = true;
+      //
+      // A non-case resourceType's own bespoke `filters` array (e.g.
+      // `change_request`'s `assignmentGroupId`) happens to share this exact
+      // `{field, op, values}[]` shape, but is a different contract that can
+      // carry sibling named fields alongside it (e.g. `change_request`'s
+      // own top-level `states`) — see `NESTED_FILTER_PARAM_PREFIX`'s doc
+      // comment. Only the real case-DSL resourceTypes use the bare
+      // `field=values` encoding + the whole-URL `CASE_FILTER_MARKER`;
+      // everything else tags each entry with that prefix instead, so decode
+      // can tell an array entry apart from a sibling flat field without a
+      // single all-or-nothing flag.
       for (const entry of value) {
         const values = entry.values ?? [];
         const op = entry.op || "in";
@@ -199,11 +256,21 @@ export function buildWidgetPreviewHref(params: {
         const masked = values.map((v) =>
           v === params.currentUserId ? CURRENT_USER_SENTINEL : v,
         );
-        // `in` keeps the bare `field=values` form so previously-shared links
-        // still resolve; any other op is encoded as `field~op` so it survives
-        // the round trip instead of silently decoding back as `in` (which
-        // inverted `notIn` -- a tag EXCLUSION became a tag filter).
-        q.set(op === "in" ? entry.field : `${entry.field}${OP_SEPARATOR}${op}`, masked.join(","));
+        if (isCaseDslResourceType) {
+          usesCaseFieldFilterShape = true;
+          // `in` keeps the bare `field=values` form so previously-shared
+          // links still resolve; any other op is encoded as `field~op` so
+          // it survives the round trip instead of silently decoding back as
+          // `in` (which inverted `notIn` -- a tag EXCLUSION became a tag
+          // filter).
+          q.set(op === "in" ? entry.field : `${entry.field}${OP_SEPARATOR}${op}`, masked.join(","));
+        } else {
+          const taggedKey =
+            op === "in"
+              ? `${NESTED_FILTER_PARAM_PREFIX}${entry.field}`
+              : `${NESTED_FILTER_PARAM_PREFIX}${entry.field}${OP_SEPARATOR}${op}`;
+          q.set(taggedKey, masked.join(","));
+        }
       }
       continue;
     }
@@ -367,14 +434,34 @@ export function parseWidgetPreviewFilters(
     };
   }
 
+  // A non-case resourceType's own bespoke `filters` array entries (see
+  // `NESTED_FILTER_PARAM_PREFIX`'s doc comment) are tagged with this prefix
+  // specifically so they can be picked out here without relying on a
+  // whole-URL flag — every other param on the same URL (e.g.
+  // `change_request`'s sibling `states`) is a genuine flat field and must
+  // NOT be folded into this array.
+  const nestedFieldFilters: WidgetCaseFieldFilterLike[] = [];
+  for (const key of searchParams.keys()) {
+    if (!key.startsWith(NESTED_FILTER_PARAM_PREFIX)) continue;
+    const raw = searchParams.get(key) ?? "";
+    const rest = key.slice(NESTED_FILTER_PARAM_PREFIX.length);
+    const sep = rest.indexOf(OP_SEPARATOR);
+    const field = sep === -1 ? rest : rest.slice(0, sep);
+    const op = sep === -1 ? "in" : rest.slice(sep + OP_SEPARATOR.length);
+    const values = raw === "" ? [] : raw.split(",");
+    if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
+    nestedFieldFilters.push({ field, op, values });
+  }
+
   const filters: Record<string, unknown> = {};
   for (const [key, raw] of searchParams.entries()) {
-    if (RESERVED_PARAMS.has(key)) continue;
+    if (RESERVED_PARAMS.has(key) || key.startsWith(NESTED_FILTER_PARAM_PREFIX)) continue;
 
     const values = raw.split(",");
     if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
     filters[key] = values;
   }
+  if (nestedFieldFilters.length > 0) filters.filters = nestedFieldFilters;
   if (anyOf) filters.anyOf = anyOf;
 
   return { filters, needsCurrentUser };

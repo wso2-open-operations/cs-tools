@@ -17,19 +17,20 @@
 // TanStack React Query hooks wrapping the api client's endpoint functions.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./endpoints";
-import type { IssueFilters } from "./types";
+import type { GlobalFilters, IssueFilters } from "./types";
 
 /**
- * GET /metrics/overview, optionally scoped to repo/priority; polls every 60s.
- * Keeps the previous filter's data on screen (isPlaceholderData) while a new
- * filter's fetch is in flight, instead of flipping isLoading. staleTime
- * mirrors the backend's overviewCacheTTL (30s, metrics.go), so toggling a
- * filter off and back on inside that window is a pure client cache hit.
+ * GET /metrics/overview, optionally scoped to repo/priority/abtTeam; polls
+ * every 60s. Keeps the previous filter's data on screen (isPlaceholderData)
+ * while a new filter's fetch is in flight, instead of flipping isLoading.
+ * staleTime mirrors the backend's overviewCacheTTL (30s, metrics.go), so
+ * toggling a filter off and back on inside that window is a pure client
+ * cache hit.
  */
-export function useOverview(repo?: string, priority?: string) {
+export function useOverview(filters: GlobalFilters = {}) {
   return useQuery({
-    queryKey: ["overview", repo, priority],
-    queryFn: () => api.getOverview({ repo, priority }),
+    queryKey: ["overview", filters.repo, filters.priority, filters.abtTeam],
+    queryFn: () => api.getOverview(filters),
     refetchInterval: 60_000,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
@@ -55,7 +56,13 @@ export function makeIsCsStatus(csStatuses: string[] | undefined) {
  * GET /metrics/timeseries for the given filters. staleTime mirrors the
  * backend's timeseriesCacheTTL (60s, metrics.go); see useOverview.
  */
-export function useTimeseries(params: { repo?: string; metric?: string; days?: number; groupBy?: string }) {
+export function useTimeseries(params: {
+  repo?: string;
+  metric?: string;
+  days?: number;
+  groupBy?: string;
+  abtTeam?: string;
+}) {
   return useQuery({
     queryKey: ["timeseries", params],
     queryFn: () => api.getTimeseries(params),
@@ -70,22 +77,6 @@ export function useIssues(filters: IssueFilters) {
     queryKey: ["issues", filters],
     queryFn: () => api.listIssues(filters),
     placeholderData: keepPreviousData,
-  });
-}
-
-/**
- * Runtime title resolution for a set of issue ids. Titles never touch the
- * DB; they are fetched through the API's GitHub proxy at render time. The
- * stable sorted key makes reordered lists hit the same cache entry.
- */
-export function useIssueTitles(ids: number[]) {
-  const key = [...ids].sort((a, b) => a - b).join(",");
-  return useQuery({
-    queryKey: ["issue-titles", key],
-    queryFn: () => api.getIssueTitles(ids),
-    enabled: ids.length > 0,
-    staleTime: 10 * 60_000, // matches the server-side 15-min cache order of magnitude
-    retry: 1,
   });
 }
 

@@ -51,10 +51,17 @@ type timeseriesRawRow struct {
 	N            int
 }
 
-// BuildTimeseries builds the /metrics/timeseries response for repo (optional
-// "owner/name"), a days window, groupBy ("priority" | "none"), and metric
-// ("violated" | "at_risk" | "total").
-func BuildTimeseries(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfig, repo *string, days int, groupBy, metric string) (Timeseries, error) {
+// BuildTimeseries builds the /metrics/timeseries response for f's repo and
+// ABT team filters, a days window, groupBy ("priority" | "none"), and metric
+// ("violated" | "at_risk" | "total"). f.Priority is not read: this endpoint
+// has no priority parameter, and groupBy=priority already splits the result
+// per tier.
+//
+// The ABT team filter matches each issue's current team, so history is
+// scoped by where an issue sits today rather than by whichever team it was
+// assigned to on each historical date — team assignment is treated as a
+// stable attribute of an issue.
+func BuildTimeseries(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfig, f Filter, days int, groupBy, metric string) (Timeseries, error) {
 	sql := `
 		SELECT
 			s.snapshot_date,
@@ -68,15 +75,26 @@ func BuildTimeseries(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppCon
 			COUNT(*)::int AS n
 		FROM sla_snapshots s
 		JOIN repositories rep ON rep.id = s.repository_id
+	`
+	// issues is joined only to filter by ABT team, so the common case keeps
+	// the cheaper two-table plan.
+	if f.AbtTeam != nil {
+		sql += ` JOIN issues i ON i.id = s.issue_id `
+	}
+	sql += `
 		WHERE s.snapshot_date >= (now() AT TIME ZONE 'UTC')::date - $1::int
 		  AND rep.enabled = true
 	`
 	args := []any{days - 1}
 
-	if repo != nil {
-		owner, name, _ := strings.Cut(*repo, "/")
+	if f.Repo != nil {
+		owner, name, _ := strings.Cut(*f.Repo, "/")
 		args = append(args, owner, name)
 		sql += fmt.Sprintf(" AND rep.owner = $%d AND rep.name = $%d", len(args)-1, len(args))
+	}
+	if f.AbtTeam != nil {
+		args = append(args, *f.AbtTeam)
+		sql += fmt.Sprintf(" AND i.abt_team = $%d", len(args))
 	}
 
 	switch metric {

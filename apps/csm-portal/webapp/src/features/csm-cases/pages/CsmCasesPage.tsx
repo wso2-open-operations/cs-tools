@@ -19,6 +19,7 @@ import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { useSearchParams } from "react-router";
 
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import { readWidgetTitleParam } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -39,6 +40,7 @@ export default function CsmCasesPage(): JSX.Element {
   const navigate = useNavTransition();
   const [searchParams] = useSearchParams();
   const title = readWidgetTitleParam(searchParams) ?? "Cases";
+  const { canWrite } = usePortalAccess();
 
   return (
     <CsmIssuesView
@@ -63,15 +65,17 @@ export default function CsmCasesPage(): JSX.Element {
       enableColumnCustomization
       columnsViewId="cases"
       actions={
-        <Button
-          variant="contained"
-          color="primary"
-          size="small"
-          startIcon={<Plus size={16} />}
-          onClick={() => navigate("/cases/new")}
-        >
-          Create case
-        </Button>
+        canWrite ? (
+          <Button
+            variant="contained"
+            color="primary"
+            size="small"
+            startIcon={<Plus size={16} />}
+            onClick={() => navigate("/cases/new")}
+          >
+            Create case
+          </Button>
+        ) : undefined
       }
     />
   );

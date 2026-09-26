@@ -207,6 +207,69 @@ describe("DashboardWidgetTile", () => {
     );
   });
 
+  it("shape count: dense=true still renders the same resolved count and label (only its own sizing tightens, never its data)", async () => {
+    postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_patches"
+        displayName="My Patches"
+        resourceType="case"
+        shape="count"
+        filters={{}}
+        dense
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
+    expect(screen.getByText("My Patches")).toBeInTheDocument();
+    // Dense mode is a pure CSS/sizing change (see DashboardWidgetGrid's own
+    // `isDenseSection`) — it never suppresses or alters the underlying
+    // fetch/render, only how tightly the result is laid out.
+    expect(postMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shape count: dense=true wraps a long label to (at most) two lines instead of single-line ellipsis truncation, but leaves a non-dense tile's label single-line", async () => {
+    postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
+    const longLabel = "FDE - InProgress Engagement Case";
+
+    const { rerender } = renderWithClient(
+      <DashboardWidgetTile
+        widgetId="fde_inprogress_engagement"
+        displayName={longLabel}
+        resourceType="case"
+        shape="count"
+        filters={{}}
+        dense
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(longLabel)).toBeInTheDocument());
+    const denseLabel = screen.getByText(longLabel);
+    // Dense: no `noWrap` (that MUI prop sets `white-space: nowrap` +
+    // single-line ellipsis) — wrapped instead via `denseWidgetLabelSx`'s
+    // 2-line `-webkit-box`/`-webkit-line-clamp` clamp.
+    expect(denseLabel).not.toHaveClass("MuiTypography-noWrap");
+
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <DashboardWidgetTile
+            widgetId="fde_inprogress_engagement_non_dense"
+            displayName={longLabel}
+            resourceType="case"
+            shape="count"
+            filters={{}}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText(longLabel)).toBeInTheDocument());
+    const nonDenseLabel = screen.getByText(longLabel);
+    expect(nonDenseLabel).toHaveClass("MuiTypography-noWrap");
+  });
+
   it("renders its own error state when its /cases/search call fails", async () => {
     postMock.mockRejectedValue(new Error("boom"));
 

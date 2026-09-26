@@ -38,11 +38,40 @@ var validTimeCardState = map[domain.TimeCardState]bool{
 type timeCardService struct {
 	repo     repository.TimeCardRepository
 	userRepo repository.UserRepository
+	// snWriteback/snMirror back CreateTimeCard's best-effort, asynchronous
+	// ServiceNow mirror write under DATA_SOURCE=postgres-servicenow-dual-write
+	// -- both nil in every other mode. Set only via
+	// NewTimeCardServiceWithSNWriteback.
+	//
+	// UpdateTimeCard/DeleteTimeCard are deliberately NOT mirrored here, same
+	// reasoning as callRequestService's own doc comment on why
+	// UpdateCallRequest isn't mirrored: CreateTimeCard is Postgres-first --
+	// time_card.id is a plain Postgres-generated UUID with no ServiceNow
+	// counterpart stored anywhere (no column on time_card holds one -- see
+	// migration 000039), unlike case/change_request/incident whose CREATE is
+	// ServiceNow-first under this data source. uuidToSysid(that id) would not
+	// resolve to the real ServiceNow record, so a mirrored update/delete
+	// would either permanently 404 or risk colliding with an unrelated
+	// ServiceNow record.
+	snWriteback *SNWritebackDispatcher
+	snMirror    TimeCardService
 }
 
 // NewTimeCardService constructs a TimeCardService backed by Postgres.
 func NewTimeCardService(repo repository.TimeCardRepository, userRepo repository.UserRepository) TimeCardService {
 	return &timeCardService{repo: repo, userRepo: userRepo}
+}
+
+// NewTimeCardServiceWithSNWriteback is NewTimeCardService plus the wiring
+// DATA_SOURCE=postgres-servicenow-dual-write needs: CreateTimeCard dispatches
+// a best-effort, asynchronous ServiceNow mirror write onto mirror after the
+// Postgres write commits -- see CreateTimeCard's own doc comment, and
+// timeCardService's own doc comment on why Update/DeleteTimeCard are not
+// mirrored. A separate constructor rather than extending NewTimeCardService's
+// own signature, same reasoning as NewCaseServiceWithSNWriteback's own doc
+// comment.
+func NewTimeCardServiceWithSNWriteback(repo repository.TimeCardRepository, userRepo repository.UserRepository, dispatcher *SNWritebackDispatcher, mirror TimeCardService) TimeCardService {
+	return &timeCardService{repo: repo, userRepo: userRepo, snWriteback: dispatcher, snMirror: mirror}
 }
 
 // currentUserID resolves the caller's user id from their x-user-id-token --
@@ -231,6 +260,24 @@ func (s *timeCardService) CreateTimeCard(ctx context.Context, req domain.CreateT
 	view, err := s.repo.CreateTimeCard(ctx, req, userID)
 	if err != nil {
 		return domain.TimeCardMutationResponse{}, err
+	}
+
+	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
+	// only (snWriteback/snMirror are both nil otherwise -- see
+	// timeCardService's own doc comment). Postgres has already committed by
+	// this point; the ServiceNow-side id this mirror creates is deliberately
+	// discarded (never written back onto the Postgres row) -- see
+	// timeCardService's own doc comment for why Update/DeleteTimeCard cannot
+	// use it later anyway.
+	if s.snWriteback != nil {
+		mirrorReq := req
+		s.snWriteback.Dispatch(ctx, "time_card", view.ID, "create",
+			map[string]any{"caseId": req.CaseID, "projectId": req.ProjectID, "date": req.Date},
+			func(writeCtx context.Context) error {
+				_, err := s.snMirror.CreateTimeCard(writeCtx, mirrorReq)
+				return err
+			},
+		)
 	}
 
 	return domain.TimeCardMutationResponse{Message: "Time card created successfully", TimeCard: &view}, nil

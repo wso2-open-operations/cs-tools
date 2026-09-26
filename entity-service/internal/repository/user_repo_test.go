@@ -17,6 +17,8 @@
 package repository
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,9 +100,72 @@ func TestScanUser(t *testing.T) {
 			if err != nil {
 				t.Fatalf("scanUser() error = %v", err)
 			}
-			if got != tt.want {
+			// DeepEqual, not ==: domain.User now holds a slice (Roles), which
+			// scanUser must leave nil -- only user search fills it in.
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("scanUser() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUserOrderBy(t *testing.T) {
+	tests := []struct {
+		name string
+		sort domain.UserSortBy
+		want string
+	}{
+		{"no sort keeps newest-first", domain.UserSortBy{}, "u.created_on DESC, u.id"},
+		{"createdOn asc", domain.UserSortBy{Field: domain.UserSortFieldCreatedOn, Order: domain.UserSortOrderAsc}, "u.created_on ASC, u.id"},
+		{"updatedOn desc", domain.UserSortBy{Field: domain.UserSortFieldUpdatedOn, Order: domain.UserSortOrderDesc}, "u.updated_on DESC, u.id"},
+		{"order omitted defaults to ascending", domain.UserSortBy{Field: domain.UserSortFieldUpdatedOn}, "u.updated_on ASC, u.id"},
+	}
+	for _, tt := range tests {
+		if got := userOrderBy(tt.sort); got != tt.want {
+			t.Errorf("%s: userOrderBy = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	// name sorts on the fallback expression, in the requested direction, with u.id last.
+	got := userOrderBy(domain.UserSortBy{Field: domain.UserSortFieldName, Order: domain.UserSortOrderDesc})
+	if !strings.HasPrefix(got, "LOWER(COALESCE(") || !strings.HasSuffix(got, " DESC, u.id") {
+		t.Errorf("name sort = %q, want the COALESCE fallback ordered DESC then u.id", got)
+	}
+	// An unknown field must never reach SQL: it falls back to the default.
+	if got := userOrderBy(domain.UserSortBy{Field: "email; DROP TABLE x"}); got != "u.created_on DESC, u.id" {
+		t.Errorf("unknown field produced %q", got)
+	}
+}
+
+func TestAssignRoles(t *testing.T) {
+	users := []domain.User{{ID: "u1"}, {ID: "u2"}, {ID: "u3"}}
+	assignRoles(users, map[string][]string{"u1": {"admin", "internal"}, "u3": {"agent"}})
+	if got := strings.Join(users[0].Roles, ","); got != "admin,internal" {
+		t.Errorf("u1 roles = %q", got)
+	}
+	if got := strings.Join(users[2].Roles, ","); got != "agent" {
+		t.Errorf("u3 roles = %q", got)
+	}
+	// A user with no roles must be [] (serializes as []), never nil (null).
+	if users[1].Roles == nil || len(users[1].Roles) != 0 {
+		t.Errorf("u2 roles = %#v, want empty non-nil", users[1].Roles)
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	s := func(v string) *string { return &v }
+	tests := []struct {
+		name           string
+		n, first, lst  *string
+		userName, want string
+	}{
+		{"display name wins", s("Jane Q. Doe"), s("Jane"), s("Doe"), "jd", "Jane Q. Doe"},
+		{"blank display name falls back to first + last", s("  "), s("Jane"), s("Doe"), "jd", "Jane Doe"},
+		{"only a first name", nil, s("Jane"), nil, "jd", "Jane"},
+		{"nothing set falls back to the user name", nil, nil, nil, "jane@example.com", "jane@example.com"},
+	}
+	for _, tt := range tests {
+		if got := displayName(tt.n, tt.first, tt.lst, tt.userName); got != tt.want {
+			t.Errorf("%s: displayName = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

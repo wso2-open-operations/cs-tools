@@ -97,11 +97,21 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Renders params as a `?a=1&b=2` query string, dropping undefined/empty-string entries. */
-export function qs(params: Record<string, string | number | undefined>): string {
+/**
+ * Renders params as a `?a=1&b=2` query string, dropping undefined/empty-string
+ * entries. An array value is emitted as one repeated key per element (e.g.
+ * `status: ["WOC", "Open"]` -> `status=WOC&status=Open`), with an empty array
+ * dropped entirely rather than emitting the key with no value.
+ */
+export function qs(params: Record<string, string | number | string[] | undefined>): string {
   const sp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") sp.set(key, String(value));
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) if (v !== "") sp.append(key, v);
+    } else if (value !== "") {
+      sp.set(key, String(value));
+    }
   }
   const s = sp.toString();
   return s ? `?${s}` : "";

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import ActivityCommentInput from "@case-details-activity/ActivityCommentInput";
@@ -48,6 +48,27 @@ vi.mock("@asgardeo/react", () => ({
   })),
 }));
 
+// Stub the real (Lexical) editor with a plain textarea so tests can drive
+// `onChange` directly, e.g. to simulate a comment body over the size guard's
+// threshold without needing to type that many characters through Lexical.
+vi.mock("@components/rich-text-editor/Editor", () => ({
+  default: ({
+    onChange,
+    overlayElement,
+  }: {
+    onChange?: (html: string) => void;
+    overlayElement?: React.ReactNode;
+  }) => (
+    <div>
+      <textarea
+        data-testid="case-description-editor"
+        onChange={(e) => onChange?.(e.target.value)}
+      />
+      {overlayElement}
+    </div>
+  ),
+}));
+
 function renderInput(caseId = "case-001") {
   return render(
     <LoggerProvider config={{ level: "ERROR", prefix: "Test" }}>
@@ -75,4 +96,23 @@ describe("ActivityCommentInput", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("should disable send and swap the tooltip to a size-limit message when the comment body exceeds the 1 MB guard", async () => {
+    renderInput();
+    const editor = screen.getByTestId("case-description-editor");
+    // 1 MB threshold minus the JSON envelope headroom; a single repeated
+    // character is enough to cross it without needing real inline images.
+    const oversized = "a".repeat(1024 * 1024);
+    fireEvent.change(editor, { target: { value: oversized } });
+
+    const btn = screen.getByRole("button", { name: /send comment/i });
+    expect(btn).toBeDisabled();
+
+    // MUI Tooltip only mounts its content on hover; opening it here confirms
+    // the title was swapped from the static "Send comment" to the size-limit
+    // guidance, not just that the button got disabled for some other reason.
+    fireEvent.mouseOver(btn);
+    expect(
+      await screen.findByText(/upload large images as attachments instead/i),
+    ).toBeInTheDocument();
+  });
 });

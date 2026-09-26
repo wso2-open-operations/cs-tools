@@ -16,6 +16,8 @@
 
 package productconsumption
 
+import "encoding/json"
+
 // These types mirror the upstream product-consumption service's wire format
 // 1:1 so json.Unmarshal can decode its responses directly.
 
@@ -106,20 +108,18 @@ type DeploymentLicenseRequest struct {
 	Email string `json:"email"`
 }
 
-// SubscriptionData carries the deployment's license/subscription details.
-type SubscriptionData struct {
-	DeploymentID    string `json:"deploymentId"`
-	DeploymentName  string `json:"deploymentName"`
-	SubscriptionKey string `json:"subscriptionKey"`
-	ClientID        string `json:"clientId"`
-	ClientSecret    string `json:"clientSecret"`
-	Secrets         string `json:"secrets"`
-}
-
 // License is the final license payload returned to the caller.
+//
+// SubscriptionData is carried verbatim rather than modelled as a struct.
+// ServiceNow signs an HMAC over the canonicalised subscription data, so any
+// field lost in transit breaks verification in the customer's product — and a
+// closed struct loses every field it does not name. The six-field struct this
+// replaces dropped usageDataPublishingUrl, which is both signed and the address
+// the product publishes usage to. The Ballerina implementation avoids this by
+// declaring an open record (`json...`).
 type License struct {
-	SubscriptionData SubscriptionData `json:"subscriptionData"`
-	Signature        string           `json:"signature"`
+	SubscriptionData json.RawMessage `json:"subscriptionData"`
+	Signature        string          `json:"signature"`
 }
 
 // LicenseResult wraps License with a success flag.

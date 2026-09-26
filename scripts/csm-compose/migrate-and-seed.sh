@@ -17,9 +17,16 @@
 #
 # One-shot init: applies entity-service's and sre-alert-ingestion-service's
 # raw SQL migrations (neither service wires up a migration tool -- see
-# apps/csm-portal/README.md), then loads dummy seed data into entity-service's
-# database. Runs as the "migrate" compose service, which every dependent
-# service waits on via `depends_on: condition: service_completed_successfully`.
+# apps/csm-portal/README.md), then loads the fixed, minimal dummy seed data
+# in seed-entity-service.sql into entity-service's database. Runs as the
+# "migrate" compose service, which every dependent service waits on via
+# `depends_on: condition: service_completed_successfully`.
+#
+# A broader, randomized set of dummy data is generated separately by the
+# "seed-generator" compose service (scripts/csm-compose/seed-generator),
+# chained to run after this script completes -- it isn't an extra step in
+# this script because this container's image (postgres:16-alpine) has no Go
+# toolchain to build or run that program.
 set -eu
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"

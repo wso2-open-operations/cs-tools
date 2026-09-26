@@ -100,9 +100,9 @@ func TestInvoiceSuspendDate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := invoiceSuspendDate(invoiceDate, tt.invoiceDueDate, tt.eulaVersion, tt.hasPrimaryPartner)
+			got := InvoiceSuspendDate(invoiceDate, tt.invoiceDueDate, tt.eulaVersion, tt.hasPrimaryPartner)
 			if !got.Equal(tt.want) {
-				t.Errorf("invoiceSuspendDate() = %v, want %v", got, tt.want)
+				t.Errorf("InvoiceSuspendDate() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -151,7 +151,7 @@ func TestDecideInvoice_CascadeFiresRelativeToComputedSuspendDate(t *testing.T) {
 }
 
 // TestDecideInvoice_GracePeriodShiftsTheAnchorDate confirms DecideInvoice
-// actually uses invoiceSuspendDate's computed date as its cascade anchor,
+// actually uses InvoiceSuspendDate's computed date as its cascade anchor,
 // not the raw due date — an EULA 3.3 invoice with a short credit period
 // (due date already passed) must not suspend early if day 60 from the
 // invoice date hasn't arrived yet.

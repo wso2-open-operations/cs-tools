@@ -31,15 +31,15 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, ChevronDown } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, ChevronDown, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useRef, useState, type JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import type { CreateIncidentFromCaseNavState } from "@features/csm-cases/types/csmCases";
 import { usePostIncident } from "@features/csm-operations/api/usePostIncident";
+import type { CreateIncidentFromIncidentNavState } from "@features/csm-operations/utils/incidents";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
-import { useSearchGroups } from "@api/useSearchGroups";
 import { useSearchItServices } from "@api/useSearchItServices";
 import { useSearchServiceOfferings } from "@api/useSearchServiceOfferings";
 import { useSearchConfigurationItems } from "@api/useSearchConfigurationItems";
@@ -65,7 +65,7 @@ import type {
   BeIncidentUrgency,
   BeCreateIncidentPayload,
   BeConfigurationItem,
-  BeGroup,
+  BeEntityRef,
   BeItService,
   BeServiceOffering,
   BeUser,
@@ -99,9 +99,29 @@ export default function CreateIncidentPage(): JSX.Element {
   // trip or a full page load. See CsmCaseDetailPage.tsx's `create_incident`
   // handler.
   const location = useLocation();
-  const originCaseState = location.state as
+  const locationState = location.state as
     | CreateIncidentFromCaseNavState
+    | CreateIncidentFromIncidentNavState
+    | { from?: string }
     | undefined;
+  // Discriminate by `caseId`/`incidentId` rather than trusting the cast
+  // shape alone — `location.state` is one plain object shared by every
+  // caller of this page (a case's "Create incident from case…" action, an
+  // incident's own "Create child incident" action, or a plain `{ from }`
+  // navigation), so an unchecked cast to either nav-state type would read as
+  // truthy regardless of which one actually populated it, misapplying the
+  // wrong prefill/notice (e.g. the case-origin notice rendering "Incident
+  // from case undefined: …" for a child-incident navigation, whose state has
+  // no `caseId` at all).
+  const originCaseState =
+    locationState && "caseId" in locationState ? locationState : undefined;
+
+  // Set when opened from an incident's own "Create child incident" action,
+  // which navigates here with router state so the source incident's id
+  // carries over as the new incident's parent without a query-string round
+  // trip or a full page load. See CsmIncidentDetailPage.tsx's Create menu.
+  const originIncidentState =
+    locationState && "incidentId" in locationState ? locationState : undefined;
 
   // Set when opened from a list/detail page's own "Create incident" action
   // with `state: { from: ... }` (same convention as the case-type create
@@ -114,7 +134,9 @@ export default function CreateIncidentPage(): JSX.Element {
   const [shortDescription, setShortDescription] = useState(
     originCaseState?.subject
       ? `Incident from case ${originCaseState.caseNumber ?? originCaseState.caseId}: ${originCaseState.subject}`
-      : "",
+      : originIncidentState?.subject
+        ? `Child incident of ${originIncidentState.incidentNumber ?? originIncidentState.incidentId}: ${originIncidentState.subject}`
+        : "",
   );
   const [description, setDescription] = useState(originCaseState?.description ?? "");
   const [category, setCategory] = useState<BeIncidentCategory | "">(UNSET);
@@ -126,11 +148,21 @@ export default function CreateIncidentPage(): JSX.Element {
   const [serviceId, setServiceId] = useState("");
   const [serviceOfferingId, setServiceOfferingId] = useState("");
   const [configurationItemId, setConfigurationItemId] = useState("");
+  // Derived from the selected Service's ServiceNow `support_group` — not
+  // independently pickable. `assignmentGroupId` is what's actually submitted
+  // (unchanged shape); `derivedAssignmentGroup` only carries the name for
+  // display in the read-only field below.
   const [assignmentGroupId, setAssignmentGroupId] = useState("");
+  const [derivedAssignmentGroup, setDerivedAssignmentGroup] = useState<BeEntityRef | null>(
+    null,
+  );
   const [assignedEngineerId, setAssignedEngineerId] = useState("");
   const [watchList, setWatchList] = useState<string[]>([]);
   const [workNotes, setWorkNotes] = useState("");
   const [parentId, setParentId] = useState(originCaseState?.caseId ?? "");
+  const [parentIncidentId, setParentIncidentId] = useState(
+    originIncidentState?.incidentId ?? "",
+  );
   const [changeRequestId, setChangeRequestId] = useState("");
   const [problemId, setProblemId] = useState("");
   const [causedById, setCausedById] = useState("");
@@ -229,6 +261,7 @@ export default function CreateIncidentPage(): JSX.Element {
     if (watchList.length > 0) payload.watchList = watchList;
     if (workNotes.trim()) payload.workNotes = workNotes.trim();
     if (parentId.trim()) payload.parentId = parentId.trim();
+    if (parentIncidentId.trim()) payload.parentIncidentId = parentIncidentId.trim();
     if (changeRequestId.trim()) payload.changeRequestId = changeRequestId.trim();
     if (problemId.trim()) payload.problemId = problemId.trim();
     if (causedById.trim()) payload.causedById = causedById.trim();
@@ -306,13 +339,22 @@ export default function CreateIncidentPage(): JSX.Element {
       >
         Back
       </Button>
-      <Typography variant="h5" sx={{ mb: originCaseState ? 0.5 : 2 }}>
+      <Typography
+        variant="h5"
+        sx={{ mb: originCaseState || originIncidentState ? 0.5 : 2 }}
+      >
         New incident
       </Typography>
       {originCaseState && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Linked to case {originCaseState.caseNumber ?? originCaseState.caseId} — its id is
           carried through automatically as this incident's parent.
+        </Typography>
+      )}
+      {originIncidentState && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Linked to incident {originIncidentState.incidentNumber ?? originIncidentState.incidentId}
+          {" "}— its id is carried through automatically as this incident's parent incident.
         </Typography>
       )}
 
@@ -464,18 +506,42 @@ export default function CreateIncidentPage(): JSX.Element {
                 label="Service"
                 placeholder="Search services…"
                 value={serviceId}
-                onChange={(next) => {
+                onChange={(next, service) => {
                   setServiceId(next);
                   markTouched("serviceId");
                   // A service offering only makes sense under its own
                   // service — drop it rather than leave a stale pairing.
                   setServiceOfferingId("");
+                  // Assignment group is derived from the service, not
+                  // independently pickable — see the read-only field below.
+                  setAssignmentGroupId(service?.supportGroup?.id ?? "");
+                  setDerivedAssignmentGroup(service?.supportGroup ?? null);
                 }}
                 disabled={postIncident.isPending}
                 useSearch={useSearchItServices}
                 getId={(s) => s.id}
                 getLabel={itServiceLabel}
                 helperText={touched.serviceId && !isServiceValid ? REQUIRED_HELPER : undefined}
+              />
+            </Box>
+            <Box sx={{ flex: "1 1 260px" }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Assignment group"
+                value={derivedAssignmentGroup?.name ?? ""}
+                slotProps={{
+                  input: {
+                    readOnly: true,
+                    endAdornment: <Lock size={16} aria-hidden style={{ opacity: 0.6 }} />,
+                  },
+                  htmlInput: { "aria-readonly": true },
+                }}
+                helperText={
+                  serviceId && !derivedAssignmentGroup
+                    ? "No support group set for this service in ServiceNow."
+                    : "Derived from the selected Service."
+                }
               />
             </Box>
           </Box>
@@ -523,19 +589,6 @@ export default function CreateIncidentPage(): JSX.Element {
 
               <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                 <Box sx={{ flex: "1 1 220px" }}>
-                  <AsyncEntitySelect<BeGroup>
-                    id="incident-assignment-group"
-                    label="Assignment group"
-                    placeholder="Search groups…"
-                    value={assignmentGroupId}
-                    onChange={setAssignmentGroupId}
-                    disabled={postIncident.isPending}
-                    useSearch={useSearchGroups}
-                    getId={(g) => g.id}
-                    getLabel={(g) => g.name}
-                  />
-                </Box>
-                <Box sx={{ flex: "1 1 220px" }}>
                   <AsyncEntitySelect<BeUser>
                     id="incident-assigned-engineer"
                     label="Assigned to"
@@ -579,7 +632,7 @@ export default function CreateIncidentPage(): JSX.Element {
               </Typography>
               <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                 <TextField
-                  label="Parent ID (case / incident / CR / problem)"
+                  label="Parent ID (case / CR / problem)"
                   size="small"
                   value={parentId}
                   onChange={(e) => setParentId(e.target.value)}
@@ -588,6 +641,19 @@ export default function CreateIncidentPage(): JSX.Element {
                     originCaseState
                       ? `Carried through from case ${originCaseState.caseNumber ?? originCaseState.caseId}.`
                       : undefined
+                  }
+                  sx={{ flex: "1 1 220px" }}
+                />
+                <TextField
+                  label="Parent incident ID"
+                  size="small"
+                  value={parentIncidentId}
+                  onChange={(e) => setParentIncidentId(e.target.value)}
+                  disabled={postIncident.isPending}
+                  helperText={
+                    originIncidentState
+                      ? `Carried through from incident ${originIncidentState.incidentNumber ?? originIncidentState.incidentId}.`
+                      : "The major incident this is linked to."
                   }
                   sx={{ flex: "1 1 220px" }}
                 />

@@ -16,6 +16,8 @@
 
 // Wire types for the backend API's request/response shapes. Fields and
 // query params use camelCase (e.g. `slaState`, not `sla_state`).
+import type { IssueSortField, IssueSortOrder } from "./issueSort";
+
 export type SlaState = "NO_SLA" | "OK" | "AT_RISK" | "VIOLATED" | "TERMINAL";
 
 export interface Sla {
@@ -27,8 +29,8 @@ export interface Sla {
   slaRunning: boolean | null;
 }
 
-// PRIVACY: rows carry no title, assignees, opener, or labels. Titles are
-// resolved separately at render time via useIssueTitles().
+// PRIVACY: rows carry title, ABT team, and opened-by (a @wso2.com address),
+// but no labels, assignees, or event actors.
 export interface IssueRow {
   id: number;
   number: number | null;
@@ -40,6 +42,9 @@ export interface IssueRow {
   githubCreatedAt: string | null;
   githubUpdatedAt: string | null;
   sla: Sla | null;
+  title: string | null;
+  abtTeam: string | null;
+  openedBy: string | null;
 }
 
 export interface StatusEvent {
@@ -53,7 +58,14 @@ export interface IssueDetail extends IssueRow {
   events: StatusEvent[];
 }
 
-export type TitleMap = Record<number, string | null>;
+// GET /issues's response envelope.
+export interface IssueListResponse {
+  issues: IssueRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
 
 export interface OverviewHeroStat {
   n: number;
@@ -116,7 +128,8 @@ export interface UnknownStatus {
 
 export interface Overview {
   refreshedAt: string;
-  filters: { repo: string | null; priority: string | null };
+  filters: { repo: string | null; priority: string | null; abtTeam: string | null };
+  abtTeams: string[];
   hero: {
     violated: OverviewHeroStat;
     atRisk: OverviewHeroStat;
@@ -197,16 +210,23 @@ export type BucketKey =
   | "tracked"
   | "untracked"
   | "attention";
-export type OrderKey = "budget_desc" | "updated_desc";
-
 export interface IssueFilters {
-  repo?: string;
-  priority?: string;
+  repo?: string[];
+  priority?: string[];
+  abtTeam?: string[];
   state?: "OPEN" | "CLOSED";
-  slaState?: SlaState;
-  status?: string;
+  slaState?: SlaState[];
+  status?: string[];
   q?: string; // issue number (digits only)
   limit?: number;
+  offset?: number;
   bucket?: BucketKey;
-  order?: OrderKey;
+  sort?: IssueSortField;
+  order?: IssueSortOrder;
+}
+
+export interface GlobalFilters {
+  repo?: string;
+  priority?: string;
+  abtTeam?: string;
 }

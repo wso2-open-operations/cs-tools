@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
 // upstreamErrorCases is the table used by every PATCH/update handler — the
@@ -897,6 +898,92 @@ func TestSearchCases(t *testing.T) {
 		if resp["total"] != float64(1) {
 			t.Errorf("total = %v, want 1", resp["total"])
 		}
+	})
+
+	t.Run("security report search: denied without PermViewSecurityCenter (no guard wired)", func(t *testing.T) {
+		called := false
+		client := &mockEntityCaseClient{
+			searchCasesFn: func(context.Context, []byte) ([]byte, error) {
+				called = true
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"filters":{"filters":[{"field":"type","op":"in","values":["security_report_analysis"]}]}}`)))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		if called {
+			t.Fatal("entity service must not be called for a denied security-report search")
+		}
+	})
+
+	t.Run("security report search: denied for a role that isn't cs_engineer/admin", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{
+			searchCasesFn: func(context.Context, []byte) ([]byte, error) { return []byte(`{}`), nil },
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"filters":{"filters":[{"field":"type","op":"in","values":["security_report_analysis"]}]}}`))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "viewer@example.com", UserID: "u1", Roles: []string{"test-viewer"}}))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+	})
+
+	t.Run("security report search: allowed for cs_engineer", func(t *testing.T) {
+		var capturedBody []byte
+		h := NewCaseHandler(&mockEntityCaseClient{
+			searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"cases":[],"total":0}`), nil
+			},
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		const reqBody = `{"filters":{"filters":[{"field":"type","op":"in","values":["security_report_analysis"]}]}}`
+		r := httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "cs@example.com", UserID: "u2", Roles: []string{"test-cs-engineer"}}))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if string(capturedBody) != reqBody {
+			t.Errorf("upstream received %q, want %q", capturedBody, reqBody)
+		}
+	})
+
+	t.Run("security report search: allowed for admin, mixed with another type in the same filter", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{
+			searchCasesFn: func(context.Context, []byte) ([]byte, error) { return []byte(`{"cases":[],"total":0}`), nil },
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"filters":{"filters":[{"field":"type","op":"in","values":["case","security_report_analysis"]}]}}`))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "admin@example.com", UserID: "u3", Roles: []string{"test-admin"}}))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("security report search: denied when named only inside an anyOf branch", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{
+			searchCasesFn: func(context.Context, []byte) ([]byte, error) { return []byte(`{}`), nil },
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"filters":{"anyOf":[{"filters":[{"field":"type","op":"in","values":["security_report_analysis"]}]}]}}`))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "viewer@example.com", UserID: "u1", Roles: []string{"test-viewer"}}))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+	})
+
+	t.Run("a search naming an unrelated type is unaffected by the security-report check", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{
+			searchCasesFn: func(context.Context, []byte) ([]byte, error) { return []byte(`{"cases":[],"total":0}`), nil },
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"filters":{"filters":[{"field":"type","op":"in","values":["case"]}]}}`))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "viewer@example.com", UserID: "u1", Roles: []string{"test-viewer"}}))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+		assertStatus(t, w, http.StatusOK)
 	})
 
 	t.Run("forwards body without projectIds unchanged", func(t *testing.T) {
@@ -3327,6 +3414,178 @@ func TestPatchCaseWorstCaseFixEta(t *testing.T) {
 	if wrapper.Case.WorstCaseFixEta != "2026-08-01" {
 		t.Errorf("case.worstCaseFixEta = %q, want %q", wrapper.Case.WorstCaseFixEta, "2026-08-01")
 	}
+}
+
+func TestPatchCaseFixEtaWorkNote(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("single fix-ETA field PATCH records a work note with only that field", func(t *testing.T) {
+		var (
+			commentCaseID string
+			commentBody   []byte
+		)
+		commentCalled := make(chan struct{})
+		client := &mockEntityCaseClient{
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				// The response echoes an unrelated, already-set mostLikelyFixEta
+				// alongside the field this PATCH actually touched, to prove the
+				// note is gated on what was in the request, not on what's
+				// merely non-empty in the response.
+				return []byte(`{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","bestCaseFixEta":"2026-10-01","mostLikelyFixEta":"2026-09-15"}}`), nil
+			},
+			createCaseCommentFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
+				commentCaseID = caseID
+				commentBody = body
+				close(commentCalled)
+				return []byte(`{"id":"wn-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"bestCaseFixEta":"2026-10-01"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+
+		select {
+		case <-commentCalled:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreateCaseComment to be called after a successful fix-ETA PATCH")
+		}
+		if commentCaseID != testCaseID {
+			t.Errorf("comment posted against caseID %q, want %q", commentCaseID, testCaseID)
+		}
+
+		var note struct {
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(commentBody, &note); err != nil {
+			t.Fatalf("decode comment body: %v; raw: %s", err, commentBody)
+		}
+		if note.Type != "work_note" {
+			t.Errorf("comment type = %q, want %q", note.Type, "work_note")
+		}
+		wantContent := "Fix ETA updated — Best case: 2026-10-01"
+		if note.Content != wantContent {
+			t.Errorf("comment content = %q, want %q", note.Content, wantContent)
+		}
+	})
+
+	t.Run("all three fix-ETA fields PATCH mentions all three in order", func(t *testing.T) {
+		commentCalled := make(chan struct{})
+		var commentBody []byte
+		client := &mockEntityCaseClient{
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","bestCaseFixEta":"2026-10-01","mostLikelyFixEta":"2026-10-03","worstCaseFixEta":"2026-10-07"}}`), nil
+			},
+			createCaseCommentFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+				commentBody = body
+				close(commentCalled)
+				return []byte(`{"id":"wn-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		reqBody := `{"bestCaseFixEta":"2026-10-01","mostLikelyFixEta":"2026-10-03","worstCaseFixEta":"2026-10-07"}`
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		select {
+		case <-commentCalled:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreateCaseComment to be called after a successful fix-ETA PATCH")
+		}
+
+		var note struct {
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(commentBody, &note); err != nil {
+			t.Fatalf("decode comment body: %v; raw: %s", err, commentBody)
+		}
+		wantContent := "Fix ETA updated — Best case: 2026-10-01, Most likely: 2026-10-03, Worst case: 2026-10-07"
+		if note.Content != wantContent {
+			t.Errorf("comment content = %q, want %q", note.Content, wantContent)
+		}
+	})
+
+	t.Run("fires regardless of addPublicComment on the same request", func(t *testing.T) {
+		commentCalled := make(chan struct{})
+		var callCount atomic.Int32
+		client := &mockEntityCaseClient{
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","bestCaseFixEta":"2026-10-01"}}`), nil
+			},
+			createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				if callCount.Add(1) == 1 {
+					close(commentCalled)
+				}
+				return []byte(`{"id":"wn-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		reqBody := `{"bestCaseFixEta":"2026-10-01","addPublicComment":true}`
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		select {
+		case <-commentCalled:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected the internal fix-ETA work note to be recorded even when addPublicComment is set")
+		}
+	})
+
+	t.Run("PATCH without any fix-ETA field does not record a work note", func(t *testing.T) {
+		var commentCalled atomic.Bool
+		client := &mockEntityCaseClient{
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","subject":"New subject text"}}`), nil
+			},
+			createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				commentCalled.Store(true)
+				return []byte(`{"id":"wn-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"subject":"New subject text"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		// Give any (incorrectly-fired) goroutine a moment to run before asserting
+		// its absence, mirroring the bounded-wait style used elsewhere in this
+		// file for negative fire-and-forget assertions.
+		time.Sleep(50 * time.Millisecond)
+		if commentCalled.Load() {
+			t.Error("expected CreateCaseComment not to be called when no fix-ETA field is present")
+		}
+	})
+
+	t.Run("fix-ETA PATCH still succeeds when the work-note comment call fails", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-07-23T10:00:00Z","bestCaseFixEta":"2026-10-01"}}`), nil
+			},
+			createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return nil, errors.New("entity service unavailable")
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"bestCaseFixEta":"2026-10-01"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
 }
 
 func TestGetCasePassesThroughNewFixEtaFields(t *testing.T) {

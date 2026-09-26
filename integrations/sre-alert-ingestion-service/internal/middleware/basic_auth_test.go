@@ -17,6 +17,7 @@
 package middleware_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -59,6 +60,48 @@ func TestBasicAuth_ValidCredentials_CallsWrappedHandler(t *testing.T) {
 	}
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+// TestBasicAuth_ValidCredentials_StoresAuthenticatedUsernameInContext pins
+// the authorization fix's foundation: a successful auth must make the
+// authenticated identity available to downstream handlers via
+// AuthenticatedUsernameFromContext, not merely check credentials and
+// discard who they belonged to.
+func TestBasicAuth_ValidCredentials_StoresAuthenticatedUsernameInContext(t *testing.T) {
+	t.Parallel()
+
+	users := middleware.BasicAuthUsers{"datadog": mustHash(t, "s3cret")}
+	var gotUsername string
+	var gotOK bool
+	handler := middleware.BasicAuth(users)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUsername, gotOK = middleware.AuthenticatedUsernameFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	r := httptest.NewRequest(http.MethodPost, "/alerts", nil)
+	r.SetBasicAuth("datadog", "s3cret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if !gotOK {
+		t.Fatal("AuthenticatedUsernameFromContext returned ok=false for a request that passed BasicAuth")
+	}
+	if gotUsername != "datadog" {
+		t.Errorf("AuthenticatedUsernameFromContext username = %q, want %q", gotUsername, "datadog")
+	}
+}
+
+// TestAuthenticatedUsernameFromContext_AbsentWhenNeverAuthenticated confirms
+// a bare context (e.g. a rejected request that never reached the wrapped
+// handler, or any context BasicAuth never touched) reports ok=false rather
+// than a stale or zero-value username.
+func TestAuthenticatedUsernameFromContext_AbsentWhenNeverAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	username, ok := middleware.AuthenticatedUsernameFromContext(context.Background())
+	if ok {
+		t.Errorf("AuthenticatedUsernameFromContext on a bare context: ok = true, username = %q, want ok = false", username)
 	}
 }
 
@@ -121,6 +164,11 @@ func TestBasicAuth_RejectsAndNeverCallsWrappedHandler(t *testing.T) {
 				t.Error("WWW-Authenticate header was not set")
 			} else if want := `Basic realm="sre-alert-ingestion-service"`; got != want {
 				t.Errorf("WWW-Authenticate = %q, want %q", got, want)
+			}
+			// A rejected request never reaches the wrapped handler, so it
+			// must never carry an authenticated-username context value.
+			if username, ok := middleware.AuthenticatedUsernameFromContext(r.Context()); ok {
+				t.Errorf("rejected request context carries authenticated username %q, want none", username)
 			}
 		})
 	}

@@ -54,6 +54,15 @@ type Notice struct {
 	ProjectID   string
 	ProjectName string
 	ProjectKey  string
+	// ProjectSfID is the project's Salesforce record ID, when known — used
+	// only by EmailNotifier to render the internal notice's "Project Name"
+	// field as a hyperlink to https://wso2.my.salesforce.com/{ProjectSfID},
+	// matching a real reference email. Empty when absent (no Salesforce ID
+	// on file), in which case that field renders as plain text like every
+	// other field row — never used for customer-facing notices, which
+	// don't get this link at all (confirmed absent from the real
+	// customer-facing reference email).
+	ProjectSfID string
 	StartDate   time.Time
 	EndDate     time.Time
 	Window      closure.NoticeWindow

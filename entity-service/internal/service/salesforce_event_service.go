@@ -34,14 +34,48 @@ type SalesEntityCustomerClient interface {
 	GetCustomer(ctx context.Context, id string) (salesentity.Customer, error)
 }
 
-type salesforceEventService struct {
-	repo repository.AccountRepository
-	se   SalesEntityCustomerClient
+// SalesEntityMembershipClient fetches the Salesforce records the membership
+// ingest needs from REST sales/sales-entity-service.
+type SalesEntityMembershipClient interface {
+	GetProjectContact(ctx context.Context, id string) (salesentity.ProjectContact, error)
+	GetContact(ctx context.Context, id string) (salesentity.Contact, error)
 }
 
-// NewSalesforceEventService constructs a SalesforceEventService.
+// MembershipIngest bundles the dependencies of the Project_Contact__c /
+// Contact branch of POST /salesforce/events. It is optional: a
+// salesforceEventService built without it acknowledges those entities and
+// does nothing (the pre-existing behaviour), which is how
+// CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=false is realised in routes.go.
+type MembershipIngest struct {
+	Memberships repository.ProjectMembershipRepository
+	Steps       repository.OnboardingStepRepository
+	SalesEntity SalesEntityMembershipClient
+	// Publisher may be nil (Event Hub unconfigured): project_contact.invited
+	// is then not published, the database write still happens.
+	Publisher EventPublisherService
+}
+
+func (m *MembershipIngest) enabled() bool {
+	return m != nil && m.Memberships != nil && m.Steps != nil && m.SalesEntity != nil
+}
+
+type salesforceEventService struct {
+	repo       repository.AccountRepository
+	se         SalesEntityCustomerClient
+	membership *MembershipIngest
+}
+
+// NewSalesforceEventService constructs a SalesforceEventService that ingests
+// Account events only; Project_Contact__c and Contact envelopes are
+// acknowledged and ignored.
 func NewSalesforceEventService(repo repository.AccountRepository, se SalesEntityCustomerClient) SalesforceEventService {
 	return &salesforceEventService{repo: repo, se: se}
+}
+
+// NewSalesforceEventServiceWithMembershipIngest additionally ingests
+// Project_Contact__c and Contact envelopes — see salesforce_membership_ingest.go.
+func NewSalesforceEventServiceWithMembershipIngest(repo repository.AccountRepository, se SalesEntityCustomerClient, ingest MembershipIngest) SalesforceEventService {
+	return &salesforceEventService{repo: repo, se: se, membership: &ingest}
 }
 
 // HandleEvent implements SalesforceEventService.
@@ -58,7 +92,17 @@ func (s *salesforceEventService) HandleEvent(ctx context.Context, req domain.Sal
 	req.EventType = strings.TrimSpace(req.EventType)
 	req.Entity = strings.TrimSpace(req.Entity)
 	req.ReferenceID = strings.TrimSpace(req.ReferenceID)
-	if !strings.EqualFold(req.Entity, domain.SalesforceEntityAccount) {
+	switch {
+	case strings.EqualFold(req.Entity, domain.SalesforceEntityAccount):
+		// handled below
+	case strings.EqualFold(req.Entity, domain.SalesforceEntityProjectContact),
+		strings.EqualFold(req.Entity, domain.SalesforceEntityProjectContactAlt):
+		return s.handleProjectContactEvent(ctx, req)
+	case strings.EqualFold(req.Entity, domain.SalesforceEntityContact):
+		return s.handleContactEvent(ctx, req)
+	default:
+		// Other Salesforce objects are acknowledged and ignored: a 400 would
+		// make ASB retry the envelope forever.
 		return nil
 	}
 	if req.EventType == domain.SalesforceEventUndefined {

@@ -15,6 +15,7 @@
 // under the License.
 
 import { type JSX, Suspense, useEffect, useRef, useState } from "react";
+import { Box } from "@wso2/oxygen-ui";
 import { useAsgardeo } from "@asgardeo/react";
 import { ProtectedRoute } from "@asgardeo/react-router";
 import { Outlet, useLocation, useNavigate } from "react-router";
@@ -26,6 +27,7 @@ import {
   CurrentUserProvider,
   useCurrentUser,
 } from "@context/current-user/CurrentUserContext";
+import { getPortalAccess } from "@context/current-user/portalAccess";
 import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
 import NoPortalAccessPage from "@components/error/NoPortalAccessPage";
 import { useLogger } from "@hooks/useLogger";
@@ -166,9 +168,16 @@ function SignInRedirect({ bare = false }: { bare?: boolean }): JSX.Element {
  * page, or the "not authorized" page in its content area.
  */
 function AuthorizedAppShell(): JSX.Element {
-  const { isLoading, isError, error } = useCurrentUser();
+  const { user, isLoading, isError, error } = useCurrentUser();
+  // `GET /users/me` deliberately succeeds for a signed-in user who holds no
+  // portal role (so this page can be shown rather than an error), while every
+  // other endpoint 403s them. `roles` absent means an older backend or a
+  // profile that failed to parse, which must not lock anyone out.
+  const holdsNoPortalRole =
+    !!user && Array.isArray(user.roles) && !getPortalAccess(user.roles).hasAnyRole;
   const notAuthorized =
-    isError && (isUnauthorizedError(error) || isForbiddenError(error));
+    holdsNoPortalRole ||
+    (isError && (isUnauthorizedError(error) || isForbiddenError(error)));
 
   if (isLoading) {
     return (
@@ -187,6 +196,82 @@ function AuthorizedAppShell(): JSX.Element {
   }
 
   return <AppLayout />;
+}
+
+export interface AuthGuardProps {
+  /** Skips `AppLayout` (header, sidebar, banners, idle-timeout provider)
+   * once authenticated, rendering a bare `<Outlet />` instead — for a route
+   * that needs real authentication but must show nothing else on screen
+   * (e.g. `/cs-monitor-dashboard`, a full-screen kiosk-style view).
+   * `false` (the default) is every other route's normal, chrome-wrapped
+   * behavior. Deliberately a prop on THIS guard rather than a second,
+   * parallel guard component — the sign-in latching/redirect-preservation
+   * logic below is exactly the same either way; only the shells it renders
+   * (the pending, sign-in-redirect and authenticated states) swap from
+   * `AppLayout`-based to `BareAuthLoader` / a plain `<Outlet />`. */
+  bare?: boolean;
+}
+
+/**
+ * `bare` mode's counterpart to `AuthorizedAppShell` above — the exact same
+ * `/users/me` entitlement gate (loading / not-authorized / authorized),
+ * just rendered into `bare` mode's own full-viewport, chrome-free frame
+ * instead of `AppLayout`.
+ *
+ * This gate is not optional for `bare` routes: skipping it (an earlier
+ * version of this file did, rendering `<Outlet />` the instant Asgardeo
+ * sign-in succeeded) let anyone with a valid WSO2 identity reach the routed
+ * page — and the widgets it mounts, which fire their own authenticated API
+ * calls immediately — before `/users/me` had confirmed they were actually
+ * entitled to this portal at all, not just signed in to the IdP. Same class
+ * of gap `AuthorizedAppShell` exists to close for every other route.
+ *
+ * Deliberately stricter than `AuthorizedAppShell` on one point: an `isError`
+ * that ISN'T a confirmed 401/403 (a transient 5xx or network failure on
+ * `/users/me`) holds here on `BareAuthLoader` rather than falling through to
+ * the outlet the way `AuthorizedAppShell` does for normal routes. Failing
+ * open there is a reasonable default for a route a signed-in employee is
+ * actively driving — worst case they briefly see the wrong loading state and
+ * retry. `/cs-monitor-dashboard` is this fix's whole reason to exist: an
+ * unattended kiosk with no one to notice or retry, where "wait a bit longer"
+ * costs nothing and "fire real widget queries without confirmed entitlement
+ * because `/users/me` hiccuped" is exactly the CWE-862 gap being closed.
+ *
+ * `NoPortalAccessPage` renders fine outside `AppLayout` — its own root is a
+ * `flex: 1` `Box` meant to fill whatever flex-column parent it's given,
+ * which the wrapper below (matching `BareAuthLoader`'s own frame) provides.
+ */
+function BareAuthorizedContent(): JSX.Element {
+  const { isLoading, isError, error } = useCurrentUser();
+  const notAuthorized =
+    isError && (isUnauthorizedError(error) || isForbiddenError(error));
+
+  if (isLoading) {
+    return <BareAuthLoader />;
+  }
+
+  if (notAuthorized) {
+    return (
+      <Box sx={{ height: "100dvh", width: "100%", display: "flex", flexDirection: "column" }}>
+        <NoPortalAccessPage />
+      </Box>
+    );
+  }
+
+  // `isError` here means `/users/me` failed for a reason OTHER than a
+  // confirmed 401/403 (see `notAuthorized` above) — entitlement is simply
+  // unknown, not confirmed. Hold on the loader rather than falling through
+  // to the outlet; see this function's own doc comment for why that's the
+  // right default specifically for an unattended kiosk route.
+  if (isError) {
+    return <BareAuthLoader />;
+  }
+
+  return (
+    <Suspense fallback={<BareAuthLoader />}>
+      <Outlet />
+    </Suspense>
+  );
 }
 
 export interface AuthGuardProps {
@@ -319,17 +404,12 @@ export default function AuthGuard({ bare = false }: AuthGuardProps): JSX.Element
   // signed in, that is the ONLY recovery trigger this app needs; a token
   // expiring while the user does nothing at all needs no proactive fix.
   //
-  // In `bare` mode the authenticated content is the matched route's own
-  // element with no portal chrome — no header/sidebar/banners, and none of
-  // `AuthorizedAppShell`'s `AppLayout`-wrapped loading / not-authorized
-  // states. `AppLayout` is otherwise the only place in the tree that
-  // provides a `Suspense` boundary, so `bare` mode brings its own — falling
-  // back to `BareAuthLoader`, the same centered progress bar the pending
-  // and sign-in-redirect states show.
+  // In `bare` mode the authenticated content is `BareAuthorizedContent`
+  // rather than `AuthorizedAppShell` — the same `/users/me` entitlement
+  // gate (see that component's own doc comment for why it's not optional),
+  // just rendered without any portal chrome (no header/sidebar/banners).
   const authenticatedContent = bare ? (
-    <Suspense fallback={<BareAuthLoader />}>
-      <Outlet />
-    </Suspense>
+    <BareAuthorizedContent />
   ) : (
     <AuthorizedAppShell />
   );

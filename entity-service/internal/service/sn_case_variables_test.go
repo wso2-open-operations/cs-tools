@@ -86,7 +86,7 @@ func TestSNCaseService_GetCaseByID_MapsVariables(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			})
 
-			svc := NewServiceNowCaseService(client, nil, nil, noopSLAClockService{}, nil, "", nil)
+			svc := NewServiceNowCaseService(client, nil, nil, nil, nil)
 
 			cv, err := svc.GetCaseByID(contextWithUserIDToken("token"), sysidToUUID(testWLCaseSysid))
 			if err != nil {
