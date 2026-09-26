@@ -141,7 +141,7 @@ func TestProjectStatsIntegration_Aggregations(t *testing.T) {
 	})
 
 	t.Run("OutstandingCounts", func(t *testing.T) {
-		counts, err := repo.OutstandingCounts(ctx, statsProjectID,
+		counts, err := repo.OutstandingCounts(ctx, repository.SearchScope{Unrestricted: true}, statsProjectID,
 			[]string{"OPEN", "WORK_IN_PROGRESS", "AWAITING_INFO", "WAITING_ON_WSO2", "REOPENED", "SOLUTION_PROPOSED"},
 			[]string{"CUSTOMER_APPROVAL", "SCHEDULED", "IMPLEMENT", "REVIEW", "CUSTOMER_REVIEW"})
 		if err != nil {

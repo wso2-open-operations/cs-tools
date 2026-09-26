@@ -53,9 +53,21 @@ func caseTypeRef(workItemType string) domain.ReferenceTableItem {
 // SearchScope restricts a search to some projects. Unrestricted means all of
 // them; otherwise only ProjectIDs, and an empty list matches nothing (it is
 // never treated as "no filter").
+//
+// ViewerEmail is the resolved caller's own email (populated alongside
+// ProjectIDs in AccessService.scopeForUser) -- set here rather than
+// re-derived from auth.IdentityFromContext at the repository layer, so
+// identity resolution stays in the one place resolveScopeForID's own doc
+// comment already designates for it. Only announcement-visibility reads
+// (case_repo.go's setAnnouncementVisibility) currently use it; every other
+// scoped query still only reads Unrestricted/ProjectIDs. It is left empty
+// for an Unrestricted caller resolved from an internal client credential
+// with no attached user token -- safe, since Unrestricted alone already
+// grants that path full access regardless of email.
 type SearchScope struct {
 	Unrestricted bool
 	ProjectIDs   []string
+	ViewerEmail  string
 }
 
 // scopePredicate is the single place the "row belongs to one of the caller's
@@ -129,8 +141,16 @@ func orderDirection(desc bool) string {
 	return "ASC"
 }
 
-// runSearch executes the count and page queries concurrently.
-func runSearch[T any](ctx context.Context, db *pgxpool.Pool, countSQL, pageSQL string, f searchFilter, pagination domain.Pagination, scan func(pgx.Rows) (T, error)) ([]T, int, error) {
+// runSearch executes the count and page queries concurrently, each inside
+// its own transaction with the caller's identity set via
+// runWithCallerIdentity -- required so any table these queries touch that
+// carries a caller-scoped row-level-security policy (currently just
+// `announcement`, via SearchCases's join) is evaluated correctly. This
+// applies unconditionally, including for SearchProjects, which doesn't
+// currently need it: the cost is two trivial extra statements per query, and
+// it means a future RLS policy on another table this function's callers
+// might one day join against needs no further change here.
+func runSearch[T any](ctx context.Context, db *pgxpool.Pool, scope SearchScope, countSQL, pageSQL string, f searchFilter, pagination domain.Pagination, scan func(pgx.Rows) (T, error)) ([]T, int, error) {
 	pageArgs := append(append([]any{}, f.args...), pagination.Limit, pagination.Offset)
 	pageSQL = fmt.Sprintf("%s LIMIT $%d OFFSET $%d", pageSQL, len(f.args)+1, len(f.args)+2)
 
@@ -139,25 +159,29 @@ func runSearch[T any](ctx context.Context, db *pgxpool.Pool, countSQL, pageSQL s
 
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		if err := db.QueryRow(egCtx, countSQL, f.args...).Scan(&total); err != nil {
-			return fmt.Errorf("count: %w", err)
-		}
-		return nil
+		return runWithCallerIdentity(egCtx, db, scope, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(egCtx, countSQL, f.args...).Scan(&total); err != nil {
+				return fmt.Errorf("count: %w", err)
+			}
+			return nil
+		})
 	})
 	eg.Go(func() error {
-		rows, err := db.Query(egCtx, pageSQL, pageArgs...)
-		if err != nil {
-			return fmt.Errorf("query: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			v, err := scan(rows)
+		return runWithCallerIdentity(egCtx, db, scope, func(tx pgx.Tx) error {
+			rows, err := tx.Query(egCtx, pageSQL, pageArgs...)
 			if err != nil {
-				return fmt.Errorf("scan: %w", err)
+				return fmt.Errorf("query: %w", err)
 			}
-			out = append(out, v)
-		}
-		return rows.Err()
+			defer rows.Close()
+			for rows.Next() {
+				v, err := scan(rows)
+				if err != nil {
+					return fmt.Errorf("scan: %w", err)
+				}
+				out = append(out, v)
+			}
+			return rows.Err()
+		})
 	})
 	if err := eg.Wait(); err != nil {
 		return nil, 0, err
@@ -203,7 +227,7 @@ func (r *globalSearchRepo) SearchProjects(ctx context.Context, scope SearchScope
 	                   pt.id, pt.name, a.id, a.name` + from + ` ` + f.where +
 		fmt.Sprintf(` ORDER BY %s %s NULLS LAST, p.id`, col, orderDirection(desc))
 
-	return runSearch(ctx, r.db, countSQL, pageSQL, f, pagination, func(rows pgx.Rows) (domain.GlobalSearchProject, error) {
+	return runSearch(ctx, r.db, scope, countSQL, pageSQL, f, pagination, func(rows pgx.Rows) (domain.GlobalSearchProject, error) {
 		var (
 			p                   domain.GlobalSearchProject
 			name, description   *string
@@ -251,6 +275,15 @@ func (r *globalSearchRepo) SearchCases(ctx context.Context, scope SearchScope, q
 
 	f := searchFilter{where: `WHERE wi.type = ANY(` + caseLikeWorkItemTypes + `)`}
 	f.scope("wi.project_id", scope)
+	// Without this, an ANNOUNCEMENT-typed row the caller can't see under
+	// migration 000085's RLS policy would still surface here with its
+	// subject/description intact (both live on the unprotected work_item
+	// table) and only its state nulled out -- the exact leak this repo's
+	// case_repo.go counterpart already guards against. A self-contained
+	// EXISTS, not "ann.id IS NULL" (case_repo.go's version): countSQL below
+	// has no announcement join at all to reference an ann alias against,
+	// unlike pageSQL, so this must work standalone in both.
+	f.where += ` AND NOT (wi.type = 'ANNOUNCEMENT' AND NOT EXISTS (SELECT 1 FROM announcement rls_ann WHERE rls_ann.id = wi.id))`
 	if query != "" {
 		f.args = append(f.args, containsPattern(query))
 		n := len(f.args)
@@ -275,7 +308,7 @@ func (r *globalSearchRepo) SearchCases(ctx context.Context, scope SearchScope, q
 	                   a.id, a.name` + from + ` ` + f.where +
 		fmt.Sprintf(` ORDER BY %s %s NULLS LAST, wi.id`, col, orderDirection(desc))
 
-	return runSearch(ctx, r.db, countSQL, pageSQL, f, pagination, func(rows pgx.Rows) (domain.GlobalSearchCase, error) {
+	return runSearch(ctx, r.db, scope, countSQL, pageSQL, f, pagination, func(rows pgx.Rows) (domain.GlobalSearchCase, error) {
 		var (
 			cs                       domain.GlobalSearchCase
 			internalID, title, descr *string

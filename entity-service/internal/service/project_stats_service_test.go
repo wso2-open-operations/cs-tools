@@ -65,7 +65,7 @@ func (f *fakeProjectStatsRepo) InstanceCount(context.Context, string) (int, erro
 func (f *fakeProjectStatsRepo) LastDeploymentOn(context.Context, string) (*time.Time, error) {
 	return f.lastDeployment, nil
 }
-func (f *fakeProjectStatsRepo) OutstandingCounts(context.Context, string, []string, []string) (map[string]int, error) {
+func (f *fakeProjectStatsRepo) OutstandingCounts(context.Context, repository.SearchScope, string, []string, []string) (map[string]int, error) {
 	return f.outstanding, nil
 }
 func (f *fakeProjectStatsRepo) SLAStatusInputs(context.Context, string) (repository.ProjectSLAStatusInputs, error) {

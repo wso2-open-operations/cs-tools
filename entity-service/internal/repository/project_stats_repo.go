@@ -86,8 +86,13 @@ type ProjectStatsRepository interface {
 	// OutstandingCounts returns the per-type counts of work items in an
 	// outstanding state: caseStates for the five case-like types, crStates
 	// for change requests (the two sets differ -- see the service's own
-	// constants).
-	OutstandingCounts(ctx context.Context, projectID string, caseStates, crStates []string) (map[string]int, error)
+	// constants). scope is the caller's resolved AccessScope -- the
+	// announcement count this returns comes from a query joining
+	// `announcement`, which RLS-restricts by caller identity (see
+	// runWithCallerIdentity), so scope must be the real caller's, not an
+	// unrestricted one, or the count would include announcements the caller
+	// cannot otherwise see.
+	OutstandingCounts(ctx context.Context, scope SearchScope, projectID string, caseStates, crStates []string) (map[string]int, error)
 
 	// SLAStatusInputs evaluates the four projectSLAStatus conditions in one
 	// round trip rather than four.
@@ -209,30 +214,39 @@ func (r *projectStatsRepo) LastDeploymentOn(ctx context.Context, projectID strin
 
 // OutstandingCounts implements ProjectStatsRepository. The returned map is
 // keyed by the lowercase domain type ("case", "change_request", ...).
-func (r *projectStatsRepo) OutstandingCounts(ctx context.Context, projectID string, caseStates, crStates []string) (map[string]int, error) {
+func (r *projectStatsRepo) OutstandingCounts(ctx context.Context, scope SearchScope, projectID string, caseStates, crStates []string) (map[string]int, error) {
 	out := make(map[string]int)
 
-	rows, err := r.db.Query(ctx, `
-		SELECT wi.type::TEXT, COUNT(*)
-		  FROM work_item wi
-		  LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
-		 WHERE wi.project_id = $1::uuid
-		   AND wi.type = ANY(`+caseLikeWorkItemTypes+`)
-		   AND `+caseLikeStateColumn+` = ANY($2)
-		 GROUP BY 1`, projectID, caseStates)
-	if err != nil {
-		return nil, fmt.Errorf("project stats: outstanding case counts: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var t string
-		var n int
-		if err := rows.Scan(&t, &n); err != nil {
-			return nil, fmt.Errorf("project stats: scan outstanding count: %w", err)
+	// caseLikeJoins LEFT JOINs announcement, which is RLS-protected (migration
+	// 000085): without the caller's identity set in this same transaction, a
+	// restricted announcement's row is invisible to the join, ann.state comes
+	// back NULL, and caseLikeStateColumn's CASE/COALESCE then excludes it from
+	// every state filter -- undercounting outstanding announcements for a
+	// caller who is otherwise entitled to see them via project membership.
+	err := runWithCallerIdentity(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT wi.type::TEXT, COUNT(*)
+			  FROM work_item wi
+			  LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
+			 WHERE wi.project_id = $1::uuid
+			   AND wi.type = ANY(`+caseLikeWorkItemTypes+`)
+			   AND `+caseLikeStateColumn+` = ANY($2)
+			 GROUP BY 1`, projectID, caseStates)
+		if err != nil {
+			return fmt.Errorf("project stats: outstanding case counts: %w", err)
 		}
-		out[strings.ToLower(t)] = n
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var t string
+			var n int
+			if err := rows.Scan(&t, &n); err != nil {
+				return fmt.Errorf("project stats: scan outstanding count: %w", err)
+			}
+			out[strings.ToLower(t)] = n
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, err
 	}
 

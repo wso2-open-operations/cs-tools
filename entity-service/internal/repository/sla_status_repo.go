@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
@@ -143,32 +144,48 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 	var total int
 	var statuses []domain.SLAStatus
 
+	// Both queries join caseLikeStateColumn/caseLikeJoins, which LEFT JOINs
+	// the RLS-protected `announcement` table (migration 000085). This
+	// endpoint has no caller-scoped filtering of its own -- it's an
+	// internal-caller-only read (see SLAStatusRepository's doc comment) -- so
+	// Unrestricted is the correct scope here, not a resolved user scope: it
+	// still must be set explicitly, in the same transaction as each query,
+	// or a restricted announcement's state/severity columns come back NULL
+	// instead of their real values.
+	scope := SearchScope{Unrestricted: true}
+
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		if err := r.db.QueryRow(egCtx, countQuery).Scan(&total); err != nil {
+		err := runWithCallerIdentity(egCtx, r.db, scope, func(tx pgx.Tx) error {
+			return tx.QueryRow(egCtx, countQuery).Scan(&total)
+		})
+		if err != nil {
 			return fmt.Errorf("count active sla statuses: %w", err)
 		}
 		return nil
 	})
 	eg.Go(func() error {
-		rows, err := r.db.Query(egCtx, dataQuery, pagination.Limit, pagination.Offset)
-		if err != nil {
-			return fmt.Errorf("query active sla statuses: %w", err)
-		}
-		defer rows.Close()
-		result := make([]domain.SLAStatus, 0, pagination.Limit)
-		for rows.Next() {
-			st, err := scanSLAStatus(rows)
+		err := runWithCallerIdentity(egCtx, r.db, scope, func(tx pgx.Tx) error {
+			rows, err := tx.Query(egCtx, dataQuery, pagination.Limit, pagination.Offset)
 			if err != nil {
-				return fmt.Errorf("scan sla status: %w", err)
+				return fmt.Errorf("query active sla statuses: %w", err)
 			}
-			result = append(result, st)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate active sla statuses: %w", err)
-		}
-		statuses = result
-		return nil
+			defer rows.Close()
+			result := make([]domain.SLAStatus, 0, pagination.Limit)
+			for rows.Next() {
+				st, err := scanSLAStatus(rows)
+				if err != nil {
+					return fmt.Errorf("scan sla status: %w", err)
+				}
+				result = append(result, st)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate active sla statuses: %w", err)
+			}
+			statuses = result
+			return nil
+		})
+		return err
 	})
 	if err := eg.Wait(); err != nil {
 		return nil, 0, err

@@ -107,27 +107,33 @@ func (s *projectStatsService) GetProjectCaseStats(ctx context.Context, projectID
 // requireProject validates the id, confirms the caller may see the project,
 // and confirms it exists -- in that order, so every method below reports a
 // project the caller has no access to exactly as it reports a missing one.
-func (s *projectStatsService) requireProject(ctx context.Context, projectID string) error {
+// Returns the resolved scope so callers that go on to run an
+// RLS-protected repository query (see repository.SearchScope) can forward the
+// same identity authorizeProject already resolved, instead of resolving it
+// twice.
+func (s *projectStatsService) requireProject(ctx context.Context, projectID string) (AccessScope, error) {
 	if err := validateUUIDs("id", []string{projectID}); err != nil {
-		return err
+		return AccessScope{}, err
 	}
-	if err := authorizeProject(ctx, s.access, projectID); err != nil {
-		return err
+	scope, err := authorizeProject(ctx, s.access, projectID)
+	if err != nil {
+		return AccessScope{}, err
 	}
 	found, _, err := s.refRepo.GetProjectByID(ctx, projectID)
 	if err != nil {
-		return err
+		return AccessScope{}, err
 	}
 	if !found {
-		return &apierror.NotFoundError{Msg: "project not found"}
+		return AccessScope{}, &apierror.NotFoundError{Msg: "project not found"}
 	}
-	return nil
+	return scope, nil
 }
 
 // GetProjectStats implements ProjectStatsService -- ServiceNow's
 // getProjectStatistics.
 func (s *projectStatsService) GetProjectStats(ctx context.Context, projectID string) (domain.ProjectStatsResponse, error) {
-	if err := s.requireProject(ctx, projectID); err != nil {
+	scope, err := s.requireProject(ctx, projectID)
+	if err != nil {
 		return domain.ProjectStatsResponse{}, err
 	}
 
@@ -188,7 +194,7 @@ func (s *projectStatsService) GetProjectStats(ctx context.Context, projectID str
 	})
 	g.Go(func() error {
 		var err error
-		outstanding, err = s.repo.OutstandingCounts(gctx, projectID, caseStatsOutstandingStates, crOutstandingStates)
+		outstanding, err = s.repo.OutstandingCounts(gctx, scope, projectID, caseStatsOutstandingStates, crOutstandingStates)
 		return err
 	})
 	g.Go(func() error {
@@ -254,7 +260,7 @@ func loggedMinutes(minutes int) float64 {
 // GetProjectConversationStats implements ProjectStatsService -- ServiceNow's
 // getProjectChatStats.
 func (s *projectStatsService) GetProjectConversationStats(ctx context.Context, projectID, createdBy string) (domain.ProjectConversationStatsResponse, error) {
-	if err := s.requireProject(ctx, projectID); err != nil {
+	if _, err := s.requireProject(ctx, projectID); err != nil {
 		return domain.ProjectConversationStatsResponse{}, err
 	}
 
@@ -288,7 +294,7 @@ func (s *projectStatsService) GetProjectConversationStats(ctx context.Context, p
 
 // GetProjectDeploymentStats implements ProjectStatsService.
 func (s *projectStatsService) GetProjectDeploymentStats(ctx context.Context, projectID string) (domain.ProjectDeploymentStatsResponse, error) {
-	if err := s.requireProject(ctx, projectID); err != nil {
+	if _, err := s.requireProject(ctx, projectID); err != nil {
 		return domain.ProjectDeploymentStatsResponse{}, err
 	}
 
@@ -322,7 +328,7 @@ func (s *projectStatsService) GetProjectTimeCardStats(ctx context.Context, proje
 	if err := validateStatsDate("endDate", endDate); err != nil {
 		return domain.ProjectTimeCardStatsResponse{}, err
 	}
-	if err := s.requireProject(ctx, projectID); err != nil {
+	if _, err := s.requireProject(ctx, projectID); err != nil {
 		return domain.ProjectTimeCardStatsResponse{}, err
 	}
 
@@ -356,7 +362,7 @@ func validateStatsDate(name, value string) error {
 // GetProjectChangeRequestStats implements ProjectStatsService -- ServiceNow's
 // getProjectChangeRequestStats.
 func (s *projectStatsService) GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error) {
-	if err := s.requireProject(ctx, projectID); err != nil {
+	if _, err := s.requireProject(ctx, projectID); err != nil {
 		return domain.ProjectChangeRequestStatsResponse{}, err
 	}
 

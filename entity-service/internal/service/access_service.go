@@ -118,7 +118,7 @@ func (s *accessService) scopeForUser(ctx context.Context, email string) (AccessS
 		if err != nil {
 			return AccessScope{}, err
 		}
-		return AccessScope{ProjectIDs: ids}, nil
+		return AccessScope{ProjectIDs: ids, ViewerEmail: email}, nil
 	case internal && !other:
 		return AccessScope{Unrestricted: true}, nil
 	default:
@@ -137,7 +137,13 @@ func resolveScopeForID(ctx context.Context, access AccessService, id string) (Ac
 	return access.ResolveScope(ctx)
 }
 
-// authorizeProject refuses a caller who may not act on this project.
+// authorizeProject refuses a caller who may not act on this project, and
+// returns the resolved scope so the caller can pass it on to any
+// RLS-protected repository query it makes on the project's behalf (see
+// repository.SearchScope/runWithCallerIdentity) -- authorizeProject already
+// resolves this scope to perform its own check, so returning it here means
+// callers never need a second ResolveScope call just to get the identity
+// they must forward.
 //
 // Two kinds of endpoint need this. A by-id read takes the project id straight
 // from the request path, so validating only that the project EXISTS lets
@@ -155,18 +161,18 @@ func resolveScopeForID(ctx context.Context, access AccessService, id string) (Ac
 // projectID is compared case-insensitively. Postgres renders uuid values in
 // lower case, but the id here comes from the request path, and a caller who
 // upper-cases a UUID they legitimately hold must not be locked out.
-func authorizeProject(ctx context.Context, access AccessService, projectID string) error {
+func authorizeProject(ctx context.Context, access AccessService, projectID string) (AccessScope, error) {
 	scope, err := resolveScopeForID(ctx, access, projectID)
 	if err != nil {
-		return err
+		return AccessScope{}, err
 	}
 	if scope.Unrestricted {
-		return nil
+		return scope, nil
 	}
 	for _, id := range scope.ProjectIDs {
 		if strings.EqualFold(id, projectID) {
-			return nil
+			return scope, nil
 		}
 	}
-	return &apierror.NotFoundError{Msg: "project not found"}
+	return AccessScope{}, &apierror.NotFoundError{Msg: "project not found"}
 }

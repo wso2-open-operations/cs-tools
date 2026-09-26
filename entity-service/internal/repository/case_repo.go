@@ -746,15 +746,25 @@ const createSecurityReportAnalysisFromServiceNowQuery = `
 	JOIN inserted_security_report_analysis isra ON isra.id = iwi.id`
 
 // CreateCaseFromServiceNow implements CaseRepository.
+//
+// The "announcement" branch is split out into its own method
+// (createAnnouncementFromServiceNow) because, unlike the other four
+// case-like types, announcement is RLS-protected (migration 000085):
+// createAnnouncementFromServiceNowQuery's INSERT...RETURNING reads back the
+// row it just wrote, and that read-back is itself subject to the SELECT
+// policy. Postgres does not silently return zero rows for a failed
+// INSERT...RETURNING the way it does for UPDATE/DELETE -- it rejects the
+// INSERT outright ("new row violates row-level security policy"), so every
+// announcement created by the ServiceNow sync job would fail unless the
+// caller's identity is set first, in the same transaction. Confirmed both
+// failure and fix empirically against a local Postgres instance.
 func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.CreateCaseRequest, id, number, wso2ID, createdBy, state string) (domain.Case, error) {
+	if req.Type == "announcement" {
+		return r.createAnnouncementFromServiceNow(ctx, req, id, number, wso2ID, createdBy, state)
+	}
+
 	var row pgx.Row
 	switch req.Type {
-	case "announcement":
-		row = r.db.QueryRow(ctx, createAnnouncementFromServiceNowQuery,
-			id, createdBy,
-			number, wso2ID, req.Subject, req.Description,
-			req.ProjectID, state,
-		)
 	case "service_request":
 		row = r.db.QueryRow(ctx, createServiceRequestFromServiceNowQuery,
 			id, createdBy,
@@ -786,21 +796,56 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 	}
 	c, err := scanUpdatedCase(row)
 	if err != nil {
-		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23505": // unique_violation on id/number/wso2_id — see this method's own doc comment for why this "shouldn't" happen
-				return domain.Case{}, &apierror.ConflictError{Msg: "a case already exists for this ServiceNow id/number/internalId: " + pgErr.Detail}
-			case "22P02": // invalid_text_representation — id was not a valid UUID
-				return domain.Case{}, &apierror.ValidationError{Msg: "id is not a valid UUID: " + id}
-			case "23503": // foreign_key_violation — one of the referenced IDs does not exist
-				return domain.Case{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-			case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority)
-				return domain.Case{}, &apierror.ValidationError{Msg: pgErr.Message}
-			}
-		}
-		return domain.Case{}, fmt.Errorf("create case from servicenow: %w", err)
+		return domain.Case{}, mapCreateCaseFromServiceNowError(err, id)
 	}
 	return c, nil
+}
+
+// createAnnouncementFromServiceNow implements CreateCaseFromServiceNow's
+// "announcement" branch. This is a system write on behalf of the ServiceNow
+// sync job, not a specific customer's request -- there is no viewer to scope
+// to -- so Unrestricted is the correct identity here, the same choice
+// already made for SearchActiveSLAStatuses/SearchAllCallRequests's own
+// internal-only contexts. See CreateCaseFromServiceNow's own doc comment for
+// why this branch alone needs the identity set at all.
+//
+// The scan happens inside the transaction, before it commits: the pgx.Row
+// returned by tx.QueryRow cannot be read once its transaction has been
+// committed or rolled back.
+func (r *caseRepo) createAnnouncementFromServiceNow(ctx context.Context, req domain.CreateCaseRequest, id, number, wso2ID, createdBy, state string) (domain.Case, error) {
+	var c domain.Case
+	err := runWithCallerIdentity(ctx, r.db, SearchScope{Unrestricted: true}, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, createAnnouncementFromServiceNowQuery,
+			id, createdBy,
+			number, wso2ID, req.Subject, req.Description,
+			req.ProjectID, state,
+		)
+		var scanErr error
+		c, scanErr = scanUpdatedCase(row)
+		return scanErr
+	})
+	if err != nil {
+		return domain.Case{}, mapCreateCaseFromServiceNowError(err, id)
+	}
+	return c, nil
+}
+
+// mapCreateCaseFromServiceNowError translates a low-level error from any
+// CreateCaseFromServiceNow branch into the apierror the handler expects.
+func mapCreateCaseFromServiceNowError(err error, id string) error {
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505": // unique_violation on id/number/wso2_id — see CreateCaseFromServiceNow's own doc comment for why this "shouldn't" happen
+			return &apierror.ConflictError{Msg: "a case already exists for this ServiceNow id/number/internalId: " + pgErr.Detail}
+		case "22P02": // invalid_text_representation — id was not a valid UUID
+			return &apierror.ValidationError{Msg: "id is not a valid UUID: " + id}
+		case "23503": // foreign_key_violation — one of the referenced IDs does not exist
+			return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority)
+			return &apierror.ValidationError{Msg: pgErr.Message}
+		}
+	}
+	return fmt.Errorf("create case from servicenow: %w", err)
 }
 
 // GetCaseByID implements CaseRepository.
@@ -855,7 +900,21 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		scopeClause = " AND " + scopePredicate("wi.project_id", 2)
 		scopeArgs = append(scopeArgs, scope.ProjectIDs)
 	}
-	err := r.db.QueryRow(ctx,
+
+	// A transaction, not a bare r.db.QueryRow, is required here purely so
+	// setCallerIdentity's set_config calls and this SELECT share one
+	// transaction -- see that function's own comment for why. This read
+	// itself is not otherwise transactional.
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.CaseView{}, fmt.Errorf("get case by id: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setCallerIdentity(ctx, tx, scope); err != nil {
+		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
+	}
+
+	err = tx.QueryRow(ctx,
 		`SELECT wi.id, wi.number, wi.wso2_id, wi.type::TEXT,
 		        wi.description, c.severity::TEXT, c.issue_type::TEXT, c.work_state::TEXT,
 		        `+caseLikeStateColumn+`, `+caseLikeCauseColumn+`, `+caseLikeCloseNotesColumn+`,
@@ -890,7 +949,13 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		 LEFT JOIN work_item pw ON pw.id = wi.parent_id
 		 LEFT JOIN "case" rc ON rc.id = c.related_case_id
 		 LEFT JOIN work_item rc_wi ON rc_wi.id = rc.id
-		 WHERE wi.id = $1 AND wi.type = ANY(`+caseLikeWorkItemTypes+`)`+scopeClause, scopeArgs...,
+		 -- The AND NOT (...) excludes an ANNOUNCEMENT row the caller can't
+		 -- see under migration 000085's RLS policy: without it, ann.* alone
+		 -- would come back null while wi.subject/wi.description (an
+		 -- unprotected, separate table) still leaked through. See
+		 -- SearchCases's identical condition for the fuller comment.
+		 WHERE wi.id = $1 AND wi.type = ANY(`+caseLikeWorkItemTypes+`)
+		   AND NOT (wi.type = 'ANNOUNCEMENT' AND ann.id IS NULL)`+scopeClause, scopeArgs...,
 	).Scan(
 		&cv.ID, &cv.Number, &internalID, &caseType,
 		&description, &severity, &issueType, &workState,
@@ -915,6 +980,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 	}
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.CaseView{}, fmt.Errorf("get case by id: commit: %w", err)
 	}
 	cv.InternalID = stringOrEmpty(internalID)
 	// work_item.description (migration 000035) has no NOT NULL constraint,
@@ -1690,6 +1758,19 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
+	// The announcement RLS policy (migration 000085) only hides ann.* --
+	// work_item itself (subject, description, existence) is a completely
+	// separate, unprotected table, so an ANNOUNCEMENT-typed work_item whose
+	// announcement row was filtered out would otherwise still surface here
+	// with those two fields intact and only its state/cause/close_notes/etc.
+	// nulled out. This excludes it from the result (and from the COUNT
+	// below, via the identical countQuery WHERE) entirely, rather than
+	// leaking a partially-redacted row. Every other case-like type is
+	// unaffected: none of them use a policy that could make ann.id (or
+	// their own extension row) legitimately absent for a row that should
+	// still be visible.
+	where += " AND NOT (wi.type = 'ANNOUNCEMENT' AND ann.id IS NULL)"
+
 	// Fields shared with anyOf branches are built by one function so the two
 	// cannot drift apart (see caseFieldPredicates for the column notes).
 	fieldPreds, fieldArgs, nextIdx, err := caseFieldPredicates(caseFieldSet{
@@ -1926,15 +2007,41 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
+	// COUNT and SELECT each open their own transaction (rather than sharing
+	// one) specifically so they can still run concurrently on separate pool
+	// connections, same as before this change -- a pgx.Tx is bound to a
+	// single connection, so one shared transaction across both goroutines
+	// would have serialized them. setCallerIdentity's set_config
+	// calls must be repeated per transaction; there is no way to set them
+	// once and have both connections see it.
 	eg.Go(func() error {
-		if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
+		tx, err := r.db.Begin(egCtx)
+		if err != nil {
+			return fmt.Errorf("count cases: begin tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback(egCtx) }()
+		if err := setCallerIdentity(egCtx, tx, scope); err != nil {
 			return fmt.Errorf("count cases: %w", err)
+		}
+		if err := tx.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
+			return fmt.Errorf("count cases: %w", err)
+		}
+		if err := tx.Commit(egCtx); err != nil {
+			return fmt.Errorf("count cases: commit: %w", err)
 		}
 		return nil
 	})
 
 	eg.Go(func() error {
-		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
+		tx, err := r.db.Begin(egCtx)
+		if err != nil {
+			return fmt.Errorf("query cases: begin tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback(egCtx) }()
+		if err := setCallerIdentity(egCtx, tx, scope); err != nil {
+			return fmt.Errorf("query cases: %w", err)
+		}
+		rows, err := tx.Query(egCtx, dataQuery, dataArgs...)
 		if err != nil {
 			return fmt.Errorf("query cases: %w", err)
 		}
@@ -2034,6 +2141,13 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate cases: %w", err)
+		}
+		// Rows must be fully consumed and closed before Commit -- the
+		// deferred rows.Close() above only fires on this closure's own
+		// return, which is after Commit in program order.
+		rows.Close()
+		if err := tx.Commit(egCtx); err != nil {
+			return fmt.Errorf("query cases: commit: %w", err)
 		}
 		cases = result
 		return nil

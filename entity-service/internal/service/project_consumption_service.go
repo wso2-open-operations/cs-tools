@@ -77,7 +77,7 @@ func (s *projectConsumptionService) GetProjectConsumption(ctx context.Context, p
 	if err := validateUUIDs("projectId", []string{projectID}); err != nil {
 		return domain.ProjectConsumptionView{}, err
 	}
-	if err := authorizeProject(ctx, s.access, projectID); err != nil {
+	if _, err := authorizeProject(ctx, s.access, projectID); err != nil {
 		return domain.ProjectConsumptionView{}, err
 	}
 	return s.readConsumption(ctx, projectID)
@@ -108,7 +108,7 @@ func (s *projectConsumptionService) UpdateProjectConsumption(ctx context.Context
 	if err := validateUUIDs("projectId", []string{projectID}); err != nil {
 		return domain.UpdateProjectConsumptionResponse{}, err
 	}
-	if err := authorizeProject(ctx, s.access, projectID); err != nil {
+	if _, err := authorizeProject(ctx, s.access, projectID); err != nil {
 		return domain.UpdateProjectConsumptionResponse{}, err
 	}
 
@@ -237,7 +237,7 @@ func (s *projectConsumptionService) ProcessLicenseDownload(ctx context.Context, 
 	if err := validateEmail(email); err != nil {
 		return domain.License{}, err
 	}
-	if err := authorizeProject(ctx, s.access, projectID); err != nil {
+	if _, err := authorizeProject(ctx, s.access, projectID); err != nil {
 		return domain.License{}, err
 	}
 	if s.choreoClient == nil {
