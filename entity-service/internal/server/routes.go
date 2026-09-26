@@ -873,7 +873,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.DataSource == config.DataSourceServiceNow {
 		activeConversationSvc = service.NewServiceNowConversationService(serviceNowIntegrationServiceClient)
 	} else {
-		activeConversationSvc = service.NewConversationService(conversationRepo)
+		activeConversationSvc = service.NewConversationService(conversationRepo, accessSvc)
 	}
 	conversationHandler := handler.NewConversationHandler(activeConversationSvc)
 
