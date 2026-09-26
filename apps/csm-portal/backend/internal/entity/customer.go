@@ -682,6 +682,103 @@ func (c *CustomerEntityClient) SearchTags(ctx context.Context, body []byte) ([]b
 	return c.do(ctx, http.MethodPost, "/tags/search", body)
 }
 
+// CreateKBArticle calls POST /kb-articles on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) CreateKBArticle(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-articles", body)
+}
+
+// GetKBArticle calls GET /kb-articles/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) GetKBArticle(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/kb-articles/%s", url.PathEscape(id)), nil)
+}
+
+// SearchKBArticles calls POST /kb-articles/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) SearchKBArticles(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-articles/search", body)
+}
+
+// PatchKBArticleState calls PATCH /kb-articles/{id}/state on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) PatchKBArticleState(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/kb-articles/%s/state", url.PathEscape(id)), body)
+}
+
+// SearchKBManagerUsers calls POST /kb-manager-users/search on the entity service.
+func (c *CustomerEntityClient) SearchKBManagerUsers(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-users/search", body)
+}
+
+// SearchKBManagerGroups calls POST /kb-manager-groups/search on the entity service.
+func (c *CustomerEntityClient) SearchKBManagerGroups(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-groups/search", body)
+}
+
+// PatchKBArticleContent calls PATCH /kb-articles/{id} on the entity service.
+func (c *CustomerEntityClient) PatchKBArticleContent(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/kb-articles/%s", url.PathEscape(id)), body)
+}
+
+// ListKnowledgeBases calls GET /knowledge-bases on the entity service.
+func (c *CustomerEntityClient) ListKnowledgeBases(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/knowledge-bases", nil)
+}
+
+// DeleteKBArticle calls DELETE /kb-articles/{id} on the entity service.
+func (c *CustomerEntityClient) DeleteKBArticle(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodDelete, fmt.Sprintf("/kb-articles/%s", url.PathEscape(id)), nil)
+	return err
+}
+
+// ListKBArticleHistory calls GET /kb-articles/{id}/history on the entity service.
+func (c *CustomerEntityClient) ListKBArticleHistory(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/kb-articles/%s/history", url.PathEscape(id)), nil)
+}
+
+// GetUsersByIDs calls POST /users/by-ids on the entity service.
+func (c *CustomerEntityClient) GetUsersByIDs(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/users/by-ids", body)
+}
+
+// CreateKnowledgeBase calls POST /knowledge-bases on the entity service.
+func (c *CustomerEntityClient) CreateKnowledgeBase(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/knowledge-bases", body)
+}
+
+// UpdateKnowledgeBaseName calls PATCH /knowledge-bases/{id} on the entity service.
+func (c *CustomerEntityClient) UpdateKnowledgeBaseName(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/knowledge-bases/%s", url.PathEscape(id)), body)
+}
+
+// SetKnowledgeBaseActive calls PATCH /knowledge-bases/{id}/active on the entity service.
+func (c *CustomerEntityClient) SetKnowledgeBaseActive(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/knowledge-bases/%s/active", url.PathEscape(id)), body)
+}
+
+// CreateKBManagerUser calls POST /kb-manager-users on the entity service.
+func (c *CustomerEntityClient) CreateKBManagerUser(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-users", body)
+}
+
+// DeleteKBManagerUser calls DELETE /kb-manager-users on the entity service.
+func (c *CustomerEntityClient) DeleteKBManagerUser(ctx context.Context, body []byte) error {
+	_, err := c.do(ctx, http.MethodDelete, "/kb-manager-users", body)
+	return err
+}
+
+// CreateKBManagerGroup calls POST /kb-manager-groups on the entity service.
+func (c *CustomerEntityClient) CreateKBManagerGroup(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-groups", body)
+}
+
+// DeleteKBManagerGroup calls DELETE /kb-manager-groups on the entity service.
+func (c *CustomerEntityClient) DeleteKBManagerGroup(ctx context.Context, body []byte) error {
+	_, err := c.do(ctx, http.MethodDelete, "/kb-manager-groups", body)
+	return err
+}
+
 // GetAlert calls GET /alerts/{id} on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) GetAlert(ctx context.Context, id string) ([]byte, error) {

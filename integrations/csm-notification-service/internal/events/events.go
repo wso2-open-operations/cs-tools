@@ -58,6 +58,16 @@ const (
 	// one; see that package's own doc comment for the full redesign).
 	TypeSLATierReached Type = "sla.tier_reached"
 
+	// TypeKBArticlePublished is published by entity-service when a KB
+	// article transitions to the published state -- same reasoning as
+	// TypeSLAClockRegister above: not an email/Chat trigger, so
+	// dispatch.Handle's switch has no case for it either. Consumed
+	// instead by internal/kbembeddingengine on its own handling, sharing
+	// Flow 1's csm-notification-service-kb-embedding consumer group
+	// (both flows subscribe to the same case-events topic anyway --
+	// see cmd/server/main.go's kbDraftConsumerGroup comment).
+	TypeKBArticlePublished Type = "kb.article_published"
+
 	// TypeCRApprovalRequested is published by csm-flow-service's
 	// cr_approval_notice flow when a change request enters an approval state.
 	// Unlike the case.* types, its recipients and subject arrive already
@@ -109,7 +119,7 @@ const (
 // that enumerate valid values.
 var KnownTypes = []Type{
 	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
-	TypeSLATierReached, TypeCaseBillableStatusChanged,
+	TypeSLATierReached, TypeCaseBillableStatusChanged, TypeKBArticlePublished,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
 	TypeProjectContactInvited,
 }
@@ -219,6 +229,15 @@ type CommentAddedPayload struct {
 	// format recipients are already used to.
 	IsInternalNote bool     `json:"isInternalNote,omitempty"`
 	Recipients     []string `json:"recipients"`
+}
+
+// KBArticlePublishedPayload is TypeKBArticlePublished's payload --
+// mirrors entity-service's own copy of this type exactly (same reasoning
+// as every other payload in this file: keep the two schemas in sync by
+// hand). KnowledgeArticleID must match Envelope.EntityID, validated the
+// same way CaseID is validated against EntityID elsewhere in this file.
+type KBArticlePublishedPayload struct {
+	KnowledgeArticleID string `json:"knowledgeArticleId"`
 }
 
 // StatusChangedPayload is TypeStatusChanged's payload. See

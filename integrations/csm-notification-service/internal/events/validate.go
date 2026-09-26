@@ -207,6 +207,17 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if p.CaseID != entityID {
 			return fmt.Errorf("events: payload caseId %q does not match entityId %q", p.CaseID, entityID)
 		}
+	case TypeKBArticlePublished:
+		var p KBArticlePublishedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.KnowledgeArticleID == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if p.KnowledgeArticleID != entityID {
+			return fmt.Errorf("events: payload knowledgeArticleId %q does not match entityId %q", p.KnowledgeArticleID, entityID)
+		}
 	case TypeCRPlanDateNotice:
 		var p CRPlanDateNoticePayload
 		if err := decodeStrict(raw, &p); err != nil {

@@ -406,6 +406,7 @@ type mockEntityUserClient struct {
 	patchUserMeFn            func(ctx context.Context, body []byte) ([]byte, error)
 	searchUsersFn            func(ctx context.Context, body []byte) ([]byte, error)
 	getUserFn                func(ctx context.Context, id string) ([]byte, error)
+	getUsersByIDsFn          func(ctx context.Context, body []byte) ([]byte, error)
 	listSavedFilterViewsFn   func(ctx context.Context, listKey string) ([]byte, error)
 	saveSavedFilterViewFn    func(ctx context.Context, body []byte) ([]byte, error)
 	deleteSavedFilterViewFn  func(ctx context.Context, listKey, name string) ([]byte, error)
@@ -425,6 +426,13 @@ func (m *mockEntityUserClient) GetUser(ctx context.Context, id string) ([]byte, 
 		return m.getUserFn(ctx, id)
 	}
 	return []byte(`{"id":"` + id + `","email":"","roles":[],"groups":[],"teams":[]}`), nil
+}
+
+func (m *mockEntityUserClient) GetUsersByIDs(ctx context.Context, body []byte) ([]byte, error) {
+	if m.getUsersByIDsFn != nil {
+		return m.getUsersByIDsFn(ctx, body)
+	}
+	return []byte(`{"users":[]}`), nil
 }
 
 // testTeamRegistry is a representative registry in its configured wire form: an

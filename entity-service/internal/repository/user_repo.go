@@ -46,6 +46,9 @@ type UserRepository interface {
 	// GetUserByEmail returns the user with the given email address, or a
 	// NotFoundError if no matching user exists.
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
+	// GetUsersByIDs returns every user matching the given ids. Unlike
+	// SearchUsers, this is not gated to the ServiceNow data source.
+	GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error)
 	// GetUserRoles returns the role names assigned to userID via user_role
 	// (migration 000006), empty if none.
 	GetUserRoles(ctx context.Context, userID string) ([]string, error)
@@ -316,6 +319,32 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 	return users, total, nil
 }
 
+// GetUsersByIDs returns every user matching the given ids, in Postgres
+// mode. Unlike SearchUsers, this is not gated to ServiceNow -- ids are
+// this platform's own identifiers, so an id-based lookup is always safe
+// regardless of data source.
+func (r *userRepo) GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, user_name, first_name, last_name, email, phone, timezone, user_type, created_on, updated_on
+		 FROM "user" WHERE id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get users by ids: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]domain.User, 0, len(ids))
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(&u.ID, &u.UserName, &u.FirstName, &u.LastName, &u.Email, &u.Phone, &u.Timezone, &u.UserType, &u.CreatedOn, &u.UpdatedOn); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 // attachRoles fills in each user's Roles from user_role in ONE query for the
 // whole page (not one per user), so the search stays a fixed number of round
 // trips whatever the page size. DISTINCT because user_role has no unique
@@ -366,6 +395,7 @@ func assignRoles(users []domain.User, byUser map[string][]string) {
 		users[i].Roles = []string{}
 	}
 }
+
 
 // GetUserRoles implements UserRepository.
 func (r *userRepo) GetUserRoles(ctx context.Context, userID string) ([]string, error) {

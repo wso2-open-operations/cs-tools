@@ -7432,6 +7432,187 @@ type DeleteScheduledTaskRunsResponse struct {
 	DeletedCount int `json:"deletedCount"`
 }
 
+// Kb articles are the knowledge-base articles that can be created, reviewed, and published in postgresql.
+
+type KBArticleState string
+
+const (
+	KBArticleStateDraft         KBArticleState = "draft"
+	KBArticleStatePendingReview KBArticleState = "pending_review"
+	KBArticleStatePublished     KBArticleState = "published"
+	KBArticleStateRetired       KBArticleState = "retired"
+)
+
+type KBArticle struct {
+	ID               string         `json:"id"`
+	KnowledgeBaseID  string         `json:"knowledgeBaseId"`
+	Title            string         `json:"title"`
+	Body             string         `json:"body"`
+	State            KBArticleState `json:"state"`
+	AuthorID         string         `json:"authorId"`
+	RevisedByID      *string        `json:"revisedById"`
+	SourceCaseID     *string        `json:"sourceCaseId"`
+	RejectionComment *string        `json:"rejectionComment"`
+	// UpdatedBy is the user who most recently edited or transitioned this
+	// article -- null only for an article that has never been touched
+	// since creation (shouldn't normally happen, since create sets it too).
+	UpdatedBy *string `json:"updatedBy"`
+	// Number is a human-readable reference number, matching the real
+	// table's "number" column -- optional, no current code sets it.
+	Number *string `json:"number,omitempty"`
+	// BaseVersionID/Latest implement history: editing an article creates
+	// a NEW row linked back to the FIRST row in its lineage via
+	// BaseVersionID (nil on that first row itself), with exactly one row
+	// per lineage having Latest=true -- see kb-tables.sql's doc comment.
+	BaseVersionID *string   `json:"baseVersionId,omitempty"`
+	Latest        bool      `json:"latest"`
+	CreatedOn     time.Time `json:"createdOn"`
+	UpdatedOn     time.Time `json:"updatedOn"`
+	PublishedOn   *time.Time `json:"publishedOn"`
+	RetiredOn     *time.Time `json:"retiredOn"`
+	// ScheduledPublishOn/GeneratedWithAI/AIGeneratedBy/HelpfulCount/
+	// Rating/UseCount/ViewCount all exist on the real table but have no
+	// current code using them -- omitted here until something needs them.
+}
+
+type CreateKBArticleRequest struct {
+	KnowledgeBaseID string  `json:"knowledgeBaseId"`
+	Title           string  `json:"title"`
+	Body            string  `json:"body"`
+	AuthorID        string  `json:"authorId"`
+	TeamKey         *string `json:"teamKey,omitempty"`
+}
+
+type UpdateKBArticleStateRequest struct {
+	State            KBArticleState `json:"state"`
+	RejectionComment *string        `json:"rejectionComment,omitempty"`
+	UpdatedBy        string         `json:"updatedBy"`
+}
+
+type SearchKBArticlesRequest struct {
+	KnowledgeBaseID string           `json:"knowledgeBaseId,omitempty"`
+	States          []KBArticleState `json:"states,omitempty"`
+	AuthorID        string           `json:"authorId,omitempty"`
+	TeamKeys        []string         `json:"teamKeys,omitempty"`
+	SearchQuery     string           `json:"searchQuery,omitempty"`
+	Pagination      Pagination       `json:"pagination"`
+}
+
+type SearchKBArticlesResponse struct {
+	Articles []KBArticle `json:"articles"`
+	Total    int         `json:"total"`
+	Limit    int         `json:"limit"`
+	Offset   int         `json:"offset"`
+	HasMore  bool        `json:"hasMore"`
+}
+
+type CreateKBArticleResponse struct {
+	Article KBArticle `json:"article"`
+}
+
+type UpdateKBArticleStateResponse struct {
+	Article KBArticle `json:"article"`
+}
+
+type KBManagerUser struct {
+	ID              string    `json:"id"`
+	KnowledgeBaseID string    `json:"knowledgeBaseId"`
+	UserID          string    `json:"userId"`
+	CreatedOn       time.Time `json:"createdOn"`
+}
+
+// KBManagerGroup grants every member of a group manager access to a
+// knowledge base -- see knowledge_base_manager_group's own doc comment
+// (kb-tables.sql) for why GroupID has no local FK.
+type KBManagerGroup struct {
+	ID              string    `json:"id"`
+	KnowledgeBaseID string    `json:"knowledgeBaseId"`
+	GroupID         string    `json:"groupId"`
+	GroupName       *string   `json:"groupName"`
+	CreatedOn       time.Time `json:"createdOn"`
+}
+
+type SearchKBManagerUsersRequest struct {
+	KnowledgeBaseID string `json:"knowledgeBaseId,omitempty"`
+	UserID          string `json:"userId,omitempty"`
+}
+
+type SearchKBManagerUsersResponse struct {
+	Managers []KBManagerUser `json:"managers"`
+}
+
+type SearchKBManagerGroupsRequest struct {
+	KnowledgeBaseID string `json:"knowledgeBaseId,omitempty"`
+	GroupID         string `json:"groupId,omitempty"`
+}
+
+type SearchKBManagerGroupsResponse struct {
+	Managers []KBManagerGroup `json:"managers"`
+}
+
+type UpdateKBArticleContentRequest struct {
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	UpdatedBy string `json:"updatedBy"`
+}
+
+type KnowledgeBase struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Active    bool      `json:"active"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
+}
+
+type ListKnowledgeBasesResponse struct {
+	KnowledgeBases []KnowledgeBase `json:"knowledgeBases"`
+}
+
+type KBArticleHistoryEntry struct {
+	ID          string         `json:"id"`
+	KBArticleID string         `json:"kbArticleId"`
+	Title       string         `json:"title"`
+	Body        string         `json:"body"`
+	State       KBArticleState `json:"state"`
+	ChangedBy   string         `json:"changedBy"`
+	CreatedOn   time.Time      `json:"createdOn"`
+}
+
+type ListKBArticleHistoryResponse struct {
+	History []KBArticleHistoryEntry `json:"history"`
+}
+
+type GetUsersByIDsResponse struct {
+	Users []User `json:"users"`
+}
+
+type CreateKnowledgeBaseRequest struct {
+	// ProductID is optional -- a knowledge base doesn't have to be tied to
+	// a specific product (per the Sep 11 call, "we might have knowledge
+	// bases without the product or with multiple products").
+	ProductID *string `json:"productId,omitempty"`
+	Name      string  `json:"name"`
+}
+
+type UpdateKnowledgeBaseRequest struct {
+	Name string `json:"name"`
+}
+
+type UpdateKnowledgeBaseActiveRequest struct {
+	IsActive bool `json:"isActive"`
+}
+
+type CreateKBManagerUserRequest struct {
+	KnowledgeBaseID string `json:"knowledgeBaseId"`
+	UserID          string `json:"userId"`
+}
+
+type CreateKBManagerGroupRequest struct {
+	KnowledgeBaseID string  `json:"knowledgeBaseId"`
+	GroupID         string  `json:"groupId"`
+	GroupName       *string `json:"groupName,omitempty"`
+}
+
 // AlertIncidentMappingView is the durable record of one monitoring alert
 // that was grouped onto a CSM incident — e.g. a firing event and a later
 // resolved event for the same underlying condition both map onto the same

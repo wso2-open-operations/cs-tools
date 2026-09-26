@@ -304,6 +304,18 @@ func (s *userService) GetMe(ctx context.Context) (domain.GetUserMeResponse, erro
 	}, nil
 }
 
+// GetUsersByIDs implements UserService.
+func (s *userService) GetUsersByIDs(ctx context.Context, ids []string) (domain.GetUsersByIDsResponse, error) {
+	if len(ids) == 0 {
+		return domain.GetUsersByIDsResponse{Users: []domain.User{}}, nil
+	}
+	users, err := s.repo.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return domain.GetUsersByIDsResponse{}, err
+	}
+	return domain.GetUsersByIDsResponse{Users: users}, nil
+}
+
 // CreateUser implements UserService.
 func (s *userService) CreateUser(ctx context.Context, req domain.CreateUserRequest) (domain.User, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -327,3 +339,4 @@ func (s *userService) CreateUser(ctx context.Context, req domain.CreateUserReque
 
 	return s.repo.CreateUser(ctx, req, actor)
 }
+
