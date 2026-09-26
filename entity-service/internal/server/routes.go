@@ -543,6 +543,31 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	deploymentHandler := handler.NewDeploymentHandler(activeDeploymentSvc)
 
+	// KB features are Postgres-only, like event_publish_failures above --
+	// db may be nil under DATA_SOURCE=servicenow, and a nil pool panics on
+	// first query rather than at construction (CodeRabbit finding). Gate
+	// the whole chain on it: nil handlers mean the KB routes below are
+	// never registered when there's no database to serve them.
+	var kbArticleHandler *handler.KBArticleHandler
+	var kbManagerUserHandler *handler.KBManagerUserHandler
+	var kbManagerGroupHandler *handler.KBManagerGroupHandler
+	var knowledgeBaseHandler *handler.KnowledgeBaseHandler
+	if db != nil {
+		kbArticleRepo := repository.NewKBArticleRepository(db)
+		kbArticleSvc := service.NewKBArticleService(kbArticleRepo, eventPublisher)
+		kbArticleHandler = handler.NewKBArticleHandler(kbArticleSvc)
+		kbManagerUserRepo := repository.NewKBManagerUserRepository(db)
+		kbManagerUserSvc := service.NewKBManagerUserService(kbManagerUserRepo)
+		kbManagerUserHandler = handler.NewKBManagerUserHandler(kbManagerUserSvc)
+		kbManagerGroupRepo := repository.NewKBManagerGroupRepository(db)
+		kbManagerGroupSvc := service.NewKBManagerGroupService(kbManagerGroupRepo)
+		kbManagerGroupHandler = handler.NewKBManagerGroupHandler(kbManagerGroupSvc)
+
+		knowledgeBaseRepo := repository.NewKnowledgeBaseRepository(db)
+		knowledgeBaseSvc := service.NewKnowledgeBaseService(knowledgeBaseRepo)
+		knowledgeBaseHandler = handler.NewKnowledgeBaseHandler(knowledgeBaseSvc)
+	}
+
 	deployedProductRepo := repository.NewDeployedProductRepository(db)
 	var activeDeployedProductSvc service.DeployedProductService
 	if cfg.DataSource == config.DataSourceServiceNow {
@@ -1077,7 +1102,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/{id}", userHandler.GetUser)
 		mux.HandleFunc("GET /users/me", userHandler.GetMe)
 		mux.HandleFunc("POST /users/search", userHandler.SearchUsers)
-		mux.HandleFunc("POST /users", userHandler.CreateUser)
+	mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
+	mux.HandleFunc("POST /users", userHandler.CreateUser)
 	}
 	if snAccountHandler != nil {
 		mux.HandleFunc("GET /accounts/{id}", snAccountHandler.GetAccount)
@@ -1175,6 +1201,29 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// (and CaseHandler.SearchTagsQuery) once they are all on the POST.
 	//nolint:staticcheck // SA1019: intentional one-release compatibility route; remove with the handler.
 	mux.HandleFunc("GET /tags/search", caseHandler.SearchTagsQuery)
+	// KB routes are only registered when db != nil (see the KB handler
+	// construction above) -- matches the eventPublishFailureHandler
+	// pattern below: referencing a method on a nil handler here would
+	// panic at server startup, before any request ever arrives.
+	if kbArticleHandler != nil {
+		mux.HandleFunc("POST /kb-articles", kbArticleHandler.CreateKBArticle)
+		mux.HandleFunc("GET /kb-articles/{id}", kbArticleHandler.GetKBArticle)
+		mux.HandleFunc("POST /kb-articles/search", kbArticleHandler.SearchKBArticles)
+		mux.HandleFunc("PATCH /kb-articles/{id}/state", kbArticleHandler.PatchKBArticleState)
+		mux.HandleFunc("POST /kb-manager-users/search", kbManagerUserHandler.SearchKBManagerUsers)
+		mux.HandleFunc("POST /kb-manager-users", kbManagerUserHandler.CreateKBManagerUser)
+		mux.HandleFunc("DELETE /kb-manager-users", kbManagerUserHandler.DeleteKBManagerUser)
+		mux.HandleFunc("POST /kb-manager-groups/search", kbManagerGroupHandler.SearchKBManagerGroups)
+		mux.HandleFunc("POST /kb-manager-groups", kbManagerGroupHandler.CreateKBManagerGroup)
+		mux.HandleFunc("DELETE /kb-manager-groups", kbManagerGroupHandler.DeleteKBManagerGroup)
+		mux.HandleFunc("PATCH /kb-articles/{id}", kbArticleHandler.PatchKBArticleContent)
+		mux.HandleFunc("GET /knowledge-bases", knowledgeBaseHandler.ListKnowledgeBases)
+		mux.HandleFunc("POST /knowledge-bases", knowledgeBaseHandler.CreateKnowledgeBase)
+		mux.HandleFunc("PATCH /knowledge-bases/{id}", knowledgeBaseHandler.UpdateKnowledgeBaseName)
+		mux.HandleFunc("PATCH /knowledge-bases/{id}/active", knowledgeBaseHandler.SetKnowledgeBaseActive)
+		mux.HandleFunc("DELETE /kb-articles/{id}", kbArticleHandler.DeleteKBArticle)
+		mux.HandleFunc("GET /kb-articles/{id}/history", kbArticleHandler.ListKBArticleHistory)
+	}
 
 	mux.HandleFunc("POST /call-requests", callRequestHandler.CreateCallRequest)
 	mux.HandleFunc("POST /call-requests/search", callRequestHandler.SearchCallRequests)

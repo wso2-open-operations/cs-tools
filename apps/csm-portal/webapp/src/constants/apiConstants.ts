@@ -114,6 +114,8 @@ export const ApiQueryKeys = {
   DEPLOYED_PRODUCT_INSTANCE_METRICS: "deployed-product-instance-metrics",
   CSM_ABT_DASHBOARD: "csm-abt-dashboard",
   CSM_CASES: "csm-cases",
+  CSM_KB_ARTICLES: "csm-kb-articles",
+  CSM_KB_ARTICLE_DETAIL: "csm-kb-article-detail",
   CSM_ANNOUNCEMENTS: "csm-announcements",
   CSM_ANNOUNCEMENT_REGISTRY: "csm-announcement-registry",
   CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS: "csm-announcement-excluded-project-keys",

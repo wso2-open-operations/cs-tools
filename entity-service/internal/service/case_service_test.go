@@ -304,6 +304,13 @@ func (s stubUserRepo) GetUserGroups(ctx context.Context, id string) ([]domain.Us
 	return nil, nil
 }
 
+// GetUsersByIDs returns empty rather than panicking, matching
+// GetUserRoles/GetUserGroups above -- no existing test case in this
+// file exercises it.
+func (stubUserRepo) GetUsersByIDs(context.Context, []string) ([]domain.User, error) {
+	return nil, nil
+}
+
 // TestCaseService_SearchCases_RejectsUnsupportedPostgresFields proves the
 // Postgres-backed SearchCases path rejects each of these filter fields
 // ParseCaseFieldFilters accepts but the Postgres repository has no query
