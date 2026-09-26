@@ -305,8 +305,12 @@ func TestHandleWebhook_UnmappedRepositoryIsIgnored(t *testing.T) {
 
 // Our own writes come back as webhooks; dropping them by sender identity is
 // what stops a comment we posted syncing back as a new one.
+// An issue this service raised from a case must not come back as a new service
+// request. The guard is the issue's AUTHOR, not whoever triggered the delivery:
+// see isOwnIssue for why the two differ and what the difference cost.
 func TestHandleWebhook_OwnEventsAreDropped(t *testing.T) {
 	d := crDelivery()
+	d.Payload.Issue.User.Login = "wso2-integration-bot"
 	d.Payload.Sender.Login = "wso2-integration-bot"
 	r := &fakeGhRepo{mapping: mapped()}
 	m := &fakeGhMutations{}
@@ -315,7 +319,7 @@ func TestHandleWebhook_OwnEventsAreDropped(t *testing.T) {
 		t.Fatalf("HandleWebhook: %v", err)
 	}
 	if out.Skipped == "" || m.created != 0 {
-		t.Errorf("acted on our own event: %+v", out)
+		t.Errorf("acted on an issue we raised ourselves: %+v", out)
 	}
 }
 
@@ -587,5 +591,50 @@ func TestHandleWebhook_ValidatedIssueIsCreated(t *testing.T) {
 	}
 	if mut.created != 1 {
 		t.Errorf("a validated issue must create exactly one record, got %d", mut.created)
+	}
+}
+
+// The repository's validation workflow applies validation-passed, so GitHub
+// reports that label change as issues/labeled sent by github-actions[bot] --
+// the integration account. Guarding every event on sender identity discarded
+// exactly the delivery the validation gate waits for, and the issue passed
+// validation while no record was ever created. Observed on a live delivery;
+// the existing fixtures missed it because they send as a human.
+func TestHandleWebhook_ValidationLabelFromTheBotStillCreates(t *testing.T) {
+	d := ghDelivery("issues", "labeled", "[CR]: rotate gateway certificates",
+		[]string{"CR/NormalChange"})
+	d.Payload.Sender.Login = "github-actions[bot]"
+
+	mut := &fakeGhMutations{}
+	svc := writingSvc(&fakeGhRepo{mapping: mapped()}, mut, &fakeGhClient{})
+
+	out, err := svc.HandleWebhook(context.Background(), d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Skipped != "" {
+		t.Fatalf("the validation label must not be discarded as our own event, got skip %q", out.Skipped)
+	}
+	if mut.created != 1 {
+		t.Errorf("expected the record to be created, got %d creations", mut.created)
+	}
+}
+
+// The other half of the same rule: a comment from the integration account is
+// still an echo of something we posted, and must never become a second CSM
+// comment.
+func TestHandleWebhook_CommentFromTheBotIsStillIgnored(t *testing.T) {
+	d := commentDelivery("relayed text", "github-actions[bot]")
+	d.Payload.Sender.Login = "github-actions[bot]"
+
+	mut := &fakeGhMutations{}
+	svc := writingSvc(&fakeGhRepo{mapping: mapped(), caseID: "case-1"}, mut, &fakeGhClient{})
+
+	out, err := svc.HandleWebhook(context.Background(), d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Skipped == "" {
+		t.Error("a comment from the integration account must be skipped")
 	}
 }

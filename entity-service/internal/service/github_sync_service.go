@@ -188,6 +188,10 @@ type githubSyncService struct {
 	// writes coming back and are dropped -- identity, not string-matching the
 	// comment body the way the case webhook does.
 	integrationLogins []string
+	// issueAuthorLogin is the account this service creates issues under
+	// (GITHUB_INTEGRATION_LOGIN). Distinct from github-actions[bot], which runs
+	// the repository's workflows and only ever labels and comments.
+	issueAuthorLogin string
 }
 
 // githubIssueClient is the slice of *github.Client this service needs.
@@ -207,7 +211,7 @@ func NewGithubSyncService(repo repository.GithubSyncRepository, gh githubIssueCl
 // NewGithubSyncServiceWithLabels is NewGithubSyncService with an explicit
 // label vocabulary.
 func NewGithubSyncServiceWithLabels(repo repository.GithubSyncRepository, gh githubIssueClient, integrationLogin string, labels GithubLabels) GithubSyncService {
-	return &githubSyncService{repo: repo, gh: gh, integrationLogins: integrationLoginSet(integrationLogin), labels: labels}
+	return &githubSyncService{repo: repo, gh: gh, integrationLogins: integrationLoginSet(integrationLogin), issueAuthorLogin: strings.TrimSpace(integrationLogin), labels: labels}
 }
 
 // WithMutations returns the service able to write change requests. Without it
@@ -220,7 +224,7 @@ func (s *githubSyncService) WithMutations(m repository.GithubMutationRepository)
 // NewGithubSyncServiceWriting is the full service: recognises, writes, and
 // pushes the resulting label changes back to the issue.
 func NewGithubSyncServiceWriting(repo repository.GithubSyncRepository, mutate repository.GithubMutationRepository, gh githubIssueClient, integrationLogin string, labels GithubLabels) GithubSyncService {
-	return &githubSyncService{repo: repo, gh: gh, integrationLogins: integrationLoginSet(integrationLogin), labels: labels, mutate: mutate}
+	return &githubSyncService{repo: repo, gh: gh, integrationLogins: integrationLoginSet(integrationLogin), issueAuthorLogin: strings.TrimSpace(integrationLogin), labels: labels, mutate: mutate}
 }
 
 func skip(reason string) (Outcome, error) { return Outcome{Skipped: reason}, nil }
@@ -249,11 +253,32 @@ func (s *githubSyncService) HandleWebhook(ctx context.Context, d Delivery) (Outc
 	// sn_comment_to_github.yml's own guard. Identity alone should be enough;
 	// the marker catches a repository whose workflow posts under some other
 	// account.
-	if s.isOwnEvent(p) {
-		return skip("event was sent by the integration account")
-	}
+	// ONLY A COMMENT CAN LOOP, SO ONLY A COMMENT IS GUARDED ON IDENTITY.
+	//
+	// Applying the identity check to every event broke issue creation
+	// outright: the repository's validation workflow applies
+	// validation-passed, GitHub reports that as issues/labeled sent by
+	// github-actions[bot], and the guard discarded exactly the event the
+	// validation gate waits for. The issue passed validation and no record was
+	// ever created -- observed on a live delivery, invisible to the unit tests
+	// because their fixtures send as a human.
+	//
+	// An issues event carries the reporter's own text no matter who triggered
+	// the delivery, so re-reading it cannot echo anything we wrote; the unique
+	// index and the update path make a repeat harmless. A comment is the only
+	// thing we put back onto the issue, so it is the only thing that can
+	// return to us as new content.
 	if d.Event != "issues" && d.Event != "issue_comment" {
 		return skip("event " + d.Event + " is not handled")
+	}
+	if d.Event == "issue_comment" {
+		// Any of our identities: a comment is the only thing we put back onto
+		// an issue, so it is the only thing that can return as new content.
+		if s.isOwnEvent(p) {
+			return skip("event was sent by the integration account")
+		}
+	} else if s.isOwnIssue(p) {
+		return skip("issue was raised by this service")
 	}
 
 	if err := s.repo.ClaimDelivery(ctx, d.ID, d.Event, p.Action); err != nil {
@@ -464,6 +489,24 @@ func (s *githubSyncService) handleComment(ctx context.Context, p IssuePayload, m
 		return Outcome{}, err
 	}
 	return Outcome{Action: "comment_relayed", ChangeRequestID: caseID}, nil
+}
+
+
+// isOwnIssue reports whether an issues event concerns an issue this service
+// raised itself, from a case. Only the configured integration login creates
+// issues; github-actions[bot] never does -- it runs the repository's workflows,
+// which label and comment.
+//
+// THE DISTINCTION IS NOT COSMETIC. Treating every integration identity as
+// disqualifying here discarded the issues/labeled event that the validation
+// workflow produces when it applies validation-passed -- the exact delivery the
+// validation gate waits for. The issue passed validation and no record was ever
+// created. Guarding on the issue's author instead keeps the real loop closed
+// (an issue we raised from a case must not come back as a new service request)
+// without silencing the workflow.
+func (s *githubSyncService) isOwnIssue(p IssuePayload) bool {
+	return s.issueAuthorLogin != "" &&
+		strings.EqualFold(p.Issue.User.Login, s.issueAuthorLogin)
 }
 
 // isOwnEvent reports whether this delivery is an echo of something we caused.
