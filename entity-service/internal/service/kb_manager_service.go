@@ -24,40 +24,80 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-type kbManagerService struct {
-	repo repository.KBManagerRepository
+type kbManagerUserService struct {
+	repo repository.KBManagerUserRepository
 }
 
-// NewKBManagerService constructs a KBManagerService backed by the given repository.
-func NewKBManagerService(repo repository.KBManagerRepository) KBManagerService {
-	return &kbManagerService{repo: repo}
+// NewKBManagerUserService constructs a KBManagerUserService backed by the given repository.
+func NewKBManagerUserService(repo repository.KBManagerUserRepository) KBManagerUserService {
+	return &kbManagerUserService{repo: repo}
 }
 
-// SearchKBManagers implements KBManagerService.
-func (s *kbManagerService) SearchKBManagers(ctx context.Context, req domain.SearchKBManagersRequest) (domain.SearchKBManagersResponse, error) {
-	managers, err := s.repo.SearchKBManagers(ctx, req)
+// SearchKBManagerUsers implements KBManagerUserService.
+func (s *kbManagerUserService) SearchKBManagerUsers(ctx context.Context, req domain.SearchKBManagerUsersRequest) (domain.SearchKBManagerUsersResponse, error) {
+	managers, err := s.repo.SearchKBManagerUsers(ctx, req)
 	if err != nil {
-		return domain.SearchKBManagersResponse{}, err
+		return domain.SearchKBManagerUsersResponse{}, err
 	}
-	return domain.SearchKBManagersResponse{Managers: managers}, nil
+	return domain.SearchKBManagerUsersResponse{Managers: managers}, nil
 }
 
-// CreateKBManager implements KBManagerService.
-func (s *kbManagerService) CreateKBManager(ctx context.Context, req domain.CreateKBManagerRequest) (domain.KBManager, error) {
+// CreateKBManagerUser implements KBManagerUserService. createdBy is the
+// authenticated caller's identity -- NOT YET wired through from the
+// handler layer (same open identity question as KB article authorship);
+// callers must supply it explicitly until that's resolved.
+func (s *kbManagerUserService) CreateKBManagerUser(ctx context.Context, req domain.CreateKBManagerUserRequest, createdBy string) (domain.KBManagerUser, error) {
 	if req.KnowledgeBaseID == "" {
-		return domain.KBManager{}, &apierror.ValidationError{Msg: "knowledgeBaseId is required"}
+		return domain.KBManagerUser{}, &apierror.ValidationError{Msg: "knowledgeBaseId is required"}
 	}
 	if req.UserID == "" {
-		return domain.KBManager{}, &apierror.ValidationError{Msg: "userId is required"}
+		return domain.KBManagerUser{}, &apierror.ValidationError{Msg: "userId is required"}
 	}
-	return s.repo.CreateKBManager(ctx, req)
+	return s.repo.CreateKBManagerUser(ctx, req, createdBy)
 }
 
-// DeleteKBManager implements KBManagerService.
-func (s *kbManagerService) DeleteKBManager(ctx context.Context, knowledgeBaseID, userID string) error {
+// DeleteKBManagerUser implements KBManagerUserService.
+func (s *kbManagerUserService) DeleteKBManagerUser(ctx context.Context, knowledgeBaseID, userID string) error {
 	if knowledgeBaseID == "" || userID == "" {
 		return &apierror.ValidationError{Msg: "knowledgeBaseId and userId are both required"}
 	}
-	return s.repo.DeleteKBManager(ctx, knowledgeBaseID, userID)
+	return s.repo.DeleteKBManagerUser(ctx, knowledgeBaseID, userID)
 }
 
+type kbManagerGroupService struct {
+	repo repository.KBManagerGroupRepository
+}
+
+// NewKBManagerGroupService constructs a KBManagerGroupService backed by the given repository.
+func NewKBManagerGroupService(repo repository.KBManagerGroupRepository) KBManagerGroupService {
+	return &kbManagerGroupService{repo: repo}
+}
+
+// SearchKBManagerGroups implements KBManagerGroupService.
+func (s *kbManagerGroupService) SearchKBManagerGroups(ctx context.Context, req domain.SearchKBManagerGroupsRequest) (domain.SearchKBManagerGroupsResponse, error) {
+	managers, err := s.repo.SearchKBManagerGroups(ctx, req)
+	if err != nil {
+		return domain.SearchKBManagerGroupsResponse{}, err
+	}
+	return domain.SearchKBManagerGroupsResponse{Managers: managers}, nil
+}
+
+// CreateKBManagerGroup implements KBManagerGroupService. createdBy -- see
+// CreateKBManagerUser's doc comment above; same open question.
+func (s *kbManagerGroupService) CreateKBManagerGroup(ctx context.Context, req domain.CreateKBManagerGroupRequest, createdBy string) (domain.KBManagerGroup, error) {
+	if req.KnowledgeBaseID == "" {
+		return domain.KBManagerGroup{}, &apierror.ValidationError{Msg: "knowledgeBaseId is required"}
+	}
+	if req.GroupID == "" {
+		return domain.KBManagerGroup{}, &apierror.ValidationError{Msg: "groupId is required"}
+	}
+	return s.repo.CreateKBManagerGroup(ctx, req, createdBy)
+}
+
+// DeleteKBManagerGroup implements KBManagerGroupService.
+func (s *kbManagerGroupService) DeleteKBManagerGroup(ctx context.Context, knowledgeBaseID, groupID string) error {
+	if knowledgeBaseID == "" || groupID == "" {
+		return &apierror.ValidationError{Msg: "knowledgeBaseId and groupId are both required"}
+	}
+	return s.repo.DeleteKBManagerGroup(ctx, knowledgeBaseID, groupID)
+}

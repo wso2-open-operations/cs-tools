@@ -314,8 +314,8 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 // regardless of data source.
 func (r *userRepo) GetUsersByIDs(ctx context.Context, ids []string) ([]domain.User, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, user_name, first_name, last_name, email, phone, timezone, user_type, created_at, updated_at
-		 FROM users WHERE id = ANY($1)`,
+		`SELECT id, user_name, first_name, last_name, email, phone, timezone, user_type, created_on, updated_on
+		 FROM "user" WHERE id = ANY($1)`,
 		ids,
 	)
 	if err != nil {

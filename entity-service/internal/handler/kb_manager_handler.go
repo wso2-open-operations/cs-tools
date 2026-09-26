@@ -25,23 +25,27 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// KBManagerHandler handles HTTP requests for the kb_manager resource.
-type KBManagerHandler struct {
-	svc service.KBManagerService
+// KBManagerUserHandler handles HTTP requests for the
+// knowledge_base_manager_user resource. createdBy is currently hardcoded
+// to "system" for both handlers below -- NOT YET wired to the
+// authenticated caller's real identity (see the service layer's own doc
+// comment; same open question as KB article authorship).
+type KBManagerUserHandler struct {
+	svc service.KBManagerUserService
 }
 
-// NewKBManagerHandler constructs a KBManagerHandler with the given service.
-func NewKBManagerHandler(svc service.KBManagerService) *KBManagerHandler {
-	return &KBManagerHandler{svc: svc}
+// NewKBManagerUserHandler constructs a KBManagerUserHandler with the given service.
+func NewKBManagerUserHandler(svc service.KBManagerUserService) *KBManagerUserHandler {
+	return &KBManagerUserHandler{svc: svc}
 }
 
-// SearchKBManagers handles POST /kb-managers/search.
-func (h *KBManagerHandler) SearchKBManagers(w http.ResponseWriter, r *http.Request) {
-	var req domain.SearchKBManagersRequest
+// SearchKBManagerUsers handles POST /kb-manager-users/search.
+func (h *KBManagerUserHandler) SearchKBManagerUsers(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchKBManagerUsersRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.SearchKBManagers(r.Context(), req)
+	resp, err := h.svc.SearchKBManagerUsers(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -50,13 +54,13 @@ func (h *KBManagerHandler) SearchKBManagers(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// CreateKBManager handles POST /kb-managers.
-func (h *KBManagerHandler) CreateKBManager(w http.ResponseWriter, r *http.Request) {
-	var req domain.CreateKBManagerRequest
+// CreateKBManagerUser handles POST /kb-manager-users.
+func (h *KBManagerUserHandler) CreateKBManagerUser(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateKBManagerUserRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	m, err := h.svc.CreateKBManager(r.Context(), req)
+	m, err := h.svc.CreateKBManagerUser(r.Context(), req, "system")
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -66,21 +70,83 @@ func (h *KBManagerHandler) CreateKBManager(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(m)
 }
 
-// deleteKBManagerRequest is the body for DELETE /kb-managers -- a knowledge
-// base + user pair, since kb_managers has no single-column primary key
-// convenient to address by path alone from the caller's perspective.
-type deleteKBManagerRequest struct {
+// deleteKBManagerUserRequest is the body for DELETE /kb-manager-users -- a
+// knowledge base + user pair, since this table has no single-column
+// primary key convenient to address by path alone from the caller's
+// perspective.
+type deleteKBManagerUserRequest struct {
 	KnowledgeBaseID string `json:"knowledgeBaseId"`
 	UserID          string `json:"userId"`
 }
 
-// DeleteKBManager handles DELETE /kb-managers.
-func (h *KBManagerHandler) DeleteKBManager(w http.ResponseWriter, r *http.Request) {
-	var req deleteKBManagerRequest
+// DeleteKBManagerUser handles DELETE /kb-manager-users.
+func (h *KBManagerUserHandler) DeleteKBManagerUser(w http.ResponseWriter, r *http.Request) {
+	var req deleteKBManagerUserRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	if err := h.svc.DeleteKBManager(r.Context(), req.KnowledgeBaseID, req.UserID); err != nil {
+	if err := h.svc.DeleteKBManagerUser(r.Context(), req.KnowledgeBaseID, req.UserID); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// KBManagerGroupHandler handles HTTP requests for the
+// knowledge_base_manager_group resource.
+type KBManagerGroupHandler struct {
+	svc service.KBManagerGroupService
+}
+
+// NewKBManagerGroupHandler constructs a KBManagerGroupHandler with the given service.
+func NewKBManagerGroupHandler(svc service.KBManagerGroupService) *KBManagerGroupHandler {
+	return &KBManagerGroupHandler{svc: svc}
+}
+
+// SearchKBManagerGroups handles POST /kb-manager-groups/search.
+func (h *KBManagerGroupHandler) SearchKBManagerGroups(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchKBManagerGroupsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchKBManagerGroups(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// CreateKBManagerGroup handles POST /kb-manager-groups.
+func (h *KBManagerGroupHandler) CreateKBManagerGroup(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateKBManagerGroupRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	m, err := h.svc.CreateKBManagerGroup(r.Context(), req, "system")
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(m)
+}
+
+// deleteKBManagerGroupRequest is the body for DELETE /kb-manager-groups.
+type deleteKBManagerGroupRequest struct {
+	KnowledgeBaseID string `json:"knowledgeBaseId"`
+	GroupID         string `json:"groupId"`
+}
+
+// DeleteKBManagerGroup handles DELETE /kb-manager-groups.
+func (h *KBManagerGroupHandler) DeleteKBManagerGroup(w http.ResponseWriter, r *http.Request) {
+	var req deleteKBManagerGroupRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	if err := h.svc.DeleteKBManagerGroup(r.Context(), req.KnowledgeBaseID, req.GroupID); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}

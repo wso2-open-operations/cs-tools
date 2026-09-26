@@ -65,6 +65,21 @@ const (
 	// identity (via scim-operations-service) and send the invitation email —
 	// see ProjectContactInvitedPayload. Keyed by the Salesforce membership Id.
 	TypeProjectContactInvited Type = "project_contact.invited"
+	// TypeSLAClockRegister belongs to csm-notification-service's own
+	// internal/slaengine, not its internal/dispatch — see
+	// SLAClockRegisterPayload's own doc comment. Published once, from
+	// sn_case_service.go's publishCaseCreated; unlike every payload above,
+	// there is no separate "tier reached"/breach event type here —
+	// csm-notification-service's slaengine owns that half of the mechanism
+	// entirely (it also sends the Google Chat breach alert directly,
+	// without a second event round-trip through this topic).
+	TypeSLAClockRegister Type = "sla.clock.register"
+	// TypeKBArticlePublished is published when a KB article transitions
+	// to the published state, for csm-notification-service's Flow 2
+	// (embedding -> Pinecone) to consume on its own dedicated handling,
+	// same reasoning as TypeSLAClockRegister above -- not an email/Chat
+	// trigger, so no Recipients field.
+	TypeKBArticlePublished Type = "kb.article_published"
 )
 
 // Envelope is the wire shape of every record on the case-events topic.
@@ -113,6 +128,17 @@ type CommentAddedPayload struct {
 	// distinct email layout for it.
 	IsInternalNote bool     `json:"isInternalNote,omitempty"`
 	Recipients     []string `json:"recipients"`
+}
+
+// KBArticlePublishedPayload is the Payload shape for
+// TypeKBArticlePublished. KnowledgeArticleID mirrors Envelope's own
+// EntityID (validated to match, same pattern as CaseID on every other
+// payload here) -- kept as an explicit field anyway rather than relying
+// on EntityID alone, matching how every other payload in this file does
+// it, since a consumer decoding just the payload (without inspecting the
+// envelope) still gets a complete, self-describing record.
+type KBArticlePublishedPayload struct {
+	KnowledgeArticleID string `json:"knowledgeArticleId"`
 }
 
 // StatusChangedPayload is the Payload shape for TypeStatusChanged — mirrors

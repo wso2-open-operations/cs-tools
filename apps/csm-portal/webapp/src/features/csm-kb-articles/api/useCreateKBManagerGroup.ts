@@ -17,15 +17,15 @@
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CreateKBManagerRequest } from "@features/csm-kb-articles/types/csmKbArticles";
+import type { CreateKBManagerGroupRequest, KBManagerGroup } from "@features/csm-kb-articles/types/csmKbArticles";
 
-export function useDeleteKBManager(): UseMutationResult<void, Error, CreateKBManagerRequest> {
+export function useCreateKBManagerGroup(): UseMutationResult<KBManagerGroup, Error, CreateKBManagerGroupRequest> {
   const api = useBackendApi();
   const queryClient = useQueryClient();
-  return useMutation<void, Error, CreateKBManagerRequest>({
-    mutationFn: (input) => api.delete("/kb-managers", input),
+  return useMutation<KBManagerGroup, Error, CreateKBManagerGroupRequest>({
+    mutationFn: (input) => api.post<CreateKBManagerGroupRequest, KBManagerGroup>("/kb-manager-groups", input),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_KB_ARTICLES, "kb-managers", variables.knowledgeBaseId] });
+      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_KB_ARTICLES, "kb-manager-groups", variables.knowledgeBaseId] });
     },
   });
 }

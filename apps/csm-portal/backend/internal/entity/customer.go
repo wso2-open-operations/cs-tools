@@ -706,8 +706,14 @@ func (c *CustomerEntityClient) PatchKBArticleState(ctx context.Context, id strin
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/kb-articles/%s/state", url.PathEscape(id)), body)
 }
 
-func (c *CustomerEntityClient) SearchKBManagers(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/kb-managers/search", body)
+// SearchKBManagerUsers calls POST /kb-manager-users/search on the entity service.
+func (c *CustomerEntityClient) SearchKBManagerUsers(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-users/search", body)
+}
+
+// SearchKBManagerGroups calls POST /kb-manager-groups/search on the entity service.
+func (c *CustomerEntityClient) SearchKBManagerGroups(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-groups/search", body)
 }
 
 // PatchKBArticleContent calls PATCH /kb-articles/{id} on the entity service.
@@ -751,14 +757,25 @@ func (c *CustomerEntityClient) SetKnowledgeBaseActive(ctx context.Context, id st
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/knowledge-bases/%s/active", url.PathEscape(id)), body)
 }
 
-// CreateKBManager calls POST /kb-managers on the entity service.
-func (c *CustomerEntityClient) CreateKBManager(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/kb-managers", body)
+// CreateKBManagerUser calls POST /kb-manager-users on the entity service.
+func (c *CustomerEntityClient) CreateKBManagerUser(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-users", body)
 }
 
-// DeleteKBManager calls DELETE /kb-managers on the entity service.
-func (c *CustomerEntityClient) DeleteKBManager(ctx context.Context, body []byte) error {
-	_, err := c.do(ctx, http.MethodDelete, "/kb-managers", body)
+// DeleteKBManagerUser calls DELETE /kb-manager-users on the entity service.
+func (c *CustomerEntityClient) DeleteKBManagerUser(ctx context.Context, body []byte) error {
+	_, err := c.do(ctx, http.MethodDelete, "/kb-manager-users", body)
+	return err
+}
+
+// CreateKBManagerGroup calls POST /kb-manager-groups on the entity service.
+func (c *CustomerEntityClient) CreateKBManagerGroup(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/kb-manager-groups", body)
+}
+
+// DeleteKBManagerGroup calls DELETE /kb-manager-groups on the entity service.
+func (c *CustomerEntityClient) DeleteKBManagerGroup(ctx context.Context, body []byte) error {
+	_, err := c.do(ctx, http.MethodDelete, "/kb-manager-groups", body)
 	return err
 }
 

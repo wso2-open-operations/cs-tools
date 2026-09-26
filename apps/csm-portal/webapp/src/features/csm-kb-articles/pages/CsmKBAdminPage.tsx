@@ -45,10 +45,16 @@ import { useCreateKnowledgeBase } from "@features/csm-kb-articles/api/useCreateK
 import { useSearchProducts } from "@features/csm-projects/api/useSearchProducts";
 import { useUpdateKnowledgeBaseName } from "@features/csm-kb-articles/api/useUpdateKnowledgeBaseName";
 import { useSetKnowledgeBaseActive } from "@features/csm-kb-articles/api/useSetKnowledgeBaseActive";
-import { useSearchKBManagers } from "@features/csm-kb-articles/api/useSearchKBManagers";
-import { useCreateKBManager } from "@features/csm-kb-articles/api/useCreateKBManager";
-import { useDeleteKBManager } from "@features/csm-kb-articles/api/useDeleteKBManager";
+import { useSearchKBManagerUsers } from "@features/csm-kb-articles/api/useSearchKBManagerUsers";
+import { useCreateKBManagerUser } from "@features/csm-kb-articles/api/useCreateKBManagerUser";
+import { useDeleteKBManagerUser } from "@features/csm-kb-articles/api/useDeleteKBManagerUser";
+import { useSearchKBManagerGroups } from "@features/csm-kb-articles/api/useSearchKBManagerGroups";
+import { useCreateKBManagerGroup } from "@features/csm-kb-articles/api/useCreateKBManagerGroup";
+import { useDeleteKBManagerGroup } from "@features/csm-kb-articles/api/useDeleteKBManagerGroup";
 import { useUsersByIds } from "@features/csm-kb-articles/api/useUsersByIds";
+import { useSearchGroups } from "@api/useSearchGroups";
+import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import type { BeGroup } from "@api/backend/types";
 import type { KnowledgeBase } from "@features/csm-kb-articles/types/csmKbArticles";
 
 /**
@@ -127,12 +133,12 @@ function CreateKBDialog({ open, onClose }: { open: boolean; onClose: () => void 
  * required before the toggle actually fires.
  */
 function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () => void }): JSX.Element {
-  const [name, setName] = useState(kb?.name ?? "");
+  const [name, setName] = useState(kb?.title ?? "");
   const [confirmingToggle, setConfirmingToggle] = useState(false);
   const update = useUpdateKnowledgeBaseName();
   const setActive = useSetKnowledgeBaseActive();
 
-  if (kb && name === "") setName(kb.name);
+  if (kb && name === "") setName(kb.title);
 
   const handleSave = (): void => {
     if (!kb || !name.trim()) return;
@@ -142,7 +148,7 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
   const handleConfirmToggle = (): void => {
     if (!kb) return;
     setActive.mutate(
-      { id: kb.id, isActive: !kb.isActive },
+      { id: kb.id, isActive: !kb.active },
       { onSuccess: () => setConfirmingToggle(false) },
     );
   };
@@ -154,7 +160,7 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
 
   return (
     <Dialog open={Boolean(kb)} onClose={handleClose} fullWidth maxWidth="sm">
-      <DialogTitle>Edit "{kb?.name}"</DialogTitle>
+      <DialogTitle>Edit "{kb?.title}"</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
         <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} fullWidth />
         {update.isError && (
@@ -168,15 +174,15 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
             <Button
               size="small"
               variant="outlined"
-              color={kb?.isActive ? "error" : "success"}
+              color={kb?.active ? "error" : "success"}
               onClick={() => setConfirmingToggle(true)}
             >
-              {kb?.isActive ? "Deactivate this knowledge base" : "Activate this knowledge base"}
+              {kb?.active ? "Deactivate this knowledge base" : "Activate this knowledge base"}
             </Button>
           ) : (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Alert severity="warning">
-                {kb?.isActive
+                {kb?.active
                   ? "Engineers will no longer be able to create new articles under this knowledge base. Existing articles are unaffected. Are you sure?"
                   : "This will let engineers create new articles under this knowledge base again. Are you sure?"}
               </Alert>
@@ -192,11 +198,11 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
                 <Button
                   size="small"
                   variant="contained"
-                  color={kb?.isActive ? "error" : "success"}
+                  color={kb?.active ? "error" : "success"}
                   onClick={handleConfirmToggle}
                   disabled={setActive.isPending}
                 >
-                  Yes, {kb?.isActive ? "deactivate" : "activate"}
+                  Yes, {kb?.active ? "deactivate" : "activate"}
                 </Button>
               </Box>
             </Box>
@@ -217,16 +223,20 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
 
 function ApproversDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () => void }): JSX.Element {
   const api = useBackendApi();
-  const { data: managers } = useSearchKBManagers(kb?.id);
-  const userIds = useMemo(() => (managers?.managers ?? []).map((m) => m.userId), [managers]);
+  const { data: userManagers } = useSearchKBManagerUsers(kb?.id);
+  const { data: groupManagers } = useSearchKBManagerGroups(kb?.id);
+  const userIds = useMemo(() => (userManagers?.managers ?? []).map((m) => m.userId), [userManagers]);
   const { data: nameById = new Map<string, string>() } = useUsersByIds(userIds);
 
   const [email, setEmail] = useState("");
   const [lookupError, setLookupError] = useState<string | null>(null);
-  const createManager = useCreateKBManager();
-  const deleteManager = useDeleteKBManager();
+  const [groupId, setGroupId] = useState("");
+  const createManagerUser = useCreateKBManagerUser();
+  const deleteManagerUser = useDeleteKBManagerUser();
+  const createManagerGroup = useCreateKBManagerGroup();
+  const deleteManagerGroup = useDeleteKBManagerGroup();
 
-  const handleAdd = async (): Promise<void> => {
+  const handleAddUser = async (): Promise<void> => {
     if (!kb || !email.trim()) return;
     setLookupError(null);
     try {
@@ -239,7 +249,7 @@ function ApproversDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: (
         setLookupError("No user found with that email.");
         return;
       }
-      createManager.mutate(
+      createManagerUser.mutate(
         { knowledgeBaseId: kb.id, userId: user.id },
         { onSuccess: () => setEmail("") },
       );
@@ -248,29 +258,60 @@ function ApproversDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: (
     }
   };
 
+  const handleAddGroup = (): void => {
+    if (!kb || !groupId) return;
+    createManagerGroup.mutate(
+      { knowledgeBaseId: kb.id, groupId },
+      { onSuccess: () => setGroupId("") },
+    );
+  };
+
+  const hasNoManagers = (userManagers?.managers ?? []).length === 0 && (groupManagers?.managers ?? []).length === 0;
+
   return (
     <Dialog open={Boolean(kb)} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Approvers for "{kb?.name}"</DialogTitle>
+      <DialogTitle>Approvers for "{kb?.title}"</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          {(managers?.managers ?? []).length === 0 ? (
+          {hasNoManagers ? (
             <Typography variant="body2" color="text.secondary">
               No approvers assigned yet.
             </Typography>
           ) : (
-            (managers?.managers ?? []).map((m) => (
-              <Box key={m.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <Typography variant="body2">{nameById.get(m.userId) ?? m.userId}</Typography>
-                <IconButton
-                  size="small"
-                  onClick={() => kb && deleteManager.mutate({ knowledgeBaseId: kb.id, userId: m.userId })}
-                  disabled={deleteManager.isPending}
-                  aria-label="Remove approver"
-                >
-                  <Trash2 size={14} />
-                </IconButton>
-              </Box>
-            ))
+            <>
+              {(userManagers?.managers ?? []).map((m) => (
+                <Box key={m.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Chip label="Person" size="small" variant="outlined" />
+                    <Typography variant="body2">{nameById.get(m.userId) ?? m.userId}</Typography>
+                  </Box>
+                  <IconButton
+                    size="small"
+                    onClick={() => kb && deleteManagerUser.mutate({ knowledgeBaseId: kb.id, userId: m.userId })}
+                    disabled={deleteManagerUser.isPending}
+                    aria-label="Remove approver"
+                  >
+                    <Trash2 size={14} />
+                  </IconButton>
+                </Box>
+              ))}
+              {(groupManagers?.managers ?? []).map((m) => (
+                <Box key={m.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Chip label="Group" size="small" color="primary" variant="outlined" />
+                    <Typography variant="body2">{m.groupName ?? m.groupId}</Typography>
+                  </Box>
+                  <IconButton
+                    size="small"
+                    onClick={() => kb && deleteManagerGroup.mutate({ knowledgeBaseId: kb.id, groupId: m.groupId })}
+                    disabled={deleteManagerGroup.isPending}
+                    aria-label="Remove group approver"
+                  >
+                    <Trash2 size={14} />
+                  </IconButton>
+                </Box>
+              ))}
+            </>
           )}
         </Box>
 
@@ -282,14 +323,37 @@ function ApproversDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: (
             onChange={(e) => setEmail(e.target.value)}
             fullWidth
           />
-          <Button variant="outlined" onClick={handleAdd} disabled={createManager.isPending}>
+          <Button variant="outlined" onClick={handleAddUser} disabled={createManagerUser.isPending}>
             Add
           </Button>
         </Box>
         {lookupError && <Alert severity="error">{lookupError}</Alert>}
-        {createManager.isError && (
+        {createManagerUser.isError && (
           <Alert severity="error">
-            {createManager.error instanceof Error ? createManager.error.message : "Failed to add approver."}
+            {createManagerUser.error instanceof Error ? createManagerUser.error.message : "Failed to add approver."}
+          </Alert>
+        )}
+
+        <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
+          <Box sx={{ flex: 1 }}>
+            <AsyncEntitySelect<BeGroup>
+              id="kb-approvers-add-group"
+              label="Add approver group"
+              placeholder="Search groups…"
+              value={groupId}
+              onChange={setGroupId}
+              useSearch={useSearchGroups}
+              getId={(g) => g.id}
+              getLabel={(g) => g.name}
+            />
+          </Box>
+          <Button variant="outlined" onClick={handleAddGroup} disabled={createManagerGroup.isPending || !groupId}>
+            Add
+          </Button>
+        </Box>
+        {createManagerGroup.isError && (
+          <Alert severity="error">
+            {createManagerGroup.error instanceof Error ? createManagerGroup.error.message : "Failed to add group approver."}
           </Alert>
         )}
       </DialogContent>
@@ -346,12 +410,12 @@ export default function CsmKBAdminPage(): JSX.Element {
               ) : (
                 kbs.map((kb) => (
                   <TableRow key={kb.id}>
-                    <TableCell>{kb.name}</TableCell>
+                    <TableCell>{kb.title}</TableCell>
                     <TableCell>
                       <Chip
                         size="small"
-                        label={kb.isActive ? "Active" : "Deactivated"}
-                        color={kb.isActive ? "success" : "default"}
+                        label={kb.active ? "Active" : "Deactivated"}
+                        color={kb.active ? "success" : "default"}
                         variant="outlined"
                       />
                     </TableCell>

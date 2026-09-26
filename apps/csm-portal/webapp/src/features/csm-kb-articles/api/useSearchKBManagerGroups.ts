@@ -17,14 +17,14 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { SearchKBManagersRequest, SearchKBManagersResponse } from "@features/csm-kb-articles/types/csmKbArticles";
+import type { SearchKBManagerGroupsRequest, SearchKBManagerGroupsResponse } from "@features/csm-kb-articles/types/csmKbArticles";
 
-export function useSearchKBManagers(knowledgeBaseId: string | undefined): UseQueryResult<SearchKBManagersResponse | null, Error> {
+export function useSearchKBManagerGroups(knowledgeBaseId: string | undefined): UseQueryResult<SearchKBManagerGroupsResponse | null, Error> {
   const api = useBackendApi();
-  return useQuery<SearchKBManagersResponse | null, Error>({
-    queryKey: [ApiQueryKeys.CSM_KB_ARTICLES, "kb-managers", knowledgeBaseId ?? ""],
+  return useQuery<SearchKBManagerGroupsResponse | null, Error>({
+    queryKey: [ApiQueryKeys.CSM_KB_ARTICLES, "kb-manager-groups", knowledgeBaseId ?? ""],
     queryFn: () =>
-      api.post<SearchKBManagersRequest, SearchKBManagersResponse>("/kb-managers/search", { knowledgeBaseId }),
+      api.post<SearchKBManagerGroupsRequest, SearchKBManagerGroupsResponse>("/kb-manager-groups/search", { knowledgeBaseId }),
     enabled: Boolean(knowledgeBaseId),
   });
 }

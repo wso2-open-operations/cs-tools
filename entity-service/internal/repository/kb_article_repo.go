@@ -29,7 +29,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// KBArticleRepository defines the persistence operations for the kb_articles table.
+// KBArticleRepository defines the persistence operations for the real
+// knowledge_article table (see kb-tables.sql from Sajith, Sep 22 -- this
+// replaces the original kb_articles/kb_article_history design). Two real
+// behavior changes from the original design, both called out where they
+// matter below: (1) there is no submitted_at equivalent at all in the real
+// table; (2) the real table has no DB-level state-transition-validation
+// trigger, unlike the original design's trg_kb_article_valid_transition --
+// that validation needs to live in the service layer now, not here.
 type KBArticleRepository interface {
 	// CreateKBArticle inserts a new article in the draft state.
 	CreateKBArticle(ctx context.Context, req domain.CreateKBArticleRequest) (domain.KBArticle, error)
@@ -39,19 +46,25 @@ type KBArticleRepository interface {
 
 	// SearchKBArticles returns a filtered, paginated slice of articles together
 	// with the total count of matching rows before pagination. COUNT and SELECT
-	// are executed concurrently on separate pool connections.
+	// are executed concurrently on separate pool connections. Only returns
+	// latest=true rows -- older versions in a lineage are excluded from
+	// search results by design; see ListKBArticleHistory for those.
 	SearchKBArticles(ctx context.Context, req domain.SearchKBArticlesRequest) ([]domain.KBArticle, int, error)
 
-	// UpdateKBArticleState transitions an article's state. Illegal transitions
-	// are rejected by the trg_kb_article_valid_transition trigger and surfaced
-	// here as an apierror.ValidationError, not a raw DB error.
+	// UpdateKBArticleState transitions an article's state via a plain
+	// UPDATE. Legal-transition validation is NOT enforced by the database
+	// on this table (no trigger exists on the real schema) -- the CALLER
+	// (service layer) must validate the transition before invoking this.
 	UpdateKBArticleState(ctx context.Context, id string, req domain.UpdateKBArticleStateRequest) (domain.KBArticle, error)
 
-	// UpdateKBArticleContent edits an existing draft's title/body. Callers
-	// are expected to only invoke this while state == draft; the DB layer
-	// does not itself enforce that (unlike state transitions, which the
-	// trigger enforces) -- the CSM Portal Backend enforces it before
-	// forwarding, same as the author-only rule on submit.
+	// UpdateKBArticleContent edits an existing draft's title/body IN PLACE
+	// -- does NOT create a new versioned row. Callers are expected to only
+	// invoke this while state == draft; the DB layer does not itself
+	// enforce that. OPEN QUESTION (not yet settled with Sajith): should
+	// editing published content instead create a new lineage row (via
+	// base_version_id/latest) rather than updating in place? Deliberately
+	// NOT implemented here until that's confirmed, to avoid guessing at
+	// unstated business logic.
 	UpdateKBArticleContent(ctx context.Context, id string, req domain.UpdateKBArticleContentRequest) (domain.KBArticle, error)
 
 	// DeleteKBArticle removes an article only if it is currently in draft or
@@ -59,7 +72,12 @@ type KBArticleRepository interface {
 	// Returns an apierror.ValidationError if the article is in neither state.
 	DeleteKBArticle(ctx context.Context, id string) error
 
-	// ListKBArticleHistory returns snapshots for an article, newest first.
+	// ListKBArticleHistory returns every version in the given article's
+	// lineage (itself plus every row sharing its base_version_id chain),
+	// newest first -- there is no separate history table in the real
+	// schema; "history" IS other knowledge_article rows. Returns just the
+	// one current row until something actually creates additional lineage
+	// rows (see UpdateKBArticleContent's open question above).
 	ListKBArticleHistory(ctx context.Context, kbArticleID string) ([]domain.KBArticleHistoryEntry, error)
 }
 
@@ -72,39 +90,35 @@ func NewKBArticleRepository(db *pgxpool.Pool) KBArticleRepository {
 	return &kbArticleRepo{db: db}
 }
 
+const kbArticleColumns = `id, knowledge_base_id, title, body, state, author_id,
+	revised_by_id, source_case_id, rejection_comment, updated_by, base_version_id, latest,
+	created_on, updated_on, published_on, retired_on`
+
+func scanKBArticle(row interface {
+	Scan(dest ...any) error
+}, a *domain.KBArticle) error {
+	return row.Scan(
+		&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
+		&a.RevisedByID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.BaseVersionID, &a.Latest,
+		&a.CreatedOn, &a.UpdatedOn, &a.PublishedOn, &a.RetiredOn,
+	)
+}
+
 // CreateKBArticle implements KBArticleRepository.
 func (r *kbArticleRepo) CreateKBArticle(ctx context.Context, req domain.CreateKBArticleRequest) (domain.KBArticle, error) {
-	// TEMPORARY, SCOPED FIX for kbdraftengine (KB auto-generation feature):
-	// the real shared DB's table is "knowledge_article" (singular), not
-	// "kb_articles" -- team_key and submitted_at don't exist there at all
-	// (dropped below); reviewer_id/created_at/updated_at/published_at/
-	// retired_at are named revised_by_id/created_on/updated_on/
-	// published_on/retired_on there instead. Neither id nor created_on/
-	// updated_on has a DB-level default on the real table (confirmed via
-	// \d+ -- no "Default" shown), so both are generated explicitly here
-	// rather than relying on the database. created_by is NOT NULL and not
-	// FK-validated (free text, like case/comment's created_by) -- reusing
-	// req.AuthorID as a placeholder value here; revisit once the real
-	// authorID/identity question is settled with Sajith.
-	const query = `
-		INSERT INTO knowledge_article (id, knowledge_base_id, title, body, state, author_id, created_by, updated_by, created_on, updated_on)
-		VALUES (gen_random_uuid(), $1, $2, $3, 'draft', $4::uuid, $4::text, $4::text, NOW(), NOW())
-		RETURNING id, knowledge_base_id, title, body, state, author_id,
-		          revised_by_id, source_case_id, rejection_comment, updated_by, created_on, updated_on, published_on, retired_on`
+	query := fmt.Sprintf(`
+		INSERT INTO knowledge_article (id, knowledge_base_id, title, body, state, author_id, created_by, updated_by, created_on, updated_on, latest)
+		VALUES (gen_random_uuid(), $1, $2, $3, 'draft', $4::uuid, $4::text, $4::text, NOW(), NOW(), true)
+		RETURNING %s`, kbArticleColumns)
 
 	var a domain.KBArticle
-	err := r.db.QueryRow(ctx, query,
-		req.KnowledgeBaseID, req.Title, req.Body, req.AuthorID,
-	).Scan(
-		&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
-		&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.CreatedOn, &a.UpdatedOn, &a.PublishedOn, &a.RetiredOn,
-	)
+	err := scanKBArticle(r.db.QueryRow(ctx, query, req.KnowledgeBaseID, req.Title, req.Body, req.AuthorID), &a)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
-			case "23503": // foreign_key_violation — knowledge_base_id or author_id does not exist
+			case "23503":
 				return domain.KBArticle{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-			case "P0001": // raise_exception from trg_kb_article_knowledge_base_active
+			case "P0001":
 				return domain.KBArticle{}, &apierror.ValidationError{Msg: pgErr.Message}
 			}
 		}
@@ -115,18 +129,10 @@ func (r *kbArticleRepo) CreateKBArticle(ctx context.Context, req domain.CreateKB
 
 // GetKBArticleByID implements KBArticleRepository.
 func (r *kbArticleRepo) GetKBArticleByID(ctx context.Context, id string) (domain.KBArticle, error) {
-	const query = `
-		SELECT id, knowledge_base_id, title, body, state, author_id,
-		       reviewer_id, source_case_id, rejection_comment, updated_by, team_key, created_at, updated_at, submitted_at, published_at, retired_at
-		FROM kb_articles
-		WHERE id = $1`
+	query := fmt.Sprintf(`SELECT %s FROM knowledge_article WHERE id = $1`, kbArticleColumns)
 
 	var a domain.KBArticle
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
-		&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.TeamKey, &a.CreatedOn, &a.UpdatedOn, &a.SubmittedOn, &a.PublishedOn, &a.RetiredOn,
-	)
-	if err != nil {
+	if err := scanKBArticle(r.db.QueryRow(ctx, query, id), &a); err != nil {
 		return domain.KBArticle{}, fmt.Errorf("get kb article: %w", err)
 	}
 	return a, nil
@@ -137,7 +143,7 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 	filterArgs := []any{}
 	argIdx := 1
 
-	where := "WHERE 1=1"
+	where := "WHERE latest = true"
 
 	if req.KnowledgeBaseID != "" {
 		where += fmt.Sprintf(" AND knowledge_base_id = $%d", argIdx)
@@ -146,12 +152,11 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 	}
 
 	if len(req.States) > 0 {
-		// Convert []KBArticleState to []string — pgx has no codec for named string types.
 		stateStrings := make([]string, len(req.States))
 		for i, s := range req.States {
 			stateStrings[i] = string(s)
 		}
-		where += fmt.Sprintf(" AND state = ANY($%d::kb_article_state_enum[])", argIdx)
+		where += fmt.Sprintf(" AND state = ANY($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, stateStrings)
 		argIdx++
 	}
@@ -159,12 +164,6 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 	if req.AuthorID != "" {
 		where += fmt.Sprintf(" AND author_id = $%d", argIdx)
 		filterArgs = append(filterArgs, req.AuthorID)
-		argIdx++
-	}
-
-	if len(req.TeamKeys) > 0 {
-		where += fmt.Sprintf(" AND team_key = ANY($%d)", argIdx)
-		filterArgs = append(filterArgs, req.TeamKeys)
 		argIdx++
 	}
 
@@ -176,16 +175,11 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM kb_articles " + where
+	countQuery := "SELECT COUNT(*) FROM knowledge_article " + where
 
 	dataQuery := fmt.Sprintf(
-		`SELECT id, knowledge_base_id, title, body, state, author_id,
-		        reviewer_id, source_case_id, rejection_comment, updated_by, team_key, created_at, updated_at, submitted_at, published_at, retired_at
-		 FROM kb_articles
-		 %s
-		 ORDER BY created_at DESC, id
-		 LIMIT $%d OFFSET $%d`,
-		where, argIdx, argIdx+1,
+		`SELECT %s FROM knowledge_article %s ORDER BY created_on DESC, id LIMIT $%d OFFSET $%d`,
+		kbArticleColumns, where, argIdx, argIdx+1,
 	)
 	dataArgs := append(append([]any{}, filterArgs...), req.Pagination.Limit, req.Pagination.Offset)
 
@@ -211,10 +205,7 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 		result := make([]domain.KBArticle, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var a domain.KBArticle
-			if err := rows.Scan(
-				&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
-				&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.TeamKey, &a.CreatedOn, &a.UpdatedOn, &a.SubmittedOn, &a.PublishedOn, &a.RetiredOn,
-			); err != nil {
+			if err := scanKBArticle(rows, &a); err != nil {
 				return fmt.Errorf("scan kb article: %w", err)
 			}
 			result = append(result, a)
@@ -237,83 +228,57 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 func (r *kbArticleRepo) UpdateKBArticleState(ctx context.Context, id string, req domain.UpdateKBArticleStateRequest) (domain.KBArticle, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return domain.KBArticle{}, fmt.Errorf("begin tx: %w", err)
+		return domain.KBArticle{}, fmt.Errorf("update kb article state: begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Capture the state before the update so we only record a version
-	// snapshot when a genuine transition happens -- a retried or duplicated
-	// request that resubmits the *same* target state must not inflate the
-	// version count.
-	var oldState string
-	if err := tx.QueryRow(ctx, `SELECT state FROM kb_articles WHERE id = $1`, id).Scan(&oldState); err != nil {
-		return domain.KBArticle{}, fmt.Errorf("read current kb article state: %w", err)
-	}
-
-	const query = `
- UPDATE kb_articles
- SET state = $2::kb_article_state_enum,
-     rejection_comment = $3,
-     updated_by = $4,
-     submitted_at = CASE WHEN $2 = 'pending_review' THEN NOW() ELSE submitted_at END,
-     published_at = CASE WHEN $2 = 'published' THEN NOW() ELSE published_at END,
-     retired_at   = CASE WHEN $2 = 'retired'   THEN NOW() ELSE retired_at   END
- WHERE id = $1
- RETURNING id, knowledge_base_id, title, body, state, author_id,
-           reviewer_id, source_case_id, rejection_comment, updated_by, team_key, created_at, updated_at, submitted_at, published_at, retired_at`
+	query := fmt.Sprintf(`
+		UPDATE knowledge_article
+		SET state = $2::text,
+		    rejection_comment = $3,
+		    updated_by = $4,
+		    updated_on = NOW(),
+		    published_on = CASE WHEN $2::text = 'published' THEN NOW() ELSE published_on END,
+		    retired_on   = CASE WHEN $2::text = 'retired'   THEN NOW() ELSE retired_on   END
+		WHERE id = $1
+		RETURNING %s`, kbArticleColumns)
 
 	var a domain.KBArticle
-	err = tx.QueryRow(ctx, query, id, string(req.State), req.RejectionComment, req.UpdatedBy).Scan(
-		&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
-		&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.TeamKey, &a.CreatedOn, &a.UpdatedOn, &a.SubmittedOn, &a.PublishedOn, &a.RetiredOn,
-	)
+	err = scanKBArticle(tx.QueryRow(ctx, query, id, string(req.State), req.RejectionComment, req.UpdatedBy), &a)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
-			case "P0001":
-				return domain.KBArticle{}, &apierror.ValidationError{Msg: pgErr.Message}
-			case "23514":
+			case "P0001", "23514":
 				return domain.KBArticle{}, &apierror.ValidationError{Msg: pgErr.Message}
 			}
 		}
 		return domain.KBArticle{}, fmt.Errorf("update kb article state: %w", err)
 	}
 
-	if oldState != string(a.State) {
-		changedBy := a.AuthorID
-		if a.UpdatedBy != nil && *a.UpdatedBy != "" {
-			changedBy = *a.UpdatedBy
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO kb_article_history (kb_article_id, title, body, state, changed_by)
-  VALUES ($1, $2, $3, $4, $5)`,
-			a.ID, a.Title, a.Body, string(a.State), changedBy,
-		); err != nil {
-			return domain.KBArticle{}, fmt.Errorf("insert kb article history: %w", err)
-		}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO knowledge_article_history (id, knowledge_article_id, title, body, state, changed_by)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
+		a.ID, a.Title, a.Body, string(a.State), req.UpdatedBy,
+	); err != nil {
+		return domain.KBArticle{}, fmt.Errorf("update kb article state: insert history: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return domain.KBArticle{}, fmt.Errorf("commit tx: %w", err)
+		return domain.KBArticle{}, fmt.Errorf("update kb article state: commit tx: %w", err)
 	}
 	return a, nil
 }
 
 // UpdateKBArticleContent implements KBArticleRepository.
 func (r *kbArticleRepo) UpdateKBArticleContent(ctx context.Context, id string, req domain.UpdateKBArticleContentRequest) (domain.KBArticle, error) {
-	const query = `
-		UPDATE kb_articles
-		SET title = $2, body = $3, updated_by = $4, updated_at = NOW()
+	query := fmt.Sprintf(`
+		UPDATE knowledge_article
+		SET title = $2, body = $3, updated_by = $4, updated_on = NOW()
 		WHERE id = $1 AND state = 'draft'
-		RETURNING id, knowledge_base_id, title, body, state, author_id,
-		          reviewer_id, source_case_id, rejection_comment, updated_by, team_key, created_at, updated_at, submitted_at, published_at, retired_at`
+		RETURNING %s`, kbArticleColumns)
 
 	var a domain.KBArticle
-	err := r.db.QueryRow(ctx, query, id, req.Title, req.Body, req.UpdatedBy).Scan(
-		&a.ID, &a.KnowledgeBaseID, &a.Title, &a.Body, &a.State, &a.AuthorID,
-		&a.ReviewerID, &a.SourceCaseID, &a.RejectionComment, &a.UpdatedBy, &a.TeamKey, &a.CreatedOn, &a.UpdatedOn, &a.SubmittedOn, &a.PublishedOn, &a.RetiredOn,
-	)
-	if err != nil {
+	if err := scanKBArticle(r.db.QueryRow(ctx, query, id, req.Title, req.Body, req.UpdatedBy), &a); err != nil {
 		return domain.KBArticle{}, fmt.Errorf("update kb article content: %w", err)
 	}
 	return a, nil
@@ -321,18 +286,8 @@ func (r *kbArticleRepo) UpdateKBArticleContent(ctx context.Context, id string, r
 
 // DeleteKBArticle implements KBArticleRepository.
 func (r *kbArticleRepo) DeleteKBArticle(ctx context.Context, id string) error {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, `DELETE FROM kb_article_history WHERE kb_article_id = $1`, id); err != nil {
-		return fmt.Errorf("delete kb article history: %w", err)
-	}
-
-	tag, err := tx.Exec(ctx,
-		`DELETE FROM kb_articles WHERE id = $1 AND state IN ('draft', 'pending_review')`,
+	tag, err := r.db.Exec(ctx,
+		`DELETE FROM knowledge_article WHERE id = $1 AND state IN ('draft', 'pending_review')`,
 		id,
 	)
 	if err != nil {
@@ -341,20 +296,18 @@ func (r *kbArticleRepo) DeleteKBArticle(ctx context.Context, id string) error {
 	if tag.RowsAffected() == 0 {
 		return &apierror.ValidationError{Msg: "article not found, or not in a deletable state"}
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
 	return nil
 }
 
 // ListKBArticleHistory implements KBArticleRepository.
 func (r *kbArticleRepo) ListKBArticleHistory(ctx context.Context, kbArticleID string) ([]domain.KBArticleHistoryEntry, error) {
-	rows, err := r.db.Query(ctx,
-		`SELECT id, kb_article_id, title, body, state, changed_by, created_at
-		 FROM kb_article_history WHERE kb_article_id = $1 ORDER BY created_at DESC`,
-		kbArticleID,
-	)
+	const query = `
+		SELECT id, knowledge_article_id, title, body, state, changed_by, created_on
+		FROM knowledge_article_history
+		WHERE knowledge_article_id = $1
+		ORDER BY created_on DESC`
+
+	rows, err := r.db.Query(ctx, query, kbArticleID)
 	if err != nil {
 		return nil, fmt.Errorf("list kb article history: %w", err)
 	}

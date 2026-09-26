@@ -45,7 +45,10 @@ export interface KBArticle {
   teamKey: string | null;
   createdOn: string;
   updatedOn: string;
-  submittedOn: string | null;
+  // No longer sent by the real backend (no submitted_at column exists
+  // on the real knowledge_article table) -- optional so this doesn't
+  // silently lie about the field always being present.
+  submittedOn?: string | null;
   publishedOn: string | null;
   retiredOn: string | null;
 }
@@ -122,25 +125,48 @@ export interface UpdateKnowledgeBaseActiveRequest {
   isActive: boolean;
 }
 
-export interface KBManager {
+export interface KBManagerUser {
   id: string;
   knowledgeBaseId: string;
   userId: string;
   createdOn: string;
 }
 
-export interface SearchKBManagersRequest {
+export interface SearchKBManagerUsersRequest {
   knowledgeBaseId?: string;
   userId?: string;
 }
 
-export interface SearchKBManagersResponse {
-  managers: KBManager[];
+export interface SearchKBManagerUsersResponse {
+  managers: KBManagerUser[];
 }
 
-export interface CreateKBManagerRequest {
+export interface CreateKBManagerUserRequest {
   knowledgeBaseId: string;
   userId: string;
+}
+
+export interface KBManagerGroup {
+  id: string;
+  knowledgeBaseId: string;
+  groupId: string;
+  groupName: string | null;
+  createdOn: string;
+}
+
+export interface SearchKBManagerGroupsRequest {
+  knowledgeBaseId?: string;
+  groupId?: string;
+}
+
+export interface SearchKBManagerGroupsResponse {
+  managers: KBManagerGroup[];
+}
+
+export interface CreateKBManagerGroupRequest {
+  knowledgeBaseId: string;
+  groupId: string;
+  groupName?: string;
 }
 
 export interface ListKnowledgeBasesResponse {

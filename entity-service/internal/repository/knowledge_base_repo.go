@@ -18,28 +18,32 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-const knowledgeBaseColumns = "id, product_id, name, is_active, created_at, updated_at"
+// knowledgeBaseColumns matches the real "knowledge_base" table -- title/
+// active (not name/is_active), no product_id column at all (a knowledge
+// base is no longer tied to a specific product in the real schema).
+const knowledgeBaseColumns = "id, title, active, created_on, updated_on"
 
-// KnowledgeBaseRepository defines the persistence operations for the knowledge_bases table.
+// KnowledgeBaseRepository defines the persistence operations for the real
+// knowledge_base table. NOTE: the request structs below (Create/Update...)
+// still use their original field names (Name, ProductID, IsActive) --
+// deliberately NOT renamed in this pass to keep this fix scoped; this
+// repository translates them to the real title/active columns internally.
+// ProductID is accepted but silently ignored -- there is nowhere to store
+// it, since the real table has no such column at all.
 type KnowledgeBaseRepository interface {
-	// ListKnowledgeBases returns every knowledge base, ordered by name.
+	// ListKnowledgeBases returns every knowledge base, ordered by title.
 	// Includes deactivated ones -- the Admin screen needs to see and
-	// reactivate them; article-creation pickers filter is_active
-	// themselves on the frontend/consumer side.
+	// reactivate them; article-creation pickers filter active themselves
+	// on the frontend/consumer side.
 	ListKnowledgeBases(ctx context.Context) ([]domain.KnowledgeBase, error)
 
-	// CreateKnowledgeBase creates a new, active knowledge base for a
-	// product. A ValidationError is returned if the product already has one
-	// (product_id is UNIQUE).
+	// CreateKnowledgeBase creates a new, active knowledge base.
 	CreateKnowledgeBase(ctx context.Context, req domain.CreateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 
 	// UpdateKnowledgeBaseName renames an existing knowledge base.
@@ -63,14 +67,7 @@ func NewKnowledgeBaseRepository(db *pgxpool.Pool) KnowledgeBaseRepository {
 
 // ListKnowledgeBases implements KnowledgeBaseRepository.
 func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.KnowledgeBase, error) {
-	// TEMPORARY, SCOPED FIX for kbdraftengine: the real shared DB's table
-	// is "knowledge_base" (singular), with "title"/"active" instead of
-	// "name"/"is_active", and no product_id column at all -- kb.ProductID
-	// is left unset (zero value) below since there's nothing to map it
-	// from; kbdraftengine only reads ID/IsActive, so this doesn't block it,
-	// but any other consumer of this method relying on ProductID would
-	// need a real design decision first (out of scope here).
-	rows, err := r.db.Query(ctx, "SELECT id, title, active, created_on, updated_on FROM knowledge_base ORDER BY title")
+	rows, err := r.db.Query(ctx, "SELECT "+knowledgeBaseColumns+" FROM knowledge_base ORDER BY title")
 	if err != nil {
 		return nil, fmt.Errorf("list knowledge bases: %w", err)
 	}
@@ -79,7 +76,7 @@ func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.Kn
 	kbs := make([]domain.KnowledgeBase, 0)
 	for rows.Next() {
 		var kb domain.KnowledgeBase
-		if err := rows.Scan(&kb.ID, &kb.Name, &kb.IsActive, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
+		if err := rows.Scan(&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("scan knowledge base: %w", err)
 		}
 		kbs = append(kbs, kb)
@@ -90,26 +87,23 @@ func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.Kn
 	return kbs, nil
 }
 
-// CreateKnowledgeBase implements KnowledgeBaseRepository.
+// CreateKnowledgeBase implements KnowledgeBaseRepository. Neither id nor
+// created_on/updated_on has a DB-level default on the real table, so all
+// three are generated explicitly. created_by/updated_by are NOT NULL on
+// the real table -- req has no caller-identity field to source this from
+// yet, so a placeholder "system" is used until that's wired through from
+// the handler layer (same open question as KB articles' author identity).
 func (r *knowledgeBaseRepo) CreateKnowledgeBase(ctx context.Context, req domain.CreateKnowledgeBaseRequest) (domain.KnowledgeBase, error) {
 	const query = `
-		INSERT INTO knowledge_bases (product_id, name)
-		VALUES ($1, $2)
+		INSERT INTO knowledge_base (id, title, active, created_on, updated_on, created_by, updated_by)
+		VALUES (gen_random_uuid(), $1, true, NOW(), NOW(), 'system', 'system')
 		RETURNING ` + knowledgeBaseColumns
 
 	var kb domain.KnowledgeBase
-	err := r.db.QueryRow(ctx, query, req.ProductID, req.Name).Scan(
-		&kb.ID, &kb.ProductID, &kb.Name, &kb.IsActive, &kb.CreatedOn, &kb.UpdatedOn,
+	err := r.db.QueryRow(ctx, query, req.Name).Scan(
+		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
-		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23503": // foreign_key_violation -- product_id does not exist
-				return domain.KnowledgeBase{}, &apierror.ValidationError{Msg: "product does not exist: " + pgErr.Detail}
-			case "23505": // unique_violation -- this product already has a KB
-				return domain.KnowledgeBase{}, &apierror.ValidationError{Msg: "this product already has a knowledge base"}
-			}
-		}
 		return domain.KnowledgeBase{}, fmt.Errorf("create knowledge base: %w", err)
 	}
 	return kb, nil
@@ -118,13 +112,13 @@ func (r *knowledgeBaseRepo) CreateKnowledgeBase(ctx context.Context, req domain.
 // UpdateKnowledgeBaseName implements KnowledgeBaseRepository.
 func (r *knowledgeBaseRepo) UpdateKnowledgeBaseName(ctx context.Context, id string, req domain.UpdateKnowledgeBaseRequest) (domain.KnowledgeBase, error) {
 	const query = `
-		UPDATE knowledge_bases SET name = $2, updated_at = NOW()
+		UPDATE knowledge_base SET title = $2, updated_on = NOW()
 		WHERE id = $1
 		RETURNING ` + knowledgeBaseColumns
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, id, req.Name).Scan(
-		&kb.ID, &kb.ProductID, &kb.Name, &kb.IsActive, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
 		return domain.KnowledgeBase{}, fmt.Errorf("update knowledge base name: %w", err)
@@ -135,13 +129,13 @@ func (r *knowledgeBaseRepo) UpdateKnowledgeBaseName(ctx context.Context, id stri
 // SetKnowledgeBaseActive implements KnowledgeBaseRepository.
 func (r *knowledgeBaseRepo) SetKnowledgeBaseActive(ctx context.Context, id string, req domain.UpdateKnowledgeBaseActiveRequest) (domain.KnowledgeBase, error) {
 	const query = `
-		UPDATE knowledge_bases SET is_active = $2, updated_at = NOW()
+		UPDATE knowledge_base SET active = $2, updated_on = NOW()
 		WHERE id = $1
 		RETURNING ` + knowledgeBaseColumns
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, id, req.IsActive).Scan(
-		&kb.ID, &kb.ProductID, &kb.Name, &kb.IsActive, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
 		return domain.KnowledgeBase{}, fmt.Errorf("set knowledge base active: %w", err)

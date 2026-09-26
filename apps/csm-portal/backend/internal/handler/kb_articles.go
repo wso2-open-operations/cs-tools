@@ -34,14 +34,17 @@ type entityKBArticleClient interface {
 	GetKBArticle(ctx context.Context, id string) ([]byte, error)
 	SearchKBArticles(ctx context.Context, body []byte) ([]byte, error)
 	PatchKBArticleState(ctx context.Context, id string, body []byte) ([]byte, error)
-	SearchKBManagers(ctx context.Context, body []byte) ([]byte, error)
+	SearchKBManagerUsers(ctx context.Context, body []byte) ([]byte, error)
 	PatchKBArticleContent(ctx context.Context, id string, body []byte) ([]byte, error)
 	ListKnowledgeBases(ctx context.Context) ([]byte, error)
 	CreateKnowledgeBase(ctx context.Context, body []byte) ([]byte, error)
 	UpdateKnowledgeBaseName(ctx context.Context, id string, body []byte) ([]byte, error)
 	SetKnowledgeBaseActive(ctx context.Context, id string, body []byte) ([]byte, error)
-	CreateKBManager(ctx context.Context, body []byte) ([]byte, error)
-	DeleteKBManager(ctx context.Context, body []byte) error
+	CreateKBManagerUser(ctx context.Context, body []byte) ([]byte, error)
+	DeleteKBManagerUser(ctx context.Context, body []byte) error
+	SearchKBManagerGroups(ctx context.Context, body []byte) ([]byte, error)
+	CreateKBManagerGroup(ctx context.Context, body []byte) ([]byte, error)
+	DeleteKBManagerGroup(ctx context.Context, body []byte) error
 	GetUserMe(ctx context.Context) ([]byte, error)
 	DeleteKBArticle(ctx context.Context, id string) error
 	ListKBArticleHistory(ctx context.Context, id string) ([]byte, error)
@@ -168,6 +171,77 @@ type kbManagerSearchResult struct {
 	} `json:"managers"`
 }
 
+// kbManagerGroupSearchResult is the minimal shape read back from
+// SearchKBManagerGroups.
+type kbManagerGroupSearchResult struct {
+	Managers []struct {
+		GroupID string `json:"groupId"`
+	} `json:"managers"`
+}
+
+// currentUserGroupIDs returns the group IDs the currently authenticated
+// user belongs to, via GetMe's own Groups field (best-effort upstream --
+// see GetUserMeResponse's own doc comment; an empty list here just means
+// no group-based access will be found below, not necessarily that the
+// user genuinely has no groups).
+func (h *KBArticleHandler) currentUserGroupIDs(ctx context.Context) ([]string, error) {
+	raw, err := h.entity.GetUserMe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var me struct {
+		Groups []struct {
+			ID string `json:"id"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal(raw, &me); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(me.Groups))
+	for _, g := range me.Groups {
+		ids = append(ids, g.ID)
+	}
+	return ids, nil
+}
+
+// isKBManagerViaGroup reports whether the currently authenticated user
+// manages knowledgeBaseID through membership in one of its group-based
+// managers (knowledge_base_manager_group) -- the counterpart to an
+// individual SearchKBManagerUsers check. Added to close a real
+// authorization gap: without this, a knowledge base with ONLY
+// group-based managers had nobody who could pass the individual-only
+// check.
+func (h *KBArticleHandler) isKBManagerViaGroup(ctx context.Context, knowledgeBaseID string) (bool, error) {
+	userGroupIDs, err := h.currentUserGroupIDs(ctx)
+	if err != nil || len(userGroupIDs) == 0 {
+		return false, err
+	}
+
+	searchBody, err := json.Marshal(map[string]string{"knowledgeBaseId": knowledgeBaseID})
+	if err != nil {
+		return false, err
+	}
+	raw, err := h.entity.SearchKBManagerGroups(ctx, searchBody)
+	if err != nil {
+		return false, err
+	}
+	var groupManagers kbManagerGroupSearchResult
+	if err := json.Unmarshal(raw, &groupManagers); err != nil {
+		return false, err
+	}
+
+	userGroupSet := make(map[string]bool, len(userGroupIDs))
+	for _, id := range userGroupIDs {
+		userGroupSet[id] = true
+	}
+	for _, m := range groupManagers.Managers {
+		if userGroupSet[m.GroupID] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // kbArticleStateDecisionPayload is decoded here only to validate the allowed
 // action names before forwarding; the entity service performs the real
 // state-machine validation via trg_kb_article_valid_transition.
@@ -279,9 +353,9 @@ func (h *KBArticleHandler) PatchKBArticleState(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
-		managersRaw, err := h.entity.SearchKBManagers(r.Context(), searchBody)
+		managersRaw, err := h.entity.SearchKBManagerUsers(r.Context(), searchBody)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "entity SearchKBManagers failed (permission check)", "userID", user.UserID, "id", id, "err", err)
+			slog.ErrorContext(r.Context(), "entity SearchKBManagerUsers failed (permission check)", "userID", user.UserID, "id", id, "err", err)
 			mapUpstreamErrorGeneric(w, err, "Failed to update KB article state.")
 			return
 		}
@@ -291,7 +365,19 @@ func (h *KBArticleHandler) PatchKBArticleState(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
-		if len(managers.Managers) == 0 {
+		isManager := len(managers.Managers) > 0
+		if !isManager {
+			// Not an individual manager -- fall back to checking group-based
+			// access (knowledge_base_manager_group) before denying.
+			viaGroup, err := h.isKBManagerViaGroup(r.Context(), current.KnowledgeBaseID)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "group manager check failed (permission check)", "userID", user.UserID, "id", id, "err", err)
+				mapUpstreamErrorGeneric(w, err, "Failed to update KB article state.")
+				return
+			}
+			isManager = viaGroup
+		}
+		if !isManager {
 			writeError(w, http.StatusForbidden, ErrMsgForbidden)
 			return
 		}
@@ -483,7 +569,7 @@ func (h *KBArticleHandler) DeleteKBArticle(w http.ResponseWriter, r *http.Reques
 				writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 				return
 			}
-			managersRaw, err := h.entity.SearchKBManagers(r.Context(), searchBody)
+			managersRaw, err := h.entity.SearchKBManagerUsers(r.Context(), searchBody)
 			if err != nil {
 				mapUpstreamErrorGeneric(w, err, "Failed to delete KB article.")
 				return
@@ -491,6 +577,14 @@ func (h *KBArticleHandler) DeleteKBArticle(w http.ResponseWriter, r *http.Reques
 			var managers kbManagerSearchResult
 			if err := json.Unmarshal(managersRaw, &managers); err == nil && len(managers.Managers) > 0 {
 				allowed = true
+			}
+			if !allowed {
+				// Not an individual manager -- fall back to checking
+				// group-based access before denying.
+				viaGroup, err := h.isKBManagerViaGroup(r.Context(), current.KnowledgeBaseID)
+				if err == nil && viaGroup {
+					allowed = true
+				}
 			}
 		}
 	}
@@ -561,7 +655,11 @@ func (h *KBArticleHandler) ListMyManagedKnowledgeBases(w http.ResponseWriter, r 
 		return
 	}
 
-	raw, err := h.entity.SearchKBManagers(r.Context(), searchBody)
+	// NOTE: only checks direct (individual) manager assignment -- does NOT
+	// account for group-based access via knowledge_base_manager_group yet.
+	// A user who manages a KB only through group membership won't see it
+	// here. Known gap, not yet resolved.
+	raw, err := h.entity.SearchKBManagerUsers(r.Context(), searchBody)
 	if err != nil {
 		mapUpstreamErrorGeneric(w, err, "Failed to load managed knowledge bases.")
 		return

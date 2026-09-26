@@ -549,15 +549,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// the whole chain on it: nil handlers mean the KB routes below are
 	// never registered when there's no database to serve them.
 	var kbArticleHandler *handler.KBArticleHandler
-	var kbManagerHandler *handler.KBManagerHandler
+	var kbManagerUserHandler *handler.KBManagerUserHandler
+	var kbManagerGroupHandler *handler.KBManagerGroupHandler
 	var knowledgeBaseHandler *handler.KnowledgeBaseHandler
 	if db != nil {
 		kbArticleRepo := repository.NewKBArticleRepository(db)
-		kbArticleSvc := service.NewKBArticleService(kbArticleRepo)
+		kbArticleSvc := service.NewKBArticleService(kbArticleRepo, eventPublisher)
 		kbArticleHandler = handler.NewKBArticleHandler(kbArticleSvc)
-		kbManagerRepo := repository.NewKBManagerRepository(db)
-		kbManagerSvc := service.NewKBManagerService(kbManagerRepo)
-		kbManagerHandler = handler.NewKBManagerHandler(kbManagerSvc)
+		kbManagerUserRepo := repository.NewKBManagerUserRepository(db)
+		kbManagerUserSvc := service.NewKBManagerUserService(kbManagerUserRepo)
+		kbManagerUserHandler = handler.NewKBManagerUserHandler(kbManagerUserSvc)
+		kbManagerGroupRepo := repository.NewKBManagerGroupRepository(db)
+		kbManagerGroupSvc := service.NewKBManagerGroupService(kbManagerGroupRepo)
+		kbManagerGroupHandler = handler.NewKBManagerGroupHandler(kbManagerGroupSvc)
 
 		knowledgeBaseRepo := repository.NewKnowledgeBaseRepository(db)
 		knowledgeBaseSvc := service.NewKnowledgeBaseService(knowledgeBaseRepo)
@@ -1186,9 +1190,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /kb-articles/{id}", kbArticleHandler.GetKBArticle)
 		mux.HandleFunc("POST /kb-articles/search", kbArticleHandler.SearchKBArticles)
 		mux.HandleFunc("PATCH /kb-articles/{id}/state", kbArticleHandler.PatchKBArticleState)
-		mux.HandleFunc("POST /kb-managers/search", kbManagerHandler.SearchKBManagers)
-		mux.HandleFunc("POST /kb-managers", kbManagerHandler.CreateKBManager)
-		mux.HandleFunc("DELETE /kb-managers", kbManagerHandler.DeleteKBManager)
+		mux.HandleFunc("POST /kb-manager-users/search", kbManagerUserHandler.SearchKBManagerUsers)
+		mux.HandleFunc("POST /kb-manager-users", kbManagerUserHandler.CreateKBManagerUser)
+		mux.HandleFunc("DELETE /kb-manager-users", kbManagerUserHandler.DeleteKBManagerUser)
+		mux.HandleFunc("POST /kb-manager-groups/search", kbManagerGroupHandler.SearchKBManagerGroups)
+		mux.HandleFunc("POST /kb-manager-groups", kbManagerGroupHandler.CreateKBManagerGroup)
+		mux.HandleFunc("DELETE /kb-manager-groups", kbManagerGroupHandler.DeleteKBManagerGroup)
 		mux.HandleFunc("PATCH /kb-articles/{id}", kbArticleHandler.PatchKBArticleContent)
 		mux.HandleFunc("GET /knowledge-bases", knowledgeBaseHandler.ListKnowledgeBases)
 		mux.HandleFunc("POST /knowledge-bases", knowledgeBaseHandler.CreateKnowledgeBase)

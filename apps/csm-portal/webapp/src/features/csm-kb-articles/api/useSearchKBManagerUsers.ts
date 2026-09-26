@@ -14,18 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CreateKBManagerRequest, KBManager } from "@features/csm-kb-articles/types/csmKbArticles";
+import type { SearchKBManagerUsersRequest, SearchKBManagerUsersResponse } from "@features/csm-kb-articles/types/csmKbArticles";
 
-export function useCreateKBManager(): UseMutationResult<KBManager, Error, CreateKBManagerRequest> {
+export function useSearchKBManagerUsers(knowledgeBaseId: string | undefined): UseQueryResult<SearchKBManagerUsersResponse | null, Error> {
   const api = useBackendApi();
-  const queryClient = useQueryClient();
-  return useMutation<KBManager, Error, CreateKBManagerRequest>({
-    mutationFn: (input) => api.post<CreateKBManagerRequest, KBManager>("/kb-managers", input),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_KB_ARTICLES, "kb-managers", variables.knowledgeBaseId] });
-    },
+  return useQuery<SearchKBManagerUsersResponse | null, Error>({
+    queryKey: [ApiQueryKeys.CSM_KB_ARTICLES, "kb-manager-users", knowledgeBaseId ?? ""],
+    queryFn: () =>
+      api.post<SearchKBManagerUsersRequest, SearchKBManagerUsersResponse>("/kb-manager-users/search", { knowledgeBaseId }),
+    enabled: Boolean(knowledgeBaseId),
   });
 }

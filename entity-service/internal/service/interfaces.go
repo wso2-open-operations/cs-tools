@@ -1222,15 +1222,28 @@ type KBArticleService interface {
 }
 
 // KBManagerService defines the operations available on the kb_manager entity.
-type KBManagerService interface {
-	// SearchKBManagers returns kb_managers rows matching the given filters.
-	// Called with both knowledgeBaseId and userId set, an empty result means
-	// "this user does not manage this knowledge base."
-	SearchKBManagers(ctx context.Context, req domain.SearchKBManagersRequest) (domain.SearchKBManagersResponse, error)
-	// CreateKBManager grants a user approver access to a knowledge base.
-	CreateKBManager(ctx context.Context, req domain.CreateKBManagerRequest) (domain.KBManager, error)
-	// DeleteKBManager revokes a user's approver access to a knowledge base.
-	DeleteKBManager(ctx context.Context, knowledgeBaseID, userID string) error
+type KBManagerUserService interface {
+	// SearchKBManagerUsers returns knowledge_base_manager_user rows
+	// matching the given filters. Called with both knowledgeBaseId and
+	// userId set, an empty result means "this user does not directly
+	// manage this knowledge base" (they may still have access via a
+	// group -- see KBManagerGroupService).
+	SearchKBManagerUsers(ctx context.Context, req domain.SearchKBManagerUsersRequest) (domain.SearchKBManagerUsersResponse, error)
+	// CreateKBManagerUser grants a user manager access to a knowledge base.
+	CreateKBManagerUser(ctx context.Context, req domain.CreateKBManagerUserRequest, createdBy string) (domain.KBManagerUser, error)
+	// DeleteKBManagerUser revokes a user's manager access to a knowledge base.
+	DeleteKBManagerUser(ctx context.Context, knowledgeBaseID, userID string) error
+}
+
+type KBManagerGroupService interface {
+	// SearchKBManagerGroups returns knowledge_base_manager_group rows
+	// matching the given filters.
+	SearchKBManagerGroups(ctx context.Context, req domain.SearchKBManagerGroupsRequest) (domain.SearchKBManagerGroupsResponse, error)
+	// CreateKBManagerGroup grants every member of a group manager access
+	// to a knowledge base.
+	CreateKBManagerGroup(ctx context.Context, req domain.CreateKBManagerGroupRequest, createdBy string) (domain.KBManagerGroup, error)
+	// DeleteKBManagerGroup revokes a group's manager access to a knowledge base.
+	DeleteKBManagerGroup(ctx context.Context, knowledgeBaseID, groupID string) error
 }
 
 // KnowledgeBaseService defines the operations available on the knowledge_base entity.

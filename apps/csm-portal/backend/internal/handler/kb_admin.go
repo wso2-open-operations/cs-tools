@@ -126,9 +126,10 @@ func (h *KBAdminHandler) SetKnowledgeBaseActive(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, result)
 }
 
-// CreateKBManager handles POST /kb-managers -- adds a user to a knowledge
-// base's approver pool.
-func (h *KBAdminHandler) CreateKBManager(w http.ResponseWriter, r *http.Request) {
+// SearchKBManagerUsers handles POST /kb-manager-users/search -- lists
+// current individual approvers, typically filtered by knowledgeBaseId for
+// the Admin screen.
+func (h *KBAdminHandler) SearchKBManagerUsers(w http.ResponseWriter, r *http.Request) {
 	if middleware.UserInfoFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
@@ -137,7 +138,26 @@ func (h *KBAdminHandler) CreateKBManager(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	result, err := h.entity.CreateKBManager(r.Context(), body)
+	result, err := h.entity.SearchKBManagerUsers(r.Context(), body)
+	if err != nil {
+		mapUpstreamErrorGeneric(w, err, "Failed to load approvers.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateKBManagerUser handles POST /kb-manager-users -- adds a user to a
+// knowledge base's approver pool.
+func (h *KBAdminHandler) CreateKBManagerUser(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	body, ok := readAndValidateJSONBody(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.entity.CreateKBManagerUser(r.Context(), body)
 	if err != nil {
 		mapUpstreamErrorGeneric(w, err, "Failed to add approver.")
 		return
@@ -145,9 +165,9 @@ func (h *KBAdminHandler) CreateKBManager(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, result)
 }
 
-// DeleteKBManager handles DELETE /kb-managers -- removes a user from a
-// knowledge base's approver pool.
-func (h *KBAdminHandler) DeleteKBManager(w http.ResponseWriter, r *http.Request) {
+// DeleteKBManagerUser handles DELETE /kb-manager-users -- removes a user
+// from a knowledge base's approver pool.
+func (h *KBAdminHandler) DeleteKBManagerUser(w http.ResponseWriter, r *http.Request) {
 	if middleware.UserInfoFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
@@ -156,16 +176,17 @@ func (h *KBAdminHandler) DeleteKBManager(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if err := h.entity.DeleteKBManager(r.Context(), body); err != nil {
+	if err := h.entity.DeleteKBManagerUser(r.Context(), body); err != nil {
 		mapUpstreamErrorGeneric(w, err, "Failed to remove approver.")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// SearchKBManagers handles POST /kb-managers/search -- lists current
-// approvers, typically filtered by knowledgeBaseId for the Admin screen.
-func (h *KBAdminHandler) SearchKBManagers(w http.ResponseWriter, r *http.Request) {
+// SearchKBManagerGroups handles POST /kb-manager-groups/search -- lists
+// current group approvers, typically filtered by knowledgeBaseId for the
+// Admin screen.
+func (h *KBAdminHandler) SearchKBManagerGroups(w http.ResponseWriter, r *http.Request) {
 	if middleware.UserInfoFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
@@ -174,10 +195,47 @@ func (h *KBAdminHandler) SearchKBManagers(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	result, err := h.entity.SearchKBManagers(r.Context(), body)
+	result, err := h.entity.SearchKBManagerGroups(r.Context(), body)
 	if err != nil {
-		mapUpstreamErrorGeneric(w, err, "Failed to load approvers.")
+		mapUpstreamErrorGeneric(w, err, "Failed to load group approvers.")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateKBManagerGroup handles POST /kb-manager-groups -- adds a group to a
+// knowledge base's approver pool.
+func (h *KBAdminHandler) CreateKBManagerGroup(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	body, ok := readAndValidateJSONBody(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.entity.CreateKBManagerGroup(r.Context(), body)
+	if err != nil {
+		mapUpstreamErrorGeneric(w, err, "Failed to add group approver.")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// DeleteKBManagerGroup handles DELETE /kb-manager-groups -- removes a
+// group from a knowledge base's approver pool.
+func (h *KBAdminHandler) DeleteKBManagerGroup(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	body, ok := readAndValidateJSONBody(w, r)
+	if !ok {
+		return
+	}
+	if err := h.entity.DeleteKBManagerGroup(r.Context(), body); err != nil {
+		mapUpstreamErrorGeneric(w, err, "Failed to remove group approver.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
