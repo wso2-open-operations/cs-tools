@@ -51,8 +51,8 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 	where := "WHERE 1=1"
 
 	if len(req.ProjectIDs) > 0 {
-		// Cast the parameter to uuid[] so the column stays uncast and idx_deployments_project_id is usable.
-		where += fmt.Sprintf(" AND d.project_id = ANY($%d::uuid[])", argIdx)
+		// Cast the parameter to text[] so the column stays uncast and idx_deployments_project_id is usable.
+		where += fmt.Sprintf(" AND d.project_id = ANY($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, req.ProjectIDs)
 		argIdx++
 	}
