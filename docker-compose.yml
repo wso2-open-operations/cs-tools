@@ -83,6 +83,8 @@ services:
       - ./entity-service/migrations:/migrations/entity-service:ro
       - ./integrations/sre-alert-ingestion-service/migrations:/migrations/sre-alert-ingestion-service:ro
       - ./scripts/csm-compose/seed-entity-service.sql:/migrations/seed-entity-service.sql:ro
+      - ./scripts/csm-compose/seed-team-schedule.sql:/migrations/seed-team-schedule.sql:ro
+      - ./scripts/csm-compose/fixtures:/migrations/fixtures:ro
       - ./scripts/csm-compose/migrate-and-seed.sh:/migrate.sh:ro
     entrypoint: ["sh", "/migrate.sh"]
 
@@ -286,6 +288,18 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3001
       PORT: "8080"
       DASHBOARDS_DIR: ./dashboards.example
+      # The team catalogue. Unset, every team filter returns nothing and the
+      # backend warns "team registry is empty" at startup. These are the teams
+      # seed-team-schedule.sql creates; the display names must match the seeded
+      # team.name exactly, because members are resolved by name.
+      CSM_TEAM_REGISTRY: "castor|Castor|CRE-ABT,draco|Draco|CRE-ABT,vega|Vega|CRE-ABT,sirius|Sirius|CRE-ABT,atlas|Atlas|CRE-ABT,phoenix|Phoenix|CRE-ABT,rigel|Rigel|CRE-ABT,americas|Americas|CRE,migration|Migration|CRE,apollo|Apollo|SRE-ABT,artemis|Artemis|SRE-ABT"
+      # PLG refuses a plaintext OAuth2 token URL to a non-loopback host, and
+      # this stack's mock identity provider is plain http on a compose hostname
+      # -- so the backend exits 1 before it ever binds a port. The guard permits
+      # loopback, so PLG gets a loopback URL of its own here. PLG's own routes
+      # are not exercised by this stack; every other client keeps using
+      # OAUTH2_TOKEN_URL and reaches mock-oidc normally.
+      PLG_ENTITY_OAUTH_TOKEN_URL: http://localhost:9100/oauth2/token
     # No host port published: csm-portal-gateway-shim below takes over
     # :8082 on the host so it sits on the request path (Authorization ->
     # x-jwt-assertion), the one job Choreo's real gateway does in

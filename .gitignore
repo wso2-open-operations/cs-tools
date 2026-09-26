@@ -49,3 +49,4 @@ apps/csm-portal/backend/plg-source-map.json
 
 # PLG's own documentation, kept locally rather than pushed.
 apps/csm-portal/plg-docs/
+docs/*

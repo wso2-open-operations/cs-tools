@@ -70,15 +70,42 @@ apply_pending_migrations() {
   for f in $(ls "${dir}"/*.up.sql | sort); do
     version="$(basename "$f" .up.sql)"
     already="$($PSQL -d "$db" -tAc "SELECT 1 FROM schema_migrations WHERE version = '${version}'")"
-    if [ "$already" = "1" ]; then
-      continue
+    if [ "$already" != "1" ]; then
+      echo "[migrate]   applying $f"
+      tmp="$(mktemp)"
+      cat "$f" > "$tmp"
+      printf "\nINSERT INTO schema_migrations (version) VALUES ('%s');\n" "$version" >> "$tmp"
+      $PSQL -d "$db" -1 -f "$tmp"
+      rm -f "$tmp"
     fi
-    echo "[migrate]   applying $f"
-    tmp="$(mktemp)"
-    cat "$f" > "$tmp"
-    printf "\nINSERT INTO schema_migrations (version) VALUES ('%s');\n" "$version" >> "$tmp"
-    $PSQL -d "$db" -1 -f "$tmp"
-    rm -f "$tmp"
+
+    # A fixture named for this migration runs straight after it, in the same
+    # pass. Some migrations backfill rows that only ServiceNow supplies and
+    # RAISE EXCEPTION when they are absent -- fatal on a fresh local database,
+    # and fatal for every migration queued behind them. A fixture supplies
+    # those rows at the moment they first become insertable, so the real
+    # migration runs unmodified. Local dev only; nothing reads /migrations/
+    # fixtures outside this compose stack.
+    #
+    # A fixture is recorded as its own row, `fixture:<version>`, and checked
+    # independently of its migration. Otherwise a fixture that failed after
+    # its migration was recorded would never be retried, and a volume whose
+    # migration ran before the fixture existed would never get it -- leaving
+    # the later migration that needs its rows failing on every run. Still run
+    # here, inside the loop, so it lands before any later migration does.
+    # Fixtures must therefore be safe to re-run (ON CONFLICT DO NOTHING).
+    fixture="/migrations/fixtures/${version}.sql"
+    if [ -f "$fixture" ]; then
+      loaded="$($PSQL -d "$db" -tAc "SELECT 1 FROM schema_migrations WHERE version = 'fixture:${version}'")"
+      if [ "$loaded" != "1" ]; then
+        echo "[migrate]     + fixture ${version}.sql"
+        tmp="$(mktemp)"
+        cat "$fixture" > "$tmp"
+        printf "\nINSERT INTO schema_migrations (version) VALUES ('fixture:%s');\n" "$version" >> "$tmp"
+        $PSQL -d "$db" -1 -f "$tmp"
+        rm -f "$tmp"
+      fi
+    fi
   done
 }
 
@@ -90,5 +117,12 @@ apply_pending_migrations "${SRE_ALERT_DB_NAME}" /migrations/sre-alert-ingestion-
 
 echo "[migrate] loading entity-service seed data"
 $PSQL -d "${ENTITY_DB_NAME}" -f /migrations/seed-entity-service.sql
+
+# The Team Schedule roster: teams, engineers and a rota either side of today.
+# Separate from the base seed because it is the only seed that depends on the
+# schedule_* tables, and because it is the one a developer is likely to want to
+# re-run on its own while working on the rota.
+echo "[migrate] loading Team Schedule roster"
+$PSQL -d "${ENTITY_DB_NAME}" -f /migrations/seed-team-schedule.sql
 
 echo "[migrate] done"

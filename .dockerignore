@@ -1,0 +1,19 @@
+# The webapp Dockerfile installs dependencies, then copies the source over the
+# top. Without this, a developer's host node_modules -- a pnpm symlink farm
+# pointing at paths that do not exist in the image -- lands on top of the clean
+# install and every import fails to resolve (TS2307 on @wso2/oxygen-ui and
+# anything else). It also keeps ~530MB out of the build context.
+**/node_modules
+
+# Build outputs and test artefacts: rebuilt in the image, never copied in.
+**/dist
+**/build
+**/coverage
+**/playwright-report
+**/test-results
+**/.turbo
+**/.vite
+
+# Local environment files never belong in an image.
+**/.env*
+!**/.env.example

@@ -5288,6 +5288,189 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
 
+  /team-schedule/catalogue:
+    get:
+      summary: The Team Schedule catalogue — time zones, shift windows and absence kinds.
+      description: >
+        Everything a client needs before it can draw a rota. Served as one
+        payload because a single day view needs all three, and three round
+        trips to render one screen is three too many.
+      operationId: getScheduleCatalogue
+      responses:
+        "200":
+          description: The zones, windows and absence kinds currently in use.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleCatalogue'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff — the rota is not available to customers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/assignments/search:
+    post:
+      summary: Who is working over a date window.
+      description: >
+        `includeOvernight` widens the window to catch a block that began before
+        `from` and is still running into it — the night crew a day view shows at
+        the top, rostered for yesterday but working this morning.
+      operationId: searchScheduleAssignments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchScheduleAssignmentsRequest'
+      responses:
+        "200":
+          description: The rota for the window asked for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleAssignmentsResponse'
+        "400":
+          description: Bad request — missing, malformed or too wide a window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff — the rota is not available to customers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: >
+            Not found — the schedule routes are registered only when a database
+            pool is configured, so an entity-service running without one has no
+            such path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/absences/search:
+    post:
+      summary: Who is out of the rota over a date window.
+      operationId: searchScheduleAbsences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchScheduleAbsencesRequest'
+      responses:
+        "200":
+          description: Absences overlapping the window asked for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleAbsencesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff — the rota is not available to customers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: >
+            Not found — the schedule routes are registered only when a database
+            pool is configured, so an entity-service running without one has no
+            such path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/on-duty:
+    get:
+      summary: Who is responsible at this instant.
+      description: >
+        The lookup an alert escalation makes before it decides who to ring.
+        Defaults to now; `at` asks about another moment.
+      operationId: getScheduleOnDuty
+      parameters:
+        - name: at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: RFC3339 instant. Defaults to now.
+      responses:
+        "200":
+          description: Everyone whose window covers that instant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleAssignmentsResponse'
+        "400":
+          description: Bad request — `at` is not an RFC3339 instant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff — the rota is not available to customers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /groups/search:
     post:
       summary: Search groups (ServiceNow data source only).
@@ -15466,6 +15649,153 @@ components:
           type: string
           description: Free-text search query.
 
+    ScheduleZone:
+      type: object
+      description: An SRE time zone.
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: TZ1 }
+        label: { type: string }
+        weekendZoneCode:
+          type: string
+          description: >
+            The zone that absorbs this one at the weekend, when three weekday
+            zones collapse into two.
+        sortOrder: { type: integer }
+    ScheduleShift:
+      type: object
+      description: >
+        A named window of the working day. Minutes are counted from midnight in
+        authoringTimeZone; an end past 1440 runs into the next day, so
+        21:00–06:00 is one window (1260 → 1800) rather than two.
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: SRE_TZ1_L1 }
+        shortCode: { type: string, example: L1 }
+        label: { type: string }
+        family: { type: string, enum: [CRE, SRE] }
+        zoneCode: { type: string }
+        tier: { type: string, enum: [L1, L2, L3] }
+        dayScope: { type: string, enum: [WEEKDAY, WEEKEND, ANY] }
+        startMinute: { type: integer }
+        endMinute: { type: integer }
+        authoringTimeZone: { type: string, example: Asia/Colombo }
+        isOnCall: { type: boolean }
+        isEscalation: { type: boolean }
+        crossesMidnight: { type: boolean }
+        colourToken: { type: string }
+        sortOrder: { type: integer }
+    ScheduleAbsenceKind:
+      type: object
+      description: Why someone is out of the rota.
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: ANNUAL_LEAVE }
+        shortCode: { type: string, example: AL }
+        label: { type: string }
+        bucket: { type: string, enum: [LEAVE, ALLOCATION, EXCLUDED] }
+        colourToken: { type: string }
+        sortOrder: { type: integer }
+    ScheduleCatalogue:
+      type: object
+      properties:
+        zones:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleZone' }
+        shifts:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleShift' }
+        absenceKinds:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleAbsenceKind' }
+    ScheduleEngineer:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        isLead: { type: boolean }
+    ScheduleAssignment:
+      type: object
+      description: One engineer, one rota day, one window.
+      properties:
+        id: { type: string, format: uuid }
+        engineer: { $ref: '#/components/schemas/ScheduleEngineer' }
+        teamKey: { type: string }
+        shiftCode: { type: string }
+        zoneCode: { type: string }
+        tier: { type: string, enum: [L1, L2, L3] }
+        rotaDate:
+          type: string
+          format: date
+          description: >
+            The day the crew is rostered for, not the calendar date of every
+            hour worked: a Monday 21:00–06:00 block carries the Monday even
+            though six of its hours fall on Tuesday.
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        isOnCall: { type: boolean }
+        source: { type: string, enum: [GENERATED, MANUAL, SWAP, IMPORTED] }
+        note: { type: string }
+    ScheduleAbsence:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        engineer: { $ref: '#/components/schemas/ScheduleEngineer' }
+        teamKey: { type: string }
+        kindCode: { type: string }
+        startsOn: { type: string, format: date }
+        endsOn:
+          type: string
+          format: date
+          description: Absent for a standing allocation that runs until further notice.
+        note: { type: string }
+    SearchScheduleAssignmentsRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        teamKeys:
+          type: array
+          items: { type: string }
+        family: { type: string, enum: [CRE, SRE] }
+        userId: { type: string, format: uuid }
+        userEmail:
+          type: string
+          description: >
+            One engineer's own rota. The portal knows its users by email rather
+            than by this service's ids, so it is resolved here.
+        includeOvernight:
+          type: boolean
+          description: >
+            Also return a block that began before `from` and is still running
+            into it — the night crew a day view shows at the top.
+    SearchScheduleAbsencesRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        teamKeys:
+          type: array
+          items: { type: string }
+        userId: { type: string, format: uuid }
+        userEmail: { type: string }
+    ScheduleAssignmentsResponse:
+      type: object
+      properties:
+        assignments:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleAssignment' }
+        count: { type: integer }
+    ScheduleAbsencesResponse:
+      type: object
+      properties:
+        absences:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleAbsence' }
+        count: { type: integer }
     SearchGroupsRequest:
       type: object
       properties:

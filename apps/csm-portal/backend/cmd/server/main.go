@@ -374,6 +374,16 @@ func main() {
 	route("POST /services/search", handler.PermView, itServiceHandler.SearchITServices)
 	route("POST /service-offerings/search", handler.PermView, serviceOfferingHandler.SearchServiceOfferings)
 	route("POST /groups/search", handler.PermView, groupHandler.SearchGroups)
+
+	// Team Schedule. Reads only for now, so everything sits under view: any
+	// role that can see the portal can see who is on the rota. Editing the
+	// rota is a lead's job and will need a permission of its own when the
+	// write routes land -- see the plan's Phase 2b.
+	scheduleHandler := handler.NewScheduleHandler(customerEntityClient)
+	route("GET /team-schedule/catalogue", handler.PermView, scheduleHandler.GetScheduleCatalogue)
+	route("POST /team-schedule/assignments/search", handler.PermView, scheduleHandler.SearchScheduleAssignments)
+	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
+	route("GET /team-schedule/on-duty", handler.PermView, scheduleHandler.GetScheduleOnDuty)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)

@@ -20,6 +20,7 @@ import {
   Briefcase,
   Bug,
   Building2,
+  CalendarDays,
   ChartColumn,
   Clock,
   ClipboardList,
@@ -117,6 +118,15 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     label: "Support",
     href: "/cases",
     icon: Headset,
+  },
+  {
+    id: "team-schedule",
+    label: "Team Schedule",
+    href: "/team-schedule",
+    // No `requires`: the rota is readable by everyone who can open the portal.
+    // Editing it is a lead's job and will gate on its own flag when the write
+    // routes land.
+    icon: CalendarDays,
   },
   {
     id: "operations",
