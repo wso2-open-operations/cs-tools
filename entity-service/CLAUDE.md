@@ -432,7 +432,7 @@ SLA duration policy first (see above), which is out of scope here.
 
 ## Scheduled task runs
 
-`scheduled_task_run` (migration `000013`, `internal/domain/entity.go`'s
+`scheduled_task_run` (migration `000014`, `internal/domain/entity.go`'s
 `ScheduledTaskRun`, `internal/repository/scheduled_task_run_repo.go`,
 `internal/service/scheduled_task_run_service.go`) is durable claim/retry
 state for `operations/csm-scheduled-tasks` — a single Choreo Scheduled Task

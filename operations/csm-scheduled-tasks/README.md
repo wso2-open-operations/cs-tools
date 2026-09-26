@@ -75,5 +75,5 @@ go build -o server ./cmd/server
 
 This component has no database of its own. All claim/retry/succeed/fail state lives in
 entity-service's `scheduled_task_run` table, added alongside this component (see that repo's
-`migrations/000013_create_scheduled_task_run.up.sql`, `CLAUDE.md` — "Scheduled task runs" — and
+`migrations/000014_create_scheduled_task_run.up.sql`, `CLAUDE.md` — "Scheduled task runs" — and
 `openapi.yaml`). Deploy that migration before this component's first real invocation.
