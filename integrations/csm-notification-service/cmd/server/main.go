@@ -37,6 +37,9 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/dispatch"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/kbclient"
+"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/kbembeddingengine"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/kbdraftengine"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
@@ -466,6 +469,82 @@ func main() {
 	timeCardConsumerCount := envInt("TIME_CARD_CONSUMER_COUNT", 1)
 	timeCardConsumers := startConsumers(ctx, "time-card", eventBusCfg, timeCardConsumerGroup, timeCardConsumerCount, timeCardEngine.Handle, toDeadLetter)
 
+	// kbdraftengine (Flow 1 of the KB auto-generation work): reuses the
+	// EXISTING case.status_changed event and case-events topic -- no new
+	// topic needed for this flow. One shared consumer group for both new
+	// KB flows (this one, and the future publish->embedding flow) --
+	// see the KB-Auto-Generation-NOVA-Integration-Plan doc for the
+	// reasoning (both flows are low-frequency relative to the main
+	// dispatcher's traffic, so isolating them from EACH OTHER the way
+	// SLA/time-card are isolated from the main dispatcher isn't
+	// warranted the same way).
+	//
+	// KB_DRAFT_AUTHOR_ID and the knowledge-base resolution below are both
+	// still open questions -- see kbdraftengine's own package doc.
+	// MockDraftGenerator stands in for a real OpenAI call until a
+	// test/placeholder key is available.
+	kbEntityClient := kbclient.New(kbclient.Config{
+		BaseURL:      os.Getenv("CUSTOMER_ENTITY_BASE_URL"),
+		TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+		ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+		ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+		Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+	})
+	kbDraftAuthorID := os.Getenv("KB_DRAFT_AUTHOR_ID")
+	if kbDraftAuthorID == "" {
+		slog.Warn("KB_DRAFT_AUTHOR_ID is not set; kbdraftengine will fail to save any draft until it is configured")
+	}
+	// TODO: placeholder resolution -- picks the first active knowledge
+	// base rather than mapping the case's actual product. Replace once
+	// the real case->KB mapping is confirmed (see kbdraftengine's doc).
+	resolveKnowledgeBaseID := func(ctx context.Context, kb *kbclient.Client, caseID string) (string, error) {
+		kbs, err := kb.ListKnowledgeBases(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, k := range kbs {
+			if k.Active {
+				return k.ID, nil
+			}
+		}
+		return "", fmt.Errorf("no active knowledge base found")
+	}
+	var kbDraftGenerator kbdraftengine.DraftGenerator = kbdraftengine.MockDraftGenerator{}
+	if azureKey := os.Getenv("AZURE_US_OPENAI_API_KEY"); azureKey != "" {
+		kbDraftGenerator = kbdraftengine.NewAzureOpenAIDraftGenerator(
+			os.Getenv("AZURE_US_OPENAI_ENDPOINT"),
+			azureKey,
+			os.Getenv("AZURE_US_OPENAI_DEPLOYMENT_NAME"), // TODO: EU routing not yet implemented, hardcoded to US for testing
+		)
+	}
+	kbDraftEngine := kbdraftengine.New(kbEntityClient, kbDraftGenerator, kbDraftAuthorID, resolveKnowledgeBaseID)
+
+	var kbEmbeddingGenerator kbembeddingengine.EmbeddingGenerator = kbembeddingengine.MockEmbeddingGenerator{}
+	if embURL := os.Getenv("AZURE_US_OPENAI_EMBEDDING_URL"); embURL != "" {
+		kbEmbeddingGenerator = kbembeddingengine.NewAzureOpenAIEmbeddingGenerator(
+			embURL,
+			os.Getenv("AZURE_US_OPENAI_EMBEDDING_KEY"),
+			os.Getenv("AZURE_US_OPENAI_ENDPOINT"),
+			os.Getenv("AZURE_US_OPENAI_API_KEY"),
+			os.Getenv("AZURE_US_OPENAI_DEPLOYMENT_NAME"),
+		)
+	}
+	var kbPineconeUpserter kbembeddingengine.PineconeUpserter = kbembeddingengine.MockPineconeUpserter{}
+	if pineconeHost := os.Getenv("PINECONE_HOST"); pineconeHost != "" {
+		kbPineconeUpserter = kbembeddingengine.NewPineconeClient(pineconeHost, os.Getenv("PINECONE_KEY"))
+	}
+	kbEmbeddingEngine := kbembeddingengine.New(kbEntityClient, kbEmbeddingGenerator, kbPineconeUpserter)
+
+	kbCombinedHandle := func(ctx context.Context, record eventbus.Record) error {
+		if err := kbDraftEngine.Handle(ctx, record); err != nil {
+			return err
+		}
+		return kbEmbeddingEngine.Handle(ctx, record)
+	}
+	kbDraftConsumerGroup := envOrDefault("KB_DRAFT_CONSUMER_GROUP", "csm-notification-service-kb-embedding")
+	kbDraftConsumerCount := envInt("KB_DRAFT_CONSUMER_COUNT", 1)
+	kbDraftConsumers := startConsumers(ctx, "kb-draft", eventBusCfg, kbDraftConsumerGroup, kbDraftConsumerCount, kbCombinedHandle, toDeadLetter)
+
 	<-ctx.Done()
 	stop()
 
@@ -488,6 +567,9 @@ func main() {
 		c.Close()
 	}
 	for _, c := range timeCardConsumers {
+		c.Close()
+	}
+	for _, c := range kbDraftConsumers {
 		c.Close()
 	}
 	if slaProducer != nil {
