@@ -353,7 +353,7 @@ func TestSNIncidentService_UpdateIncident_WatchListClearedByEmptyList(t *testing
 func TestSNCaseService_UpdateCase_WatchListAbsentVsEmpty(t *testing.T) {
 	emptyWatchList := []string{}
 	populatedWatchList := []string{testIncidentWatcherUUID1, testIncidentWatcherUUID2}
-	assignee := "jane.doe@example.com"
+	assignee := json.RawMessage(`"jane.doe@example.com"`)
 
 	tests := []struct {
 		name           string
@@ -366,7 +366,7 @@ func TestSNCaseService_UpdateCase_WatchListAbsentVsEmpty(t *testing.T) {
 			name: "absent watch list is not sent",
 			req: domain.UpdateCaseRequest{
 				ID:            sysidToUUID(testWLCaseSysid),
-				AssigneeEmail: &assignee,
+				AssigneeEmail: assignee,
 			},
 			wantPresent: false,
 		},
@@ -452,7 +452,7 @@ func TestSNCaseService_UpdateCase_WatchListAbsentVsEmpty(t *testing.T) {
 func TestSNCaseService_UpdateCase_EmptyWatchListFieldAccounting(t *testing.T) {
 	emptyWatchList := []string{}
 	populatedWatchList := []string{testIncidentWatcherUUID1}
-	assignee := "jane.doe@example.com"
+	assignee := json.RawMessage(`"jane.doe@example.com"`)
 	relatedCase := testRelatedCaseUUID
 
 	tests := []struct {
@@ -472,7 +472,7 @@ func TestSNCaseService_UpdateCase_EmptyWatchListFieldAccounting(t *testing.T) {
 			req: domain.UpdateCaseRequest{
 				ID:            sysidToUUID(testWLCaseSysid),
 				WatchList:     &emptyWatchList,
-				AssigneeEmail: &assignee,
+				AssigneeEmail: assignee,
 			},
 			wantErr: true,
 		},

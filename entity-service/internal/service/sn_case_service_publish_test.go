@@ -881,7 +881,7 @@ func TestSNCaseService_UpdateCase_DoesNotPublishStatusChangedForOtherFields(t *t
 	svc := NewServiceNowCaseService(client, nil, publisher)
 
 	assigneeEmail := "alex@example.com"
-	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: &assigneeEmail}
+	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: json.RawMessage(`"` + assigneeEmail + `"`)}
 
 	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -932,7 +932,7 @@ func TestSNCaseService_UpdateCase_PublishesCaseAssigned(t *testing.T) {
 	svc := NewServiceNowCaseService(client, nil, publisher)
 
 	assigneeEmail := "alex@example.com"
-	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: &assigneeEmail}
+	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: json.RawMessage(`"` + assigneeEmail + `"`)}
 
 	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1004,7 +1004,7 @@ func TestSNCaseService_UpdateCase_SkipsPublishCaseAssignedWhenNoWatchers(t *test
 	svc := NewServiceNowCaseService(client, nil, publisher)
 
 	assigneeEmail := "alex@example.com"
-	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: &assigneeEmail}
+	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: json.RawMessage(`"` + assigneeEmail + `"`)}
 
 	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1055,12 +1055,62 @@ func TestSNCaseService_UpdateCase_SkipsPublishCaseAssignedWhenAssigneeUnchanged(
 	svc := NewServiceNowCaseService(client, nil, publisher)
 
 	assigneeEmail := "alex@example.com"
-	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: &assigneeEmail}
+	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: json.RawMessage(`"` + assigneeEmail + `"`)}
 
 	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(publisher.calls) != 0 {
 		t.Fatalf("expected no publish call when the assignee didn't actually change, got %d", len(publisher.calls))
+	}
+}
+
+// TestSNCaseService_UpdateCase_DoesNotPublishCaseAssignedOnClear verifies
+// that clearing the assignee (an explicit assigneeEmail:null PATCH) never
+// publishes case.assigned -- nobody was assigned by this PATCH, so that
+// event would be actively wrong, and there is no case.unassigned event to
+// publish instead. This case has an active watch list, so a false publish
+// here can't be confused with the no-watchers skip covered by
+// TestSNCaseService_UpdateCase_SkipsPublishCaseAssignedWhenNoWatchers.
+func TestSNCaseService_UpdateCase_DoesNotPublishCaseAssignedOnClear(t *testing.T) {
+	caseSysid := sysid32('a')
+	projectSysid := sysid32('b')
+	watcherSysid := sysid32('c')
+	caseID := sysidToUUID(caseSysid)
+
+	getCaseBody := `{
+		"id": "` + caseSysid + `",
+		"internalId": "WSO2-030",
+		"number": "CS0030001",
+		"title": "Clear assignee test",
+		"description": "d",
+		"createdOn": "2026-01-02 10:00:00",
+		"createdBy": "jane.doe@example.com",
+		"createdByFullName": "Jane Doe",
+		"project": {"id": "` + projectSysid + `", "name": "Project Zeta"},
+		"deployment": {"id": "", "name": ""},
+		"deployedProduct": {"id": "", "name": "", "version": ""},
+		"state": {"id": 1, "label": "Open"},
+		"assignedEngineer": {"id": "` + sysid32('e') + `", "name": "Alex Assignee", "email": "alex@example.com"},
+		"watchList": [
+			{"id": "` + watcherSysid + `", "userName": "jroe", "name": "John Roe", "email": "john.roe@example.com"}
+		]
+	}`
+	updateCaseBody := `{
+		"message": "Case updated successfully",
+		"case": {"id": "` + caseSysid + `", "updatedOn": "2026-01-02 12:00:00", "updatedBy": "jane.doe"}
+	}`
+
+	client := newTestUpdateCaseClient(t, getCaseBody, updateCaseBody)
+	publisher := &mockEventPublisher{}
+	svc := NewServiceNowCaseService(client, nil, publisher)
+
+	req := domain.UpdateCaseRequest{ID: caseID, AssigneeEmail: json.RawMessage(`null`)}
+
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(publisher.calls) != 0 {
+		t.Fatalf("expected no publish call when clearing the assignee, got %d", len(publisher.calls))
 	}
 }

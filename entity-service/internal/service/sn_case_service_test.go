@@ -498,7 +498,7 @@ func TestSNCaseService_UpdateCase_ExactlyOneFieldValidation(t *testing.T) {
 			req: domain.UpdateCaseRequest{
 				ID:            testDeploymentUUID,
 				DeploymentID:  strPtr(testDeploymentUUID),
-				AssigneeEmail: strPtr("engineer@example.com"),
+				AssigneeEmail: json.RawMessage(`"engineer@example.com"`),
 			},
 		},
 		{

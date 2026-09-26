@@ -2195,8 +2195,12 @@ type UpdateCaseRequest struct {
 	// accepted and resolved to emails for CSM callers. It is a pointer so an
 	// absent field and an explicitly empty list are distinguishable: nil leaves
 	// the watch list untouched, while an empty list clears it.
-	WatchList      *[]string           `json:"watchList"`
-	AssigneeEmail  *string             `json:"assigneeEmail"`
+	WatchList *[]string `json:"watchList"`
+	// AssigneeEmail uses json.RawMessage to preserve three states: nil/empty = omit,
+	// "null" = clear (unassign), `"value"` = set -- mirroring
+	// UpdateAttachmentRequest.Description, since a plain *string cannot tell an omitted
+	// field apart from an explicit null.
+	AssigneeEmail  json.RawMessage     `json:"assigneeEmail"`
 	ResolutionCode *CaseResolutionCode `json:"resolutionCode"`
 	Cause          *CaseCause          `json:"cause"`
 	CloseNotes     *string             `json:"closeNotes"`

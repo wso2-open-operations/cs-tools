@@ -1518,19 +1518,32 @@ export default function CsmCaseDetailPage(): JSX.Element {
     proceedLifecycleTransition(action, targetState);
   }, [noPublicCommentConfirm, proceedLifecycleTransition]);
 
-  // Assign the case to the chosen engineer via PATCH { assigneeEmail }. The
-  // detail query is invalidated by the hook, so the assignee display refreshes
-  // on success. (ServiceNow-source only; the BE rejects it for PG cases.)
+  // Assign the case to the chosen engineer via PATCH { assigneeEmail }, or
+  // clear the assignee via PATCH { assigneeEmail: null }. The detail query is
+  // invalidated by the hook, so the assignee display refreshes on success.
+  // (ServiceNow-source only; the BE rejects it for PG cases.)
   const onAssign = useCallback(
-    (email: string) => {
+    (email: string | null) => {
       patchCase.mutate(
         { assigneeEmail: email },
         {
           onSuccess: () => {
             setAssignOpen(false);
-            showSuccess("Case reassigned.");
+            showSuccess(email === null ? "Case unassigned." : "Case reassigned.");
           },
-          onError: (err) => showError("Could not reassign the case.", err),
+          onError: (err) => {
+            // SN can reject a clear/reassign for state reasons (e.g. "cannot
+            // be changed for Work In Progress - Ongoing") — surface that
+            // 4xx message verbatim rather than the generic fallback, same
+            // treatment as every other 4xx on this page.
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : email === null
+                  ? "Could not unassign the case."
+                  : "Could not reassign the case.";
+            showError(msg, err);
+          },
         },
       );
     },

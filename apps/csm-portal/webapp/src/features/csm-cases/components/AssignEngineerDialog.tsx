@@ -28,7 +28,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Search, UserCheck } from "@wso2/oxygen-ui-icons-react";
+import { Search, UserCheck, UserX } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
@@ -45,8 +45,11 @@ interface AssignEngineerDialogProps {
   /** True while a PATCH is in flight; disables the actions. */
   isAssigning: boolean;
   onClose: () => void;
-  /** Assign the case to this engineer's email (`PATCH { assigneeEmail }`). */
-  onAssign: (email: string) => void;
+  /**
+   * Assign the case to this engineer's email (`PATCH { assigneeEmail }`), or
+   * clear the assignee when called with `null`.
+   */
+  onAssign: (email: string | null) => void;
 }
 
 function initialsOf(name: string): string {
@@ -63,9 +66,11 @@ function fullName(u: NormalizedUser): string {
 }
 
 /**
- * Pick the engineer to assign a case to. Searches internal users via
- * `POST /users/search` and assigns by email through `PATCH /cases/{id}`
- * (`assigneeEmail`). Assignment is a ServiceNow-source capability; on a
+ * Pick the engineer to assign a case to, or clear the current assignee.
+ * Searches internal users via `POST /users/search` and assigns by email
+ * through `PATCH /cases/{id}` (`assigneeEmail`); an "Unassign" action sends
+ * `assigneeEmail: null` to clear it instead, offered only when the case
+ * already has an assignee. Assignment is a ServiceNow-source capability; on a
  * Postgres-sourced case the backend rejects it and the caller surfaces the
  * error. Mount only while open so the user search isn't issued in the
  * background.
@@ -80,12 +85,16 @@ export default function AssignEngineerDialog({
   const [input, setInput] = useState("");
   // Which target's assign click is in flight — `isAssigning` alone (a plain
   // disable) was easy to miss, especially on a fast request, so the clicked
-  // button also swaps its icon for a spinner instead of just dimming.
-  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
-  const handleAssign = (email: string): void => {
-    setPendingEmail(email);
+  // button also swaps its icon for a spinner instead of just dimming. Wrapped
+  // in an object so a pending *unassign* (target email `null`) is
+  // distinguishable from "nothing pending" (`pending === null`).
+  const [pending, setPending] = useState<{ email: string | null } | null>(null);
+  const handleAssign = (email: string | null): void => {
+    setPending({ email });
     onAssign(email);
   };
+  const hasAssignee = !!currentAssignee && currentAssignee !== "Unassigned";
+  const isUnassignPending = isAssigning && pending !== null && pending.email === null;
   const search = useDebouncedValue(input.trim(), 300);
   const { data, isFetching, isError } = useSearchUsers({
     filters: {
@@ -132,7 +141,7 @@ export default function AssignEngineerDialog({
               variant="outlined"
               size="small"
               startIcon={
-                isAssigning && pendingEmail === currentUserEmail ? (
+                isAssigning && pending !== null && pending.email === currentUserEmail ? (
                   <CircularProgress size={14} color="inherit" />
                 ) : (
                   <UserCheck size={16} />
@@ -143,6 +152,26 @@ export default function AssignEngineerDialog({
               sx={{ alignSelf: "flex-start" }}
             >
               Assign to me
+            </Button>
+          )}
+
+          {hasAssignee && (
+            <Button
+              variant="outlined"
+              color="error"
+              size="small"
+              startIcon={
+                isUnassignPending ? (
+                  <CircularProgress size={14} color="inherit" />
+                ) : (
+                  <UserX size={16} />
+                )
+              }
+              disabled={isAssigning}
+              onClick={() => handleAssign(null)}
+              sx={{ alignSelf: "flex-start" }}
+            >
+              Unassign
             </Button>
           )}
 
@@ -187,7 +216,8 @@ export default function AssignEngineerDialog({
               <Box sx={{ display: "flex", flexDirection: "column" }}>
                 {engineers.map((u) => {
                   const name = fullName(u);
-                  const isPendingForThis = isAssigning && pendingEmail === u.email;
+                  const isPendingForThis =
+                    isAssigning && pending !== null && pending.email === u.email;
                   return (
                     <Button
                       key={u.id}

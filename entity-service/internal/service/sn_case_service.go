@@ -1929,8 +1929,10 @@ type snUpdateCasePayload struct {
 	Variables             []snCaseVariable `json:"variables,omitempty"`
 	// WatchList replaces the whole list, so an explicitly empty list must still be
 	// sent to clear it rather than be omitted -- hence the pointer.
-	WatchList     *[]string `json:"watchList,omitempty"`
-	AssigneeEmail *string   `json:"assigneeEmail,omitempty"`
+	WatchList *[]string `json:"watchList,omitempty"`
+	// AssigneeEmail is json.RawMessage so an explicit null (clear the assignee) can be
+	// distinguished from an omitted field, mirroring snUpdateDeployedProductPayload.Description.
+	AssigneeEmail json.RawMessage `json:"assigneeEmail,omitempty"`
 	// Acknowledge claims the case for the calling engineer, first-write-wins. Only
 	// true is ever sent -- there is no unacknowledge -- and the backing service keeps
 	// it mutually exclusive with every other field in this payload.
@@ -2149,7 +2151,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.WatchList != nil {
 		exclusiveCount++
 	}
-	if req.AssigneeEmail != nil {
+	if len(req.AssigneeEmail) > 0 {
 		exclusiveCount++
 	}
 	if req.ParentID != nil {
@@ -2396,7 +2398,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 		payload.WatchList = &emails
 	}
-	if req.AssigneeEmail != nil {
+	if len(req.AssigneeEmail) > 0 {
 		payload.AssigneeEmail = req.AssigneeEmail
 	}
 	if req.Acknowledge != nil {
@@ -2554,18 +2556,34 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// for the same call.
 	var caseBeforeAssign domain.CaseView
 	publishCaseAssign := false
-	if req.AssigneeEmail != nil && s.publisher != nil {
-		enrichCtx, cancel := context.WithTimeout(ctx, publishCaseAssignedTimeout)
-		cv, err := s.GetCaseByID(enrichCtx, req.ID)
-		cancel()
+	var assigneeEmail string
+	if len(req.AssigneeEmail) > 0 && s.publisher != nil {
+		isClear, email, err := parseAssigneeEmail(req.AssigneeEmail)
 		switch {
 		case err != nil:
-			slog.ErrorContext(ctx, "sn update case: enrich case for case.assigned publish failed", "caseId", req.ID)
-		case cv.AssignedEngineer != nil && strings.EqualFold(cv.AssignedEngineer.Email, *req.AssigneeEmail):
-			slog.InfoContext(ctx, "sn update case: case.assigned not published, assignee is unchanged", "caseId", req.ID)
+			// Malformed assigneeEmail JSON that isn't null and isn't a valid string
+			// (e.g. a JSON number) -- SN itself would 400 on this, so it should
+			// realistically never happen here. Skip the publish block rather than
+			// failing the whole PATCH over an event-publishing concern.
+			slog.ErrorContext(ctx, "sn update case: parse assigneeEmail for case.assigned publish failed", "caseId", req.ID)
+		case isClear:
+			// A clear (explicit null) never publishes case.assigned -- nobody was
+			// assigned, so that event would be actively wrong, and there is no
+			// case.unassigned event to publish instead.
 		default:
-			caseBeforeAssign = cv
-			publishCaseAssign = true
+			assigneeEmail = email
+			enrichCtx, cancel := context.WithTimeout(ctx, publishCaseAssignedTimeout)
+			cv, err := s.GetCaseByID(enrichCtx, req.ID)
+			cancel()
+			switch {
+			case err != nil:
+				slog.ErrorContext(ctx, "sn update case: enrich case for case.assigned publish failed", "caseId", req.ID)
+			case cv.AssignedEngineer != nil && strings.EqualFold(cv.AssignedEngineer.Email, assigneeEmail):
+				slog.InfoContext(ctx, "sn update case: case.assigned not published, assignee is unchanged", "caseId", req.ID)
+			default:
+				caseBeforeAssign = cv
+				publishCaseAssign = true
+			}
 		}
 	}
 
@@ -2682,11 +2700,11 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		s.publishStatusChanged(ctx, req.ID, snResp.Case.State.Label, caseBeforeUpdate)
 	}
 	if publishCaseAssign {
-		assigneeName := *req.AssigneeEmail
+		assigneeName := assigneeEmail
 		if snResp.Case.AssignedTo != nil && snResp.Case.AssignedTo.Name != "" {
 			assigneeName = snResp.Case.AssignedTo.Name
 		}
-		s.publishCaseAssigned(ctx, req.ID, assigneeName, *req.AssigneeEmail, caseBeforeAssign)
+		s.publishCaseAssigned(ctx, req.ID, assigneeName, assigneeEmail, caseBeforeAssign)
 	}
 	// AlreadyAcknowledged distinguishes a genuine first-time claim from a
 	// repeat Acknowledge:true call that succeeded without changing anything
@@ -3148,6 +3166,19 @@ func (s *snCaseService) GetAttachmentByID(ctx context.Context, id string) (domai
 		Content:     &snResp.Content,
 		Status:      domain.AttachmentStatusComplete,
 	}, nil
+}
+
+// parseAssigneeEmail interprets a json.RawMessage assigneeEmail field. Call only when
+// the field is known to be present (len(raw) > 0). Returns isClear=true for an explicit
+// null (no email value); otherwise unmarshals the raw JSON into email and returns it.
+func parseAssigneeEmail(raw json.RawMessage) (isClear bool, email string, err error) {
+	if string(raw) == "null" {
+		return true, "", nil
+	}
+	if err := json.Unmarshal(raw, &email); err != nil {
+		return false, "", err
+	}
+	return false, email, nil
 }
 
 // validateAttachmentUpdate mirrors the Ballerina reference's

@@ -833,8 +833,12 @@ export type BeCaseUpdatePayload =
   | (Omit<BeCaseUpdateNever, "type"> & { type: "security_report_analysis" })
   /** Work sub-state toggle (`ongoing` / `paused`) for an in-progress case. */
   | (Omit<BeCaseUpdateNever, "workState"> & { workState: BeCaseWorkState })
-  /** Email of the engineer to assign (ServiceNow only). */
-  | (Omit<BeCaseUpdateNever, "assigneeEmail"> & { assigneeEmail: string })
+  /**
+   * Email of the engineer to assign (ServiceNow only). `null` clears the
+   * assignee instead of assigning one — distinct from omitting the field,
+   * which the backend rejects as an empty update.
+   */
+  | (Omit<BeCaseUpdateNever, "assigneeEmail"> & { assigneeEmail: string | null })
   /**
    * Full replacement watch list, as platform user UUIDs — not a delta, and
    * not emails: the backend resolves each id to whatever identifier the
