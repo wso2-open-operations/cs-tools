@@ -465,45 +465,6 @@ type ProjectStatsService interface {
 	GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error)
 }
 
-// ProjectConsumptionService defines the operations on a project's
-// product-consumption provisioning state — the resumable sequence that creates
-// a Choreo application for the project, subscribes it to the tracking API and
-// mints the credentials a deployment's license is built from.
-//
-// The two halves need different things, and neither is gated on DATA_SOURCE —
-// staging and production both run DATA_SOURCE=servicenow and need both.
-//
-//   - GetProjectConsumption and UpdateProjectConsumption read and write the
-//     Postgres mirror, so they need a pool. A pool enables them on either
-//     data source.
-//   - ProcessLicenseDownload needs neither. It reads status from ServiceNow
-//     through the configured Choreo subscription operation and touches
-//     Postgres only to mirror what it did, which is best-effort and skipped
-//     entirely when there is no repository.
-//
-// ServiceNow remains the source of truth for the status itself. There it lives
-// on the customer_project record, reached through the product-consumption
-// scripted REST API that the Choreo subscription operation calls directly —
-// neither this service nor the ServiceNow integration service sits in that
-// path at all.
-//
-// Every method is scoped to the caller (see AccessService): the project id
-// comes from the request path, so a caller who cannot see a project can
-// neither read its provisioning state nor drive provisioning for it.
-type ProjectConsumptionService interface {
-	// GetProjectConsumption returns the project's current provisioning state.
-	// A project that has never entered the flow reports status 1 (pending)
-	// rather than a not-found error; an unknown project ID is not found.
-	GetProjectConsumption(ctx context.Context, projectID string) (domain.ProjectConsumptionView, error)
-	// UpdateProjectConsumption records the completion of one provisioning step.
-	// The status may only move forward; a status that is not ahead of what is
-	// stored returns the stored state unchanged instead of failing.
-	UpdateProjectConsumption(ctx context.Context, projectID string, req domain.UpdateProjectConsumptionRequest) (domain.UpdateProjectConsumptionResponse, error)
-	// ProcessLicenseDownload executes the 5-step resumable provisioning sequence
-	// and issues the signed deployment license.
-	ProcessLicenseDownload(ctx context.Context, projectID, deploymentID, email string) (domain.License, error)
-}
-
 // ProjectContactService defines the operations available on project contacts.
 // The Postgres-backed implementation (projectContactService) reads from
 // project_contact (migration 000022), joined through account_contact to

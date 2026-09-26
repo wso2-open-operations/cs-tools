@@ -195,67 +195,6 @@ rather than async.
 | `AUTH_INTERNAL_CLIENT_IDS` | Comma-separated Asgardeo application client ids trusted with unconditional full access to every project and case (checked against a client-credentials `x-jwt-assertion` token), regardless of any `x-user-id-token` the same request also carries. A caller not in this list is resolved purely from its `x-user-id-token` instead. Which real client ids go here is a deployment decision, but a service that calls the scoped endpoints directly with only a client-credentials token gets a 401 unless it is listed (optional) |
 | `CUSTOMER_ROLES` | Comma-separated ServiceNow role names whose presence on a case comment's author marks it a customer reply — see "Customer reply state transition" below. No default; unset means that path never fires (optional) |
 
-### Product-consumption provisioning state
-
-Where a project has got to in the product-consumption provisioning flow — the Choreo application
-created for it, that application's OAuth2 credentials, and the two subscription secret keys a
-deployment's license is built from — is stored on the **`project` table**, mirroring the ServiceNow
-`customer_project` record field for field (`choreo_application_status`, `choreo_application_id`,
-`product_consumption_client_id`, `product_consumption_client_secret`, and `product_consumption_primary_secret_key`/`product_consumption_secondary_secret_key` from migration
-`000075`). Exposed at `GET /projects/{id}/consumption` and `PATCH /projects/{id}/consumption`.
-
-These two routes are gated on a database being configured, **not** on the data source: the flow
-mirrors its state into Postgres alongside ServiceNow, and the deployments that need it run
-`DATA_SOURCE=servicenow`, so gating on the data source would disable the feature exactly where it
-is used. ServiceNow remains the source of truth for the status itself, read through the Choreo
-subscription operation (`internal/choreosubscription`); Postgres is written alongside and any
-divergence is logged.
-
-`POST /projects/{id}/deployments/{deploymentId}/license` is registered **independently of the
-database**. Issuing a licence reads status from ServiceNow and runs through the Choreo operation;
-Postgres is touched only to mirror state, which is best-effort and skipped entirely when there is
-no repository. It needs the operation's own configuration instead — see the deployment-licence
-variables below.
-
-The status is a step number, and it only ever moves forward: `1` pending, `2` application created,
-`3` subscribed, `4` credentials generated, `5` secret keys generated. The flow is resumable by
-design — a caller reads the current status and runs only the steps above it — so a write whose
-status is not ahead of what is stored is a no-op that returns the stored state, not an error. This
-matters: applying an out-of-order write would re-run a side-effecting step and create a **second**
-Choreo application for a customer who already has one.
-
-All three routes are scoped to the caller. The project id comes from the request path, so a caller
-who cannot see a project can neither read its provisioning state nor drive provisioning for it; the
-refusal is a 404, never a 403, so a project's existence is not revealed either.
-
-Credentials are never returned by either endpoint — the read reports only
-`hasConsumerSecret`/`hasSecretKeys`. They are stored as supplied, which is how the ServiceNow sync
-already writes these same columns; the observed values there are plain 64-character keys and short
-client secrets, not ciphertext.
-
-This service deliberately does not encrypt its own writes. Doing so alone would put two formats in
-one column that cannot be told apart on read — a hex key is also valid base64, so no heuristic
-recovers which writer produced a given value — and a row written here would stop matching the
-ServiceNow record the project row mirrors, where `ProductConsumptionUtils.updateProject` assigns
-each value straight from its payload.
-
-It would also have to be undone before licence issuance could move here: ServiceNow signs a licence
-by reading these four values back in the clear (`_getDeployment`), and refuses to sign unless every
-one is present.
-
-Encrypting these at rest is worth doing, but it has to happen across every writer including the
-sync, which is a platform change rather than this service's to make. These routes need no
-configuration of their own beyond `DB_*`.
-
-**License issuance still runs in ServiceNow.** This service drives the five-step provisioning
-sequence through the Choreo subscription operation and returns the licence ServiceNow issues; the
-signed payload is passed through byte for byte, never reshaped, because the customer's product
-verifies an HMAC computed over it and a dropped field breaks that verification.
-
-Moving issuance out of ServiceNow is not in scope here. It is gated on a licence-format transition
-plan, since changing the payload changes the signature and invalidates every licence a deployed
-customer product already holds.
-
 ### SLA status
 
 `GET /sla-status` reads SLA state live from the `sla` table (migration `000052`), which
