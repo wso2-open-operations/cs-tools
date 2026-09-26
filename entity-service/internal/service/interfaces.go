@@ -1198,6 +1198,40 @@ type EscalationService interface {
 
 // InstanceService defines the operations available on the instances entity.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
+// QueryHourService maintains each project's computed query-hour position —
+// the port of ServiceNow's `[Query Hour] UpdateTime Card` flow together with
+// the `Set Project Query Hour State` and `Consumed Query Hour Update`
+// business rules, which between them did this work in three places.
+//
+// It reads the csm-sync-service-owned `project` and `time_card` tables and
+// writes only entity-service's own `project_query_hours`; `project`'s own
+// query-hour columns mirror ServiceNow and are left alone. See migration
+// 000084.
+type QueryHourService interface {
+	// Recompute re-derives one project's position from its approved time
+	// cards, stores it, and pushes the result to Choreo when the state
+	// differs from what Choreo last accepted. A failed push does NOT fail the
+	// call — the position is recorded and the next recompute retries.
+	// Returns a NotFoundError if the project does not exist.
+	Recompute(ctx context.Context, projectID string) (domain.RecomputeQueryHoursResponse, error)
+	// RecomputeForTimeCard resolves a time card to its project and recomputes
+	// that project only. This is the direct replacement for the ServiceNow
+	// flow's trigger, minus its account-wide fan-out.
+	RecomputeForTimeCard(ctx context.Context, timeCardID string) (domain.RecomputeQueryHoursResponse, error)
+	// Get returns the stored position without recomputing. A NotFoundError
+	// means the project has never been computed.
+	Get(ctx context.Context, projectID string) (domain.ProjectQueryHours, error)
+	// WeeklyReport assembles the weekly query-hour consumption report: every
+	// account with an exceeded or nearly-exhausted entitlement, grouped by
+	// connected components of the opportunity-to-project funding graph. Read
+	// only — unlike the ServiceNow flow it ports, it writes nothing.
+	WeeklyReport(ctx context.Context) (domain.QueryHoursWeeklyReport, error)
+	// Sweep recomputes up to limit projects whose position is older than
+	// staleFor, stalest first. A single project's failure is recorded and the
+	// sweep continues.
+	Sweep(ctx context.Context, staleFor time.Duration, limit int) (domain.RecomputeQueryHoursBatchResponse, error)
+}
+
 type InstanceService interface {
 	// SearchInstances returns a paginated list of instances filtered by optional
 	// project/deployment/deployed-product IDs (mutually exclusive) and date range.

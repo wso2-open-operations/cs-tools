@@ -168,6 +168,69 @@ query run) if empty. Shares `internal/entitycases.Client` and the row-rendering 
 (`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
 emails" below.
 
+## Weekly query support consumption report
+
+`internal/queryhoursweekly.SendReport`, registered as `"query_hours_weekly_report"`, is the Go
+port of ServiceNow's `[WSO2][Query Hours] Weekly Report`. It lists every account whose purchased
+query hours are exhausted, or nearly so, in the seven-column table that report has always used.
+
+**It is deliberately separate from the per-project threshold email** that
+`integrations/csm-notification-service` sends. The two look related and are not:
+
+| | threshold notice | this report |
+|---|---|---|
+| fires | per project, on crossing a threshold | weekly, over the whole estate |
+| rule | 75 / 90 / 100 **percent** consumed | under ten hours **remaining**, absolute |
+| table | five columns, bare project name | seven columns, project key + Salesforce link |
+
+Those rules disagree constantly — a 1h entitlement with nothing consumed is 0% used but has only
+sixty minutes left, so it appears here and not there. Do not unify them. A project-key suffix has
+already leaked from this format into that email once.
+
+Default schedule **`30 18 * * 0`** — Sunday 18:30 UTC, with the same `TZ=UTC` caveat as
+"Housekeeping" above. That is not a typo for Monday: ServiceNow fires this at 00:00:05 on day 1
+interpreted in the instance's own `Asia/Colombo`, which *is* 18:30 UTC Sunday, and recipients have
+had it arrive Monday first thing local time for years. `0 0 * * 1` would look like the obvious
+translation and would quietly move the mail 5½ hours later — and change its date stamp, which is a
+UTC date and is exactly why the Monday mail is headed with Sunday's.
+
+**Recipients come from `SUB_CRON_RECIPIENTS`, not from the data**, unlike
+`allocation_status_update_reminder`. ServiceNow derived the To line from each exceeded account's
+owners; entity-service reports those addresses but this task ignores them. The ServiceNow copy
+available for inspection provably is not what sends production's mail — its Send Email step carries
+two Cc addresses where the real message carries three, and its derivation caps around 33 recipients
+where the real message reaches about 48. Deriving an audience from an unverified rule would email
+roughly fifty people on a guess. An empty `to` skips the fetch entirely, like the other report
+tasks.
+
+An **empty report is still sent**: "nothing is exhausted" is a real answer, and a week with no mail
+is indistinguishable from a week where the job broke.
+
+**This is NOT yet a paired ServiceNow deactivation**, and that is the one thing to know before
+widening its recipients. The flow it ports is not the read-only report it appears to be — it also
+stamps `sf_opportunity.query_hour_state` on every ungrouped opportunity it renders and caches the
+rendered HTML onto the account. Only the read half is ported. Turning the ServiceNow flow off would
+stop those writes too, and nothing has yet established what still reads that column. Until that is
+settled both systems send, so keep this task's audience narrow.
+
+Where the port **diverges deliberately** from the original, all recorded in
+the ServiceNow discovery pack — `43-query-hour-flows.js`, PASS 15 and 16, which lands with
+the csm-flow-service work rather than on this branch:
+
+- **Grouping is connected components.** ServiceNow collected opportunities sharing a project into
+  groups by a pairwise union check, and when that check could not partition the graph it replaced
+  the whole account with the string `"Complicated Link In Opps and Projects Level"` — silently
+  dropping it from the report. Components are what that code was reaching for; computing them
+  properly removes the bail-out.
+- **Thresholds are applied after merging.** The original computes its flags per opportunity before
+  merging and never recomputes, which is how an account can show a hundred hours remaining and
+  still sit in the going-to-exceed table.
+- **Unmatched product lines are surfaced.** A product name outside the six known packs contributes
+  zero hours in both systems; only this one says so.
+
+Consumption counts approved **billable** time only, as the original does.
+
+
 ## Alerting
 
 Two layers, combined:
@@ -218,6 +281,9 @@ sent from inside that task's own handler, not through this alerting path at all.
 report emails" below for why that's not a generic engine feature.
 
 ## Environment variables
+
+> **Deployment config lives in [`docs/choreo-deployment-config.md`](../../docs/choreo-deployment-config.md).**
+> Any change that adds or renames a config value updates that table in the same commit.
 
 | Variable | Required | Description |
 |---|---|---|

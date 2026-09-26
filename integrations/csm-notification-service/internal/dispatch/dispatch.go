@@ -413,6 +413,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleCRApprovalRequested(ctx, record, env.Payload)
 	case events.TypeCRPlanDateNotice:
 		return d.handleCRPlanDateNotice(ctx, record, env.Payload)
+	case events.TypeQueryHourThresholdReached:
+		return d.handleQueryHourThresholdReached(ctx, record, env.Payload)
 	case events.TypeProjectContactInvited:
 		return d.handleProjectContactInvited(ctx, record, env.Payload)
 	case events.TypeSLATierReached:
@@ -1364,6 +1366,86 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 	slog.InfoContext(ctx, "dispatch: plan date notice sent",
 		"changeRequestId", p.ChangeRequestID, "number", p.Number,
 		"kind", p.Kind, "audience", p.Audience, "recipients", len(recipients))
+	return nil
+}
+
+// handleQueryHourThresholdReached emails the account manager and technical
+// owner that a project has burned 75%, 90% or 100% of its query hours.
+//
+// Port of ServiceNow's `[WSO2][Query Hour] Usage Notifications - Project`.
+// Three things that flow did are deliberately NOT done here:
+//
+//   - It triggered on EVERY update of customer_project, with no trigger
+//     condition at all, and worked out inside a script whether there was
+//     anything to say. entity-service now publishes only on an actual upward
+//     crossing, so arriving here already means there is news.
+//   - It resolved recipients inline by walking account.u_owner and
+//     account.u_technical_owner as GlideRecords. That resolution now happens
+//     in entity-service, before the publish, for the same reason the
+//     engagement port moved its own recipient filter there: who may read an
+//     internal usage notice is a business rule, not a delivery concern.
+//   - When the account had no owner it fell back to one hardcoded personal
+//     address. The port drops that — the cc groups still get the notice, and
+//     the missing owner stays visible as a warning rather than being absorbed
+//     into somebody's inbox.
+func (d *Dispatcher) handleQueryHourThresholdReached(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
+	var p events.QueryHourThresholdReachedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode project.query_hour_threshold_reached payload: %w", err)
+	}
+	if p.Subject == "" {
+		slog.WarnContext(ctx, "dispatch: query-hour threshold notice with no subject, dropping",
+			"projectId", p.ProjectID, "state", p.State)
+		return nil
+	}
+
+	recipients := p.Recipients
+	cc := p.CcRecipients
+	// Unlike most notices here, an empty To is NOT a reason to drop this one:
+	// the cc groups are the standing audience and they are the reason the
+	// notice exists. entity-service has already logged the missing owner.
+	if len(recipients) == 0 && len(cc) == 0 {
+		slog.WarnContext(ctx, "dispatch: query-hour threshold notice with no recipients at all, dropping",
+			"projectId", p.ProjectID, "state", p.State)
+		return nil
+	}
+
+	if !d.emailSendingEnabled {
+		slog.InfoContext(ctx, "dispatch: email sending disabled, skipping query-hour threshold notice",
+			"projectId", p.ProjectID, "state", p.State, "recipients", len(recipients))
+		return nil
+	}
+	if d.emailDebugMode {
+		if len(d.emailDebugRecipients) == 0 {
+			slog.WarnContext(ctx, "dispatch: email debug mode on with no debug recipients, skipping query-hour threshold notice",
+				"projectId", p.ProjectID, "state", p.State)
+			return nil
+		}
+		// Cc is dropped rather than redirected — same reasoning as the
+		// engagement status update above.
+		recipients = d.emailDebugRecipients
+		cc = nil
+	}
+
+	body := notifications.RenderQueryHourThresholdEmail(notifications.QueryHourThresholdEmailData{
+		Subject:         p.Subject,
+		OwnerName:       p.OwnerName,
+		ProjectKey:      p.ProjectKey,
+		AccountName:     p.AccountName,
+		ProjectName:     p.ProjectName,
+		State:           p.State,
+		TotalQueryHours: p.TotalQueryHours,
+		ConsumedHours:   p.ConsumedHours,
+		RemainingHours:  p.RemainingHours,
+		PercentConsumed: p.PercentConsumed,
+	})
+
+	if err := d.email.SendEmail(ctx, recipients, cc, nil, nil, p.Subject, body, nil); err != nil {
+		return fmt.Errorf("dispatch: send query-hour threshold notice: %w", err)
+	}
+	slog.InfoContext(ctx, "dispatch: query-hour threshold notice sent",
+		"projectId", p.ProjectID, "state", p.State,
+		"recipients", len(recipients), "cc", len(cc))
 	return nil
 }
 

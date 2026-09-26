@@ -29,6 +29,9 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 
 ## Environment variables
 
+> **Deployment config lives in [`docs/choreo-deployment-config.md`](../docs/choreo-deployment-config.md).**
+> Any change that adds or renames a config value updates that table in the same commit.
+
 | Variable      | Required | Default | Purpose                   |
 |---------------|----------|---------|---------------------------|
 | `DB_HOST`     | no       | `localhost` | PostgreSQL hostname    |
@@ -3356,6 +3359,53 @@ stand-in, same `if cfg.DataSource == ... else ...` shape as `activeTaskSvc`
 above) and always registers both routes unconditionally — a real, documented
 503 instead of an undocumented 404 callers can't distinguish from a
 genuinely missing resource.
+
+## Weekly query-hour consumption report
+
+`GET /query-hours/weekly-report` returns every account whose purchased query hours are exhausted
+(`exceeded`) or nearly so (`goingToExceed`). Backs the `query_hours_weekly_report` sub-cron in
+`operations/csm-scheduled-tasks`, which renders and emails it — this service decides what is true
+about the estate, that one decides who hears about it.
+
+The port of ServiceNow's `[WSO2][Query Hours] Weekly Report`, **read half only**. That flow is not
+the read-only report it looks like: it also stamps `sf_opportunity.query_hour_state` on every
+ungrouped opportunity it renders and caches the rendered HTML onto `customer_account`. Neither
+write is reproduced, because two systems on the same column is what the double-fire rule forbids
+and nothing has yet established what still reads that state. `WeeklyReport` writes nothing.
+
+Three rules worth knowing before changing any of it — all evidenced in
+the ServiceNow discovery pack — `43-query-hour-flows.js`, PASS 15 and 16, which lands with
+the csm-flow-service work rather than on this branch:
+
+- **`goingToExceed` is an absolute floor of 600 minutes, not a percentage.** It is unrelated to the
+  75/90/100 percent thresholds in `QueryHourStateFor`, and ServiceNow applies both rules to the
+  same data in the same function. They disagree constantly. Do not unify them.
+- **The unit is a connected component of the opportunity-to-project funding graph**, not an
+  opportunity. Opportunities that fund a project in common have interchangeable entitlements.
+  Entitlement counts each opportunity once; consumption counts each distinct project once.
+  ServiceNow tried to build the same grouping by hand and bailed out — replacing the whole account
+  with the string `"Complicated Link In Opps and Projects Level"` — whenever its pairwise check
+  could not partition the graph. Components remove the bail-out.
+- **The two lists are not disjoint.** An account is in a list if *any* of its groups qualifies, so
+  one with an exhausted component and a nearly-exhausted one appears in both, and the counts say
+  so. That is the original's own rule.
+
+**Internal callers only**, the same gate `Sweep` uses. The response is the whole estate in one
+document — every account's entitlement and consumption, plus the people behind each one — and
+there is no per-project scope that would make a filtered version meaningful, so a scoped caller
+gets a 403 rather than a subset.
+
+`accountManagerEmail`/`technicalOwnerEmail` are **reported, not used for addressing** — ServiceNow
+derived the report's recipients from them; the sub-cron uses its own configured list instead. See
+that component's `CLAUDE.md` for why.
+
+The query starts from in-service product lines and joins outward, the inverse of ServiceNow's walk
+over every account: on dev, 1169 accounts carry a Salesforce id but only 176 product lines are
+live. `unmatchedLineCount` reports lines whose product name matched none of the six entitlement
+packs — they contribute zero hours silently in both systems, and this makes the silence visible.
+
+Consumption is approved **billable** time only, matching the original.
+
 
 ## Adding a new entity
 

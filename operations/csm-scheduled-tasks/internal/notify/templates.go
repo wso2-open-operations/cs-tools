@@ -20,11 +20,13 @@ import (
 	_ "embed"
 	"fmt"
 	"html"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 )
 
 //go:embed templates/alert.html
@@ -228,4 +230,215 @@ func humanizeState(state string) string {
 		words[i] = strings.ToUpper(w[:1]) + w[1:]
 	}
 	return strings.Join(words, " ")
+}
+
+//go:embed templates/query_hours_weekly_report.html
+var queryHoursWeeklyReportTemplateRaw string
+
+// QueryHoursWeeklyReportData holds everything substituted into the weekly
+// query-support consumption report template.
+type QueryHoursWeeklyReportData struct {
+	Report queryhoursreport.Report
+	// SalesforceBaseURL turns account, opportunity and project cells into
+	// links. Empty leaves them as plain text — the report is still complete
+	// and readable, which is why an unset value is not an error.
+	SalesforceBaseURL string
+}
+
+// timeConvert formats a minute count the way the whole query-hour family
+// does: "100h 0m".
+//
+// This is SN_Utils.timeConvert, reproduced exactly, and the exactness matters
+// more than it looks. The ServiceNow original is:
+//
+//	return sign + " " + rhours + "h " + rminutes + "m";
+//
+// with `sign` being "-" for negatives and "" otherwise — so EVERY value
+// carries a space after the sign position. Negatives render "- 4h 35m" and
+// positives render " 4h 35m", with a leading space. Dropping that space, or
+// rendering "-4h 35m", makes every cell in a side-by-side comparison against
+// the original differ.
+func timeConvert(minutes int) string {
+	sign := ""
+	if minutes < 0 {
+		sign = "-"
+		minutes = -minutes
+	}
+	return sign + " " + strconv.Itoa(minutes/60) + "h " + strconv.Itoa(minutes%60) + "m"
+}
+
+// RenderQueryHoursWeeklyReport fills in the weekly query-support consumption
+// report template.
+//
+// Its own template and its own renderer, per this component's CLAUDE.md
+// ("Per-task report emails"). It shares nothing with the per-project
+// threshold email that csm-notification-service sends — see
+// internal/queryhoursreport's package doc for why keeping them apart is a
+// correctness requirement rather than a style preference.
+func RenderQueryHoursWeeklyReport(data QueryHoursWeeklyReportData) string {
+	replacer := strings.NewReplacer(
+		"<!-- [LOGO_SRC] -->", bakeLogo(wso2LogoURL),
+		"<!-- [GENERATED_ON] -->", escapeHTML(data.Report.GeneratedOn),
+		"<!-- [EXCEEDED_COUNT] -->", strconv.Itoa(data.Report.ExceededCount),
+		"<!-- [GOING_TO_EXCEED_COUNT] -->", strconv.Itoa(data.Report.GoingToExceedCount),
+		"<!-- [UNMATCHED_NOTE] -->", unmatchedNote(data.Report.UnmatchedLineCount),
+		"<!-- [EXCEEDED_ROWS] -->", renderReportAccounts(data.Report.Exceeded, data.SalesforceBaseURL),
+		"<!-- [GOING_TO_EXCEED_ROWS] -->", renderReportAccounts(data.Report.GoingToExceed, data.SalesforceBaseURL),
+		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
+	)
+	return replacer.Replace(queryHoursWeeklyReportTemplateRaw)
+}
+
+// unmatchedNote surfaces product lines whose name matched none of the six
+// entitlement packs.
+//
+// Silence here is the failure mode worth guarding: ServiceNow contributes
+// zero hours for an unrecognised product name and says nothing, so a pack
+// renamed in Salesforce understates every entitlement derived from it and the
+// report still looks perfectly normal. This makes that visible in the one
+// place people actually read.
+func unmatchedNote(count int) string {
+	if count == 0 {
+		return ""
+	}
+	return `<p style="margin:0 0 24px; padding:12px 14px; border-left:4px solid #ff7101; background:#fff6ef; font-size:13px; color:#465868;">` +
+		`<strong>` + strconv.Itoa(count) + `</strong> in-service product line(s) matched none of the six known ` +
+		`query-hour packs and contributed zero hours. A pack renamed or added in Salesforce understates ` +
+		`every entitlement derived from it.</p>`
+}
+
+// renderReportAccounts renders one table's worth of account sections.
+func renderReportAccounts(accounts []queryhoursreport.Account, sfBase string) string {
+	if len(accounts) == 0 {
+		return `<tr><td colspan="7" style="padding:14px 10px; border:1px solid #d7dade; color:#8a8f98;">` +
+			`No accounts in this category.</td></tr>`
+	}
+	var b strings.Builder
+	for _, account := range accounts {
+		renderReportAccount(&b, account, sfBase)
+	}
+	return b.String()
+}
+
+// renderReportAccount renders one account, spanning its name down every row
+// it owns and each group's totals down that group's rows — the rowspan layout
+// the ServiceNow report uses.
+func renderReportAccount(b *strings.Builder, account queryhoursreport.Account, sfBase string) {
+	firstRowOfAccount := true
+
+	for _, group := range account.Groups {
+		firstRowOfGroup := true
+
+		for _, opportunity := range group.Opportunities {
+			firstRowOfOpportunity := true
+
+			for _, project := range opportunity.Projects {
+				b.WriteString("<tr>")
+
+				if firstRowOfAccount {
+					b.WriteString(cell(account.RowCount, "left", "",
+						link(accountURL(sfBase, account.SFID), account.Name)))
+					firstRowOfAccount = false
+				}
+				if firstRowOfOpportunity {
+					b.WriteString(cell(len(opportunity.Projects), "left", "",
+						link(opportunityURL(sfBase, opportunity.SFID), opportunity.Name)))
+					firstRowOfOpportunity = false
+				}
+				if firstRowOfGroup {
+					b.WriteString(cell(group.RowCount, "right", "color:#26814f; font-weight:700;",
+						escapeHTML(timeConvert(group.EntitlementMinutes))))
+				}
+
+				b.WriteString(projectCell(project, sfBase))
+				b.WriteString(consumedCell(project))
+
+				if firstRowOfGroup {
+					b.WriteString(cell(group.RowCount, "right", "font-weight:700;",
+						escapeHTML(timeConvert(group.ConsumedMinutes))))
+					b.WriteString(cell(group.RowCount, "right",
+						"font-weight:700; color:"+remainsColour(group)+";",
+						escapeHTML(timeConvert(group.RemainingMinutes))))
+					firstRowOfGroup = false
+				}
+
+				b.WriteString("</tr>")
+			}
+		}
+	}
+}
+
+// remainsColour mirrors the original's crimson/tomato signalling.
+func remainsColour(group queryhoursreport.Group) string {
+	switch {
+	case group.Exceeded:
+		return "#dc143c"
+	case group.GoingToExceed:
+		return "#ff6347"
+	default:
+		return "#26814f"
+	}
+}
+
+// cell writes one rowspan-aware table cell.
+func cell(rowspan int, align, extraStyle, content string) string {
+	if rowspan < 1 {
+		rowspan = 1
+	}
+	return `<td align="` + align + `" rowspan="` + strconv.Itoa(rowspan) +
+		`" style="padding:6px 10px; border:1px solid #d7dade; ` + extraStyle + `">` + content + `</td>`
+}
+
+// projectCell renders the project cell: name, key, and a Salesforce link —
+// the seven-column format's own layout. The per-project threshold email
+// deliberately shows a bare project name instead; do not converge them.
+func projectCell(project queryhoursreport.Project, sfBase string) string {
+	style := "padding:6px 10px; border:1px solid #d7dade;"
+	keyColour := "#585555"
+	if project.Duplicate {
+		style += " background:#eceff1; color:#8a8f98;"
+		keyColour = "#8a8f98"
+	}
+	out := `<td style="` + style + `">` + escapeHTML(project.Name)
+	if project.Key != "" {
+		out += `<br/><span style="color:` + keyColour + `; font-size:12px;">- Project Key : <b>` +
+			escapeHTML(project.Key) + `</b></span>`
+	}
+	if url := projectURL(sfBase, project.SFID); url != "" {
+		out += `<div style="text-align:right; font-size:12px;">[` + link(url, "salesforce") + `]</div>`
+	}
+	return out + `</td>`
+}
+
+// consumedCell renders one project's own consumed figure.
+func consumedCell(project queryhoursreport.Project) string {
+	style := "padding:6px 10px; border:1px solid #d7dade; font-weight:700;"
+	if project.Duplicate {
+		style += " background:#eceff1; color:#8a8f98;"
+	}
+	return `<td align="right" style="` + style + `">` +
+		escapeHTML(timeConvert(project.ConsumedMinutes)) + `</td>`
+}
+
+// link renders an anchor, or plain text when there is no URL to point at.
+func link(url, text string) string {
+	if url == "" {
+		return escapeHTML(text)
+	}
+	return `<a href="` + escapeHTML(url) + `" target="_blank" ` +
+		`style="color:#1798c1; font-weight:600; text-decoration:none;">` + escapeHTML(text) + `</a>`
+}
+
+// The three Salesforce record paths the report links to. Each returns empty
+// when either the base URL or the record's Salesforce id is missing, which
+// the caller renders as plain text rather than a broken link.
+func accountURL(base, sfID string) string     { return sfRecordURL(base, "Account", sfID) }
+func opportunityURL(base, sfID string) string { return sfRecordURL(base, "Opportunity", sfID) }
+func projectURL(base, sfID string) string     { return sfRecordURL(base, "Project__c", sfID) }
+
+func sfRecordURL(base, object, sfID string) string {
+	if base == "" || sfID == "" {
+		return ""
+	}
+	return strings.TrimRight(base, "/") + "/lightning/r/" + object + "/" + url.PathEscape(sfID) + "/view"
 }

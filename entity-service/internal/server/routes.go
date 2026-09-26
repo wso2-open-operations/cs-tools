@@ -25,6 +25,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/choreo"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/choreosubscription"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
@@ -235,6 +236,29 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		githubClient   *github.Client
 		githubLabelSet service.GithubLabels
 	)
+	// Query hours: the port of ServiceNow's `[Query Hour] UpdateTime Card`
+	// flow plus the `Set Project Query Hour State` and `Consumed Query Hour
+	// Update` business rules, which between them did this in three places.
+	//
+	// Gated on db alone, like scheduledTaskRunHandler below and unlike the
+	// data-source-gated handlers above: it reads the csm-sync-service-owned
+	// `project`, `time_card` and `sf_opportunity*` tables, which exist only in
+	// Postgres and have no ServiceNow-API equivalent worth proxying.
+	//
+	// The Choreo client is nil when QUERY_HOUR_CHOREO_BASE_URL is unset, which
+	// disables the outbound push without disabling the recompute.
+	var queryHourHandler *handler.QueryHourHandler
+	if db != nil {
+		queryHourHandler = handler.NewQueryHourHandler(
+			service.NewQueryHourService(
+				repository.NewQueryHourRepository(db),
+				subscriptionClosureNotifier(cfg),
+				eventPublisher,
+				accessSvc,
+				cfg.QueryHourNotificationsEnabled,
+			))
+	}
+
 	var scheduledTaskRunHandler *handler.ScheduledTaskRunHandler
 	if db != nil {
 		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
@@ -1001,6 +1025,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	mux := http.NewServeMux()
 
+	if queryHourHandler != nil {
+		mux.HandleFunc("GET /projects/{id}/query-hours", queryHourHandler.GetProjectQueryHours)
+		mux.HandleFunc("POST /projects/{id}/query-hours/recompute", queryHourHandler.RecomputeProjectQueryHours)
+		mux.HandleFunc("POST /time-cards/{id}/query-hours/recompute", queryHourHandler.RecomputeForTimeCard)
+		mux.HandleFunc("POST /query-hours/sweep", queryHourHandler.SweepQueryHours)
+		mux.HandleFunc("GET /query-hours/weekly-report", queryHourHandler.GetWeeklyReport)
+	}
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 
 	if salesforceEventHandler != nil {
@@ -1341,4 +1372,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			),
 		),
 	), closePublishers
+}
+
+// subscriptionClosureNotifier builds the Choreo push client, or returns nil
+// when it is not configured.
+//
+// The explicit nil return matters: handing the service a non-nil interface
+// wrapping a nil *SubscriptionClosureClient would make its `notifier == nil`
+// check false and panic on first use. This is the standard Go typed-nil trap,
+// and the reason this is a function rather than an inline expression.
+func subscriptionClosureNotifier(cfg *config.Config) service.SubscriptionClosureNotifier {
+	client := choreo.NewSubscriptionClosureClient(choreo.Config{
+		BaseURL: cfg.QueryHourChoreoBaseURL,
+		APIKey:  cfg.QueryHourChoreoAPIKey,
+	})
+	if client == nil {
+		return nil
+	}
+	return client
 }

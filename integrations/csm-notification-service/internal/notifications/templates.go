@@ -45,6 +45,9 @@ var severityChangedTemplateRaw string
 //go:embed templates/cr_approval_requested.html
 var crApprovalRequestedTemplateRaw string
 
+//go:embed templates/query_hour_threshold.html
+var queryHourThresholdTemplate string
+
 //go:embed templates/cr_plan_date_notice.html
 var crPlanDateNoticeTemplateRaw string
 
@@ -445,6 +448,96 @@ func RenderCRPlanDateNoticeEmail(d CRPlanDateEmailData) string {
 		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
 	)
 	return replacer.Replace(crPlanDateNoticeTemplate)
+}
+
+// QueryHourThresholdEmailData is what RenderQueryHourThresholdEmail needs.
+// Every field is plain text and is escaped on the way in — unlike the
+// engagement update, nothing here is author-composed HTML.
+type QueryHourThresholdEmailData struct {
+	Subject     string
+	OwnerName   string
+	AccountName string
+	ProjectName string
+	// ProjectKey is a fallback for the project cell when the name is empty.
+	// It is NOT appended to the name: the project-level ServiceNow email
+	// shows the bare project name.
+	ProjectKey string
+	// State is 1 (>=75%), 2 (>=90%) or 3 (>=100%) and selects the wording.
+	State           int
+	TotalQueryHours string
+	ConsumedHours   string
+	RemainingHours  string
+	PercentConsumed float64
+}
+
+// RenderQueryHourThresholdEmail renders the query-hour usage notice.
+//
+// The three messages are ServiceNow's own wording, verbatim, from the inline
+// script in `[WSO2][Query Hour] Usage Notifications - Project`. They are kept
+// word for word on purpose: the recipients have been reading this exact
+// sentence for years, and a port is not the moment to rewrite it.
+//
+// The table is the same five columns in the same order — Account, Total Query
+// Hour, Project, Consumed, Remains — and nothing else is added. An earlier cut
+// carried a percent-consumed line; it was removed because the original has no
+// such line and these land next to years of the original.
+//
+// The one thing NOT carried over is the original's behaviour at state 0. Its
+// `internal_message` variable was never declared and never assigned on that
+// path, so the body was built with the literal string "undefined" in it. This
+// renderer has no state-0 case because the publisher never emits one.
+func RenderQueryHourThresholdEmail(d QueryHourThresholdEmailData) string {
+	ownerName := d.OwnerName
+	if ownerName == "" {
+		ownerName = "Account Manager"
+	}
+
+	account := d.AccountName
+	if account == "" {
+		account = "this account"
+	}
+
+	// No headline: the ServiceNow original opens straight on the greeting, and
+	// these land next to years of it. This is the one notification in this
+	// package without the shell's headline row, deliberately.
+	var message string
+	switch d.State {
+	case 3:
+		message = "Kindly note that, <b>Allocated query support hours are exceeded in " +
+			escapeHTML(account) + "</b>. Therefore, It is advised to start the closure " +
+			"management process or notify customers to repurchase additional subscription hours."
+	case 2:
+		message = "Kindly note that, Allocated 90% of query support hours are utilized in " +
+			escapeHTML(account) + ". Query support will be disabled on 100% usage. Therefore, " +
+			"It is advised to start the closure management process or notify customers to " +
+			"repurchase additional subscription hours."
+	default:
+		message = "Kindly note that, Allocated 75% of query support hours are utilized in " +
+			escapeHTML(account) + ". Query support will be disabled on 100% usage. Therefore, " +
+			"It is advised to notify customers to repurchase additional subscription hours."
+	}
+
+	// The project cell is the project NAME only. An earlier cut appended
+	// " - Project Key : <key>" after seeing it in a production email, but that
+	// sample came from the ACCOUNT-level notifier (the seven-column variant);
+	// the project-level email this ports shows the bare name. ProjectKey is
+	// still carried on the payload for anyone who needs it.
+	project := d.ProjectName
+	if project == "" {
+		project = d.ProjectKey
+	}
+
+	replacer := strings.NewReplacer(
+		"<!-- [SUBJECT] -->", escapeHTML(d.Subject),
+		"<!-- [OWNER_NAME] -->", escapeHTML(ownerName),
+		"<!-- [MESSAGE] -->", message,
+		"<!-- [ACCOUNT] -->", escapeHTML(account),
+		"<!-- [PROJECT] -->", escapeHTML(project),
+		"<!-- [TOTAL] -->", escapeHTML(d.TotalQueryHours),
+		"<!-- [CONSUMED] -->", escapeHTML(d.ConsumedHours),
+		"<!-- [REMAINS] -->", escapeHTML(d.RemainingHours),
+	)
+	return replacer.Replace(queryHourThresholdTemplate)
 }
 
 // ProjectContactInvitedEmailData holds every value substituted into the
