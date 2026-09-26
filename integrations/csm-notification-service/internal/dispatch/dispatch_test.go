@@ -757,7 +757,7 @@ func TestDispatcher_Handle_SeverityChanged(t *testing.T) {
 	if len(gotEmail.to) != 1 || gotEmail.to[0] != testRecipient {
 		t.Errorf("to = %v, want [%s]", gotEmail.to, testRecipient)
 	}
-	if !strings.Contains(gotEmail.htmlBody, "High (P2)") || !strings.Contains(gotEmail.htmlBody, "Low (P4)") {
+	if !strings.Contains(gotEmail.htmlBody, "High(S2)") || !strings.Contains(gotEmail.htmlBody, "Low(S4)") {
 		t.Error("htmlBody does not contain both the old and new severity labels")
 	}
 

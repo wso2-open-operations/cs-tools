@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -156,7 +157,16 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if err := decodeStrict(raw, &p); err != nil {
 			return err
 		}
-		if p.ProjectID == "" || p.CaseID == "" || p.OldSeverity == "" || p.NewSeverity == "" ||
+		// OldSeverity/NewSeverity are trimmed before the emptiness check —
+		// unlike case.created's Priority (deliberately allowed blank, see
+		// that case's own comment), a severity change is meaningless
+		// without both values, and a whitespace-only value (which would
+		// pass a bare =="" check) would otherwise reach dispatch as if it
+		// were valid, only to render as a blank label once
+		// dispatch.emailSeverityLabel trims it — producing an email/Chat
+		// alert with an empty severity and, when CaseTitle is also empty,
+		// a subject of "Severity changed to ".
+		if p.ProjectID == "" || p.CaseID == "" || strings.TrimSpace(p.OldSeverity) == "" || strings.TrimSpace(p.NewSeverity) == "" ||
 			p.OldSeverity == p.NewSeverity || !validRecipients(p.Recipients) {
 			return fmt.Errorf("events: missing or invalid required field for %s", t)
 		}

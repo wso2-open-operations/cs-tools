@@ -21,37 +21,38 @@ import (
 	"testing"
 )
 
-// TestPlainTextFromHTML is a regression test for a real bug: ServiceNow
-// returns case descriptions and comments as rich-text HTML (e.g.
-// `<p><span style="white-space: pre-wrap;">some text</span></p>`), and
-// escapeMultiline used to HTML-escape that HTML directly, so the source's
-// own tags showed up as literal, visible "<p>..." clutter in the rendered
-// email instead of just the text.
-func TestPlainTextFromHTML(t *testing.T) {
+// TestSanitizeRichText_StructureAndFormatting is a regression test for a
+// real bug: ServiceNow/the portal editors return case descriptions and
+// comments as rich-text HTML (e.g.
+// `<p><span style="white-space: pre-wrap;">some text</span></p>`), and this
+// function must render that structure as safe HTML — never leak the
+// source's own tags as literal, visible "<p>..." clutter, and never lose a
+// paragraph break by running separate paragraphs into one line.
+func TestSanitizeRichText_StructureAndFormatting(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 		want  string
 	}{
 		{
-			name:  "servicenow's rich-text wrapper",
+			name:  "a span wrapper disappears, its text survives",
 			input: `<p><span style="white-space: pre-wrap;">Test comment</span></p>`,
 			want:  "Test comment",
 		},
 		{
-			name:  "multiple paragraphs become newlines, not run together",
+			name:  "multiple paragraphs become line breaks, not run together",
 			input: `<p>First paragraph.</p><p>Second paragraph.</p>`,
-			want:  "First paragraph.\nSecond paragraph.",
+			want:  "First paragraph.<br>Second paragraph.",
 		},
 		{
-			name:  "br becomes a newline",
+			name:  "br becomes a line break",
 			input: "Line one<br>Line two<br/>Line three",
-			want:  "Line one\nLine two\nLine three",
+			want:  "Line one<br>Line two<br>Line three",
 		},
 		{
 			name:  "heading followed by a paragraph stays separated",
 			input: "<h2>Summary</h2><p>Details</p>",
-			want:  "Summary\nDetails",
+			want:  "Summary<br>Details",
 		},
 		{
 			name:  "plain text with no markup passes through unchanged",
@@ -59,40 +60,125 @@ func TestPlainTextFromHTML(t *testing.T) {
 			want:  "just plain text, no html here",
 		},
 		{
-			name:  "html entities are decoded",
+			name:  "html entities are decoded then re-escaped safely",
 			input: "<p>Salt &amp; pepper</p>",
-			want:  "Salt & pepper",
+			want:  "Salt &amp; pepper",
+		},
+		{
+			name:  "bold, italic, and underline are preserved",
+			input: "<p><b>bold</b> <i>italic</i> <u>underline</u></p>",
+			want:  "<b>bold</b> <i>italic</i> <u>underline</u>",
+		},
+		{
+			name:  "a bullet list renders as a real list",
+			input: "<ul><li>one</li><li>two</li></ul>",
+			want:  "<ul><li>one</li><li>two</li></ul>",
+		},
+		{
+			name:  "an unrecognized tag is dropped, its text kept",
+			input: `<table><tr><td>cell text</td></tr></table>`,
+			want:  "cell text",
+		},
+		{
+			name:  "a literal < a user actually typed is escaped, not stripped",
+			input: "I <3 this",
+			want:  "I &lt;3 this",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := plainTextFromHTML(tt.input); got != tt.want {
-				t.Errorf("plainTextFromHTML(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := sanitizeRichText(tt.input); got != tt.want {
+				t.Errorf("sanitizeRichText(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestEscapeMultiline_StripsSourceHTMLThenEscapes verifies the full pipeline
-// escapeMultiline actually runs: strip the source's own HTML down to plain
-// text first (plainTextFromHTML), then HTML-escape the result and convert
-// newlines to <br> — so literal "<p>" tags from the source never survive
-// into the rendered output, but something a user actually typed (e.g.
-// "<3") still gets safely escaped rather than interpreted.
-func TestEscapeMultiline_StripsSourceHTMLThenEscapes(t *testing.T) {
-	got := escapeMultiline(`<p><span style="white-space: pre-wrap;">Test comment</span></p>`)
-	if strings.Contains(got, "&lt;p&gt;") || strings.Contains(got, "<p>") {
-		t.Errorf("escapeMultiline(...) = %q, source's own <p> tag leaked into the output one way or another", got)
+// TestSanitizeRichText_Links verifies a hyperlink survives only when its
+// scheme is one of the safe ones — an unsafe scheme (javascript:) must
+// still render the link's own visible text, just not as a clickable tag,
+// since a comment author could otherwise smuggle a script URL into an
+// email a recipient's mail client might render as clickable.
+func TestSanitizeRichText_Links(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "an https link is preserved",
+			input: `<a href="https://example.com/case/1">View</a>`,
+			want:  `<a href="https://example.com/case/1">View</a>`,
+		},
+		{
+			name:  "a mailto link is preserved",
+			input: `<a href="mailto:someone@example.com">Email</a>`,
+			want:  `<a href="mailto:someone@example.com">Email</a>`,
+		},
+		{
+			name:  "a javascript: href drops the tag but keeps the text",
+			input: `<a href="javascript:alert(1)">click me</a>`,
+			want:  "click me",
+		},
+		{
+			name:  "a data: href on a link (not an image) drops the tag too",
+			input: `<a href="data:text/html,evil">click me</a>`,
+			want:  "click me",
+		},
 	}
-	if got != "Test comment" {
-		t.Errorf("escapeMultiline(...) = %q, want %q", got, "Test comment")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeRichText(tt.input); got != tt.want {
+				t.Errorf("sanitizeRichText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
+}
 
-	// A literal "<" a user actually typed must still come out escaped, not
-	// stripped as if it were a real tag with nothing after it.
-	got = escapeMultiline("I <3 this")
-	if !strings.Contains(got, "&lt;3") {
-		t.Errorf("escapeMultiline(%q) = %q, want the literal \"<\" escaped, not stripped", "I <3 this", got)
+// TestSanitizeRichText_Images verifies an inline image survives only as a
+// self-contained base64 data URI — never an http(s) source, which would
+// have the recipient's mail client fetch an external URL the moment the
+// email is opened (a tracking-pixel/read-receipt leak — see
+// safeImageDataURI's own doc comment).
+func TestSanitizeRichText_Images(t *testing.T) {
+	const dataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "a data:image src is preserved",
+			input: `<img src="` + dataURI + `" alt="screenshot">`,
+			want:  `<img src="` + dataURI + `" alt="screenshot" style="max-width:100%;height:auto;">`,
+		},
+		{
+			name:  "an http(s) src is dropped entirely",
+			input: `<img src="https://evil.example.com/tracker.png">`,
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeRichText(tt.input); got != tt.want {
+				t.Errorf("sanitizeRichText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSanitizeRichText_ScriptContentNeverExecutes verifies a <script> tag's
+// own body is dropped as a normal unrecognized tag — the tokenizer hands
+// its raw-text content back as an ordinary text token, which this function
+// HTML-escapes like any other text, so it can only ever render as inert,
+// visible text, never as executable markup.
+func TestSanitizeRichText_ScriptContentNeverExecutes(t *testing.T) {
+	got := sanitizeRichText(`<p>before</p><script>alert(1)</script><p>after</p>`)
+	if strings.Contains(got, "<script>") {
+		t.Errorf("sanitizeRichText(...) = %q, <script> tag survived", got)
+	}
+	if !strings.Contains(got, "before") || !strings.Contains(got, "after") {
+		t.Errorf("sanitizeRichText(...) = %q, surrounding text was lost", got)
 	}
 }
 

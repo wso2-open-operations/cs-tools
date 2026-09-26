@@ -19,9 +19,12 @@ package notifications
 import (
 	_ "embed"
 	"html"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+
+	xhtml "golang.org/x/net/html"
 )
 
 //go:embed templates/comment_added.html
@@ -94,34 +97,216 @@ var (
 	projectContactInvitedReminderTemplate = bakeLogo(projectContactInvitedReminderTemplateRaw)
 )
 
-// htmlBlockBoundary matches the tags plainTextFromHTML treats as line
-// breaks — everything else just disappears when stripped, which would
-// otherwise run a rich-text source's separate paragraphs together into one
-// unreadable line.
-var htmlBlockBoundary = regexp.MustCompile(`(?i)</p>|</h[1-6]>|<br\s*/?>|</div>|</li>`)
+// safeLinkSchemes is the allow-list of URL schemes sanitizeRichText permits
+// on an <a href>. Everything else (javascript:, data:, vbscript:, a bare
+// relative path with no scheme, ...) drops the tag — the link's own text
+// still renders, just not as a clickable link — since none of those are
+// both meaningful and safe to click from inside an email.
+var safeLinkSchemes = map[string]bool{
+	"http":   true,
+	"https":  true,
+	"mailto": true,
+	"tel":    true,
+}
 
-// htmlTag matches any remaining tag, stripped unconditionally — this is a
-// blunt strip-everything approach, not a sanitizer with an allow-list, but
-// that's what makes it safe: no tag ever survives to be interpreted, so
-// there's no allow-list to get wrong.
-var htmlTag = regexp.MustCompile(`<[^>]*>`)
+// safeImageDataURI matches a self-contained base64-encoded image data URI —
+// the ONLY form of <img src> sanitizeRichText allows through. Never an
+// http(s) URL: an externally-hosted image would have the recipient's mail
+// client fetch it the moment the email is opened, a classic tracking-pixel/
+// read-receipt leak (their IP, mail client, and open time, all revealed to
+// whoever controls that URL) that a comment's own author could embed
+// without the recipient ever knowing. The portal's own rich-text editor
+// only ever produces a data: URI for an inserted image in the first place
+// (apps/customer-portal/webapp's richTextEditor.tsx), so this loses no real
+// functionality.
+var safeImageDataURI = regexp.MustCompile(`(?i)^data:image/[a-z0-9.+-]+;base64,[a-z0-9+/]+=*$`)
 
-// plainTextFromHTML converts s from rich-text HTML (as ServiceNow returns
-// case descriptions and comments — e.g.
-// `<p><span style="white-space: pre-wrap;">some text</span></p>`) to plain
-// text, so escapeMultiline below doesn't end up HTML-escaping the source's
-// own tags into literal, visible "<p>" clutter in the rendered email. Runs
-// before escaping, not instead of it: the result is still plain text that
-// itself might contain "<"/"&" (e.g. someone literally typed "<3" in a
-// comment), which escapeMultiline still needs to escape safely.
+// isSafeLinkHref reports whether href is safe to render as a clickable
+// <a href> in an email — see safeLinkSchemes' own doc comment. An
+// unparseable value is never safe.
+func isSafeLinkHref(href string) bool {
+	u, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	return safeLinkSchemes[strings.ToLower(u.Scheme)]
+}
+
+// openTag is one entry of sanitizeRichText's stack — name is the source
+// tag this entry was pushed for (used to match against a later close tag),
+// out is what to write when that close tag arrives ("" for a tag that was
+// dropped, so its close is silently dropped too).
+type openTag struct {
+	name string
+	out  string
+}
+
+// drainAttrs consumes every attribute of the current tag token without
+// using any of them — the tokenizer requires every attribute to be read
+// before the next Next() call can advance past this tag.
+func drainAttrs(z *xhtml.Tokenizer, hasAttr bool) {
+	for hasAttr {
+		_, _, hasAttr = z.TagAttr()
+	}
+}
+
+// sanitizeRichText converts rich-text HTML (as the portal's comment/
+// description editors produce it, or ServiceNow returns it — e.g.
+// `<p><span style="white-space: pre-wrap;">some text</span></p>`) into a
+// safe HTML fragment for embedding in an email body: structure (paragraphs,
+// line breaks, lists), basic formatting (bold/italic/underline), hyperlinks,
+// and inline images are preserved; everything else is dropped down to its
+// own inner text.
 //
-// s that was never HTML in the first place (no tags present) passes through
-// unchanged other than entity-decoding, which is a no-op for plain text.
-func plainTextFromHTML(s string) string {
-	s = htmlBlockBoundary.ReplaceAllString(s, "\n")
-	s = htmlTag.ReplaceAllString(s, "")
-	s = html.UnescapeString(s)
-	return strings.TrimSpace(s)
+// Uses a real HTML tokenizer (golang.org/x/net/html), not a regex — a
+// hand-rolled regex sanitizer can't reliably reject malformed/adversarial
+// markup the way a real parser does, and deciding what's safe to let
+// through is this function's whole job: comment/description text is
+// caller-supplied (a customer's own case comment), not trusted input.
+//
+// Allow-list, deliberately narrow — widen it only for a tag/attribute this
+// pipeline actually needs to render, never speculatively:
+//   - p, div, h1..h6: no output on open; their close renders as "<br>" —
+//     real HTML email clients render nested block tags inconsistently, so
+//     this stays intentionally flat rather than attempting real block
+//     layout
+//   - br: "<br>", handled directly as a void element (see the tokenizer
+//     dispatch below for why this can't go through the generic open/close
+//     stack the way p/div does)
+//   - ul, ol, li: real <ul>/<ol>/<li> tags, so an inserted bullet/numbered
+//     list actually renders as one instead of flattening to plain lines
+//   - b, strong, i, em, u: preserved as themselves
+//   - a: only when href resolves to a safeLinkSchemes scheme — every other
+//     attribute is dropped, and an unsafe/unparseable href drops the tag
+//     but keeps the link's own visible text
+//   - img: only when src is a safeImageDataURI — see that var's own doc
+//     comment for why http(s) is never allowed. alt is preserved if present
+//
+// Every other tag (span, font, table, script, ...) is dropped, keeping its
+// inner text as plain (escaped) content — the same "no allow-list to get
+// wrong" reasoning this function's stripped-down predecessor
+// (plainTextFromHTML) always had for anything not explicitly listed above.
+// A tag's own raw-text content (e.g. a <script> body) is never interpreted
+// — the tokenizer hands it back as an ordinary text token, which is
+// HTML-escaped like any other text, so it can only ever render as inert,
+// visible text, never execute.
+//
+// A close tag is only honored when it matches the stack's own top entry —
+// deliberately conservative: adversarial/malformed markup (a stray
+// mismatched close tag) is only ever a cosmetic risk this way (e.g. a
+// dangling unclosed <b> leaving the rest of the message bold), never a
+// safety one, since every tag this function itself emits is one of the
+// fixed, hardcoded strings above with properly escaped attribute values.
+// trimBoundaryBreaks removes leading/trailing "<br>" runs (and any
+// surrounding whitespace) from a sanitizeRichText result — the source's
+// own leading/trailing paragraph or line break otherwise survives as a
+// visible blank line at the very start/end of the rendered comment, the
+// same leading/trailing blank line plainTextFromHTML's own TrimSpace used
+// to absorb back when it operated on plain "\n" instead of "<br>".
+func trimBoundaryBreaks(s string) string {
+	s = strings.TrimSpace(s)
+	for strings.HasSuffix(s, "<br>") {
+		s = strings.TrimSpace(s[:len(s)-len("<br>")])
+	}
+	for strings.HasPrefix(s, "<br>") {
+		s = strings.TrimSpace(s[len("<br>"):])
+	}
+	return s
+}
+
+func sanitizeRichText(s string) string {
+	z := xhtml.NewTokenizer(strings.NewReader(s))
+	var b strings.Builder
+	var stack []openTag
+
+	for {
+		switch z.Next() {
+		case xhtml.ErrorToken:
+			return trimBoundaryBreaks(b.String())
+
+		case xhtml.TextToken:
+			b.WriteString(escapeHTML(string(z.Text())))
+
+		case xhtml.StartTagToken, xhtml.SelfClosingTagToken:
+			name, hasAttr := z.TagName()
+			tag := string(name)
+
+			// Void elements never get a matching close tag from any real
+			// source, self-closing slash or not — handling them here,
+			// before the stack push below, is what keeps the stack in
+			// sync with the tokenizer's own actual nesting depth.
+			switch tag {
+			case "br":
+				drainAttrs(z, hasAttr)
+				b.WriteString("<br>")
+				continue
+			case "img":
+				var src, alt string
+				for hasAttr {
+					var key, val []byte
+					key, val, hasAttr = z.TagAttr()
+					switch string(key) {
+					case "src":
+						src = string(val)
+					case "alt":
+						alt = string(val)
+					}
+				}
+				if safeImageDataURI.MatchString(src) {
+					b.WriteString(`<img src="` + escapeHTML(src) + `" alt="` + escapeHTML(alt) + `" style="max-width:100%;height:auto;">`)
+				}
+				continue
+			}
+
+			switch tag {
+			case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6":
+				drainAttrs(z, hasAttr)
+				stack = append(stack, openTag{name: tag, out: "<br>"})
+			case "li":
+				drainAttrs(z, hasAttr)
+				b.WriteString("<li>")
+				stack = append(stack, openTag{name: tag, out: "</li>"})
+			case "ul":
+				drainAttrs(z, hasAttr)
+				b.WriteString("<ul>")
+				stack = append(stack, openTag{name: tag, out: "</ul>"})
+			case "ol":
+				drainAttrs(z, hasAttr)
+				b.WriteString("<ol>")
+				stack = append(stack, openTag{name: tag, out: "</ol>"})
+			case "b", "strong", "i", "em", "u":
+				drainAttrs(z, hasAttr)
+				b.WriteString("<" + tag + ">")
+				stack = append(stack, openTag{name: tag, out: "</" + tag + ">"})
+			case "a":
+				var href string
+				for hasAttr {
+					var key, val []byte
+					key, val, hasAttr = z.TagAttr()
+					if string(key) == "href" {
+						href = string(val)
+					}
+				}
+				if isSafeLinkHref(href) {
+					b.WriteString(`<a href="` + escapeHTML(href) + `">`)
+					stack = append(stack, openTag{name: tag, out: "</a>"})
+				} else {
+					stack = append(stack, openTag{name: tag})
+				}
+			default:
+				drainAttrs(z, hasAttr)
+				stack = append(stack, openTag{name: tag})
+			}
+
+		case xhtml.EndTagToken:
+			name, _ := z.TagName()
+			if len(stack) > 0 && stack[len(stack)-1].name == string(name) {
+				out := stack[len(stack)-1].out
+				stack = stack[:len(stack)-1]
+				b.WriteString(out)
+			}
+		}
+	}
 }
 
 // escapeHTML HTML-escapes s and additionally converts every non-ASCII rune
@@ -148,12 +333,6 @@ func escapeHTML(s string) string {
 	return b.String()
 }
 
-// escapeMultiline HTML-escapes s (see escapeHTML) and converts its newlines
-// to <br>, so free-text fields (a comment, a case description) keep their
-// original line breaks when dropped into HTML.
-func escapeMultiline(s string) string {
-	return strings.ReplaceAll(escapeHTML(plainTextFromHTML(s)), "\n", "<br>")
-}
 
 // applyOptionalBlock handles a template section wrapped in
 // "<!-- [BLOCK:<name>_START] -->"..."<!-- [BLOCK:<name>_END] -->": if value is
@@ -176,20 +355,21 @@ func applyOptionalBlock(tmpl, name, value string) string {
 }
 
 // RenderCommentAddedEmail fills in the "comment added" HTML email template.
-// name and caseTitle are HTML-escaped as-is; caseComment is escaped via
-// escapeMultiline, which also strips any rich-text HTML markup the source
-// comment carries down to plain text first (see plainTextFromHTML) so raw
-// tags never show up as literal clutter in the rendered email. commentLink
-// is the "Add Comment" call-to-action target; caseLink is the "View Case"
-// link and the case-title link target. caseNumber is the case's
-// human-readable reference (e.g. "CS0023001") — display-only, distinct from
-// the caseLink URL, which already carries whatever id the portal needs.
+// name and caseTitle are HTML-escaped as-is; caseComment goes through
+// sanitizeRichText, which preserves the source comment's structure, basic
+// formatting, links, and inline images (see that function's own doc
+// comment for the exact allow-list) rather than stripping every tag.
+// commentLink is the "Add Comment" call-to-action target; caseLink is the
+// "View Case" link and the case-title link target. caseNumber is the
+// case's human-readable reference (e.g. "CS0023001") — display-only,
+// distinct from the caseLink URL, which already carries whatever id the
+// portal needs.
 func RenderCommentAddedEmail(name, caseNumber, caseTitle, caseComment, commentLink, caseLink string) string {
 	replacer := strings.NewReplacer(
 		"<!-- [NAME] -->", escapeHTML(name),
 		"<!-- [CASE_NUMBER] -->", escapeHTML(caseNumber),
 		"<!-- [CASE_TITLE] -->", escapeHTML(caseTitle),
-		"<!-- [CASE_COMMENT] -->", escapeMultiline(caseComment),
+		"<!-- [CASE_COMMENT] -->", sanitizeRichText(caseComment),
 		"<!-- [COMMENT_LINK] -->", escapeHTML(commentLink),
 		"<!-- [CASE_LINK] -->", escapeHTML(caseLink),
 	)
@@ -211,7 +391,7 @@ func RenderInternalNoteEmail(name, caseNumber, caseTitle, caseComment, commentLi
 		"<!-- [NAME] -->", escapeHTML(name),
 		"<!-- [CASE_NUMBER] -->", escapeHTML(caseNumber),
 		"<!-- [CASE_TITLE] -->", escapeHTML(caseTitle),
-		"<!-- [CASE_COMMENT] -->", escapeMultiline(caseComment),
+		"<!-- [CASE_COMMENT] -->", sanitizeRichText(caseComment),
 		"<!-- [COMMENT_LINK] -->", escapeHTML(commentLink),
 		"<!-- [CASE_LINK] -->", escapeHTML(caseLink),
 	)
@@ -238,9 +418,12 @@ func RenderStatusChangedEmail(caseNumber, newStatus, caseLink, commentLink strin
 // (same strap-line-above-a-mostly-empty-card layout, same Add
 // Comment/View Case links), just with oldSeverity/newSeverity in place of
 // a single newStatus. oldSeverity/newSeverity are expected to already be
-// display-formatted (e.g. "High (P2)") — dispatch.severityLabelAndColor's
-// concern, not this function's — matching the Chat card's own severity
-// labels so an email and its matching Chat alert read consistently.
+// display-formatted (e.g. "High(S2)") — dispatch.emailSeverityLabel's
+// concern, not this function's. This is deliberately a different label
+// format from the matching Chat card (dispatch.severityLabelAndColor's
+// "High (P2)") — email uses entity-service's own S0..S4 severity notation,
+// Chat keeps its established P0..P4 convention; the two are not meant to
+// match.
 func RenderSeverityChangedEmail(caseNumber, oldSeverity, newSeverity, caseLink, commentLink string) string {
 	replacer := strings.NewReplacer(
 		"<!-- [CASE_NUMBER] -->", escapeHTML(caseNumber),
@@ -300,8 +483,8 @@ func RenderCaseCreatedEmail(data CaseCreatedEmailData) string {
 		"<!-- [PRIORITY] -->", escapeHTML(data.Priority),
 		"<!-- [PRODUCT] -->", escapeHTML(data.Product),
 		"<!-- [CREATED_AT] -->", escapeHTML(data.CreatedAt),
-		"<!-- [DESCRIPTION] -->", escapeMultiline(data.Description),
-		"<!-- [INCIDENT_IMPACT_DESCRIPTION] -->", escapeMultiline(data.IncidentImpactDescription),
+		"<!-- [DESCRIPTION] -->", sanitizeRichText(data.Description),
+		"<!-- [INCIDENT_IMPACT_DESCRIPTION] -->", sanitizeRichText(data.IncidentImpactDescription),
 		"<!-- [CASE_LINK] -->", escapeHTML(data.CaseLink),
 		"<!-- [COMMENT_LINK] -->", escapeHTML(data.CommentLink),
 	)
@@ -439,8 +622,8 @@ func RenderCRPlanDateNoticeEmail(d CRPlanDateEmailData) string {
 		"<!-- [CR_NUMBER] -->", escapeHTML(d.Number),
 		"<!-- [HEADLINE] -->", headline,
 		"<!-- [PROJECT_AND_NUMBER] -->", projectAndNumber,
-		"<!-- [SHORT_DESCRIPTION] -->", escapeMultiline(d.ShortDescription),
-		"<!-- [DESCRIPTION] -->", escapeMultiline(d.Description),
+		"<!-- [SHORT_DESCRIPTION] -->", sanitizeRichText(d.ShortDescription),
+		"<!-- [DESCRIPTION] -->", sanitizeRichText(d.Description),
 		"<!-- [CLOSING_LINE] -->", escapeHTML(w.closing),
 		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
 	)

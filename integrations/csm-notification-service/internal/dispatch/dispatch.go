@@ -507,7 +507,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 				CaseNumber:                caseRef,
 				CaseTitle:                 p.CaseTitle,
 				CaseType:                  p.CaseType,
-				Priority:                  p.Priority,
+				Priority:                  emailSeverityLabel(p.Priority),
 				Product:                   p.Product,
 				CreatedAt:                 p.CreatedAt,
 				Description:               p.Description,
@@ -858,6 +858,8 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	caseRef := displayCaseRef(p.CaseNumber, p.CaseID)
 	oldLabel, oldColor := severityLabelAndColor(p.OldSeverity)
 	newLabel, newColor := severityLabelAndColor(p.NewSeverity)
+	emailOldLabel := emailSeverityLabel(p.OldSeverity)
+	emailNewLabel := emailSeverityLabel(p.NewSeverity)
 
 	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
 	if err != nil {
@@ -868,12 +870,12 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 			// A publisher that hasn't sent CaseTitle still gets a meaningful
 			// subject rather than a blank title slot — same fallback
 			// handleStatusChanged/handleCaseAssigned use.
-			title = "Severity changed to " + newLabel
+			title = "Severity changed to " + emailNewLabel
 		}
 		subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, title)
 		var emailErr error
 		_, emailErr = d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, func(caseLink string) string {
-			return notifications.RenderSeverityChangedEmail(caseRef, oldLabel, newLabel, caseLink, commentLinkFor(caseLink, ""))
+			return notifications.RenderSeverityChangedEmail(caseRef, emailOldLabel, emailNewLabel, caseLink, commentLinkFor(caseLink, ""))
 		})
 		if emailErr != nil {
 			errs = append(errs, emailErr)
@@ -1001,6 +1003,34 @@ func severityLabelAndColor(severity string) (label, color string) {
 		label = "Unknown"
 	}
 	return label, "#6B7280"
+}
+
+// emailSeverityLabels maps entity-service's raw uppercase severity value
+// (e.g. "HIGH", as sent on CaseCreatedPayload.Priority/SeverityChangedPayload.
+// OldSeverity/NewSeverity) to the title-case "<Label>(S<n>)" format shown in
+// case.created/case.severity_changed emails — S0..S4 matching entity-service's
+// own case_severity_enum labels (CATASTROPHIC=S0 .. LOW=S4, see that
+// service's own CLAUDE.md), not the P0..P4 notation severityLabelAndColor
+// above uses for Google Chat cards. Deliberately a separate, email-specific
+// convention per explicit request — not meant to be reconciled with Chat's
+// own labels.
+var emailSeverityLabels = map[string]string{
+	"CATASTROPHIC": "Catastrophic(S0)",
+	"CRITICAL":     "Critical(S1)",
+	"HIGH":         "High(S2)",
+	"MEDIUM":       "Medium(S3)",
+	"LOW":          "Low(S4)",
+}
+
+// emailSeverityLabel resolves severity to its email display label
+// (case/whitespace-insensitive), falling back to the raw trimmed value for
+// anything unrecognized — including blank, which stays blank so an absent
+// Priority still renders as an empty field rather than a fabricated label.
+func emailSeverityLabel(severity string) string {
+	if label, ok := emailSeverityLabels[strings.ToUpper(strings.TrimSpace(severity))]; ok {
+		return label
+	}
+	return strings.TrimSpace(severity)
 }
 
 // maxChatTitleLength bounds truncateTitle's output — long enough to still
