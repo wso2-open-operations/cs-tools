@@ -34,6 +34,7 @@ type resolvedInvoice struct {
 	InvoiceDate        time.Time
 	DueDate            time.Time
 	EULAVersionDecimal float64
+	SfID               string
 }
 
 // excludedInvoiceClassifications mirrors the legacy fetchDueInvoicesByProject
@@ -46,12 +47,10 @@ type resolvedInvoice struct {
 var excludedInvoiceClassifications = map[string]bool{"PP": true, "CO": true, "TAM": true}
 
 // resolveDueInvoice finds the "immediate" due invoice for a project —
-// ported from the legacy ACPInvoiceUtils.fetchDueInvoicesByProject, minus
-// the opportunity-stage=Closed-Won check (the new Opportunity API doesn't
-// expose a stage field yet — see the epic issue's follow-up request to
-// Sajith; deliberately not faked here, this filter is simply not applied
-// until that field exists). Returns (nil, nil) when the project has no
-// eligible due invoice — a legitimate, common state, not an error.
+// ported from the legacy ACPInvoiceUtils.fetchDueInvoicesByProject,
+// including its opportunity eligibility check (see eligibleOpportunity).
+// Returns (nil, nil) when the project has no eligible due invoice — a
+// legitimate, common state, not an error.
 func resolveDueInvoice(ctx context.Context, reader entityReader, proj project) (*resolvedInvoice, error) {
 	links, err := fetchAllProjectOpportunityLinks(ctx, reader, proj.ID)
 	if err != nil {
@@ -113,6 +112,7 @@ func resolveDueInvoice(ctx context.Context, reader entityReader, proj project) (
 				InvoiceDate:        invoiceDate,
 				DueDate:            dueDate,
 				EULAVersionDecimal: eulaDecimal,
+				SfID:               stringValue(inv.SfID),
 			}
 			if best == nil || candidate.DueDate.Before(best.DueDate) {
 				best = candidate
@@ -189,12 +189,20 @@ func fetchAllInvoicesForOpportunity(ctx context.Context, reader entityReader, op
 	return all, nil
 }
 
+// closedWonStage is the only opportunity stage whose invoices count —
+// the exact literal legacy compares u_stage against.
+const closedWonStage = "50 - Closed Won"
+
 // eligibleOpportunity mirrors the legacy fetchDueInvoicesByProject
-// eligibility check on the opportunity's text EULA field — non-null and
-// not "Customer contract". Kept literal (see excludedInvoiceClassifications'
-// doc comment) rather than adjusted against unverified staging data.
+// eligibility check exactly: stage is "50 - Closed Won", and the text EULA
+// field is non-null and not "Customer contract". A null or any other stage
+// is ineligible, as in legacy's equality check. See CLAUDE.md ("Only Closed
+// Won opportunities' invoices count"). Kept literal (see
+// excludedInvoiceClassifications' doc comment) rather than adjusted against
+// unverified staging data.
 func eligibleOpportunity(opp opportunityDTO) bool {
-	return opp.EulaVersion != nil && *opp.EulaVersion != "Customer contract"
+	return opp.Stage != nil && *opp.Stage == closedWonStage &&
+		opp.EulaVersion != nil && *opp.EulaVersion != "Customer contract"
 }
 
 // eligibleInvoice mirrors the legacy fetchDueInvoicesByProject invoice

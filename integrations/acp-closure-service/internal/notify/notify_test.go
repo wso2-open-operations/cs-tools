@@ -105,10 +105,12 @@ func TestLoggingNotifier_Send_LogsProjectAndSubjectFields(t *testing.T) {
 
 // TestLoggingNotifier_Send_LogsRecipientsIncludingCustomerWhenPresent covers
 // the structured Recipients attribute: Account Owner/Renewal Manager/
-// Technical Owner's names AND emails are always logged (names matter here —
-// Renewal Manager and Technical Owner never appear by name anywhere else in
-// the log, unlike Account Owner which also shows up in Body), and Customer
-// is logged too when present (a resolved 15/7/0-window customer contact).
+// Technical Owner's names are logged as-is (names matter here — Renewal
+// Manager and Technical Owner never appear by name anywhere else in the log,
+// unlike Account Owner which also shows up in Body), but every email address
+// is masked, and so is the customer's name: log-only mode must never write a
+// customer's personal details, or any full address, to the logs. Customer is
+// logged when present (a resolved 15/7/0-window customer contact).
 func TestLoggingNotifier_Send_LogsRecipientsIncludingCustomerWhenPresent(t *testing.T) {
 	h := &capturingHandler{}
 	n := &LoggingNotifier{Logger: slog.New(h)}
@@ -132,14 +134,14 @@ func TestLoggingNotifier_Send_LogsRecipientsIncludingCustomerWhenPresent(t *test
 	}
 
 	wantAttrs := map[string]string{
-		"accountOwner":       "jordan.perera@wso2.example",
+		"accountOwner":       "j************@wso2.example",
 		"accountOwnerName":   "Jordan Perera",
-		"renewalManager":     "sam.jayasuriya@wso2.example",
+		"renewalManager":     "s*************@wso2.example",
 		"renewalManagerName": "Sam Jayasuriya",
-		"technicalOwner":     "alex.fernando@wso2.example",
+		"technicalOwner":     "a************@wso2.example",
 		"technicalOwnerName": "Alex Fernando",
-		"customer":           "bob@customer.example",
-		"customerName":       "Bob",
+		"customer":           "b**@customer.example",
+		"customerName":       "B**",
 		"resolvedVia":        string(recipients.ResolvedViaBusinessContact),
 	}
 	for key, want := range wantAttrs {
@@ -210,5 +212,46 @@ func TestLoggingNotifier_Send_LogsBodyWhenPresent(t *testing.T) {
 	}
 	if got != body {
 		t.Errorf("body = %q, want %q", got, body)
+	}
+}
+
+// TestMaskEmail pins the masking rule for addresses written by log-only
+// mode: keep the first character and the domain (so a reader can still tell
+// an internal @wso2.com recipient from an external one), star the rest of the
+// local part. Anything that isn't a plain local@domain (exactly one "@", with
+// something on both sides) is starred entirely.
+func TestMaskEmail(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{in: "paraparan@wso2.com", want: "p********@wso2.com"},
+		{in: "bob@customer.example", want: "b**@customer.example"},
+		{in: "a@wso2.com", want: "a@wso2.com"},
+		{in: "", want: ""},
+		{in: "not-an-address", want: "**************"},
+		{in: "@nolocal.example", want: "****************"},
+		// More than one "@" is malformed: keeping everything after the first
+		// one would leak an embedded address (CodeRabbit, PR #2029).
+		{in: "a@wso2.com@evil.example", want: "***********************"},
+		{in: "john@", want: "*****"},
+	}
+	for _, tt := range tests {
+		if got := maskEmail(tt.in); got != tt.want {
+			t.Errorf("maskEmail(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestMaskName pins the customer-name masking rule: first letter of each
+// word kept, the rest starred, so the log shows a name was present without
+// revealing it.
+func TestMaskName(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{in: "Bob", want: "B**"},
+		{in: "Jordan Perera", want: "J***** P*****"},
+		{in: "", want: ""},
+	}
+	for _, tt := range tests {
+		if got := maskName(tt.in); got != tt.want {
+			t.Errorf("maskName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }

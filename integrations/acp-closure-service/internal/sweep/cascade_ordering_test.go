@@ -42,7 +42,7 @@ func bothCascadesReader(t *testing.T, invoiceDueDate time.Time) *mockEntityReade
 			return oppLinksResponse("p1", "opp1"), nil
 		},
 		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
-			return []byte(`{"id":"opp1","name":"Opp One","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+			return []byte(`{"id":"opp1","name":"Opp One","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
 		},
 		searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			return []byte(`{"invoices":[{

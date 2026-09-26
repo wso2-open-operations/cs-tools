@@ -32,6 +32,9 @@ import (
 type dueInvoice struct {
 	ID          string
 	Opportunity string
+	// SfID is the invoice's own Salesforce record ID, for the internal
+	// notice's "Open in Salesforce" link. Empty when not on file.
+	SfID string
 	// DueDate is the invoice's own due date — always what's shown in the
 	// "Due Date:" field, in both the internal and customer-facing bodies,
 	// regardless of any grace period.

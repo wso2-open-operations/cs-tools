@@ -157,6 +157,22 @@ you're tempted to reintroduce an early `isPartner` check for efficiency
 is no way to know the cascade is actually disabled without `hasPrimaryPartner`,
 which requires the same `GetAccount` call regardless.
 
+## Only Closed Won opportunities' invoices count
+
+`eligibleOpportunity` (`invoice_resolve.go`) applies legacy's full check
+from `ACPInvoiceUtils.fetchDueInvoicesByProject`: `stage` must equal
+`"50 - Closed Won"` exactly, and the text EULA field must be non-null and
+not `"Customer contract"`. A null or any other stage is ineligible, as in
+legacy's equality check.
+
+The stage half was missing until the Opportunity API started returning
+`stage` (added by Sajith; confirmed present on both `GET /opportunities/{id}`
+and `/opportunities/search`). Before that, an unpaid invoice on a
+not-yet-won opportunity (e.g. `"45 - Proposal"`) could drive invoice
+notices and suspension, which legacy never did. The shared test
+opportunity ("ACP Partner Opportunity") is Closed Won in staging, so the
+test projects' invoice cascade is unaffected.
+
 ## Invoice-side searches must paginate
 
 `fetchAllProjectOpportunityLinks`/`fetchAllInvoicesForOpportunity`
@@ -378,6 +394,17 @@ isn't lost or re-litigated:
   pending) replaces `LoggingNotifier` as the thing this component
   ultimately integrates with. Don't re-add logging to this type without
   confirming that direction has changed.
+- **That `"notice"` line masks personal contact details** (`maskEmail`,
+  `maskName` in `notify.go`). Every email address keeps only its first
+  character and domain (`p********@wso2.com`), and the customer's name keeps
+  only initials. Staff names stay readable, since they're the point of the
+  dry-run review and already appear in the internal body. The
+  customer-facing body names no one, so log-only mode writes no customer
+  personal data at all. Real staging logs from before email sending was
+  enabled showed full addresses and names in this line; that was flagged in
+  the threat model's privacy review and closed by this masking. Don't log a
+  raw address here again. `EmailNotifier` already logs only recipient
+  counts.
 
 ## Project Name links to Salesforce (internal notices only)
 
@@ -406,14 +433,26 @@ rendered as plain bold text) until caught against the real reference.
   or `projectNameFieldRowHTML` at all — there's no shared code path that
   could accidentally leak the link onto a customer copy.
 
-**Not yet implemented**: the real reference email also has a second,
-separate "Open in Salesforce" button near the invoice-details box, linking
-to what appears to be the *invoice's own* Salesforce ID (a different ID
-prefix than the project's). Deliberately not added — `invoiceDTO`
-(`types.go`) has no sfId-equivalent field, and none is documented in
-`csm-integration-service`'s `openapi.yaml` either. Needs confirming via a
-real `SearchInvoices`/`GetInvoice` Postman response before implementing;
-don't guess a field name.
+**Project `sfId` in the broad sweep:** `/projects/search` items now carry
+an `sfId` key, but as of 2026-09-26 it is `null` for every project in
+staging, even where `GET /projects/{id}` returns a real value. So the
+Project Name link only appears in `TEST_PROJECT_ID`-scoped runs until the
+API populates it. No change is needed here when it does: `project.SfID`
+already reads the field from both endpoints.
+
+**"Open in Salesforce" (invoice notices, internal only):** the real
+reference email also has a separate "Open in Salesforce" link inside the
+invoice box, pointing at the *invoice's own* Salesforce record (an `a0I…`
+ID, not the project's `a0d…`). `invoiceDTO.SfID` (`sfId`, confirmed on both
+`GET /invoices/{id}` and `/invoices/search`) flows through
+`resolvedInvoice` → `dueInvoice` → `notifyForWindow`'s `invoiceSfID`, which
+sets `Notice.InvoiceSfID` on the **internal notice only**.
+`openInSalesforceLinkHTML` renders it at the start of the invoice box's
+right half (the box is split into two equal halves, as in the reference),
+using table cells rather than the reference's `display:flex`, which email
+clients don't all support. There's no link when the invoice has no `sfId`, and
+never on customer or nudge notices. The reference's small external-link
+icon is deliberately left out, as for the Project Name link.
 
 ## suspensionProcessState's real shape
 

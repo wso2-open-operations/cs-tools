@@ -184,6 +184,7 @@ type opportunityDTO struct {
 	Account            *entityRefDTO `json:"account"`
 	EulaVersion        *string       `json:"eulaVersion"`
 	EulaVersionDecimal *string       `json:"eulaVersionDecimal"`
+	Stage              *string       `json:"stage"`
 }
 
 type searchOpportunitiesResponse struct {
@@ -207,6 +208,7 @@ type invoiceDTO struct {
 	InvoicedDueDate  *string       `json:"invoicedDueDate"`
 	Opportunity      *entityRefDTO `json:"opportunity"`
 	Classification   *string       `json:"classification"`
+	SfID             *string       `json:"sfId"`
 }
 
 type searchInvoicesResponse struct {

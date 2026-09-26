@@ -81,6 +81,7 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 	resolvedForNotice := dueInvoice{
 		ID:          invoice.ID,
 		Opportunity: invoice.Opportunity,
+		SfID:        invoice.SfID,
 		DueDate:     invoice.DueDate,
 		SuspendDate: closure.InvoiceSuspendDate(invoice.InvoiceDate, invoice.DueDate, invoice.EULAVersionDecimal, hasPrimaryPartner),
 	}
@@ -104,7 +105,7 @@ func actInvoice(ctx context.Context, reader entityReader, updater projectUpdater
 		delivered := false
 		var err error
 		if !alreadyClosed {
-			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window,
+			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window, invoice.SfID,
 				func(w closure.NoticeWindow, p project, accountOwnerName string) string {
 					return internalInvoiceNoticeBody(w, p, accountOwnerName, invoice)
 				},

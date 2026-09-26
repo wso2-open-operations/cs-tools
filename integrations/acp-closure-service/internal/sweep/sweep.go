@@ -175,7 +175,7 @@ func actSubscription(ctx context.Context, reader entityReader, updater projectUp
 		delivered := false
 		var err error
 		if !alreadyClosed {
-			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window, internalNoticeBody, customerNoticeSubject, customerNoticeBody)
+			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window, "", internalNoticeBody, customerNoticeSubject, customerNoticeBody)
 			if err != nil {
 				return fmt.Errorf("sweep: notify project %s: %w", proj.ID, err)
 			}
@@ -433,6 +433,7 @@ type customerBodyBuilder func(window closure.NoticeWindow, proj project) string
 
 func notifyForWindow(
 	ctx context.Context, reader entityReader, ntf notifier, proj project, window closure.NoticeWindow,
+	invoiceSfID string,
 	buildInternalBody internalBodyBuilder,
 	buildCustomerSubject customerSubjectBuilder,
 	buildCustomerBody customerBodyBuilder,
@@ -452,6 +453,9 @@ func notifyForWindow(
 	internalNotice.Subject = internalNoticeSubject(window, proj.Name, accountName(proj))
 	internalNotice.Body = buildInternalBody(window, proj, contacts.AccountOwner.Name)
 	internalNotice.Recipients = internalRecipients
+	// Only the internal notice links to the invoice's Salesforce record;
+	// customer and nudge notices never carry it.
+	internalNotice.InvoiceSfID = invoiceSfID
 
 	if !needsCustomerAudience(window) {
 		delivered, err := ntf.Send(ctx, internalNotice)

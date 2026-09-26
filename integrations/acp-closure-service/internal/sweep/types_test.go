@@ -226,3 +226,59 @@ func TestAccountDTO_ParsesTechnicalOwnerAndRenewalAccountManager(t *testing.T) {
 		t.Errorf("AccountManager = %v, want Name %q", acc.AccountManager, "Jordan Perera")
 	}
 }
+
+// TestOpportunityDTO_ParsesStageFromRealGetOpportunityResponse pins the
+// stage field's real wire name, using a real GET /opportunities/{id}
+// response from staging. eligibleOpportunity's Closed Won check reads it, so
+// a wrong JSON tag would silently make every opportunity ineligible.
+func TestOpportunityDTO_ParsesStageFromRealGetOpportunityResponse(t *testing.T) {
+	const realGetOpportunityResponse = `{
+		"id": "024f5c23-1bec-43d0-0bb3-da47b04bcbe0",
+		"name": "Test Opp 1 for Support T",
+		"account": {
+			"id": "270f942f-1b28-4350-a002-c9d3604bcb79",
+			"name": "Test Acc for Support T"
+		},
+		"eulaVersion": "EULA 3.3 customised",
+		"eulaVersionDecimal": "3.3",
+		"stage": "45 - Proposal"
+	}`
+
+	var opp opportunityDTO
+	if err := json.Unmarshal([]byte(realGetOpportunityResponse), &opp); err != nil {
+		t.Fatalf("unmarshal real GetOpportunity response: %v", err)
+	}
+	if opp.Stage == nil || *opp.Stage != "45 - Proposal" {
+		t.Errorf("Stage = %v, want %q", opp.Stage, "45 - Proposal")
+	}
+}
+
+// TestInvoiceDTO_ParsesSfIDFromRealGetInvoiceResponse pins the sfId field's
+// real wire name, using the real GET /invoices/{id} response for the shared
+// test invoice in staging. It feeds the internal notice's "Open in
+// Salesforce" link, so a wrong JSON tag would silently drop the link.
+func TestInvoiceDTO_ParsesSfIDFromRealGetInvoiceResponse(t *testing.T) {
+	const realGetInvoiceResponse = `{
+		"id": "bab87559-1bc7-6650-182c-0dc5604bcb5d",
+		"name": "ACP Partner Invoice",
+		"invoicedAmount": null,
+		"invoiceDate": "2025-12-30",
+		"invoicedPaidDate": null,
+		"invoicedDueDate": "2026-07-13",
+		"invoiceOriginalDueDate": "2025-06-18",
+		"opportunity": {
+			"id": "1c687195-1bc7-66d4-0bb3-da47b04bcbca",
+			"name": "ACP Partner Opportunity"
+		},
+		"classification": "PS",
+		"sfId": "a0IE2000006XBu5MAG"
+	}`
+
+	var inv invoiceDTO
+	if err := json.Unmarshal([]byte(realGetInvoiceResponse), &inv); err != nil {
+		t.Fatalf("unmarshal real GetInvoice response: %v", err)
+	}
+	if inv.SfID == nil || *inv.SfID != "a0IE2000006XBu5MAG" {
+		t.Errorf("SfID = %v, want %q", inv.SfID, "a0IE2000006XBu5MAG")
+	}
+}

@@ -47,7 +47,7 @@ func TestResolveDueInvoice_HappyPathPicksTheOnlyEligibleInvoice(t *testing.T) {
 			return oppLinksResponse("p1", "opp1"), nil
 		},
 		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
-			return []byte(`{"id":"opp1","name":"Opp One","eulaVersion":"EULA 3.3","eulaVersionDecimal":"3.3"}`), nil
+			return []byte(`{"id":"opp1","name":"Opp One","stage":"50 - Closed Won","eulaVersion":"EULA 3.3","eulaVersionDecimal":"3.3"}`), nil
 		},
 		searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			return []byte(`{"invoices":[{
@@ -105,9 +105,9 @@ func TestResolveDueInvoice_PaginatesProjectOpportunityLinks(t *testing.T) {
 		},
 		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
 			if id == "opp-page2" {
-				return []byte(`{"id":"opp-page2","name":"Opp Page 2","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+				return []byte(`{"id":"opp-page2","name":"Opp Page 2","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
 			}
-			return []byte(`{"id":"opp-page1","name":"Opp Page 1","eulaVersion":"Customer contract"}`), nil
+			return []byte(`{"id":"opp-page1","name":"Opp Page 1","stage":"50 - Closed Won","eulaVersion":"Customer contract"}`), nil
 		},
 		searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			return []byte(`{"invoices":[{
@@ -143,7 +143,7 @@ func TestResolveDueInvoice_PaginatesInvoicesForOpportunity(t *testing.T) {
 			return oppLinksResponse("p1", "opp1"), nil
 		},
 		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
-			return []byte(`{"id":"opp1","name":"Opp One","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+			return []byte(`{"id":"opp1","name":"Opp One","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
 		},
 		searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			invoiceCalls++
@@ -174,7 +174,7 @@ func TestResolveDueInvoice_PicksTheEarliestDueDateAcrossOpportunities(t *testing
 			return oppLinksResponse("p1", "opp1", "opp2"), nil
 		},
 		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
-			return []byte(`{"id":"` + id + `","name":"Opp","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+			return []byte(`{"id":"` + id + `","name":"Opp","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
 		},
 		searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			var req struct {
@@ -210,11 +210,19 @@ func TestResolveDueInvoice_ExcludesOpportunitiesFailingTheEligibilityCheck(t *te
 	}{
 		{
 			name: "eulaVersion is Customer contract",
-			opp:  `{"id":"opp1","eulaVersion":"Customer contract","eulaVersionDecimal":"3.4"}`,
+			opp:  `{"id":"opp1","stage":"50 - Closed Won","eulaVersion":"Customer contract","eulaVersionDecimal":"3.4"}`,
 		},
 		{
 			name: "eulaVersion is null",
-			opp:  `{"id":"opp1","eulaVersion":null,"eulaVersionDecimal":"3.4"}`,
+			opp:  `{"id":"opp1","stage":"50 - Closed Won","eulaVersion":null,"eulaVersionDecimal":"3.4"}`,
+		},
+		{
+			name: "stage is not Closed Won",
+			opp:  `{"id":"opp1","stage":"45 - Proposal","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`,
+		},
+		{
+			name: "stage is null",
+			opp:  `{"id":"opp1","stage":null,"eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`,
 		},
 	}
 
@@ -290,7 +298,7 @@ func TestResolveDueInvoice_ExcludesIneligibleInvoices(t *testing.T) {
 					return oppLinksResponse("p1", "opp1"), nil
 				},
 				getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
-					return []byte(`{"id":"opp1","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+					return []byte(`{"id":"opp1","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
 				},
 				searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
 					return []byte(`{"invoices":[` + tt.invoice + `]}`), nil
