@@ -371,15 +371,14 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
   {
     id: "spl",
     label: "Support Portal Lite",
-    href: "/spl/accounts",
+    href: "/spl/cases",
     icon: Layers,
-    // Cases, Team schedule, User scan, Customer health and Usage metrics
-    // land in their own follow-up PRs (this port was split by domain to
-    // stay under CodeRabbit's 100-file review limit) -- each adds its own
-    // entry to this list, and the first one to merge should also move
-    // href back to /spl/cases (SPL's real landing page; see App.tsx's
-    // RootLanding for the matching redirect).
+    // Team schedule, User scan, Customer health and Usage metrics land in
+    // a follow-up PR (feat/spl-merge-3-*) -- this port was split by domain
+    // to stay under CodeRabbit's 100-file review limit; that PR adds its
+    // own entries to this list.
     children: [
+      { id: "spl.cases", label: "Cases", href: "/spl/cases", icon: Layers },
       {
         id: "spl.accounts",
         label: "Accounts",

@@ -108,6 +108,8 @@ import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncem
 import CsmAnnouncementCreatePage from "@features/csm-announcements/pages/CsmAnnouncementCreatePage";
 import HelpPage from "@features/help/pages/HelpPage";
 import SplRouteGuard from "@features/spl/pages/SplRouteGuard";
+import SplCasesPage from "@features/spl/cases/pages/SplCasesPage";
+import SplCaseDetailPage from "@features/spl/cases/pages/SplCaseDetailPage";
 import SplAccountsPage from "@features/spl/accounts/pages/SplAccountsPage";
 import SplAccountDetailPage from "@features/spl/accounts/pages/SplAccountDetailPage";
 import SplProjectsPage from "@features/spl/projects/pages/SplProjectsPage";
@@ -115,9 +117,8 @@ import SplProjectDetailPage from "@features/spl/projects/pages/SplProjectDetailP
 import SplSlaReportPage from "@features/spl/reports/pages/SplSlaReportPage";
 import SplCsReportPage from "@features/spl/reports/pages/SplCsReportPage";
 import SplTimelogsReportPage from "@features/spl/reports/pages/SplTimelogsReportPage";
-// Cases, Team schedule, User scan, Customer health and Usage metrics land in
-// their own follow-up PRs (feat/spl-merge-2-cases, feat/spl-merge-3-*) --
-// see this PR's own description for why this port was split by domain.
+// Team schedule, User scan, Customer health and Usage metrics land in a
+// follow-up PR (feat/spl-merge-3-*) -- see this PR's own description.
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -150,12 +151,10 @@ function RootLanding(): JSX.Element | null {
     Boolean(searchParams.get(key)?.trim()),
   );
   // The Sales/SA view has no dashboard (SPL never had one) — its landing
-  // page is Cases, same as the standalone app's own index redirect (see
-  // usePortalView.ts). Cases itself lands in a follow-up PR
-  // (feat/spl-merge-2-cases); until it merges, Accounts is this view's
-  // landing page instead.
+  // page is Cases, same as the standalone app's own index redirect. See
+  // usePortalView.ts.
   const view = usePortalView();
-  const landing = view === "sales-sa" ? "/spl/accounts" : "/dashboard";
+  const landing = view === "sales-sa" ? "/spl/cases" : "/dashboard";
   return pending || hasDeepLinkSearch ? null : <Navigate to={landing} replace />;
 }
 
@@ -633,11 +632,14 @@ export default function App(): JSX.Element {
                       real enforcement point (an audience-gate 403, not just
                       a hidden nav entry) and also mounts
                       SplPermissionProvider for every screen below it.
-                      Cases, Team schedule, User scan, Customer health and
-                      Usage metrics land in their own follow-up PRs -- this
-                      port was split by domain to stay under CodeRabbit's
-                      100-file review limit. */}
+                      Team schedule, User scan, Customer health and Usage
+                      metrics land in a follow-up PR (feat/spl-merge-3-*) --
+                      this port was split by domain to stay under
+                      CodeRabbit's 100-file review limit. */}
                   <Route path="spl" element={<SplRouteGuard />}>
+                    <Route path="cases" element={<SplCasesPage />} />
+                    <Route path="cases/:caseId" element={<SplCaseDetailPage />} />
+
                     {/* SplAccountsPage reads the path leaf itself to decide
                         all-accounts vs my-accounts — same component, two
                         routes. Only "accounts" has a csmNavItems.ts entry;
