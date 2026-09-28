@@ -1,0 +1,188 @@
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Manual dispatch only — never push, never a schedule, and never against a
+# production URL. `full` runs an active scan, which is indistinguishable from
+# an attack on a shared environment: it refuses to run unless
+# confirm_active_scan=true, and that must only be set once the platform team
+# has cleared an active scan against target_url. The safe target for `full`
+# is a locally docker-composed instance — see
+# apps/git-internals-dashboard/scripts/dast-local.sh, which runs that same
+# active scan against localhost without touching Choreo (or needing
+# clearance) at all.
+#
+# The optional bearer token comes from the repository secret
+# GID_DEV_BEARER_TOKEN (Settings > Secrets and variables > Actions). It is
+# never logged or echoed; ZAP receives it only via ZAP_AUTH_HEADER_VALUE,
+# which GitHub Actions masks in logs like any other secret-derived value.
+
+name: Git Internals Dashboard DAST
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Base URL of the Development environment to scan (webapp URL for baseline/full, backend base URL for api)"
+        required: true
+        type: string
+      scan_mode:
+        description: "baseline (passive, webapp) | api (openapi.yaml driven) | full (active — requires confirm_active_scan, see file header)"
+        required: false
+        type: choice
+        options:
+          - baseline
+          - api
+          - full
+        default: baseline
+      use_bearer_token:
+        description: "Inject GID_DEV_BEARER_TOKEN as the Authorization header (ZAP_AUTH_HEADER_VALUE)"
+        required: false
+        type: boolean
+        default: false
+      confirm_active_scan:
+        description: "scan_mode=full only: I have platform-team clearance to run an active scan against target_url"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  zap-baseline:
+    name: ZAP Baseline (passive)
+    if: inputs.scan_mode == 'baseline'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: ${{ inputs.target_url }}
+          cmd_options: "-a"
+          # This workflow only grants `contents: read` (see permissions:
+          # above); allow_issue_writing defaults to true and needs
+          # issues: write to file/update a report issue, which would fail
+          # under this token. Scan results are read from the job output
+          # instead.
+          allow_issue_writing: false
+
+  zap-api:
+    name: ZAP API Scan (openapi.yaml)
+    if: inputs.scan_mode == 'api'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Restrict target_url to an approved Choreo dev host
+        # api mode forwards GID_DEV_BEARER_TOKEN (when use_bearer_token is
+        # set) to whatever host target_url names. workflow_dispatch inputs
+        # are attacker-influenceable by anyone who can trigger this
+        # workflow, so target_url is validated against this app's own
+        # documented backend host convention (see
+        # webapp/public/config.js.example) before the token is ever put in
+        # scope, rather than trusting the confirm/description text alone.
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          host=$(python3 -c "import sys, urllib.parse as u; print(u.urlparse(sys.argv[1]).hostname or '')" "$TARGET_URL")
+          if [[ -z "$host" ]] || ! [[ "$host" =~ ^([a-zA-Z0-9-]+\.)*choreoapis\.dev$ ]]; then
+            echo "::error::target_url host '$host' is not an approved Choreo backend dev host (*.choreoapis.dev). Refusing to run — this gates forwarding GID_DEV_BEARER_TOKEN to an arbitrary host."
+            exit 1
+          fi
+
+      - name: Point the spec at the scan target
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          cp apps/git-internals-dashboard/backend/openapi.yaml openapi-scan.yaml
+          # servers[0].url drives where ZAP sends requests; the checked-in spec
+          # points at a placeholder, so it's rewritten here rather than committed.
+          python3 - "$TARGET_URL" <<'PY'
+          import sys, yaml
+          target = sys.argv[1]
+          with open("openapi-scan.yaml") as f:
+              spec = yaml.safe_load(f)
+          spec["servers"] = [{"url": target}]
+          with open("openapi-scan.yaml", "w") as f:
+              yaml.safe_dump(spec, f)
+          PY
+
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
+        # ZAP core itself reads ZAP_AUTH_HEADER_VALUE (and defaults
+        # ZAP_AUTH_HEADER to "Authorization" when unset) and injects it on
+        # every request — the action passes these straight through to the
+        # container. Left unset entirely when use_bearer_token is false, so
+        # no empty/placeholder header is ever sent.
+        env:
+          ZAP_AUTH_HEADER_VALUE: ${{ inputs.use_bearer_token && format('Bearer {0}', secrets.GID_DEV_BEARER_TOKEN) || '' }}
+        with:
+          target: openapi-scan.yaml
+          format: openapi
+          cmd_options: "-a"
+          allow_issue_writing: false
+
+  zap-full-refused:
+    name: ZAP Full Scan — refused (no clearance confirmed)
+    if: inputs.scan_mode == 'full' && !inputs.confirm_active_scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to run without explicit platform-team clearance
+        run: |
+          echo "::error::scan_mode=full runs an active scan. This must not be pointed at the shared Choreo data plane without clearance from the platform team — it is indistinguishable from an attack."
+          echo "::error::Re-run with confirm_active_scan=true only once that clearance is in hand, or target a local instance instead: apps/git-internals-dashboard/scripts/dast-local.sh runs this same active scan against localhost with no clearance needed."
+          exit 1
+
+  zap-full:
+    name: ZAP Full Scan (ACTIVE — clearance confirmed)
+    if: inputs.scan_mode == 'full' && inputs.confirm_active_scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Restrict target_url to an approved Choreo dev host
+        # An active scan is indistinguishable from an attack; confirm_active_scan
+        # is only a checkbox and does not, by itself, stop target_url from
+        # naming an unrelated production or third-party host. Validated here
+        # against this app's own documented webapp host convention (see
+        # webapp/public/config.js.example's backend equivalent) before the
+        # active scan runs at all.
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          host=$(python3 -c "import sys, urllib.parse as u; print(u.urlparse(sys.argv[1]).hostname or '')" "$TARGET_URL")
+          if [[ -z "$host" ]] || ! [[ "$host" =~ ^([a-zA-Z0-9-]+\.)*choreoapps\.dev$ ]]; then
+            echo "::error::target_url host '$host' is not an approved Choreo webapp dev host (*.choreoapps.dev). Refusing to run an active scan against an unapproved host."
+            exit 1
+          fi
+
+      - name: ZAP Full Scan
+        uses: zaproxy/action-full-scan@3c58388149901b9a03b7718852c5ba889646c27c # v0.13.0
+        with:
+          target: ${{ inputs.target_url }}
+          cmd_options: "-a"
+          allow_issue_writing: false
