@@ -41,10 +41,18 @@ func TestValidate_Valid(t *testing.T) {
 		"case.severity_changed":                 {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
 		"incident.created":                      {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down","callTo":"+15551234567"}`},
 		"incident.created omits product/callTo": {"INC-1", TypeIncidentCreated, `{"title":"P1 outage","shortDescription":"Everything is down"}`},
-		"sla.tier_reached":                      {"CASE-1", TypeSLATierReached, `{"caseId":"CASE-1","clockType":"response","tier":"50"}`},
-		"project_contact.invited":               {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"003000000000001AAA","email":"jane@acme.com","givenName":"Jane","familyName":"Doe","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":["Admin","Portal user"],"isIntegrationUser":false,"type":"OWN CONTACT"}`},
-		"project_contact.invited resend":        {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"003000000000001AAA","email":"jane@acme.com","givenName":"Jane","familyName":"Doe","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":["Admin"],"isIntegrationUser":false,"type":"OWN CONTACT","isResend":true}`},
-		"project_contact.invited without names": {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"","email":"svc@acme.com","givenName":"","familyName":"","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":null,"isIntegrationUser":true,"type":"OWN CONTACT"}`},
+		"incident.acknowledged":                      {"INC-1", TypeIncidentAcknowledged, `{"previousState":"NEW","newState":"IN_PROGRESS"}`},
+		"incident.priority_elevated":                 {"INC-1", TypeIncidentPriorityElevated, `{"oldPriority":"MODERATE","newPriority":"HIGH","title":"Gateway 500s"}`},
+		// entity-service builds title from a nilable ServiceNow field, so it
+		// can genuinely publish this. It must not be rejected: an invalid
+		// payload is retried, dead-lettered and dropped.
+		"incident.priority_elevated without a title": {"INC-1", TypeIncidentPriorityElevated, `{"oldPriority":"MODERATE","newPriority":"HIGH"}`},
+		"incident.comment_added (public)":            {"INC-1", TypeIncidentCommentAdded, `{"commentId":"c-1","isPublic":true}`},
+		"incident.comment_added (work note)":         {"INC-1", TypeIncidentCommentAdded, `{"commentId":"c-1","isPublic":false}`},
+		"sla.tier_reached":                           {"CASE-1", TypeSLATierReached, `{"caseId":"CASE-1","clockType":"response","tier":"50"}`},
+		"project_contact.invited":                    {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"003000000000001AAA","email":"jane@acme.com","givenName":"Jane","familyName":"Doe","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":["Admin","Portal user"],"isIntegrationUser":false,"type":"OWN CONTACT"}`},
+		"project_contact.invited resend":             {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"003000000000001AAA","email":"jane@acme.com","givenName":"Jane","familyName":"Doe","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":["Admin"],"isIntegrationUser":false,"type":"OWN CONTACT","isResend":true}`},
+		"project_contact.invited without names":      {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"","email":"svc@acme.com","givenName":"","familyName":"","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":null,"isIntegrationUser":true,"type":"OWN CONTACT"}`},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -92,8 +100,8 @@ func TestValidate_RequiresFields(t *testing.T) {
 		"severity_changed missing recipients":                      {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW"}`},
 		"severity_changed caseId/entityId mismatch":                {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-2","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
 		"severity_changed no-op transition":                        {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"HIGH","recipients":["r@x.com"]}`},
-		"severity_changed whitespace-only oldSeverity":              {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"   ","newSeverity":"LOW","recipients":["r@x.com"]}`},
-		"severity_changed whitespace-only newSeverity":              {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"   ","recipients":["r@x.com"]}`},
+		"severity_changed whitespace-only oldSeverity":             {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"   ","newSeverity":"LOW","recipients":["r@x.com"]}`},
+		"severity_changed whitespace-only newSeverity":             {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"   ","recipients":["r@x.com"]}`},
 		"incident missing title":                                   {"INC-1", TypeIncidentCreated, `{"product":"api-manager","shortDescription":"d","callTo":"+15551234567"}`},
 		"incident malformed callTo":                                {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"t","shortDescription":"d","callTo":"555-1234"}`},
 		"incident missing entityId":                                {"", TypeIncidentCreated, `{"title":"t","shortDescription":"d"}`},
@@ -107,6 +115,11 @@ func TestValidate_RequiresFields(t *testing.T) {
 		"project_contact.invited malformed email":                  {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","contactSfId":"003000000000001AAA","email":"not-an-email","givenName":"Jane","familyName":"Doe","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":[],"isIntegrationUser":false,"type":"OWN CONTACT"}`},
 		"project_contact.invited membershipSfId/entityId mismatch": {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000002AAA","contactSfId":"003000000000001AAA","email":"jane@acme.com","givenName":"Jane","familyName":"Doe","projectName":"Acme Cloud","projectKey":"ACMECLOUD","roles":[],"isIntegrationUser":false,"type":"OWN CONTACT"}`},
 		"project_contact.invited unknown field":                    {"a0e000000000001AAA", TypeProjectContactInvited, `{"membershipSfId":"a0e000000000001AAA","email":"jane@acme.com","password":"x"}`},
+		"incident.acknowledged without entityId":                   {"", TypeIncidentAcknowledged, `{"previousState":"NEW","newState":"IN_PROGRESS"}`},
+		"incident.acknowledged without newState":                   {"INC-1", TypeIncidentAcknowledged, `{"previousState":"NEW"}`},
+		"incident.priority_elevated without newP":                  {"INC-1", TypeIncidentPriorityElevated, `{"oldPriority":"MODERATE","title":"t"}`},
+		"incident.priority_elevated without oldP":                  {"INC-1", TypeIncidentPriorityElevated, `{"newPriority":"HIGH","title":"t"}`},
+		"incident.comment_added without commentId":                 {"INC-1", TypeIncidentCommentAdded, `{"isPublic":true}`},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -347,6 +347,14 @@ func TestIncidentService_CreateIncident_PublishesOnlyAfterPostgresSucceeds(t *te
 			resp.Incident.CreatedBy = createdBy
 			return resp, nil
 		},
+		// Publishing enriches the event with the escalation fields, which
+		// means reading the incident back -- the same read the ServiceNow
+		// path already makes, now reached from this caller too. An empty view
+		// is enough: every escalation field is optional and this test is
+		// about WHEN the publish happens, not what it carries.
+		getIncidentByID: func(context.Context, string) (domain.IncidentView, error) {
+			return domain.IncidentView{}, nil
+		},
 	}
 	publisher := &mockEventPublisher{}
 	svc := NewIncidentServiceWithSNMirror(repo, nil, mirror, publisher, nil)

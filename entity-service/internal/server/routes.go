@@ -934,13 +934,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var activeCommentSvc service.CommentService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
-		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient)
+		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
 	case config.DataSourcePostgresServiceNowDualWrite:
 		// CreateComment mirrors to ServiceNow, asynchronously, after
 		// Postgres -- see commentService's own doc comment. This is separate
 		// from case's own comment mirror (CreateCaseComment/CreateBareCaseComment),
 		// which backs the case-scoped comment routes, not these generic ones.
-		snCommentMirrorSvc := service.NewServiceNowCommentService(serviceNowIntegrationServiceClient)
+		//
+		// The mirror carries eventPublisher rather than nil: it is the only
+		// thing on this path that publishes at all (the Postgres comment
+		// service publishes nothing), so without it an incident comment in
+		// dual-write mode would emit no incident.comment_added, and an
+		// elevation-triggered escalation ladder would lose its only stop
+		// signal. There is no double-publish risk for the same reason.
+		snCommentMirrorSvc := service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
 		activeCommentSvc = service.NewCommentServiceWithSNWriteback(commentRepo, userRepo, snWritebackDispatcher, snCommentMirrorSvc)
 	default:
 		activeCommentSvc = service.NewCommentService(commentRepo, userRepo)

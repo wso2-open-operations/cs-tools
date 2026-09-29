@@ -49,6 +49,30 @@ func (m *mockEventPublisher) Publish(_ context.Context, eventType events.Type, e
 
 func (m *mockEventPublisher) Close() {}
 
+// findPublishCall returns the first recorded call of the given event type.
+// Tests assert on the call they care about rather than on the total publish
+// count: one mutation legitimately publishes several unrelated events (a
+// created case emits both case.created and sla.clock.register), and counting
+// them couples every such test to every future publisher.
+func findPublishCall(calls []mockPublishCall, t events.Type) (mockPublishCall, bool) {
+	for _, c := range calls {
+		if c.eventType == t {
+			return c, true
+		}
+	}
+	return mockPublishCall{}, false
+}
+
+// publishedTypes lists what was actually published, for a failure message
+// that says what turned up instead of what was expected.
+func publishedTypes(calls []mockPublishCall) []events.Type {
+	types := make([]events.Type, 0, len(calls))
+	for _, c := range calls {
+		types = append(types, c.eventType)
+	}
+	return types
+}
+
 // newTestCreateCaseClient stubs both requests publishCaseCreated triggers
 // after a successful create: the POST /cases create call itself, then the
 // GetCaseByID enrichment (a GET /cases/{id}, plus a GET /cases/{id}/tags

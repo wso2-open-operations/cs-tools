@@ -440,7 +440,7 @@ func (s *incidentService) createIncidentSNFirst(ctx context.Context, req domain.
 	// doc comment for why this can't just be snIncidentService's own
 	// automatic publish (that fires right after the ServiceNow POST, before
 	// this Postgres insert was even attempted).
-	publishIncidentCreatedEvent(ctx, s.eventPublisher, req, resp.Incident.ID)
+	publishIncidentCreatedEvent(ctx, s.eventPublisher, req, resp.Incident.ID, snResp.Incident.Number, snResp.Incident.CreatedOn, s.GetIncidentByID)
 	return resp, nil
 }
 
