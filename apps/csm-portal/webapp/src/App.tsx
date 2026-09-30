@@ -108,6 +108,13 @@ import CsmTimeCardsPage from "@features/csm-timecards/pages/CsmTimeCardsPage";
 import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncementsPage";
 import CsmAnnouncementCreatePage from "@features/csm-announcements/pages/CsmAnnouncementCreatePage";
 import HelpPage from "@features/help/pages/HelpPage";
+import CsmKBArticlesLayout from "@features/csm-kb-articles/pages/CsmKBArticlesLayout";
+import CsmKBArticlesAllPage from "@features/csm-kb-articles/pages/CsmKBArticlesAllPage";
+import CsmKBArticlesListPage from "@features/csm-kb-articles/pages/CsmKBArticlesListPage";
+import CsmKBArticleEditorPage from "@features/csm-kb-articles/pages/CsmKBArticleEditorPage";
+import CsmKBArticleHistoryDetailPage from "@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage";
+import CsmKBReviewQueuePage from "@features/csm-kb-articles/pages/CsmKBReviewQueuePage";
+import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 import RouteGuard from "@features/spl/pages/RouteGuard";
 import CasesPage from "@features/spl/cases/pages/CasesPage";
 import CaseDetailPage from "@features/spl/cases/pages/CaseDetailPage";
@@ -631,6 +638,17 @@ export default function App(): JSX.Element {
                       than its own route, so unlike Customers/Settings above
                       there is nothing to redirect an index route to. */}
                   <Route path="help" element={<HelpPage />} />
+
+                  <Route path="knowledge" element={<CsmKBArticlesLayout />}>
+                    <Route index element={<Navigate to="all" replace />} />
+                    <Route path="all" element={<CsmKBArticlesAllPage />} />
+                    <Route path="my-articles" element={<CsmKBArticlesListPage />} />
+                    <Route path="my-articles/new" element={<CsmKBArticleEditorPage />} />
+                    <Route path="my-articles/:id" element={<CsmKBArticleEditorPage />} />
+                    <Route path="my-articles/:id/history" element={<CsmKBArticleHistoryDetailPage />} />
+                    <Route path="to-review" element={<CsmKBReviewQueuePage />} />
+                    <Route path="admin" element={<CsmKBAdminPage />} />
+                  </Route>
 
                   {/* Support Portal Lite — ported from the former standalone
                       apps/support-portal-lite/webapp. RouteGuard is the

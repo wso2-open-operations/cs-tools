@@ -97,6 +97,7 @@ export interface BackendApi {
     options?: BackendApiPostOptions,
   ): Promise<TResponse>;
   patch<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse>;
+  delete(path: string, body?: unknown): Promise<void>;
   /**
    * Authenticated PUT. Added for the /spl/customer-health/* endpoints
    * (risk close, action-item status/update) — the only current callers of
@@ -176,6 +177,18 @@ export function useBackendApi(): BackendApi {
         });
         if (!response.ok) throw await readError(response, correlationId);
         return (await response.json()) as TResponse;
+      },
+      async delete(path: string, body?: unknown): Promise<void> {
+        const correlationId = newCorrelationId();
+        const response = await authFetch(buildUrl(path), {
+          method: "DELETE",
+          headers: {
+            ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+            [CORRELATION_ID_HEADER]: correlationId,
+          },
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        });
+        if (response.status < 200 || response.status >= 300) throw await readError(response, correlationId);
       },
       async put<TRequest, TResponse>(
         path: string,
