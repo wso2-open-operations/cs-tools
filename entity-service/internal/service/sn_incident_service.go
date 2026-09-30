@@ -677,18 +677,20 @@ type snCreateIncidentPayload struct {
 	ChangeRequestID     *string  `json:"changeRequestId,omitempty"`
 	ProblemID           *string  `json:"problemId,omitempty"`
 	CausedByID          *string  `json:"causedById,omitempty"`
-	// CorrelationID: see domain.CreateIncidentRequest.CorrelationID doc
-	// comment. Maps to ServiceNow's stock `correlation_id` field.
+	// CorrelationID and Environment are deliberately NOT populated by
+	// CreateIncident below anymore -- see project memory
+	// project-csm-correlationid-blocked: the ServiceNow-side connector
+	// (servicenow-integration-service, Choreo-managed) 400s whenever
+	// `environment` is present in the CREATE payload, since its schema was
+	// never updated to accept incident.u_enviroment. correlationId is
+	// excluded alongside it for consistency, not because it currently
+	// reproduces the 400 on its own. Both fields are still persisted to this
+	// service's own Postgres row (IncidentRepository.CreateIncidentFromServiceNow
+	// reads them off the original request, not off this payload) -- only the
+	// outbound ServiceNow write excludes them. Re-populate once the
+	// connector's schema is fixed and republished.
 	CorrelationID *string `json:"correlationId,omitempty"`
-	// Environment: see domain.CreateIncidentRequest.Environment doc comment.
-	// Maps to ServiceNow's own custom incident.u_enviroment field, but the
-	// Choreo connector's CREATE record spells the JSON key correctly as
-	// u_environment -- confirmed by a live Azure-Staging 400, "data binding
-	// failed: undefined field 'u_enviroment'", when the misspelled key
-	// (used on PATCH, see snUpdateIncidentPayload.Environment) was sent
-	// here instead. The two operations' generated records disagree on the
-	// key's spelling; this is CREATE-only.
-	Environment *string `json:"u_environment,omitempty"`
+	Environment   *string `json:"u_environment,omitempty"`
 }
 
 // snCreateIncidentResponse mirrors the Choreo POST /incidents response.
@@ -703,11 +705,10 @@ type snCreateIncidentResponse struct {
 }
 
 func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
-	// Reject before the ServiceNow call, not after: createIncidentSNFirst
-	// creates the ServiceNow incident first and has no compensating delete,
-	// so a value too long for either ServiceNow's u_enviroment (max 40) or
-	// this service's own environment column (VARCHAR(40)) must fail fast
-	// here rather than leave an orphaned ServiceNow incident behind.
+	// Environment is no longer sent to ServiceNow at all (see
+	// snCreateIncidentPayload's doc comment), but the 40-char cap stays: it's
+	// also this service's own environment column (VARCHAR(40)), which
+	// CreateIncidentFromServiceNow still writes to below.
 	if req.Environment != nil && len([]rune(*req.Environment)) > 40 {
 		return domain.CreateIncidentResponse{}, &apierror.ValidationError{
 			Msg: "environment must not exceed 40 characters",
@@ -784,6 +785,8 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 		return domain.CreateIncidentResponse{}, err
 	}
 
+	// CorrelationID/Environment are intentionally not set here -- see
+	// snCreateIncidentPayload's own doc comment on those two fields for why.
 	payload := snCreateIncidentPayload{
 		CallerID:           uuidToSysid(req.CallerID),
 		CategoryKey:        snIncidentCategoryKeyMap[req.Category],
@@ -794,8 +797,6 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 		WatchList:          watchList,
 		AdditionalComments: req.AdditionalComments,
 		WorkNotes:          req.WorkNotes,
-		CorrelationID:      req.CorrelationID,
-		Environment:        req.Environment,
 	}
 	if req.Subcategory != nil {
 		v := snIncidentSubcategoryKeyMap[*req.Subcategory]

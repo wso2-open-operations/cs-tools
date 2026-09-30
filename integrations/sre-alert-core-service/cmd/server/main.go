@@ -98,13 +98,12 @@ func main() {
 		Scopes:       splitComma(os.Getenv("CSM_INTEGRATION_SCOPES")),
 	})
 	notifier := notify.New(base.With("component", "notify"), csmClient, notify.Config{
-		CallerID:             mustEnv(logger, "CSM_CALLER_ID"),
-		UnknownServiceID:     mustEnv(logger, "CSM_UNKNOWN_SERVICE_ID"),
-		ServiceCacheTTL:      depCfg.Notify.ServiceCacheTTL.Duration(),
-		MaxAttempts:          depCfg.Notify.MaxAttempts,
-		RetryBaseDelay:       depCfg.Notify.RetryBaseDelay.Duration(),
-		HTTPTimeout:          depCfg.Notify.HTTPTimeout.Duration(),
-		SendEnvironmentField: depCfg.Notify.SendEnvironmentField,
+		CallerID:         mustEnv(logger, "CSM_CALLER_ID"),
+		UnknownServiceID: mustEnv(logger, "CSM_UNKNOWN_SERVICE_ID"),
+		ServiceCacheTTL:  depCfg.Notify.ServiceCacheTTL.Duration(),
+		MaxAttempts:      depCfg.Notify.MaxAttempts,
+		RetryBaseDelay:   depCfg.Notify.RetryBaseDelay.Duration(),
+		HTTPTimeout:      depCfg.Notify.HTTPTimeout.Duration(),
 	})
 	eng := engine.New(base.With("component", "engine"), alerts, incidents, notifier, defaults, depCfg.Notify.MaxCSMAttempts, depCfg.Notify.StateCheckInterval.Duration(), depCfg.Engine.DedupWindow.Duration(), engine.CSMRetryConfig{
 		BaseDelay:  depCfg.Notify.CSMRetryBaseDelay.Duration(),

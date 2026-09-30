@@ -63,8 +63,6 @@ csm_retry_base_delay = "30s"
 csm_retry_multiplier = 3
 # Caps how long the exponential CSM retry wait can grow to.
 csm_retry_max_delay = "1h"
-# Whether CreateIncident sends the environment field; off because the live connector 400s on it.
-send_environment_field = false
 
 [server]
 # Bounds how long SIGTERM/SIGINT waits for in-flight work before forcing exit.
