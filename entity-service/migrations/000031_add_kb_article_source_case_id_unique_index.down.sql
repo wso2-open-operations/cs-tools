@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_knowledge_article_source_case_id_unique;
