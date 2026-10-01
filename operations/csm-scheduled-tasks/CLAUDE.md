@@ -168,6 +168,79 @@ query run) if empty. Shares `internal/entitycases.Client` and the row-rendering 
 (`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
 emails" below.
 
+## Weekly query support consumption report
+
+`internal/queryhoursweekly.SendReport`, registered as `"query_hours_weekly_report"`, is the Go
+port of ServiceNow's `[WSO2][Query Hours] Weekly Report`. It lists every account whose purchased
+query hours are exhausted, or nearly so, in the seven-column table that report has always used.
+
+**It is deliberately separate from the per-project threshold email** that
+`integrations/csm-notification-service` sends. The two look related and are not:
+
+| | threshold notice | this report |
+|---|---|---|
+| fires | per project, on crossing a threshold | weekly, over the whole estate |
+| rule | 75 / 90 / 100 **percent** consumed | under ten hours **remaining**, absolute |
+| table | five columns, bare project name | seven columns, project key + Salesforce link |
+
+Those rules disagree constantly — a 1h entitlement with nothing consumed is 0% used but has only
+sixty minutes left, so it appears here and not there. Do not unify them. A project-key suffix has
+already leaked from this format into that email once.
+
+Default schedule **`30 18 * * 0`** — Sunday 18:30 UTC, with the same `TZ=UTC` caveat as
+"Housekeeping" above. That is not a typo for Monday: ServiceNow fires this at 00:00:05 on day 1
+interpreted in the instance's own `Asia/Colombo`, which *is* 18:30 UTC Sunday, and recipients have
+had it arrive Monday first thing local time for years. `0 0 * * 1` would look like the obvious
+translation and would quietly move the mail 5½ hours later — and change its date stamp, which is a
+UTC date and is exactly why the Monday mail is headed with Sunday's.
+
+**The To line is DERIVED from the data; Cc is configuration.** `SUB_CRON_RECIPIENTS`' `to` is the
+SEED, not the audience: `DeriveRecipients` appends the account manager and technical owner of every
+**exceeded** account, lower-cased, `@wso2.com` only, deduplicated, seed first. That is the
+production action script's rule, read directly on 2026-10-01. Accounts merely *going* to exceed
+contribute nobody — in the script both pushes sit inside `if (acc_data.is_exceeded)`, and deriving
+from both tables is the mistake that silently widens the audience every week.
+
+The addresses come from `account.account_manager_id` / `technical_owner_id`, mirrored by
+csm-sync-service from `customer_account.u_owner` / `u_technical_owner`. **An unpopulated column
+there shortens the audience instead of failing**, so a short To is a mirroring question first. The
+dev ServiceNow copy capped near 33 recipients against the real message's 48 and carried two Cc
+addresses against its three — the rule is now settled, the count is not, so check a real run against
+a real message before trusting it.
+
+An empty `to` still skips the fetch entirely, like the other report tasks, which is also the lever
+below.
+
+An **empty report is still sent**: "nothing is exhausted" is a real answer, and a week with no mail
+is indistinguishable from a week where the job broke.
+
+**This is NOT yet a paired ServiceNow deactivation**, and that is the one thing to know before
+widening its recipients. The flow it ports is not the read-only report it appears to be — it also
+stamps `sf_opportunity.query_hour_state` on every ungrouped opportunity it renders and caches the
+rendered HTML onto the account. Only the read half is ported. Turning the ServiceNow flow off would
+stop those writes too, and nothing has yet established what still reads that column. Until that is
+settled both systems send — and with a derived To that is ~48 people receiving two reports a week,
+not a handful. `ALERTS_ENABLED=false`, or leaving this task out of `SUB_CRON_RECIPIENTS` so `to` is
+empty, is how it stays off until then.
+
+Where the port **diverges deliberately** from the original, all recorded in
+the ServiceNow discovery pack — `43-query-hour-flows.js`, PASS 15 and 16, which lands with
+the csm-flow-service work rather than on this branch:
+
+- **Grouping is connected components.** ServiceNow collected opportunities sharing a project into
+  groups by a pairwise union check, and when that check could not partition the graph it replaced
+  the whole account with the string `"Complicated Link In Opps and Projects Level"` — silently
+  dropping it from the report. Components are what that code was reaching for; computing them
+  properly removes the bail-out.
+- **Thresholds are applied after merging.** The original computes its flags per opportunity before
+  merging and never recomputes, which is how an account can show a hundred hours remaining and
+  still sit in the going-to-exceed table.
+- **Unmatched product lines are surfaced.** A product name outside the six known packs contributes
+  zero hours in both systems; only this one says so.
+
+Consumption counts approved **billable** time only, as the original does.
+
+
 ## Alerting
 
 Two layers, combined:
@@ -218,6 +291,9 @@ sent from inside that task's own handler, not through this alerting path at all.
 report emails" below for why that's not a generic engine feature.
 
 ## Environment variables
+
+> **Deployment config lives in [`docs/choreo-deployment-config.md`](../../docs/choreo-deployment-config.md).**
+> Any change that adds or renames a config value updates that table in the same commit.
 
 | Variable | Required | Description |
 |---|---|---|
