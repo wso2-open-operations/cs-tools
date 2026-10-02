@@ -681,11 +681,15 @@ type snCreateIncidentPayload struct {
 	// comment. Maps to ServiceNow's stock `correlation_id` field.
 	CorrelationID *string `json:"correlationId,omitempty"`
 	// Environment: see domain.CreateIncidentRequest.Environment doc comment.
-	// Maps to ServiceNow's own custom incident.u_enviroment field -- the
-	// JSON key here is that field's exact name (misspelling included), not
-	// a rewritten "environment", since this is what the Choreo connector's
-	// own contract exposes for a custom field.
-	Environment *string `json:"u_enviroment,omitempty"`
+	// Eventually reaches ServiceNow's own custom incident.u_enviroment field,
+	// but the Choreo connector's own POST /incidents contract (openapi.yaml)
+	// exposes this as plain "environment" -- the connector renames it to
+	// ServiceNow's real (misspelled) field internally, at the one call site
+	// that actually needs it. Sending "u_enviroment" directly here was tried
+	// and is wrong: the connector's own request-payload type doesn't declare
+	// that key at all, so it was rejected outright with "data binding
+	// failed: undefined field 'u_enviroment'" on every request that set one.
+	Environment *string `json:"environment,omitempty"`
 }
 
 // snCreateIncidentResponse mirrors the Choreo POST /incidents response.
