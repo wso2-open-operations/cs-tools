@@ -598,13 +598,13 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	}
 
 	if len(req.Parsed.ProjectIDs) > 0 {
-		where += fmt.Sprintf(" AND c.project_id = ANY($%d::uuid[])", argIdx)
+		where += fmt.Sprintf(" AND c.project_id = ANY($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ProjectIDs)
 		argIdx++
 	}
 
 	if len(req.Parsed.ExcludeProjectIDs) > 0 {
-		where += fmt.Sprintf(" AND c.project_id != ALL($%d::uuid[])", argIdx)
+		where += fmt.Sprintf(" AND c.project_id != ALL($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ExcludeProjectIDs)
 		argIdx++
 	}
@@ -672,7 +672,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	}
 
 	if len(req.Parsed.AssignedUserIDs) > 0 {
-		where += fmt.Sprintf(" AND c.assigned_engineer = ANY($%d::uuid[])", argIdx)
+		where += fmt.Sprintf(" AND c.assigned_engineer = ANY($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.AssignedUserIDs)
 		argIdx++
 	}
