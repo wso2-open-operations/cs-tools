@@ -207,7 +207,7 @@ to check `pausedOn` before firing a tier, and records a crossed tier idempotentl
 
 ### Scheduled task runs
 
-`scheduled_task_run` (migration `000013` — the one intentionally singular table name in this
+`scheduled_task_run` (migration `000014` — the one intentionally singular table name in this
 schema) is durable claim/retry state for `operations/csm-scheduled-tasks`, a single Choreo
 Scheduled Task that fans out to many independently-scheduled sub-crons on one shared driver
 cadence. Has no ServiceNow equivalent — always backed by Postgres. No stored status column: a row's
