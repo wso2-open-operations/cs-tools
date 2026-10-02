@@ -32,11 +32,11 @@
 // The audience question here — does this caller have any business in SPL
 // at all — and the nav-default question there are answered separately on
 // purpose; keep them that way rather than merging the two checks. See
-// internal/handler/access.go's PermSPLAccess for the matching backend
+// internal/handler/access.go's PermViewerAccess for the matching backend
 // grant, which must stay in sync with this hook's role check.
 //
 // Real enforcement is server-side: every /spl/* route on the Go backend
-// re-checks PermSPLAccess (internal/handler/access.go), currently granted
+// re-checks PermViewerAccess (internal/handler/access.go), currently granted
 // by the same Viewer role this hook checks. A caller who reaches an SPL
 // screen without the role sees a 403 from every call it makes, same as
 // any other tampered/stale-claim scenario in this app.
@@ -55,7 +55,7 @@ export interface Access {
 // key (apps/csm-portal/backend/internal/handler/access.go) -- see this
 // file's own top-of-file comment for why this check is unconditional
 // (no cs_engineer exclusion) unlike usePortalView.ts's nav-default choice.
-const SPL_AUDIENCE_ROLE = "viewer";
+const VIEWER_AUDIENCE_ROLE = "viewer";
 
 export function useAccess(): Access {
   let roles: string[] | undefined;
@@ -77,6 +77,6 @@ export function useAccess(): Access {
     // when the signed-in account has no portal roles provisioned yet.
     if (devBypassAccessCheck) return { ready: true, hasAccess: true };
     if (isLoading) return { ready: false, hasAccess: false };
-    return { ready: true, hasAccess: (roles ?? []).includes(SPL_AUDIENCE_ROLE) };
+    return { ready: true, hasAccess: (roles ?? []).includes(VIEWER_AUDIENCE_ROLE) };
   }, [roles, isLoading]);
 }

@@ -19,7 +19,7 @@
 // useGetCaseAttachments (React Query) instead of useSplApi's useGetApi.
 import { Box, ButtonBase, Stack, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { CircleAlertIcon, ClockIcon } from "@wso2/oxygen-ui-icons-react";
-import { usePermissions } from "@features/spl/api/permissionsContext";
+import { usePermissions } from "@features/sales-sa/api/permissionsContext";
 import { useAttachmentDownload } from "../api/useAttachmentDownload";
 import { useGetCaseAttachments } from "../api/useCases";
 import type { AttachmentDetails } from "../api/caseTypes";

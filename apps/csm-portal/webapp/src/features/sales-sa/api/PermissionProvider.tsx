@@ -25,7 +25,7 @@ import { PermissionContext, type Permissions } from "./permissionsContext";
 // useAccess.ts for why the earlier client-side-groups exception was
 // removed. Three independent booleans, each a role-membership check — UI
 // guidance only: the Go backend enforces its own copies of these same
-// checks server-side (internal/handler/auth.go's requireSPLPermission).
+// checks server-side (internal/handler/auth.go's requireViewerPermission).
 export function PermissionProvider({ children }: { children: ReactNode }) {
   let roles: string[] | undefined;
   try {

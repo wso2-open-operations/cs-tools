@@ -34,7 +34,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { AlertTriangleIcon, FileTextIcon } from "@wso2/oxygen-ui-icons-react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import { usePermissions } from "@features/spl/api/permissionsContext";
+import { usePermissions } from "@features/sales-sa/api/permissionsContext";
 import { useGetSplAccount } from "../api/useAccountsApi";
 import type { AccountDetails } from "../api/accountTypes";
 import ListAccountProjects from "./ListAccountProjects";

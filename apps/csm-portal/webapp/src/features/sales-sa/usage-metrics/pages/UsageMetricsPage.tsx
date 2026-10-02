@@ -43,11 +43,11 @@ import {
 } from "@wso2/oxygen-ui";
 import type { SelectChangeEvent } from "@mui/material";
 import { LockIcon, SearchIcon, CalendarIcon } from "@wso2/oxygen-ui-icons-react";
-import { usePermissions } from "@features/spl/api/permissionsContext";
-import { usePostApi, useParallelPostApi } from "@features/spl/usage-metrics/api/useUsageMetricsApi";
-import { type StatSummary, fmtNumber, computeStats, extractVersion } from "@features/spl/usage-metrics/utils/formatters";
-import { ProductBreakdownRow, type ProductBreakdownRowProps } from "@features/spl/usage-metrics/components/ProductBreakdownRow";
-import { METRIC_CHART_CONFIG } from "@features/spl/usage-metrics/utils/usageMetricsProductClassifier";
+import { usePermissions } from "@features/sales-sa/api/permissionsContext";
+import { usePostApi, useParallelPostApi } from "@features/sales-sa/usage-metrics/api/useUsageMetricsApi";
+import { type StatSummary, fmtNumber, computeStats, extractVersion } from "@features/sales-sa/usage-metrics/utils/formatters";
+import { ProductBreakdownRow, type ProductBreakdownRowProps } from "@features/sales-sa/usage-metrics/components/ProductBreakdownRow";
+import { METRIC_CHART_CONFIG } from "@features/sales-sa/usage-metrics/utils/usageMetricsProductClassifier";
 import type {
   SnInstancesResponse,
   DeploymentsSearchResponse,
@@ -55,7 +55,7 @@ import type {
   DeployedProductsSearchResponse,
   SnDeployedProductMetricsResponse,
   SnDeployedProductUsageCountsResponse,
-} from "@features/spl/usage-metrics/api/usageMetricsTypes";
+} from "@features/sales-sa/usage-metrics/api/usageMetricsTypes";
 
 interface ProjectListItem {
   id: string;

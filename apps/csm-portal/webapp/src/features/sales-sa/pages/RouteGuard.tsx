@@ -18,8 +18,8 @@ import { type JSX } from "react";
 import { Outlet } from "react-router";
 import { Skeleton } from "@wso2/oxygen-ui";
 import Error403Page from "@components/error/Error403Page";
-import { PermissionProvider } from "@features/spl/api/PermissionProvider";
-import { useAccess } from "@features/spl/api/useAccess";
+import { PermissionProvider } from "@features/sales-sa/api/PermissionProvider";
+import { useAccess } from "@features/sales-sa/api/useAccess";
 
 /**
  * Route guard for every `/spl/*` route: hiding the nav section (see

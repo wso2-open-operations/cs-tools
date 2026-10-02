@@ -25,7 +25,7 @@ import { Box, Button, Card, CardContent, Stack, Typography } from "@wso2/oxygen-
 import { useTheme } from "@mui/material/styles";
 import { CircleAlertIcon, ClockIcon, StickyNoteIcon } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
-import { usePermissions } from "@features/spl/api/permissionsContext";
+import { usePermissions } from "@features/sales-sa/api/permissionsContext";
 import { useInlineAttachmentImages } from "../utils/useInlineAttachmentImages";
 import { useGetCaseComments } from "../api/useCases";
 import type { CaseCommentDetails } from "../api/caseTypes";
