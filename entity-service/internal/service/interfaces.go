@@ -1267,6 +1267,17 @@ type OutageService interface {
 	GetOutageMetadata(ctx context.Context) (domain.OutageMetadataResponse, error)
 }
 
+// EngagementAllocationService defines the operations available on the
+// customer-engagement allocation tables — see
+// domain.StatusUpdateReminderRecipient's doc comment for what they are.
+type EngagementAllocationService interface {
+	// StatusUpdateReminderRecipients returns everyone who has a live
+	// allocation covering cycleStartDate (YYYY-MM-DD) and has not published
+	// their own status update for that cycle. A ValidationError is returned
+	// if cycleStartDate is missing or not a valid date.
+	StatusUpdateReminderRecipients(ctx context.Context, cycleStartDate string) (domain.StatusUpdateReminderResponse, error)
+}
+
 // CloudStatusDashboardService serves what the public cloud status dashboard
 // renders, replacing five ServiceNow Scripted REST APIs with Postgres reads.
 // Read-only: the dashboard must never be able to change what it shows.

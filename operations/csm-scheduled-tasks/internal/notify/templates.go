@@ -20,6 +20,7 @@ import (
 	_ "embed"
 	"fmt"
 	"html"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,9 @@ var staleCasesReportTemplateRaw string
 
 //go:embed templates/open_cases_report.html
 var openCasesReportTemplateRaw string
+
+//go:embed templates/allocation_status_update_reminder.html
+var allocationReminderTemplateRaw string
 
 // wso2LogoURL is the white WSO2 logo variant — the alert template's header
 // sits on an orange background, unlike
@@ -56,6 +60,7 @@ func bakeLogo(raw string) string {
 var alertTemplate = bakeLogo(alertTemplateRaw)
 var staleCasesReportTemplate = bakeLogo(staleCasesReportTemplateRaw)
 var openCasesReportTemplate = bakeLogo(openCasesReportTemplateRaw)
+var allocationReminderTemplate = bakeLogo(allocationReminderTemplateRaw)
 
 // escapeHTML mirrors integrations/csm-notification-service's own
 // internal/notifications.escapeHTML exactly: HTML-escapes s and
@@ -153,6 +158,56 @@ func RenderOpenCasesReport(data OpenCasesReportData) string {
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
 	)
 	return replacer.Replace(openCasesReportTemplate)
+}
+
+// RenderAllocationStatusUpdateReminder fills in the weekly
+// engagement-allocation status-update reminder template.
+//
+// portalBaseURL is the CSM Portal this deployment's recipients actually use
+// (cmd/server/main.go's CSM_PORTAL_WEB_BASE_URL). When it is set, the
+// "Engagements" step becomes a link straight to that portal's engagements
+// page; when it is empty the step still reads correctly as plain text, so an
+// unconfigured deployment sends a usable email rather than one with a broken
+// or half-rendered link.
+//
+// It takes no other arguments, and that is the point: this is the one email
+// this component sends that is addressed to the person who has to ACT, not to
+// an ops audience reading a report about other people. The copy is identical
+// for every recipient -- no case list, no name, no per-person detail -- so
+// there is nothing else to substitute beyond the footer year.
+//
+// The copy is the ServiceNow flow's own body, with the navigation steps
+// rewritten: the original told people to log into ServiceNow Agent Workspace
+// and use "Customer Engagements" > "My Allocations", which no longer exists
+// for them.
+func RenderAllocationStatusUpdateReminder(portalBaseURL string) string {
+	replacer := strings.NewReplacer(
+		"<!-- [ENGAGEMENTS_LINK] -->", engagementsLink(portalBaseURL),
+		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
+	)
+	return replacer.Replace(allocationReminderTemplate)
+}
+
+// engagementsLink renders the "Engagements" step, as a hyperlink when a usable
+// portal base URL is configured and as bold plain text otherwise.
+//
+// Anything that is not an absolute http(s) URL is treated as unconfigured
+// rather than interpolated: the value reaches this function straight from the
+// environment, and a malformed or non-http value would otherwise be pasted
+// into an href in outbound mail.
+func engagementsLink(portalBaseURL string) string {
+	const label = "<strong>&quot;Engagements&quot;</strong>"
+
+	trimmed := strings.TrimRight(strings.TrimSpace(portalBaseURL), "/")
+	if trimmed == "" {
+		return label
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return label
+	}
+	href := escapeHTML(trimmed + "/engagements")
+	return `<a href="` + href + `" style="color:#ff7300; text-decoration:underline;">` + label + `</a>`
 }
 
 // renderCaseRows builds one <tr> per case for RenderStaleCasesReport. A case
