@@ -1,134 +1,289 @@
-# # Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
-# #
-# # WSO2 LLC. licenses this file to you under the Apache License,
-# # Version 2.0 (the "License"); you may not use this file except
-# # in compliance with the License.
-# # You may obtain a copy of the License at
-# #
-# # http://www.apache.org/licenses/LICENSE-2.0
-# #
-# # Unless required by applicable law or agreed to in writing,
-# # software distributed under the License is distributed on an
-# # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# # KIND, either express or implied.  See the License for the
-# # specific language governing permissions and limitations
-# # under the License.
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-# # ⚠️ NOT RUNNABLE IN CI YET — session provisioning is unsolved.
-# #
-# # The specs authenticate by replaying a captured browser session from
-# # apps/customer-portal/webapp/tests/e2e/storageState/session.json. That file
-# # holds real tokens and is git-ignored, so it does not exist on a runner. Without
-# # it withSession() skips every test and the job exits 0 — a green tick that means
-# # "nothing ran", not "E2E passed". The guard step below turns that into an
-# # explicit failure instead.
-# #
-# # Before enabling this on push/PR, three things need settling:
-# #   1. Session provisioning — inject a bundle from a secret, or drive a real
-# #      login. Access tokens expire in well under an hour, so a stored secret goes
-# #      stale between runs.
-# #   2. Target environment — .env.e2e points at staging with E2E_NO_WEBSERVER=1,
-# #      so the build/preview steps below are currently inert: the tests never hit
-# #      localhost:3000. (They could not anyway — public/config.js is git-ignored,
-# #      so a preview build boots without runtime config.) Either drop those steps
-# #      or capture a localhost session and override E2E_BASE_URL here.
-# #   3. Test data — the creation specs write to a REAL backend and there is no
-# #      delete endpoint, so every run leaves permanent cases and service requests.
-# #      Only the "Create Case — validation" suite is side-effect free.
-# #
-# # Kept as workflow_dispatch-only until the above is resolved.
+# Customer Portal — Playwright E2E.
+#
+# The suite signs itself in: the `auth` setup project performs a real
+# username/password/TOTP login and writes the session every spec replays, so no
+# session file needs provisioning here. It needs the credentials below —
+# usernames as repo VARIABLES, passwords and TOTP seeds as SECRETS. Without them
+# the sign-in skips, every spec skips, and the job would report a green tick
+# meaning "nothing ran"; the "Verify credentials" step turns that into an
+# explicit failure instead.
+#
+# ⚠️ These specs run against a REAL deployed backend. Creation specs write
+# records that cannot be deleted, so they are gated behind
+# E2E_ALLOW_PERMANENT_WRITES and stay OFF here. A scheduled or per-PR run must
+# not accumulate permanent customer-visible data.
 
-# name: END TO END TESTS
+name: Customer Portal E2E Tests
 
-# on:
-#   #push:
-#     #branches:
-#       #- customer-portal-milestone-1
-#   workflow_dispatch:
+# Manual only.
+#
+# The push and pull_request triggers are deliberately absent: these specs run
+# against a REAL deployed environment under a single shared account, so every
+# run competes with anyone else testing and some of it writes records that
+# cannot be deleted. Firing on every push to a 300-test suite that signs in for
+# real would also rate-limit the IdP.
+#
+# Re-enable them only once the suite has a disposable environment of its own.
+on:
+  workflow_dispatch:
 
-# # The specs write to a single shared staging tenant: a service request comment, a
-# # kept attachment per case, a call request, deployments. Two runs overlapping
-# # would interleave those writes — two dispatches could both find a record absent
-# # and both create it. Serialised rather than cancelled, because a half-finished
-# # run leaves records behind either way and cancelling mid-write is worse than
-# # queueing.
-# concurrency:
-#   group: e2e-tests
-#   cancel-in-progress: false
+# Least privilege, declared explicitly: without a `permissions` block the
+# GITHUB_TOKEN inherits the repository/organisation default, which is commonly
+# read-write across every scope. This workflow only reads the repository — the
+# checkout — and writes nothing back. Artifact upload uses the Actions runtime
+# token rather than GITHUB_TOKEN, so it is unaffected by this.
+permissions:
+  contents: read
 
-# jobs:
-#   e2e:
-#     name: Run Playwright E2E tests
-#     runs-on: ubuntu-latest
+env:
+  TZ: Asia/Kolkata 
 
-#     defaults:
-#       run:
-#         working-directory: apps/customer-portal/webapp
+# One run at a time: the suite shares a single account against a live backend,
+# so two concurrent runs interfere with each other. Queued rather than
+# cancelled — a manual run is deliberate, and killing someone's half-finished
+# run mid-way can leave the AI assistant toggled on for everyone else.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
-#     steps:
-#       - name: Checkout repository
-#         uses: actions/checkout@v4
+defaults:
+  run:
+    # package.json, pnpm-lock.yaml and playwright.config.ts all live here — the
+    # specs under tests/e2e are not a separate package.
+    working-directory: apps/customer-portal/webapp
 
-#       - name: Setup pnpm
-#         uses: pnpm/action-setup@v4
-#         with:
-#           version: 9
+jobs:
+  test:
+    name: E2E (chromium)
+    timeout-minutes: 240
+    runs-on: ubuntu-latest
 
-#       - name: Setup Node.js
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: 20
-#           cache: pnpm
-#           cache-dependency-path: apps/customer-portal/webapp/pnpm-lock.yaml
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-#       # Fail fast rather than reporting a green "all skipped" run. withSession()
-#       # skips every spec when the bundle is absent, which Playwright counts as
-#       # success — so without this check the job passes having tested nothing.
-#       - name: Verify E2E session bundle is present
-#         run: |
-#           if [ ! -f tests/e2e/storageState/session.json ]; then
-#             echo "::error::No tests/e2e/storageState/session.json on the runner."
-#             echo "::error::Every spec would skip and this job would pass without testing anything."
-#             echo "::error::See the header of .github/workflows/e2e-tests.yml — CI session provisioning is not solved yet."
-#             exit 1
-#           fi
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
-#       - name: Install dependencies
-#         run: pnpm install --frozen-lockfile
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.0.0
+          cache: "pnpm"
+          cache-dependency-path: apps/customer-portal/webapp/pnpm-lock.yaml
 
-#       - name: Install Playwright Chromium browser
-#         run: pnpm exec playwright install --with-deps chromium
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-#       - name: Build application
-#         run: pnpm run build
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 15
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          
+      - name: Verify configuration and credentials
+        # Without this the job is worse than useless: the auth setup project
+        # SKIPS when its credentials are absent, every spec then skips on the
+        # missing session, and Playwright exits 0 — a green tick meaning
+        # "nothing ran", which is indistinguishable from success in the checks
+        # UI. Only the identity actually being used is required, so configuring
+        # one account does not oblige you to configure both.
+        env:
+          # No fallback: see the check below.
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+          E2E_LOGIN_IDENTITY: ${{ vars.E2E_LOGIN_IDENTITY != '' && vars.E2E_LOGIN_IDENTITY || 'admin' }}
+          E2E_USERNAME: ${{ vars.E2E_USERNAME }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          E2E_TOTP_SECRET: ${{ secrets.E2E_TOTP_SECRET }}
+          E2E_PORTAL_USERNAME: ${{ secrets.E2E_PORTAL_USERNAME }}
+          E2E_PORTAL_PASSWORD: ${{ secrets.E2E_PORTAL_PASSWORD }}
+          E2E_PORTAL_TOTP_SECRET: ${{ secrets.E2E_PORTAL_TOTP_SECRET }}
+        run: |
+          set -eu
 
-#       - name: Start preview server
-#         run: pnpm run preview -- --host 0.0.0.0 --port 3000 &
+          # The target is REQUIRED, with no localhost default. A runner serves
+          # nothing on localhost: the dev server is not started, and could not
+          # be — public/config.js is git-ignored, so a preview build boots
+          # without runtime config. Defaulting there would point the whole suite
+          # at a dead URL and fail as a wall of connection errors.
+          if [ -z "${E2E_BASE_URL:-}" ]; then
+            echo "::error::E2E_BASE_URL is not set. Add it as a repository or"
+            echo "environment VARIABLE naming the deployment to test, e.g."
+            echo "https://support-stg.wso2.com — it must be the environment the"
+            echo "configured credentials belong to."
+            exit 1
+          fi
+          echo "Target: $E2E_BASE_URL"
 
-#       - name: Wait for preview server
-#         run: |
-#           for i in {1..30}; do
-#             if curl -sSf http://localhost:3000 > /dev/null; then
-#               echo "Server is up"
-#               exit 0
-#             fi
-#             echo "Waiting for server to be ready..."
-#             sleep 2
-#           done
-#           echo "Server did not start in time" >&2
-#           exit 1
+          identity="${E2E_LOGIN_IDENTITY:-admin}"
 
-#       - name: Run Playwright tests
-#         env:
-#           CI: true
-#         run: pnpm run test:e2e
+          # Mirrors loginIdentity() in tests/e2e/auth/credentials.ts, which
+          # accepts exactly these two and throws on anything else — caught here
+          # so a typo fails in a second rather than after a browser install.
+          case "$identity" in
+            admin)
+              prefix="E2E"
+              user="${E2E_USERNAME:-}"
+              pass="${E2E_PASSWORD:-}"
+              totp="${E2E_TOTP_SECRET:-}"
+              ;;
+            portal)
+              prefix="E2E_PORTAL"
+              user="${E2E_PORTAL_USERNAME:-}"
+              pass="${E2E_PORTAL_PASSWORD:-}"
+              totp="${E2E_PORTAL_TOTP_SECRET:-}"
+              ;;
+            *)
+              echo "::error::E2E_LOGIN_IDENTITY is '$identity'; expected 'admin' or 'portal'."
+              exit 1
+              ;;
+          esac
 
-#       - name: Upload Playwright artifacts
-#         if: always()
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: playwright-report
-#           path: |
-#             apps/customer-portal/webapp/playwright-report/
-#             apps/customer-portal/webapp/test-results/
-#           retention-days: 7
+          missing=""
+          [ -n "$user" ] || missing="$missing ${prefix}_USERNAME"
+          [ -n "$pass" ] || missing="$missing ${prefix}_PASSWORD"
+          [ -n "$totp" ] || missing="$missing ${prefix}_TOTP_SECRET"
+
+          if [ -n "$missing" ]; then
+            echo "::error::Missing credentials for identity '$identity':$missing"
+            echo "Set the username as a repository VARIABLE and the password and"
+            echo "TOTP seed as SECRETS, then re-run."
+            exit 1
+          fi
+
+          # The username is a variable, so naming it here is safe and says which
+          # account the run will use.
+          echo "Credentials present for identity '$identity' ($user)."
+
+      - name: Report clock skew vs target
+        continue-on-error: true
+        env:
+          # Declared here too: env set on one step is not visible to another.
+          # Validated as non-empty by the step above, so no fallback.
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+        run: |
+          echo "Runner UTC : $(date -u)"
+          echo "Runner $TZ : $(date)"
+          remote=$(curl -sSI --max-time 20 "$E2E_BASE_URL" | grep -i '^date:' | cut -d' ' -f2-)
+          echo "Target Date header: ${remote:-<none>}"
+          if [ -n "$remote" ]; then
+            skew=$(( $(date -u -d "$remote" +%s) - $(date -u +%s) ))
+            echo "Skew: ${skew}s (runner is behind by this many seconds)"
+          fi
+
+      - name: Run E2E tests
+        env:
+          # Target environment, from a repo/environment VARIABLE — it is not a
+          # credential, and keeping it visible means a failing run shows which
+          # deployment it ran against. Required: the step above fails the job
+          # when it is unset. The minted session is scoped to this origin, so it
+          # must match the deployment the credentials belong to.
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+          # Always 1. CI runs against a deployed environment and never boots the
+          # vite dev server — it could not serve a working app anyway, since
+          # public/config.js is git-ignored. Not configurable, so an empty
+          # variable cannot silently turn this into a localhost run.
+          E2E_NO_WEBSERVER: "1"
+          # "admin" (default) or "portal" — see tests/e2e/auth/credentials.ts.
+          E2E_LOGIN_IDENTITY: ${{ vars.E2E_LOGIN_IDENTITY != '' && vars.E2E_LOGIN_IDENTITY || 'admin' }}
+          # The account to sign in as. A variable, not a secret: it identifies
+          # which account ran rather than granting access, and the suite already
+          # prints it on every run (describeCredentials) — masking it would only
+          # hide which account a failure belongs to.
+          E2E_USERNAME: ${{ vars.E2E_USERNAME }}
+          # Real staging password and TOTP seed: masked secrets only, never vars.
+          # When these are unset the auth setup project skips and the specs skip
+          # with it, rather than failing.
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          E2E_TOTP_SECRET: ${{ secrets.E2E_TOTP_SECRET }}
+          # Only needed when E2E_LOGIN_IDENTITY is "portal".
+          E2E_PORTAL_USERNAME: ${{ secrets.E2E_PORTAL_USERNAME }}
+          E2E_PORTAL_PASSWORD: ${{ secrets.E2E_PORTAL_PASSWORD }}
+          E2E_PORTAL_TOTP_SECRET: ${{ secrets.E2E_PORTAL_TOTP_SECRET }}
+          # ── The 3x4 identity matrix, used by the RBAC specs ─────────────
+          #
+          # Addressed as E2E_<PROJECT>_<ROLE>_* by readRoleCredentials() in
+          # tests/e2e/auth/credentials.ts. Usernames are VARIABLES (identifiers,
+          # and the specs log them so a failure names the account); passwords and
+          # TOTP seeds are SECRETS.
+          #
+          # Any pair that is unset simply skips its tests — hasRoleCredentials()
+          # gates on all three being present, so a partially configured matrix
+          # reports which combination is missing rather than failing obscurely.
+          #
+          # Subscription
+          E2E_SUB_ADMIN_USERNAME: ${{ vars.E2E_SUB_ADMIN_USERNAME }}
+          E2E_SUB_ADMIN_PASSWORD: ${{ secrets.E2E_SUB_ADMIN_PASSWORD }}
+          E2E_SUB_ADMIN_TOTP_SECRET: ${{ secrets.E2E_SUB_ADMIN_TOTP_SECRET }}
+          E2E_SUB_PORTAL_USERNAME: ${{ vars.E2E_SUB_PORTAL_USERNAME }}
+          E2E_SUB_PORTAL_PASSWORD: ${{ secrets.E2E_SUB_PORTAL_PASSWORD }}
+          E2E_SUB_PORTAL_TOTP_SECRET: ${{ secrets.E2E_SUB_PORTAL_TOTP_SECRET }}
+          E2E_SUB_SECURITY_USERNAME: ${{ vars.E2E_SUB_SECURITY_USERNAME }}
+          E2E_SUB_SECURITY_PASSWORD: ${{ secrets.E2E_SUB_SECURITY_PASSWORD }}
+          E2E_SUB_SECURITY_TOTP_SECRET: ${{ secrets.E2E_SUB_SECURITY_TOTP_SECRET }}
+          E2E_SUB_LEAD_USERNAME: ${{ vars.E2E_SUB_LEAD_USERNAME }}
+          E2E_SUB_LEAD_PASSWORD: ${{ secrets.E2E_SUB_LEAD_PASSWORD }}
+          E2E_SUB_LEAD_TOTP_SECRET: ${{ secrets.E2E_SUB_LEAD_TOTP_SECRET }}
+          #
+          # Managed Cloud Subscription
+          E2E_MS_SUB_ADMIN_USERNAME: ${{ vars.E2E_MS_SUB_ADMIN_USERNAME }}
+          E2E_MS_SUB_ADMIN_PASSWORD: ${{ secrets.E2E_MS_SUB_ADMIN_PASSWORD }}
+          E2E_MS_SUB_ADMIN_TOTP_SECRET: ${{ secrets.E2E_MS_SUB_ADMIN_TOTP_SECRET }}
+          E2E_MS_SUB_PORTAL_USERNAME: ${{ vars.E2E_MS_SUB_PORTAL_USERNAME }}
+          E2E_MS_SUB_PORTAL_PASSWORD: ${{ secrets.E2E_MS_SUB_PORTAL_PASSWORD }}
+          E2E_MS_SUB_PORTAL_TOTP_SECRET: ${{ secrets.E2E_MS_SUB_PORTAL_TOTP_SECRET }}
+          E2E_MS_SUB_SECURITY_USERNAME: ${{ vars.E2E_MS_SUB_SECURITY_USERNAME }}
+          E2E_MS_SUB_SECURITY_PASSWORD: ${{ secrets.E2E_MS_SUB_SECURITY_PASSWORD }}
+          E2E_MS_SUB_SECURITY_TOTP_SECRET: ${{ secrets.E2E_MS_SUB_SECURITY_TOTP_SECRET }}
+          E2E_MS_SUB_LEAD_USERNAME: ${{ vars.E2E_MS_SUB_LEAD_USERNAME }}
+          E2E_MS_SUB_LEAD_PASSWORD: ${{ secrets.E2E_MS_SUB_LEAD_PASSWORD }}
+          E2E_MS_SUB_LEAD_TOTP_SECRET: ${{ secrets.E2E_MS_SUB_LEAD_TOTP_SECRET }}
+          #
+          # Cloud Support
+          E2E_CLOUD_ADMIN_USERNAME: ${{ vars.E2E_CLOUD_ADMIN_USERNAME }}
+          E2E_CLOUD_ADMIN_PASSWORD: ${{ secrets.E2E_CLOUD_ADMIN_PASSWORD }}
+          E2E_CLOUD_ADMIN_TOTP_SECRET: ${{ secrets.E2E_CLOUD_ADMIN_TOTP_SECRET }}
+          E2E_CLOUD_PORTAL_USERNAME: ${{ vars.E2E_CLOUD_PORTAL_USERNAME }}
+          E2E_CLOUD_PORTAL_PASSWORD: ${{ secrets.E2E_CLOUD_PORTAL_PASSWORD }}
+          E2E_CLOUD_PORTAL_TOTP_SECRET: ${{ secrets.E2E_CLOUD_PORTAL_TOTP_SECRET }}
+          E2E_CLOUD_SECURITY_USERNAME: ${{ vars.E2E_CLOUD_SECURITY_USERNAME }}
+          E2E_CLOUD_SECURITY_PASSWORD: ${{ secrets.E2E_CLOUD_SECURITY_PASSWORD }}
+          E2E_CLOUD_SECURITY_TOTP_SECRET: ${{ secrets.E2E_CLOUD_SECURITY_TOTP_SECRET }}
+          E2E_CLOUD_LEAD_USERNAME: ${{ vars.E2E_CLOUD_LEAD_USERNAME }}
+          E2E_CLOUD_LEAD_PASSWORD: ${{ secrets.E2E_CLOUD_LEAD_PASSWORD }}
+          E2E_CLOUD_LEAD_TOTP_SECRET: ${{ secrets.E2E_CLOUD_LEAD_TOTP_SECRET }}
+        run: pnpm run test:e2e
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: apps/customer-portal/webapp/playwright-report/
+          retention-days: 30
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results
+          path: apps/customer-portal/webapp/test-results/
+          retention-days: 7

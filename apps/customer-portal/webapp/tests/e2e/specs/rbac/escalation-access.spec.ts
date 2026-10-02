@@ -46,10 +46,7 @@
 
 import { test, expect } from "../../fixtures/test";
 import { CaseDetailPage } from "../../pages/CaseDetailPage";
-import {
-  hasRoleCredentials,
-  type RoleKey,
-} from "../../auth/credentials";
+import { hasRoleCredentials, type RoleKey } from "../../auth/credentials";
 import { signInAsRole } from "../../auth/signInAsRole";
 import {
   CASE_INPUT,
@@ -58,10 +55,7 @@ import {
   ProjectType,
 } from "../../config/testData";
 import { CASE_DETAIL, CASE_ESCALATION } from "../../utils/selectors";
-import {
-  createCaseDirect,
-  skipWhenUnconfigured,
-} from "../../utils/caseFlows";
+import { createCaseDirect, skipWhenUnconfigured } from "../../utils/caseFlows";
 
 // These specs perform a REAL sign-in — a password and a TOTP code are typed into
 // the page. The chromium project records trace and video `retain-on-failure`, and
@@ -91,8 +85,8 @@ const MAX_LEVEL = 5;
  */
 const EXPECTATIONS: { role: RoleKey; maxLevel: number }[] = [
   { role: "ADMIN", maxLevel: 3 },
-  { role: "PORTAL", maxLevel: MAX_LEVEL },
-  { role: "LEAD", maxLevel: 3 },
+  { role: "PORTAL", maxLevel: 3 },
+  { role: "LEAD", maxLevel: MAX_LEVEL },
   // ⚠️ SECURITY = 0 is a REQUIREMENT, not a description of the current build.
   // `showEscalateButton` in CaseDetailsActionRow gates only on the escalation
   // level, the case not being Closed, EL5 being the ceiling, and `isCurrentUserLead`
@@ -181,9 +175,7 @@ test.describe("RBAC — escalation ceiling per user type", () => {
         ).toBeVisible({ timeout: 60_000 });
 
         await caseDetail.openEscalateModal();
-        await expect(
-          caseDetail.escalationLevelChip(`EL${from}`),
-        ).toBeVisible();
+        await expect(caseDetail.escalationLevelChip(`EL${from}`)).toBeVisible();
         await expect(caseDetail.escalationLevelChip(next)).toBeVisible();
 
         const reason = `${ESCALATION_REASON} Step EL${from} to ${next}.`;
