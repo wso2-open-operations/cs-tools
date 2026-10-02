@@ -58,6 +58,13 @@ func main() {
 	}
 	if pool != nil {
 		defer pool.Close()
+		// Row-level security only protects a role it applies to; a superuser,
+		// a BYPASSRLS role, or the table owner without FORCE silently sees
+		// every row. Say so loudly at startup, and refuse to start when
+		// RLS_PROTECTION_REQUIRED=true.
+		if err := db.VerifyRLSProtection(context.Background(), pool, cfg.RLSProtectionRequired); err != nil {
+			log.Fatalf("RLS protection: %v", err)
+		}
 	} else {
 		log.Printf("no database pool (DATA_SOURCE=%s): event-publish-failures, sla-clocks, and scheduled-task-run endpoints are disabled", cfg.DataSource)
 	}

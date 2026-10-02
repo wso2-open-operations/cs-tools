@@ -31,8 +31,19 @@ package repository_test
 
 import (
 	"context"
+	"os"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
+
+// rlsAllowNoForceEnv opts the schema test into the "separate application role"
+// deployment (docs/rls-database-roles.md): the tables are owned by one role and
+// FORCE ROW LEVEL SECURITY is off so that role (admin tools, migrations, sync
+// jobs) is exempt, while the service connects as a different, non-owner role
+// that RLS binds without FORCE. It is off by default so the default expectation
+// is unchanged: FORCE on every protected table.
+const rlsAllowNoForceEnv = "RLS_SCHEMA_TEST_ALLOW_NO_FORCE"
 
 // rlsProtectedTables is every table this migration series (000085,
 // 0141-0151, minus sla/incident/incident_task/problem, dropped by 0153) put under FORCE ROW LEVEL SECURITY, gathered directly from
@@ -105,6 +116,22 @@ func TestRLSSchemaIntegration_EveryProtectedTableHasForceRowLevelSecurity(t *tes
 		t.Fatalf("iterate pg_class rows: %v", err)
 	}
 
+	// With the opt-in set, an un-forced table is accepted only if the role this
+	// test connected as is genuinely bound by RLS (not a superuser, not
+	// BYPASSRLS, not an owner of an un-forced table). Otherwise "no FORCE"
+	// would really mean "no protection" and must still fail.
+	noForceAllowed := false
+	if os.Getenv(rlsAllowNoForceEnv) == "true" {
+		protection, err := db.CheckRLSProtection(ctx, pool)
+		if err != nil {
+			t.Fatalf("check RLS protection of the test role: %v", err)
+		}
+		if protection.Exempt() {
+			t.Fatalf("%s=true but the test role is exempt from RLS: %s", rlsAllowNoForceEnv, protection.Summary())
+		}
+		noForceAllowed = true
+	}
+
 	for _, table := range rlsProtectedTables {
 		state, ok := found[table]
 		if !ok {
@@ -114,7 +141,7 @@ func TestRLSSchemaIntegration_EveryProtectedTableHasForceRowLevelSecurity(t *tes
 		if !state.enabled {
 			t.Errorf("table %q: relrowsecurity = false, want true (ROW LEVEL SECURITY not enabled)", table)
 		}
-		if !state.forced {
+		if !state.forced && !noForceAllowed {
 			t.Errorf("table %q: relforcerowsecurity = false, want true (FORCE ROW LEVEL SECURITY not set -- a non-superuser table owner would bypass its own policies)", table)
 		}
 	}
