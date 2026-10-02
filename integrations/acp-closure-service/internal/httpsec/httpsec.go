@@ -36,21 +36,25 @@ import (
 // over plain http: that traffic never leaves the machine, so the
 // cleartext-interception risk this check exists for doesn't apply — and it's
 // exactly what every client test uses via httptest.NewServer, which only
-// ever binds to loopback.
+// ever binds to loopback. Errors never include rawURL (or a wrapped parse
+// error): it may carry userinfo or secret query parameters and callers log
+// the error.
 func RequireHTTPS(name, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("parse %s %q: %w", name, rawURL, err)
+		// url.Error embeds the input URL, which may carry userinfo or a secret
+		// query parameter; neither it nor rawURL may reach a log line.
+		return fmt.Errorf("%s is not a valid URL", name)
 	}
 	// "https://" alone parses cleanly and would pass a scheme-only check,
 	// then fail on every request with a far less obvious error.
 	if u.Hostname() == "" {
-		return fmt.Errorf("%s has no host: %q", name, rawURL)
+		return fmt.Errorf("%s has no host", name)
 	}
 	if u.Scheme == "https" || isLoopback(u.Hostname()) {
 		return nil
 	}
-	return fmt.Errorf("%s must use https, got %q", name, rawURL)
+	return fmt.Errorf("%s must use https (got scheme %q)", name, u.Scheme)
 }
 
 func isLoopback(host string) bool {

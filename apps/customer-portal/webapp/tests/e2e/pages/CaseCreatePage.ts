@@ -244,6 +244,46 @@ export class CaseCreatePage {
     await this.page.getByRole("option", { name: option, exact: true }).click();
   }
 
+  /**
+   * Confirms a Select that no longer shows its placeholder genuinely holds a
+   * chosen value, so "(already selected)" is only ever returned on evidence.
+   *
+   * The placeholder locators stop matching both when a value was chosen AND when
+   * the control never rendered (a failed options fetch leaves the Skeleton in
+   * place). Treating the second as the first would hide a real failure, so the
+   * fallback requires a visible combobox whose text is not a placeholder.
+   *
+   * The two value Selects are the form's only comboboxes besides issue type and
+   * severity (which have ids). Deployment is the first of them; Product Version
+   * is the last, which also holds on Cloud Support where Deployment is hidden.
+   *
+   * @param position - Which of the value Selects to inspect.
+   * @param field - Field name, for the failure message.
+   * @throws When the control is absent or still shows a placeholder.
+   */
+  private async expectAlreadyChosen(
+    position: "first" | "last",
+    field: string,
+  ): Promise<void> {
+    const candidates = this.main().locator(
+      `[role="combobox"]:not(${CREATE_CASE.ids.issueType}):not(${CREATE_CASE.ids.severity})`,
+    );
+    const control = position === "first" ? candidates.first() : candidates.last();
+
+    await expect(
+      control,
+      `${field}: its placeholder never appeared and no selected value is ` +
+        "shown either — the control did not render",
+    ).toBeVisible({ timeout: FORM_LOAD_TIMEOUT_MS });
+
+    const shown = (await control.innerText()).trim();
+    if (!shown || /^select\b/i.test(shown)) {
+      throw new Error(
+        `${field} was expected to be pre-selected but shows "${shown}".`,
+      );
+    }
+  }
+
   async selectDeployment(name: string): Promise<string> {
     const select = this.deploymentSelect();
 
@@ -255,7 +295,10 @@ export class CaseCreatePage {
       .waitFor({ state: "attached", timeout: FORM_LOAD_TIMEOUT_MS })
       .then(() => true)
       .catch(() => false);
-    if (!needsChoosing) return "(already selected)";
+    if (!needsChoosing) {
+      await this.expectAlreadyChosen("first", "Deployment");
+      return "(already selected)";
+    }
 
     await expect(select).toBeEnabled({ timeout: FORM_LOAD_TIMEOUT_MS });
     await select.click();
@@ -322,7 +365,10 @@ export class CaseCreatePage {
       .waitFor({ state: "attached", timeout: FORM_LOAD_TIMEOUT_MS })
       .then(() => true)
       .catch(() => false);
-    if (!needsChoosing) return "(already selected)";
+    if (!needsChoosing) {
+      await this.expectAlreadyChosen("last", "Product Version");
+      return "(already selected)";
+    }
 
     // Waits for enabled on the long form-load budget: the options are refetched
     // after a deployment is picked, and the control is disabled until they land.

@@ -19,6 +19,8 @@ import {
   appendWidgetTitleParam,
   buildWidgetPreviewHref,
   describeWidgetFilters,
+  isCaseFieldFilterArray,
+  isFieldFilterEntry,
   parseWidgetPreviewFilters,
   readWidgetTitleParam,
   resolveCurrentUserSentinels,
@@ -473,5 +475,22 @@ describe("widget preview URL — non-case resourceType's own filters array (chan
     const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
     expect(filters.states).toEqual(["scheduled"]);
     expect(filters.filters).toEqual([{ field: "approval", op: "eq", values: ["approved"] }]);
+  });
+});
+
+describe("isCaseFieldFilterArray — values shape", () => {
+  it("rejects an entry whose values is a string rather than string[]", () => {
+    const bad = { field: "creTeam", op: "in", values: "current-team" };
+    expect(isFieldFilterEntry(bad)).toBe(false);
+    expect(isCaseFieldFilterArray([bad])).toBe(false);
+  });
+
+  it("rejects an entry whose values array holds non-strings", () => {
+    expect(isFieldFilterEntry({ field: "f", op: "in", values: ["a", 1] })).toBe(false);
+  });
+
+  it("accepts string[] values and omitted values (value-less ops)", () => {
+    expect(isFieldFilterEntry({ field: "f", op: "in", values: ["a"] })).toBe(true);
+    expect(isFieldFilterEntry({ field: "f", op: "isEmpty" })).toBe(true);
   });
 });

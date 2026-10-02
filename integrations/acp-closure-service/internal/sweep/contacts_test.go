@@ -245,3 +245,37 @@ func TestProcessProject_V10ContactsFallBackToPrimaryContacts(t *testing.T) {
 		t.Errorf("customer notice recipients = %v, want [petra.primary@customer.example]", got)
 	}
 }
+
+// TestProcessProject_ReadsEveryPageOfContactsWithoutTotal: an endpoint that
+// omits total (it decodes as 0) must not truncate the result to the first
+// page; paging continues until a page holds fewer rows than the page size.
+func TestProcessProject_ReadsEveryPageOfContactsWithoutTotal(t *testing.T) {
+	const total = 120
+	serve := pagedContacts(t, total, func(i int) map[string]any {
+		return map[string]any{"name": fmt.Sprintf("C%d", i), "email": fmt.Sprintf("c%d@customer.example", i), "roles": []string{"BUSINESS_CONTACT"}}
+	})
+	reader := &mockEntityReader{
+		searchProjectContactsFn: func(ctx context.Context, projectID string, body []byte) ([]byte, error) {
+			raw, err := serve(body)
+			if err != nil {
+				return nil, err
+			}
+			var page map[string]any
+			if err := json.Unmarshal(raw, &page); err != nil {
+				return nil, err
+			}
+			delete(page, "total")
+			return json.Marshal(page)
+		},
+	}
+	ntf := &mockNotifier{}
+	now, proj := sevenDayProject()
+
+	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+		t.Fatalf("processProject() error = %v, want nil", err)
+	}
+
+	if got := customerNoticeEmails(t, ntf); len(got) != total {
+		t.Fatalf("customer notice recipients = %d, want %d", len(got), total)
+	}
+}

@@ -165,7 +165,11 @@ export function isCaseFieldFilterArray(value: unknown): value is WidgetCaseField
         e !== null &&
         typeof e === "object" &&
         typeof (e as Record<string, unknown>).field === "string" &&
-        typeof (e as Record<string, unknown>).op === "string",
+        typeof (e as Record<string, unknown>).op === "string" &&
+        // `values` is optional (value-less ops), but when present it must be a
+        // string[]: consumers call array methods on it.
+        ((e as Record<string, unknown>).values === undefined ||
+          isStringArray((e as Record<string, unknown>).values)),
     )
   );
 }

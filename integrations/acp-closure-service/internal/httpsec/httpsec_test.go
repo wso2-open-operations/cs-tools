@@ -16,7 +16,10 @@
 
 package httpsec
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestRequireHTTPS covers the startup URL check both OAuth2 clients use.
 // Anything that would send the client secret or bearer token in cleartext
@@ -43,6 +46,36 @@ func TestRequireHTTPS(t *testing.T) {
 			err := RequireHTTPS("TokenURL", tt.url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RequireHTTPS(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestRequireHTTPS_ErrorOmitsURL: callers log the error, so it must never
+// carry userinfo or a secret query parameter from the configured URL, nor
+// wrap a parse error that embeds it.
+func TestRequireHTTPS_ErrorOmitsURL(t *testing.T) {
+	const secret = "s3cr3t-value"
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{name: "http remote with userinfo", url: "http://user:" + secret + "@csm-integration.example/token"},
+		{name: "http remote with query secret", url: "http://csm-integration.example/token?client_secret=" + secret},
+		{name: "no host with query secret", url: "https:///token?client_secret=" + secret},
+		{name: "unparseable with secret", url: "https://%zz/" + secret},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := RequireHTTPS("TokenURL", tt.url)
+			if err == nil {
+				t.Fatalf("RequireHTTPS(%q) = nil, want error", tt.url)
+			}
+			if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "csm-integration.example") {
+				t.Errorf("error %q leaks the configured URL", err)
+			}
+			if !strings.Contains(err.Error(), "TokenURL") {
+				t.Errorf("error %q should name the config field", err)
 			}
 		})
 	}

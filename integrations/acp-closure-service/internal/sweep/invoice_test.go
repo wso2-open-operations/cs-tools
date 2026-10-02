@@ -211,3 +211,23 @@ func TestInternalInvoiceNoticeBody_LineBreaksInValuesDontAddInvoiceGroups(t *tes
 		t.Errorf("body has %d paragraphs, want %d (two invoice groups exactly)\nbody: %s", got, want, body)
 	}
 }
+
+// TestInternalInvoiceNoticeBody_LineBreaksInHeaderValuesDontAddGroups: the
+// owner name, project name and project key sit in the body's header; blank
+// lines in them must not add paragraphs either, or the layout guard (which
+// accepts counts differing by a multiple of three) could pass a body with a
+// phantom invoice group.
+func TestInternalInvoiceNoticeBody_LineBreaksInHeaderValuesDontAddGroups(t *testing.T) {
+	invoice := testDueInvoice()
+	invoice.Listed = []invoiceLine{
+		{Number: "US1", Opportunity: "Opp One", DueDate: invoice.DueDate},
+		{Number: "US2", Opportunity: "Opp Two", DueDate: invoice.DueDate},
+	}
+	proj := project{Name: "Acme\n\n\n\n\n\nSub", ProjectKey: "KEY\r\n\r\nX"}
+
+	body := internalInvoiceNoticeBody(closure.NoticeWindow7, proj, "Jordan\n\nPerera", invoice)
+
+	if got, want := len(strings.Split(body, "\n\n")), 12+3; got != want {
+		t.Errorf("body has %d paragraphs, want %d\nbody: %s", got, want, body)
+	}
+}

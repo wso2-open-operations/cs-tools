@@ -18,7 +18,8 @@
 // Creates one case per project type per severity — S1 to S4 across
 // Subscription, Managed Cloud Subscription and Cloud Support.
 //
-// ⚠️ NOT idempotent, UNGATED, and the most expensive suite in the repo to run.
+// ⚠️ NOT idempotent, and this is the most expensive suite in the repo to run.
+// Gated behind E2E_ALLOW_PERMANENT_WRITES (see utils/permanentWrites).
 // Every execution raises a case for each offered combination — up to twelve —
 // and cases have no delete endpoint, so nothing here or elsewhere can remove
 // them. Retries add more. Treat a full run as a permanent write to the target
@@ -51,6 +52,10 @@ import {
   SEVERITY_CODES,
 } from "../../config/testData";
 import { expectSuccess, skipWhenUnconfigured } from "../../utils/caseFlows";
+import {
+  permanentWriteSkipReason,
+  permanentWritesAllowed,
+} from "../../utils/permanentWrites";
 import { CREATE_CASE } from "../../utils/selectors";
 
 withSession(test);
@@ -71,6 +76,12 @@ test.describe("Case Matrix", () => {
 
         test(`create ${code} case`, async ({ page }) => {
           skipWhenUnconfigured(project);
+          test.skip(
+            !permanentWritesAllowed(),
+            permanentWriteSkipReason(
+              "a support case (up to 12 across the full matrix)",
+            ),
+          );
 
           console.log(`${projectType} ${code}: creating "${subject}"`);
 

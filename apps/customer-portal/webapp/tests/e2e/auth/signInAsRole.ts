@@ -31,6 +31,7 @@
 //
 
 import { expect, type Page } from "../fixtures/test";
+import { CASE_DETAIL } from "../utils/selectors";
 import { LoginPage } from "./LoginPage";
 import {
   readRoleCredentials,
@@ -76,16 +77,33 @@ export async function signInAsRole(
   await page.goto("/");
   await new LoginPage(page).signIn(readRoleCredentials(project, role), origin);
 
+  // The identity call settles first: the shell keeps showing its loading state
+  // until /users/me resolves, so nothing below is meaningful before it.
+  const details = (await (await userDetailsResponse).json()) as UserDetails;
+
   // Authentication is not authorisation: an account can sign in correctly and
   // still be refused the portal, which would make a "cannot see X" assertion
   // pass for entirely the wrong reason.
+  //
+  // Asserting the denial heading is ABSENT is vacuous on its own: it holds
+  // before the shell has rendered anything. The shell swaps its loading
+  // progress bar for either the page or the denial heading in a single render
+  // once /users/me settles, so wait for the bar to go inside <main> first. Only
+  // then does the absence of the heading mean "authorised".
+  const main = page.getByTestId(CASE_DETAIL.mainTestId);
+  await expect(main, "the portal shell never rendered").toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(
+    main.getByRole("progressbar"),
+    "the portal shell is still loading",
+  ).toHaveCount(0, { timeout: 60_000 });
   await expect(
     page.getByRole("heading", { name: /portal access required/i }),
     `${role} signed in but has no access to the portal — that is an ` +
       "entitlement gap, not an RBAC result",
   ).toHaveCount(0);
 
-  const details = (await (await userDetailsResponse).json()) as UserDetails;
   const actual = details.email ?? details.userName ?? "(no email in /users/me)";
 
   // The check this module exists for. Compared case-insensitively because the

@@ -637,6 +637,9 @@ func fetchContacts(ctx context.Context, reader entityReader, proj project) ([]re
 
 // pageContacts calls fetch once per page, passing the request body for that
 // page. fetch returns how many rows the page held and the reported total.
+// When total is 0 or missing it keeps paging until a page holds fewer rows
+// than pageSize, so an endpoint that omits total can't truncate the result
+// to the first page.
 func pageContacts(fetch func(body []byte) (rows, total int, err error)) error {
 	offset := 0
 	for {
@@ -649,7 +652,7 @@ func pageContacts(fetch func(body []byte) (rows, total int, err error)) error {
 			return err
 		}
 		offset += rows
-		if rows == 0 || offset >= total {
+		if rows == 0 || (total > 0 && offset >= total) || (total <= 0 && rows < pageSize) {
 			return nil
 		}
 	}

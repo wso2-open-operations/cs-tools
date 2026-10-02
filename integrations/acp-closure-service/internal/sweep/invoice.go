@@ -168,7 +168,8 @@ func internalInvoiceNoticeBody(window closure.NoticeWindow, proj project, accoun
 		fields = append(fields, fmt.Sprintf("Invoice Id: %s\n\nOpportunity: %s\n\nDue Date: %s", oneLine(l.Number), oneLine(l.Opportunity), formatDate(&due)))
 	}
 	return fmt.Sprintf(template,
-		accountOwnerName, proj.Name, proj.ProjectKey, formatDate(proj.StartDate), formatDate(proj.EndDate),
+		oneLine(accountOwnerName), oneLine(proj.Name), oneLine(proj.ProjectKey),
+		formatDate(proj.StartDate), formatDate(proj.EndDate),
 		strings.Join(fields, "\n\n"))
 }
 
