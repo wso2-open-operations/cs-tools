@@ -441,6 +441,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		}))
 	}
 
+	// Allocation-app events into customer engagements; off by default (route not registered).
+	var customerEngagementAllocationHandler *handler.CustomerEngagementAllocationHandler
+	if db != nil && cfg.HasCustomerEngagementIngest() {
+		customerEngagementAllocationHandler = handler.NewCustomerEngagementAllocationHandler(
+			service.NewCustomerEngagementAllocationService(
+				repository.NewCustomerEngagementAllocationRepository(repository.NewScoped(db)),
+				cfg.CustomerEngagementFirefightingTypeID),
+			cfg.AuthInternalClientIDs)
+	}
+
 	// Also constructed for DataSourcePostgresServiceNowDualWrite: that mode's
 	// active services stay Postgres-backed (see the case wiring below), but
 	// its best-effort ServiceNow mirror writes still need this client.
@@ -1202,6 +1212,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if salesforcePartnerHandler != nil {
 		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh-partners", salesforcePartnerHandler.RefreshPartners)
+	}
+	if customerEngagementAllocationHandler != nil {
+		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)
 	}
 	if onboardingStepHandler != nil {
 		mux.HandleFunc("PUT /onboarding-steps/{membershipSfId}/{step}", onboardingStepHandler.UpsertOnboardingStep)

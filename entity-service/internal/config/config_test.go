@@ -598,3 +598,22 @@ func TestLoad_SalesforceIngestRetryInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_Validate_CustomerEngagementIngestNeedsFirefightingTypeID(t *testing.T) {
+	c := baseValidConfig()
+	c.CSMMigrationCustomerEngagementIngestEnabled = true
+	if err := c.Validate(); err == nil {
+		t.Fatal("Validate() = nil, want an error without CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID")
+	}
+	c.CustomerEngagementFirefightingTypeID = "fc7f2d171b81f910d64e64a2604bcb9b"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.HasCustomerEngagementIngest() {
+		t.Error("HasCustomerEngagementIngest() = false on a Postgres config")
+	}
+	c.DataSource = DataSourceServiceNow
+	if c.HasCustomerEngagementIngest() {
+		t.Error("HasCustomerEngagementIngest() = true on a ServiceNow config")
+	}
+}
